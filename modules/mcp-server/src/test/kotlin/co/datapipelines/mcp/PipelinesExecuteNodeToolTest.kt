@@ -178,10 +178,10 @@ class PipelinesExecuteNodeToolTest {
     }
 
     @Test
-    fun `a TRANSFORM node is the standalone refusal pointing at templates_evaluate`() {
-        // 7c (#7): a TRANSFORM is a script over staged data, not SQL — the tool's one refusal
+    fun `a SCRIPT node is the standalone refusal pointing at templates_evaluate`() {
+        // 7c (#7): a SCRIPT is a script over staged data, not SQL — the tool's one refusal
         // code, the reason named, and `use` naming the verb that DOES evaluate it.
-        resolverReturns(rendered(nodeType = NodeType.TRANSFORM, source = ""))
+        resolverReturns(rendered(nodeType = NodeType.SCRIPT, source = ""))
 
         val thrown =
             shouldThrow<DatapipelinesException> {
@@ -190,7 +190,7 @@ class PipelinesExecuteNodeToolTest {
 
         assertAll(
             { thrown.code shouldBe co.datapipelines.pipeline.PipelineErrorCodes.Node.STANDALONE_EXECUTION_REFUSED },
-            { thrown.details["reason"] shouldBe "transform_node" },
+            { thrown.details["reason"] shouldBe "script_node" },
             { thrown.details["use"] shouldBe "templates_evaluate" },
         )
         verify(exactly = 0) { runner.select(any(), any(), any(), any()) }
@@ -198,8 +198,8 @@ class PipelinesExecuteNodeToolTest {
     }
 
     @Test
-    fun `a transform template's no-dialect resolver refusal maps to the same standalone refusal`() {
-        // The REAL resolution path: a transform template declares no dialect, so the resolver
+    fun `a script template's no-dialect resolver refusal maps to the same standalone refusal`() {
+        // The REAL resolution path: a script template declares no dialect, so the resolver
         // refuses its render with this exact sentence before the tool's `when` can fire. The
         // sentence is the pinned contract of that branch — if the resolver rewords it, this
         // test and the refusal need rewording together.
@@ -218,7 +218,7 @@ class PipelinesExecuteNodeToolTest {
 
         assertAll(
             { thrown.code shouldBe co.datapipelines.pipeline.PipelineErrorCodes.Node.STANDALONE_EXECUTION_REFUSED },
-            { thrown.details["reason"] shouldBe "transform_node" },
+            { thrown.details["reason"] shouldBe "script_node" },
             { thrown.details["use"] shouldBe "templates_evaluate" },
         )
     }

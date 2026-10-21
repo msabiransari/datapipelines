@@ -236,7 +236,7 @@ class SemanticsListTool(
                     "datasources_get / _get_tables / _get_columns, which is where to read them while authoring; use " +
                     "this to review, to find a fact's id to supersede or retire, or to answer 'what was recorded " +
                     "since <time>'. Every WORKSPACE fact carries implemented_by: the template versions that cite it " +
-                    "as the transform implementing that rule — reuse one before writing your own. Retired facts are " +
+                    "as the script implementing that rule — reuse one before writing your own. Retired facts are " +
                     "hidden unless include_retired.",
             schema =
                 """

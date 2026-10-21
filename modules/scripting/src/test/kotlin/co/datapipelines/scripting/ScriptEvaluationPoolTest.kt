@@ -63,7 +63,7 @@ class ScriptEvaluationPoolTest {
         overrunThread.join(10_000)
 
         // The caller failed on time and the abandonment was counted …
-        timeout.get().shouldNotBeNull().code shouldBe "pipeline.transform.timeout"
+        timeout.get().shouldNotBeNull().code shouldBe "pipeline.script.timeout"
         p.abandoned.sum() shouldBe 1
         p.abandonedThreadsAlive() shouldBe 1
 
@@ -71,7 +71,7 @@ class ScriptEvaluationPoolTest {
         // while the abandoned thread lives. At most `size` evaluation threads are alive,
         // abandoned ones included — a runaway never adds a thread the pool did not count.
         val refused = runCatching { p.run(limits(Duration.ofSeconds(5)), "next@1") { "served" } }.exceptionOrNull()
-        (refused.shouldNotBeNull() as ScriptPoolExhaustedException).code shouldBe "pipeline.transform.pool_exhausted"
+        (refused.shouldNotBeNull() as ScriptPoolExhaustedException).code shouldBe "pipeline.script.pool_exhausted"
 
         // The slot comes back when the runaway's thread ends, and the next call is served.
         release.countDown()

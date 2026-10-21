@@ -35,10 +35,10 @@ internal object NodeTypeRules {
                 // hand an author two errors for one edit.
                 NodeType.CALCULATOR -> Unit
 
-                // §12.13 (TransformRules) owns the whole shape of a TRANSFORM node the same
+                // §12.13 (ScriptRules) owns the whole shape of a SCRIPT node the same
                 // way — its `output` is legal in `row`/`table` mode and refused in `value`
                 // mode, a verdict that needs the pinned contract and belongs to one report.
-                NodeType.TRANSFORM -> Unit
+                NodeType.SCRIPT -> Unit
             }
         }
     }

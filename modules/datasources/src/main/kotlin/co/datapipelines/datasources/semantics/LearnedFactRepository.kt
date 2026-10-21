@@ -90,9 +90,9 @@ class LearnedFactRepository(
 
     /**
      * 7e (transform-nodes design §2.3) — of [ids], the facts [readerWorkspaceId] may CITE from a
-     * transform: visible to it (the ONE predicate) AND a `WORKSPACE` fact of a workspace-scoped
+     * script: visible to it (the ONE predicate) AND a `WORKSPACE` fact of a workspace-scoped
      * kind (`definition`, `exclusion`, `preference` — derived from [LearnedFactKind], never
-     * typed). A DATASOURCE fact is excluded by rule (a transform never sees a datasource), and an
+     * typed). A DATASOURCE fact is excluded by rule (a script never sees a datasource), and an
      * id another workspace owns is simply absent — the caller answers both as not-found. Trust is
      * NOT a condition: citing a retired fact is legal and reads `needs_review` at once.
      */
@@ -246,7 +246,7 @@ class LearnedFactRepository(
         /** D-S1/D-S9 — the ONE visibility predicate. */
         const val VISIBLE = "(scope = 'DATASOURCE' OR workspace_id = :reader)"
 
-        /** The workspace-scoped kinds a transform may implement (§2.3), from the enum's own scope column. */
+        /** The workspace-scoped kinds a script may implement (§2.3), from the enum's own scope column. */
         val WORKSPACE_KINDS: List<String> = LearnedFactKind.entries.filter { it.scope == LearnedFactScope.WORKSPACE }.map { it.wire }
 
         val INSERT_SQL =

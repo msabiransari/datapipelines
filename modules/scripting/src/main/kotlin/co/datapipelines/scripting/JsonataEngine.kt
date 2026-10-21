@@ -7,7 +7,7 @@ import java.time.Duration
 import java.time.Instant
 
 /**
- * The round-one engine: JSONata via `com.dashjoin:jsonata`, in-process (transform-nodes
+ * The round-one engine: JSONata via `com.dashjoin:jsonata`, in-process (script-nodes
  * design §4.2).
  *
  * ## What this engine guarantees
@@ -68,7 +68,7 @@ import java.time.Instant
  * engine therefore always SHADOWS both builtins on the per-evaluation frame:
  * [EvaluationLimits.now] set → they return that instant (`$now()` twice a second apart
  * yields the same string — the conformance suite proves it); null → calling them is a
- * typed refusal ("a transform is a pure function of its inputs"). The refusal fires
+ * typed refusal ("a script is a pure function of its inputs"). The refusal fires
  * when the body actually evaluates the call, so an unevaluated branch is legal.
  *
  * ## What it does not guarantee
@@ -279,7 +279,7 @@ class JsonataEngine(
         clockFunction(SIGNATURE_NOW) { _, _ ->
             throw guard.refuse(
                 ScriptEvaluationException(
-                    "$name() is not available: a transform is a pure function of its inputs — " +
+                    "$name() is not available: a script is a pure function of its inputs — " +
                         "pin EvaluationLimits.now so the clock is an input, or remove the clock call",
                 ),
             )

@@ -1121,11 +1121,11 @@ class TemplateRepository(
             "isLibrary" to draft.isLibrary,
             "importsJson" to TemplateJson.writeImports(draft.imports),
             "body" to draft.body,
-            // 7b: the three transform blocks (transform-nodes §2.2) — null on sql/html, which
-            // is exactly what keeps the hash's CASE arm off those rows (chk_transform_blocks).
-            "contractJson" to TransformBlocks.writeContract(draft.contract),
-            "invariantsJson" to TransformBlocks.writeInvariants(draft.invariants),
-            "testsJson" to TransformBlocks.writeTests(draft.tests),
+            // 7b: the three script blocks (script-nodes §2.2) — null on sql/html, which
+            // is exactly what keeps the hash's CASE arm off those rows (chk_script_blocks).
+            "contractJson" to ScriptBlocks.writeContract(draft.contract),
+            "invariantsJson" to ScriptBlocks.writeInvariants(draft.invariants),
+            "testsJson" to ScriptBlocks.writeTests(draft.tests),
             "actor" to actor,
         )
 
@@ -1828,21 +1828,21 @@ class TemplateRepository(
                     description = rs.getString("description"),
                     imports = TemplateJson.readImports(rs.getString("imports_json")),
                     body = rs.getString("body"),
-                    contract = TransformBlocks.readContract(rs.getString("contract_json")),
-                    invariants = TransformBlocks.readInvariants(rs.getString("invariants_json")),
-                    tests = TransformBlocks.readTests(rs.getString("tests_json")),
+                    contract = ScriptBlocks.readContract(rs.getString("contract_json")),
+                    invariants = ScriptBlocks.readInvariants(rs.getString("invariants_json")),
+                    tests = ScriptBlocks.readTests(rs.getString("tests_json")),
                     isLibrary = rs.getBoolean("is_library"),
                     createdAt = rs.getObject("created_at", OffsetDateTime::class.java).toInstant(),
                     createdBy = rs.getObject("version_created_by", UUID::class.java),
                     status = PipelineVersionStatus.fromWire(rs.getString("status")),
                     bodyHash = rs.getString("body_hash"),
                 ).let { template ->
-                    // 7e (transform-nodes §2.3/§8.2): the citations and the retired ones among
+                    // 7e (script-nodes §2.3/§8.2): the citations and the retired ones among
                     // them, computed by this row's own query. `implements` belongs to the
-                    // transform types (null on sql/html, like the blocks).
+                    // script types (null on sql/html, like the blocks).
                     template.copy(
                         implements =
-                            if (template.type.isTransform) TemplateImplementsRepository.readIds(rs.getString("implements_json")) else null,
+                            if (template.type.isScript) TemplateImplementsRepository.readIds(rs.getString("implements_json")) else null,
                         retiredFacts = TemplateImplementsRepository.readRetired(rs.getString("retired_facts_json")),
                     )
                 }

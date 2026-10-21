@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.197
+**Status:** v1.198
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-20 (#574; #595; #588; #541; #634; #635; #622 merge follow-up; #622; #599; #604; #639; #638; #610; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-21 (#640); 2026-10-20 (#574; #595; #588; #541; #634; #635; #622 merge follow-up; #622; #599; #604; #639; #638; #610; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 ---
 
 ## 1. Purpose
@@ -1108,7 +1108,7 @@ Each boolean narrows for an API-key principal by the key's SCOPE as well as its 
 | Pipeline editor | Execute, Cancel | `canExecute` — **viewer-level** (D3); never the promoter (D5) | `pipeline.execute` / `execution.cancel` |
 | Templates catalog and workspace (§4.6/§4.7) | Create, Edit, Discard, Restore, Purge, Release | `canAuthor` | `template.create` / `template.update` / `template.version.manage` / `template.delete` / `template.release` |
 | Template workspace (§4.7) | the Source tab's Edit, and the Render tab's context form and **Preview** (143, #398) | `canAuthor` — everyone else reads the working version in the read-only pane | `template.update` / `template.render` (the preview POST) |
-| Template workspace — the transform face (§4.7, 7d) | **Save draft** (`transform-save`), **Run suite** (`transform-run-suite`), the four editable panes | `canAuthor` **and** the displayed version is the working DRAFT — everyone else (and an author on a released version, who gets **Edit**) reads the four panes as `<pre>` blocks | `template.update` / `template.evaluate` |
+| Template workspace — the script face (§4.7, 7d) | **Save draft** (`script-save`), **Run suite** (`script-run-suite`), the four editable panes | `canAuthor` **and** the displayed version is the working DRAFT — everyone else (and an author on a released version, who gets **Edit**) reads the four panes as `<pre>` blocks | `template.update` / `template.evaluate` |
 | Shell (§3.4) | the **Admin** item (143) | `navAdminUsers` (super admin → `/admin/users`) or `navAdminMembers` (workspace admin → `/workspaces#workspace-members`); absent otherwise | `user.manage` / `workspace.members.manage` |
 | Shell (§3.4) | the **Executions**, **Promotion** and **Workspaces** rail items (177) | `navExecutions` (= `canReadExecutions`), `navPromotion` (= `canReadPromotion`), `navWorkspaces` (workspace admin, super admin, or a principal with no workspace — the no-workspace page is the one screen that explains their state) | `execution.read` / `promotion.read` / `workspace.read` |
 | Shell (§3.4) | the header search (161, #155) | every role — a READ over what the session's workspace already shows; each result is a link to a page the destination screen's own guards govern | `pipeline.read` |
@@ -1141,7 +1141,7 @@ all (D5: no execute), which is the same answer the rail gives by not drawing Exe
 TEMPLATE workspace floors at `read` (143, T315, owner ruling; the editor page became the workspace
 in #398):** the tree's and the catalog's links render for every reader, so the page they lead to
 must open for every reader — read-only, like the pipeline workspace. `readOnly` is the author permission combined with the version rule
-(`TemplateSourceModel.fill` since 7d — moved unchanged out of `TemplateEditorController.fillSource` so the transform face's routes share the one rule), on the page and on the source partial; the editable
+(`TemplateSourceModel.fill` since 7d — moved unchanged out of `TemplateEditorController.fillSource` so the script face's routes share the one rule), on the page and on the source partial; the editable
 textarea, Preview, the context rail and Release are an author's; the read-only line renders for a
 viewer and for a promoter — a promoter, through the lens (178): a template the lens hides opens as not-found, exactly as an unknown name does. Every version-row Open carries its row's version.
 
@@ -1183,7 +1183,7 @@ Fully specified in [Pipeline Editor spec](pipeline-editor.md). Only the rows tha
 - **The data blobs cannot break out of their script blocks (185):** the editor's two `<script type="application/json">` blocks (`#pipeline-data`, `#pipeline-lifecycle`) are inserted with `th:utext`, so the controller writes both through `ScriptSafeJson.forScriptBlock` — a closing-tag sequence inside any free-text field the pipeline carries (display name, description, node labels, template names) is escaped and the JSON parses back unchanged client-side; `ScriptBlockUtextAuditTest` holds the document's closed `th:utext` allowlist and `PipelineEditorJsonRenderTest` reads the render back through a real HTML parser.
 - **Result grid:** the execution result table is the data table (§3.7) — a frame FIXED by its pane (`dt-fill`): the header and the first column hold while a wide result scrolls both ways, the scrollbar starts under the header, the columns sort (this page) and resize; the bespoke `.pe-result-table` styles are gone. Paging stays client-side cursor paging (the §10.5 contract there).
 - **Template reference (§9.4 there):** a node's template is a read-only reference display — `acme/finance/monthly_revenue @ v3`, one line with the FULL reference on `title`, in the Details tab's key/value grid **and** in the server-rendered `partials/pipeline-node-sql` **and** in the `template-missing` empty state. **There is no template picker on this screen**; template selection happens through pipeline JSON authoring, import and MCP. **If a picker is ever added, it reuses the sidebar's REST tree component (§3.4, rest-api §24) — it does not get its own client-side tree.** (§4.6's server-rendered prefix fragment, which this sentence named before, was removed with #466.)
-- **The TRANSFORM node (7d, #7; [transform-nodes design §9.3](superpowers/specs/2026-09-09-transform-nodes-design.md)):** its card wears its own accent (`TYPE_TOKEN.TRANSFORM = "transform"` → `app.css`'s `--type-transform`, a teal derived from the theme's info and success accents — no literal colour) and the sprite's `code` glyph (the rail's template glyph: a TRANSFORM is a pinned function), and carries three fact lines: **the language and the pin** — `jsonata · …/order_lines.jsonata @ v3`; the language is the pinned template's `type`, which is not on the node JSON, so the card reads `transform · …` until `graph.js` resolves the pin the way it resolves datasource dialects (one `GET /api/v1/templates/versions` per distinct pin, `template.read`, capped at 50; a failure or a lens-hidden version leaves the honest `transform`); **what it reads and where it writes** — `2 inputs → tempdb.order_lines`, `→ caller`, or `→ $line_count` for a value-mode node's Context key; **rejects and strict** when set — `rejects → tempdb.order_rejects · strict`. The output is fact line 2, not a port row (a TRANSFORM's write is not a `node_progress` operation today). Every value passes through `buildCardHtml`'s escaper (a template name planted with `<script>` renders as text — `graph-transform-card.test.mjs`). The **Details** pane lists Template, Language and Mode (both read off the resolved pin — the mode is the CONTRACT's, never the node's; `resolving…` until the lookup lands), Inputs as bound (`orders ← stg_orders · tz ← $org_timezone`), Output, Rejects and Strict, plus the node deadline; no Query Timeout row (a TRANSFORM runs no statement — `SettingsRules`' statement types). The definition pane shows the node as a function call — the template, its language and mode, the inputs map, the output and the rejects — escaped by construction; nothing is fetched (a TRANSFORM has no SQL to render). A pinned version marked `needs_review` (lane 7e's flag, read off the resolved pin) shows the marker on the card's kind line and in the Details header and rows. The legend names **Transform**. Read-only, as every node is. (`TransformNodeCardBrowserTest` — three TRANSFORM shapes saved through 7c's validator.)
+- **The SCRIPT node (7d, #7; [transform-nodes design §9.3](superpowers/specs/2026-09-09-transform-nodes-design.md)):** its card wears its own accent (`TYPE_TOKEN.SCRIPT = "script"` → `app.css`'s `--type-script`, a teal derived from the theme's info and success accents — no literal colour) and the sprite's `code` glyph (the rail's template glyph: a SCRIPT is a pinned function), and carries three fact lines: **the language and the pin** — `jsonata · …/order_lines.jsonata @ v3`; the language is the pinned template's `type`, which is not on the node JSON, so the card reads `script · …` until `graph.js` resolves the pin the way it resolves datasource dialects (one `GET /api/v1/templates/versions` per distinct pin, `template.read`, capped at 50; a failure or a lens-hidden version leaves the honest `script`); **what it reads and where it writes** — `2 inputs → tempdb.order_lines`, `→ caller`, or `→ $line_count` for a value-mode node's Context key; **rejects and strict** when set — `rejects → tempdb.order_rejects · strict`. The output is fact line 2, not a port row (a SCRIPT's write is not a `node_progress` operation today). Every value passes through `buildCardHtml`'s escaper (a template name planted with `<script>` renders as text — `graph-script-card.test.mjs`). The **Details** pane lists Template, Language and Mode (both read off the resolved pin — the mode is the CONTRACT's, never the node's; `resolving…` until the lookup lands), Inputs as bound (`orders ← stg_orders · tz ← $org_timezone`), Output, Rejects and Strict, plus the node deadline; no Query Timeout row (a SCRIPT runs no statement — `SettingsRules`' statement types). The definition pane shows the node as a function call — the template, its language and mode, the inputs map, the output and the rejects — escaped by construction; nothing is fetched (a SCRIPT has no SQL to render). A pinned version marked `needs_review` (lane 7e's flag, read off the resolved pin) shows the marker on the card's kind line and in the Details header and rows. The legend names **Script**. Read-only, as every node is. (`ScriptNodeCardBrowserTest` — three SCRIPT shapes saved through 7c's validator.)
 - **Failure display (057/T85, re-homed by 065, consolidated by 080):** `node_failed`'s `error` object — the failure record — renders in the dock's **Errors tab**: one entry per failed node, newest last, `node id · code` as its summary line, then the message, correlation id, details, the rendered SQL and the exception chain **root-cause-first**, one Copy button. The 065 per-node inspector section is gone with the overlay — the tab is the record's one home beside the modal's one-line summary. `pipeline_failed`'s execution-level record joins the same list (deduped on node + code + message). `PEErrorDetails.build` remains the one view-model (`sse-node-failure.test.mjs` pins it). Under `error-detail=structured` the SQL and Exception sections are simply absent — no apology. The recovery poll's banner names the error code.
 - **Page width (065 → 076 → #573):** the editor renders the same `<main>` as every page, `.app-container.app-main` (§3.1: padded by the band, framed at 1500px), and opts out of the frame only, by `app-canvas` on its root (`.pe-root`), so it keeps the whole track. 065's `fullBleed` model attribute and its `app-main-bleed` class, the editor's escape from a 1600px `--app-content-max` cap on `<main>`, were deleted in 076 (the token name returned in #502 as the measure of the editor's reading panes, `.pe-doc`, never `<main>`'s); `EditorLayoutRenderTest` pins their absence and the shared `<main>` on the editor and on the pipelines list.
 - **Editor entry preserves the rail (#460):** the host validates the destination and dependencies before
@@ -1328,7 +1328,7 @@ Guards: `DatasourceOverviewControllerTest` (the model: tile, charts, buckets, re
 | Auth required | Yes (`read` to browse; `author` to create — the create button is role-gated per [§4.3e](#43e-role-visibility--every-verb-and-the-role-boolean-that-renders-it-114-normative)) |
 | Purpose | The **catalog**: one flat, server-paged list of full paths — every template the caller may read when `q` is empty, or the matches of `q` — with the dialect and type filters, and (an author's) the create modal. Each row links into the template workspace (§4.7). The folder TREE is the resource browser's (§3.4). The menu's Templates item lands on `/overview/templates` (§4.25, #579), whose View all, linked metrics (since #599 the summary strip's and its foot's) and Review your drafts lead here — the metrics and the row with `?lifecycle=` (the five offered buckets; `discarded` and unknown values are the house 400) |
 | Design primitives | `.ds-input`, `.ds-badge`, `.ds-button`, `.ds-empty`; the rows are `template-tree.css`'s `.tpl-results` / `a.tpl-result`; the create modal is `.u-backdrop` + `.ds-card` |
-| JS | the create modal's lifecycle (`/js/template-create-modal.js`: open/close, inline refusal, dialect-conditional-on-type, the transform blocks); none of its own otherwise — `tree/sidebar.mjs` owns **Browse folders** (`data-nav-tree-reveal`), which shows the resource browser's Templates tree and puts focus in its search |
+| JS | the create modal's lifecycle (`/js/template-create-modal.js`: open/close, inline refusal, dialect-conditional-on-type, the script blocks); none of its own otherwise — `tree/sidebar.mjs` owns **Browse folders** (`data-nav-tree-reveal`), which shows the resource browser's Templates tree and puts focus in its search |
 | htmx | the search input and the two filter selects re-fetch ONLY the list into its stable root `#template-list-wrapper` (`GET /partials/templates`, `outerHTML`); the sidebar uses REST tree/search (§3.4) |
 
 **#398 (the #396 ruling's first reuse of the workspace pattern):** with the tree in the sidebar,
@@ -1364,17 +1364,17 @@ folders are browsed in the resource browser.
 - **Create** (`author`/`admin`) is the modal posting to `POST /partials/templates`, §5.1 Shape
   A: the success node closes the modal and the refreshed catalog rides along out-of-band with
   the toast. It keeps its **`type` selector** and makes `dialect` conditional — required for
-  `sql`, disabled and absent for `html` and the transform types (the control is *disabled*, not
+  `sql`, disabled and absent for `html` and the script types (the control is *disabled*, not
   merely hidden, so it does not post; the controller drops it either way and `chk_type_dialect`
   is the database's backstop). The name field's `pattern` and `maxlength` are **rendered from
   the server's own grammar** (`TemplateNameGrammar`) — never a regex retyped beside it; the
   server validates every write regardless and its rejection is the one that counts (§9.5).
   There is no rename affordance on this form or anywhere else: `name` is a create-time input,
   full stop.
-- **A transform type (7d).** Choosing `jsonata` or `javascript` hides and disables `dialect`
+- **A script type (7d).** Choosing `jsonata` or `javascript` hides and disables `dialect`
   (as for `html`) and shows the **Contract / Invariants / Tests** field — three JSON textareas,
   disabled (so not posted) for any other type — prefilled with the design record's §2.2
-  example. A transform carries its contract, invariants and tests inside its version, one
+  example. A script carries its contract, invariants and tests inside its version, one
   empty-input case is mandatory, and the create runs the suite (7b's gate). The blocks bind
   through the same binder the workspace's Save uses (7b's strict deserializer — a typo is
   `template.contract_invalid` `unknown_field`, naming its block); a refusal lands in the
@@ -1402,7 +1402,7 @@ row's **needs review** marker — the same warning badge, `data-needs-review` an
 its version and draft badges, inside the panel's view however long the name (#541); the tree keeps complete levels, so a drift that changed a fact and
 not the template shows on the panel's Refresh.
 Guards: `TemplateSidebarTreeBrowserTest`, `ReusableRestTreeBrowserTest`, `ShellRenderTest`,
-`TransformImplementsBrowserTest` (the marker).
+`ScriptImplementsBrowserTest` (the marker).
 
 #### 4.6b What moved where (the §4.6-explorer capability inventory)
 
@@ -1421,8 +1421,8 @@ Every capability the old two-pane explorer offered has a new home and an execute
 | Versions table (status, in-use phrase, provenance, ⋯ verbs) | the workspace's Versions tab (house table) | `TemplateWorkspaceBrowserTest`, `TemplateLifecycleDialogControllerTest` |
 | Source tab (the body, read-only) | the workspace's Source tab | `TemplateWorkspaceBrowserTest`, `ViewerEditorRenderTest` |
 | Runs tab (derived runs, #275 visibility) | the workspace's Runs tab (lazy-once) | `TemplateWorkspaceBrowserTest`, `TemplatePartialControllerTest` |
-| `needs_review` marker (leaf, row, detail) | catalog rows, tree leaves, the workspace chip | `TemplateExplorerRenderTest` (row), `TreeControllerTest` + `reusable-tree.test.mjs` (leaf, #533), `TransformFaceRenderTest` (chip), `TransformImplementsBrowserTest` (all three) |
-| The create modal | the catalog page (Q1(b), unchanged verbs) | `TemplateCreatePartialTest`, `TemplateCreateTransformTest` |
+| `needs_review` marker (leaf, row, detail) | catalog rows, tree leaves, the workspace chip | `TemplateExplorerRenderTest` (row), `TreeControllerTest` + `reusable-tree.test.mjs` (leaf, #533), `ScriptFaceRenderTest` (chip), `ScriptImplementsBrowserTest` (all three) |
+| The create modal | the catalog page (Q1(b), unchanged verbs) | `TemplateCreatePartialTest`, `TemplateCreateScriptTest` |
 
 ### 4.7 The Template Workspace
 
@@ -1431,9 +1431,9 @@ Every capability the old two-pane explorer offered has a new home and an execute
 | URL | `GET /templates/{*name}?version={N}&tab={source\|overview\|render\|runs\|used-by\|versions}` — the name IS the id, the folder path; it travels in the path HERE only (the capture-everything variable; `TemplateWorkspaceRouteTest` pins the routing: a dotted, multi-segment name captures whole and the literal `/templates` and `/templates/editor` routes win). Everywhere else the name stays a query parameter (§9.6) |
 | Auth required | Yes — the page floors at `read` (`template.read`, the pipelines workspace's rule): the screen's lowest role reads it. Edit and Save post to `template.update` routes; Preview posts to `template.render`; Run suite posts to `template.evaluate`; the lifecycle verbs are their own rows — [§4.3e](#43e-role-visibility--every-verb-and-the-role-boolean-that-renders-it-114-normative) |
 | Purpose | THE place a template is read, rendered, evaluated and version-managed: version-explicit (the current release by default; an explicit version never falls back; a draft is explicit and visibly a draft), tabbed, with nothing of the old explorer or editor missing (§4.6b) |
-| Design primitives | `.ds-card`, `.ds-button`, `.ds-badge`, `.ds-form` + `static/css/template-editor.css` (the source column and the transform face, unchanged) and `static/css/template-workspace.css` (the top bar, the selector, the tab strip — design tokens only) — both head-loaded (§3.0 is normative: no page template carries its own stylesheet link). The version selector's viewed row carries the menu's selection expression (§3.1, §2.8; #625): the `--brand-soft` tint, `--text-primary` ink for the label and its `· current` suffix (Minimal `--text-inverted`) and a 3px `--border-focus` left bar from `--app-nav-indicator-w`, which every row reserves transparent so a version switch moves nothing; `TemplateVersionSelectorBrowserTest` measures it on every bundled theme and both halves of auto |
-| JS | One `template[data-page-assets="on-mount"]` catalog through the page-script loader (§3.2), once per document: `/js/pipeline-editor/sql-highlight.js`, `/js/template-editor/preview.js`, `/js/csrf.js` (before lifecycle), then lifecycle, transform face and lifecycle dialogs; `/js/template-editor/workspace.js` is LAST with `data-page-mount` (`TemplateWorkspaceMount`), wiring each live or restored tab strip once and synchronizing lifecycle's context mode with the visible Key/Value or JSON controls. `/js/template-editor/workspace.js` (the tab state machine — pure, node-tested; the tab strip and `?tab=` URL are its DOM glue), `/js/template-editor/lifecycle.js` (the Render tab's context rows, the Key/Value ⇄ JSON toggle, the preview call), `/js/template-transform-face.js` (the unsaved-changes marker, the result scroll), `/js/lifecycle-dialog.js` (§4.3d's dialogs into `#tx-dialog`); the preview output is highlighted with the shared dependency-free SQL tokenizer (032) — the editable textarea is deliberately plain |
-| htmx | the version selector and every Open are FULL navigations (`hx-boost="false"` — the resolution is server-side, R5 by construction); the Runs tab lazy-loads once (`GET /partials/templates/runs`); **Edit** posts to `/partials/templates/editor/edit` (`#tpl-edit-refusal`, `innerHTML`; success answers `HX-Redirect` onto the workspace with the draft explicit); **Save draft** posts the face to `/partials/templates/transform-face/save`; **Preview** posts to `/partials/templates/render` |
+| Design primitives | `.ds-card`, `.ds-button`, `.ds-badge`, `.ds-form` + `static/css/template-editor.css` (the source column and the script face, unchanged) and `static/css/template-workspace.css` (the top bar, the selector, the tab strip — design tokens only) — both head-loaded (§3.0 is normative: no page template carries its own stylesheet link). The version selector's viewed row carries the menu's selection expression (§3.1, §2.8; #625): the `--brand-soft` tint, `--text-primary` ink for the label and its `· current` suffix (Minimal `--text-inverted`) and a 3px `--border-focus` left bar from `--app-nav-indicator-w`, which every row reserves transparent so a version switch moves nothing; `TemplateVersionSelectorBrowserTest` measures it on every bundled theme and both halves of auto |
+| JS | One `template[data-page-assets="on-mount"]` catalog through the page-script loader (§3.2), once per document: `/js/pipeline-editor/sql-highlight.js`, `/js/template-editor/preview.js`, `/js/csrf.js` (before lifecycle), then lifecycle, script face and lifecycle dialogs; `/js/template-editor/workspace.js` is LAST with `data-page-mount` (`TemplateWorkspaceMount`), wiring each live or restored tab strip once and synchronizing lifecycle's context mode with the visible Key/Value or JSON controls. `/js/template-editor/workspace.js` (the tab state machine — pure, node-tested; the tab strip and `?tab=` URL are its DOM glue), `/js/template-editor/lifecycle.js` (the Render tab's context rows, the Key/Value ⇄ JSON toggle, the preview call), `/js/template-script-face.js` (the unsaved-changes marker, the result scroll), `/js/lifecycle-dialog.js` (§4.3d's dialogs into `#tx-dialog`); the preview output is highlighted with the shared dependency-free SQL tokenizer (032) — the editable textarea is deliberately plain |
+| htmx | the version selector and every Open are FULL navigations (`hx-boost="false"` — the resolution is server-side, R5 by construction); the Runs tab lazy-loads once (`GET /partials/templates/runs`); **Edit** posts to `/partials/templates/editor/edit` (`#tpl-edit-refusal`, `innerHTML`; success answers `HX-Redirect` onto the workspace with the draft explicit); **Save draft** posts the face to `/partials/templates/script-face/save`; **Preview** posts to `/partials/templates/render` |
 
 **The resolution order (workspace spec §3.1, read onto a family without execution).** The
 caller's lens narrows every read; the house 404 covers every absence the URL can name — an
@@ -1455,8 +1455,8 @@ family differs):**
 
 - **Source** (the default): the VIEWED version's body — the source column for `sql`/`html`
   (R5: a selected version is read-only, with its badge and release provenance; the editable
-  textarea carries the WORKING draft only), or the **transform face** for `jsonata`/`javascript`
-  ([4.7a](#47a-the-transform-face-7d-7--the-source-tab-of-a-transform)); beside it, the version's Imports table. **Edit** is
+  textarea carries the WORKING draft only), or the **script face** for `jsonata`/`javascript`
+  ([4.7a](#47a-the-script-face-7d-7--the-source-tab-of-a-script)); beside it, the version's Imports table. **Edit** is
   the one way out of the read-only view (Q1(b): kept on the working draft's surface, as the
   editor page offered it): it copies the selected version into a new draft — or opens the draft
   that already exists, writing nothing — and lands on the workspace with the draft's version
@@ -1465,15 +1465,15 @@ family differs):**
 - **Overview**: the chips (`v<n>`, draft/released, `type`, `dialect`, `engine`, the
   `needs_review` marker and the facts it cites), the description, the **References** reading —
   the identifiers the body interpolates, labelled as a derived scan and never as a declared
-  contract (a template declares no parameters; only a pipeline does; a transform shows its
+  contract (a template declares no parameters; only a pipeline does; a script shows its
   contract's declared mode and inputs instead) — and the created provenance plus the
   current/draft pointers.
-- **Render** (authors, non-transform): the Render Context panel — Key/Value rows and the JSON
+- **Render** (authors, non-script): the Render Context panel — Key/Value rows and the JSON
   textarea over one underlying value — and the preview (`POST /partials/templates/render` of
   the STORED version the page is viewing; a blank render is "(empty output)"). A reader is not
   offered a control the server would refuse (143): the tab is not drawn, and a `tab=render`
-  request resolves to Source before any render state is read. A transform has no Render tab
-  (its preview would feed a Freemarker render a transform does not have).
+  request resolves to Source before any render state is read. A script has no Render tab
+  (its preview would feed a Freemarker render a script does not have).
 - **Runs**: the derived fragment (`GET /partials/templates/runs`, lazy on the tab's first
   open) — the recent executions of the pipelines that pin this template. The derivation is
   stated on the fragment: an execution names a pipeline and a version, never the templates its
@@ -1521,25 +1521,25 @@ template's NAME — §5.1's typed-confirm convention). The explorer's Shape A le
 detail-pane re-render and the `lifecycle-changed` badge rewrite) is gone with the pane; the
 redirect's fresh page re-reads the tree under the same per-workspace state.
 
-#### 4.7a The transform face (7d, #7) — the Source tab of a transform
+#### 4.7a The script face (7d, #7) — the Source tab of a script
 
 Specified by the [transform-nodes design §9.3](superpowers/specs/2026-09-09-transform-nodes-design.md).
-A `jsonata` / `javascript` template's Source tab is the **transform face**
-(`partials/template-transform-face :: face`, keeping the column's stable `#template-source`
+A `jsonata` / `javascript` template's Source tab is the **script face**
+(`partials/template-script-face :: face`, keeping the column's stable `#template-source`
 id): four panes — **Body** (labelled with its language), **Contract**, **Invariants**,
 **Tests** — two by two above 1100px, one column below. Each is a plain `<textarea>` with the
 create modal's mono class (no editor component, no grammar, no CDN — the record's §11 defers
 a code editor). The three block panes are JSON, pretty-printed from the stored version on
 every paint **losslessly**: an absent optional stays absent, but a `null` inside the data (a
-test row's `"customer_id": null`, a JSON-null expected output) is kept — `TransformFaceModelTest`
-pins the round trip. There is no Render tab and no Freemarker preview (a transform renders
+test row's `"customer_id": null`, a JSON-null expected output) is kept — `ScriptFaceModelTest`
+pins the round trip. There is no Render tab and no Freemarker preview (a script renders
 nothing; `templates_render` refuses the type).
 
 | Route | Permission | What it does |
 |---|---|---|
-| `GET /partials/templates/transform-face?name=&version=` | `template.read` | the face for a version — the same `TemplateSourceModel` rule as the page decides `readOnly` |
-| `POST /partials/templates/transform-face/save` | `template.update` | **Save draft** — the four panes through 7b's write path: its strict deserializer, the `TemplateValidator` (the save gate runs the whole suite) and `TemplateDraftService` (the service `PUT /api/v1/templates` uses) under the draft's `body_hash` precondition |
-| `POST /partials/templates/transform-face/run-suite` | `template.evaluate` | **Run suite** — the panes AS TYPED, nothing written |
+| `GET /partials/templates/script-face?name=&version=` | `template.read` | the face for a version — the same `TemplateSourceModel` rule as the page decides `readOnly` |
+| `POST /partials/templates/script-face/save` | `template.update` | **Save draft** — the four panes through 7b's write path: its strict deserializer, the `TemplateValidator` (the save gate runs the whole suite) and `TemplateDraftService` (the service `PUT /api/v1/templates` uses) under the draft's `body_hash` precondition |
+| `POST /partials/templates/script-face/run-suite` | `template.evaluate` | **Run suite** — the panes AS TYPED, nothing written |
 
 **Editable only on the working DRAFT, for an author.** A viewer, a promoter, a RELEASED
 working version and any older version picked in the selector render the four panes as
@@ -1566,18 +1566,18 @@ through 7b's machinery in two passes under ONE `suite-timeout-seconds` budget: t
 `TemplateValidator` (exactly what Save would run — a static refusal names its pane and the
 suite does not run, as at save; its verdict is the result's "Save would accept / refuse with …"
 line, so a green list and a refusing Save cannot both appear), then each case through
-`TransformTestRunner.runCase` (the same runner, pool and per-case limits) for what the gate's
+`ScriptTestRunner.runCase` (the same runner, pool and per-case limits) for what the gate's
 one line cannot say. The result list: `N of M cases pass`, and per case its verdict; a failing
 case shows **the first difference's path** (`$.rejects[0].reason`), **expected and actual** as
 text in `<pre>`, or the expected refusal and the code the run refused with; **every invariant**
 with holds/is false and its message; a case past the deadline says `not run — the suite
 timeout was reached`, never silently dropped. After a Run suite or a Save refusal the result
-region is scrolled into view (`template-transform-face.js` — it lands under four tall panes).
+region is scrolled into view (`template-script-face.js` — it lands under four tall panes).
 The first keystroke in a pane shows an `unsaved changes` badge: Release publishes the last
 SAVED draft, never what is typed.
 
 Every user-supplied string — the panes, case and invariant names and messages, the diff sides,
-refusal messages — renders through `th:text`, never `th:utext` (`TransformFaceRenderTest`
+refusal messages — renders through `th:text`, never `th:utext` (`ScriptFaceRenderTest`
 plants markup in each pane). Release and Purge draft are the §4.3d dialogs, unchanged.
 
 
@@ -3085,6 +3085,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-21 | v1.198 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The pipeline editor's TRANSFORM card and the template editor's transform face are the SCRIPT card and the script face** (§4.3 the editor card, its accent `--type-script` and the legend's **Script**; §4.7 the face's Save draft / Run suite and its routes `/partials/templates/script-face/…`; the template workspace's script rules). A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-20 | v1.197 | #574 the browser header's count has one source — renumbered at merge after #595's v1.196 | **§3.4 Counts:** the 60-second TTL sentence and the "no general metadata cache" paragraph give way to the freshness rule — `NavCounts` reads the five counts on every shell render, so the header and the tree cannot disagree past one navigation after a create, release, discard or delete (UI or MCP), and the read is deferred to the first count a render reads, so a JSON API request pays none; the lens rule and the never-zero rule are unchanged. Guards: `PipelineSidebarTreeStateBrowserTest`'s create-then-navigate case (header = the catalog route's total, no clock advance) and `NavCountsTest`'s every-render and nothing-read-until-a-value cases. |
 | 2026-10-20 | v1.196 | #595 §4.25 names five guided families — renumbered at merge after #588's v1.195 | **§4.25:** the stale selection sentence is replaced by the as-built rule — every tree family's menu item links its overview (`/overview/<family>`) since #556/#579–#582, the Datasources item `/overview/datasources` since #583, the Schedules and API items their homes (`/overview/schedules`, `/overview/api-console`) since #584/#585. `ShellRenderTest`'s href case is named for what it asserts (every family item links its overview home) and its #556 KDoc states the as-built links; assertions unchanged. |
 | 2026-10-20 | v1.195 | #588 the five family catalogs' intro sentence names the resource browser — renumbered at merge after #541's v1.194 | **§4.3, §4.6, §4.21, §4.23, §4.24:** the four family catalogs' visible intro sentence (pipelines, templates, dashboards, visualizations) says "Browse the folders in the resource browser's <Family> tree" — the Parameter Sets sentence's one wording since #554 moved the trees out of the rail; each page's comment says the tree lives in the resource browser's panel. **§4.3, §4.6:** the Purpose rows' "folder TREE" and the two owner-ruling paragraphs' last sentence (dates and meaning kept, the control's name changed) and §4.6's filter bullet name the resource browser; **§4.23:** the catalog's two tree reads do; **§3.4:** the icons paragraph's REST-tree sentence does. Guards: `CatalogIntroRenderTest` renders each of the five pages and pins the visible text — no "sidebar", the resource-browser sentence present. |

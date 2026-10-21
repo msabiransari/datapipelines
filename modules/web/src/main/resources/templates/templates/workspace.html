@@ -27,8 +27,8 @@
     <script th:src="@{/js/csrf.js}"></script>
     <!-- Armed once on the document body: Render context controls and preview requests. -->
     <script th:src="@{/js/template-editor/lifecycle.js}"></script>
-    <!-- Armed once and delegated: unsaved-change markers and fresh transform result scrolls. -->
-    <script th:src="@{/js/template-transform-face.js}"></script>
+    <!-- Armed once and delegated: unsaved-change markers and fresh script result scrolls. -->
+    <script th:src="@{/js/template-script-face.js}"></script>
     <!-- Delegated document wiring for the lifecycle dialogs; the loader prevents stacking. -->
     <script th:src="@{/js/lifecycle-dialog.js}"></script>
     <!-- The pure tab state machine plus DOM glue: mount each live or restored root once. -->
@@ -73,7 +73,7 @@
   </div>
 
   <div class="tw-root app-canvas" th:if="${hasSelectedBody}"
-       th:attr="data-template-id=${templateName}, data-viewed-version=${viewedVersion}, data-can-render=${canAuthor == true and isTransform != true}">
+       th:attr="data-template-id=${templateName}, data-viewed-version=${viewedVersion}, data-can-render=${canAuthor == true and isScript != true}">
     <!-- Header: back to the catalog, crumb (folder muted + leaf bold), the viewed-version
          chip, the version selector, the read-only note, and the header verbs (102 §B.1's
          one-destructive rule) — at most one of Purge template / Discard current / Purge
@@ -145,17 +145,17 @@
     </div>
 
     <!-- #398 — the workspace's six tabs (the tab floor, the pipelines twin's shape): Source is
-         the default; Overview, Render (authors, non-transform), Runs, Used by and Versions are
+         the default; Overview, Render (authors, non-script), Runs, Used by and Versions are
          the template's reading surfaces. A tab change is NAVIGATION ONLY — it swaps no state
          and refetches nothing but the Runs tab's one lazy load. The tab set is closed
          server-side (TemplateWorkspaceTab); Render resolves to Source for a reader and for a
-         transform. The panels hide through the `hidden` ATTRIBUTE (never an inline style). -->
+         script. The panels hide through the `hidden` ATTRIBUTE (never an inline style). -->
     <nav class="tw-tabs" role="tablist" aria-label="Template workspace tabs">
       <button type="button" class="tw-tab" role="tab" id="tw-tab-source" aria-controls="tw-pane-source"
               data-tw-tab="source" th:attr="aria-selected=${activeTab == 'source'} ? 'true' : 'false'">Source</button>
       <button type="button" class="tw-tab" role="tab" id="tw-tab-overview" aria-controls="tw-pane-overview"
               data-tw-tab="overview" th:attr="aria-selected=${activeTab == 'overview'} ? 'true' : 'false'">Overview</button>
-      <button th:if="${canAuthor == true and isTransform != true}" type="button" class="tw-tab" role="tab"
+      <button th:if="${canAuthor == true and isScript != true}" type="button" class="tw-tab" role="tab"
               id="tw-tab-render" aria-controls="tw-pane-render"
               data-tw-tab="render" th:attr="aria-selected=${activeTab == 'render'} ? 'true' : 'false'">Render</button>
       <button type="button" class="tw-tab" role="tab" id="tw-tab-runs" aria-controls="tw-pane-runs"
@@ -171,13 +171,13 @@
     </nav>
 
     <div class="tw-panes">
-      <!-- SOURCE — the viewed version's body: the source column (or the transform face), plus
+      <!-- SOURCE — the viewed version's body: the source column (or the script face), plus
            the imports table. The column fragments are the workspace's one definition (the same
-           /partials/templates/editor/source and /partials/templates/transform-face serve);
+           /partials/templates/editor/source and /partials/templates/script-face serve);
            the fragments carry their own read-only/editable rule (R5). -->
       <div class="tw-pane tw-pane-source" id="tw-pane-source" role="tabpanel" aria-labelledby="tw-tab-source"
            th:attr="hidden=${activeTab != 'source'}">
-        <div class="tw-source-row" th:with="paneView=${isTransform == true} ? ~{partials/template-transform-face :: face} : ~{partials/template-source :: source}">
+        <div class="tw-source-row" th:with="paneView=${isScript == true} ? ~{partials/template-script-face :: face} : ~{partials/template-source :: source}">
           <div th:replace="${paneView}"></div>
           <th:block th:if="${template?.imports != null and !template.imports.isEmpty()}">
             <section class="ds-card tw-imports">
@@ -241,7 +241,7 @@
               <dl class="tw-kv">
                 <!-- A template declares NO parameter schema anywhere in this system (only a
                      pipeline does), so this is what the body REFERENCES, said as that.
-                     7d: a transform DECLARES its inputs (its contract), so it shows the
+                     7d: a script DECLARES its inputs (its contract), so it shows the
                      declared mode and inputs; sql/html keep the derived References reading. -->
                 <th:block th:if="${template?.contract != null}">
                   <dt>Mode</dt>
@@ -274,13 +274,13 @@
         </div>
       </div>
 
-      <!-- RENDER (authors, non-transform) — the Render Context panel (Key/Value + JSON tabs)
+      <!-- RENDER (authors, non-script) — the Render Context panel (Key/Value + JSON tabs)
            and the preview. The preview POST is MUTATE (`template.render`) and the context is
            an author's surface (143): the tab is not drawn for a reader, and the server's tab
            admission resolves render→source for one before any render state is read. The
            preview renders the STORED version the page is viewing. -->
       <div class="tw-pane tw-pane-render" id="tw-pane-render" role="tabpanel" aria-labelledby="tw-tab-render"
-           th:if="${canAuthor == true and isTransform != true}"
+           th:if="${canAuthor == true and isScript != true}"
            th:attr="hidden=${activeTab != 'render'}">
         <div class="tw-doc">
           <section class="ds-card">

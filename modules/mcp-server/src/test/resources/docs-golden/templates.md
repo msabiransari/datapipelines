@@ -15,8 +15,8 @@ template dialect must match what its `source` can execute; `LAKE` is object stor
 place (`lake`).
 
 **Types.** `sql` is the default and the only kind a pipeline node references today; `html`
-renders escaped output and takes no `dialect`; the transform types are their own area
-(`transforms` — the render tools refuse them with `template.render_not_applicable`).
+renders escaped output and takes no `dialect`; the script types are their own area
+(`scripts` — the render tools refuse them with `template.render_not_applicable`).
 
 ## The workflow
 
@@ -54,5 +54,5 @@ Minting a second copy of a lookup another pipeline already pins; letting the nex
 - **`templates-calculators`** — a value must be computed once and bound downstream: the
   CALCULATOR node, the Context keys, overriding.
 - **`templates-tools`** — the area's tools, generated from their shipped descriptions.
-- **`transforms`** — the body is a function, not SQL: the transform types.
+- **`scripts`** — the body is a function, not SQL: the script types.
 - **`pipelines-engine-quirks`** — the render failed or the dialect fought back: engine traps.

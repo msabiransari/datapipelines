@@ -1510,7 +1510,7 @@ class PipelineRepository(
          * started after the version's last draft write — `updated_at` moves on every draft
          * write and never at release (metadata-db §4.5), so the predicate reads exactly "an
          * execution that ran this body". Child executions (`parent_execution_id` non-null)
-         * never qualify; a transform caller's contract outranks the record (the reader's
+         * never qualify; a script caller's contract outranks the record (the reader's
          * precedence, §3.3.1); a version with no qualifying execution records NULL and still
          * releases. Keyed by `:pipelineId` + `v.version` inside the flip's own
          * workspace-checked WHERE — it cannot cross a workspace.

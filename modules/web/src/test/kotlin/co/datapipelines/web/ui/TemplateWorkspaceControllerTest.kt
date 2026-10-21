@@ -452,24 +452,24 @@ class TemplateWorkspaceControllerTest {
     }
 
     @Test
-    fun `a transform template has no render tab - the request resolves to source`() {
+    fun `a script template has no render tab - the request resolves to source`() {
         authenticate()
-        val transformName = "demo/row_pick.jsonata"
-        every { repository.existsId(workspaceId, transformName) } returns true
-        every { repository.findLatest(workspaceId, transformName) } returns
-            TransformFixtures.storedSkeleton(version = 1).let { it.copy(id = transformName, version = 1) }
-        every { repository.findDraftDetail(workspaceId, transformName) } returns null
-        every { repository.listVersions(workspaceId, transformName) } returns
-            listOf(co.datapipelines.templates.TemplateVersionSummary(transformName, 1, Instant.EPOCH, userId))
-        every { repository.findVersion(workspaceId, transformName, 1) } returns
-            TransformFixtures.storedSkeleton(version = 1).let { it.copy(id = transformName) }
-        every { repository.findVersionDetail(workspaceId, transformName, 1) } returns releasedDetail(transformName, 1)
+        val scriptName = "demo/row_pick.jsonata"
+        every { repository.existsId(workspaceId, scriptName) } returns true
+        every { repository.findLatest(workspaceId, scriptName) } returns
+            ScriptFixtures.storedSkeleton(version = 1).let { it.copy(id = scriptName, version = 1) }
+        every { repository.findDraftDetail(workspaceId, scriptName) } returns null
+        every { repository.listVersions(workspaceId, scriptName) } returns
+            listOf(co.datapipelines.templates.TemplateVersionSummary(scriptName, 1, Instant.EPOCH, userId))
+        every { repository.findVersion(workspaceId, scriptName, 1) } returns
+            ScriptFixtures.storedSkeleton(version = 1).let { it.copy(id = scriptName) }
+        every { repository.findVersionDetail(workspaceId, scriptName, 1) } returns releasedDetail(scriptName, 1)
         every { themeResolver.resolve(any()) } returns "saas"
 
         val page = ExtendedModelMap()
-        controller.workspace("/$transformName", null, "render", page, MockHttpServletRequest())
+        controller.workspace("/$scriptName", null, "render", page, MockHttpServletRequest())
 
         page["activeTab"] shouldBe "source"
-        page["isTransform"] shouldBe true
+        page["isScript"] shouldBe true
     }
 }

@@ -162,6 +162,10 @@ class FlywayMigrationIntegrationTest {
                 // #376 (V48) — the parameter-set evaluation history: parameter_evaluations + parameter_evaluation_queries.
                 "48|parameter evaluations|true",
                 "49|schedule notification settings|true",
+                // script-node-rename (V50) — the TRANSFORM→SCRIPT node-type rename: stored
+                // pipeline bodies rewritten with their hashes re-stamped, V33's blocks
+                // constraint renamed (the V33 file itself byte-identical).
+                "50|script node type|true",
             )
     }
 
@@ -1712,14 +1716,14 @@ class FlywayMigrationIntegrationTest {
                 "chk_schedules_missed_run_policy",
                 "chk_schedules_notification_events",
                 "chk_schedules_revision",
+                // 7b (V33) created it as chk_transform_blocks; script-node-rename (V50) renamed
+                // it — the blocks exist exactly on the script types (metadata-db §4.9).
+                "chk_script_blocks",
                 "chk_status",
                 "chk_template_type",
                 "chk_template_versions_discard_stamps",
                 "chk_template_versions_status",
                 "chk_template_versions_via",
-                // 7b (V33) — the transform blocks exist exactly on the transform types
-                // (metadata-db §4.9).
-                "chk_transform_blocks",
                 "chk_triggered_via",
                 "chk_type_dialect",
                 // 215b (V34) — users.kind is human | service (a key's identity) | system.

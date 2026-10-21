@@ -995,7 +995,7 @@ class RoleVisibilityRenderTest {
         /**
          * The inventory as shipped, RE-DERIVED from the sweep (never incremented): 114 shipped 63
          * controls over 50 verbs; the tree held 70 over 56 at 7d's base (81d5a327) with the floor
-         * still at 114's numbers; 7d's transform face adds `transform-save`, `transform-run-suite`
+         * still at 114's numbers; 7d's script face adds `script-save`, `script-run-suite`
          * and the face's own `template-edit` control — 73 over 58; keys v2 retires the login-mint
          * chip (A15), whose two controls and two verbs (`mcp-key-copy`, `mcp-key-delete`) leave
          * the tree — 71 over 56 at the 233c base refresh of `feat/keys-v2`.
@@ -1037,22 +1037,22 @@ class RoleVisibilityRenderTest {
             )
     }
 
-    // ------------------------------------------------------------------ 7d: the transform face
+    // ------------------------------------------------------------------ 7d: the script face
 
     /**
-     * 7d (#7, transform-nodes design §9.4) — a viewer's transform face is the four panes as
+     * 7d (#7, transform-nodes design §9.4) — a viewer's script face is the four panes as
      * read-only `<pre>` blocks and NOTHING else: no form, no textarea, no verb. The promoter
      * (who releases nothing and edits nothing, D5) gets the same face.
      */
     @Test
-    fun `a viewer's transform face is four read-only panes and no verb - a promoter's too`() {
+    fun `a viewer's script face is four read-only panes and no verb - a promoter's too`() {
         listOf(
             RoleModel.NONE.copy(canRead = true, canExecute = true, roleLabel = "viewer"),
             RoleModel.NONE.copy(canRead = true, canReadPromotion = true, canPromote = true, roleLabel = "promoter"),
         ).forEach { roles ->
             val html =
-                render(TransformFace.VIEW) {
-                    transformFaceModel()
+                render(ScriptFace.VIEW) {
+                    scriptFaceModel()
                     withRoles(roles)
                 }
             Regex("<pre id=\"tf-[a-z]+-ro\"").findAll(html).count() shouldBe 4
@@ -1064,36 +1064,36 @@ class RoleVisibilityRenderTest {
 
     /** The two new verbs are an author's (`template.update` / `template.evaluate`), on the editable draft. */
     @Test
-    fun `an author's transform face on its draft carries Save draft and Run suite`() {
+    fun `an author's script face on its draft carries Save draft and Run suite`() {
         val author =
-            render(TransformFace.VIEW) {
-                transformFaceModel()
+            render(ScriptFace.VIEW) {
+                scriptFaceModel()
                 withRoles(canPromote = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "author")
             }
 
-        author shouldContain "data-verb=\"transform-save\""
-        author shouldContain "data-verb=\"transform-run-suite\""
+        author shouldContain "data-verb=\"script-save\""
+        author shouldContain "data-verb=\"script-run-suite\""
         Regex("<textarea id=\"tf-").findAll(author).count() shouldBe 4
         author shouldNotContain "data-verb=\"template-edit\""
     }
 
     /** A RELEASED working version is read-only for an author too: Edit opens a draft, and only a draft saves. */
     @Test
-    fun `an author on a released transform version gets Edit - never Save draft or Run suite`() {
+    fun `an author on a released script version gets Edit - never Save draft or Run suite`() {
         val html =
-            render(TransformFace.VIEW) {
-                transformFaceModel(editable = false)
+            render(ScriptFace.VIEW) {
+                scriptFaceModel(editable = false)
                 withRoles(canPromote = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "author")
             }
 
         html shouldContain "data-verb=\"template-edit\""
-        html shouldNotContain "data-verb=\"transform-save\""
-        html shouldNotContain "data-verb=\"transform-run-suite\""
+        html shouldNotContain "data-verb=\"script-save\""
+        html shouldNotContain "data-verb=\"script-run-suite\""
     }
 
-    private fun WebContext.transformFaceModel(editable: Boolean = true) {
+    private fun WebContext.scriptFaceModel(editable: Boolean = true) {
         val stored =
-            TransformFixtures.storedSkeleton(
+            ScriptFixtures.storedSkeleton(
                 status =
                     if (editable) {
                         co.datapipelines.pipeline.PipelineVersionStatus.DRAFT
@@ -1106,12 +1106,12 @@ class RoleVisibilityRenderTest {
         setVariable("selectedVersion", stored.version)
         setVariable("selectedStatus", stored.status.name)
         setVariable("readOnly", false)
-        setVariable("isTransform", true)
+        setVariable("isScript", true)
         setVariable("faceEditable", editable)
         setVariable("faceHash", stored.bodyHash)
         setVariable("faceHashShort", stored.bodyHash.take(12))
         setVariable("faceLanguage", "JSONata")
-        setVariable("panes", TransformPanes.of(stored))
+        setVariable("panes", ScriptPanes.of(stored))
     }
 
     // ------------------------------------------------------------------ 7e: the semantic link

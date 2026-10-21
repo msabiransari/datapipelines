@@ -140,8 +140,8 @@ class PipelineErrorCodesSpecDriftTest {
                 "mcp.",
                 // 140 — release checks (§13.17).
                 "pipeline.check.",
-                // 7c (#7) — the TRANSFORM node's execution-time family (§13.18).
-                "pipeline.transform.",
+                // 7c (#7) — the SCRIPT node's execution-time family (§13.18).
+                "pipeline.script.",
                 // #9 — the scheduler's refusals (§13.19).
                 "schedule.",
                 // #194 — the parameter engine (§13.20): both halves of the table, because the save-time
@@ -202,7 +202,7 @@ class PipelineErrorCodesSpecDriftTest {
                 PipelineErrorCodes.Workspace.INACTIVE,
                 PipelineErrorCodes.Template.NOT_FOUND,
                 PipelineErrorCodes.Template.IN_USE,
-                // 7b (#7) — the transform blocks' codes are bare `template.*` (the record's §7
+                // 7b (#7) — the script blocks' codes are bare `template.*` (the record's §7
                 // names them without the `validation.` infix): the domain has no entity
                 // dimension for these — each is about the version's own content.
                 PipelineErrorCodes.Template.CONTRACT_INVALID,

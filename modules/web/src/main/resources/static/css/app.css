@@ -22,11 +22,11 @@
   --type-pipeline-bg: var(--accent-success-bg);
   --type-calc: #7c3aed;
   --type-calc-bg: #ede9fe;
-  /* 7d (#7): the TRANSFORM node — a teal between the DQL (info) and PIPELINE (success)
+  /* 7d (#7): the SCRIPT node — a teal between the DQL (info) and PIPELINE (success)
      accents, derived from the THEME's own pair so every theme and both modes carry it;
      no literal colour (the two above predate the rule). */
-  --type-transform: color-mix(in srgb, var(--accent-info) 45%, var(--accent-success));
-  --type-transform-bg: color-mix(in srgb, var(--accent-info-bg) 50%, var(--accent-success-bg));
+  --type-script: color-mix(in srgb, var(--accent-info) 45%, var(--accent-success));
+  --type-script-bg: color-mix(in srgb, var(--accent-info-bg) 50%, var(--accent-success-bg));
   --brand: var(--text-link);
   --brand-soft: color-mix(in srgb, var(--brand) 16%, var(--surface-default));
   --border-faint: color-mix(in srgb, var(--border-subtle) 40%, var(--surface-default));
@@ -73,7 +73,7 @@
 [data-type="ddl"] { --type: var(--type-ddl); --type-bg: var(--type-ddl-bg); }
 [data-type="pipeline"] { --type: var(--type-pipeline); --type-bg: var(--type-pipeline-bg); }
 [data-type="calc"] { --type: var(--type-calc); --type-bg: var(--type-calc-bg); }
-[data-type="transform"] { --type: var(--type-transform); --type-bg: var(--type-transform-bg); }
+[data-type="script"] { --type: var(--type-script); --type-bg: var(--type-script-bg); }
 
 /* ---------------------------------------------------------------------------
    #555 — THE COMPACT SCALE: type, control and shape ROLES, defined once
@@ -326,7 +326,7 @@
   /* #502 — the danger chip tint: the success/warning/info `--accent-*-bg` trio's missing
      sibling. The vendored design system ships no `--accent-danger-bg` and is never edited
      here, so the token is defined as a tint of `--accent-danger` on `--surface-default`,
-     the same shape as `--type-transform-bg` above. 4% stays: a near-white tint in light,
+     the same shape as `--type-script-bg` above. 4% stays: a near-white tint in light,
      a near-surface dark red in dark. The chip's TEXT is no longer `--accent-danger` (3.52:1
      on this tint in dark, the gap #502 reported) but `--app-danger-ink` below, which clears
      4.5:1 on it on every vendored theme (#509). */
@@ -3692,8 +3692,8 @@ button.app-busy::after {
   }
 }
 
-/* ---- 7d (#7, transform-nodes design §9.3) — the TRANSFORM editor face ----
- * Four panes over one transform version, two by two on the editor's wide column and one
+/* ---- 7d (#7, transform-nodes design §9.3) — the SCRIPT editor face ----
+ * Four panes over one script version, two by two on the editor's wide column and one
  * column on a narrow one; the result list under them. The panes are the create modal's
  * mono textarea (`.app-template-body-input`) or the source column's read-only <pre>
  * (`.te-readonly`); nothing here names a colour — pass/fail read the accent tokens. */

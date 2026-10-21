@@ -19,8 +19,8 @@ For **every** datasource a pipeline will touch:
    `semantics_record`. Neither lists tables: a lake's registered tables come from
    `datasources_get_tables`, whose entries state partition status for a lake table (step 2).
    The `definitions` on the listing are this workspace's rules; each carries `implemented_by`.
-   Search the facts, find the definition, find the transform that implements it, and reuse it
-   before writing your own (`transforms-contracts` § Implements).
+   Search the facts, find the definition, find the script that implements it, and reuse it
+   before writing your own (`scripts-contracts` § Implements).
 2. `datasources_get_schemas` → `datasources_get_tables(namespace)` — every table, with its
    `remarks`; on a LAKE datasource each entry also carries `partition_column`, the registered
    partition key. Use a compatible predicate on it when it matches the question's window.

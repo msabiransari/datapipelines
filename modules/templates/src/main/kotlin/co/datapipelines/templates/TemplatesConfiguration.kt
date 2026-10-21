@@ -74,9 +74,9 @@ class TemplatesConfiguration {
         libraryResolver: LibraryResolver,
         properties: TemplatesProperties,
         // The §8.1 test suite: the runner bean lives in web's EngineConfiguration (the pool and
-        // the transform.* knobs are the app's wiring, not this module's). ObjectProvider keeps
+        // the script.* knobs are the app's wiring, not this module's). ObjectProvider keeps
         // this configuration loadable in a context that does not assemble the engine.
-        runner: org.springframework.beans.factory.ObjectProvider<TransformTestRunner>,
+        runner: org.springframework.beans.factory.ObjectProvider<ScriptTestRunner>,
         // 7e — the §2.3 citation rule, implemented over the learned-fact store by the
         // application layer (web's SemanticsConfiguration declares it). Absent, nothing is
         // citable: a draft carrying `implements` is refused rather than stored unchecked.

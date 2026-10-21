@@ -26,7 +26,7 @@ import java.time.Instant
  *   carrying the field keeps the seam stable for the round-two isolate, which can.
  * @param maxStatements statement budget, or null when the caller declares none. Same
  *   story as [maxHeapBytes]: reserved for the isolate engine (`boundsStatements`).
- * @param now the instant `$now()` and `$millis()` return, or null. A transform is a pure
+ * @param now the instant `$now()` and `$millis()` return, or null. A script is a pure
  *   function of its inputs (D-T4), so production callers always pin this to the
  *   execution's `current_timestamp` — a template is reproducible because the clock is an
  *   input, not an ambient read. When null, the engine refuses any body that calls the

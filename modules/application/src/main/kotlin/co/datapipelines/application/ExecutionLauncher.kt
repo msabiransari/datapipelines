@@ -135,9 +135,9 @@ class ExecutionLauncher(
             launch.pipeline.parameters,
             launch.pipeline.calculatorOutputs(),
             launch.pipeline.calculatorOutputGroups(),
-            // 7c (#7): a value-mode TRANSFORM's `context_key` binds as an implicit optional
+            // 7c (#7): a value-mode SCRIPT's `context_key` binds as an implicit optional
             // input on the same rule — supplied, the child's node is skipped.
-            launch.pipeline.transformOutputKeys(),
+            launch.pipeline.scriptOutputKeys(),
         ).bindOrThrow(launch.parameters)
 
         val key = launch.idempotencyKey ?: return LaunchDecision.Start(null)

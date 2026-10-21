@@ -15,7 +15,7 @@ class DraftDashboardDependenciesBrowserTest : DashboardBrowserSuite() {
 
     @Test
     @Suppress("LongMethod") // creation, initial render, parameter change, edit and discard are one ordered API/browser experiment
-    fun `all draft dependencies render through nested composition selectors imports and transforms`() {
+    fun `all draft dependencies render through nested composition selectors imports and scripts`() {
         startTrace()
         val root = ready("draftdeps")
         val datasource = registerSourceDatasource()
@@ -23,7 +23,7 @@ class DraftDashboardDependenciesBrowserTest : DashboardBrowserSuite() {
         val outer = "$root/templates/outer.sql"
         val query = "$root/templates/query.sql"
         val selector = "$root/templates/options.sql"
-        val transform = "$root/templates/shape"
+        val script = "$root/templates/shape"
         val innerBody = sqlTemplate(inner, "<#function suffix><#return '-lib'></#function>", library = true)
         val createdInner = request("POST", "/api/v1/templates", innerBody, 201)
         request(
@@ -61,8 +61,8 @@ class DraftDashboardDependenciesBrowserTest : DashboardBrowserSuite() {
             "POST",
             "/api/v1/templates",
             """
-            {"id":"$transform","type":"jsonata","display_name":"Shape","description":"Draft transform",
-             "body":"[ rows.{\"c\": c & \"-transform\"} ]",
+            {"id":"$script","type":"jsonata","display_name":"Shape","description":"Draft script",
+             "body":"[ rows.{\"c\": c & \"-script\"} ]",
              "contract":{"mode":"row","inputs":{"rows":{"kind":"table","columns":[{"name":"c","type":"STRING"},{"name":"n","type":"INTEGER"},{"name":"previous","type":"INTEGER"}]}},
                          "output":{"kind":"table","columns":[{"name":"c","type":"STRING"}]}},
              "invariants":[],"tests":[{"name":"empty input","input":{"rows":[],"inputs":{}},"expect":{"output":[]}}]}
@@ -117,7 +117,7 @@ class DraftDashboardDependenciesBrowserTest : DashboardBrowserSuite() {
             """
             {"name":"$root/visualizations/table","display_name":"Draft table","renderer":{"kind":"table","version":"1"},
              "inputs":{"main":{"columns":[{"name":"c","type":"STRING","nullable":false},{"name":"n","type":"INTEGER","nullable":false},{"name":"previous","type":"INTEGER","nullable":false}]}},
-             "transform":{"template":{"name":"$transform","version":1},"inputs":{"rows":"main"}},
+             "transform":{"template":{"name":"$script","version":1},"inputs":{"rows":"main"}},
              "config":{"columns":[{"label":"Country","values":null}]},"bindings":{"columns[0].values":"c"}}
             """.trimIndent(),
             201,
@@ -165,20 +165,20 @@ class DraftDashboardDependenciesBrowserTest : DashboardBrowserSuite() {
         request("GET", "/api/v1/dashboards/$board/runtime/config", null, 404)
         val config = request("GET", "/api/v1/dashboards/$board/runtime/config?version=1", null, 200)["configuration_id"]
         page.navigate("$baseUrl/dashboards/$board?version=1&tab=board")
-        awaitCell("EU-1-lib-transform")
+        awaitCell("EU-1-lib-script")
         page.locator("#dp-board .plotly .main-svg").first().waitFor()
         page.locator("#dp-board .dp-dashboard-kpi-number").innerText() shouldBe "42"
         page.locator("#dp-board .dp-dashboard-kpi-comparison-value").innerText() shouldBe "10"
         page.locator("[data-dp-parameter='kind'] select").selectOption("1")
         page.waitForCondition { page.locator("[data-dp-parameter='country'] select").innerText().contains("US-1") }
         page.evaluate("() => window.__dpPage.instance.refresh({scope:'all'})")
-        awaitCell("US-1-lib-transform")
+        awaitCell("US-1-lib-script")
         // A real draft write at the same version must invalidate the graph, through two import edges.
         val edited = sqlTemplate(inner, "<#function suffix><#return '-edited'></#function>", library = true)
         request("PUT", "/api/v1/templates", edited, 200, createdInner["body_hash"] as String)
         request("GET", "/api/v1/dashboards/$board/runtime/config?version=1", null, 200)["configuration_id"] shouldNotBe config
         page.reload()
-        awaitCell("EU-1-edited-transform")
+        awaitCell("EU-1-edited-script")
         page.screenshot(
             com.microsoft.playwright.Page.ScreenshotOptions().setPath(
                 java.nio.file.Paths

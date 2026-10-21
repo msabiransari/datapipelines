@@ -145,8 +145,8 @@ object ParameterCoercion {
     /**
      * The digit cap bounds the PARSE; this bounds the VALUE (the 279 merge's security pass,
      * finding 2): `"1e999999999"` is eleven characters and parses in constant time to scale
-     * −999,999,999, and the first `toPlainString()` downstream — the wire encoder, the transform
-     * context — then allocates a gigabyte of zeros. A magnitude whose plain rendering would need
+     * −999,999,999, and the first `toPlainString()` downstream — the wire encoder, the script
+     * engine's evaluation context — then allocates a gigabyte of zeros. A magnitude whose plain rendering would need
      * more than [maxNumericDigits] digits is the same `too_many_digits` refusal: `|scale|` and
      * `precision` are both held to the cap, so every renderer inherits the bound.
      */

@@ -33,8 +33,8 @@ sample); `_get_tables` each table's (grain, caveats); `_get_columns` each column
 time zones, what a coded value means, joins) — each with its `trust` and evidence.
 `observed` or `verified` with evidence saves you the probe; `stale` or `needs_review` is a
 warning, not a truth — re-verify it. The `definitions` on the listing are rules earlier
-pipelines chose, each with `implemented_by`; find the transform that implements a rule before
-writing your own (`transforms-contracts` § Implements).
+pipelines chose, each with `implemented_by`; find the script that implements a rule before
+writing your own (`scripts-contracts` § Implements).
 
 ## Correcting and retiring
 

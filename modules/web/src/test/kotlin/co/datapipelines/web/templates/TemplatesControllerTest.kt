@@ -604,7 +604,7 @@ class TemplatesControllerTest {
     }
 
     @Test
-    fun `render on a transform type is render_not_applicable pointing at evaluate`() {
+    fun `render on a script type is render_not_applicable pointing at evaluate`() {
         authenticate()
         every { repository.lookupVersion(any(), "test/xform.jsonata", 1) } returns
             TemplateVersion(
@@ -635,7 +635,7 @@ class TemplatesControllerTest {
                 rejects = emptyList(),
                 invariants =
                     listOf(
-                        co.datapipelines.templates.TransformTestRunner
+                        co.datapipelines.templates.ScriptTestRunner
                             .InvariantVerdict("one_to_one", true, "no row lost"),
                     ),
             )
@@ -699,7 +699,7 @@ class TemplatesControllerTest {
     }
 
     /**
-     * #333 reader 3 — the transform test's `input` binds through `TransformBlocks.mapper`. A number where its
+     * #333 reader 3 — the script test's `input` binds through `ScriptBlocks.mapper`. A number where its
      * `now` is declared a string used to bind as "5"; it is the catalogued `template.contract_invalid`
      * (`details.rule: wrong_type`, the path, never the value). The evaluate service is a STRICT mock with nothing
      * stubbed: the refusal comes before it, and a call would fail the case with a different exception.

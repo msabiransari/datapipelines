@@ -56,7 +56,7 @@ class JsonataEngineBoundsTest {
                 )
             }.exceptionOrNull()
         val timeout = caught.shouldNotBeNull() as ScriptTimeoutException
-        timeout.code shouldBe "pipeline.transform.timeout"
+        timeout.code shouldBe "pipeline.script.timeout"
     }
 
     @Test
@@ -67,7 +67,7 @@ class JsonataEngineBoundsTest {
             }.exceptionOrNull()
         val limit = caught.shouldNotBeNull() as ScriptResourceLimitException
         limit.kind shouldBe ScriptResourceLimitException.Kind.DEPTH
-        limit.code shouldBe "pipeline.transform.resource_limit"
+        limit.code shouldBe "pipeline.script.resource_limit"
     }
 
     @Test
@@ -97,7 +97,7 @@ class JsonataEngineBoundsTest {
             }.exceptionOrNull()
         val limit = caught.shouldNotBeNull() as ScriptResourceLimitException
         limit.kind shouldBe ScriptResourceLimitException.Kind.DEPTH
-        limit.code shouldBe "pipeline.transform.resource_limit"
+        limit.code shouldBe "pipeline.script.resource_limit"
     }
 
     @Test
@@ -126,7 +126,7 @@ class JsonataEngineBoundsTest {
             }
         caller.start()
         caller.join(10_000)
-        caught.get().shouldNotBeNull().code shouldBe "pipeline.transform.timeout"
+        caught.get().shouldNotBeNull().code shouldBe "pipeline.script.timeout"
         pool.abandoned.sum() shouldBe 1
     }
 

@@ -77,7 +77,7 @@ done when a customer can use it end to end from the browser, not when the contra
 | Ask | Status on record | Where it lives |
 |---|---|---|
 | **Full implementation of the pipeline editor** — pipelines created, edited and saved WITHOUT an agent | Already listed (§2 *Pipeline CRUD and template CRUD in the UI*; §3.2 *UI pipeline edit mode*); restated 2026-09-12 as a must, not a candidate | ui-screens §4.7, pipeline-editor §11 |
-| **Full implementation of the template editor, per type** — one authoring surface per `TemplateType` (SQL/Freemarker today; JSONata and JavaScript once they exist), with Save | Already listed (§2 CRUD row); the per-type shape is new | ui-screens §4.7, template-hierarchy-design; the TRANSFORM-nodes design record for the two new types |
+| **Full implementation of the template editor, per type** — one authoring surface per `TemplateType` (SQL/Freemarker today; JSONata and JavaScript once they exist), with Save | Already listed (§2 CRUD row); the per-type shape is new | ui-screens §4.7, template-hierarchy-design; the SCRIPT-nodes design record for the two new types |
 | **Full support of JSONata** | Designed: `docs/superpowers/specs/2026-09-09-transform-nodes-design.md` (D-T1–D-T6; `com.dashjoin:jsonata` 0.9.10), prompt to write after the tag; O-1..O-5 open for the owner | §3.2 *Non-SQL node types* is superseded by that record |
 | **Full support of JavaScript, on GraalJS** | Designed in the same record (GraalJS polyglot isolate, `SandboxPolicy.UNTRUSTED`, pure functions v1) | same |
 | **Full support of the scheduler, INCLUDING a UI** | Tracked in [#9](https://github.com/msabiransari/datapipelines/issues/9), the status authority. Design for Fable review: pipeline-agnostic scheduler module, UI/application REST creation, hierarchical names, no schedule release/promotion lifecycle, author/admin modification, reusable scheduler keys, operational blocking and lifecycle emails. Pipeline executor owns `current` and keyword resolution. No new human role. Historical prompt `092` needs replacement; owner lock required before implementation. | [Scheduler design revision](superpowers/specs/2026-09-22-scheduler-design-revision.md); §3.2 *Pipeline scheduling* |
@@ -112,7 +112,7 @@ Larger feature work, multi-spec scope. Planned but not scheduled.
 | Feature | Source spec |
 |---|---|
 | **Calculators** — pre-execution transformers that read Context and write additional keys (`quarter` from `date`, etc.) | pipeline-contract §18 |
-| **Non-SQL node types** — `EXPRESSION` (no SQL, transform via expression language), `HTTP` (call external API, stage response) | pipeline-contract §18, dag-executor §13 |
+| **Non-SQL node types** — `EXPRESSION` (no SQL, script via expression language), `HTTP` (call external API, stage response) | pipeline-contract §18, dag-executor §13 |
 | **Conditional execution** — skip nodes based on a Context expression (`when: "${include_cancelled} == true"`) | pipeline-contract §18, dag-executor §13 |
 | **Per-node retry policies** (`{"retries": 3, "backoff": "exponential"}`) | pipeline-contract §18, dag-executor §13 |
 | **Streaming between nodes** — pipe rows instead of full materialization | pipeline-contract §18, dag-executor §13, staging §14 |

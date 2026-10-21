@@ -40,7 +40,7 @@ class TemplateEditorController(
     private val lens: PromoterLens,
     actors: ActorNames,
 ) {
-    /** The source column's one rule, shared with the transform face's routes (7d). */
+    /** The source column's one rule, shared with the script face's routes (7d). */
     private val source = TemplateSourceModel(reads, actors)
 
     /**
@@ -99,7 +99,7 @@ class TemplateEditorController(
         val workspaceId = principal.requireWorkspace().id
         val filled = source.fill(model, workspaceId, lens.viewFor(principal).templates, name, version, RoleModel.roles(principal).canAuthor)
         RoleModel.stamp(model, principal)
-        // 7d: a transform template's column is the face — the same answer the face's own GET gives.
+        // 7d: a script template's column is the face — the same answer the face's own GET gives.
         return filled.view
     }
 
@@ -174,7 +174,7 @@ class TemplateEditorController(
             imports = imports,
             body = body,
             isLibrary = isLibrary,
-            // 7d: a transform version's three blocks are content (inside `body_hash`); dropping
+            // 7d: a script version's three blocks are content (inside `body_hash`); dropping
             // them made Edit on a released jsonata version a `contract_invalid` blocks_missing.
             contract = contract,
             invariants = invariants,

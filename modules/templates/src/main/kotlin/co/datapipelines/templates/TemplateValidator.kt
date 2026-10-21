@@ -54,7 +54,7 @@ class TemplateValidator(
      * The suite runs last, on the pool, only when every static check passed — a malformed
      * contract has no meaningful evaluation.
      */
-    private val suiteRunner: TransformTestRunner? = null,
+    private val suiteRunner: ScriptTestRunner? = null,
     /**
      * 7e — the §2.3 citation rule's one question ("which of these facts may this workspace
      * cite?"), the port the application layer implements over the learned-fact store.
@@ -100,8 +100,8 @@ class TemplateValidator(
         addEngineFailure(draft, failures)
         addSchemaVersionFailure(draft, failures)
         addTypeDialectFailures(draft, failures)
-        addTransformFieldFailures(draft, failures)
-        addTransformBlockFailures(draft, failures)
+        addScriptFieldFailures(draft, failures)
+        addScriptBlockFailures(draft, failures)
         addImplementsFailure(draft, workspaceId, failures)
         addHtmlEntityFailure(draft, failures)
         addBodyFailures(draft, failures, trace)
@@ -111,7 +111,7 @@ class TemplateValidator(
         // (a malformed contract has no meaningful evaluation) and production wiring supplied
         // the runner. The draft-id-less label names the body hash when the caller has one.
         val type = draft.type ?: TemplateType.SQL
-        if (failures.isEmpty() && suiteRunner != null && type.isTransform) {
+        if (failures.isEmpty() && suiteRunner != null && type.isScript) {
             val contract = draft.contract
             val invariants = draft.invariants
             val tests = draft.tests
@@ -245,12 +245,12 @@ class TemplateValidator(
     }
 
     /**
-     * D-T9 / transform-nodes design §2.1 — a transform type has no Freemarker at all:
+     * D-T9 / transform-nodes design §2.1 — a script type has no Freemarker at all:
      * `imports` and `is_library` are refused (there is no Freemarker to import into), and a
      * body containing a Freemarker construct (`${`, `<#`, `<@`) is refused, all with
      * `template.validation.freemarker_forbidden`, the detail naming which.
      */
-    private fun addTransformFieldFailures(
+    private fun addScriptFieldFailures(
         draft: TemplateDraft,
         failures: MutableList<TemplateValidationFailure>,
     ) {
@@ -262,7 +262,7 @@ class TemplateValidator(
                     code = PipelineErrorCodes.Template.FREEMARKER_FORBIDDEN,
                     message =
                         "A template of type '${type.wire}' declares no imports — there is no Freemarker " +
-                            "to import into on a transform template.",
+                            "to import into on a script template.",
                     details = mapOf("rule" to "imports", "type" to type.wire),
                 )
         }
@@ -272,7 +272,7 @@ class TemplateValidator(
                     code = PipelineErrorCodes.Template.FREEMARKER_FORBIDDEN,
                     message =
                         "A template of type '${type.wire}' cannot be a library — a library is a Freemarker " +
-                            "macro collection, and a transform body is evaluated, never rendered.",
+                            "macro collection, and a script body is evaluated, never rendered.",
                     details = mapOf("rule" to "is_library", "type" to type.wire),
                 )
         }
@@ -282,7 +282,7 @@ class TemplateValidator(
                 TemplateValidationFailure(
                     code = PipelineErrorCodes.Template.FREEMARKER_FORBIDDEN,
                     message =
-                        "The body contains the Freemarker construct '${construct.value}' — a transform body is " +
+                        "The body contains the Freemarker construct '${construct.value}' — a script body is " +
                             "evaluated by the script engine, never rendered (D-T9).",
                     details = mapOf("rule" to "body", "type" to type.wire, "match" to construct.value),
                 )
@@ -294,7 +294,7 @@ class TemplateValidator(
      * was HTML-escaped on its way here and can never be the SQL its author meant. Named so the
      * fix is one edit, not a full run ending in a driver syntax error (pipeline-3 audit).
      * Applies to `sql` templates only: an `html` template may legitimately emit entities, and a
-     * transform body is not SQL.
+     * script body is not SQL.
      */
     private fun addHtmlEntityFailure(
         draft: TemplateDraft,
@@ -339,12 +339,12 @@ class TemplateValidator(
     }
 
     /**
-     * The transform blocks' model rules (transform-nodes design §2.2, in §8.1's save order —
+     * The script blocks' model rules (transform-nodes design §2.2, in §8.1's save order —
      * the body parse is [addBodyFailures]', this is contract → invariants → tests; the suite
-     * itself is [TransformTestRunner]'s, run by the service):
+     * itself is [ScriptTestRunner]'s, run by the service):
      *
-     *  - `sql`/`html` carry no blocks and no `implements` (`template.blocks_not_allowed`); a transform type carries
-     *    all three (the `chk_transform_blocks` twin, reported as `template.contract_invalid`
+     *  - `sql`/`html` carry no blocks and no `implements` (`template.blocks_not_allowed`); a script type carries
+     *    all three (the `chk_script_blocks` twin, reported as `template.contract_invalid`
      *    with `blocks_missing`).
      *  - contract: at least one input (`inputs_empty`); input names are §6.1-shaped
      *    (`name_invalid`); `row` mode requires exactly one table input (`row_mode_inputs`);
@@ -356,17 +356,17 @@ class TemplateValidator(
      *    table under `inputs` (`row_case_lists_table`, R2); `expect` is exactly one of
      *    `output`/`refusal` (`expect_shape`).
      */
-    private fun addTransformBlockFailures(
+    private fun addScriptBlockFailures(
         draft: TemplateDraft,
         failures: MutableList<TemplateValidationFailure>,
     ) {
         val type = draft.type ?: TemplateType.SQL
-        if (!type.isTransform) {
+        if (!type.isScript) {
             listOfNotNull(
                 "contract".takeIf { draft.contract != null },
                 "invariants".takeIf { draft.invariants != null },
                 "tests".takeIf { draft.tests != null },
-                // 7e (record §7): a citation belongs to a transform too — an sql/html template
+                // 7e (record §7): a citation belongs to a script too — an sql/html template
                 // is never an implementation of a workspace rule.
                 "implements".takeIf { draft.implements != null },
             ).forEach { block ->
@@ -374,7 +374,7 @@ class TemplateValidator(
                     TemplateValidationFailure(
                         code = PipelineErrorCodes.Template.BLOCKS_NOT_ALLOWED,
                         message =
-                            "An '$block' block belongs to a transform template; type '${type.wire}' " +
+                            "An '$block' block belongs to a script template; type '${type.wire}' " +
                                 "declares none (transform-nodes design §2.2).",
                         details = mapOf("block" to block, "type" to type.wire),
                     )
@@ -394,7 +394,7 @@ class TemplateValidator(
                 TemplateValidationFailure(
                     code = PipelineErrorCodes.Template.CONTRACT_INVALID,
                     message =
-                        "A transform template carries contract, invariants and tests; missing: " +
+                        "A script template carries contract, invariants and tests; missing: " +
                             missing.joinToString(", ") + " (transform-nodes design §2.2).",
                     details = mapOf("rule" to "blocks_missing", "missing" to missing),
                 )
@@ -406,11 +406,11 @@ class TemplateValidator(
     }
 
     /**
-     * 7e, transform-nodes design §2.3 — every `implements` entry on a transform draft must be a
+     * 7e, transform-nodes design §2.3 — every `implements` entry on a script draft must be a
      * fact [workspaceId] may cite ([ImplementsIds.unresolved]: a visible WORKSPACE definition,
      * exclusion or preference; one not-found answer otherwise). Absent (`null`) is "not stated"
-     * and inherits at write time; on sql/html the presence itself is [addTransformBlockFailures]'
-     * `blocks_not_allowed`, so this rule only speaks for the transform types.
+     * and inherits at write time; on sql/html the presence itself is [addScriptBlockFailures]'
+     * `blocks_not_allowed`, so this rule only speaks for the script types.
      */
     private fun addImplementsFailure(
         draft: TemplateDraft,
@@ -418,7 +418,7 @@ class TemplateValidator(
         failures: MutableList<TemplateValidationFailure>,
     ) {
         val cited = draft.implements ?: return
-        if (!(draft.type ?: TemplateType.SQL).isTransform) return
+        if (!(draft.type ?: TemplateType.SQL).isScript) return
         ImplementsIds.unresolved(workspaceId, cited, citableFacts)?.let { failures += it }
     }
 
@@ -433,11 +433,11 @@ class TemplateValidator(
     )
 
     private fun validateContract(
-        contract: TransformContract,
+        contract: ScriptContract,
         failures: MutableList<TemplateValidationFailure>,
     ) {
         if (contract.inputs.isEmpty()) {
-            failures += contractFailure("inputs_empty", "A transform contract declares at least one input.")
+            failures += contractFailure("inputs_empty", "A script contract declares at least one input.")
         }
         contract.inputs.keys.filterNot { INPUT_NAME.matches(it) }.forEach { name ->
             failures +=
@@ -447,8 +447,8 @@ class TemplateValidator(
                     mapOf("input" to name),
                 )
         }
-        val tableInputs = contract.inputs.filterValues { it is TransformInput.Table }
-        if (contract.mode == TransformMode.ROW && tableInputs.size != 1) {
+        val tableInputs = contract.inputs.filterValues { it is ScriptInput.Table }
+        if (contract.mode == ScriptMode.ROW && tableInputs.size != 1) {
             failures +=
                 contractFailure(
                     "row_mode_inputs",
@@ -463,30 +463,30 @@ class TemplateValidator(
 
     /** Every declared type in the contract — inputs, table columns, the output — through the §4 rule. */
     private fun validateDeclaredTypes(
-        contract: TransformContract,
+        contract: ScriptContract,
         failures: MutableList<TemplateValidationFailure>,
     ) {
         contract.inputs.forEach { (name, input) ->
             validateDeclaredType("inputs.$name", input.typeOf(), input.precisionOf(), input.scaleOf(), failures)
-            (input as? TransformInput.Table)?.columns?.forEach { column ->
+            (input as? ScriptInput.Table)?.columns?.forEach { column ->
                 validateDeclaredType("inputs.$name.${column.name}", column.type, column.precision, column.scale, failures)
             }
         }
         validateDeclaredType("output", contract.output.typeOf(), contract.output.precisionOf(), contract.output.scaleOf(), failures)
-        (contract.output as? TransformOutput.Table)?.columns?.forEach { column ->
+        (contract.output as? ScriptOutput.Table)?.columns?.forEach { column ->
             validateDeclaredType("output.${column.name}", column.type, column.precision, column.scale, failures)
         }
     }
 
     /** mode/output.kind agreement, and rejects only with a table output (record §2.2). */
     private fun validateModeAndRejects(
-        contract: TransformContract,
+        contract: ScriptContract,
         failures: MutableList<TemplateValidationFailure>,
     ) {
         val modeOutputOk =
             when (contract.mode) {
-                TransformMode.ROW, TransformMode.TABLE -> contract.output is TransformOutput.Table
-                TransformMode.VALUE -> contract.output is TransformOutput.Value || contract.output is TransformOutput.Obj
+                ScriptMode.ROW, ScriptMode.TABLE -> contract.output is ScriptOutput.Table
+                ScriptMode.VALUE -> contract.output is ScriptOutput.Value || contract.output is ScriptOutput.Obj
             }
         if (!modeOutputOk) {
             failures +=
@@ -497,7 +497,7 @@ class TemplateValidator(
                     mapOf("mode" to contract.mode.wire, "output_kind" to contract.output.kind),
                 )
         }
-        if (contract.rejects && contract.output !is TransformOutput.Table) {
+        if (contract.rejects && contract.output !is ScriptOutput.Table) {
             failures +=
                 contractFailure(
                     "rejects_without_table",
@@ -507,17 +507,17 @@ class TemplateValidator(
         }
     }
 
-    private fun TransformInput.typeOf(): LogicalType? = (this as? TransformInput.Value)?.type
+    private fun ScriptInput.typeOf(): LogicalType? = (this as? ScriptInput.Value)?.type
 
-    private fun TransformInput.precisionOf(): Int? = (this as? TransformInput.Value)?.precision
+    private fun ScriptInput.precisionOf(): Int? = (this as? ScriptInput.Value)?.precision
 
-    private fun TransformInput.scaleOf(): Int? = (this as? TransformInput.Value)?.scale
+    private fun ScriptInput.scaleOf(): Int? = (this as? ScriptInput.Value)?.scale
 
-    private fun TransformOutput.typeOf(): LogicalType? = (this as? TransformOutput.Value)?.type
+    private fun ScriptOutput.typeOf(): LogicalType? = (this as? ScriptOutput.Value)?.type
 
-    private fun TransformOutput.precisionOf(): Int? = (this as? TransformOutput.Value)?.precision
+    private fun ScriptOutput.precisionOf(): Int? = (this as? ScriptOutput.Value)?.precision
 
-    private fun TransformOutput.scaleOf(): Int? = (this as? TransformOutput.Value)?.scale
+    private fun ScriptOutput.scaleOf(): Int? = (this as? ScriptOutput.Value)?.scale
 
     /** type-system.md §4 applied to a declared (not inferred) contract type. */
     private fun validateDeclaredType(
@@ -532,7 +532,7 @@ class TemplateValidator(
             failures +=
                 contractFailure(
                     "type_unsupported",
-                    "Declared type ${type.wire} at '$path' is not supported in a transform contract " +
+                    "Declared type ${type.wire} at '$path' is not supported in a script contract " +
                         "(transform-nodes design §6).",
                     mapOf("path" to path, "type" to type.wire),
                 )
@@ -584,7 +584,7 @@ class TemplateValidator(
     }
 
     private fun validateInvariants(
-        invariants: List<TransformInvariant>,
+        invariants: List<ScriptInvariant>,
         failures: MutableList<TemplateValidationFailure>,
     ) {
         val engine = scriptEngines.getValue(ScriptLanguage.JSONATA)
@@ -617,8 +617,8 @@ class TemplateValidator(
     }
 
     private fun validateTests(
-        contract: TransformContract,
-        tests: List<TransformTestCase>,
+        contract: ScriptContract,
+        tests: List<ScriptTestCase>,
         failures: MutableList<TemplateValidationFailure>,
     ) {
         val hasEmptyCase =
@@ -627,14 +627,14 @@ class TemplateValidator(
                 val tablesEmpty =
                     when (contract.mode) {
                         // R2: in row mode the table rides `rows`; `inputs` lists no table.
-                        TransformMode.ROW -> {
+                        ScriptMode.ROW -> {
                             true
                         }
 
                         // Every declared table input is listed AND empty.
-                        TransformMode.TABLE, TransformMode.VALUE -> {
+                        ScriptMode.TABLE, ScriptMode.VALUE -> {
                             contract.inputs
-                                .filterValues { it is TransformInput.Table }
+                                .filterValues { it is ScriptInput.Table }
                                 .keys
                                 .all { name -> (case.input.inputs?.get(name) as? List<*>)?.isEmpty() == true }
                         }
@@ -645,14 +645,14 @@ class TemplateValidator(
             failures +=
                 contractFailure(
                     "empty_case_missing",
-                    "A transform declares a test case whose every table input and rows are empty — " +
-                        "a transform with no test for zero rows does not save (transform-nodes design §2.2).",
+                    "A script declares a test case whose every table input and rows are empty — " +
+                        "a script with no test for zero rows does not save (transform-nodes design §2.2).",
                 )
         }
-        if (contract.mode == TransformMode.ROW) {
+        if (contract.mode == ScriptMode.ROW) {
             val tableName =
                 contract.inputs
-                    .filterValues { it is TransformInput.Table }
+                    .filterValues { it is ScriptInput.Table }
                     .keys
                     .singleOrNull()
             tests.forEach { case ->
@@ -687,10 +687,10 @@ class TemplateValidator(
         /** The five entities a SQL body can only have acquired by being HTML-escaped. */
         private val HTML_ENTITY = Regex("&(lt|gt|amp|quot|#39);")
 
-        /** D-T9's forbidden Freemarker constructs in a transform body: interpolation or a directive. */
+        /** D-T9's forbidden Freemarker constructs in a script body: interpolation or a directive. */
         private val FREEMARKER_CONSTRUCT = Regex("""\$\{|<#|<@""")
 
-        /** A transform contract's input name — pipeline-contract §6.1's identifier rule. */
+        /** A script contract's input name — pipeline-contract §6.1's identifier rule. */
         private val INPUT_NAME = Regex("[a-z_][a-z0-9_]*")
 
         /** type-system.md §4: DECIMAL is exact up to 15 digits; beyond that the type is BIGDECIMAL. */

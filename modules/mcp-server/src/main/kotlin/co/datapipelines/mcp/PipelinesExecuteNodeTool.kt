@@ -58,7 +58,7 @@ class PipelinesExecuteNodeTool(
                     "decoded rows — a debug query for testing a node in isolation, NOT a pipeline execution. " +
                     "DML and DDL nodes execute FOR REAL against the datasource, leaving no execution history " +
                     "or trace. No ancestors run and no tempdb exists: a node whose source is tempdb is refused, " +
-                    "and so is a TRANSFORM node (use templates_evaluate). " +
+                    "and so is a SCRIPT node (use templates_evaluate). " +
                     "Parameters bind through the pipeline's declarations; unsupplied required parameters fall " +
                     "back to sample values and the response names them in sampled_parameters. Absent version " +
                     "runs the DRAFT if one exists, else the current released version; the response states which " +
@@ -158,13 +158,13 @@ class PipelinesExecuteNodeTool(
             }
 
             is NodeSqlResolution.RenderFailed -> {
-                // 7c (#7): a transform template declares no dialect, so the resolver refuses
+                // 7c (#7): a script template declares no dialect, so the resolver refuses
                 // its render with its own no-dialect sentence BEFORE any tool verdict can name
                 // the node type. That sentence — pinned by the tool test — is the one shape a
-                // TRANSFORM node produces here, and the tool's answer for it is the tempdb
+                // SCRIPT node produces here, and the tool's answer for it is the tempdb
                 // refusal with `use: templates_evaluate`, never a render failure.
                 if (resolution.message.contains("only type 'sql' templates can render node SQL")) {
-                    standaloneRefused(resolution.version, nodeId, "transform_node")
+                    standaloneRefused(resolution.version, nodeId, "script_node")
                 }
                 throw DatapipelinesException(
                     code = PipelineErrorCodes.Node.TEMPLATE_RENDER_FAILED,
@@ -195,10 +195,10 @@ class PipelinesExecuteNodeTool(
             // different feature. Use pipelines_execute for the node that builds this table.
             standaloneRefused(resolution.version, node.id, "tempdb_source")
         }
-        if (node.type == NodeType.TRANSFORM) {
-            // 7c (#7): a TRANSFORM carries no source at all — refusing here, before the
+        if (node.type == NodeType.SCRIPT) {
+            // 7c (#7): a SCRIPT carries no source at all — refusing here, before the
             // datasource resolution, keeps its blank source from being resolved as one.
-            standaloneRefused(resolution.version, node.id, "transform_node")
+            standaloneRefused(resolution.version, node.id, "script_node")
         }
 
         val datasourceName = node.source
@@ -242,10 +242,10 @@ class PipelinesExecuteNodeTool(
                     standaloneRefused(resolution.version, node.id, "calculator_node")
                 }
 
-                // 7c (#7): a TRANSFORM node is a script over staged data, not SQL against a
+                // 7c (#7): a SCRIPT node is a script over staged data, not SQL against a
                 // datasource — the same refusal, and `templates_evaluate` is its debug verb.
-                NodeType.TRANSFORM -> {
-                    standaloneRefused(resolution.version, node.id, "transform_node")
+                NodeType.SCRIPT -> {
+                    standaloneRefused(resolution.version, node.id, "script_node")
                 }
             }
         }
@@ -289,8 +289,8 @@ class PipelinesExecuteNodeTool(
                             "Context key, and runs no SQL of its own."
                     }
 
-                    "transform_node" -> {
-                        "Node '$nodeId' is a TRANSFORM node — it evaluates a script over staged data " +
+                    "script_node" -> {
+                        "Node '$nodeId' is a SCRIPT node — it evaluates a script over staged data " +
                             "and runs no SQL of its own."
                     }
 
@@ -303,8 +303,8 @@ class PipelinesExecuteNodeTool(
                     "node_id" to nodeId,
                     "reason" to reason,
                     "version" to version.version,
-                    // 7c: a TRANSFORM's debug verb is the evaluate surface, not this tool.
-                    "use" to if (reason == "transform_node") "templates_evaluate" else null,
+                    // 7c: a SCRIPT's debug verb is the evaluate surface, not this tool.
+                    "use" to if (reason == "script_node") "templates_evaluate" else null,
                 ),
         )
 }

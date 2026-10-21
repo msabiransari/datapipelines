@@ -76,58 +76,58 @@ class TemplateDryRendererImpl(
         return SqlBindScanner.scan(version.body)
     }
 
-    override fun transformContract(
+    override fun scriptContract(
         workspaceId: java.util.UUID,
         ref: TemplateRef,
-    ): co.datapipelines.pipeline.TransformContractView? {
+    ): co.datapipelines.pipeline.ScriptContractView? {
         val version = engines.registryFor(workspaceId).lookup(ref.id, ref.version) ?: return null
-        if (!version.type.isTransform) return null
-        return TransformBlocks.readContract(version.contractJson)?.let(::viewOf)
+        if (!version.type.isScript) return null
+        return ScriptBlocks.readContract(version.contractJson)?.let(::viewOf)
     }
 }
 
 /** The one mapping from 7b's contract model to pipeline-contract's §12.13 view — see the view's KDoc. */
-private fun viewOf(contract: TransformContract): co.datapipelines.pipeline.TransformContractView =
-    co.datapipelines.pipeline.TransformContractView(
+private fun viewOf(contract: ScriptContract): co.datapipelines.pipeline.ScriptContractView =
+    co.datapipelines.pipeline.ScriptContractView(
         mode =
             when (contract.mode) {
-                TransformMode.ROW -> co.datapipelines.pipeline.TransformContractView.Mode.ROW
-                TransformMode.TABLE -> co.datapipelines.pipeline.TransformContractView.Mode.TABLE
-                TransformMode.VALUE -> co.datapipelines.pipeline.TransformContractView.Mode.VALUE
+                ScriptMode.ROW -> co.datapipelines.pipeline.ScriptContractView.Mode.ROW
+                ScriptMode.TABLE -> co.datapipelines.pipeline.ScriptContractView.Mode.TABLE
+                ScriptMode.VALUE -> co.datapipelines.pipeline.ScriptContractView.Mode.VALUE
             },
         inputs =
             contract.inputs.mapValues { (_, input) ->
                 when (input) {
-                    is TransformInput.Table -> {
-                        co.datapipelines.pipeline.TransformContractView.Input
+                    is ScriptInput.Table -> {
+                        co.datapipelines.pipeline.ScriptContractView.Input
                             .Table(input.columns.map(::viewColumn))
                     }
 
-                    is TransformInput.Value -> {
-                        co.datapipelines.pipeline.TransformContractView.Input
+                    is ScriptInput.Value -> {
+                        co.datapipelines.pipeline.ScriptContractView.Input
                             .Value(input.type)
                     }
                 }
             },
         output =
             when (val output = contract.output) {
-                is TransformOutput.Table -> {
-                    co.datapipelines.pipeline.TransformContractView.Output
+                is ScriptOutput.Table -> {
+                    co.datapipelines.pipeline.ScriptContractView.Output
                         .Table(output.columns.map(::viewColumn))
                 }
 
-                is TransformOutput.Value -> {
-                    co.datapipelines.pipeline.TransformContractView.Output
+                is ScriptOutput.Value -> {
+                    co.datapipelines.pipeline.ScriptContractView.Output
                         .Value(output.type)
                 }
 
-                is TransformOutput.Obj -> {
-                    co.datapipelines.pipeline.TransformContractView.Output.Obj
+                is ScriptOutput.Obj -> {
+                    co.datapipelines.pipeline.ScriptContractView.Output.Obj
                 }
             },
         rejects = contract.rejects,
     )
 
-private fun viewColumn(column: ContractColumn): co.datapipelines.pipeline.TransformContractView.Column =
-    co.datapipelines.pipeline.TransformContractView
+private fun viewColumn(column: ContractColumn): co.datapipelines.pipeline.ScriptContractView.Column =
+    co.datapipelines.pipeline.ScriptContractView
         .Column(column.name, column.type, column.nullable)

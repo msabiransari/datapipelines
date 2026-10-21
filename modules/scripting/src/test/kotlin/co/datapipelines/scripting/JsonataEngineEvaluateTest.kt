@@ -73,7 +73,7 @@ class JsonataEngineEvaluateTest {
                 engine.evaluate(engine.compile("foo(1)"), null, limits)
             }.exceptionOrNull()
         val failure = caught.shouldNotBeNull() as ScriptEvaluationException
-        failure.code shouldBe "pipeline.transform.evaluation_failed"
+        failure.code shouldBe "pipeline.script.evaluation_failed"
         val message = failure.message.shouldNotBeNull()
         (message.length <= ScriptEvaluationException.MAX_MESSAGE_CHARS + 60) shouldBe true
     }

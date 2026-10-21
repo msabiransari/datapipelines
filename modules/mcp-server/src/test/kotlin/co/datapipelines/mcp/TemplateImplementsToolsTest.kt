@@ -53,7 +53,7 @@ class TemplateImplementsToolsTest {
         args: Map<String, Any?>,
     ) = McpFixtures.payloadOf(McpToolDispatcher(listOf(tool), RecordingSink()).call(McpFixtures.request(name, args), ctx))
 
-    private fun transform(
+    private fun script(
         implements: List<String>? = listOf("$fact"),
         retired: List<RetiredFactCitation> = emptyList(),
     ) = Template(
@@ -73,7 +73,7 @@ class TemplateImplementsToolsTest {
         retiredFacts = retired,
     )
 
-    private val transformArgs =
+    private val scriptArgs =
         mapOf(
             "id" to "test/rainy.jsonata",
             "type" to "jsonata",
@@ -86,10 +86,10 @@ class TemplateImplementsToolsTest {
     fun `templates_create hands the stated implements to the draft service and returns the stored citations`() {
         val drafted = slot<TemplateDraft>()
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
-        every { drafts.create(any(), capture(drafted), McpFixtures.USER, CreateLifecycle.DRAFT, WriteSurface.MCP) } returns transform()
+        every { drafts.create(any(), capture(drafted), McpFixtures.USER, CreateLifecycle.DRAFT, WriteSurface.MCP) } returns script()
         val tool = TemplatesCreateTool(templates, co.datapipelines.pipeline.AuthoringGuard(true), validator, drafts)
 
-        val payload = dispatch(tool, "templates_create", transformArgs + ("implements" to listOf("$fact")))
+        val payload = dispatch(tool, "templates_create", scriptArgs + ("implements" to listOf("$fact")))
 
         assertSoftly {
             drafted.captured.implements shouldBe listOf("$fact")
@@ -101,13 +101,13 @@ class TemplateImplementsToolsTest {
     @Test
     fun `templates_update passes an omitted implements as null - inherit - and a stated one verbatim`() {
         val drafted = mutableListOf<TemplateDraft>()
-        every { templates.findWorking(any(), "test/rainy.jsonata") } returns transform()
+        every { templates.findWorking(any(), "test/rainy.jsonata") } returns script()
         every { validator.validateOrThrow(capture(drafted), any()) } answers { firstArg() }
         every { drafts.write(any(), "test/rainy.jsonata", any(), "h1", McpFixtures.USER, WriteSurface.MCP) } returns
             TemplateVersionDetail("test/rainy.jsonata", 1, PipelineVersionStatus.RELEASED, "h1", Instant.EPOCH, McpFixtures.USER)
-        every { templates.findVersion(any(), "test/rainy.jsonata", 1) } returns transform()
+        every { templates.findVersion(any(), "test/rainy.jsonata", 1) } returns script()
         val tool = TemplatesUpdateTool(templates, drafts, validator)
-        val base = transformArgs + ("expected_hash" to "h1")
+        val base = scriptArgs + ("expected_hash" to "h1")
 
         dispatch(tool, "templates_update", base)
         dispatch(tool, "templates_update", base + ("implements" to listOf("$successor")))
@@ -118,9 +118,9 @@ class TemplateImplementsToolsTest {
 
     @Test
     fun `a non-array implements, or a non-string entry, is a protocol fault - a malformed id is the validator's`() {
-        every { templates.findWorking(any(), "test/rainy.jsonata") } returns transform()
+        every { templates.findWorking(any(), "test/rainy.jsonata") } returns script()
         val tool = TemplatesUpdateTool(templates, drafts, validator)
-        val base = transformArgs + ("expected_hash" to "h1")
+        val base = scriptArgs + ("expected_hash" to "h1")
 
         shouldThrow<McpError> { tool.call(McpArguments(base + ("implements" to "$fact")), ctx) }
             .message
@@ -134,7 +134,7 @@ class TemplateImplementsToolsTest {
     fun `templates_list hands the implements filter to the read service as a fact id, and refuses a malformed one`() {
         val cited = slot<UUID>()
         val reads = mockk<TemplateService>()
-        every { reads.list(any(), any(), any(), any(), any(), any(), any(), capture(cited)) } returns listOf(transform())
+        every { reads.list(any(), any(), any(), any(), any(), any(), any(), capture(cited)) } returns listOf(script())
         val tool = TemplatesListTool(reads, McpFixtures.EVERYTHING_LENS)
 
         val rows = dispatch(tool, "templates_list", mapOf("implements" to "$fact"))
@@ -154,7 +154,7 @@ class TemplateImplementsToolsTest {
         val reads = mockk<TemplateService>()
         every { reads.findDraftDetail(any(), any(), "test/rainy.jsonata") } returns null
         every { reads.findLatest(any(), any(), "test/rainy.jsonata") } returns
-            transform(retired = listOf(RetiredFactCitation("$fact", "superseded", "$successor")))
+            script(retired = listOf(RetiredFactCitation("$fact", "superseded", "$successor")))
         val payload = dispatch(TemplatesGetTool(reads, McpFixtures.EVERYTHING_LENS), "templates_get", mapOf("id" to "test/rainy.jsonata"))
 
         assertSoftly {

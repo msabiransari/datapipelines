@@ -19,6 +19,14 @@ import co.datapipelines.templates.ContractColumn
 import co.datapipelines.templates.ImplementingVersion
 import co.datapipelines.templates.LibraryResolver
 import co.datapipelines.templates.RepositoryTemplateRegistry
+import co.datapipelines.templates.ScriptBlocks
+import co.datapipelines.templates.ScriptContract
+import co.datapipelines.templates.ScriptInput
+import co.datapipelines.templates.ScriptMode
+import co.datapipelines.templates.ScriptOutput
+import co.datapipelines.templates.ScriptTestCase
+import co.datapipelines.templates.ScriptTestExpect
+import co.datapipelines.templates.ScriptTestInput
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDraft
 import co.datapipelines.templates.TemplateDraftService
@@ -26,14 +34,6 @@ import co.datapipelines.templates.TemplateImplementsRepository
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidationFailure
 import co.datapipelines.templates.TemplateValidator
-import co.datapipelines.templates.TransformBlocks
-import co.datapipelines.templates.TransformContract
-import co.datapipelines.templates.TransformInput
-import co.datapipelines.templates.TransformMode
-import co.datapipelines.templates.TransformOutput
-import co.datapipelines.templates.TransformTestCase
-import co.datapipelines.templates.TransformTestExpect
-import co.datapipelines.templates.TransformTestInput
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.LogicalType
 import io.kotest.assertions.withClue
@@ -121,7 +121,7 @@ class TemplateImplementsIntegrationTest {
 
     @Test
     fun `a create cites WORKSPACE facts and every read carries them, sorted`() {
-        val created = drafts.create(WORKSPACE, validated(transform(implements = listOf("$rule", "$exclusion"))), actor)
+        val created = drafts.create(WORKSPACE, validated(script(implements = listOf("$rule", "$exclusion"))), actor)
 
         created.implements shouldBe listOf(rule, exclusion).map { it.toString() }.sorted()
         created.needsReview shouldBe false
@@ -140,7 +140,7 @@ class TemplateImplementsIntegrationTest {
             )
         cases.forEach { (id, reason) ->
             withClue(id) {
-                val failure = implementsFailure(transform(implements = listOf("$rule", id)))
+                val failure = implementsFailure(script(implements = listOf("$rule", id)))
                 failure.shouldNotBeNull()
                 failure.details["reason"] shouldBe reason
                 // Not-found semantics: the answer never says whose fact it is or that it exists.
@@ -175,7 +175,7 @@ class TemplateImplementsIntegrationTest {
             drafts.write(
                 WORKSPACE,
                 NAME,
-                validated(transform(implements = listOf("$rule", "$exclusion"))),
+                validated(script(implements = listOf("$rule", "$exclusion"))),
                 v1.bodyHash,
                 actor,
                 WriteSurface.MCP,
@@ -190,7 +190,7 @@ class TemplateImplementsIntegrationTest {
         // R9: the hash is byte-identical before and after — and equals the hash the database
         // computes for the same content, so no hidden column moved it either.
         after.bodyHash shouldBe hashBefore
-        after.bodyHash shouldBe hashOf(transform())
+        after.bodyHash shouldBe hashOf(script())
     }
 
     @Test
@@ -198,7 +198,7 @@ class TemplateImplementsIntegrationTest {
         val v1 = releasedV1(implements = listOf("$rule"))
 
         // Absent implements + a body change: v2 DRAFT inherits v1's citation (owner ruling 2026-09-25).
-        val v2 = drafts.write(WORKSPACE, NAME, validated(transform(body = "rows ~> \$count()")), v1.bodyHash, actor, WriteSurface.MCP)
+        val v2 = drafts.write(WORKSPACE, NAME, validated(script(body = "rows ~> \$count()")), v1.bodyHash, actor, WriteSurface.MCP)
         v2.status shouldBe PipelineVersionStatus.DRAFT
         v2.version shouldBe 2
         templates.findVersion(WORKSPACE, NAME, 2)!!.implements shouldBe listOf("$rule")
@@ -208,7 +208,7 @@ class TemplateImplementsIntegrationTest {
             drafts.write(
                 WORKSPACE,
                 NAME,
-                validated(transform(body = "rows ~> \$count() + 0")),
+                validated(script(body = "rows ~> \$count() + 0")),
                 v2.bodyHash,
                 actor,
                 WriteSurface.MCP,
@@ -219,7 +219,7 @@ class TemplateImplementsIntegrationTest {
         drafts.write(
             WORKSPACE,
             NAME,
-            validated(transform(body = "rows ~> \$count() + 0", implements = emptyList())),
+            validated(script(body = "rows ~> \$count() + 0", implements = emptyList())),
             inPlace.bodyHash,
             actor,
             WriteSurface.MCP,
@@ -230,7 +230,7 @@ class TemplateImplementsIntegrationTest {
 
     @Test
     fun `a purged draft takes its citations with it`() {
-        val draft = drafts.create(WORKSPACE, validated(transform(implements = listOf("$rule"))), actor)
+        val draft = drafts.create(WORKSPACE, validated(script(implements = listOf("$rule"))), actor)
         citationRows() shouldBe 1
 
         templates.purgeDraft(WORKSPACE, NAME, draft.bodyHash, draftEligible = true) shouldBe true
@@ -243,7 +243,7 @@ class TemplateImplementsIntegrationTest {
     @Test
     fun `retiring a cited fact marks every citing version on read, naming the successor, until the successor is cited`() {
         val v1 = releasedV1(implements = listOf("$rule"))
-        val v2 = drafts.write(WORKSPACE, NAME, validated(transform(body = "rows ~> \$count()")), v1.bodyHash, actor, WriteSurface.MCP)
+        val v2 = drafts.write(WORKSPACE, NAME, validated(script(body = "rows ~> \$count()")), v1.bodyHash, actor, WriteSurface.MCP)
         val successor = supersede(rule, "rainy = precipitation_mm >= 5.0")
         val expected = listOf(RetiredFactCitation("$rule", "superseded", "$successor"))
 
@@ -264,7 +264,7 @@ class TemplateImplementsIntegrationTest {
         drafts.write(
             WORKSPACE,
             NAME,
-            validated(transform(body = "rows ~> \$count()", implements = listOf("$successor"))),
+            validated(script(body = "rows ~> \$count()", implements = listOf("$successor"))),
             v2.bodyHash,
             actor,
             WriteSurface.MCP,
@@ -303,7 +303,7 @@ class TemplateImplementsIntegrationTest {
     @Test
     fun `implemented_by honours the reader's lens and never lists a discarded version`() {
         val v1 = releasedV1(implements = listOf("$rule"))
-        drafts.write(WORKSPACE, NAME, validated(transform(body = "rows ~> \$count()")), v1.bodyHash, actor, WriteSurface.MCP)
+        drafts.write(WORKSPACE, NAME, validated(script(body = "rows ~> \$count()")), v1.bodyHash, actor, WriteSurface.MCP)
 
         service.implementedBy(WORKSPACE, ReadLens.Everything, listOf(rule, exclusion)) shouldBe
             mapOf(rule to listOf(ImplementingVersion(NAME, 1), ImplementingVersion(NAME, 2)))
@@ -322,7 +322,7 @@ class TemplateImplementsIntegrationTest {
     @Test
     fun `the implements filter keeps the templates whose listed version cites the fact, and a foreign id matches nothing`() {
         releasedV1(implements = listOf("$rule"))
-        drafts.create(WORKSPACE, validated(transform(name = OTHER_NAME, implements = listOf("$exclusion"))), actor)
+        drafts.create(WORKSPACE, validated(script(name = OTHER_NAME, implements = listOf("$exclusion"))), actor)
 
         templates.list(WORKSPACE, implements = rule).map { it.id } shouldContainExactly listOf(NAME)
         templates.count(WORKSPACE, implements = rule) shouldBe 1
@@ -381,7 +381,7 @@ class TemplateImplementsIntegrationTest {
     }
 
     /** The record's row-mode shape: one table input, a table output, the mandatory empty case. */
-    private fun transform(
+    private fun script(
         name: String = NAME,
         body: String = "rows",
         implements: List<String>? = null,
@@ -394,18 +394,18 @@ class TemplateImplementsIntegrationTest {
         description = "Marks each day rainy by the workspace definition.",
         body = body,
         contract =
-            TransformContract(
-                mode = TransformMode.ROW,
-                inputs = mapOf("days" to TransformInput.Table(listOf(ContractColumn("day", LogicalType.STRING)))),
-                output = TransformOutput.Table(listOf(ContractColumn("day", LogicalType.STRING))),
+            ScriptContract(
+                mode = ScriptMode.ROW,
+                inputs = mapOf("days" to ScriptInput.Table(listOf(ContractColumn("day", LogicalType.STRING)))),
+                output = ScriptOutput.Table(listOf(ContractColumn("day", LogicalType.STRING))),
             ),
         invariants = emptyList(),
         tests =
             listOf(
-                TransformTestCase(
+                ScriptTestCase(
                     name = "empty",
-                    input = TransformTestInput(rows = emptyList()),
-                    expect = TransformTestExpect(output = TransformBlocks.mapper.readTree("""{"rows": []}""")),
+                    input = ScriptTestInput(rows = emptyList()),
+                    expect = ScriptTestExpect(output = ScriptBlocks.mapper.readTree("""{"rows": []}""")),
                 ),
             ),
         implements = implements,
@@ -418,7 +418,7 @@ class TemplateImplementsIntegrationTest {
 
     /** v1 created with [implements] and released — the RELEASED version a pipeline would pin. */
     private fun releasedV1(implements: List<String>): Template {
-        val created = drafts.create(WORKSPACE, validated(transform(implements = implements)), actor)
+        val created = drafts.create(WORKSPACE, validated(script(implements = implements)), actor)
         templates.releaseDraft(WORKSPACE, NAME, created.bodyHash, actor).shouldNotBeNull()
         return templates.findVersion(WORKSPACE, NAME, 1)!!
     }
@@ -437,9 +437,9 @@ class TemplateImplementsIntegrationTest {
             isLibrary = draft.isLibrary,
             importsJson = "[]",
             body = draft.body,
-            contractJson = TransformBlocks.writeContract(draft.contract),
-            invariantsJson = TransformBlocks.writeInvariants(draft.invariants),
-            testsJson = TransformBlocks.writeTests(draft.tests),
+            contractJson = ScriptBlocks.writeContract(draft.contract),
+            invariantsJson = ScriptBlocks.writeInvariants(draft.invariants),
+            testsJson = ScriptBlocks.writeTests(draft.tests),
         )
 
     private fun citationRows(): Int = jdbc.jdbcTemplate.queryForObject("SELECT COUNT(*) FROM template_implements", Int::class.java)!!

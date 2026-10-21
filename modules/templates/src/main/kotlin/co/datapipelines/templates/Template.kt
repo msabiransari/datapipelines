@@ -81,20 +81,20 @@ data class Template(
     @field:JsonProperty("body_hash") @get:JsonProperty("body_hash") @param:JsonProperty("body_hash")
     val bodyHash: String = "",
     /**
-     * The three transform blocks (7b, transform-nodes design §2.2) — present exactly when
-     * [type] is a transform type; null on `sql`/`html`. They are part of the version's content
+     * The three script blocks (7b, transform-nodes design §2.2) — present exactly when
+     * [type] is a script type; null on `sql`/`html`. They are part of the version's content
      * (inside `body_hash`), so the export/import and promotion shapes carry them.
      */
     @field:JsonProperty("contract") @get:JsonProperty("contract") @param:JsonProperty("contract")
-    val contract: TransformContract? = null,
+    val contract: ScriptContract? = null,
     @field:JsonProperty("invariants") @get:JsonProperty("invariants") @param:JsonProperty("invariants")
-    val invariants: List<TransformInvariant>? = null,
+    val invariants: List<ScriptInvariant>? = null,
     @field:JsonProperty("tests") @get:JsonProperty("tests") @param:JsonProperty("tests")
-    val tests: List<TransformTestCase>? = null,
+    val tests: List<ScriptTestCase>? = null,
     /**
      * The learned facts this version cites as implementing (7e, transform-nodes design §2.3) —
-     * fact ids, sorted; `[]` on a transform version that cites none, null on `sql`/`html`
-     * (like the blocks above: the field belongs to the transform types). NOT content: outside
+     * fact ids, sorted; `[]` on a script version that cites none, null on `sql`/`html`
+     * (like the blocks above: the field belongs to the script types). NOT content: outside
      * `body_hash`, stored in `template_implements`, carried by export/import/promotion.
      */
     @field:JsonProperty("implements") @get:JsonProperty("implements") @param:JsonProperty("implements")
@@ -125,7 +125,7 @@ data class Template(
         /** The `engine` of an `sql`/`html` template (enums.md §6). */
         const val FREEMARKER_ENGINE = "freemarker"
 
-        /** The `engine` of a transform template (transform-nodes design §2.1: no rendering engine). */
+        /** The `engine` of a script template (transform-nodes design §2.1: no rendering engine). */
         const val NONE_ENGINE = "none"
     }
 }
@@ -179,9 +179,9 @@ data class TemplateVersion(
     val bodyHash: String = "",
     val updatedAt: Instant? = null,
     /**
-     * The three transform blocks as stored jsonb text (7b) — non-null exactly when [type] is a
-     * transform type. Text, not the bound model: this record serves the engine seam's callers
-     * (the test runner, `templates_evaluate`), which bind through [TransformBlocks] exactly
+     * The three script blocks as stored jsonb text (7b) — non-null exactly when [type] is a
+     * script type. Text, not the bound model: this record serves the engine seam's callers
+     * (the test runner, `templates_evaluate`), which bind through [ScriptBlocks] exactly
      * once, and the row's own hash was computed over the stored text.
      */
     val contractJson: String? = null,

@@ -2,12 +2,12 @@ package co.datapipelines.visualization
 
 import co.datapipelines.parameters.ParameterSetRepository
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.ScriptContractView
 import co.datapipelines.pipeline.TemplateDryRenderer
 import co.datapipelines.pipeline.TemplateLookup
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.pipeline.TemplateVersionStatuses
-import co.datapipelines.pipeline.TransformContractView
 import co.datapipelines.typesystem.LogicalType
 import java.util.UUID
 
@@ -17,7 +17,7 @@ import java.util.UUID
 
 /**
  * A pinned template version as the visualization validator needs it (the spec's §3.1 `transform`): exists?
- * a transform? its contract? The production adapter is [over] — composed from pipeline-contract's two template
+ * a script? its contract? The production adapter is [over] — composed from pipeline-contract's two template
  * ports, which `templates` implements, so this module needs no `templates` edge.
  */
 fun interface TemplateContractFacts {
@@ -45,10 +45,10 @@ fun interface TemplateContractFacts {
 
                     is TemplateLookup.Found -> {
                         val status = statuses.statusOf(workspaceId, ref.name, ref.version)
-                        val contract = renderer.transformContract(workspaceId, templateRef)
+                        val contract = renderer.scriptContract(workspaceId, templateRef)
                         when {
                             status == null || status == PipelineVersionStatus.DISCARDED -> TemplatePin.VersionNotFound
-                            !lookup.type.isTransform || contract == null -> TemplatePin.NotTransform(lookup.type)
+                            !lookup.type.isScript || contract == null -> TemplatePin.NotScript(lookup.type)
                             else -> TemplatePin.Transform(status, contract)
                         }
                     }
@@ -63,13 +63,13 @@ sealed interface TemplatePin {
 
     data object VersionNotFound : TemplatePin
 
-    data class NotTransform(
+    data class NotScript(
         val type: TemplateType,
     ) : TemplatePin
 
     data class Transform(
         val status: PipelineVersionStatus,
-        val contract: TransformContractView,
+        val contract: ScriptContractView,
     ) : TemplatePin
 }
 
@@ -95,7 +95,7 @@ data class PipelineReleaseFact(
     val parameters: List<PipelineParameterFact>,
     /**
      * The caller output columns of this release — what a visualization input can be fed, in #328's precedence
-     * (pipeline-contract §3.3.1): a TRANSFORM caller's DECLARED contract columns; any other (SQL) caller node's
+     * (pipeline-contract §3.3.1): a SCRIPT caller's DECLARED contract columns; any other (SQL) caller node's
      * RECORDED columns — the release's `caller_output_json`, copied from the version's latest run (D1); EMPTY
      * when the release has no caller node (it returns no rows); NULL only when a SQL caller node has no record —
      * the save-time `input_contract_mismatch` check is then skipped, never guessed, and the runtime judges the

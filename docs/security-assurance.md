@@ -28,7 +28,7 @@ The boundaries with this product's real blast radius (record §8, ordered by B7)
 | # | Boundary | Why no test settles it | ASVS families it bears on | Status |
 |---|---|---|---|---|
 | M1 | **SQL containment by database privileges.** User-authored SQL runs against customer datasources as the configured user. | The product executes the SQL it is given, by design; the boundary is the privileges of the account a datasource is registered with, which the product does not control. | V1.2, V8.2, V13.2 | manual — outstanding |
-| M2 | **In-process engines** (H2 staging, DuckDB lake, the JSONata/Freemarker evaluators). | Their privilege model is the engine's configuration and the JVM's, not a route; the transform record's breach suite is the precedent to extend. | V1.2, V5.3, V15.2 | manual — outstanding |
+| M2 | **In-process engines** (H2 staging, DuckDB lake, the JSONata/Freemarker evaluators). | Their privilege model is the engine's configuration and the JVM's, not a route; the script record's breach suite is the precedent to extend. | V1.2, V5.3, V15.2 | manual — outstanding |
 | M3 | **Datasource egress to private address ranges.** | Customer databases are often private, so a public-address-only rule would break the product (record §8). The policy is a deployment decision per instance. | V12.3, V13.2 | manual — outstanding |
 | M4 | **File roots** (lake and file datasources). | Traversal, canonicalisation and symlink handling at pool build; the open follow-ups are in [#204](https://github.com/msabiransari/datapipelines/issues/204). | V5.1, V5.3 | manual — outstanding |
 
