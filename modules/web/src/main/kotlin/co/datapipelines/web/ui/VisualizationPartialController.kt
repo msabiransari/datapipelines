@@ -4,6 +4,7 @@ import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.web.api.currentPrincipal
+import jakarta.servlet.http.HttpServletResponse
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
@@ -35,16 +36,21 @@ class VisualizationPartialController(
     /** 178 — the promoter lens: every fragment here renders the caller's view. */
     private val lens: PromoterLens,
 ) {
-    /** The `/visualizations` catalog's swap root: the flat list, every readable visualization or the matches of `q`. */
+    /**
+     * The `/visualizations` catalog's swap root: the flat list, every readable visualization or the matches of `q`.
+     * #591: the answer carries the catalog URL of the list it renders ([CatalogUrl]).
+     */
     @GetMapping
     @RequiredScope(Permission.VISUALIZATION_READ)
     fun catalog(
         model: Model,
+        response: HttpServletResponse,
         @RequestParam(required = false) q: String?,
         @RequestParam(required = false) offset: Int?,
         @RequestParam(required = false) lifecycle: String? = null,
     ): String {
         val bucket = CatalogLifecycle.parse(lifecycle, CatalogLifecycle.VISUALIZATIONS)
+        CatalogUrl.replace(response, CatalogUrl.VISUALIZATIONS, q, bucket, offset)
         val principal = currentPrincipal()
         return browse.fillWrapper(
             model,

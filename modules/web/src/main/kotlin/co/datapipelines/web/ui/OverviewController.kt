@@ -19,8 +19,8 @@ import java.time.Instant
  * [RequiredScope], and a literal leaves no value a variable would have to refuse. One template,
  * `overview/family`, renders all five from an [OverviewPage].
  *
- * One request renders the whole page: the inventory is read ONCE ([FamilyInventory.forFamily], or
- * [FamilyInventory.chartsFor] for a family carrying the #598 charts — one SQL snapshot either way)
+ * One request renders the whole page: the charts are read ONCE ([FamilyInventory.chartsFor],
+ * one SQL snapshot for every family)
  * and so is Recently updated, both under the caller's [PromoterLens] view — a
  * promoter's numbers and list are the admitted ones, never the workspace's. The clock is read
  * ONCE per request too (#598b): the chart read's weeks and the recent list's ages share it, and
@@ -85,19 +85,9 @@ class OverviewController(
         // asking it again must not turn the page into a 500, and an unknown arm reads as lensed.
         val lensed = runCatching { !family.lens(view).isEverything }.getOrDefault(true)
         val now = Instant.now()
-        // #598a: still ONE inventory read per request — the chart group for a family that carries
-        // the stacked charts, the four-bucket inventory for every other.
-        val page =
-            when (family.charts) {
-                OverviewStacked.ChartSet.LIFECYCLE -> {
-                    val charts = inventory.chartsFor(family.navigation, workspaceId, view, now, ui.activelyDevelopedDays)
-                    OverviewPage.of(family, lensed, charts, latest, now)
-                }
-
-                OverviewStacked.ChartSet.STANDARD -> {
-                    OverviewPage.of(family, lensed, inventory.forFamily(family.navigation, workspaceId, view), latest, now)
-                }
-            }
+        // One chart read per request: the lifecycle strip, activity columns and release history.
+        val charts = inventory.chartsFor(family.navigation, workspaceId, view, now, ui.activelyDevelopedDays)
+        val page = OverviewPage.of(family, lensed, charts, latest, now)
         model.addAttribute(MODEL, page)
         return VIEW
     }

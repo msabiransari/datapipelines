@@ -1,0 +1,578 @@
+[
+  {
+    "path": "/pipelines",
+    "section": "/pipelines",
+    "family": "pipelines",
+    "ticketed": true
+  },
+  {
+    "path": "/pipelines/123e4567-e89b-12d3-a456-426614174000?version=2",
+    "section": "/pipelines",
+    "family": "pipelines",
+    "ticketed": true
+  },
+  {
+    "path": "/overview/pipelines",
+    "section": "/pipelines",
+    "family": "pipelines",
+    "ticketed": true
+  },
+  {
+    "path": "/overview/pipelines/details",
+    "section": "/pipelines",
+    "family": "pipelines",
+    "ticketed": true
+  },
+  {
+    "path": "/pipelinesx",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/pipelinesx",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/templates",
+    "section": "/templates",
+    "family": "templates",
+    "ticketed": true
+  },
+  {
+    "path": "/templates/123e4567-e89b-12d3-a456-426614174000?version=2",
+    "section": "/templates",
+    "family": "templates",
+    "ticketed": true
+  },
+  {
+    "path": "/overview/templates",
+    "section": "/templates",
+    "family": "templates",
+    "ticketed": true
+  },
+  {
+    "path": "/overview/templates/details",
+    "section": "/templates",
+    "family": "templates",
+    "ticketed": true
+  },
+  {
+    "path": "/templatesx",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/templatesx",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/datasources",
+    "section": "/datasources",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/datasources/123e4567-e89b-12d3-a456-426614174000?version=2",
+    "section": "/datasources",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/datasources",
+    "section": "/datasources",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/datasources/details",
+    "section": "/datasources",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/datasourcesx",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/datasourcesx",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/dashboards",
+    "section": "/dashboards",
+    "family": "dashboards",
+    "ticketed": true
+  },
+  {
+    "path": "/dashboards/123e4567-e89b-12d3-a456-426614174000?version=2",
+    "section": "/dashboards",
+    "family": "dashboards",
+    "ticketed": true
+  },
+  {
+    "path": "/overview/dashboards",
+    "section": "/dashboards",
+    "family": "dashboards",
+    "ticketed": true
+  },
+  {
+    "path": "/overview/dashboards/details",
+    "section": "/dashboards",
+    "family": "dashboards",
+    "ticketed": true
+  },
+  {
+    "path": "/dashboardsx",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/dashboardsx",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/visualizations",
+    "section": "/visualizations",
+    "family": "visualizations",
+    "ticketed": true
+  },
+  {
+    "path": "/visualizations/123e4567-e89b-12d3-a456-426614174000?version=2",
+    "section": "/visualizations",
+    "family": "visualizations",
+    "ticketed": true
+  },
+  {
+    "path": "/overview/visualizations",
+    "section": "/visualizations",
+    "family": "visualizations",
+    "ticketed": true
+  },
+  {
+    "path": "/overview/visualizations/details",
+    "section": "/visualizations",
+    "family": "visualizations",
+    "ticketed": true
+  },
+  {
+    "path": "/visualizationsx",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/visualizationsx",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/parameter-sets",
+    "section": "/parameter-sets",
+    "family": "parameter-sets",
+    "ticketed": true
+  },
+  {
+    "path": "/parameter-sets/123e4567-e89b-12d3-a456-426614174000?version=2",
+    "section": "/parameter-sets",
+    "family": "parameter-sets",
+    "ticketed": true
+  },
+  {
+    "path": "/overview/parameter-sets",
+    "section": "/parameter-sets",
+    "family": "parameter-sets",
+    "ticketed": true
+  },
+  {
+    "path": "/overview/parameter-sets/details",
+    "section": "/parameter-sets",
+    "family": "parameter-sets",
+    "ticketed": true
+  },
+  {
+    "path": "/parameter-setsx",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/parameter-setsx",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/executions",
+    "section": "/executions",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/executions/123e4567-e89b-12d3-a456-426614174000?version=2",
+    "section": "/executions",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/executions",
+    "section": "/executions",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/executions/details",
+    "section": "/executions",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/executionsx",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/executionsx",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/schedules",
+    "section": "/schedules",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/schedules/123e4567-e89b-12d3-a456-426614174000?version=2",
+    "section": "/schedules",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/schedules",
+    "section": "/schedules",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/schedules/details",
+    "section": "/schedules",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/schedulesx",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/schedulesx",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/api-console",
+    "section": "/api-console",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/api-console/123e4567-e89b-12d3-a456-426614174000?version=2",
+    "section": "/api-console",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/api-console",
+    "section": "/api-console",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/api-console/details",
+    "section": "/api-console",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/api-consolex",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/api-consolex",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/promotion",
+    "section": "/promotion",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/promotion/123e4567-e89b-12d3-a456-426614174000?version=2",
+    "section": "/promotion",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/promotion",
+    "section": "/promotion",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/promotion/details",
+    "section": "/promotion",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/promotionx",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/promotionx",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/workspaces",
+    "section": "/workspaces",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/workspaces/123e4567-e89b-12d3-a456-426614174000?version=2",
+    "section": "/workspaces",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/workspaces",
+    "section": "/workspaces",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/workspaces/details",
+    "section": "/workspaces",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/workspacesx",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/workspacesx",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/admin",
+    "section": "/admin",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/admin/123e4567-e89b-12d3-a456-426614174000?version=2",
+    "section": "/admin",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/admin",
+    "section": "/admin",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/admin/details",
+    "section": "/admin",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/adminx",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/adminx",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/docs",
+    "section": "/docs",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/docs/123e4567-e89b-12d3-a456-426614174000?version=2",
+    "section": "/docs",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/docs",
+    "section": "/docs",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/docs/details",
+    "section": "/docs",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/docsx",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/docsx",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/settings/api-keys",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/api-keys",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/settings/password",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/settings",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/settingsx",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/api-keysx",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/settings",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overviews/pipelines",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/login",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/unknown",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/dashboard",
+    "section": "/dashboard",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/dashboard/123e4567-e89b-12d3-a456-426614174000?version=2",
+    "section": "/dashboard",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/dashboard",
+    "section": "/dashboard",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/dashboard/details",
+    "section": "/dashboard",
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/dashboardx",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  },
+  {
+    "path": "/overview/dashboardx",
+    "section": null,
+    "family": null,
+    "ticketed": false
+  }
+]

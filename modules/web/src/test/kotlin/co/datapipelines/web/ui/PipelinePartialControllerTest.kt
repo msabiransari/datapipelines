@@ -7,15 +7,19 @@ import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineVersionRecord
 import co.datapipelines.pipeline.PipelineVersionStatus
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.springframework.http.HttpStatus
+import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
+import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
 import java.util.UUID
 
@@ -39,11 +43,12 @@ class PipelinePartialControllerTest {
     private val workspaceId = UUID.randomUUID()
     private val model = ExtendedModelMap()
     private val pageSize = PipelineBrowseModel.PAGE_SIZE
+    private val response = MockHttpServletResponse()
 
     private fun list(
         q: String?,
         offset: Int?,
-    ): String = controller.list(model, q, offset, null)
+    ): String = controller.list(model, response, q, offset, null)
 
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
@@ -95,6 +100,8 @@ class PipelinePartialControllerTest {
         (model["pipelines"] as List<*>).size shouldBe 2
         model["total"] shouldBe 2
         model["hasMore"] shouldBe false
+        // #591: the answer names the list it renders; page one carries no offset.
+        response.getHeader(CatalogUrl.HEADER) shouldBe "/pipelines?q=revenue"
     }
 
     @Test
@@ -106,6 +113,8 @@ class PipelinePartialControllerTest {
 
         (model["pipelines"] as List<*>).size shouldBe 5
         model["hasMore"] shouldBe false
+        // #591: the pager's page rides the URL too, so a reload stays on it.
+        response.getHeader(CatalogUrl.HEADER) shouldBe "/pipelines?q=nyc&offset=25"
     }
 
     @Test
@@ -131,6 +140,17 @@ class PipelinePartialControllerTest {
         list(q = null, offset = -5)
 
         model["offset"] shouldBe 0
+        response.getHeader(CatalogUrl.HEADER) shouldBe "/pipelines"
+    }
+
+    @Test
+    fun `#591 - a refused lifecycle is the house 400 before the URL is written or anything is read`() {
+        val refused = shouldThrow<ResponseStatusException> { controller.list(model, response, "nyc", 0, "discarded") }
+
+        refused.statusCode shouldBe HttpStatus.BAD_REQUEST
+        refused.reason shouldBe CatalogLifecycle.BAD_LIFECYCLE
+        response.getHeader(CatalogUrl.HEADER) shouldBe null
+        verify(exactly = 0) { repository.findAll(any()) }
     }
 
     @Test
@@ -231,7 +251,7 @@ class PipelinePartialControllerTest {
             listOf(record("nyc/mobility/admitted"), record("nyc/mobility/hidden"), record("trade/hidden"))
         every { repository.findDrafts(workspaceId, any()) } returns emptyMap()
 
-        lensed.list(model, q = "nyc/mobility", offset = 0, lifecycle = null)
+        lensed.list(model, MockHttpServletResponse(), q = "nyc/mobility", offset = 0, lifecycle = null)
 
         // The rows are the lens's answer — the hidden ones are absent from the model, not
         // rendered and left to CSS.

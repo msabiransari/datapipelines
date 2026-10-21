@@ -18,6 +18,7 @@ import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpStatus
+import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
@@ -194,7 +195,7 @@ class DashboardPartialControllerTest {
     fun `the catalog partial is the flat list, threading the pager's offset (#400)`() {
         authenticate()
 
-        controller.dashboardCatalog(model, q = null, offset = 50, lifecycle = null)
+        controller.dashboardCatalog(model, MockHttpServletResponse(), q = null, offset = 50, lifecycle = null)
 
         verify(exactly = 1) { browse.fillWrapper(model, workspaceId, any(), q = null, offset = 50) }
     }
@@ -203,7 +204,7 @@ class DashboardPartialControllerTest {
     fun `the catalog partial without an offset is page one`() {
         authenticate()
 
-        controller.dashboardCatalog(model, q = "revenue", offset = null, lifecycle = null)
+        controller.dashboardCatalog(model, MockHttpServletResponse(), q = "revenue", offset = null, lifecycle = null)
 
         verify(exactly = 1) { browse.fillWrapper(model, workspaceId, any(), q = "revenue", offset = 0) }
     }
@@ -213,9 +214,12 @@ class DashboardPartialControllerTest {
         authenticate()
 
         CatalogLifecycle.DASHBOARDS.forEach { bucket ->
-            controller.dashboardCatalog(model, q = "revenue", offset = 25, lifecycle = bucket.wire)
+            val response = MockHttpServletResponse()
+            controller.dashboardCatalog(model, response, q = "revenue", offset = 25, lifecycle = bucket.wire)
 
             verify(exactly = 1) { browse.fillWrapper(model, workspaceId, any(), q = "revenue", offset = 25, lifecycle = bucket) }
+            // #591: the answer names the list it renders, so the address bar follows the controls.
+            response.getHeader(CatalogUrl.HEADER) shouldBe "/dashboards?q=revenue&lifecycle=${bucket.wire}&offset=25"
         }
     }
 
@@ -224,10 +228,14 @@ class DashboardPartialControllerTest {
         authenticate()
 
         listOf("discarded", "bogus", "<b>draft</b>").forEach { raw ->
+            val response = MockHttpServletResponse()
             val refused =
-                shouldThrow<ResponseStatusException> { controller.dashboardCatalog(model, q = null, offset = null, lifecycle = raw) }
+                shouldThrow<ResponseStatusException> {
+                    controller.dashboardCatalog(model, response, q = null, offset = null, lifecycle = raw)
+                }
             refused.statusCode shouldBe HttpStatus.BAD_REQUEST
             refused.reason shouldBe CatalogLifecycle.BAD_LIFECYCLE
+            response.getHeader(CatalogUrl.HEADER) shouldBe null
         }
         verify(exactly = 0) { browse.fillWrapper(any(), any(), any(), any(), any(), any()) }
         (LifecycleBucket.DISCARDED_ONLY in CatalogLifecycle.DASHBOARDS) shouldBe false

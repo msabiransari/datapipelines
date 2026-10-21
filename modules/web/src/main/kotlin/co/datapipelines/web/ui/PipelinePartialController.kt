@@ -4,6 +4,7 @@ import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.web.api.currentPrincipal
+import jakarta.servlet.http.HttpServletResponse
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
@@ -26,7 +27,8 @@ import java.util.UUID
  * every pipeline the caller may read when `q` is empty, the matches of `q` otherwise, paged by
  * `offset` (§9.2, #350). It is the target of the catalog's search box, its pager and its
  * "Clear search" control — and, #556, of its lifecycle control: `lifecycle` keeps one inventory
- * bucket ([CatalogLifecycle]), the page's own parse and 400.
+ * bucket ([CatalogLifecycle]), the page's own parse and 400. #591: every answer carries the
+ * catalog URL of the list it renders ([CatalogUrl]), so the address bar follows the controls.
  *
  * #466: the sidebar's server-rendered tree (`scope=nav`, `prefix` levels and their stamp
  * header) is gone — since #460 the sidebar reads `/api/v1/pipelines/tree`. A stale `scope` or
@@ -44,6 +46,7 @@ class PipelinePartialController(
     @RequiredScope(Permission.PIPELINE_READ)
     fun list(
         model: Model,
+        response: HttpServletResponse,
         @RequestParam(required = false) q: String?,
         @RequestParam(required = false) offset: Int?,
         @RequestParam(required = false) lifecycle: String?,
@@ -51,6 +54,7 @@ class PipelinePartialController(
         val bucket = CatalogLifecycle.parse(lifecycle, CatalogLifecycle.PIPELINES)
         val principal = currentPrincipal()
         model.addAttribute("q", q ?: "")
+        CatalogUrl.replace(response, CatalogUrl.PIPELINES, q, bucket, offset)
         return browse.fillWrapper(
             model,
             principal.requireWorkspace().id,

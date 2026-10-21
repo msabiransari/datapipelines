@@ -4,6 +4,7 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.AuthoringGuard
+import co.datapipelines.pipeline.LifecycleBucket
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.Template
@@ -11,6 +12,7 @@ import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.CapturingSlot
@@ -21,9 +23,11 @@ import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpStatus
+import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
+import org.springframework.web.server.ResponseStatusException
 import org.springframework.web.servlet.ModelAndView
 import java.util.UUID
 
@@ -82,14 +86,53 @@ class TemplatePartialControllerTest {
 
     @Test
     fun `the catalog's flat list with the trimmed query`() {
-        controller.list(model, q = "  rev  ", dialect = null, type = null, offset = 0, lifecycle = null)
+        val response = MockHttpServletResponse()
+        controller.list(model, response, q = "  rev  ", dialect = null, type = null, offset = 0, lifecycle = null)
 
         verify { browse.fillSearch(model, workspaceId, any(), q = "rev", dialect = null, type = null, offset = 0) }
+        response.getHeader(CatalogUrl.HEADER) shouldBe "/templates?q=rev"
+    }
+
+    @Test
+    fun `#591 - the catalog URL carries the parsed dialect, type and lifecycle, never an unknown filter`() {
+        val response = MockHttpServletResponse()
+        controller.list(model, response, q = null, dialect = "postgres", type = "SQL", offset = 50, lifecycle = "draft")
+
+        verify {
+            browse.fillSearch(
+                model,
+                workspaceId,
+                any(),
+                q = null,
+                dialect = Dialect.POSTGRES,
+                type = TemplateType.SQL,
+                offset = 50,
+                lifecycle = LifecycleBucket.DRAFT_ONLY,
+            )
+        }
+        // The wire forms of the PARSED values (the controls' option values), not the input's spelling.
+        response.getHeader(CatalogUrl.HEADER) shouldBe "/templates?dialect=POSTGRES&type=sql&lifecycle=draft&offset=50"
+
+        val unknown = MockHttpServletResponse()
+        controller.list(model, unknown, q = null, dialect = "<b>x</b>", type = "nope", offset = 0, lifecycle = null)
+        unknown.getHeader(CatalogUrl.HEADER) shouldBe "/templates"
+    }
+
+    @Test
+    fun `#591 - a refused lifecycle is the house 400 before the URL is written`() {
+        val response = MockHttpServletResponse()
+        val refused =
+            shouldThrow<ResponseStatusException> {
+                controller.list(model, response, q = "rev", dialect = null, type = null, offset = 0, lifecycle = "discarded")
+            }
+        refused.statusCode shouldBe HttpStatus.BAD_REQUEST
+        refused.reason shouldBe CatalogLifecycle.BAD_LIFECYCLE
+        response.getHeader(CatalogUrl.HEADER) shouldBe null
     }
 
     @Test
     fun `a blank query is not a query`() {
-        controller.list(model, q = "   ", dialect = null, type = null, offset = 0, lifecycle = null)
+        controller.list(model, MockHttpServletResponse(), q = "   ", dialect = null, type = null, offset = 0, lifecycle = null)
 
         verify { browse.fillSearch(model, workspaceId, any(), q = null, dialect = null, type = null, offset = 0) }
     }

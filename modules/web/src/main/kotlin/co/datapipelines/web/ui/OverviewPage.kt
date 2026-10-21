@@ -11,7 +11,7 @@ import java.util.Locale
 
 /**
  * #556 — what one family overview renders (`overview/family.html`, shell design §8), built in ONE
- * place from one [InventoryResult] and one [RecentResult], so the page's summary counts and its
+ * place from one [ChartsResult] and one [RecentResult], so the page's summary counts and its
  * charts are read from the same model the page's controller built and cannot disagree.
  *
  * #583 widened the frame without changing these five families' page: the inventory panel carries
@@ -38,8 +38,8 @@ data class OverviewPage(
 ) {
     /**
      * #638 — the summary strip: the panel's [InventoryPanel.metrics] when it carries them,
-     * otherwise its counts, one metric each (a STANDARD sibling's strip keeps its meaning until
-     * #599 / home-ops). Empty when the inventory is unknown: the strip then says so, no digit.
+     * otherwise its counts, one metric each (the sibling homes' fallback).
+     * Empty when the inventory is unknown: the strip then says so, no digit.
      */
     val metrics: List<Metric>
         get() = inventory?.let { panel -> panel.metrics.ifEmpty { panel.counts.map { Metric.of(it, lensed) } } }.orEmpty()
@@ -226,7 +226,7 @@ data class OverviewPage(
         val offered: List<LifecycleBucket>,
         val guided: Boolean,
         val icon: String,
-        val charts: OverviewStacked.ChartSet = OverviewStacked.ChartSet.STANDARD,
+        val charts: OverviewStacked.ChartSet,
     ) {
         PIPELINES(
             NavigationFamily.PIPELINES,
@@ -299,24 +299,6 @@ data class OverviewPage(
     }
 
     companion object {
-        /** The page for a [OverviewStacked.ChartSet.STANDARD] [family] from one inventory read and one recent read, at [now]. */
-        fun of(
-            family: Family,
-            lensed: Boolean,
-            inventory: InventoryResult,
-            recent: RecentResult?,
-            now: Instant,
-        ): OverviewPage {
-            require(family.charts == OverviewStacked.ChartSet.STANDARD) { "$family reads its charts, not the four counts" }
-            return page(
-                family,
-                lensed,
-                (inventory as? InventoryResult.Available)?.let { panel(family, it.inventory) },
-                (inventory as? InventoryResult.Unavailable)?.reason,
-                recent?.let { recentPanel(family, it, now) },
-            )
-        }
-
         /**
          * #598a — the page for a [OverviewStacked.ChartSet.LIFECYCLE] [family] from one chart read
          * (the lifecycle and maturity charts, one snapshot) and one recent read, at [now]. An
@@ -394,57 +376,6 @@ data class OverviewPage(
                 guided = family.guided,
             )
 
-        /** Every number of the panel from [inventory] alone — the chart never disagrees with its totals. */
-        fun panel(
-            family: Family,
-            inventory: Inventory,
-        ): InventoryPanel {
-            val counts =
-                listOf(
-                    Count("objects", "Objects", inventory.objects, OBJECTS_HELP, null),
-                    Count(
-                        "with-drafts",
-                        "With drafts",
-                        inventory.withDrafts,
-                        WITH_DRAFTS_HELP,
-                        family.filtered(LifecycleBucket.WITH_DRAFTS),
-                    ),
-                    Count(
-                        "with-releases",
-                        "With releases",
-                        inventory.withReleases,
-                        WITH_RELEASES_HELP,
-                        family.filtered(LifecycleBucket.WITH_RELEASES),
-                    ),
-                    Count(
-                        "discarded",
-                        "Discarded only",
-                        inventory.discardedOnly,
-                        DISCARDED_HELP,
-                        family.filtered(LifecycleBucket.DISCARDED_ONLY),
-                    ),
-                )
-            val buckets = BAR_ORDER.map { it to it.countIn(inventory) }
-            val tallest = buckets.maxOf { it.second }
-            val bars =
-                buckets.map { (bucket, value) ->
-                    val name = CatalogLifecycle.label(bucket)
-                    Bar(
-                        key = bucket.wire,
-                        name = name,
-                        value = value,
-                        width = width(value, tallest),
-                        tone = TONES.getValue(bucket),
-                        label = "$name: ${family.count(value)}",
-                        href = family.filtered(bucket),
-                    )
-                }
-            // #583: the lifecycle chart, the one chart these five families carry — its caption
-            // is the words the hidden table has always had, now shared with the list's label.
-            val chart = Chart("lifecycle", "${family.title} by lifecycle", bars)
-            return InventoryPanel(counts, listOf(chart), viewAll = OverviewStacked.live(inventory))
-        }
-
         private fun recentPanel(
             family: Family,
             recent: RecentResult,
@@ -492,29 +423,6 @@ data class OverviewPage(
 
         /** The three homes whose controllers build their page directly (rail icons, shell record §3). */
         private val SIBLING_ICONS = mapOf("datasources" to "database", "schedules" to "calendar-clock", "api-console" to "activity")
-
-        /** The chart's rows, top to bottom: the inventory's exclusive buckets A–D (shell design §8). */
-        private val BAR_ORDER =
-            listOf(
-                LifecycleBucket.DRAFT_ONLY,
-                LifecycleBucket.RELEASED_ONLY,
-                LifecycleBucket.RELEASED_WITH_DRAFT,
-                LifecycleBucket.DISCARDED_ONLY,
-            )
-
-        /** Warning, success, accent and muted (shell design §8: no danger red on an ordinary draft). */
-        private val TONES =
-            mapOf(
-                LifecycleBucket.DRAFT_ONLY to "draft",
-                LifecycleBucket.RELEASED_ONLY to "released",
-                LifecycleBucket.RELEASED_WITH_DRAFT to "mixed",
-                LifecycleBucket.DISCARDED_ONLY to "discarded",
-            )
-
-        const val OBJECTS_HELP = "Each counted once, however many versions it has: the four bars below added together."
-        const val WITH_DRAFTS_HELP = "Draft only plus released with draft changes, so it overlaps With releases."
-        const val WITH_RELEASES_HELP = "Released only plus released with draft changes, so it overlaps With drafts."
-        const val DISCARDED_HELP = "Every version discarded: no draft or release remains."
 
         /** The recent card's words, model-owned since #583 — the template renders what it is given. */
         const val REVIEW_DRAFTS = "Review drafts"

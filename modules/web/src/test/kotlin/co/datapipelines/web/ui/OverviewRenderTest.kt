@@ -45,7 +45,7 @@ import kotlin.math.roundToLong
  * Total, plus Actively developed), the activity columns, the release history bars, the task rows
  * and the page's one dialog — each invariant of #598 kept below. #599: the four siblings are
  * lifecycle homes too, so the family cases run over all five, each in its own words and routes;
- * the four-count and four-bar cases went with the STANDARD panel no family renders any more.
+ * the four-count and four-bar cases were removed with the STANDARD panel (#599, #645).
  */
 class OverviewRenderTest {
     private val engine =

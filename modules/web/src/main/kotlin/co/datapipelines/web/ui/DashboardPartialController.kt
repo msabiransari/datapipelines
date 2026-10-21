@@ -8,6 +8,7 @@ import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.web.api.currentPrincipal
+import jakarta.servlet.http.HttpServletResponse
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
@@ -85,17 +86,20 @@ class DashboardPartialController(
      * every dashboard the caller may read or the matches of `q`, in the pipelines catalog
      * partial's shape. The sidebar's tree levels (`/partials/dashboards/tree`) are gone with
      * #466 — the sidebar has read `/api/v1/dashboards/tree` since #460. #580: `lifecycle`
-     * narrows it to one inventory bucket, as on the page (the house 400 for a bad value).
+     * narrows it to one inventory bucket, as on the page (the house 400 for a bad value). #591:
+     * the answer carries the catalog URL of the list it renders ([CatalogUrl]).
      */
     @GetMapping("/dashboards")
     @RequiredScope(Permission.DASHBOARD_READ)
     fun dashboardCatalog(
         model: Model,
+        response: HttpServletResponse,
         @RequestParam(required = false) q: String?,
         @RequestParam(required = false) offset: Int?,
         @RequestParam(required = false) lifecycle: String?,
     ): String {
         val bucket = CatalogLifecycle.parse(lifecycle, CatalogLifecycle.DASHBOARDS)
+        CatalogUrl.replace(response, CatalogUrl.DASHBOARDS, q, bucket, offset)
         val principal = currentPrincipal()
         return browse.fillWrapper(
             model,
