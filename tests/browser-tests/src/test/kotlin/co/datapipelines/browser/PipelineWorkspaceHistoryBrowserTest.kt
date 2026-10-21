@@ -164,10 +164,14 @@ class PipelineWorkspaceHistoryBrowserTest : BrowserSuite() {
     private fun seedHistoryCounters() {
         page.evaluate(
             """() => {
-              const counters = { hit: 0, miss: 0, restore: 0 };
+              const counters = { hit: 0, miss: 0, missLoad: 0, restore: 0 };
               window.__peHistoryShape = counters;
               document.body.addEventListener('htmx:historyCacheHit', () => counters.hit++);
-              document.body.addEventListener('htmx:historyCacheMiss', () => counters.miss++);
+              document.body.addEventListener('htmx:historyCacheMiss', (evt) => {
+                counters.miss++;
+                evt.detail.xhr.addEventListener('abort', () => { window.__peMissAborted = true; });
+              });
+              document.body.addEventListener('htmx:historyCacheMissLoad', () => counters.missLoad++);
               document.body.addEventListener('htmx:historyRestore', () => counters.restore++);
             }""",
         )
@@ -320,6 +324,62 @@ class PipelineWorkspaceHistoryBrowserTest : BrowserSuite() {
             waitActivated()
             page.waitForSelector(".pe-root")
             stackDepth() shouldBe 1
+        }
+    }
+
+    @Test
+    fun `a late catalog history miss never overwrites the workspace Back restored`() {
+        val id = seedSqlVersions("pwsl" + generatedPassword("s").take(6).lowercase())
+        val workspacePath = "/pipelines/$id?version=2"
+        page.navigate("$baseUrl$workspacePath")
+        page.waitForSelector(".pe-root")
+        waitActivated()
+        seedHistoryCounters()
+        leaveThroughTheUi()
+        val initialRestores = counter("restore")
+        page.goBack()
+        waitForRestore(initialRestores)
+        waitActivated()
+
+        var held: Route? = null
+        page.route("**/pipelines") { held = it }
+        try {
+            val missesBefore = counter("miss")
+            val loadsBefore = counter("missLoad")
+            page.goForward()
+            page.waitForCondition { held != null }
+            counter("miss") shouldBe missesBefore + 1
+            val restoresBeforeBack = counter("restore")
+            page.goBack()
+            waitForRestore(restoresBeforeBack)
+            waitActivated()
+            page.waitForSelector(".pe-root")
+            try {
+                requireNotNull(held).resume()
+                println("#660 held catalog route: resume accepted")
+            } catch (error: com.microsoft.playwright.PlaywrightException) {
+                // Chromium may have already discarded the route after xhr.abort().
+                println("#660 held catalog route: resume after abort: ${error.message}")
+                page.evaluate("() => window.__peMissAborted === true") shouldBe true
+            }
+            // A loaded miss settles immediately (RED); an aborted miss gets a full second
+            // after its abort event to prove no late response can replace the workspace.
+            page.waitForFunction(
+                """(loads) => {
+                  if (window.__peHistoryShape.missLoad > loads) return true;
+                  if (!window.__peMissAborted) return false;
+                  window.__peAbortObservedAt ||= performance.now();
+                  return performance.now() - window.__peAbortObservedAt >= 1000;
+                }""",
+                loadsBefore,
+            )
+            page.locator("#pipeline-list-wrapper").count() shouldBe 0
+            page.locator(".pe-root").count() shouldBe 1
+            stackDepth() shouldBe 1
+            page.url().endsWith(workspacePath) shouldBe true
+            counter("missLoad") shouldBe loadsBefore
+        } finally {
+            page.unroute("**/pipelines")
         }
     }
 
