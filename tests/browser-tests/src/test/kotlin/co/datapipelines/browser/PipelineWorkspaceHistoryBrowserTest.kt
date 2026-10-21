@@ -373,8 +373,10 @@ class PipelineWorkspaceHistoryBrowserTest : BrowserSuite() {
                 }""",
                 loadsBefore,
             )
-            println("#660 settled: url=${page.url()}, missLoad=${counter("missLoad")}, aborted=" +
-                page.evaluate("() => window.__peMissAborted === true"))
+            println(
+                "#660 settled: url=${page.url()}, missLoad=${counter("missLoad")}, aborted=" +
+                    page.evaluate("() => window.__peMissAborted === true"),
+            )
             page.url().endsWith(workspacePath) shouldBe true
             page.locator("#pipeline-list-wrapper").count() shouldBe 0
             page.locator(".pe-root").count() shouldBe 1
