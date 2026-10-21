@@ -480,8 +480,7 @@ class ShellRenderTest {
     }
 
     /**
-     * D58 (#10 L3b): the landing item is RENAMED Home — the route (/dashboard) and its
-     * exact-match section are unchanged. #554 (record §3): Dashboards, Visualizations and
+     * D58 (#10 L3b): the landing item is RENAMED Home — the route (/dashboard) is unchanged. #554 (record §3): Dashboards, Visualizations and
      * Parameter Sets leave Build for Explore, in that order, between Build and Operate.
      */
     @Test
@@ -760,6 +759,30 @@ class ShellRenderTest {
             html.substringAfter("<aside class=\"app-browser\"").substringBefore(">") shouldContain "hidden=\"hidden\""
             html.substringAfter("<button type=\"button\" id=\"browser-open\"").substringBefore(">") shouldContain "hidden=\"hidden\""
             Regex("""id="nav-tree-[a-z-]+"[^>]*>""").findAll(html).forEach { it.value shouldContain "hidden=\"hidden\"" }
+        }
+    }
+
+    /** #659: every section rejects a lookalike path at the actual rendered shell. */
+    @Test
+    fun `bare prefixes light nothing name no crumb and hide the browser`() {
+        AppNav.ITEMS.forEach { item ->
+            listOf("${item.section}x", "/overview${item.section}x").forEach { path ->
+                val html =
+                    engine.process(
+                        "pipelines/list",
+                        webContext().apply {
+                            fillList()
+                            setVariable("currentPath", path)
+                            setVariable("crumbGroup", AppNav.crumbFor(path)?.first)
+                            setVariable("crumbPage", AppNav.crumbFor(path)?.second)
+                        },
+                    )
+                Regex("""<a [^>]*class="app-nav-link active"[^>]*>""").findAll(html).count() shouldBe 0
+                html.substringAfter("<aside class=\"app-browser\"").substringBefore(">") shouldContain "hidden=\"hidden\""
+                html.substringAfter("<button type=\"button\" id=\"browser-open\"").substringBefore(">") shouldContain "hidden=\"hidden\""
+                PANEL.findAll(html).forEach { it.value shouldContain "hidden=\"hidden\"" }
+                html.substringAfter("class=\"app-crumb-page\"").substringAfter(">").substringBefore("<") shouldBe "datapipelines"
+            }
         }
     }
 

@@ -222,14 +222,13 @@
        #app-main). The browser is never a row inside the menu: opening a folder at any depth
        moves no menu item and changes no menu width. Both asides are OUTSIDE #app-main, so a
        boosted swap re-renders neither — persistent-navigation.mjs and the tree instances keep
-       their state across it. `browserFamily` is the family whose section the request path
-       sits under (the nav's own prefix rule), or null: a non-family page renders the browser
-       `hidden` and its column collapses to nothing, giving main the width. `navPath` is the
-       path with the overview root taken off (#556: /overview/pipelines belongs to Pipelines,
-       AppNav.matches), so the family items' active state and the open family read ONE rule. -->
+       their state across it. AppNav answers the active section once at a segment boundary;
+       browserFamily selects only the five tree families from that answer. Other sections
+       keep their menu highlight but render the browser hidden. -->
   <div class="app-shell" th:classappend="${authenticated} ? null : 'app-shell-anon'"
-       th:with="navPath=${currentPath != null and #strings.startsWith(currentPath, '/overview/') ? #strings.substring(currentPath, 9) : currentPath},
-                browserFamily=${navPath == null ? null : (#strings.startsWith(navPath, '/pipelines') ? 'pipelines' : (#strings.startsWith(navPath, '/templates') ? 'templates' : (#strings.startsWith(navPath, '/dashboards') ? 'dashboards' : (#strings.startsWith(navPath, '/visualizations') ? 'visualizations' : (#strings.startsWith(navPath, '/parameter-sets') ? 'parameter-sets' : null)))))},
+       th:with="activeItem=${T(co.datapipelines.web.ui.AppNav).INSTANCE.activeFor(currentPath)},
+                activeSection=${activeItem?.section},
+                browserFamily=${activeSection != null and #lists.contains({'/pipelines', '/templates', '/dashboards', '/visualizations', '/parameter-sets'}, activeSection) ? #strings.substring(activeSection, 1) : null},
                 browserLabel=${browserFamily == 'pipelines' ? 'Pipelines' : (browserFamily == 'templates' ? 'Templates' : (browserFamily == 'dashboards' ? 'Dashboards' : (browserFamily == 'visualizations' ? 'Visualizations' : (browserFamily == 'parameter-sets' ? 'Parameter Sets' : 'resources'))))}">
 
     <!-- 110 §A, #554: the primary menu — the SAME element at every width. 202px expanded,
@@ -318,8 +317,8 @@
              the label renamed. -->
         <a th:href="@{/dashboard}" class="app-nav-link" data-nav-section="/dashboard"
            data-nav-group="" data-nav-label="Home"
-           th:classappend="${currentPath != null and currentPath == '/dashboard'} ? 'active' : null"
-           th:attr="aria-current=${currentPath != null and currentPath == '/dashboard'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#layout-grid"></use></svg><span class="app-rail-label">Home</span></a>
+           th:classappend="${activeSection == '/dashboard'} ? 'active' : null"
+           th:attr="aria-current=${activeSection == '/dashboard'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#layout-grid"></use></svg><span class="app-rail-label">Home</span></a>
 
         <div class="app-nav-group" role="group" aria-labelledby="app-nav-group-build">
           <div class="app-nav-section" id="app-nav-group-build">Build</div>
@@ -335,13 +334,13 @@
              th:classappend="${browserFamily == 'templates'} ? 'active' : null"
              th:attr="aria-current=${browserFamily == 'templates'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#code"></use></svg><span class="app-rail-label">Templates</span></a>
           <!-- #583: the Datasources item links its overview like the five families above, and
-               the same two prefixes light it. It is deliberately NOT a browserFamily: the
+               the same active-section answer lights it. It is deliberately NOT a browserFamily: the
                resource browser opens only on the five tree families — the datasources overview
                is an ordinary section page, its item rides this rule instead. -->
           <a th:href="@{/overview/datasources}" class="app-nav-link" data-nav-section="/datasources"
              data-nav-group="Build" data-nav-label="Datasources"
-             th:classappend="${currentPath != null and (#strings.startsWith(currentPath, '/datasources') or #strings.startsWith(currentPath, '/overview/datasources'))} ? 'active' : null"
-             th:attr="aria-current=${currentPath != null and (#strings.startsWith(currentPath, '/datasources') or #strings.startsWith(currentPath, '/overview/datasources'))} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#database"></use></svg><span class="app-rail-label">Datasources</span></a>
+             th:classappend="${activeSection == '/datasources'} ? 'active' : null"
+             th:attr="aria-current=${activeSection == '/datasources'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#database"></use></svg><span class="app-rail-label">Datasources</span></a>
         </div>
 
         <!-- D58 (#10 L3b), #399, #374: Dashboards, Visualizations and Parameter Sets are
@@ -367,34 +366,34 @@
           <!-- D11 (2026-09-20): the promoter reads no executions, so the item is not drawn for one. -->
           <a th:if="${navExecutions == true}" th:href="@{/executions}" class="app-nav-link" data-nav-section="/executions"
              data-nav-group="Operate" data-nav-label="Executions"
-             th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/executions')} ? 'active' : null"
-             th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/executions')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#clock"></use></svg><span class="app-rail-label">Executions</span></a>
+             th:classappend="${activeSection == '/executions'} ? 'active' : null"
+             th:attr="aria-current=${activeSection == '/executions'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#clock"></use></svg><span class="app-rail-label">Executions</span></a>
           <!-- #9 slice 2 (ui-screens §4.20): every member reads schedules — the promoter through
                the lens — so the item is drawn for every role, like Pipelines. #584: it links the
-               Schedules home and lights on both it and the explorer through `navPath` (the
-               overview root taken off); not a browserFamily — the browser stays hidden. -->
+               Schedules home and lights on both it and the explorer through `activeSection`;
+               not a browserFamily — the browser stays hidden. -->
           <a th:href="@{/overview/schedules}" class="app-nav-link" data-nav-section="/schedules"
              data-nav-group="Operate" data-nav-label="Schedules"
-             th:classappend="${navPath != null and #strings.startsWith(navPath, '/schedules')} ? 'active' : null"
-             th:attr="aria-current=${navPath != null and #strings.startsWith(navPath, '/schedules')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#calendar-clock"></use></svg><span class="app-rail-label">Schedules</span></a>
+             th:classappend="${activeSection == '/schedules'} ? 'active' : null"
+             th:attr="aria-current=${activeSection == '/schedules'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#calendar-clock"></use></svg><span class="app-rail-label">Schedules</span></a>
           <!-- 079 §C / T139: the API section. The owner's "I don't see any API menu"
                was literally true — published endpoints, keys and the MCP connection
                had no screen at all. /api-console, not /api/**: that prefix is the
                REST surface (/api/v1 and the published /api/<category> tree). #585: the item
-               lands on the API home, /overview/api-console, and navPath lights it on both the
+               lands on the API home, /overview/api-console, and activeSection lights it on both the
                home and the console (its View all); it is not a browserFamily. -->
           <a th:href="@{/overview/api-console}" class="app-nav-link" data-nav-section="/api-console"
              data-nav-group="Operate" data-nav-label="API"
-             th:classappend="${navPath != null and #strings.startsWith(navPath, '/api-console')} ? 'active' : null"
-             th:attr="aria-current=${navPath != null and #strings.startsWith(navPath, '/api-console')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#activity"></use></svg><span class="app-rail-label">API</span></a>
+             th:classappend="${activeSection == '/api-console'} ? 'active' : null"
+             th:attr="aria-current=${activeSection == '/api-console'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#activity"></use></svg><span class="app-rail-label">API</span></a>
           <!-- versioning §10.1 D8: promotion is a human action, and this link is the only way to
                reach it — there is no MCP tool and no schedule. -->
           <!-- Owner rule 13 (2026-09-20): the PAGE is readable by author, promoter and admins
                (`PROMOTION_READ`); the promote verb on it renders by role. -->
           <a th:if="${navPromotion == true}" th:href="@{/promotion}" class="app-nav-link" data-nav-section="/promotion"
              data-nav-group="Operate" data-nav-label="Promotion"
-             th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/promotion')} ? 'active' : null"
-             th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/promotion')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#trending-up"></use></svg><span class="app-rail-label">Promotion</span></a>
+             th:classappend="${activeSection == '/promotion'} ? 'active' : null"
+             th:attr="aria-current=${activeSection == '/promotion'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#trending-up"></use></svg><span class="app-rail-label">Promotion</span></a>
         </div>
 
         <div class="app-nav-group" role="group" aria-labelledby="app-nav-group-organisation">
@@ -403,8 +402,8 @@
                stays every member's. -->
           <a th:if="${navWorkspaces == true}" th:href="@{/workspaces}" class="app-nav-link" data-nav-section="/workspaces"
              data-nav-group="Organisation" data-nav-label="Workspaces"
-             th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/workspaces')} ? 'active' : null"
-             th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/workspaces')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#building"></use></svg><span class="app-rail-label">Workspaces</span></a>
+             th:classappend="${activeSection == '/workspaces'} ? 'active' : null"
+             th:attr="aria-current=${activeSection == '/workspaces'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#building"></use></svg><span class="app-rail-label">Workspaces</span></a>
           <!-- 143 (T315): the Admin item leads only where this principal is authorised — the
                instance's users for a super admin (`USER_ADMINISTRATION`), the CURRENT workspace's
                members section on Workspaces for a workspace admin (`MANAGE_WORKSPACE_MEMBERS`,
@@ -416,14 +415,14 @@
                is the active one, and this link never lights up by itself. -->
           <a th:if="${navAdminUsers == true}" th:href="@{/admin/users}" class="app-nav-link" data-nav-section="/admin"
              data-nav-group="Organisation" data-nav-label="Admin" data-nav-admin="users"
-             th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/admin')} ? 'active' : null"
-             th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/admin')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#users"></use></svg><span class="app-rail-label">Admin</span></a>
+             th:classappend="${activeSection == '/admin'} ? 'active' : null"
+             th:attr="aria-current=${activeSection == '/admin'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#users"></use></svg><span class="app-rail-label">Admin</span></a>
           <a th:if="${navAdminMembers == true}" th:href="@{/workspaces} + '#workspace-members'" class="app-nav-link" data-nav-section="/admin"
              data-nav-group="Organisation" data-nav-label="Admin" data-nav-admin="members" hx-boost="false"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#users"></use></svg><span class="app-rail-label">Admin</span></a>
           <a th:href="@{/docs}" class="app-nav-link" data-nav-section="/docs"
              data-nav-group="Organisation" data-nav-label="Docs"
-             th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/docs')} ? 'active' : null"
-             th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/docs')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#book-open"></use></svg><span class="app-rail-label">Docs</span></a>
+             th:classappend="${activeSection == '/docs'} ? 'active' : null"
+             th:attr="aria-current=${activeSection == '/docs'} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#book-open"></use></svg><span class="app-rail-label">Docs</span></a>
         </div>
       </nav>
 
