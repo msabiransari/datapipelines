@@ -25,10 +25,21 @@ class JavaScriptEngineBoundsTest {
         // Builtin-bound: a few statements per pass, so the statement budget cannot fire first (an
         // empty `for (;;) {}` spends the default 100 000 000 statements in under 500 ms, measured).
         val started = System.nanoTime()
-        val busy = "const s = 'x'.repeat(1 << 16); for (;;) { s.split('').reverse().join(''); }"
-        refusal<ScriptTimeoutException> { js(busy, limits = limits(Duration.ofMillis(500))) }
+        refusal<ScriptTimeoutException> { js(BUSY, limits = limits(Duration.ofMillis(500))) }
         val elapsedMs = (System.nanoTime() - started) / 1_000_000
         withClue("stopped after $elapsedMs ms") { (elapsedMs in 450L..2_000L) shouldBe true }
+    }
+
+    @Test
+    fun `CPU is not wall - the watchdog stops a body at its wall clock under a CPU budget twenty times longer`() {
+        // sandbox.MaxCPUTime equals the wall clock in production, so the wall-clock case above passes
+        // with either bound alone; here only the watchdog can fire inside the window.
+        val engine = JavaScriptEngine(ScriptingTestSupport.javaScriptRuntime) { it.multipliedBy(CPU_FACTOR) }
+        val script = engine.compile(BUSY)
+        val started = System.nanoTime()
+        refusal<ScriptTimeoutException> { engine.evaluate(script, null, limits(Duration.ofMillis(WATCHDOG_WALL_MS))) }
+        val elapsedMs = (System.nanoTime() - started) / 1_000_000
+        withClue("stopped after $elapsedMs ms") { (elapsedMs in WATCHDOG_WALL_MS until WATCHDOG_WALL_MS + WATCHDOG_GRACE_MS) shouldBe true }
     }
 
     @Test
@@ -135,6 +146,12 @@ class JavaScriptEngineBoundsTest {
     private companion object {
         const val MIB = 1024L * 1024
         const val SPIN = "let i = 0; for (;;) { i++; }"
+
+        /** Builtin-bound: a few statements per pass, so the statement budget cannot fire first. */
+        const val BUSY = "const s = 'x'.repeat(1 << 16); for (;;) { s.split('').reverse().join(''); }"
+        const val WATCHDOG_WALL_MS = 500L
+        const val WATCHDOG_GRACE_MS = 100L
+        const val CPU_FACTOR = 20L
 
         /** 64 one-MiB strings, all kept: over a 16 MiB heap, under 256 MiB. */
         const val HOLD_64_MIB = "const a = []; for (let i = 0; i < 64; i++) { a.push('x'.repeat(1 << 20) + i); } return a.length;"

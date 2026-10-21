@@ -61,9 +61,16 @@ import java.util.concurrent.atomic.AtomicBoolean
  * process, thread or environment access. A runtime whose isolate cannot start refuses every
  * evaluation with "the JavaScript engine is unavailable: …".
  */
-class JavaScriptEngine(
+class JavaScriptEngine internal constructor(
     private val runtime: JavaScriptRuntime,
+    /**
+     * The `sandbox.MaxCPUTime` budget for a wall clock: the same duration in production. A test
+     * passes a longer one to show the watchdog, not the CPU budget, stops a body at its wall clock.
+     */
+    private val cpuBudget: (java.time.Duration) -> java.time.Duration,
 ) : ScriptEngine {
+    constructor(runtime: JavaScriptRuntime) : this(runtime, { it })
+
     override val type: ScriptLanguage = ScriptLanguage.JAVASCRIPT
 
     override val capabilities: EngineCapabilities =
@@ -194,7 +201,7 @@ class JavaScriptEngine(
     private fun sandboxLimits(limits: EvaluationLimits): SandboxLimits {
         val options = runtime.options
         return SandboxLimits(
-            cpuMillis = limits.wallClock.toMillis().coerceAtLeast(1),
+            cpuMillis = cpuBudget(limits.wallClock).toMillis().coerceAtLeast(1),
             heapBytes = minOf(limits.maxHeapBytes ?: options.maxHeapBytes, options.maxHeapBytes),
             statements = minOf(limits.maxStatements ?: options.maxStatements, options.maxStatements),
             stackFrames = minOf(limits.maxDepth.toLong() + PRELUDE_FRAMES, options.maxStackFrames.toLong()).toInt(),
