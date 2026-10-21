@@ -2,16 +2,18 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
-  <!-- 179 (D17) — the API keys page (ui-screens.md §4.19). The workspace's `endpoint` keys:
-       create (name, expiry, initial associations), delete, and per-key association with the
-       workspace's published paths. A workspace admin's and super admin's screen
-       (`MANAGE_API_KEYS` at the route; the verb guards below are the render half).
-       User keys are NOT here: the MCP key is minted at sign-in and lives in the top bar. -->
+  <!-- 179 (D17) — the API keys page (ui-screens.md §4.19); keys v2 (A15) made it the ONE
+       creation path for every kind — the `mcp` key an agent presents at /mcp included (the
+       route is `MCP_KEY_OWN`, every member with a workspace; the login mint and the top-bar
+       chip are retired). The workspace's `endpoint` keys: create (name, expiry, initial
+       associations), delete, and per-key association with the workspace's published paths.
+       The verb guards below render only for the workspace admin and super admin. -->
   <div class="app-page-h">
     <div>
       <h1 class="ds-headline">API keys</h1>
       <p class="app-page-sub">Keys that may call this workspace's published endpoints — created by admins,
-        associated with the endpoints they may reach. Your own MCP key is in the top bar.</p>
+        associated with the endpoints they may reach. Your own mcp key is created here too:
+        it is what your agent presents at /mcp.</p>
     </div>
     <div class="app-page-actions" th:if="${canAdminWorkspace == true or isSuperAdmin == true}">
       <button type="button" data-verb="key-create" class="ds-button ds-button-primary" data-action="key-modal-open">New API key</button>
@@ -99,9 +101,10 @@
             <span th:if="${k.lastUsedAbsolute == null}" th:text="${k.lastUsedRelative}">never</span>
           </td>
           <td class="num">
-            <!-- The verbs render only for the roles the route admits anyway
-                 (MANAGE_API_KEYS: ws_admin + super admin) — belt and braces for a fragment
-                 that could one day render off its route. -->
+            <!-- The verbs render only for the workspace admin and super admin
+                 (canAdminWorkspace || isSuperAdmin — the association row `API_KEY_BIND`'s
+                 holders) — belt and braces for a fragment that could one day render off
+                 its route. -->
             <details class="app-assoc" th:if="${k.isLive and k.kind == 'endpoint' and (canAdminWorkspace == true or isSuperAdmin == true)}">
               <summary class="ds-button ds-button-ghost ds-button-sm">Edit associations</summary>
               <form class="app-assoc-form" th:if="${canAdminWorkspace == true or isSuperAdmin == true}"
