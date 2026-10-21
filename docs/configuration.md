@@ -1,8 +1,8 @@
 # Configuration Reference
 
-**Status:** v1.58 (single source of truth for every config key)
+**Status:** v1.59 (single source of truth for every config key)
 **Owner:** datapipelines.co core
-**Last updated:** 2026-10-20
+**Last updated:** 2026-10-21
 
 ---
 
@@ -193,7 +193,7 @@ There is deliberately **no fail-open key**. When the limiter's Redis is unreacha
 | `datapipelines.executions.event-retention-days` | `7` | How long to keep `execution_events` rows (Postgres, the durable record) past their execution's completion — enforced by the hourly retention job (050/T60, safe for N replicas: one idempotent `DELETE`; `pipeline_executions` rows are never touched). The post-completion Redis event log lives for 1 hour, not configurable |
 | `datapipelines.executions.stale-timeout-minutes` | `60` | Mark RUNNING executions older than this as ABORTED (crash sweep) |
 
-**Not a key: the scheduled jobs' statement bounds (#326).** The stale sweep's UPDATE is cancelled after 10 s and the hourly retention's metadata statements (the `execution_events` DELETE, the audit retention's cutoff read and batches, the keys purge's FK read and two DELETEs) after 25 s — a JDBC `queryTimeout`, failing the tick with SQLState `57014` ([Metadata DB §8.1](metadata-db.md#81-execution-event-cleanup), [§8.3](metadata-db.md#83-stale-execution-sweep)). They are code constants beside the cadences they serve (`SWEEP_STATEMENT_TIMEOUT_SECONDS`, `RETENTION_STATEMENT_TIMEOUT_SECONDS`), as the cadences are, not keys: each is set by its own cadence and the 30 s shutdown phase, not by a deployment.
+**Not a key: the scheduled jobs' statement bounds (#326, #636).** The stale sweep's UPDATE and the dashboard refresh sweep's UPDATE are cancelled after 10 s and the hourly retention's metadata statements (the `execution_events` DELETE, the audit retention's cutoff read and batches, the keys purge's FK read and two DELETEs, the dashboard refreshes' DELETE, the parameter evaluations' sweep UPDATE and batch DELETE) after 25 s — a JDBC `queryTimeout`, failing the tick with SQLState `57014` ([Metadata DB §8.1](metadata-db.md#81-execution-event-cleanup), [§8.3](metadata-db.md#83-stale-execution-sweep), [§8.4](metadata-db.md#84-stale-dashboard-refresh-sweep), [§8.5](metadata-db.md#85-stale-parameter-evaluation-sweep)). They are code constants beside the cadences they serve (`SWEEP_STATEMENT_TIMEOUT_SECONDS`, `REFRESH_SWEEP_STATEMENT_TIMEOUT_SECONDS`, `RETENTION_STATEMENT_TIMEOUT_SECONDS`), as the cadences are, not keys: each is set by its own cadence and the 30 s shutdown phase, not by a deployment.
 
 ### 3.12 Audit
 
@@ -1044,6 +1044,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-21 | v1.59 | 636 (#636) the housekeeping statements' bounds | **§3.11**'s "not a key" note names the four housekeeping statements #636 bounds — the dashboard refresh sweep's UPDATE at 10 s (`REFRESH_SWEEP_STATEMENT_TIMEOUT_SECONDS`), the dashboard refreshes' DELETE and the parameter evaluations' sweep UPDATE and batch DELETE at the retention tick's 25 s — and links metadata-db §8.4 and §8.5. No key added. |
 | 2026-10-20 | v1.58 | V50 (#640, script-node-rename lane, owner ruling 2026-10-20) | **The TRANSFORM→SCRIPT node-type rename, §3.28's keys move with it**: the nine script budgets now live at `datapipelines.script.*` (env `DATAPIPELINES_SCRIPT_*`) with no alias; **§7 gains `checkRemovedTransformKeys`** (`CHECK_COUNT` 35 → 36): any set `datapipelines.transform.*` key refuses startup BY NAME pointing at its replacement — presence, not value, is the signal (the §3.17 rule). `ScriptConfigKeysSpecDriftTest` (7b's, renamed) still pins the new keys in this document, `application.yml` and the validator. Renumbered at merge after #326's v1.57. |
 | 2026-10-20 | v1.57 | 326 (#326) the scheduled jobs' statement bounds | **§3.11** gains a "not a key" note: the stale sweep's 10 s and the hourly retention's 25 s statement bounds are code constants beside their cadences, not configuration keys. No key is added, renamed or removed. |
 | 2026-10-20 | v1.56 | 599 merge follow-up (#599) the window counts on every lifecycle home | **§3.10 row** `datapipelines.ui.actively-developed-days`: the description names every lifecycle home (the four object families read the same window since #599), not the Pipelines home only. No key, default or validation change. |
