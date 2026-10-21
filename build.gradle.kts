@@ -127,7 +127,7 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
     // a pure function of its inputs, and the executor's freedom to evaluate one anywhere depends
     // on that. Adding a second entry here is the change a reviewer must refuse.
     ":modules:calculators" to setOf(":modules:typesystem"),
-    // 7a transform engine — layer 0 beside typesystem. The seam evaluates untrusted script
+    // 7a script engine — layer 0 beside typesystem. The seam evaluates untrusted script
     // bodies as pure functions of their JSON input (transform-nodes design §4.1); its only
     // internal edge is typesystem, for the canonical LogicalType/ColumnSchema the type gate
     // (§5.3) and the egress encoding rule over. A second entry here would give a script
@@ -164,7 +164,7 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         ":modules:templates",
         ":modules:datasources",
         ":modules:staging",
-        // 7c (#7) — the TRANSFORM node's executor: evaluations run through 7a's pool and the
+        // 7c (#7) — the SCRIPT node's executor: evaluations run through 7a's pool and the
         // type gate, both scripting. The dag-executor.md layering table moves with this row.
         ":modules:scripting",
         // #194 — `Dag<T>` now lives in `graph` (same package); the executor builds its DAGs from it.

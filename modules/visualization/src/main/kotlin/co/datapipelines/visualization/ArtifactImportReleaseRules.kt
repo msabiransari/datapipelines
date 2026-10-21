@@ -34,7 +34,7 @@ class ArtifactImportReleaseRules(
         if (status == null || status == PipelineVersionStatus.RELEASED) return
         throw DatapipelinesException(
             VisualizationErrorCodes.RELEASE_DEPENDENCY_NOT_RELEASED,
-            "A visualization import lands RELEASED; its transform template '${pin.name.safeEcho()}' version " +
+            "A visualization import lands RELEASED; its script template '${pin.name.safeEcho()}' version " +
                 "${pin.version} is ${status.name} here. Release it, or import with its released version.",
             mapOf("pins_not_released" to listOf(blocking("template", pin.name, pin.version, status))),
         )

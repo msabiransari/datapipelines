@@ -65,7 +65,7 @@ sealed interface SelectorAdmission {
  *    worker thread lives on, detached, and frees its slot when the driver returns.
  *  - **No Micrometer here.** [abandoned] is the `LongAdder` the assembling layer scrapes into the
  *    `parameters.selectors.abandoned` gauge (record §11 — lane D's bean, the
- *    `transform.evaluations.abandoned` shape).
+ *    `script.evaluations.abandoned` shape).
  *
  * NOT a `ThreadPoolExecutor`: the fixed resource is the CAPACITY, not a worker set — an abandoned
  * statement's thread is never handed new work, and its slot comes back only when that thread ends.

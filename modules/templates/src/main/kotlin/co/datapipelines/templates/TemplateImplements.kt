@@ -38,7 +38,7 @@ fun interface CitableFacts {
 object ImplementsIds {
     /**
      * At most this many citations per version — a bound on the request, not a product rule: a
-     * transform implementing fifty workspace rules is one that should be split, and every read of
+     * script implementing fifty workspace rules is one that should be split, and every read of
      * the version carries the list.
      */
     const val MAX_CITATIONS = 50
@@ -133,7 +133,7 @@ data class ImplementingVersion(
 )
 
 /**
- * `template_implements` persistence (metadata-db §4.21, V36) — the citations a transform
+ * `template_implements` persistence (metadata-db §4.21, V36) — the citations a script
  * version carries, and the two reverse reads the semantic link needs.
  *
  * `NamedParameterJdbcTemplate` exclusively, the module's rule. Every statement names its

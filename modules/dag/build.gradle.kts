@@ -9,7 +9,7 @@ dependencies {
     implementation(project(":modules:templates"))
     implementation(project(":modules:datasources"))
     implementation(project(":modules:staging"))
-    // 7c (#7): the TRANSFORM node evaluates through the script engine's pool and gates through
+    // 7c (#7): the SCRIPT node evaluates through the script engine's pool and gates through
     // its TypeGate (transform-nodes design §5). Declared like the others — module-structure
     // §4.2's table and the root map carry the same row.
     implementation(project(":modules:scripting"))

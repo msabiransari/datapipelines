@@ -83,7 +83,7 @@ Open exactly the guide the task needs, then its references.
 - **`pipelines`** — authoring or changing a pipeline: the workflow, the DAG, the checks.
 - **`executions`** — runs: execute, read and page results, cancel, diagnose a failure.
 - **`templates`** — the SQL a node runs: template anatomy, dialects, libraries, calculators.
-- **`transforms`** — the logic does not fit SQL: JSONata transforms with contracts and tests.
+- **`scripts`** — the logic does not fit SQL: JSONata scripts with contracts and tests.
 - **`datasources`** — a first call, a new datasource, introspection, learned facts.
 - **`parameters`** — form controls the server evaluates: author a parameter set, the selector
   contract, the `in_list` macro, the evaluate loop.

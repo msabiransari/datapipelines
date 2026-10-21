@@ -44,8 +44,8 @@ object FactWire {
     /**
      * 7e (transform-nodes design §8.3) — the `implemented_by` value: the template versions the
      * reader's template lens admits that cite this fact, `[{template_id, version}]`. Present
-     * (possibly `[]`) on a WORKSPACE fact — "no transform implements this rule yet" is an answer —
-     * and ABSENT on a DATASOURCE fact, which a transform can never cite (§2.3): the caller passes
+     * (possibly `[]`) on a WORKSPACE fact — "no script implements this rule yet" is an answer —
+     * and ABSENT on a DATASOURCE fact, which a script can never cite (§2.3): the caller passes
      * null there, so the key's absence means "not applicable", never "none".
      */
     fun implementedByWire(versions: List<ImplementingVersion>): List<Map<String, Any?>> =

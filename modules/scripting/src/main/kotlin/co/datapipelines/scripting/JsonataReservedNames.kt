@@ -16,7 +16,7 @@ import java.util.IdentityHashMap
  * step (jsonata 0.9.10 `Jsonata.java:155, 230`); `Frame.lookup` returns a bound null. A body
  * that binds either name therefore switches both checks off for every deeper step. Those
  * hooks are a RUNAWAY guard — the sandbox bound against a hostile body is the evaluation
- * pool's abandonment (owner ruling 2026-09-28, transform-nodes record §4.5) — but a guard a
+ * pool's abandonment (owner ruling 2026-09-28, script-nodes record §4.5) — but a guard a
  * body can switch off is no guard, so every name under the prefix is the engine's.
  *
  * The check reads the library's PARSED AST (`Parser.Symbol`), never the source text: a

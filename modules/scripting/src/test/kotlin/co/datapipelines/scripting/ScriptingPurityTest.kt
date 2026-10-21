@@ -86,7 +86,7 @@ class ScriptingPurityTest {
         withClue(
             "A read of the ambient clock, default zone or a random source in modules/scripting. " +
                 "The caller owns the clock (`EvaluationLimits.now`, `ScriptClock`); the engine " +
-                "reading the wall itself would make a transform's output depend on when it ran.",
+                "reading the wall itself would make a script's output depend on when it ran.",
         ) {
             offenders.shouldBeEmpty()
         }

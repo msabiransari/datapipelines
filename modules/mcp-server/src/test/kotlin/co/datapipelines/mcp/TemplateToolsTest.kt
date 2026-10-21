@@ -71,7 +71,7 @@ class TemplateToolsTest {
             val payload = (result.content().single() as io.modelcontextprotocol.spec.McpSchema.TextContent).text()
             payload.contains("987654321") shouldBe false
             val message =
-                co.datapipelines.templates.TransformBlocks.mapper
+                co.datapipelines.templates.ScriptBlocks.mapper
                     .readTree(payload)["error"]["message"]
                     .asText()
             message.any { it.isISOControl() } shouldBe false
@@ -359,7 +359,7 @@ class TemplateToolsTest {
     }
 
     @Test
-    fun `create passes the transform blocks into the draft (7b)`() {
+    fun `create passes the script blocks into the draft (7b)`() {
         val draft = slot<TemplateDraft>()
         every { validator.validateOrThrow(capture(draft), any()) } answers { firstArg() }
         every {
@@ -408,7 +408,7 @@ class TemplateToolsTest {
             { draft.captured.type shouldBe co.datapipelines.pipeline.TemplateType.JSONATA },
             // The omitted engine defaults by the type (record §2.1).
             { draft.captured.engine shouldBe Template.NONE_ENGINE },
-            { draft.captured.contract?.mode shouldBe co.datapipelines.templates.TransformMode.ROW },
+            { draft.captured.contract?.mode shouldBe co.datapipelines.templates.ScriptMode.ROW },
             { draft.captured.tests?.map { it.name } shouldBe listOf("empty") },
         )
     }

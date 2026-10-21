@@ -1,8 +1,8 @@
 package co.datapipelines.visualization
 
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.ScriptContractView
 import co.datapipelines.pipeline.TemplateType
-import co.datapipelines.pipeline.TransformContractView
 import co.datapipelines.pipeline.ValidationFailure
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.visualization.DocumentFixtures.obj
@@ -48,17 +48,17 @@ class VisualizationValidatorTest {
     }
 
     @Test
-    fun `the transform pin's reasons - missing, not a transform, and each way the contract fails to bind`() {
+    fun `the transform pin's reasons - missing, not a script, and each way the contract fails to bind`() {
         reasons({ it.templates.clear() }) shouldBe listOf("transform.template" to "template_not_found")
         reasons({ it.templates[ValidatorFakes.TRANSFORM_REF] = TemplatePin.VersionNotFound }) shouldBe
             listOf("transform.template" to "template_version_not_found")
-        reasons({ it.templates[ValidatorFakes.TRANSFORM_REF] = TemplatePin.NotTransform(TemplateType.SQL) }) shouldBe
-            listOf("transform.template" to "not_a_transform")
+        reasons({ it.templates[ValidatorFakes.TRANSFORM_REF] = TemplatePin.NotScript(TemplateType.SQL) }) shouldBe
+            listOf("transform.template" to "not_a_script")
         reasons(mutate = { it.obj("transform").putObject("inputs").put("table", "revenue") }) shouldBe
             listOf("transform.inputs" to "inputs_mismatch")
         reasons(mutate = { it.obj("transform.inputs").put("rows", "sales") }) shouldContainExactlyInAnyOrder
             listOf("transform.inputs.rows" to "input_unknown", "inputs.revenue" to "input_unused")
-        val valueInput = ValidatorFakes.CONTRACT.copy(inputs = mapOf("rows" to TransformContractView.Input.Value(LogicalType.DATE)))
+        val valueInput = ValidatorFakes.CONTRACT.copy(inputs = mapOf("rows" to ScriptContractView.Input.Value(LogicalType.DATE)))
         reasons({ it.templates[ValidatorFakes.TRANSFORM_REF] = TemplatePin.Transform(PipelineVersionStatus.RELEASED, valueInput) }) shouldBe
             listOf("transform.inputs.rows" to "value_input")
         reasons(mutate = { it.obj("inputs").set<ObjectNode>("target", it.obj("inputs.revenue").deepCopy()) }) shouldContainExactlyInAnyOrder
@@ -84,7 +84,7 @@ class VisualizationValidatorTest {
     fun `a binding path must be the grammar and resolve inside config - a value output binds nothing`() {
         reasons(mutate = { it.obj("bindings").put("data[0]..x", "amounts") }) shouldBe listOf("bindings.data[0]..x" to "path_invalid")
         reasons(mutate = { it.obj("bindings").put("data[3].x", "amounts") }) shouldBe listOf("bindings.data[3].x" to "path_unresolved")
-        val valueOutput = ValidatorFakes.CONTRACT.copy(output = TransformContractView.Output.Value(LogicalType.DECIMAL))
+        val valueOutput = ValidatorFakes.CONTRACT.copy(output = ScriptContractView.Output.Value(LogicalType.DECIMAL))
         reasons(
             { it.templates[ValidatorFakes.TRANSFORM_REF] = TemplatePin.Transform(PipelineVersionStatus.RELEASED, valueOutput) },
         ) shouldBe

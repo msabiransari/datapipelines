@@ -33,7 +33,7 @@ object VisualizationErrorCodes {
     /** An input contract that cannot be satisfied — no inputs or columns, a bad name, a duplicate column. */
     const val INPUT_CONTRACT_INVALID = "visualization.validation.input_contract_invalid"
 
-    /** The transform pin does not bind — missing, not a transform, or its declared inputs differ. */
+    /** The transform pin does not bind — missing, not a script, or its declared inputs differ. */
     const val TRANSFORM_BINDING_INVALID = "visualization.validation.transform_binding_invalid"
 
     /** `config` fails the renderer's schema; `details.path` names the path inside it. */
@@ -85,7 +85,7 @@ object VisualizationErrorCodes {
     /** 409 — the server-run mechanical test fails now. */
     const val RELEASE_MECHANICAL_FAILED = "visualization.release.mechanical_failed"
 
-    /** 409 — a pinned transform template is not RELEASED and the cascade was not consented to. */
+    /** 409 — a pinned script template is not RELEASED and the cascade was not consented to. */
     const val RELEASE_DEPENDENCY_NOT_RELEASED = "visualization.release.dependency_not_released"
 
     // ---- import, authoring ------------------------------------------------------------------------------

@@ -9,6 +9,7 @@ import co.datapipelines.pipeline.RequestLimits
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.BindFailure
+import co.datapipelines.templates.ScriptBlocks
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDeserializationOutcome
 import co.datapipelines.templates.TemplateDeserializer
@@ -22,7 +23,6 @@ import co.datapipelines.templates.TemplateTypeBehaviour
 import co.datapipelines.templates.TemplateValidationException
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.TemplateVersionDetail
-import co.datapipelines.templates.TransformBlocks
 import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.api.ApiErrors
@@ -98,7 +98,7 @@ class TemplatesController(
     private val releases: TemplateReleaseService,
     private val authoring: co.datapipelines.pipeline.AuthoringGuard,
     private val audit: co.datapipelines.auth.AuditEventSink,
-    /** 7b — the evaluate route's service (transform-nodes §9.2), the MCP tool's twin. */
+    /** 7b — the evaluate route's service (script-nodes §9.2), the MCP tool's twin. */
     private val evaluate: co.datapipelines.application.templates.TemplateEvaluateService,
     private val deserializer: TemplateDeserializer = TemplateDeserializer(),
 ) {
@@ -494,7 +494,7 @@ class TemplatesController(
     /**
      * §8.7 — render against a sample context. The response `data` IS the rendered SQL string:
      * "Response: rendered SQL string" pins the payload, and the envelope (§4.1) wraps it.
-     * `name`, `version` and `context` are body fields (§9.6). A transform type has nothing to
+     * `name`, `version` and `context` are body fields (§9.6). A script type has nothing to
      * render — `template.render_not_applicable` points at `/evaluate` (7b, record §9.1).
      */
     @PostMapping("/render")
@@ -515,10 +515,10 @@ class TemplatesController(
                 } else {
                     ApiErrors.templateNotFound(request.name)
                 }
-        if (version.type.isTransform) {
+        if (version.type.isScript) {
             throw ApiException(
                 PipelineErrorCodes.Template.RENDER_NOT_APPLICABLE,
-                "Template '${request.name}' has type '${version.type.wire}' — a transform is evaluated, not rendered; " +
+                "Template '${request.name}' has type '${version.type.wire}' — a script is evaluated, not rendered; " +
                     "use POST /api/v1/templates/evaluate.",
                 mapOf("type" to version.type.wire, "use" to "templates_evaluate"),
             )
@@ -529,7 +529,7 @@ class TemplatesController(
     }
 
     /**
-     * §8.7A (7b, transform-nodes design §9.2) — evaluate a transform template over a
+     * §8.7A (7b, transform-nodes design §9.2) — evaluate a script template over a
      * caller-supplied input object: `{ name, version?, input, now? }` (the §9.6 addressing
      * form, the MCP tool's body and response, the same service, the same pool, the same
      * timeout). The version resolves as `/render`'s: omitted, the working version.
@@ -582,7 +582,7 @@ class TemplatesController(
     private data class EvaluateRequest(
         val name: String,
         val version: Int?,
-        val input: co.datapipelines.templates.TransformTestInput,
+        val input: co.datapipelines.templates.ScriptTestInput,
         val now: java.time.Instant?,
     )
 
@@ -610,7 +610,7 @@ class TemplatesController(
                 )
         val input =
             try {
-                TransformBlocks.mapper.treeToValue(inputNode, co.datapipelines.templates.TransformTestInput::class.java)
+                ScriptBlocks.mapper.treeToValue(inputNode, co.datapipelines.templates.ScriptTestInput::class.java)
             } catch (
                 @Suppress("SwallowedException") err: com.fasterxml.jackson.databind.JsonMappingException,
             ) {
@@ -674,7 +674,7 @@ class TemplatesController(
         // ("not one of …"); only a KNOWN, different one is the fixed-dialect refusal.
         val parsed = supplied?.let { token -> Dialect.entries.firstOrNull { it.wire == token } }
         // A known type folds the established dialect only when the type declares one (sql);
-        // html and the transform types declare none. An unknown wire value keeps the pre-7b
+        // html and the script types declare none. An unknown wire value keeps the pre-7b
         // reading (fold) — the deserializer's own type_invalid refusal catches it downstream.
         val declaresDialect =
             tree

@@ -421,53 +421,53 @@ object PipelineErrorCodes {
          */
         const val CALCULATOR_OUTPUTS_INCOMPLETE = "pipeline.validation.calculator_outputs_incomplete"
 
-        /** §12.13 (7c, #7) — a TRANSFORM node's pinned template is not `jsonata`/`javascript`. */
-        const val TRANSFORM_TEMPLATE_TYPE = "pipeline.validation.transform_template_type"
+        /** §12.13 (7c, #7) — a SCRIPT node's pinned template is not `jsonata`/`javascript`. */
+        const val SCRIPT_TEMPLATE_TYPE = "pipeline.validation.script_template_type"
 
-        /** §12.13 — a TRANSFORM node carries `source`; it is tempdb-only by construction. */
-        const val TRANSFORM_SOURCE_FORBIDDEN = "pipeline.validation.transform_source_forbidden"
+        /** §12.13 — a SCRIPT node carries `source`; it is tempdb-only by construction. */
+        const val SCRIPT_SOURCE_FORBIDDEN = "pipeline.validation.script_source_forbidden"
 
         /**
-         * §12.13 — a TRANSFORM `inputs` entry names a tempdb table no ancestor stages, or a
+         * §12.13 — a SCRIPT `inputs` entry names a tempdb table no ancestor stages, or a
          * `$key` no tier and no node writes.
          */
-        const val TRANSFORM_INPUT_UNKNOWN = "pipeline.validation.transform_input_unknown"
+        const val SCRIPT_INPUT_UNKNOWN = "pipeline.validation.script_input_unknown"
 
         /**
          * §12.13 — the node's `inputs` key set differs from the pinned contract's input names
          * (`details.missing` / `details.extra`), or a value input's Context type does not fit
          * the contract's declared type.
          */
-        const val TRANSFORM_INPUT_CONTRACT = "pipeline.validation.transform_input_contract"
+        const val SCRIPT_INPUT_CONTRACT = "pipeline.validation.script_input_contract"
 
         /**
          * §12.13 — the `output` block does not fit the contract's mode: a `target` on `value`
-         * mode (R3 — a value-mode TRANSFORM writes a Context key only), a table mode without
+         * mode (R3 — a value-mode SCRIPT writes a Context key only), a table mode without
          * `{ target: tempdb, table }` or `{ target: caller }`.
          */
-        const val TRANSFORM_OUTPUT_SHAPE = "pipeline.validation.transform_output_shape"
+        const val SCRIPT_OUTPUT_SHAPE = "pipeline.validation.script_output_shape"
 
         /** §12.13 — `output.rejects` is present but the pinned contract declares no rejects. */
-        const val TRANSFORM_REJECTS_UNDECLARED = "pipeline.validation.transform_rejects_undeclared"
+        const val SCRIPT_REJECTS_UNDECLARED = "pipeline.validation.script_rejects_undeclared"
 
         /** §12.13 — the pinned contract declares rejects and the node's `output` names no rejects table. */
-        const val TRANSFORM_REJECTS_MISSING = "pipeline.validation.transform_rejects_missing"
+        const val SCRIPT_REJECTS_MISSING = "pipeline.validation.script_rejects_missing"
 
         /**
          * §12.13 (R5) — `rejects` on a `caller` output, or a rejects-declaring contract pinned
          * by a caller node. Rejects are never silently dropped.
          */
-        const val TRANSFORM_REJECTS_ON_CALLER = "pipeline.validation.transform_rejects_on_caller"
+        const val SCRIPT_REJECTS_ON_CALLER = "pipeline.validation.script_rejects_on_caller"
 
         /** §12.13 — `strict: true` on a node whose pinned contract declares no rejects. */
-        const val TRANSFORM_STRICT_WITHOUT_REJECTS = "pipeline.validation.transform_strict_without_rejects"
+        const val SCRIPT_STRICT_WITHOUT_REJECTS = "pipeline.validation.script_strict_without_rejects"
 
         /**
          * §12.13 (R4) — a SQL `:bind`, a calculator `inputs` `$reference` or a PIPELINE
          * `parameters` `${ref}` naming a Context key whose writer's contract output is
-         * `kind: object`. An object key has ONE reader: another TRANSFORM's `inputs`.
+         * `kind: object`. An object key has ONE reader: another SCRIPT's `inputs`.
          */
-        const val TRANSFORM_OBJECT_KEY_BOUND = "pipeline.validation.transform_object_key_bound"
+        const val SCRIPT_OBJECT_KEY_BOUND = "pipeline.validation.script_object_key_bound"
     }
 
     /** §13.2 — pipeline import. */
@@ -973,9 +973,9 @@ object PipelineErrorCodes {
         const val AUTHORING_DISABLED = "template.authoring.disabled"
 
         /**
-         * §13.9 (7b, transform-nodes design §2.1 / D-T9) — a transform-typed template
+         * §13.9 (7b, transform-nodes design §2.1 / D-T9) — a script-typed template
          * (`jsonata` / `javascript`) carried `imports` or `is_library`, or its body contains a
-         * Freemarker construct (`${`, `<#`, `<@`). A transform body is evaluated, never
+         * Freemarker construct (`${`, `<#`, `<@`). A script body is evaluated, never
          * rendered; `details` names which (`imports`, `is_library`, `body`).
          */
         const val FREEMARKER_FORBIDDEN = "template.validation.freemarker_forbidden"
@@ -1001,13 +1001,13 @@ object PipelineErrorCodes {
 
         /**
          * §13.9 (7b, transform-nodes design §2.2) — `contract` / `invariants` / `tests` on an
-         * `sql` / `html` template: the blocks belong to the transform types only.
+         * `sql` / `html` template: the blocks belong to the script types only.
          */
         const val BLOCKS_NOT_ALLOWED = "template.blocks_not_allowed"
 
         /**
          * §13.9 (7b, transform-nodes design §9.1) — `templates_render` / `POST
-         * /api/v1/templates/render` on a transform type; `details.use` points at
+         * /api/v1/templates/render` on a script type; `details.use` points at
          * `templates_evaluate`.
          */
         const val RENDER_NOT_APPLICABLE = "template.render_not_applicable"
@@ -1426,62 +1426,62 @@ object PipelineErrorCodes {
     }
 
     /**
-     * §13.18 (7c, #7; the transform-nodes design record's §7) — the TRANSFORM node's
-     * execution-time refusals. Raised by `modules/dag`'s transform runner and, through
+     * §13.18 (7c, #7; the transform-nodes design record's §7) — the SCRIPT node's
+     * execution-time refusals. Raised by `modules/dag`'s script runner and, through
      * `templates_evaluate` and the save-time test suite, surfaced inside
      * `template.test_failed` (400) or the tool's own status. The scripting module's typed
      * exceptions carry [EVALUATION_FAILED], [TIMEOUT], [RESOURCE_LIMIT] and [POOL_EXHAUSTED]
      * as string literals (layer 0 — it cannot import this catalog); a dag-side test pins the
      * strings equal.
      */
-    object Transform {
+    object Script {
         /** §13.18 / record §5.1 — an input violates the contract's declared inputs. HTTP 500. */
-        const val INPUT_CONTRACT_VIOLATION = "pipeline.transform.input_contract_violation"
+        const val INPUT_CONTRACT_VIOLATION = "pipeline.script.input_contract_violation"
 
         /** §13.18 / record §4.3 — an input above `max-input-rows`, refused BEFORE loading. HTTP 500. */
-        const val INPUT_TOO_LARGE = "pipeline.transform.input_too_large"
+        const val INPUT_TOO_LARGE = "pipeline.script.input_too_large"
 
         /** §13.18 — the script threw; the detail carries the engine message bounded to 2 000 chars. HTTP 500. */
-        const val EVALUATION_FAILED = "pipeline.transform.evaluation_failed"
+        const val EVALUATION_FAILED = "pipeline.script.evaluation_failed"
 
         /**
          * §13.18 — the engine's own wall-clock bound fired (`pipeline.node.timeout` is the
          * outer backstop). HTTP 504, like its statement-level siblings.
          */
-        const val TIMEOUT = "pipeline.transform.timeout"
+        const val TIMEOUT = "pipeline.script.timeout"
 
         /** §13.18 — depth (JSONata); heap/statements (JavaScript). `details.kind` names which. HTTP 500. */
-        const val RESOURCE_LIMIT = "pipeline.transform.resource_limit"
+        const val RESOURCE_LIMIT = "pipeline.script.resource_limit"
 
         /** §13.18 / record §4.3 — the evaluation pool's admission bound is full. HTTP 503. */
-        const val POOL_EXHAUSTED = "pipeline.transform.pool_exhausted"
+        const val POOL_EXHAUSTED = "pipeline.script.pool_exhausted"
 
         /** §13.18 / record §5.3 — a returned row's key set is not exactly the declared column set. HTTP 500. */
-        const val ROW_SHAPE_MISMATCH = "pipeline.transform.row_shape_mismatch"
+        const val ROW_SHAPE_MISMATCH = "pipeline.script.row_shape_mismatch"
 
         /** §13.18 / record §5.3 — a returned value does not fit its column's wire form. HTTP 500. */
-        const val VALUE_TYPE_MISMATCH = "pipeline.transform.value_type_mismatch"
+        const val VALUE_TYPE_MISMATCH = "pipeline.script.value_type_mismatch"
 
         /** §13.18 / record §5.3 (R1) — a numeric value does not fit its declared precision/scale. HTTP 500. */
-        const val PRECISION_LOST = "pipeline.transform.precision_lost"
+        const val PRECISION_LOST = "pipeline.script.precision_lost"
 
         /** §13.18 / record §4.3 — a value/object output or a single string above the byte caps. HTTP 500. */
-        const val VALUE_TOO_LARGE = "pipeline.transform.value_too_large"
+        const val VALUE_TOO_LARGE = "pipeline.script.value_too_large"
 
         /** §13.18 / record §5.4 — an invariant evaluated to other than `true`; names it and its message. HTTP 500. */
-        const val INVARIANT_FAILED = "pipeline.transform.invariant_failed"
+        const val INVARIANT_FAILED = "pipeline.script.invariant_failed"
 
         /** §13.18 / record §5.4 — the invariants' read-back exceeded `max-input-rows`. HTTP 500. */
-        const val INVARIANTS_TOO_LARGE = "pipeline.transform.invariants_too_large"
+        const val INVARIANTS_TOO_LARGE = "pipeline.script.invariants_too_large"
 
         /** §13.18 / record §5.4 — `strict: true` and the rejects table is non-empty (count + first ten reasons). HTTP 500. */
-        const val REJECTS_STRICT = "pipeline.transform.rejects_strict"
+        const val REJECTS_STRICT = "pipeline.script.rejects_strict"
 
         /**
          * §13.18 / record §4.4 — a `javascript` template is refused until round two's engine
          * ships (503 at boot, 400 at save). Raised by `modules/templates`'s save path.
          */
-        const val JS_UNAVAILABLE = "transform.js.unavailable"
+        const val JS_UNAVAILABLE = "script.js.unavailable"
     }
 
     /**

@@ -363,7 +363,7 @@ class VisualizationUiRenderTest {
     }
 
     @Test
-    fun `a releasable draft with a DRAFT transform carries the ONE consent, checked, and from`() {
+    fun `a releasable draft with a DRAFT script carries the ONE consent, checked, and from`() {
         val dlg =
             release(
                 pin = VisualizationLifecycleDialogModel.PinView("acme/templates/t", 2, PipelineVersionStatus.DRAFT),

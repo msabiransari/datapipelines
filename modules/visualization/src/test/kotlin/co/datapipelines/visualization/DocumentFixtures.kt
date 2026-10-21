@@ -23,7 +23,7 @@ internal object DocumentFixtures {
             "revenue": { "columns": [ { "name": "month", "type": "DATE", "nullable": false },
                                       { "name": "amount", "type": "DECIMAL", "nullable": false } ] }
           },
-          "transform": { "template": { "name": "finance/transforms/revenue_bars", "version": 2 },
+          "transform": { "template": { "name": "finance/scripts/revenue_bars", "version": 2 },
                          "inputs": { "rows": "revenue" } },
           "config": { "data": [ { "type": "bar", "x": "${'$'}.x", "y": "${'$'}.y" } ], "layout": { "title": { "text": "Revenue" } } },
           "bindings": { "data[0].x": "month_labels", "data[0].y": "amounts" },

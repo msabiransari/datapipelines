@@ -1,14 +1,14 @@
 package co.datapipelines.visualization
 
 import co.datapipelines.pipeline.PipelineVersionStatus
-import co.datapipelines.pipeline.TransformContractView
+import co.datapipelines.pipeline.ScriptContractView
 import co.datapipelines.typesystem.LogicalType
 import com.fasterxml.jackson.databind.node.ObjectNode
 import java.util.UUID
 
 /**
  * Fakes for the four ports, seeded so the spec's two worked documents are VALID: `revenue_bars@2` is a RELEASED
- * transform whose `rows` input is the visualization's `revenue` columns and whose output carries the two bound
+ * script whose `rows` input is the visualization's `revenue` columns and whose output carries the two bound
  * columns; `monthly_revenue@7` is a RELEASED read-only pipeline with `year` (required) and `currency`, whose
  * caller output is `month`/`amount`; the set pins `year` and `currency` (neither a parent); the visualization
  * pin is the spec's own visualization body.
@@ -16,7 +16,7 @@ import java.util.UUID
 internal object ValidatorFakes {
     val WORKSPACE: UUID = UUID.fromString("defa0000-0000-0000-0000-00000000000a")
 
-    val TRANSFORM_REF = ArtifactRef("finance/transforms/revenue_bars", 2)
+    val TRANSFORM_REF = ArtifactRef("finance/scripts/revenue_bars", 2)
     val PIPELINE_REF = ArtifactRef("finance/pipelines/monthly_revenue", 7)
     val SET_REF = ArtifactRef("finance/parameters/reporting_period", 1)
     val VISUALIZATION_REF = ArtifactRef("finance/visualizations/monthly_revenue", 3)
@@ -25,18 +25,18 @@ internal object ValidatorFakes {
         name: String,
         type: LogicalType,
         nullable: Boolean = false,
-    ) = TransformContractView.Column(name, type, nullable)
+    ) = ScriptContractView.Column(name, type, nullable)
 
     val CONTRACT =
-        TransformContractView(
-            mode = TransformContractView.Mode.TABLE,
+        ScriptContractView(
+            mode = ScriptContractView.Mode.TABLE,
             inputs =
                 mapOf(
                     "rows" to
-                        TransformContractView.Input.Table(listOf(column("month", LogicalType.DATE), column("amount", LogicalType.DECIMAL))),
+                        ScriptContractView.Input.Table(listOf(column("month", LogicalType.DATE), column("amount", LogicalType.DECIMAL))),
                 ),
             output =
-                TransformContractView.Output.Table(
+                ScriptContractView.Output.Table(
                     listOf(column("month_labels", LogicalType.STRING), column("amounts", LogicalType.DECIMAL)),
                 ),
             rejects = false,

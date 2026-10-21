@@ -1,8 +1,8 @@
 package co.datapipelines.mcp
 
 import co.datapipelines.application.templates.TemplateEvaluateService
-import co.datapipelines.templates.TransformBlocks
-import co.datapipelines.templates.TransformTestInput
+import co.datapipelines.templates.ScriptBlocks
+import co.datapipelines.templates.ScriptTestInput
 import com.fasterxml.jackson.databind.JsonMappingException
 import io.modelcontextprotocol.spec.McpSchema
 import java.time.Instant
@@ -17,7 +17,7 @@ private const val EVALUATE_INPUT_DESC =
 /** §6.2.43 — the `now` description. */
 private const val EVALUATE_NOW_DESC =
     "Optional ISO-8601 instant the \$now()/\$millis() builtins return for this evaluation. Absent, a body that " +
-        "reads the clock refuses (a transform is a pure function of its inputs — the clock is an input)."
+        "reads the clock refuses (a script is a pure function of its inputs — the clock is an input)."
 
 /**
  * `templates_evaluate` (mcp-server.md §6.2.43). Permission: `template.evaluate`, held by the
@@ -25,7 +25,7 @@ private const val EVALUATE_NOW_DESC =
  * authoring act as rendering).
  * Not mutating: nothing is staged and nothing is stored.
  *
- * `sql_probe`'s twin for transform templates: resolves the version exactly like
+ * `sql_probe`'s twin for script templates: resolves the version exactly like
  * `templates_render` (explicit `version`, else the working version — the draft when one
  * exists, else the latest released), applies the contract's input check, evaluates on the
  * evaluation pool under `evaluate-timeout-seconds`, gates the output and runs the
@@ -40,10 +40,10 @@ class TemplatesEvaluateTool(
         McpTools.tool(
             name = "templates_evaluate",
             description =
-                "Evaluate a transform template ('jsonata'/'javascript') over a caller-supplied input object and " +
-                    "return { output, rejects, invariants } — no staging, no Context. Use this to run a transform's " +
+                "Evaluate a script template ('jsonata'/'javascript') over a caller-supplied input object and " +
+                    "return { output, rejects, invariants } — no staging, no Context. Use this to run a script's " +
                     "body against one input the way its test suite does (sql_probe's twin; templates_render is for " +
-                    "sql/html and refuses a transform type with template.render_not_applicable). The version " +
+                    "sql/html and refuses a script type with template.render_not_applicable). The version " +
                     "resolves as templates_render does: omitted, the working version (the draft when one exists, " +
                     "else the latest released). A refusal is the code with its detail — a type-gate refusal, an " +
                     "input-contract violation, or an engine refusal (timeout, resource limit, pool exhausted).",
@@ -71,7 +71,7 @@ class TemplatesEvaluateTool(
         val id = args.requiredString("id")
         val input =
             try {
-                TransformBlocks.mapper.convertValue(args.requiredObject("input"), TransformTestInput::class.java)
+                ScriptBlocks.mapper.convertValue(args.requiredObject("input"), ScriptTestInput::class.java)
             } catch (
                 err: IllegalArgumentException,
             ) {

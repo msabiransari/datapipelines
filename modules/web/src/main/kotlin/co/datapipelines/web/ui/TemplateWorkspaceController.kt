@@ -94,14 +94,14 @@ class TemplateWorkspaceController(
         // server decides, the markup renders its answer). Render is the Render Context +
         // preview tab — its POST is MUTATE (`template.render`), it exists to feed Preview,
         // and a reader is not offered a control the server would refuse (143's rule); a
-        // transform has no Render tab at all (its preview would feed a Freemarker render a
-        // transform does not have — the old rail's own rule), so the page resolves render→
+        // script has no Render tab at all (its preview would feed a Freemarker render a
+        // script does not have — the old rail's own rule), so the page resolves render→
         // source for one before any render state is read.
-        val hasRenderTab = roles.canAuthor && (resolved.viewedTemplate?.type?.isTransform != true)
+        val hasRenderTab = roles.canAuthor && (resolved.viewedTemplate?.type?.isScript != true)
         val activeTab = TemplateWorkspaceTab.fromWire(tab, hasRenderTab)
         model.addAttribute("activeTab", activeTab.wire)
 
-        // The Source tab's column and the transform face read the SAME attribute names the
+        // The Source tab's column and the script face read the SAME attribute names the
         // old editor page painted (and the /partials/templates/editor/source swap still
         // paints), so the first paint and every fragment render cannot disagree about
         // what a version shows.
@@ -181,9 +181,9 @@ class TemplateWorkspaceController(
         model.addAttribute("readOnly", readOnly)
         // Overview's References reading (a derived scan, never a declared contract).
         model.addAttribute("interpolations", TemplateWorkspaceModel.interpolations(displayed.body))
-        // 7d: a transform template's column is the face — the same fill the face's own GET gives.
-        if (displayed.type.isTransform) TransformFace.fill(model, displayed, readOnly)
-        model.addAttribute("isTransform", displayed.type.isTransform)
+        // 7d: a script template's column is the face — the same fill the face's own GET gives.
+        if (displayed.type.isScript) ScriptFace.fill(model, displayed, readOnly)
+        model.addAttribute("isScript", displayed.type.isScript)
     }
 
     /** The tab set the page's query contract admits (workspace spec §3.1, read onto templates). */

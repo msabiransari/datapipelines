@@ -2,7 +2,7 @@ package co.datapipelines.scripting
 
 /**
  * A declared resource limit other than time was hit (transform-nodes design §7:
- * `pipeline.transform.resource_limit`, detail names which).
+ * `pipeline.script.resource_limit`, detail names which).
  *
  * For the JSONata engine today this is [Kind.DEPTH] — the engine's own recursion
  * bound, counted at every evaluate entry and exit: nested expressions and non-tail
@@ -31,6 +31,6 @@ class ScriptResourceLimitException(
 
     companion object {
         /** pipeline-contract §13.18 — the resource-limit row (record §7). */
-        const val CODE = "pipeline.transform.resource_limit"
+        const val CODE = "pipeline.script.resource_limit"
     }
 }

@@ -115,7 +115,7 @@
        Head-loaded for 090's reason: the catalog is a boosted route. -->
   <link th:href="@{/css/visualizations.css}" rel="stylesheet">
   <!-- #398 — the template workspace's rules (design tokens only) over the editor sheet its
-       panes still draw from (`template-editor.css`: the source column, the transform face,
+       panes still draw from (`template-editor.css`: the source column, the script face,
        the render panel). Head-loaded for 090's reason, §3.0 normative: /templates/{name} is a
        boosted arrival (the pipeline Details and search links reach it boosted, as does a
        history restore), and a `<link>` inside `#app-main` is discovered only after the first
@@ -766,7 +766,7 @@
         <th:block th:if="${code == 'entity_purged'}"><div th:replace="~{partials/toast :: toast('success', 'Pipeline purged', 'The pipeline, its draft and its runs are gone.')}"></div></th:block>
         <th:block th:if="${code == 'template_purged'}"><div th:replace="~{partials/toast :: toast('success', 'Template purged', 'The template and its draft are gone.')}"></div></th:block>
         <!-- #399 — the visualization lifecycle verbs' redirects: `released`, `released_with_templates`
-             (the transform template is the one pin a visualization cascades), `discarded` and `restored`
+             (the script template is the one pin a visualization cascades), `discarded` and `restored`
              serve unchanged; `switched` names published endpoints — a pipeline's fact, never a
              visualization's — so the family carries its own switch, draft-purge and purge words. -->
         <th:block th:if="${code == 'visualization_switched'}"><div th:replace="~{partials/toast :: toast('success', 'Current version switched', 'Dashboards that pin this visualization keep their pinned versions; the Versions tab shows which version is current.')}"></div></th:block>

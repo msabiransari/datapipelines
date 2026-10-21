@@ -86,8 +86,8 @@ open class TemplateReleaseService(
                 imports = stored.imports,
                 body = stored.body,
                 isLibrary = stored.isLibrary,
-                // 7b: the transform blocks ride the re-validation — release re-runs the suite
-                // on exactly the content being released (transform-nodes §8.1).
+                // 7b: the script blocks ride the re-validation — release re-runs the suite
+                // on exactly the content being released (script-nodes §8.1).
                 contract = stored.contract,
                 invariants = stored.invariants,
                 tests = stored.tests,

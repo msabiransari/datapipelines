@@ -81,7 +81,7 @@ class TemplateDeserializer(
             try {
                 mapper.treeToValue(tree, TemplateDraft::class.java)
             } catch (err: com.fasterxml.jackson.databind.JsonMappingException) {
-                // Two author errors reach here, and BindFailure tells them apart. The transform
+                // Two author errors reach here, and BindFailure tells them apart. The script
                 // blocks are strict interior (the model's KDoc): a typo is a refusal, never a
                 // silently dropped section - Jackson reports it as an unknown key directly, or as
                 // the creator parameter the typo leaves missing; both are `unknown_field`. A JSON
@@ -95,7 +95,7 @@ class TemplateDeserializer(
                                 code = PipelineErrorCodes.Template.CONTRACT_INVALID,
                                 message =
                                     failure.messageFor(
-                                        "The transform blocks do not bind",
+                                        "The script blocks do not bind",
                                         " A typo is a refusal, never a silent drop.",
                                     ),
                                 details = failure.details(),
@@ -104,11 +104,11 @@ class TemplateDeserializer(
                     ),
                 )
             }
-        // An omitted engine on a transform type means 'none' (transform-nodes design §2.1) —
+        // An omitted engine on a script type means 'none' (transform-nodes design §2.1) —
         // the DTO's own default is freemarker, which would refuse a create that simply omitted
         // the field. Stated values still go through the validator's type-conditional rule.
         val normalized =
-            if (typed?.isTransform == true && !tree.has("engine")) {
+            if (typed?.isScript == true && !tree.has("engine")) {
                 parsed.copy(engine = Template.NONE_ENGINE)
             } else {
                 parsed
@@ -127,7 +127,7 @@ class TemplateDeserializer(
         // re-import cleanly).
         val dialectPresent = tree.get("dialect")?.let { !it.isNull } == true
         if (typed != null && !TemplateTypeBehaviour.of(typed).requiresDialect) {
-            // html and the transform types declare NO dialect; presence is the offense, so the
+            // html and the script types declare NO dialect; presence is the offense, so the
             // value is irrelevant — including an invalid one, which could not make it "more present".
             if (dialectPresent) {
                 return TemplateDeserializationOutcome.Rejected(

@@ -1,7 +1,7 @@
 package co.datapipelines.config
 
 /**
- * §7 / §3.31 (#279) — the platform's request-body cap. Owns its file like `TransformRules` and
+ * §7 / §3.31 (#279) — the platform's request-body cap. Owns its file like `ScriptRules` and
  * `ParametersRules` — the validator's companion is the registry, not the home, of the §3.x
  * families, and this keeps the companion under the size the static analysis allows.
  *

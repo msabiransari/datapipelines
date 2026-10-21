@@ -202,7 +202,7 @@ class ParameterCoercionTest {
     fun `a magnitude whose plain rendering would exceed the digit cap is refused in constant time - the value, not the parse`() {
         // The 279 merge's security pass, finding 2: "1e999999999" is eleven characters, parses
         // to scale -999,999,999 in constant time, and the first toPlainString() downstream (the
-        // wire encoder, the transform context) allocates a gigabyte of zeros. Both textual and
+        // wire encoder, the script context) allocates a gigabyte of zeros. Both textual and
         // JSON-number decimals hold |scale| and precision to the digit cap.
         assertTimeoutPreemptively(Duration.ofSeconds(1)) {
             ParameterCoercion

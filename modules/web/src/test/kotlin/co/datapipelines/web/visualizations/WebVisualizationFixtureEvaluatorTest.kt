@@ -3,9 +3,9 @@ package co.datapipelines.web.visualizations
 import co.datapipelines.application.templates.TemplateEvaluateService
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.ScriptContractView
 import co.datapipelines.pipeline.TemplateDryRenderer
-import co.datapipelines.pipeline.TransformContractView
-import co.datapipelines.templates.TransformTestInput
+import co.datapipelines.templates.ScriptTestInput
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.visualization.ArtifactRef
@@ -36,23 +36,23 @@ import java.util.UUID
  */
 class WebVisualizationFixtureEvaluatorTest {
     private val workspace: UUID = UUID.randomUUID()
-    private val pin = ArtifactRef("finance/transforms/revenue_bars", 2)
+    private val pin = ArtifactRef("finance/scripts/revenue_bars", 2)
 
     private val evaluate = mockk<TemplateEvaluateService>()
     private val contracts = mockk<TemplateDryRenderer>()
 
-    private fun adapter(mode: TransformContractView.Mode?): WebVisualizationFixtureEvaluator {
+    private fun adapter(mode: ScriptContractView.Mode?): WebVisualizationFixtureEvaluator {
         val contract = mode?.let { modeView(it) }
-        every { contracts.transformContract(any(), any()) } returns contract
+        every { contracts.scriptContract(any(), any()) } returns contract
         return WebVisualizationFixtureEvaluator(evaluate, contracts)
     }
 
     /** A minimal TABLE-shaped contract view carrying just the mode the shaping reads. */
-    private fun modeView(mode: TransformContractView.Mode): TransformContractView =
-        TransformContractView(
+    private fun modeView(mode: ScriptContractView.Mode): ScriptContractView =
+        ScriptContractView(
             mode = mode,
-            inputs = mapOf("rows" to TransformContractView.Input.Table(emptyList())),
-            output = TransformContractView.Output.Table(emptyList()),
+            inputs = mapOf("rows" to ScriptContractView.Input.Table(emptyList())),
+            output = ScriptContractView.Output.Table(emptyList()),
             rejects = false,
         )
 
@@ -61,11 +61,11 @@ class WebVisualizationFixtureEvaluatorTest {
     private fun rowNode(row: Map<String, Any?>): ObjectNode = ObjectMapper().valueToTree(row)
 
     @Test
-    fun `a ROW-mode transform receives the single table as rows - the contract's mode shapes the input`() {
-        val input = slot<TransformTestInput>()
+    fun `a ROW-mode script receives the single table as rows - the contract's mode shapes the input`() {
+        val input = slot<ScriptTestInput>()
         every { evaluate.evaluate(any(), any(), any(), capture(input)) } returns
             TemplateEvaluateService.Evaluation(listOf(mapOf("amounts" to 10.5)), emptyList(), emptyList())
-        adapter(TransformContractView.Mode.ROW)
+        adapter(ScriptContractView.Mode.ROW)
             .evaluate(workspace, pin, fixtures(mapOf("month" to "2026-01-01")))
             .shouldBeInstanceOf<FixtureEvaluation.Rows>()
             .rows shouldBe listOf(mapOf("amounts" to 10.5))
@@ -74,13 +74,13 @@ class WebVisualizationFixtureEvaluatorTest {
     }
 
     @Test
-    fun `a TABLE-mode transform receives each table under its input name - and the pinned version travels`() {
-        val input = slot<TransformTestInput>()
+    fun `a TABLE-mode script receives each table under its input name - and the pinned version travels`() {
+        val input = slot<ScriptTestInput>()
         val name = slot<String>()
         val version = slot<Int>()
         every { evaluate.evaluate(any(), capture(name), capture(version), capture(input)) } returns
             TemplateEvaluateService.Evaluation(listOf(mapOf("amounts" to 1)), emptyList(), emptyList())
-        adapter(TransformContractView.Mode.TABLE)
+        adapter(ScriptContractView.Mode.TABLE)
             .evaluate(workspace, pin, fixtures(mapOf("amount" to 10.5)))
             .shouldBeInstanceOf<FixtureEvaluation.Rows>()
         name.captured shouldBe pin.name
@@ -92,7 +92,7 @@ class WebVisualizationFixtureEvaluatorTest {
     fun `an evaluator refusal propagates with its own catalogued code`() {
         every { evaluate.evaluate(any(), any(), any(), any()) } throws
             DatapipelinesException("template.type_gate_refused", "row 0 column 'amount' is not a number")
-        adapter(TransformContractView.Mode.ROW)
+        adapter(ScriptContractView.Mode.ROW)
             .evaluate(workspace, pin, fixtures(mapOf("amount" to "ten")))
             .shouldBeInstanceOf<FixtureEvaluation.Refused>()
             .let {
@@ -105,10 +105,10 @@ class WebVisualizationFixtureEvaluatorTest {
     fun `a non-table output is refused the transformer's shape code - never bound blind`() {
         every { evaluate.evaluate(any(), any(), any(), any()) } returns
             TemplateEvaluateService.Evaluation("a scalar, not a table", emptyList(), emptyList())
-        adapter(TransformContractView.Mode.TABLE)
+        adapter(ScriptContractView.Mode.TABLE)
             .evaluate(workspace, pin, fixtures(mapOf("amount" to 1)))
             .shouldBeInstanceOf<FixtureEvaluation.Refused>()
-            .code shouldBe PipelineErrorCodes.Transform.ROW_SHAPE_MISMATCH
+            .code shouldBe PipelineErrorCodes.Script.ROW_SHAPE_MISMATCH
     }
 
     @Test
@@ -169,10 +169,10 @@ class WebVisualizationFixtureEvaluatorTest {
 
     private fun mechanicalCheck(nullable: Boolean): VisualizationMechanicalCheck {
         val contract =
-            modeView(TransformContractView.Mode.TABLE).copy(
-                output = TransformContractView.Output.Table(listOf(TransformContractView.Column("amount", LogicalType.DECIMAL, nullable))),
+            modeView(ScriptContractView.Mode.TABLE).copy(
+                output = ScriptContractView.Output.Table(listOf(ScriptContractView.Column("amount", LogicalType.DECIMAL, nullable))),
             )
-        every { contracts.transformContract(any(), any()) } returns contract
+        every { contracts.scriptContract(any(), any()) } returns contract
         return VisualizationMechanicalCheck(
             renderers = RendererConfigValidators.deep(),
             fixtures = WebVisualizationFixtureEvaluator(evaluate, contracts),

@@ -57,15 +57,15 @@ data class TemplateDraft(
     @field:JsonProperty("is_library") @get:JsonProperty("is_library") @param:JsonProperty("is_library")
     val isLibrary: Boolean = false,
     /**
-     * The three transform blocks (7b, transform-nodes design §2.2) — non-null exactly when
-     * [type] is a transform type (`chk_transform_blocks`); always null on `sql`/`html`.
+     * The three script blocks (7b, transform-nodes design §2.2) — non-null exactly when
+     * [type] is a script type (`chk_script_blocks`); always null on `sql`/`html`.
      */
     @field:JsonProperty("contract") @get:JsonProperty("contract") @param:JsonProperty("contract")
-    val contract: TransformContract? = null,
+    val contract: ScriptContract? = null,
     @field:JsonProperty("invariants") @get:JsonProperty("invariants") @param:JsonProperty("invariants")
-    val invariants: List<TransformInvariant>? = null,
+    val invariants: List<ScriptInvariant>? = null,
     @field:JsonProperty("tests") @get:JsonProperty("tests") @param:JsonProperty("tests")
-    val tests: List<TransformTestCase>? = null,
+    val tests: List<ScriptTestCase>? = null,
     /**
      * The learned facts this version cites as implementing (7e, transform-nodes design §2.3):
      * fact ids as the caller sent them. NOT content — outside the hash, never a reason to open

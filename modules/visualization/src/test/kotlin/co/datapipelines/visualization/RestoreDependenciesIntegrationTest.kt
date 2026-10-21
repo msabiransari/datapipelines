@@ -126,7 +126,7 @@ class RestoreDependenciesIntegrationTest {
         refusal { h.dashboards.restoreVersion(WORKSPACE, UUID.randomUUID(), 1) }.code shouldBe DashboardErrorCodes.NOT_FOUND
     }
 
-    // ---- the visualization's transform template pin
+    // ---- the visualization's script template pin
 
     private fun discardedVisualization(): UUID {
         val created = h.createVisualization()
@@ -145,7 +145,7 @@ class RestoreDependenciesIntegrationTest {
     }
 
     @Test
-    fun `a visualization whose transform template version was discarded meanwhile is refused transform_binding_invalid`() {
+    fun `a visualization whose script template version was discarded meanwhile is refused transform_binding_invalid`() {
         val id = discardedVisualization()
         h.fakes.templates[ValidatorFakes.TRANSFORM_REF] = TemplatePin.VersionNotFound
 

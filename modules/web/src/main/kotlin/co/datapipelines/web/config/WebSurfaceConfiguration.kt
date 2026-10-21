@@ -221,7 +221,7 @@ class WebSurfaceConfiguration {
     @Suppress("LongParameterList")
     @Bean
     fun subPipelineRunner(
-        transformSupport: co.datapipelines.executor.TransformSupport,
+        scriptSupport: co.datapipelines.executor.ScriptSupport,
         pipelines: PipelineRepository,
         templateEngines: WorkspaceTemplateEngines,
         datasourceRegistry: DatasourceRegistry,
@@ -263,7 +263,7 @@ class WebSurfaceConfiguration {
             eventLog = eventLog,
             eventRepository = eventRepository,
             executionRepository = executionRepository,
-            transformSupport = transformSupport,
+            scriptSupport = scriptSupport,
             eventRecorder = eventRecorder,
         )
 
@@ -290,7 +290,7 @@ class WebSurfaceConfiguration {
     @Suppress("LongParameterList")
     @Bean
     fun executionStreamLauncher(
-        transformSupport: co.datapipelines.executor.TransformSupport,
+        scriptSupport: co.datapipelines.executor.ScriptSupport,
         templateEngines: WorkspaceTemplateEngines,
         datasourceRegistry: DatasourceRegistry,
         stagingFactory: StagingFactory,
@@ -342,7 +342,7 @@ class WebSurfaceConfiguration {
             mapper = SseJson.mapper,
             scope = scope,
             subPipelineRunner = subPipelineRunner,
-            transformSupport = transformSupport,
+            scriptSupport = scriptSupport,
             eventRecorder = eventRecorder,
         )
 
@@ -356,7 +356,7 @@ class WebSurfaceConfiguration {
     @Bean
     fun recordingExecutionRunner(
         idempotencyStore: IdempotencyStore,
-        transformSupport: co.datapipelines.executor.TransformSupport,
+        scriptSupport: co.datapipelines.executor.ScriptSupport,
         templateEngines: WorkspaceTemplateEngines,
         datasourceRegistry: DatasourceRegistry,
         stagingFactory: StagingFactory,
@@ -398,7 +398,7 @@ class WebSurfaceConfiguration {
             eventRepository = eventRepository,
             executionRepository = executionRepository,
             subPipelineRunner = subPipelineRunner,
-            transformSupport = transformSupport,
+            scriptSupport = scriptSupport,
             eventRecorder = eventRecorder,
             idempotencyStore = idempotencyStore,
         )

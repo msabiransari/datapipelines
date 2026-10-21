@@ -8,14 +8,14 @@ import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineVersionDetail
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.templates.ContractColumn
+import co.datapipelines.templates.ScriptContract
+import co.datapipelines.templates.ScriptInput
+import co.datapipelines.templates.ScriptMode
+import co.datapipelines.templates.ScriptOutput
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateImport
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateVersion
-import co.datapipelines.templates.TransformContract
-import co.datapipelines.templates.TransformInput
-import co.datapipelines.templates.TransformMode
-import co.datapipelines.templates.TransformOutput
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.web.api.ApiException
 import io.kotest.assertions.throwables.shouldThrow
@@ -487,10 +487,10 @@ class PromotionServiceTest {
         batch.keyFingerprint.contains("sender-side-secret") shouldBe false
     }
 
-    // ----------------------------------------------------------------- 7b: the transform blocks
+    // ----------------------------------------------------------------- 7b: the script blocks
 
     @Test
-    fun `a transform template's payload carries its contract, invariants and tests`() {
+    fun `a script template's payload carries its contract, invariants and tests`() {
         // 7b §A.3(4): the payload is built field by field, so the three blocks ride only
         // because templatePayloadOf sets them — and the receiver's hash guard recomputes
         // over them, so a dropped block is a refused import, not a silent loss.
@@ -508,10 +508,10 @@ class PromotionServiceTest {
                 createdBy = UUID.randomUUID(),
             )
         val contract =
-            TransformContract(
-                mode = TransformMode.ROW,
-                inputs = mapOf("orders" to TransformInput.Table(listOf(ContractColumn("order_id", LogicalType.INTEGER)))),
-                output = TransformOutput.Table(listOf(ContractColumn("order_id", LogicalType.INTEGER))),
+            ScriptContract(
+                mode = ScriptMode.ROW,
+                inputs = mapOf("orders" to ScriptInput.Table(listOf(ContractColumn("order_id", LogicalType.INTEGER)))),
+                output = ScriptOutput.Table(listOf(ContractColumn("order_id", LogicalType.INTEGER))),
             )
         val stored =
             storedTemplate("test/xform.jsonata", 1).copy(

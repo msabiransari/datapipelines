@@ -187,6 +187,36 @@ class ConfigValidatorTest {
     }
 
     @Test
+    fun `a set datapipelines transform key is refused BY NAME - the rename left no alias`() {
+        // The properties class binds `datapipelines.script.*`, so without this refusal a
+        // stale `transform` key would bind NOTHING and the deployment would silently run on
+        // defaults — the budget that quietly isn't there is worse than a refused startup.
+        val report = ConfigValidator.validate(validSnapshot().copy(transformLegacyKeysSet = true))
+
+        report.violations shouldHaveSize 1
+        report.violations.single().contains("datapipelines.transform.") shouldBe true
+        report.violations.single().contains("datapipelines.script.") shouldBe true
+        report.violations.single().contains("REMOVED") shouldBe true
+    }
+
+    @Test
+    fun `the refusal names all nine removed transform keys`() {
+        val report = ConfigValidator.validate(validSnapshot().copy(transformLegacyKeysSet = true))
+
+        ScriptRules.REMOVED_TRANSFORM_KEY_SUFFIXES.forEach { suffix ->
+            report.violations.single().contains("datapipelines.transform.$suffix") shouldBe true
+        }
+        ScriptRules.REMOVED_TRANSFORM_KEY_SUFFIXES shouldHaveSize 9
+    }
+
+    @Test
+    fun `an unset transform key set is clean`() {
+        val report = ConfigValidator.validate(validSnapshot())
+
+        report.violations.shouldBeEmpty()
+    }
+
+    @Test
     fun `both removed keys are named separately - an operator fixes both in one pass`() {
         val report =
             ConfigValidator.validate(

@@ -10,7 +10,7 @@ import java.util.UUID
 /**
  * The template editor's SOURCE COLUMN model — one rule for every route that paints the column:
  * the editor page, `GET /partials/templates/editor/source` (the version select), and the
- * transform face's routes (7d, transform-nodes design §9.3). It lived in
+ * script face's routes (7d, transform-nodes design §9.3). It lived in
  * [TemplateEditorController] as `fillSource` until the face needed it too; moved unchanged, so
  * the face cannot compute a second, slightly different `readOnly`.
  *
@@ -23,8 +23,8 @@ import java.util.UUID
  * reader (viewer, or a promoter, who releases but does not edit) sees every version, the
  * working one included, in the read-only surface. [canAuthor] arrives from [RoleModel].
  *
- * 7d: a transform version (`jsonata` / `javascript`) additionally gets the face's model
- * ([TransformFace.fill]) — the four panes and the save precondition — and [Filled.isTransform]
+ * 7d: a script version (`jsonata` / `javascript`) additionally gets the face's model
+ * ([ScriptFace.fill]) — the four panes and the save precondition — and [Filled.isScript]
  * tells the route which fragment paints the column.
  */
 internal class TemplateSourceModel(
@@ -36,11 +36,11 @@ internal class TemplateSourceModel(
         val draft: TemplateVersionDetail?,
         val displayed: Template?,
     ) {
-        /** The column is the transform face, not the Freemarker source column (7d). */
-        val isTransform: Boolean get() = displayed?.type?.isTransform == true
+        /** The column is the script face, not the Freemarker source column (7d). */
+        val isScript: Boolean get() = displayed?.type?.isScript == true
 
         /** The fragment that paints the column for this fill. */
-        val view: String get() = if (isTransform) TransformFace.VIEW else SOURCE_VIEW
+        val view: String get() = if (isScript) ScriptFace.VIEW else SOURCE_VIEW
     }
 
     fun fill(
@@ -68,8 +68,8 @@ internal class TemplateSourceModel(
         model.addAttribute("releasedAt", detail?.releasedAt)
         model.addAttribute("releasedBy", actors.displayName(detail?.releasedBy))
         val filled = Filled(draft, displayed)
-        model.addAttribute("isTransform", filled.isTransform)
-        if (displayed != null && filled.isTransform) TransformFace.fill(model, displayed, readOnly)
+        model.addAttribute("isScript", filled.isScript)
+        if (displayed != null && filled.isScript) ScriptFace.fill(model, displayed, readOnly)
         return filled
     }
 

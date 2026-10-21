@@ -90,9 +90,14 @@ class TypedTemplatesMigrationTest {
         insertVersionShouldFail(type = "sql", dialect = null, constraint = "chk_type_dialect")
         // html + present dialect (chk_type_dialect)
         insertVersionShouldFail(type = "html", dialect = "POSTGRES", constraint = "chk_type_dialect")
-        // both invalid type values (chk_template_type)
-        insertVersionShouldFail(type = "csv", dialect = null, constraint = "chk_template_type")
-        insertVersionShouldFail(type = "SQL", dialect = null, constraint = "chk_template_type")
+        // both invalid type values. V50 renamed chk_transform_blocks to chk_script_blocks, which
+        // now sorts before chk_template_type — and an out-of-vocabulary type violates BOTH (no
+        // chk_script_blocks arm admits a type outside sql/html/jsonata/javascript), so Postgres
+        // reports chk_script_blocks. chk_template_type itself stays in the schema (pinned by
+        // FlywayMigrationIntegrationTest) but can no longer be the reported violation for a bad
+        // type: no row can satisfy chk_script_blocks while failing chk_template_type.
+        insertVersionShouldFail(type = "csv", dialect = null, constraint = "chk_script_blocks")
+        insertVersionShouldFail(type = "SQL", dialect = null, constraint = "chk_script_blocks")
 
         // The one legal html shape: type html, dialect null.
         insertVersion(type = "html", dialect = null)

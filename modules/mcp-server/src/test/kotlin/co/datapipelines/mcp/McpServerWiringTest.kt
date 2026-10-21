@@ -58,7 +58,7 @@ class McpServerWiringTest {
             McpFixtures.createTool(templates, authoringGuard, templateValidator),
             TemplatesUpdateTool(templates, drafts, templateValidator),
             TemplatesRenderTool(templates, engines),
-            // 7b — the transform evaluator, appended the way the shipped bean does.
+            // 7b — the script evaluator, appended the way the shipped bean does.
             TemplatesEvaluateTool(mockk<co.datapipelines.application.templates.TemplateEvaluateService>()),
             TemplatesPurgeDraftTool(templates, usage, authoringGuard, McpFixtures.EVERYTHING_LENS),
         )

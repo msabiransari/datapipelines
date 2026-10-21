@@ -5,11 +5,11 @@ import co.datapipelines.application.templates.TemplateEvaluateService
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.pipeline.ScriptContractView
 import co.datapipelines.pipeline.TemplateDryRenderer
 import co.datapipelines.pipeline.TemplateRef
-import co.datapipelines.pipeline.TransformContractView
+import co.datapipelines.templates.ScriptTestInput
 import co.datapipelines.templates.TemplateService
-import co.datapipelines.templates.TransformTestInput
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.visualization.ArtifactRef
@@ -37,11 +37,11 @@ class WebDashboardTransformerTest {
     private val transformer = WebDashboardTransformer(evaluate, renderer, templateService)
     private val tables = mapOf("orders" to listOf(mapOf<String, Any?>("x" to 1)), "rates" to listOf(mapOf<String, Any?>("r" to 2)))
 
-    private fun contract(mode: TransformContractView.Mode) =
-        TransformContractView(
+    private fun contract(mode: ScriptContractView.Mode) =
+        ScriptContractView(
             mode,
-            mapOf("orders" to TransformContractView.Input.Table(listOf(TransformContractView.Column("x", LogicalType.INTEGER, false)))),
-            TransformContractView.Output.Table(listOf(TransformContractView.Column("x", LogicalType.INTEGER, false))),
+            mapOf("orders" to ScriptContractView.Input.Table(listOf(ScriptContractView.Column("x", LogicalType.INTEGER, false)))),
+            ScriptContractView.Output.Table(listOf(ScriptContractView.Column("x", LogicalType.INTEGER, false))),
             rejects = false,
         )
 
@@ -55,9 +55,9 @@ class WebDashboardTransformerTest {
     @Test
     fun `a table-mode transform receives every table under inputs and answers its rows`() {
         released()
-        every { renderer.transformContract(workspace, TemplateRef("dbr/templates/t", 2)) } returns
-            contract(TransformContractView.Mode.TABLE)
-        val seen = slot<TransformTestInput>()
+        every { renderer.scriptContract(workspace, TemplateRef("dbr/templates/t", 2)) } returns
+            contract(ScriptContractView.Mode.TABLE)
+        val seen = slot<ScriptTestInput>()
         every { evaluate.evaluate(workspace, "dbr/templates/t", 2, capture(seen), now) } returns evaluated(listOf(mapOf("x" to 9)))
 
         val outcome = transformer.transform(workspace, template, tables, now)
@@ -70,8 +70,8 @@ class WebDashboardTransformerTest {
     @Test
     fun `a row-mode transform receives the one table as rows and no inputs`() {
         released()
-        every { renderer.transformContract(workspace, TemplateRef("dbr/templates/t", 2)) } returns contract(TransformContractView.Mode.ROW)
-        val seen = slot<TransformTestInput>()
+        every { renderer.scriptContract(workspace, TemplateRef("dbr/templates/t", 2)) } returns contract(ScriptContractView.Mode.ROW)
+        val seen = slot<ScriptTestInput>()
         every { evaluate.evaluate(workspace, "dbr/templates/t", 2, capture(seen), now) } returns evaluated(emptyList<Map<String, Any?>>())
 
         transformer.transform(workspace, template, mapOf("orders" to tables.getValue("orders")), now)
@@ -83,28 +83,28 @@ class WebDashboardTransformerTest {
     @Test
     fun `an output that is not a table is refused with the row-shape code, never bound blind`() {
         released()
-        every { renderer.transformContract(workspace, TemplateRef("dbr/templates/t", 2)) } returns
-            contract(TransformContractView.Mode.TABLE)
+        every { renderer.scriptContract(workspace, TemplateRef("dbr/templates/t", 2)) } returns
+            contract(ScriptContractView.Mode.TABLE)
         every { evaluate.evaluate(workspace, "dbr/templates/t", 2, any(), now) } returns evaluated(mapOf("scalar" to 1))
 
         transformer.transform(workspace, template, tables, now) shouldBe
-            TransformOutcome.Refused(PipelineErrorCodes.Transform.ROW_SHAPE_MISMATCH)
+            TransformOutcome.Refused(PipelineErrorCodes.Script.ROW_SHAPE_MISMATCH)
     }
 
     @Test
     fun `the evaluation's own refusal is carried by code - the message stays behind`() {
         released()
-        every { renderer.transformContract(workspace, TemplateRef("dbr/templates/t", 2)) } returns null
+        every { renderer.scriptContract(workspace, TemplateRef("dbr/templates/t", 2)) } returns null
         every { evaluate.evaluate(workspace, "dbr/templates/t", 2, any(), now) } throws
-            DatapipelinesException(PipelineErrorCodes.Transform.EVALUATION_FAILED, "a row said SECRET")
+            DatapipelinesException(PipelineErrorCodes.Script.EVALUATION_FAILED, "a row said SECRET")
 
         transformer.transform(workspace, template, tables, now) shouldBe
-            TransformOutcome.Refused(PipelineErrorCodes.Transform.EVALUATION_FAILED)
+            TransformOutcome.Refused(PipelineErrorCodes.Script.EVALUATION_FAILED)
     }
 
     @Test
     fun `a transform that is draft discarded or missing at evaluation is refused before execution`() {
-        every { renderer.transformContract(workspace, TemplateRef("dbr/templates/t", 2)) } returns null
+        every { renderer.scriptContract(workspace, TemplateRef("dbr/templates/t", 2)) } returns null
         every { evaluate.evaluate(workspace, "dbr/templates/t", 2, any(), now) } returns evaluated(emptyList<Map<String, Any?>>())
         listOf(PipelineVersionStatus.DRAFT, PipelineVersionStatus.DISCARDED, null).forEach { status ->
             every { templateService.findVersionStatus(workspace, ReadLens.Everything, "dbr/templates/t", 2) } returns status
@@ -118,8 +118,8 @@ class WebDashboardTransformerTest {
     fun `draft evaluation admits a draft transform and refuses discarded or missing templates`() {
         every { templateService.findVersionStatus(workspace, ReadLens.Everything, "dbr/templates/t", 2) } returns
             PipelineVersionStatus.DRAFT
-        every { renderer.transformContract(workspace, TemplateRef("dbr/templates/t", 2)) } returns
-            contract(TransformContractView.Mode.TABLE)
+        every { renderer.scriptContract(workspace, TemplateRef("dbr/templates/t", 2)) } returns
+            contract(ScriptContractView.Mode.TABLE)
         every { evaluate.evaluate(workspace, "dbr/templates/t", 2, any(), now) } returns evaluated(listOf(mapOf("x" to 9)))
         transformer.transformDraft(workspace, template, tables, now) shouldBe TransformOutcome.Rows(listOf(mapOf("x" to 9)))
         listOf(PipelineVersionStatus.DISCARDED, null).forEach { status ->

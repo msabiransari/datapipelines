@@ -7,6 +7,7 @@ import co.datapipelines.pipeline.RequestLimits
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.CitableFacts
 import co.datapipelines.templates.ImplementsIds
+import co.datapipelines.templates.ScriptBlocks
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDeserializationOutcome
 import co.datapipelines.templates.TemplateDeserializer
@@ -17,7 +18,6 @@ import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateTypeRule
 import co.datapipelines.templates.TemplateValidationException
 import co.datapipelines.templates.TemplateValidator
-import co.datapipelines.templates.TransformBlocks
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.api.RequestBodies
@@ -49,7 +49,7 @@ import java.util.UUID
  * An entry's cited facts (transform-nodes design §2.3) are outside the hash, so they never
  * decide a §9.2 classification. Learned facts are environment-local and never promoted, so an
  * id need not exist here: the entry keeps the ids [CitableFacts] admits for THIS workspace and
- * DROPS the rest — never a refusal, which would make every promotion of a citing transform
+ * DROPS the rest — never a refusal, which would make every promotion of a citing script
  * impossible. The kept ids land on the version the import WROTE; the idempotent re-import of an
  * identical version writes nothing, citations included. A same-workspace export → import round
  * trip is lossless; a cross-deployment promotion lands with none.
@@ -189,9 +189,9 @@ class TemplateImportService(
                 isLibrary = draft.isLibrary,
                 importsJson = TemplateJson.writeImports(draft.imports),
                 body = draft.body,
-                contractJson = TransformBlocks.writeContract(draft.contract),
-                invariantsJson = TransformBlocks.writeInvariants(draft.invariants),
-                testsJson = TransformBlocks.writeTests(draft.tests),
+                contractJson = ScriptBlocks.writeContract(draft.contract),
+                invariantsJson = ScriptBlocks.writeInvariants(draft.invariants),
+                testsJson = ScriptBlocks.writeTests(draft.tests),
             )
         val declared = preserved.bodyHash
         if (declared == null || declared != recomputed) {

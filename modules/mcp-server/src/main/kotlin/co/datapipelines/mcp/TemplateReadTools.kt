@@ -29,8 +29,8 @@ internal val DIALECT_ENUM_JSON: String = Dialect.entries.joinToString(prefix = "
 internal val TEMPLATE_TYPE_ENUM_JSON: String = TemplateType.WIRE_VALUES.joinToString(prefix = "[", postfix = "]") { "\"$it\"" }
 
 /**
- * The `engine` enum — derived from the two engine values the model admits (transform-nodes
- * design §2.1: `freemarker` for sql/html, `none` for the transform types).
+ * The `engine` enum — derived from the two engine values the model admits (script-nodes
+ * design §2.1: `freemarker` for sql/html, `none` for the script types).
  */
 internal val TEMPLATE_ENGINE_ENUM_JSON: String =
     listOf(Template.FREEMARKER_ENGINE, Template.NONE_ENGINE).joinToString(prefix = "[", postfix = "]") { "\"$it\"" }
@@ -44,13 +44,13 @@ private const val IS_LIBRARY_FILTER_DESC = "Filter to library templates (macro c
 
 /** §6.2.6 — the `implements` filter description (7e, transform-nodes design §8.3). */
 private const val IMPLEMENTS_FILTER_DESC =
-    "A learned fact id: only templates whose listed version cites it (implements) — the transforms that " +
+    "A learned fact id: only templates whose listed version cites it (implements) — the scripts that " +
         "implement a workspace definition, exclusion or preference. A fact this workspace cannot see matches " +
         "nothing. Ignored while prefix is present, like q."
 
-/** §6.2.6 — the `type` filter description (046 §10; the transform types since 7b). */
+/** §6.2.6 — the `type` filter description (046 §10; the script types since 7b). */
 private const val TYPE_FILTER_DESC =
-    "Filter by template kind: 'sql' (pipeline-referenced SQL), 'html' (rendered output), or a transform type " +
+    "Filter by template kind: 'sql' (pipeline-referenced SQL), 'html' (rendered output), or a script type " +
         "('jsonata', 'javascript' — a pure function over its input, never rendered)."
 
 /**
@@ -87,14 +87,14 @@ class TemplatesListTool(
             name = "templates_list",
             description =
                 "List the templates of the key's pinned workspace. Templates are reusable generators " +
-                    "referenced by id+version — sql/html bodies are authored in Freemarker, transform bodies " +
+                    "referenced by id+version — sql/html bodies are authored in Freemarker, script bodies " +
                     "are script expressions; each has a fixed type — 'sql' renders SQL for pipeline " +
                     "nodes (and carries a dialect), 'html' renders escaped output and declares none, and the " +
-                    "transform types ('jsonata', 'javascript') evaluate the body as a pure function of its input " +
+                    "script types ('jsonata', 'javascript') evaluate the body as a pure function of its input " +
                     "and declare neither. Template ids are " +
-                    "unique per workspace — another workspace's template resolves as not-found. A transform row " +
+                    "unique per workspace — another workspace's template resolves as not-found. A script row " +
                     "carries implements (the learned facts it cites) and needs_review (true when a cited fact was " +
-                    "retired); implements=<fact id> lists the transforms that implement that fact — reuse before " +
+                    "retired); implements=<fact id> lists the scripts that implement that fact — reuse before " +
                     "writing." +
                     " A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter " +
                     "lens); every other template resolves as not-found.",
@@ -222,7 +222,7 @@ class TemplatesGetTool(
             description =
                 "Get the body and metadata of a template version, including its imports array (the library " +
                     "macros it can call). Defaults to the working version — the draft when unreleased edits " +
-                    "exist, else the latest released. A transform version carries implements (the learned facts " +
+                    "exist, else the latest released. A script version carries implements (the learned facts " +
                     "it cites) and needs_review: true when a cited fact was retired — retired_facts names each " +
                     "one and its superseded_by; re-verify, then cite the successor with templates_update." +
                     " A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter " +

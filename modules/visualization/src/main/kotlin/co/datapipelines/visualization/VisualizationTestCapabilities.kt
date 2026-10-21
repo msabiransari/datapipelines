@@ -51,7 +51,7 @@ data class TestPreview(
  * - **Preview** answers only while the run is RUNNING and unexpired at [now] (an unswept due row counts as
  *   expired — the gate's `statusAt` reading), only for the visualization the request addresses, and only
  *   while the run's version still carries the run's body hash. The cases are evaluated the way the mechanical
- *   test's step 3 evaluates them (the pinned transform through the real bounded evaluator, DRAFT pins admitted;
+ *   test's step 3 evaluates them (the pinned script through the real bounded evaluator, DRAFT pins admitted;
  *   without a transform, the single input's rows) — no pipeline, no datasource, no agent code.
  * - **Screenshot** resolves the run of the addressed session in whichever workspace holds it, re-judges the
  *   starter, then hands the bytes and the capability to [VisualizationTestSessionService.storeScreenshot],
@@ -170,7 +170,7 @@ class VisualizationTestCapabilities(
  * A version's test cases evaluated for a preview (#399 factored this out of [VisualizationTestCapabilities] so the
  * capability preview and the signed-in workspace's Preview tab evaluate the SAME way): the cases as saved, each
  * evaluated the way the mechanical test's step 3 evaluates it — without a transform, the single input's rows; with
- * one, the pinned transform through the real bounded [TestFixtureEvaluator] (its own refusal kept as the case's
+ * one, the pinned script through the real bounded [TestFixtureEvaluator] (its own refusal kept as the case's
  * refusal). No pipeline, no datasource, no live data.
  */
 class PreviewCaseEvaluator(

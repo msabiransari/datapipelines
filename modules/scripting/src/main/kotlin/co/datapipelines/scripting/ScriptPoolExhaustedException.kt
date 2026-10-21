@@ -7,7 +7,7 @@ package co.datapipelines.scripting
  *
  * Deliberately a sibling of the other script refusals rather than a subclass: the
  * failure is the CALLER's admission control, not the script's behaviour. Carries the
- * `pipeline.transform.pool_exhausted` code.
+ * `pipeline.script.pool_exhausted` code.
  */
 class ScriptPoolExhaustedException(
     val runningCapacity: Int,
@@ -19,6 +19,6 @@ class ScriptPoolExhaustedException(
     ) {
     companion object {
         /** pipeline-contract §13.18 — the pool row (record §7). */
-        const val CODE = "pipeline.transform.pool_exhausted"
+        const val CODE = "pipeline.script.pool_exhausted"
     }
 }

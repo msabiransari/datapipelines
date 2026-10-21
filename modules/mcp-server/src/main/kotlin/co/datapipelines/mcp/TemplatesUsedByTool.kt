@@ -89,7 +89,7 @@ class TemplatesUsedByTool(
                         "set_version_status" to it.versionStatus.name,
                     )
                 },
-            // #320 — a visualization pins a transform template too; a visualization-only pin is a real reference.
+            // #320 — a visualization pins a script template too; a visualization-only pin is a real reference.
             "visualization_references" to
                 used.visualizationReferences.map {
                     mapOf(

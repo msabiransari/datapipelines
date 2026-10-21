@@ -1,6 +1,6 @@
 # modules/scripting
 
-The transform script engine (GitHub #7, design record
+The script engine (GitHub #7, design record
 `docs/superpowers/specs/2026-09-09-transform-nodes-design.md` §4/§5, lane 7a): a pure,
 layer-0 library that compiles and evaluates untrusted script bodies as pure functions of
 their JSON input. No route, tool, page or config ships from this module — 7b/7c wire the
@@ -15,7 +15,7 @@ callers.
 - `EvaluationLimits` — the declared bounds for one evaluation (`wallClock`, `maxDepth`,
   reserved `maxHeapBytes`/`maxStatements`, and `now`: the pinned instant `$now()`/`$millis()`
   return; production callers always pin it to the execution's `current_timestamp`, which is
-  what makes a transform reproducible — the clock is an input, not an ambient read).
+  what makes a script reproducible — the clock is an input, not an ambient read).
 - `EngineCapabilities` — which limits an engine can actually enforce, measured by the breach
   suite, never intended: JSONata bounds wall clock **between steps** and depth **at every
   step**; it cannot bound heap or statements, and it is not interruptible.
@@ -55,7 +55,7 @@ catalogue contains nothing from a written deny-list.
 
 | Artifact | Version | Licence | Why |
 |---|---|---|---|
-| `com.dashjoin:jsonata` | 0.9.10 (pinned; Maven Central `<release>`, verified 2026-09-23) | Apache-2.0 | the round-one transform engine. Pure Java, zero transitive dependencies. **Bus-factor note for the next dependency review:** small upstream project — 99 stars, 17 open issues, last push 2026-07-08 at dispatch. Not a blocker: the seam (`ScriptEngine`) exists precisely so the engine stays replaceable, and the breach suite re-measures whatever replaces it. |
+| `com.dashjoin:jsonata` | 0.9.10 (pinned; Maven Central `<release>`, verified 2026-09-23) | Apache-2.0 | the round-one script engine. Pure Java, zero transitive dependencies. **Bus-factor note for the next dependency review:** small upstream project — 99 stars, 17 open issues, last push 2026-07-08 at dispatch. Not a blocker: the seam (`ScriptEngine`) exists precisely so the engine stays replaceable, and the breach suite re-measures whatever replaces it. |
 
 Jackson (`jackson-databind`, BOM-managed) for `CanonicalJson`; SLF4J API (BOM-managed) for
 the pool's abandonment log.

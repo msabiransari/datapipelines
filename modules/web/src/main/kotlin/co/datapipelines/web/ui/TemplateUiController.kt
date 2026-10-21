@@ -49,10 +49,10 @@ class TemplateUiController(
         model.addAttribute("nameMaxLength", TemplateNameGrammar.maxLength)
         model.addAttribute("nameHint", TemplateNameGrammar.DESCRIPTION)
         model.addAttribute("types", TemplateType.WIRE_VALUES)
-        // 7d: the create modal's transform half — which types carry the three blocks, and the
+        // 7d: the create modal's script half — which types carry the three blocks, and the
         // design record's example they start from (the create runs its suite, so it must pass).
-        model.addAttribute("transformTypes", TemplateType.entries.filter { it.isTransform }.joinToString(",") { it.wire })
-        model.addAttribute("skeleton", TransformSkeleton)
+        model.addAttribute("scriptTypes", TemplateType.entries.filter { it.isScript }.joinToString(",") { it.wire })
+        model.addAttribute("skeleton", ScriptSkeleton)
         model.addAttribute("q", q ?: "")
         val principal = currentPrincipal()
         browse.fillSearch(

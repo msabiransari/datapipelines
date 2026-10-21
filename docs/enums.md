@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.34 (living document — updated as enums evolve)
+**Status:** v1.35 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -72,7 +72,7 @@ Where the cataloged value is already UPPER (`DQL`, `POSTGRES`, `SUCCESS`), wire 
 | `DDL` | Data Definition Language — `CREATE`, `ALTER`, `DROP`, `TRUNCATE`. Produces success/failure. No `output` block. |
 | `PIPELINE` | Executes another pipeline as a child execution (pipeline composition). Carries a `pipeline` ref `{name, version}`, never `source`/`template`; may carry an `output` block only when the pinned child has a caller node ([Pipeline Contract §4.9](pipeline-contract.md#49-json-structure-pipeline-node), §8.5). |
 | `CALCULATOR` | Evaluates a catalog calculator and writes ONE typed value — or, on a multi-output kind (121), a named set of them — into the execution Context. Carries `kind`, `inputs` and `context_key` (single) or `context_keys` (multi — never both, never neither), never `source`/`template`/`output` — it runs no SQL and produces no table ([Pipeline Contract §4.10](pipeline-contract.md#410-json-structure-calculator-node), [Calculators](calculators.md)). |
-| `TRANSFORM` | Evaluates a pinned `jsonata`/`javascript` template as a pure function over staged data and the Context. Carries `template`, `inputs`, `output` (`row`/`table` modes) or `context_key` (`value` mode) and `strict`, never `source` — tempdb-only by construction ([Pipeline Contract §4.12](pipeline-contract.md#412-json-structure-transform-node), [DAG Executor §6.3](dag-executor.md#63-behavior-by-node-type)). |
+| `SCRIPT` | Evaluates a pinned `jsonata`/`javascript` template as a pure function over staged data and the Context. Carries `template`, `inputs`, `output` (`row`/`table` modes) or `context_key` (`value` mode) and `strict`, never `source` — tempdb-only by construction ([Pipeline Contract §4.12](pipeline-contract.md#412-json-structure-script-node), [DAG Executor §6.3](dag-executor.md#63-behavior-by-node-type)). |
 
 **Reserved for future:** `EXPRESSION`, `HTTP` (non-SQL node types — see [ROADMAP](ROADMAP.md)).
 
@@ -152,7 +152,7 @@ These are **not** `(reserved)` values in the enums.md sense: all five are accept
 | Value | Description |
 |---|---|
 | `freemarker` | Apache Freemarker template engine — the engine of `sql` and `html` templates. |
-| `none` | No rendering engine — the engine of the transform types (`jsonata`, `javascript`), whose body is evaluated by the scripting engine seam as a pure function of its input (transform-nodes design §2.1, since 7b). The pairing is enforced both ways: `engine` must match the template's `type` (`template.validation.engine_unsupported`). |
+| `none` | No rendering engine — the engine of the script types (`jsonata`, `javascript`), whose body is evaluated by the scripting engine seam as a pure function of its input (transform-nodes design §2.1, since 7b). The pairing is enforced both ways: `engine` must match the template's `type` (`template.validation.engine_unsupported`). |
 
 **Reserved for future:** `pebble`, `handlebars`, `thymeleaf-sql` (see [ROADMAP](ROADMAP.md)).
 
@@ -160,15 +160,15 @@ These are **not** `(reserved)` values in the enums.md sense: all five are accept
 
 ## 6A. `TemplateType` — template kind
 
-**Source:** [Template Hierarchy §5](template-hierarchy-design.md); the transform types: [transform-nodes design §2.1](superpowers/specs/2026-09-09-transform-nodes-design.md) (7b)
+**Source:** [Template Hierarchy §5](template-hierarchy-design.md); the script types: [transform-nodes design §2.1](superpowers/specs/2026-09-09-transform-nodes-design.md) (7b)
 **Used by:** templates (engine-configuration dispatch, type/dialect consistency), pipeline-contract (reference legality).
 
 | Value | Description |
 |---|---|
 | `sql` | The template renders SQL for pipeline nodes. Requires a `dialect`. Default, and the only kind that existed before 2026-09-02 (046) — every stored template backfilled to it. |
 | `html` | The template renders HTML through a second, auto-escaping engine configuration (design §6). Declares no `dialect`; **no pipeline node may reference it** (`pipeline.validation.template_type_mismatch`). |
-| `jsonata` | A transform: the body is one JSONata expression evaluated as a pure function of its input object (7b). `engine: none`, no `dialect`, no `imports`, `is_library` false; the version carries `contract` / `invariants` / `tests` blocks inside its `body_hash`. |
-| `javascript` | A transform in JavaScript (GraalJS isolate) — the enum value, the CHECKs and the wire vocabulary are final, but **save is refused with `transform.js.unavailable` until round two's engine ships** (7b; §4.4 of the record). |
+| `jsonata` | A script: the body is one JSONata expression evaluated as a pure function of its input object (7b). `engine: none`, no `dialect`, no `imports`, `is_library` false; the version carries `contract` / `invariants` / `tests` blocks inside its `body_hash`. |
+| `javascript` | A script in JavaScript (GraalJS isolate) — the enum value, the CHECKs and the wire vocabulary are final, but **save is refused with `script.js.unavailable` until round two's engine ships** (7b; §4.4 of the record). |
 
 Fixed at template **create** and identical on every version of a template (`template.validation.type_immutable`). Serialization is the lowercase wire value (`"sql"` / `"html"` / `"jsonata"` / `"javascript"`), per the case convention above. There are no reserved future values — component sub-typing (kpi, aggrid, svg, form, …) belongs to the future dashboard abstraction and is deliberately absent here (design §2).
 
@@ -531,7 +531,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `workspace.*` | Workspace resolution, membership and provisioning refusals | pipeline-contract §13.12 (defined in [Auth §5](auth.md#5-oidc-login-flow)) |
 | `pipeline.version.*`, `pipeline.release.*`, `pipeline.promotion.*` | Draft/release version lifecycle and environment promotion — plus one WARNING, `pipeline.release.template_needs_review` (7e), returned in the release response's `warnings` array, never as an error | pipeline-contract §13.13 (defined in [Versioning](versioning.md)) |
 | `pipeline.check.*` | Release checks — the server-run cross-checks gating release | pipeline-contract §13.17 |
-| `pipeline.transform.*` | TRANSFORM node execution-time refusals (input contract, pool, gate, invariants, strict) | pipeline-contract §13.18 |
+| `pipeline.script.*` | SCRIPT node execution-time refusals (input contract, pool, gate, invariants, strict) | pipeline-contract §13.18 |
 | `template.version.*` | Template draft/release lifecycle | pipeline-contract §13.9 (defined in [Versioning](versioning.md)) |
 | `semantics.*` | The learned semantic layer: recording, evidence, duplicate and drift refusals | pipeline-contract §13.15 (defined in the [learned-semantic-layer design record](superpowers/specs/2026-09-11-learned-semantic-layer-design.md)) |
 | `mcp.*` | The MCP surface's own refusals (the resource surface's not-found is the JSON-RPC protocol's, not a code) | pipeline-contract §13.16 (defined in [MCP §6.2](mcp-server.md#62-tool-definitions)) |
@@ -565,7 +565,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `413 Content Too Large` | Request body over the platform cap (#279) | `request.body_too_large` |
 | `500 Internal Server Error` | Server error | Uncaught exceptions, `pipeline.staging.*` |
 | `502 Bad Gateway` | Upstream failure | `pipeline.node.datasource_connection_failed`, `pipeline.node.query_execution_failed` |
-| `503 Service Unavailable` | Service not ready, or a transient fault of a store it depends on | Readiness check failure, `result.storage_unavailable` (#487), `pipeline.transform.pool_exhausted` |
+| `503 Service Unavailable` | Service not ready, or a transient fault of a store it depends on | Readiness check failure, `result.storage_unavailable` (#487), `pipeline.script.pool_exhausted` |
 | `504 Gateway Timeout` | Execution timeout | `pipeline.execution.timeout`, `pipeline.node.query_timeout` |
 
 ---
@@ -1074,6 +1074,7 @@ No mail for skipped ticks or pause/resume. Empty recipients means off; recipient
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-21 | v1.35 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The `node_type` row `TRANSFORM` is `SCRIPT`**; the template-type rows say "the script types" / "a script"; the error-prefix row is `pipeline.script.*`; the JavaScript save refusal is `script.js.unavailable`; the 503 example names `pipeline.script.pool_exhausted`. A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-09 | v1.34 | 487 (#487) | The HTTP status table moves `result.storage_unavailable` from 500 to 503 ([Pipeline Contract §13.10](pipeline-contract.md#1310-result-retrieval) v1.56) and names `pipeline.transform.pool_exhausted` beside it, the 503 the catalog already carried. |
 | 2026-10-03 | v1.33 | 442a (#442) | §15 audit details gain counts/events without addresses; new §42 defines NotificationEvent and its defaults. Settings delivered; mail remains off pending part b. |
 | 2026-10-02 | v1.32 | S3 (#376) the parameter-set evaluation history | **§39 `EvaluationCaller`** (PAGE, DASHBOARD, PIPELINE — dormant, REST, MCP; the owner's §11.10 ruling), **§40 `ParameterEvaluationStatus`** (the spec's five plus `ABORTED`, the §11.7 ruling) and **§41 `QueryAttemptOutcome`** (the spec's four plus `ABORTED`) — the three V48 CHECKs, each pinned to its Kotlin enum by `ParameterEnumsSpecDriftTest`. No audit event (§15 unchanged): recording is the evaluate's side effect, visible through the History tab; the spec names an awaited `parameter.evaluation` row only if review rules one necessary. |

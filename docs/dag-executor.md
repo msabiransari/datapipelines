@@ -1,9 +1,9 @@
 # DAG Executor Specification
 
-**Status:** v1.32 (revised — see Change Log)
+**Status:** v1.33 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract spec](pipeline-contract.md), [Templates spec](templates.md), [Datasources spec](datasources.md), [Staging spec](staging.md)
-**Last updated:** 2026-10-20
+**Last updated:** 2026-10-21
 
 ---
 
@@ -585,10 +585,10 @@ Abandoning is safe only because the node body is a detached `async` whose value 
 
 #### The script engine seam (7a)
 
-TRANSFORM nodes (round one: JSONata) will evaluate through a dedicated seam in the new layer-0
+SCRIPT nodes (round one: JSONata) will evaluate through a dedicated seam in the new layer-0
 module `modules/scripting` — `ScriptEngine` (compile once, evaluate many, JSON in, JSON out),
 `ScriptEvaluationPool`, and the type gate. The module ships as a pure library first (7a); the
-executor itself gains its edge, its configuration block and its catalog rows when the TRANSFORM
+executor itself gains its edge, its configuration block and its catalog rows when the SCRIPT
 node lands (7c). What is already true and binding:
 
 - **Every production evaluation runs on the evaluation pool**, never on a `dag-executor-N`
@@ -598,12 +598,12 @@ node lands (7c). What is already true and binding:
   evaluation gets its OWN daemon thread
   (`script-eval-N`) — a thread whose evaluation outlives its budget is abandoned by its caller
   (the JSONata engine never reads `Thread.interrupted()`), logged at ERROR, counted
-  (`transform.evaluations.abandoned` is the record's meter name) and never handed new work —
+  (`script.evaluations.abandoned` is the record's meter name) and never handed new work —
   and it **keeps its slot until it ends**: the thread, not the caller, returns the permits, so
   at most `size` evaluation threads are alive at any moment, abandoned ones included. A caller
   waits for a slot at most its own wall clock, then gets the pool-exhausted refusal. This is the
   bulkhead §5.3's statement abandonment already applies (an abandoned statement keeps its
-  `dag-executor-N` thread): a runaway degrades transform capacity, never the rest of the JVM.
+  `dag-executor-N` thread): a runaway degrades script capacity, never the rest of the JVM.
   (Corrected at the 7a merge: the first cut returned the slot at abandonment, which let every
   runaway add one more live thread with no ceiling.)
 - **The engine's bounds are between expression steps — counted by the engine itself
@@ -628,25 +628,25 @@ node lands (7c). What is already true and binding:
 | regex bomb (`$match(…!, /^(a+)+$/)` on `java.util.regex`) | BOUNDED — resistant: fails fast, no catastrophic backtracking measured; no bound fired | n/a (measured resistant) |
 | deep recursion (self-recursive lambda, depth 100 000) | BOUNDED — `ScriptTimeoutException` on budget; the thread ended inside the grace. **Re-measured at #260, outcome unchanged:** the loop is tail-recursive and the library trampolines it — depth stays flat, so TIME catches it (the 7a explanation named `isParallelCall`; the trampoline is the mechanism). A NON-tail-recursive lambda nests for real and the engine's own depth count refuses it at `max-depth` nested calls | the engine's between-steps clock |
 | `$eval` nesting (an eval'd builtin overrun) | UNBOUNDED — same shape as the pad bomb; the eval'd work inherits the evaluation's timebox but reaches no step boundary inside a builtin | the pool |
-| `$now()` | REFUSED — the engine shadows the clock builtins: pinned via `EvaluationLimits.now` (the execution's `current_timestamp`) or refused — a transform is a pure function of its inputs | the engine |
+| `$now()` | REFUSED — the engine shadows the clock builtins: pinned via `EvaluationLimits.now` (the execution's `current_timestamp`) or refused — a script is a pure function of its inputs | the engine |
 | hook rebind (`$__evaluate_entry := …`, `$__evaluate_exit := …`, then a tail loop — #272) | REFUSED — `ScriptSyntaxException` (`template.validation.syntax_error`) at compile: a body may not bind a `__` name. Before the refusal (measured 2026-09-28) UNBOUNDED: both hooks were off and the loop outlived the grace | the engine, at compile |
-| hook rebind through `$eval` (the same two binds as eval'd strings — #272) | REFUSED — `ScriptEvaluationException` (`pipeline.transform.evaluation_failed`): the engine's `$eval` shadow checks the string before the library runs it. Before (measured 2026-09-28) UNBOUNDED, as above | the engine's `$eval` shadow |
+| hook rebind through `$eval` (the same two binds as eval'd strings — #272) | REFUSED — `ScriptEvaluationException` (`pipeline.script.evaluation_failed`): the engine's `$eval` shadow checks the string before the library runs it. Before (measured 2026-09-28) UNBOUNDED, as above | the engine's `$eval` shadow |
 
 - **The pool is the sandbox bound; the hooks are a runaway guard (owner ruling 2026-09-28,
-  #272; transform-nodes record §4.5).** The hooks are frame variables the library looks up by
+  #272; script-nodes record §4.5).** The hooks are frame variables the library looks up by
   name, so the engine refuses any body that binds a `__` name (compile) and checks every
   `$eval`'d string the same way before it runs; a hostile body is bounded by the pool.
 - **The depth bound counts every evaluate entry and exit (#260)**: nested EXPRESSIONS
   (500 nested arrays against a depth of 100 refuses in milliseconds — the conformance
   suite pins it) and non-tail lambda recursion alike; the library's `isParallelCall`
-  skip no longer leaks a unit per item, so a set-level transform over hundreds of rows
+  skip no longer leaks a unit per item, so a set-level script over hundreds of rows
   evaluates at the default depth of 100. A tail-recursive lambda is trampolined — its
   depth never grows, and the wall clock is the bound that catches it.
 - **Static nesting is refused at COMPILE past the ceiling (#314)**: the library's
   parser recurses per level, and 500 nested brackets overflowed a 256 KB stack inside
   the parse alone (measured 2026-09-29 — and once on a default stack under load, the
   conformance suite's 1-in-13 red). `compile` therefore refuses past a fixed ceiling
-  of 64 bracket levels BEFORE the library parses (`pipeline.transform.resource_limit`,
+  of 64 bracket levels BEFORE the library parses (`pipeline.script.resource_limit`,
   kind DEPTH — the expression is grammatical, only its depth is over the line; on the save
   and validate paths the templates validator turns that refusal into the failure list's
   `template.validation.syntax_error`, or `invariant_invalid` for an invariant, with
@@ -747,11 +747,11 @@ conn.createStatement().use { stmt ->
 
 Returns success/failure. No staging, no output block.
 
-#### 6.3.4 `TRANSFORM` — the script over staged data
+#### 6.3.4 `SCRIPT` — the script over staged data
 
-A TRANSFORM node never enters §6.1's render or §6.2's datasource paths: its template is a script
+A SCRIPT node never enters §6.1's render or §6.2's datasource paths: its template is a script
 (`jsonata` today), not SQL, and its inputs are tempdb tables plus the Context. The runner
-([pipeline-contract §4.12](pipeline-contract.md#412-json-structure-transform-node), the
+([pipeline-contract §4.12](pipeline-contract.md#412-json-structure-script-node), the
 transform-nodes design record §5) resolves the pinned version and its contract, then, per the
 contract's **mode**:
 
@@ -765,25 +765,25 @@ contract's **mode**:
   safe because the function is pure with the clock pinned; one pass would need either an
   unbounded rejects buffer or cross-coroutine locks on the executor's threads.
 - **`table` / `value`** — every table input is counted **before** loading
-  (`pipeline.transform.input_too_large` past `datapipelines.transform.max-input-rows`), loaded
+  (`pipeline.script.input_too_large` past `datapipelines.script.max-input-rows`), loaded
   whole, and evaluated once. A `table` output writes `stageRows` or the caller; a `value`
   output is gated (or, for `kind: object`, accepted as-is under
-  `datapipelines.transform.max-value-bytes`) and written to the Context **only after invariants
+  `datapipelines.script.max-value-bytes`) and written to the Context **only after invariants
   and strict pass** (record §5.5).
 
 Every evaluation — the function and each invariant — runs on the **script evaluation pool**
 (§5.3's seam), never on a `dag-executor` thread, under a wall clock set to the node's own
 deadline **minus** `cancel-grace-seconds` so the engine reports
-`pipeline.transform.timeout` first and the node deadline stays the outer backstop. The bounds
+`pipeline.script.timeout` first and the node deadline stays the outer backstop. The bounds
 and their honesty table (what the JSONata engine does and does not bound) are §5.3's — this
 node is that table's second caller and adds nothing to it. `$now()`/`$millis()` return the
 execution's `current_timestamp` from the platform tier.
 
 After the last batch the declared invariants are evaluated over `{ rows, rejects, inputs }`
 **read back from the written tempdb tables** — never the JVM's memory of them — bounded across
-rows + rejects + table inputs by `max-input-rows` (`pipeline.transform.invariants_too_large`);
+rows + rejects + table inputs by `max-input-rows` (`pipeline.script.invariants_too_large`);
 a template that declares none streams without any read-back. Then `strict: true` with a
-non-empty rejects table fails with `pipeline.transform.rejects_strict` (count + first ten
+non-empty rejects table fails with `pipeline.script.rejects_strict` (count + first ten
 reasons). Failure after a write began is atomic (record §5.5): staging rolls back the partial
 table it is writing ([Staging §4.3](staging.md)) and the executor drops the **other** completed
 table itself — the sentence staging §4.3 now carries.
@@ -929,7 +929,7 @@ Failure modes:
 
 When a downstream node's SQL references upstream tables (e.g., `SELECT * FROM stg_orders`), it runs against the per-execution tempdb instance. The table exists because the upstream DQL node created it in §6.4.1.
 
-**No cross-node data passing via Context.** Upstream data lives in tempdb tables (or, for write-back nodes, in external datasource tables); downstream templates reference those tables by name. Context carries only input parameters and calculator outputs. A TRANSFORM node reads the same staged tables through the staging read cursor (§6.3.4) rather than through SQL, and a `value`-mode TRANSFORM's Context key joins §7's tiers exactly like a calculator's.
+**No cross-node data passing via Context.** Upstream data lives in tempdb tables (or, for write-back nodes, in external datasource tables); downstream templates reference those tables by name. Context carries only input parameters and calculator outputs. A SCRIPT node reads the same staged tables through the staging read cursor (§6.3.4) rather than through SQL, and a `value`-mode SCRIPT's Context key joins §7's tiers exactly like a calculator's.
 
 ### 6.6 Pipeline composition: `direct` delivery, slots, and cancellation
 
@@ -1041,7 +1041,7 @@ Written from the terminal event (`pipeline_completed` / `pipeline_failed` / `exe
 
 Per-node, a `CALCULATOR` node's `NodeStats` also carries `context_key` and `context_value` (§7.2) — or, on a multi-output kind (121), `context_values` with every key the one evaluation wrote, the single pair staying byte-identical — so the run detail page and `executions_get` show what each calculator produced without reading the whole snapshot.
 
-Per-node, a TRANSFORM node's `NodeStats` also carries (7c, #7 — record §5.5): **`rows_in`** (rows read from the table inputs — no node reported an input count before), **`rows_rejected`** (rows the function rejected into the rejects table) and **`invariants_checked`** (how many invariants ran after the last batch; `0` when the template declares none and the node streams without a read-back). All three are additive and omitted for every other node type, and a value-mode TRANSFORM reports `context_key`/`context_value` — and `provided_by` on the caller-supplied skip — exactly like a calculator.
+Per-node, a SCRIPT node's `NodeStats` also carries (7c, #7 — record §5.5): **`rows_in`** (rows read from the table inputs — no node reported an input count before), **`rows_rejected`** (rows the function rejected into the rejects table) and **`invariants_checked`** (how many invariants ran after the last batch; `0` when the template declares none and the node streams without a read-back). All three are additive and omitted for every other node type, and a value-mode SCRIPT reports `context_key`/`context_value` — and `provided_by` on the caller-supplied skip — exactly like a calculator.
 
 **A calculator the caller supplied the key for is SKIPPED, not evaluated** (078, owner ruling 2026-09-05 — tier order org < platform < parameters < caller-supplied calculator keys < calculator outputs). Its stats row still carries `context_key` and `context_value` — the SUPPLIED value, read from the live Context — plus `"provided_by": "caller"` (absent otherwise, never null), so a run record distinguishes "the caller said 7" from "the kind computed 7". A calculator that RUNS `put()`s its key and wins over everything below tier 5, exactly as before. 121: for a multi-output node the rule is all-or-nothing — EVERY key supplied and the node is skipped (the supplied values in `context_values`, `provided_by` one field on the node); a proper subset never reaches the executor, refused at the bind with `pipeline.execution.calculator_keys_partial`.
 
@@ -1140,7 +1140,7 @@ Construction rules (these are the shapes §5.2 actually throws):
 
 **The table applies only to raw driver and unknown exceptions.** A collaborator that raises a `DatapipelinesException` has already chosen its catalog code — the template engine's `template_not_found` vs `template_render_failed` split, staging's `value_overflow` / `memory_limit_exceeded` / `invalid_column_name`, the result store's `too_large` / `storage_unavailable`. That code always wins; re-deriving one from the exception's Java type would silently overwrite a precise code with a coarser one. What the mapper adds in that case is only the structured detail (`node_id`, `phase`).
 
-**TRANSFORM failures are carried codes by construction (7c).** The §13.18 family ([Pipeline Contract §13.18](pipeline-contract.md#1318-transform)) — `pipeline.transform.input_contract_violation` / `input_too_large` / `evaluation_failed` / `timeout` (504; the engine's own bound, with `pipeline.node.timeout` the outer backstop) / `resource_limit` / `pool_exhausted` (503) / `row_shape_mismatch` / `value_type_mismatch` / `precision_lost` / `value_too_large` / `invariant_failed` / `invariants_too_large` / `rejects_strict` — is raised by the script pool, the type gate and the transform runner as `DatapipelinesException`s, so each reaches the node failure record with its own code and detail (batch and row number on the gate refusals, the invariant's name and message, the reject count and first ten reasons on `rejects_strict`), and nothing in this table re-maps it.
+**SCRIPT failures are carried codes by construction (7c).** The §13.18 family ([Pipeline Contract §13.18](pipeline-contract.md#1318-script)) — `pipeline.script.input_contract_violation` / `input_too_large` / `evaluation_failed` / `timeout` (504; the engine's own bound, with `pipeline.node.timeout` the outer backstop) / `resource_limit` / `pool_exhausted` (503) / `row_shape_mismatch` / `value_type_mismatch` / `precision_lost` / `value_too_large` / `invariant_failed` / `invariants_too_large` / `rejects_strict` — is raised by the script pool, the type gate and the script runner as `DatapipelinesException`s, so each reaches the node failure record with its own code and detail (batch and row number on the gate refusals, the invariant's name and message, the reject count and first ten reasons on `rejects_strict`), and nothing in this table re-maps it.
 
 For anything else, the **phase** the node was in is what disambiguates: a `SQLException` is the same class whether it surfaced acquiring a connection (`datasource_connection_failed`), executing (`query_execution_failed`), staging (`staging_failed`) or writing back (`writeback_failed`), so the phase is carried explicitly rather than guessed from the message. Reflected driver text is bounded at 2000 characters before it is copied into `MappedError` — H2, MSSQL and Oracle append the whole failing statement to `SQLException.message`, and that string otherwise propagates into `node_stats_json`, both SSE payloads, the Postgres `error_json`, and every log line that prints it.
 
@@ -1620,6 +1620,7 @@ document a customer can read before they need it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-21 | v1.33 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The TRANSFORM node is the SCRIPT node throughout**: the node-type prose and its section anchors, the `pipeline.script.*` refusal codes, the `datapipelines.script.*` budget keys and the meter `script.evaluations.abandoned` (was `transform.…`). A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-20 | v1.32 | #569 | The concurrency gauge is bound by the execution-slot bean, once per instance. Executor construction does not register it; rebinding the same pool is a no-op and a different pool fails fast. |
 | 2026-10-03 | v1.31 | #403 never-started reservation release | **§11.2/§11.3**: REST and MCP release before-start failures using atomic execution-id compare-and-delete; started reservations stay claimed. Stored JSON field names corrected to camelCase; crashed originals and attached followers retain the id-free 410. |
 | 2026-10-02 | v1.30 | 328 (#328) the result history gains the schema | **The result-history bookkeeping** (`recordResult` — the surfaces' write that fills `result_row_count` / `result_size_bytes` after `execute` returns the result ref) now also records `result_schema_json` (V47) — the materialized result's columns as the driver reported them, `{name, type, nullable}` (pipeline-contract §3.3.1). History, not availability: it survives the Redis TTL, and the release flip copies it. Past the record bounds (256 columns, 128 characters per name) the record is NULL with a `warn` — never a failed execution. A `direct`/`directSink` delivery (a PIPELINE child, a dashboard refresh) writes no stored result and therefore no record, exactly as it writes no row count. |

@@ -48,7 +48,7 @@ class DemoPipelineHashNeutralityTest {
                   "settings": {"tempdb": {"engine": "H2"}},
                   "parameters": {},
                   "nodes": [
-                    { "id": "shape", "description": "x", "type": "TRANSFORM",
+                    { "id": "shape", "description": "x", "type": "SCRIPT",
                       "template": {"id": "acme/shape/x.jsonata", "version": 3},
                       "inputs": {"orders": "stg_orders"},
                       "output": {"target": "tempdb", "table": "order_lines", "rejects": "order_lines_rejected"},
@@ -59,7 +59,7 @@ class DemoPipelineHashNeutralityTest {
                 """.trimIndent(),
             )
         val roundTripped = Fixtures.mapper.valueToTree<JsonNode>(Fixtures.mapper.treeToValue(body, Pipeline::class.java))
-        withClue("a TRANSFORM node's own fields survive the round trip byte-identically") {
+        withClue("a SCRIPT node's own fields survive the round trip byte-identically") {
             normalized(roundTripped) shouldBe normalized(body)
         }
     }
