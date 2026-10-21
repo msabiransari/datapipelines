@@ -37,7 +37,12 @@ fun WebContext.withRoles(
     navExecutions: Boolean = canReadExecutions,
     navPromotion: Boolean = canReadPromotion,
     navWorkspaces: Boolean = canAdminWorkspace || isSuperAdmin,
-    // 179 — the avatar menu's API-keys link (MANAGE_API_KEYS).
+    // 179 — the avatar menu's API-keys link. Production's rule (RoleModel.shell().apiKeys)
+    // is `principal.workspace != null` — every member with a workspace; the stub has no
+    // workspace notion, so its closest mirror would be a plain true. That mirror FLIPS
+    // ApiConsoleRenderTest's viewer case (the console renders through the full layout,
+    // whose avatar menu carries the link), so the value stays the admins-only stand-in
+    // pending a ruling — the #589 lane handback carries the flip, assertion unedited.
     navApiKeys: Boolean = canAdminWorkspace || isSuperAdmin,
 ): WebContext =
     apply {

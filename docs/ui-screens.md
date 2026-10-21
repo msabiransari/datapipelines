@@ -2018,10 +2018,10 @@ gate here. No key reaches it: an `endpoint`-kind key reaches only the published-
 surface ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)) and the MCP key only `/mcp` (#215 B2).
 
 **Read-only about everything on it (179).** The keys card and its minting modal lived here
-from 091 to 179; they moved to `/api-keys` (§4.19), the workspace admin's page (D17). What
-remains is the inventory — and, for the roles `api_key.read` admits, a **Manage** link per
-endpoint row and **Manage API keys** in the header. Your own MCP key is not here at all: it is
-the top bar's chip (§4.3e), minted at sign-in (D16).
+from 091 to 179; they moved to `/api-keys` (§4.19). What remains is the inventory — plus a
+**Manage** link per endpoint row and **Manage API keys** in the header for the workspace
+admin and super admin. Your own `mcp` key is not here at all: keys v2 (A15) retired the
+top-bar chip and the login mint — you create it on the Keys page (§4.19), like every kind.
 
 Two cards.
 
@@ -3085,6 +3085,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-21 | v1.198 | #589 the console's MCP note says where a key comes from today | **§4.18:** the read-only paragraph no longer points at the top bar's chip — keys v2 (A15) retired the chip and the login mint, so the sentence says the `mcp` key is created on the Keys page (§4.19) like every kind, and names the Manage link and header action's real holders (workspace admin and super admin) where it named `api_key.read`. `api/console.html`'s header comment and MCP note say the same (the note is the shared card's per-page sentence), `api/keys.html`'s header comment and sub drop the retired "in the top bar" pointer, and every comment and test name that said `MANAGE_API_KEYS` — not a row of the matrix — names the rule that actually guards the thing it describes (`MCP_KEY_OWN` for the Keys page and its REST twin, `API_KEY_BIND` for association, the `RoleModel.shell().apiKeys` workspace rule for the avatar link). `ApiConsoleRenderTest`'s new case pins the note: it names `/api-keys` and never "top bar", on the admin and the viewer render. |
 | 2026-10-20 | v1.197 | #574 the browser header's count has one source — renumbered at merge after #595's v1.196 | **§3.4 Counts:** the 60-second TTL sentence and the "no general metadata cache" paragraph give way to the freshness rule — `NavCounts` reads the five counts on every shell render, so the header and the tree cannot disagree past one navigation after a create, release, discard or delete (UI or MCP), and the read is deferred to the first count a render reads, so a JSON API request pays none; the lens rule and the never-zero rule are unchanged. Guards: `PipelineSidebarTreeStateBrowserTest`'s create-then-navigate case (header = the catalog route's total, no clock advance) and `NavCountsTest`'s every-render and nothing-read-until-a-value cases. |
 | 2026-10-20 | v1.196 | #595 §4.25 names five guided families — renumbered at merge after #588's v1.195 | **§4.25:** the stale selection sentence is replaced by the as-built rule — every tree family's menu item links its overview (`/overview/<family>`) since #556/#579–#582, the Datasources item `/overview/datasources` since #583, the Schedules and API items their homes (`/overview/schedules`, `/overview/api-console`) since #584/#585. `ShellRenderTest`'s href case is named for what it asserts (every family item links its overview home) and its #556 KDoc states the as-built links; assertions unchanged. |
 | 2026-10-20 | v1.195 | #588 the five family catalogs' intro sentence names the resource browser — renumbered at merge after #541's v1.194 | **§4.3, §4.6, §4.21, §4.23, §4.24:** the four family catalogs' visible intro sentence (pipelines, templates, dashboards, visualizations) says "Browse the folders in the resource browser's <Family> tree" — the Parameter Sets sentence's one wording since #554 moved the trees out of the rail; each page's comment says the tree lives in the resource browser's panel. **§4.3, §4.6:** the Purpose rows' "folder TREE" and the two owner-ruling paragraphs' last sentence (dates and meaning kept, the control's name changed) and §4.6's filter bullet name the resource browser; **§4.23:** the catalog's two tree reads do; **§3.4:** the icons paragraph's REST-tree sentence does. Guards: `CatalogIntroRenderTest` renders each of the five pages and pins the visible text — no "sidebar", the resource-browser sentence present. |

@@ -3,8 +3,9 @@
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
   <!-- 079 §C — the API section (ui-screens.md §4.18). READ-ONLY since 179: the keys card
-       and its minting modal moved to /api-keys, the workspace admin's page (D17), and your
-       own MCP key lives in the top bar (D16). What remains is the truthful inventory —
+       and its minting modal moved to /api-keys, the Keys page (ui-screens.md §4.19) —
+       keys v2 (A15) retired the login mint and the top-bar chip, so every kind, the
+       `mcp` key included, is created there. What remains is the truthful inventory —
        the endpoints this workspace publishes, the API keys associated with each, and the
        MCP connection — plus links to where the verbs now live. -->
   <div class="app-page-h">
@@ -153,13 +154,13 @@
       <!-- #585: the card is the shared partials/mcp-connection fragment (the API home renders
            the same one); this page passes its own note. -->
       <div th:replace="~{partials/mcp-connection :: card(~{api/console :: consoleMcpNote})}">
-        <!-- 179 (D16): the key this card's config wants is the one in the TOP BAR —
-             minted at sign-in, copied from the chip. The other kinds are confined by the
-             transport: an endpoint key reaches only the paths it is bound to, a server
-             key only this deployment's promotion routes. -->
-        <span th:ref="consoleMcpNote">Your <b>user</b> key reaches <span class="ds-mono">/mcp</span> — it is in the top bar, minted
-          when you signed in. An API key is confined to the endpoints it is associated with, and a
-          server key to this deployment's promotion routes.</span>
+        <!-- keys v2 (A15): the key this card's config wants is created on the Keys page
+             (/api-keys) — the login mint and the top-bar chip are retired. The other kinds
+             are confined by the transport: an endpoint key reaches only the paths it is
+             bound to, a server key only this deployment's promotion routes. -->
+        <span th:ref="consoleMcpNote">Your <b>mcp</b> key reaches <span class="ds-mono">/mcp</span> — create it on the Keys
+          page (<span class="ds-mono">/api-keys</span>). An <b>endpoint</b> key is confined to the endpoints it is associated
+          with, and a <b>server</b> key to this deployment's promotion routes.</span>
       </div>
 
     </div>
