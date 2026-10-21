@@ -14,6 +14,7 @@ import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.PrincipalLiveness
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceService
+import co.datapipelines.executor.BoundedJdbc
 import co.datapipelines.executor.ExecutionCancellationService
 import co.datapipelines.executor.ExecutionSlots
 import co.datapipelines.executor.ExecutorConfig
@@ -73,6 +74,7 @@ class DashboardRuntimeConfiguration {
     @Bean
     fun dashboardRuntimeConfig(properties: DashboardRuntimeProperties): DashboardRuntimeConfig = properties.toConfig()
 
+    /** The runtime's own repository — its writes are not housekeeping, so its statements carry no bound (#636). */
     @Bean
     fun dashboardRefreshRepository(jdbc: NamedParameterJdbcTemplate): DashboardRefreshRepository = DashboardRefreshRepository(jdbc)
 
@@ -217,13 +219,30 @@ class DashboardRuntimeConfiguration {
             metrics,
         )
 
-    /** Closes a RUNNING refresh once it is past its longest possible deadline plus one abort poll (metadata-db §8.4). */
+    /**
+     * Closes a RUNNING refresh once it is past its longest possible deadline plus one abort poll (metadata-db §8.4). Its
+     * repository is its OWN, over a dedicated template carrying
+     * [DashboardRefreshSweepScheduler.REFRESH_SWEEP_STATEMENT_TIMEOUT_SECONDS] (#636): the bound is the sweep's, and the
+     * shared [dashboardRefreshRepository] bean the runtime writes through stays unbounded.
+     */
     @Bean
     fun dashboardRefreshSweeper(
-        refreshes: DashboardRefreshRepository,
+        jdbc: NamedParameterJdbcTemplate,
         config: DashboardRuntimeConfig,
         executor: ExecutorConfig,
-    ): DashboardRefreshSweeper = DashboardRefreshSweeper(refreshes, config.maxRefreshSeconds + executor.cancelPollIntervalSeconds)
+        meterRegistry: MeterRegistry,
+    ): DashboardRefreshSweeper =
+        DashboardRefreshSweeper(
+            DashboardRefreshRepository(
+                BoundedJdbc.bounded(
+                    jdbc,
+                    DashboardRefreshSweepScheduler.REFRESH_SWEEP_STATEMENT_TIMEOUT_SECONDS,
+                    "REFRESH_SWEEP_STATEMENT_TIMEOUT_SECONDS",
+                ),
+            ),
+            config.maxRefreshSeconds + executor.cancelPollIntervalSeconds,
+            meterRegistry,
+        )
 
     @Bean
     fun dashboardRefreshSweepScheduler(sweeper: DashboardRefreshSweeper): DashboardRefreshSweepScheduler =
@@ -245,5 +264,17 @@ class DashboardRefreshSweepScheduler(
 
     companion object {
         const val SWEEP_INTERVAL_MILLIS = 60_000L
+
+        /**
+         * #636 — the sweep's `UPDATE` statement bound, a JDBC `queryTimeout` on the sweeper's own template. Not a config
+         * key, the cadence's reason. Ten seconds, the stale-execution sweep's value and reason: a sixth of
+         * [SWEEP_INTERVAL_MILLIS], so a cancelled tick ends long before the next is due, and under
+         * `spring.lifecycle.timeout-per-shutdown-phase` (30 s), so a SIGTERM during a hung sweep ends inside the phase.
+         * The healthy statement is one guarded `UPDATE` over the running refreshes (milliseconds); the bound only fires
+         * when it waits on a lock that never goes, which until #636 held the `dp-scheduled` thread every job shares. A
+         * cancel (SQLState `57014`) rolls the `UPDATE` back whole, logs `event=dashboard.refresh_sweep_failed`, counts
+         * `job=dashboard_refresh_sweep`, and the next tick retries.
+         */
+        const val REFRESH_SWEEP_STATEMENT_TIMEOUT_SECONDS = 10
     }
 }
