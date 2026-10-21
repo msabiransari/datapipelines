@@ -103,7 +103,8 @@ class UiWorkspaceAdvice(
     @ModelAttribute("navWorkspaces")
     fun navWorkspaces(): Boolean = RoleModel.shell(principal()).workspaces
 
-    /** 179 (D17) — the avatar menu's "API keys" link: the `/api-keys` page is `MANAGE_API_KEYS`. */
+    /** 179 (D17) — the avatar menu's "API keys" link. The `/api-keys` page's route is
+     * `MCP_KEY_OWN` (every member with a workspace); the flag mirrors `RoleModel.shell().apiKeys`. */
     @ModelAttribute("navApiKeys")
     fun navApiKeys(): Boolean = RoleModel.shell(principal()).apiKeys
 

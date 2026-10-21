@@ -26,7 +26,7 @@ import org.thymeleaf.web.servlet.JakartaServletWebApplication
  *  - **There is no "Calls 24 h" column.** Nothing records endpoint serves, so the mock's
  *    column has no truthful source; the page says so rather than inventing one.
  *  - **The version shown is the RELEASED one.** An endpoint pins a pipeline, not a version.
- *  - **The manage link renders for the roles `MANAGE_API_KEYS` admits, and no other.**
+ *  - **The manage link renders for the workspace admin and super admin, and no other.**
  */
 class ApiConsoleRenderTest {
     @Test
@@ -53,6 +53,32 @@ class ApiConsoleRenderTest {
         card.select("[onclick], [style]").size shouldBe 0
     }
 
+    @Test
+    fun `the MCP card's note names the Keys page as where the mcp key comes from`() {
+        // keys v2 (A15) retired the login mint and the top-bar chip: the sentence under the
+        // config must say the key is created on the Keys page (/api-keys) — on the admin and
+        // the viewer render alike, the card renders for every member.
+        val admin =
+            Jsoup
+                .parse(render { })
+                .select("[data-mcp-connection]")
+                .text()
+        admin shouldContain "/api-keys"
+        admin shouldNotContain "top bar"
+
+        val viewerRender =
+            render {
+                withRoles(canAuthor = false, canPromote = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "viewer")
+            }
+        val viewer =
+            Jsoup
+                .parse(viewerRender)
+                .select("[data-mcp-connection]")
+                .text()
+        viewer shouldContain "/api-keys"
+        viewer shouldNotContain "top bar"
+    }
+
     private val engine =
         SpringTemplateEngine().apply {
             setTemplateResolver(
@@ -66,11 +92,11 @@ class ApiConsoleRenderTest {
 
     /**
      * 179 (D17) — the keys card is GONE from the console: no table, no modal, no create verb.
-     * What remains is the read-only inventory and, for the roles that hold MANAGE_API_KEYS,
+     * What remains is the read-only inventory and, for the workspace admin and super admin,
      * the link to where the verbs live.
      */
     @Test
-    fun `the console carries no key management - and the manage link follows MANAGE_API_KEYS`() {
+    fun `the console carries no key management - and the manage link is the admins' alone`() {
         val admin = render { }
         admin shouldNotContain "id=\"keys-table\""
         admin shouldNotContain "id=\"key-modal\""

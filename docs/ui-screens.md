@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.198
+**Status:** v1.199
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-21 (#640); 2026-10-20 (#574; #595; #588; #541; #634; #635; #622 merge follow-up; #622; #599; #604; #639; #638; #610; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-21 (#589; #640); 2026-10-20 (#574; #595; #588; #541; #634; #635; #622 merge follow-up; #622; #599; #604; #639; #638; #610; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 ---
 
 ## 1. Purpose
@@ -2018,10 +2018,10 @@ gate here. No key reaches it: an `endpoint`-kind key reaches only the published-
 surface ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)) and the MCP key only `/mcp` (#215 B2).
 
 **Read-only about everything on it (179).** The keys card and its minting modal lived here
-from 091 to 179; they moved to `/api-keys` (§4.19), the workspace admin's page (D17). What
-remains is the inventory — and, for the roles `api_key.read` admits, a **Manage** link per
-endpoint row and **Manage API keys** in the header. Your own MCP key is not here at all: it is
-the top bar's chip (§4.3e), minted at sign-in (D16).
+from 091 to 179; they moved to `/api-keys` (§4.19). What remains is the inventory — plus a
+**Manage** link per endpoint row and **Manage API keys** in the header for the workspace
+admin and super admin. Your own `mcp` key is not here at all: keys v2 (A15) retired the
+top-bar chip and the login mint — you create it on the Keys page (§4.19), like every kind.
 
 Two cards.
 
@@ -3085,6 +3085,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-21 | v1.199 | #589 the console's MCP note says where a key comes from today — renumbered at merge after #640's v1.198 | **§4.18:** the read-only paragraph no longer points at the top bar's chip — keys v2 (A15) retired the chip and the login mint, so the sentence says the `mcp` key is created on the Keys page (§4.19) like every kind, and names the Manage link and header action's real holders (workspace admin and super admin) where it named `api_key.read`. `api/console.html`'s header comment and MCP note say the same (the note is the shared card's per-page sentence), `api/keys.html`'s header comment and sub drop the retired "in the top bar" pointer, and every comment and test name that said `MANAGE_API_KEYS` — not a row of the matrix — names the rule that actually guards the thing it describes (`MCP_KEY_OWN` for the Keys page and its REST twin, `API_KEY_BIND` for association, the `RoleModel.shell().apiKeys` workspace rule for the avatar link). `ApiConsoleRenderTest`'s new case pins the note: it names `/api-keys` and never "top bar", on the admin and the viewer render. |
 | 2026-10-21 | v1.198 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The pipeline editor's TRANSFORM card and the template editor's transform face are the SCRIPT card and the script face** (§4.3 the editor card, its accent `--type-script` and the legend's **Script**; §4.7 the face's Save draft / Run suite and its routes `/partials/templates/script-face/…`; the template workspace's script rules). A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-20 | v1.197 | #574 the browser header's count has one source — renumbered at merge after #595's v1.196 | **§3.4 Counts:** the 60-second TTL sentence and the "no general metadata cache" paragraph give way to the freshness rule — `NavCounts` reads the five counts on every shell render, so the header and the tree cannot disagree past one navigation after a create, release, discard or delete (UI or MCP), and the read is deferred to the first count a render reads, so a JSON API request pays none; the lens rule and the never-zero rule are unchanged. Guards: `PipelineSidebarTreeStateBrowserTest`'s create-then-navigate case (header = the catalog route's total, no clock advance) and `NavCountsTest`'s every-render and nothing-read-until-a-value cases. |
 | 2026-10-20 | v1.196 | #595 §4.25 names five guided families — renumbered at merge after #588's v1.195 | **§4.25:** the stale selection sentence is replaced by the as-built rule — every tree family's menu item links its overview (`/overview/<family>`) since #556/#579–#582, the Datasources item `/overview/datasources` since #583, the Schedules and API items their homes (`/overview/schedules`, `/overview/api-console`) since #584/#585. `ShellRenderTest`'s href case is named for what it asserts (every family item links its overview home) and its #556 KDoc states the as-built links; assertions unchanged. |

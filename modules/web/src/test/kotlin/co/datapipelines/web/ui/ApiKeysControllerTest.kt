@@ -45,10 +45,11 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * 091 — `/settings/api-keys` is a LINK now (ui-screens.md §4.10); 179 repointed it: your MCP
- * key is the top bar's, the workspace's API keys are the admin page's. What this test
- * protects is that the redirect-by-hand is not a dead end: the route still answers, and the
- * page it renders points at both screens the keys actually live on.
+ * 091 — `/settings/api-keys` is a LINK now (ui-screens.md §4.10); 179 repointed it at the
+ * Keys page, and keys v2 (A15) retired the top-bar chip: every kind, the `mcp` key
+ * included, is created on `/api-keys`. What this test protects is that the
+ * redirect-by-hand is not a dead end: the route still answers, and the page it renders
+ * points at the screen the keys live on.
  */
 class ApiKeysControllerTest {
     private val themeResolver = mockk<ThemeResolver>()
@@ -83,8 +84,8 @@ class ApiKeysControllerTest {
         // Keys v2 (233, A15) retired the top-bar chip: the pointer points at the Keys page now.
         html shouldContain "Keys page"
         html shouldNotContain "MCP key is in the top bar"
-        // …and the admin page's link renders for the roles that hold MANAGE_API_KEYS
-        // (withRoles defaults to the fullest set), never a table or form here.
+        // …and the link to the Keys page renders — navApiKeys is true for every member with
+        // a workspace (withRoles defaults to the fullest set), never a table or form here.
         html shouldContain "href=\"/api-keys\""
         html shouldNotContain "id=\"keys-table\""
         html shouldNotContain "createKeyForm"
