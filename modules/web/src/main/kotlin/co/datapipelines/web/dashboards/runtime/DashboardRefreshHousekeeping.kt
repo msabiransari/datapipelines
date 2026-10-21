@@ -1,7 +1,10 @@
 package co.datapipelines.web.dashboards.runtime
 
 import co.datapipelines.persistence.FailureShape
+import co.datapipelines.persistence.ScheduledJob
 import co.datapipelines.visualization.DashboardRefreshRepository
+import io.micrometer.core.instrument.Counter
+import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataAccessException
 
@@ -15,11 +18,29 @@ import org.springframework.dao.DataAccessException
  * so the cutoff is a fact, not a guess. `TIMED_OUT` with `reason` `instance_lost` when one of its executions was aborted
  * by the stale-execution sweep, else `deadline_passed`. Every replica may run it (one idempotent guarded `UPDATE`); a
  * tick that fails is logged by class and SQLState only and retried.
+ *
+ * The `UPDATE` is bounded by the template it is given (#636): the application builds [refreshes] over a dedicated
+ * template carrying `REFRESH_SWEEP_STATEMENT_TIMEOUT_SECONDS` (`DashboardRuntimeConfiguration`), so a tick queued behind
+ * a lock that never goes is cancelled at the bound (`sql_state=57014`, the `UPDATE` rolled back whole) instead of holding
+ * the `dp-scheduled` thread every job shares. A failed tick — a statement that threw, or was cancelled at its bound — is
+ * one `event=dashboard.refresh_sweep_failed` WARN and one [ScheduledJob.FAILED_TICK_METER] increment
+ * (`job=dashboard_refresh_sweep`).
  */
 class DashboardRefreshSweeper(
     private val refreshes: DashboardRefreshRepository,
     private val staleAfterSeconds: Long,
+    /** The failed-tick counter's registry; null (direct constructions in tests) counts nothing. */
+    metrics: MeterRegistry? = null,
 ) {
+    private val failedTicks: Counter? =
+        metrics?.let { registry ->
+            Counter
+                .builder(ScheduledJob.FAILED_TICK_METER)
+                .description(ScheduledJob.FAILED_TICK_DESCRIPTION)
+                .tag(ScheduledJob.JOB_TAG, ScheduledJob.DASHBOARD_REFRESH_SWEEP.tag)
+                .register(registry)
+        }
+
     init {
         require(staleAfterSeconds > 0) { "staleAfterSeconds must be positive, was $staleAfterSeconds" }
     }
@@ -32,6 +53,7 @@ class DashboardRefreshSweeper(
                 refreshes.sweepStale(staleAfterSeconds)
             } catch (e: DataAccessException) {
                 LOG.warn("event=dashboard.refresh_sweep_failed error={} sql_state={}", FailureShape.cause(e), FailureShape.sqlState(e))
+                failedTicks?.increment()
                 return 0
             }
         closed.forEach {
@@ -53,11 +75,28 @@ class DashboardRefreshSweeper(
  * tick and the same cutoff (`datapipelines.executions.event-retention-days`). `pipeline_executions` is never touched — the
  * cascade takes only the refresh's own link rows — and a `RUNNING` refresh is never deleted (only `finished_at IS NOT NULL`
  * rows are candidates).
+ *
+ * The `DELETE` carries the retention tick's bound (#636, `RetentionSchedulingConfiguration` builds [refreshes] over its
+ * 25 s template, the event DELETE's): a cancel (`sql_state=57014`) rolls the `DELETE` back whole and the next hourly tick
+ * retries from the same predicate. A failed step — a statement that threw, or was cancelled at its bound — is one
+ * `event=dashboard.refresh_retention_failed` WARN and one [ScheduledJob.FAILED_TICK_METER] increment
+ * (`job=dashboard_refresh_retention`).
  */
 class DashboardRefreshRetention(
     private val refreshes: DashboardRefreshRepository,
     private val retentionDays: Long,
+    /** The failed-tick counter's registry; null (direct constructions in tests) counts nothing. */
+    metrics: MeterRegistry? = null,
 ) {
+    private val failedTicks: Counter? =
+        metrics?.let { registry ->
+            Counter
+                .builder(ScheduledJob.FAILED_TICK_METER)
+                .description(ScheduledJob.FAILED_TICK_DESCRIPTION)
+                .tag(ScheduledJob.JOB_TAG, ScheduledJob.DASHBOARD_REFRESH_RETENTION.tag)
+                .register(registry)
+        }
+
     init {
         require(retentionDays > 0) { "retentionDays must be positive, was $retentionDays" }
     }
@@ -70,6 +109,7 @@ class DashboardRefreshRetention(
                 refreshes.deleteFinishedOlderThan(retentionDays)
             } catch (e: DataAccessException) {
                 LOG.warn("event=dashboard.refresh_retention_failed error={} sql_state={}", FailureShape.cause(e), FailureShape.sqlState(e))
+                failedTicks?.increment()
                 return 0
             }
         if (purged > 0) LOG.info("event=dashboard.refreshes_purged count={} retention_days={}", purged, retentionDays)
