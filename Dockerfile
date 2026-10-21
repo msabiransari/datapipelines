@@ -48,6 +48,17 @@ ENV DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY=/opt/duckdb/extensions
 
 COPY modules/app/build/libs/datapipelines-*.jar /app/datapipelines.jar
 
+# The JDBC driver drop-in (module-structure.md §5.4.1): the jar's PropertiesLauncher adds
+# every jar in LOADER_PATH to the classpath, so an operator mounts ojdbc11.jar or
+# mysql-connector-j.jar here with no rebuild (deployment.md §3.5). ABSOLUTE on purpose: a
+# relative entry resolves against loader.home, which defaults to the working directory, and
+# this image sets no WORKDIR, so `lib` would mean /lib, the OS library directory. Created
+# root:root 0555 BEFORE `USER`: a directory the app user could write would be
+# code-execution-by-file-drop (deployment.md §9, the lib/ checklist line). The value lives
+# here, never in compose or the chart (ImageLoaderPathSpecDriftTest refuses a deploy file naming it).
+RUN mkdir -p /app/lib && chmod 0555 /app/lib
+ENV LOADER_PATH=/app/lib
+
 USER datapipelines
 EXPOSE 8080
 
