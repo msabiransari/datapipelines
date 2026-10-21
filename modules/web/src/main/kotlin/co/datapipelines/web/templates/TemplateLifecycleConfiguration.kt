@@ -41,7 +41,7 @@ class TemplateLifecycleConfiguration {
         pipelines: PipelineRepository,
         templates: TemplateRepository,
         parameterSets: co.datapipelines.parameters.ParameterSetTemplatePins,
-        // #320 — the visualizations' script pins are the third arm.
+        // #320 — the visualizations' transform pins are the third arm.
         dependents: co.datapipelines.visualization.ArtifactDependents,
     ): co.datapipelines.application.templates.TemplateUsage =
         co.datapipelines.application.templates.TemplateUsage(

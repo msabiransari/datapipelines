@@ -81,7 +81,7 @@ class VisualizationLifecycleDialogController(
         // the dialog opened is a stale hash and the service answers visualization.version.conflict (the evidence
         // gate, which judges the current body, still answers first when the new draft has no green run).
         draftOf(workspaceId, id, version = null)
-        // D61 — the ONE consent: without it a DRAFT script pin refuses release.dependency_not_released as it
+        // D61 — the ONE consent: without it a DRAFT transform pin refuses release.dependency_not_released as it
         // always has; the server, never the checkbox, is the guard.
         val released = visualizations.release(workspaceId, id, bodyHash, principal.userId, releasePinnedTemplates)
         val cascade = LifecycleVerbs.FamilyCascade("visualization_id", id, released.version.detail.version)

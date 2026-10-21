@@ -30,7 +30,7 @@ class TemplatesUsedByTool(
                     "draft when unreleased edits exist, else the latest released). Returns one reference per node — " +
                     "pipeline name and id, node id, and the pipeline version carrying the pin — plus the distinct " +
                     "pipeline count, and one row per pinning parameter set (#194: set name and id, the parameter, " +
-                    "the set version carrying the pin), and one row per pinning visualization (#320: its `script.template` " +
+                    "the set version carrying the pin), and one row per pinning visualization (#320: its `transform.template` " +
                     "pin — visualization name and id, the visualization version carrying the pin and its status). Use it " +
                     "before editing or retiring a template version to see who you would affect. It does not answer " +
                     "'is it safe to delete' (that scan includes historical pipeline versions and lives in the " +

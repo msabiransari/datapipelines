@@ -465,7 +465,7 @@ class VisualizationMechanicalCheck(
 
 /**
  * The no-transform case's fixture-value rules — the SAME wire-form rules the type gate applies to a
- * script's input rows, applied to the single input's fixtures (the spec's §11.3 step 3, the brief's §B).
+ * transform's input rows, applied to the single input's fixtures (the spec's §11.3 step 3, the brief's §B).
  * A non-nullable column must carry a value and every value must be in its column's wire form.
  */
 private object FixtureValues {
@@ -565,7 +565,7 @@ fun interface TestFixtureEvaluator {
 
 /** The fixture evaluator's two answers. */
 sealed interface FixtureEvaluation {
-    /** The script's output rows — every bound column is checked against each. */
+    /** The transform's output rows — every bound column is checked against each. */
     data class Rows(
         val rows: List<Map<String, Any?>>,
     ) : FixtureEvaluation

@@ -34,8 +34,11 @@ import kotlin.text.RegexOption.IGNORE_CASE
  *   - **The visualization block** — a visualization pins a TEMPLATE; the pin's wire key is
  *     `transform` and the error code is `transform_binding_invalid`. The visualization module,
  *     its web half, its templates, its tests and the dashboards refresh stage keep that
- *     vocabulary by the owner's block decision.
- *   - **CSS** — the `transform:` property and the pan/zoom/drawer geometry notes.
+ *     vocabulary by the owner's block decision. Elsewhere (the MCP schema and docs, §7.6, the
+ *     skill) the block's key, `transform.template`/`transform.inputs`, its pin, its output and the
+ *     refresh stage are admitted phrase by phrase, so the node noun in the same file stays red (#640).
+ *   - **CSS** — the `transform:` property, the SVG `transform` attribute and the pan/zoom/drawer
+ *     geometry notes.
  *   - **Frozen history** — the V33/V36/V47 migrations, the `chk_transform_blocks` pre-V50
  *     constraint name, the migration tests' pre-state rows, the research snapshots.
  *   - **The sample-data fence** — `site/demo/manifest-*.json`'s `transform` key names a
@@ -100,12 +103,27 @@ class ScriptVocabularyGuardTest {
             "TRANSFORM_BINDING_INVALID",
             "TRANSFORM_STAGE",
             "TRANSFORMATION = \"AES/GCM/NoPadding\"",
+            "visualizations whose `transform.template` pins the version",
+            "`transform.inputs`' keys",
         )) {
             if (!GLOBAL_EXEMPTIONS.any { it.containsMatchIn(allowed) }) {
                 fail("a global exemption should admit: $allowed")
             }
         }
+        for ((path, line) in ADMITTED) {
+            if (!admittedByPath(path, line)) fail("a path entry should admit $path: $line")
+        }
+        for ((path, line) in NOT_ADMITTED) {
+            if (admittedByPath(path, line) || GLOBAL_EXEMPTIONS.any { it.containsMatchIn(line) }) {
+                fail("the node noun must stay red in $path: $line")
+            }
+        }
     }
+
+    private fun admittedByPath(
+        path: String,
+        line: String,
+    ): Boolean = PATH_EXEMPTIONS.any { (selector, admits) -> selector.containsMatchIn(path) && admits.containsMatchIn(line) }
 
     private fun scanTargets(): List<File> {
         val extensions =
@@ -151,6 +169,7 @@ class ScriptVocabularyGuardTest {
                 Regex("datapipelines\\.transform"), // the removed-key refusal names the old tree
                 Regex("checkRemovedTransformKeys|REMOVED_TRANSFORM_KEY_SUFFIXES|transformLegacyKeysSet"),
                 Regex("TRANSFORM_BINDING_INVALID|transform_binding_invalid"), // the visualization code
+                Regex("`transform\\.(?:template|inputs)`"), // the visualization block's pin and inputs keys (#640)
                 Regex("TRANSFORM_STAGE|stage:\\s*\"transform\"|\"transform\\.failed\"|\"transform\\.status\""), // the refresh stage
                 Regex("^\\s*\\| 2026-"), // a docs ledger row records the vocabulary of its day (append-only history)
             )
@@ -317,6 +336,85 @@ class ScriptVocabularyGuardTest {
                     Regex("transform", setOf(IGNORE_CASE)),
                     "the V33 pre-state rows and the migration's immutable filename",
                 ),
+                // The visualization block's kept senses outside the visualization module (#640): the key, its pin,
+                // its output and the dashboards refresh stage. Each regex names the restored phrase, so a node noun
+                // in the same file stays red (the self-test's NOT_ADMITTED cases).
+                Triple(
+                    Regex("^docs/mcp-server\\.md$"),
+                    Regex("\"transform\": \\{|inputs, transform, config|transform pin's contract|column of the transform's output"),
+                    "the visualization tools' rows: the document's `transform` key, its pin and its output",
+                ),
+                Triple(
+                    Regex("mcp/VisualizationsTools\\.kt$"),
+                    Regex("\"transform\": \\{\"type\"|inputs, transform, \"|transform pin's contract|column of the transform's output"),
+                    "the visualization write schema's `transform` property is the reader's DOCUMENT_KEYS entry",
+                ),
+                Triple(
+                    Regex("^docs/auth\\.md$"),
+                    Regex("the transform pin RELEASED|the transform run WITHOUT"),
+                    "§7.6's visualization.release row (the block's pin) and dashboard.execute row (the refresh stage)",
+                ),
+                Triple(
+                    Regex("^docs/versioning\\.md$"),
+                    Regex("its transform pin RELEASED|the transform pins of any pushed visualization"),
+                    "the visualization release gate and the transfer closure (the block's pin)",
+                ),
+                Triple(
+                    Regex("^docs/ui-screens\\.md$"),
+                    Regex("the transform pin with its status|the transform pin not released"),
+                    "the visualization tab's Overview and release dialog (the block's pin)",
+                ),
+                Triple(
+                    Regex("^docs/module-structure\\.md$"),
+                    Regex("its DRAFT transform pins"),
+                    "the visualization module's release cascade (the block's pin)",
+                ),
+                Triple(
+                    Regex("executor/RefreshAbortFlags\\.kt$"),
+                    Regex("a pending transform,"),
+                    "the dashboards refresh stage",
+                ),
+                Triple(
+                    Regex("web/(?:config/VisualizationConfiguration|templates/TemplateLifecycleConfiguration)\\.kt$"),
+                    Regex("a DRAFT transform pin|the visualizations' transform pins"),
+                    "the visualization release cascade and the template in-use guard (the block's pin)",
+                ),
+                Triple(
+                    Regex("(?:resources/skill|resources/docs-golden)/dashboards\\.md$"),
+                    Regex("the transform's output"),
+                    "the skill's dashboards page: a binding names a column of the block's output",
+                ),
+                Triple(
+                    Regex("ui/site/SiteHandTypedCountsGuardTest\\.kt$"),
+                    Regex("\"viewBox\", \"transform\""),
+                    "the SVG `transform` attribute is layout geometry (kept sense 1)",
+                ),
+            )
+
+        /** Restored kept-sense lines (#640) a path entry must admit — path to line. */
+        private val ADMITTED =
+            listOf(
+                "docs/mcp-server.md" to "      \"transform\": {",
+                "docs/mcp-server.md" to "the WORKING version's full document (renderer, inputs, transform, config, bindings)",
+                "modules/mcp-server/src/main/kotlin/co/datapipelines/mcp/VisualizationsTools.kt" to
+                    "    \"transform\": {\"type\": \"object\", \"description\": \"Optional\"",
+                "docs/auth.md" to "| `visualization.release` | Release a visualization's draft (a test case, the transform pin RELEASED",
+                "docs/versioning.md" to "with at least one test case, its transform pin RELEASED (or the 142 cascade",
+                "docs/ui-screens.md" to "the inputs and their columns, the transform pin with its status and bindings",
+                "modules/dag/src/main/kotlin/co/datapipelines/executor/RefreshAbortFlags.kt" to " * a pending transform, a source",
+                "modules/mcp-server/src/main/resources/skill/dashboards.md" to "(or of the transform's output)",
+                "modules/web/src/test/kotlin/co/datapipelines/web/ui/site/SiteHandTypedCountsGuardTest.kt" to
+                    "\"d\", \"viewBox\", \"transform\")",
+            )
+
+        /** The node noun in those same files stays red: the path entries admit the block, not the word. */
+        private val NOT_ADMITTED =
+            listOf(
+                "docs/mcp-server.md" to "and so is a TRANSFORM node (use templates_evaluate)",
+                "modules/mcp-server/src/main/kotlin/co/datapipelines/mcp/VisualizationsTools.kt" to "a pinned TRANSFORM template",
+                "docs/auth.md" to "`GET /partials/templates/transform-face`",
+                "docs/versioning.md" to "a transform template's draft",
+                "modules/mcp-server/src/main/resources/skill/dashboards.md" to "a pinned transform template that reshapes",
             )
     }
 }

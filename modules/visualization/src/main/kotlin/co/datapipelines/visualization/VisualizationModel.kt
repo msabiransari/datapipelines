@@ -43,7 +43,7 @@ data class VisualizationBody(
     val transform: TransformBinding? = null,
     @field:JsonProperty("config") @get:JsonProperty("config") @param:JsonProperty("config")
     val config: ObjectNode,
-    /** A JSON path into [config] → a column of the script's OUTPUT (or of the single input). */
+    /** A JSON path into [config] → a column of the transform's OUTPUT (or of the single input). */
     @field:JsonProperty("bindings") @get:JsonProperty("bindings") @param:JsonProperty("bindings")
     val bindings: Map<String, String> = emptyMap(),
     @field:JsonProperty("presentation") @get:JsonProperty("presentation") @param:JsonProperty("presentation")

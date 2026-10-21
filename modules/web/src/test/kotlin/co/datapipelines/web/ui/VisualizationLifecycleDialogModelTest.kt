@@ -31,7 +31,7 @@ import java.util.UUID
 
 /**
  * #399 — the visualization dialogs answer the question BEFORE the button (094 §B), from the SAME reads the
- * service's guards make: the release's refusals in the service's order (cases, the script pin, then the
+ * service's guards make: the release's refusals in the service's order (cases, the transform pin, then the
  * evidence gate — which is not consulted while no case exists), the ONE consent for a DRAFT pin, the pin guard's
  * pinners narrowed to the version, the discard's pointer fallback by the repository's D60 rule (the highest other
  * eligible version, a DRAFT only under the development posture), the restore's above-current-or-NULL move and the
@@ -98,7 +98,7 @@ class VisualizationLifecycleDialogModelTest {
     }
 
     @Test
-    fun `a DRAFT script pin is the ONE consent's row, not a refusal`() {
+    fun `a DRAFT transform pin is the ONE consent's row, not a refusal`() {
         draftWith(cases = 1, pinned = true)
         templateStatus = PipelineVersionStatus.DRAFT
 

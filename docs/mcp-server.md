@@ -949,7 +949,7 @@ Which pipelines pin a given template version — the reverse arrow of a node's `
 ```json
 {
   "name": "templates_used_by",
-  "description": "Which pipelines, parameter sets AND visualizations pin a given template version in their working version (the draft when unreleased edits exist, else the latest released). Returns one reference per node — pipeline name and id, node id, and the pipeline version carrying the pin — plus the distinct pipeline count, and one row per pinning parameter set (#194: set name and id, the parameter, the set version carrying the pin), and one row per pinning visualization (#320: its `script.template` pin — visualization name and id, the visualization version carrying the pin and its status). Use it before editing or retiring a template version to see who you would affect. It does not answer 'is it safe to delete' (that scan includes historical pipeline versions and lives in the delete refusal), and it never changes anything. A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter lens); every other template resolves as not-found, and pinning pipelines, sets or visualizations it cannot see are left out of the answer.",
+  "description": "Which pipelines, parameter sets AND visualizations pin a given template version in their working version (the draft when unreleased edits exist, else the latest released). Returns one reference per node — pipeline name and id, node id, and the pipeline version carrying the pin — plus the distinct pipeline count, and one row per pinning parameter set (#194: set name and id, the parameter, the set version carrying the pin), and one row per pinning visualization (#320: its `transform.template` pin — visualization name and id, the visualization version carrying the pin and its status). Use it before editing or retiring a template version to see who you would affect. It does not answer 'is it safe to delete' (that scan includes historical pipeline versions and lives in the delete refusal), and it never changes anything. A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter lens); every other template resolves as not-found, and pinning pipelines, sets or visualizations it cannot see are left out of the answer.",
   "inputSchema": {
     "type": "object",
     "required": ["id", "version"],
@@ -962,7 +962,7 @@ Which pipelines pin a given template version — the reverse arrow of a node's `
 }
 ```
 
-Returns: `{"template": {"id", "version"}, "scan": "working_version", "pipeline_count", "references": [{"pipeline", "pipeline_id", "node_id", "pipeline_version", "pipeline_version_status"}], "parameter_set_references": [{"parameter_set", "parameter_set_id", "parameter", "set_version", "set_version_status"}], "visualization_references": [{"visualization", "visualization_id", "visualization_version", "visualization_version_status"}]}` — since #320 a visualization whose `script.template` pins this version is a real reference too (working-version scan, under the caller's visualization lens: a hidden visualization is never named, and a narrowing view sees RELEASED rows only) — one row per pinning NODE (pipelines) and per pinning PARAMETER (sets), so a pipeline with two nodes on the same version appears twice and `pipeline_count` stays the honest distinct count. Since #194 lane D the answer covers PARAMETER SETS too (the record's §8.4): a set whose selector pins this template version is a real reference, listed with the set name, the parameter and the set version carrying the pin. The scan reads each pipeline's **working version** (draft-if-exists, versioning §7), so a draft that just adopted the pin is already counted — the "who do I notify" answer an author needs before editing a template ([Templates §5.4](templates.md#54-used-by-the-reverse-arrow-v19-040)). `version` is required and never clamped (the [D2 rule](templates.md#54-used-by-the-reverse-arrow-v19-040): the question is per version). The delete-safety question — who pins ANY version, in ANY pipeline version ever, and since lane D in any parameter-set version ever — is a different scan and surfaces as the `template.in_use` delete refusal on the REST surface, not here.
+Returns: `{"template": {"id", "version"}, "scan": "working_version", "pipeline_count", "references": [{"pipeline", "pipeline_id", "node_id", "pipeline_version", "pipeline_version_status"}], "parameter_set_references": [{"parameter_set", "parameter_set_id", "parameter", "set_version", "set_version_status"}], "visualization_references": [{"visualization", "visualization_id", "visualization_version", "visualization_version_status"}]}` — since #320 a visualization whose `transform.template` pins this version is a real reference too (working-version scan, under the caller's visualization lens: a hidden visualization is never named, and a narrowing view sees RELEASED rows only) — one row per pinning NODE (pipelines) and per pinning PARAMETER (sets), so a pipeline with two nodes on the same version appears twice and `pipeline_count` stays the honest distinct count. Since #194 lane D the answer covers PARAMETER SETS too (the record's §8.4): a set whose selector pins this template version is a real reference, listed with the set name, the parameter and the set version carrying the pin. The scan reads each pipeline's **working version** (draft-if-exists, versioning §7), so a draft that just adopted the pin is already counted — the "who do I notify" answer an author needs before editing a template ([Templates §5.4](templates.md#54-used-by-the-reverse-arrow-v19-040)). `version` is required and never clamped (the [D2 rule](templates.md#54-used-by-the-reverse-arrow-v19-040): the question is per version). The delete-safety question — who pins ANY version, in ANY pipeline version ever, and since lane D in any parameter-set version ever — is a different scan and surfaces as the `template.in_use` delete refusal on the REST surface, not here.
 
 An unknown template id is the catalogued `template.not_found`; a known id with no such version is the same code with a `version` detail. **Permission:** `template.read` (040 D7) — reference structure a workspace reader may already see by reading the pipelines themselves; no customer row data.
 
@@ -1962,12 +1962,12 @@ Browse ONE level of the key's pinned workspace's visualization tree (`prefix` �
 
 #### 6.2.51 `visualizations_get`
 
-Read one visualization by id: the WORKING version's full document (renderer, inputs, script, config, bindings, presentation, tests), its lifecycle state (`version`, `status`, `body_hash`, `current_version`, the `draft` pointer) and `used_by`. Another workspace's visualization — or a lens-hidden one — answers `visualization.not_found`, never a permission error (§11A.1).
+Read one visualization by id: the WORKING version's full document (renderer, inputs, transform, config, bindings, presentation, tests), its lifecycle state (`version`, `status`, `body_hash`, `current_version`, the `draft` pointer) and `used_by`. Another workspace's visualization — or a lens-hidden one — answers `visualization.not_found`, never a permission error (§11A.1).
 
 ```json
 {
   "name": "visualizations_get",
-  "description": "Read one visualization by ID: the WORKING version's full document (renderer, inputs, script, config, bindings, presentation, tests) and its lifecycle state — version and status name the returned row (the DRAFT when one exists, else the current release), current_version the latest release, body_hash what an update's expected_hash carries — plus used_by, the dashboards that pin it. A visualization of another workspace, or one the promoter lens hides, answers not-found.",
+  "description": "Read one visualization by ID: the WORKING version's full document (renderer, inputs, transform, config, bindings, presentation, tests) and its lifecycle state — version and status name the returned row (the DRAFT when one exists, else the current release), current_version the latest release, body_hash what an update's expected_hash carries — plus used_by, the dashboards that pin it. A visualization of another workspace, or one the promoter lens hides, answers not-found.",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -1989,12 +1989,12 @@ Read one visualization by id: the WORKING version's full document (renderer, inp
 
 #### 6.2.52 `visualizations_create`
 
-Create a visualization: version 1 lands as a DRAFT (no tool releases anything), validated in FULL at save by the same strict reader and validator REST's `POST /api/v1/visualizations` uses — the seven `datapipelines.visualization.*` bounds, the renderer's configuration schema, every binding path (it must already exist in `config`) and column, the script pin's contract against the inputs (a DRAFT pin is accepted), the test cases. The arguments ARE the document's keys; the 094 new-root confirmation applies.
+Create a visualization: version 1 lands as a DRAFT (no tool releases anything), validated in FULL at save by the same strict reader and validator REST's `POST /api/v1/visualizations` uses — the seven `datapipelines.visualization.*` bounds, the renderer's configuration schema, every binding path (it must already exist in `config`) and column, the transform pin's contract against the inputs (a DRAFT pin is accepted), the test cases. The arguments ARE the document's keys; the 094 new-root confirmation applies.
 
 ```json
 {
   "name": "visualizations_create",
-  "description": "Create a visualization: version 1 lands as a DRAFT (a human releases it; no tool releases anything). The document is validated in FULL at save — the renderer's configuration schema, every binding path (it must already exist in config) and column, the script pin's contract against the inputs, the test cases — and a refusal names every failing path. A NEW top-level folder is refused until you confirm it: reuse an existing root, or ask the person first and then pass confirm_new_root: true. Returns the id the other tools take and the body_hash an update needs.",
+  "description": "Create a visualization: version 1 lands as a DRAFT (a human releases it; no tool releases anything). The document is validated in FULL at save — the renderer's configuration schema, every binding path (it must already exist in config) and column, the transform pin's contract against the inputs, the test cases — and a refusal names every failing path. A NEW top-level folder is refused until you confirm it: reuse an existing root, or ask the person first and then pass confirm_new_root: true. Returns the id the other tools take and the body_hash an update needs.",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -2025,7 +2025,7 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
         "type": "object",
         "description": "Named input contracts: {<input>: {columns: [{name, type, nullable}]}}; type is a LogicalType (STRING, INTEGER, DECIMAL, DATE, TIMESTAMP, BOOLEAN, ...). At most 8 inputs, 256 columns each."
       },
-      "script": {
+      "transform": {
         "type": "object",
         "description": "Optional: {template: {name, version}, inputs: {<contract input>: <visualization input>}} — a pinned SCRIPT template whose declared input columns equal the named inputs' columns. Absent: the renderer binds one input directly."
       },
@@ -2035,7 +2035,7 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
       },
       "bindings": {
         "type": "object",
-        "description": "Optional: {<path into config, e.g. data[0].y>: <column of the script's output, or of the single input>}. Each path must already exist in config; its value is replaced by the column's values at render."
+        "description": "Optional: {<path into config, e.g. data[0].y>: <column of the transform's output, or of the single input>}. Each path must already exist in config; its value is replaced by the column's values at render."
       },
       "presentation": {
         "type": "object",
@@ -2105,7 +2105,7 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
         "type": "object",
         "description": "Named input contracts: {<input>: {columns: [{name, type, nullable}]}}; type is a LogicalType (STRING, INTEGER, DECIMAL, DATE, TIMESTAMP, BOOLEAN, ...). At most 8 inputs, 256 columns each."
       },
-      "script": {
+      "transform": {
         "type": "object",
         "description": "Optional: {template: {name, version}, inputs: {<contract input>: <visualization input>}} — a pinned SCRIPT template whose declared input columns equal the named inputs' columns. Absent: the renderer binds one input directly."
       },
@@ -2115,7 +2115,7 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
       },
       "bindings": {
         "type": "object",
-        "description": "Optional: {<path into config, e.g. data[0].y>: <column of the script's output, or of the single input>}. Each path must already exist in config; its value is replaced by the column's values at render."
+        "description": "Optional: {<path into config, e.g. data[0].y>: <column of the transform's output, or of the single input>}. Each path must already exist in config; its value is replaced by the column's values at render."
       },
       "presentation": {
         "type": "object",

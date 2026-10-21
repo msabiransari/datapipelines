@@ -24,7 +24,7 @@ data class PreviewCase(
     val name: String,
     /** The case's fixtures exactly as saved — input name to rows. */
     val fixtures: Map<String, List<ObjectNode>>,
-    /** The rows a live refresh would deliver for this case (the script's output, or the single input's rows); null when refused. */
+    /** The rows a live refresh would deliver for this case (the transform's output, or the single input's rows); null when refused. */
     val rows: List<Map<String, Any?>>?,
     /** The evaluator's own catalogued refusal when the fixtures did not evaluate; null otherwise. */
     val refusal: FixtureEvaluation.Refused?,

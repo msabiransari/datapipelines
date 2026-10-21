@@ -10,7 +10,7 @@ import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import java.util.UUID
 
-/** Complete mechanical reports pin renderer typing and the script output's presence/nullability contract. */
+/** Complete mechanical reports pin renderer typing and the transform output's presence/nullability contract. */
 class VisualizationBindingContractTest {
     private val workspace = UUID.randomUUID()
 
@@ -60,7 +60,7 @@ class VisualizationBindingContractTest {
     }
 
     @Test
-    fun `nullable script output null passes at Plotly y and z while absent keys fail precisely`() {
+    fun `nullable transform output null passes at Plotly y and z while absent keys fail precisely`() {
         listOf("data[0].y", "data[0].z[0]").forEach { path ->
             assertPassing(run(RendererKind.PLOTLY, path, LogicalType.DECIMAL, nullable = true, row = mapOf("amount" to null)))
             val missing = run(RendererKind.PLOTLY, path, LogicalType.DECIMAL, nullable = true, row = emptyMap())
@@ -71,7 +71,7 @@ class VisualizationBindingContractTest {
     }
 
     @Test
-    fun `nonnullable script output null is an invalid fixture rather than a missing binding`() {
+    fun `nonnullable transform output null is an invalid fixture rather than a missing binding`() {
         val report = run(RendererKind.PLOTLY, "data[0].y", LogicalType.DECIMAL, row = mapOf("amount" to null))
         assertFailure(report, "fixtures", VisualizationErrorCodes.TEST_CASE_INVALID, "tests.cases[0].rows[0].amount")
         report.failures.single().message shouldBe "The column is not nullable."

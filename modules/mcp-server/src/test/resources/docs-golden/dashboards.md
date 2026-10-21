@@ -31,7 +31,7 @@ Build in this order — each step's refusal names the path to fix.
    your visualization inputs against that record at save, so run the draft before handing back for release.
 3. **Create the visualization** with `visualizations_create`: `renderer`, `inputs` (the columns you will
    feed it), `config` with every path you bind already present (`"x": []`), `bindings` from a path to a
-   column of the single input (or of the script's output), and at least one test case. It lands as a
+   column of the single input (or of the transform's output), and at least one test case. It lands as a
    DRAFT.
 4. **Create the dashboard** with `dashboards_create`: `sources`, one `visualizations` occurrence per chart
    with every input mapped to a source, and a `layout.grid` that places each occurrence exactly once. A
@@ -98,7 +98,7 @@ real renderer before you hand the work over:
 - `visualization.validation.body_invalid` / `dashboard.validation.body_invalid` — the document's shape:
   an unknown key, a wrong JSON type, a missing key, or a collection over its bound. `details.path` names it.
 - `visualization.validation.binding_unbound` — a binding path that is not in `config`, or a column the
-  input (or the script's output) does not have.
+  input (or the transform's output) does not have.
 - `visualization.validation.config_schema_invalid` — the renderer's configuration (for plotly: a
   non-empty `data` array of supported trace types).
 - `dashboard.validation.input_unbound` — a pinned visualization input no source feeds.

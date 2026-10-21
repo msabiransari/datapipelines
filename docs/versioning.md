@@ -227,7 +227,7 @@ the 142 cascade with consent), and release re-runs the record's §4 source valid
 the pins as they are now. #10 adds the fourth and fifth families — **visualizations** and
 **dashboards** ([Dashboards §3](dashboards.md), V42: the parameter-set shape twice) — and every
 row reads with `visualization.*` / `dashboard.*` codes for them. A visualization releases only
-with at least one test case, its script pin RELEASED (or the 142 cascade with consent) and
+with at least one test case, its transform pin RELEASED (or the 142 cascade with consent) and
 the D56 evidence gate passing (the tests lane's; until it is installed every visualization
 release is refused); a DRAFT visualization version pinned by a LIVE dashboard version is never
 purged, nor a pinned release discarded (`visualization.version.pinned` — graph rule 1). A
@@ -244,7 +244,7 @@ Three graph rules cover every refusal:
    sources pin the version** (`details.referencing_dashboards`, beside `pinned_by`); for
    templates the existing `template.in_use` IS the in-use refusal — no `template.version.pinned`
    is added — and it names pipelines (`pinned_by`), parameter sets (`referencing_parameter_sets`)
-   and, since #320, visualizations whose `script.template` pins the version
+   and, since #320, visualizations whose `transform.template` pins the version
    (`referencing_visualizations`); `parameter.in_use` (#320) for a parameter set a dashboard pins;
    `visualization.version.pinned` for a visualization a dashboard pins. Every arrow, verb and
    details key is [§3.5.3](#353-the-reverse-arrows-into-other-families-320).
@@ -406,7 +406,7 @@ reach them through a port `application` implements — no module's SQL names ano
 
 | Arrow (dependent → pinned) | Refused verbs | Code | Details naming the dependents |
 |---|---|---|---|
-| visualization `script.template` → template | draft purge, version purge, discard, entity purge, the exclusive-draft offer | `template.in_use` | `referencing_visualizations` (names), beside `pinned_by` and `referencing_parameter_sets` |
+| visualization `transform.template` → template | draft purge, version purge, discard, entity purge, the exclusive-draft offer | `template.in_use` | `referencing_visualizations` (names), beside `pinned_by` and `referencing_parameter_sets` |
 | dashboard `sources[].pipeline` → pipeline version | draft purge, version purge, discard, entity purge | `pipeline.version.pinned` | `referencing_dashboards`: `[{dashboard, version, status}]`, beside `pinned_by` |
 | dashboard `parameter_set` → parameter-set release | draft purge, version purge, discard, entity purge | `parameter.in_use` | `pinned_by`: `[{dashboard, version, status}]`, `id`, `version` (absent for an entity purge) |
 | dashboard `visualizations[].visualization` → visualization | draft purge, version purge, discard, entity purge | `visualization.version.pinned` (L1a) | `pinned_by`: `["dashboard@version"]` |
@@ -1161,7 +1161,7 @@ Per promotion batch, push in topological order:
 
 1. **Template versions** referenced by any pushed pipeline (direct node refs plus the
    transitive `imports_json` closure — the export bundle already computes this set), plus —
-   since #10 L1c — the script pins of any pushed visualization.
+   since #10 L1c — the transform pins of any pushed visualization.
 2. **Child pipelines** referenced by PIPELINE nodes (recursively — the export bundle does
    NOT include these today; promotion computes the closure itself).
 3. The **pipelines**, children before parents.

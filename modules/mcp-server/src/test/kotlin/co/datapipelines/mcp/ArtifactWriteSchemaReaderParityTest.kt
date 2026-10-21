@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test
  * `ArtifactTools.document` keeps only the reader's `DOCUMENT_KEYS` from a call's arguments, and the schemas declare
  * `"additionalProperties": false`: a property the schema names that the reader does not is dropped without a word,
  * and a reader key the schema omits is one no schema-following agent can send. The script-node rename renamed the
- * visualization block's property to `script` while the reader kept `transform` (owner ruling 2026-10-20: the block's
+ * visualization block's property to `script` while the reader kept the block's own key (owner ruling 2026-10-20: the
  * key stays), so a template pin sent the way the schema said was silently lost. The schema's properties minus each
  * tool's own arguments — the 094 confirmation on a create, the id and hash precondition on an update — must equal
  * the reader's keys.

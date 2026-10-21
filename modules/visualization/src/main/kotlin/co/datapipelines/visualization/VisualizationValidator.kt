@@ -18,7 +18,7 @@ import java.util.UUID
  *   accepted here and must be released at the visualization's release (the 142 cascade — §11.4);
  * - `config_schema_invalid` — the renderer's schema, through [RendererConfigValidator];
  * - `binding_unbound` — a binding path outside the [BindingPath] grammar or not resolving in `config`, or a
- *   column not in the script's OUTPUT contract (or, with no transform, the one input's columns);
+ *   column not in the transform's OUTPUT contract (or, with no transform, the one input's columns);
  * - `test_case_invalid` — a case without a name or a duplicate, fixtures that miss an input or name an unknown
  *   one, a row column outside the input's contract or a null where the column is not nullable, a case with no
  *   assertion, an assertion missing its argument or carrying one its kind does not take.

@@ -56,7 +56,7 @@ class WebVisualizationFixtureEvaluator(
             @Suppress("UNCHECKED_CAST") // the type gate has already shaped the output; the cast only labels it
             val rows =
                 evaluation.output as? List<Map<String, Any?>>
-                    ?: return FixtureEvaluation.Refused(OUTPUT_SHAPE_REFUSED, "The script's output is not a table of rows.")
+                    ?: return FixtureEvaluation.Refused(OUTPUT_SHAPE_REFUSED, "The transform's output is not a table of rows.")
             FixtureEvaluation.Rows(rows)
         } catch (e: DatapipelinesException) {
             FixtureEvaluation.Refused(e.code, e.message ?: "The fixture run refused.")

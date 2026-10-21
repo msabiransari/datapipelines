@@ -380,7 +380,7 @@ class VisualizationUiRenderTest {
     }
 
     @Test
-    fun `a released script pin needs no consent`() {
+    fun `a released transform pin needs no consent`() {
         val dlg =
             release(
                 pin = VisualizationLifecycleDialogModel.PinView("acme/templates/t", 2, PipelineVersionStatus.RELEASED),

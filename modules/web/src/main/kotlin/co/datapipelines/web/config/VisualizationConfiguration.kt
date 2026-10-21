@@ -48,7 +48,7 @@ import org.springframework.transaction.support.TransactionTemplate
  * - the pipeline facts are [PipelineReleaseFactsReader] over the save-time [PipelineResolver], the published-
  *   endpoint [ReadOnlyPipelineRule] and the registry's script contract;
  * - the set facts read the one [ParameterSetRepository]; the visualization pins are the repository's own;
- * - the release cascade releases a DRAFT script pin through the template's OWN [TemplateReleaser], and both
+ * - the release cascade releases a DRAFT transform pin through the template's OWN [TemplateReleaser], and both
  *   services run their atomic work in a [TransactionTemplate] over the metadata transaction manager.
  *
  * The release gate (#352): the factory consumes the `ReleaseEvidence` bean [VisualizationTestConfiguration]
