@@ -17,6 +17,9 @@ import kotlin.text.RegexOption.IGNORE_CASE
  *   - matches one of the GLOBAL exemptions (the same line shape everywhere in the tree), nor
  *   - lives in a file matched by a [PATH_EXEMPTIONS] entry whose per-line regex admits it.
  *
+ * CSS is scanned too: only CSS property declarations, transition values and
+ * named property comments are admitted there, alongside global exemptions.
+ *
  * Each entry carries its reason. An entry that no longer matches any line is a STALE entry and
  * fails the suite — the allowlist cannot quietly grow hairs that nothing justifies any more.
  * A scanned-file floor and a matcher self-check keep the scan itself honest.
@@ -51,6 +54,7 @@ class ScriptVocabularyGuardTest {
     @Test
     fun `no line outside the allowlist carries the old noun`() {
         val scanned = scanTargets()
+        println("Vocabulary scan: ${scanned.size} files (floor $SCAN_FLOOR)")
         if (scanned.size < SCAN_FLOOR) {
             fail("the scan saw only ${scanned.size} files (floor $SCAN_FLOOR) — the walk is broken")
         }
@@ -130,7 +134,7 @@ class ScriptVocabularyGuardTest {
 
     private fun scanTargets(): List<File> {
         val extensions =
-            setOf("kt", "kts", "java", "md", "html", "js", "mjs", "json", "yml", "yaml", "sql", "properties", "toml", "sh", "txt", "xml")
+            setOf("kt", "kts", "java", "md", "html", "js", "mjs", "json", "yml", "yaml", "sql", "properties", "toml", "sh", "txt", "xml", "css")
         val root = repoRoot()
         return trackedPaths(root)
             .filter { p ->
@@ -140,8 +144,7 @@ class ScriptVocabularyGuardTest {
                     !p.startsWith("static/vendor/") &&
                     !p.startsWith("modules/web/src/main/resources/static/vendor/") &&
                     !p.startsWith("scripts/sample-data") &&
-                    !p.contains("/overview/") &&
-                    !p.endsWith(".css")
+                    !p.contains("/overview/")
             }.map { File(root, it) }
             // a tracked path deleted in the working tree has nothing to read
             .filter { it.isFile && it.length() < 4_000_000 }
@@ -204,6 +207,22 @@ class ScriptVocabularyGuardTest {
                     Regex("ui/ScriptVocabularyGuardTest\\.kt$"),
                     Regex("transform", setOf(IGNORE_CASE)),
                     "the guard itself names every sense it protects",
+                ),
+                // Match the whole line so a property cannot hide a retired identifier beside it.
+                Triple(
+                    Regex("\\.css$"),
+                    Regex(
+                        "^(?:(?!transform).|(?<![\\w.-])(?:(?:text-)?transform\\s*:|" +
+                            "transform-(?:origin|box|style)\\s*:|" +
+                            "transition(?:-property)?\\s*:(?:(?!transform)[^;])*(?<![\\w-])transform(?![\\w-])|" +
+                            "will-change\\s*:(?:(?!transform)[^;])*(?<![\\w-])transform(?![\\w-])|transform/opacity\\b)|" +
+                            "^\\s*transform(?=\\s+var\\(--(?:duration|site-motion)-)|" +
+                            "transform anywhere; the word itself carries the state, never colour alone\\)\\. \\*/|" +
+                            "TRANSFORM and OPACITY only: neither is laid|" +
+                            "no ancestor's overflow, transform or z-index can reach it\\.)*$",
+                        setOf(IGNORE_CASE),
+                    ),
+                    "the CSS transform property (#663)",
                 ),
                 Triple(
                     Regex("^docs/dashboards\\.md$"),
@@ -440,9 +459,22 @@ class ScriptVocabularyGuardTest {
                 ),
             )
 
-        /** Restored kept-sense lines (#640) a path entry must admit — path to line. */
+        /** Restored kept-sense lines (#640, #663) a path entry must admit — path to line. */
         private val ADMITTED =
             listOf(
+                "guard.css" to "transform: translateX(0);",
+                "guard.css" to "text-transform: uppercase;",
+                "guard.css" to "    transform var(--duration-fast) var(--ease-out);",
+                "guard.css" to "/* TRANSFORM and OPACITY only: neither is laid",
+                "guard.css" to "   transform anywhere; the word itself carries the state, never colour alone). */",
+                "guard.css" to " * no ancestor's overflow, transform or z-index can reach it. Where the Popover API is",
+                "guard.css" to "transition: transform 120ms ease;",
+                "guard.css" to "will-change: transform;",
+                "guard.css" to "/* transform/opacity only */",
+                "guard.css" to "/* Transform/opacity only */",
+                "guard.css" to "transform-origin: center; transform-box: fill-box; transform-style: preserve-3d;",
+                "guard.css" to "transition-property: opacity, transform;",
+                "guard.css" to "@keyframes slide { to { transform: translateX(0); } }",
                 "docs/mcp-server.md" to "      \"transform\": {",
                 "docs/mcp-server.md" to "the WORKING version's full document (renderer, inputs, transform, config, bindings)",
                 "modules/mcp-server/src/main/kotlin/co/datapipelines/mcp/VisualizationsTools.kt" to
@@ -464,6 +496,21 @@ class ScriptVocabularyGuardTest {
         /** The node noun in those same files stays red: the path entries admit the block, not the word. */
         private val NOT_ADMITTED =
             listOf(
+                "guard.css" to ".type-transform {",
+                "guard.css" to "--type-transform: …",
+                "guard.css" to "[data-transform]",
+                "guard.css" to ".transform-face {",
+                "guard.css" to ".transform-node {",
+                "guard.css" to ".type-transform { transform: translateX(0); }",
+                "guard.css" to "--type-transform: translateX(0);",
+                "guard.css" to "transition: transform-face 120ms ease;",
+                "guard.css" to "    transform var(--duration-fast) var(--type-transform);",
+                "guard.css" to "/* transform var(--duration-fast) var(--ease-out); */",
+                "guard.css" to "will-change: data-transform;",
+                "guard.css" to ".transform-origin { color: inherit; }",
+                "guard.css" to "transform: var(--type-transform);",
+                "guard.css" to "/* transform/opacity only; transform node */",
+                "guard.js" to "transform: translateX(0);",
                 "docs/mcp-server.md" to "and so is a TRANSFORM node (use templates_evaluate)",
                 "modules/mcp-server/src/main/kotlin/co/datapipelines/mcp/VisualizationsTools.kt" to "a pinned TRANSFORM template",
                 "docs/auth.md" to "`GET /partials/templates/transform-face`",
