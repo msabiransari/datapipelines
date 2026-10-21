@@ -358,7 +358,7 @@ class RoleWalkE2eTest {
             }
         // No exemptions: each governed handler must have a literal in an existing catalog row.
         val missing =
-            handlers
+            registrations
                 .filterNot { it.public || it.pattern.startsWith(PROMOTION_RECEIVER_PREFIX) }
                 .filterNot { routeKey("${it.method} ${it.pattern}") in documented }
                 .map { "${it.method} ${it.pattern} ${it.handler} (@RequiredScope ${it.permission})" }
