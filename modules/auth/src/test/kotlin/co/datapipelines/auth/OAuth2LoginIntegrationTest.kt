@@ -143,10 +143,10 @@ class OAuth2LoginIntegrationTest {
         setCookieNames.toSet() shouldBe setOf(AUTHORIZATION_REQUEST_COOKIE, "dp_session")
         jar.keys shouldBe setOf("dp_session")
 
-        // The provider's access token is not retained anywhere: no authorized-client repository
-        // stores it, and Boot's in-memory client service never received it.
-        authorizedClientRepository shouldBeSameInstanceAs NoStoreAuthorizedClientRepository
+        // The provider's access token is not retained anywhere: Boot's in-memory client service
+        // never received it (the effect), because the wired repository stores nothing (the cause).
         authorizedClientService.loadAuthorizedClient<OAuth2AuthorizedClient>("github", "4242").shouldBeNull()
+        authorizedClientRepository shouldBeSameInstanceAs NoStoreAuthorizedClientRepository
 
         println("EVIDENCE-655 stub requests:\n" + stub.recorded.joinToString("\n") { "  $it" })
     }
