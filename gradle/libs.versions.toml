@@ -191,6 +191,15 @@ jsoup = "1.23.2"
 # review: small upstream project (99 stars, 17 open issues, last push 2026-07-08 at
 # dispatch) — recorded on purpose in modules/scripting/README.md too.
 jsonata = "0.9.10"
+# graalvm — the JavaScript engine (transform-nodes design §4.4/D-T16, #8 lane 8a): the GraalJS
+# polyglot isolate on Community. Maven Central <release>25.4.4.1.1</release> for
+# org.graalvm.polyglot:polyglot, verified against repo1.maven.org maven-metadata.xml on
+# 2026-10-21 (release 2026-09-22; 25.3.4.1 is the previous line). Licences: polyglot, the
+# sdk and truffle-api UPL 1.0; the Community isolate binaries MIT + UPL 1.0 (read from the
+# linux-amd64 pom). Community isolate: the jar carries the API and the two bridge deps, never a
+# binary; the image fetches one per platform, SHA-256 pinned (Dockerfile GRAALJS_* ARGs,
+# guarded by DockerfileGraalJsPinTest); the tests get all four through the aggregator pom.
+graalvm = "25.4.4.1.1"
 # db-scheduler — the scheduler's durable queue (scheduler design revision §1/§2.2, #9 lane 1).
 # Maven Central <release>16.12.0</release> for db-scheduler AND
 # db-scheduler-spring-boot-starter, verified against repo1.maven.org maven-metadata.xml on
@@ -291,6 +300,14 @@ jjwt-jackson = { module = "io.jsonwebtoken:jjwt-jackson", version.ref = "jjwt" }
 # --- Script engine (#7 lane 7a; NOT BOM-managed) --------------------
 # Rationale and bus-factor note are at the `jsonata` version pin.
 jsonata = { module = "com.dashjoin:jsonata", version.ref = "jsonata" }
+
+# --- JavaScript engine (#8 lane 8a; NOT BOM-managed) ---------------------
+# Rationale and licences are at the `graalvm` version pin. Only modules/scripting declares them;
+# the isolate aggregator (a pom pulling the four platform binaries) is TEST runtime only.
+graalvm-polyglot = { module = "org.graalvm.polyglot:polyglot", version.ref = "graalvm" }
+graalvm-nativebridge = { module = "org.graalvm.sdk:nativebridge", version.ref = "graalvm" }
+graalvm-truffle-api = { module = "org.graalvm.truffle:truffle-api", version.ref = "graalvm" }
+graalvm-js-isolate-community = { module = "org.graalvm.polyglot:js-isolate-community", version.ref = "graalvm" }
 
 # --- Scheduling (#9; NOT BOM-managed) ------------------------------------------
 # Rationale at the `db-scheduler` version pin. Only modules/scheduler declares them.

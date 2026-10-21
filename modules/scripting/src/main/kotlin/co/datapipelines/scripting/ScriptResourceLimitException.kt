@@ -14,9 +14,11 @@ package co.datapipelines.scripting
  * before the library's recursive parser can overflow the stack, and any residual
  * stack overflow at the compile/evaluate boundary becomes this refusal rather than
  * an Error escaping the seam.
- * [Kind.HEAP] and [Kind.STATEMENTS] name limits no in-process
- * engine can enforce (`EngineCapabilities`); the kinds exist so the round-two isolate
- * engine reuses this exception unchanged.
+ * [Kind.HEAP] and [Kind.STATEMENTS] name limits the JSONata engine cannot enforce
+ * in-process (`EngineCapabilities`); the JavaScript isolate enforces both (#8). The
+ * JavaScript engine adds three: [Kind.OUTPUT] (its console stream's size cap),
+ * [Kind.INPUT_BYTES] (the serialized input, refused before the sandbox exists) and
+ * [Kind.RESULT_BYTES] (the serialized result, measured on the way out).
  */
 class ScriptResourceLimitException(
     val kind: Kind,
@@ -27,7 +29,7 @@ class ScriptResourceLimitException(
         mapOf("kind" to kind.name),
     ) {
     /** Which declared limit fired. */
-    enum class Kind { DEPTH, HEAP, STATEMENTS }
+    enum class Kind { DEPTH, HEAP, STATEMENTS, OUTPUT, INPUT_BYTES, RESULT_BYTES }
 
     companion object {
         /** pipeline-contract §13.18 — the resource-limit row (record §7). */

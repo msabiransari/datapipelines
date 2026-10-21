@@ -187,9 +187,33 @@ class TypeGateTest {
             )
             add(
                 Case(
-                    "decimal string is wrong type - numbers only",
+                    "a decimal string is the exact value it names (#8: JavaScript's spelling of a lossy DECIMAL)",
                     column("d", LogicalType.DECIMAL, 12, 2),
                     "12.34",
+                    stored(BigDecimal("12.34")),
+                ),
+            )
+            add(
+                Case(
+                    "a 20-digit decimal string keeps every digit, then rounds half-even to s",
+                    column("d", LogicalType.DECIMAL, 24, 2),
+                    "12345678901234567890.125",
+                    stored(BigDecimal("12345678901234567890.12")),
+                ),
+            )
+            add(
+                Case(
+                    "a decimal string past p is precision lost, like a number",
+                    column("d", LogicalType.DECIMAL, 3, 2),
+                    "1234.5",
+                    refused(GateRefusal.PrecisionLost::class.java),
+                ),
+            )
+            add(
+                Case(
+                    "a non-decimal string stays the wrong type",
+                    column("d", LogicalType.DECIMAL, 12, 2),
+                    "12.34 EUR",
                     refused(GateRefusal.ValueTypeMismatch::class.java),
                 ),
             )
@@ -201,6 +225,14 @@ class TypeGateTest {
                     column("d", LogicalType.DECIMAL, 15),
                     0.30000000000000004,
                     stored(0.30000000000000004),
+                ),
+            )
+            add(
+                Case(
+                    "scale-less decimal string stored as the exact BigDecimal it names",
+                    column("d", LogicalType.DECIMAL, 15),
+                    "0.1000000000000000000001",
+                    stored(BigDecimal("0.1000000000000000000001")),
                 ),
             )
 
@@ -399,10 +431,10 @@ class TypeGateTest {
     }
 
     @Test
-    fun `the table is not vacuous - 42 cases, every refusal kind covered both ways`() {
-        cases.size shouldBe 42
-        cases.count { it.expected is Expected.Stored } shouldBe 26
-        cases.count { it.expected is Expected.Refused } shouldBe 16
+    fun `the table is not vacuous - 46 cases, every refusal kind covered both ways`() {
+        cases.size shouldBe 46
+        cases.count { it.expected is Expected.Stored } shouldBe 29
+        cases.count { it.expected is Expected.Refused } shouldBe 17
         cases.mapNotNull { (it.expected as? Expected.Refused)?.kind }.toSet() shouldBe
             setOf(
                 GateRefusal.ValueTypeMismatch::class.java,
