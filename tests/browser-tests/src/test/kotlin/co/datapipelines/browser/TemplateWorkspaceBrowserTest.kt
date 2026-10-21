@@ -168,8 +168,10 @@ class TemplateWorkspaceBrowserTest : BrowserSuite() {
         page.locator("#tab-json-btn").click()
         page.locator("#tw-tab-source").click()
 
-        // Leave through the same in-shell door as an artifact link. Both Back legs must
-        // HIT the cache, preserving this document while a new root needs its own listener.
+        // Leave through the same in-shell door as an artifact link. The Back leg onto this
+        // template must HIT the cache, preserving this document while a new root needs its own
+        // listener; the leg onto the pipelines catalog fetches it, since a catalog is never
+        // cached (#591, hx-history="false").
         follow("/pipelines")
         page.waitForSelector("#pipeline-list-wrapper")
         // Arrive on Render: selecting it below is inert, so these Back legs cross pages.
@@ -191,8 +193,11 @@ class TemplateWorkspaceBrowserTest : BrowserSuite() {
         page.waitForURL("**/templates/$name?tab=source")
         page.waitForSelector(".tw-root")
         recordHistory("cached-mount")
-        page.evaluate("() => window.__templateCacheHits") shouldBe 2
-        restoreRequests shouldBe emptyList()
+        page.evaluate("() => window.__templateCacheHits") shouldBe 1
+        withClue("the only restore fetch is the catalog's: $restoreRequests") {
+            restoreRequests.size shouldBe 1
+            restoreRequests.single() shouldContain " GET $baseUrl/pipelines "
+        }
         page.evaluate("async () => { const assets = await import('/js/page-assets.mjs'); await assets.mountPage(); }")
         page.evaluate("() => window.__templateRail === document.getElementById('app-rail')") shouldBe true
         page.locator("#tw-tab-overview").click()

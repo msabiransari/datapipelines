@@ -88,7 +88,7 @@ tasks.named<BootJar>("bootJar") {
     archiveFileName.set("datapipelines-app.jar")
     // PropertiesLauncher is the only launcher that honours loader.path.
     // At runtime: java -Dloader.path=lib -jar datapipelines-app.jar
-    //         or: LOADER_PATH=lib (the deployment image sets this).
+    //         or: LOADER_PATH=/app/lib (the deployment image sets this, absolute: it has no WORKDIR).
     manifest {
         attributes("Main-Class" to "org.springframework.boot.loader.launch.PropertiesLauncher")
     }

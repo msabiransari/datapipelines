@@ -18,6 +18,7 @@ import co.datapipelines.templates.TemplateValidationException
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.currentPrincipal
+import jakarta.servlet.http.HttpServletResponse
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.context.SecurityContextHolder
@@ -59,25 +60,39 @@ class TemplatePartialController(
     @RequiredScope(Permission.TEMPLATE_READ)
     fun list(
         model: Model,
+        response: HttpServletResponse,
         @RequestParam(required = false) q: String?,
         @RequestParam(required = false) dialect: String?,
         @RequestParam(required = false) type: String?,
         @RequestParam(required = false) offset: Int?,
         @RequestParam(required = false) lifecycle: String?,
     ): String {
+        val bucket = CatalogLifecycle.parse(lifecycle, CatalogLifecycle.TEMPLATES)
+        val parsedDialect = TemplateFilters.dialect(dialect)
+        val parsedType = TemplateFilters.type(type)
         val principal = currentPrincipal()
         TemplateFilters.fill(model, dialect, type)
         model.addAttribute("q", q ?: "")
         RoleModel.stamp(model)
+        // #591: the dialect and type ride as the PARSED values' wire forms — an unknown one
+        // filters nothing, so the URL leaves it out like the list does.
+        CatalogUrl.replace(
+            response,
+            CatalogUrl.TEMPLATES,
+            q,
+            bucket,
+            offset,
+            listOf("dialect" to parsedDialect?.wire, "type" to parsedType?.wire),
+        )
         return browse.fillSearch(
             model,
             principal.requireWorkspace().id,
             lens.viewFor(principal),
             q = q?.trim()?.takeIf { it.isNotEmpty() },
-            dialect = TemplateFilters.dialect(dialect),
-            type = TemplateFilters.type(type),
+            dialect = parsedDialect,
+            type = parsedType,
             offset = offset ?: 0,
-            lifecycle = CatalogLifecycle.parse(lifecycle, CatalogLifecycle.TEMPLATES),
+            lifecycle = bucket,
         )
     }
 
