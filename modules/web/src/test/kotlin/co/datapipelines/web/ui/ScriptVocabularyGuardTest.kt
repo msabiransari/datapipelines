@@ -134,7 +134,25 @@ class ScriptVocabularyGuardTest {
 
     private fun scanTargets(): List<File> {
         val extensions =
-            setOf("kt", "kts", "java", "md", "html", "js", "mjs", "json", "yml", "yaml", "sql", "properties", "toml", "sh", "txt", "xml", "css")
+            setOf(
+                "kt",
+                "kts",
+                "java",
+                "md",
+                "html",
+                "js",
+                "mjs",
+                "json",
+                "yml",
+                "yaml",
+                "sql",
+                "properties",
+                "toml",
+                "sh",
+                "txt",
+                "xml",
+                "css",
+            )
         val root = repoRoot()
         return trackedPaths(root)
             .filter { p ->
@@ -209,6 +227,7 @@ class ScriptVocabularyGuardTest {
                     "the guard itself names every sense it protects",
                 ),
                 // Match the whole line so a property cannot hide a retired identifier beside it.
+                // Include text-transform and transition continuations; pin existing prose phrase by phrase.
                 Triple(
                     Regex("\\.css$"),
                     Regex(
