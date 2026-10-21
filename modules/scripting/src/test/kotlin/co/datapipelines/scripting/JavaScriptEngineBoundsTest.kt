@@ -1,5 +1,6 @@
 package co.datapipelines.scripting
 
+import co.datapipelines.scripting.ScriptResourceLimitException.Kind
 import co.datapipelines.scripting.ScriptingTestSupport.js
 import co.datapipelines.scripting.ScriptingTestSupport.limits
 import co.datapipelines.scripting.ScriptingTestSupport.refusal
@@ -95,9 +96,47 @@ class JavaScriptEngineBoundsTest {
 
     @Test
     fun `a per-call limit lowers the runtime's ceiling, never raises it`() {
-        val engine = JavaScriptEngine(JavaScriptRuntime(JavaScriptRuntimeOptions(maxStatements = 10_000)))
-        val script = engine.compile("let i = 0; for (;;) { i++; }")
-        refusal<ScriptResourceLimitException> { engine.evaluate(script, null, limits(maxStatements = 1_000_000_000)) }.kind shouldBe
-            ScriptResourceLimitException.Kind.STATEMENTS
+        // Each per-call value is one the body would live under if it won: the wall clock, not the
+        // statement budget, would stop the spin; 64 MiB of strings fits 256 MiB; 2 000 characters
+        // fit a megabyte. Only the runtime's ceiling refuses them.
+        val ceilings =
+            JavaScriptRuntimeOptions(maxStatements = 10_000, maxHeapBytes = 16 * MIB, maxInputBytes = 1000, maxResultBytes = 1000)
+        val engine = JavaScriptEngine(JavaScriptRuntime(ceilings))
+        val raised = limits(Duration.ofSeconds(3), maxStatements = Long.MAX_VALUE, maxHeapBytes = 256 * MIB)
+        val spin = engine.compile(SPIN)
+        val hold = engine.compile(HOLD_64_MIB)
+        val echo = engine.compile("return input;")
+        val wide = limits(maxInputBytes = MIB, maxResultBytes = MIB)
+
+        withClue("statements") {
+            refusal<ScriptResourceLimitException> { engine.evaluate(spin, null, raised) }.kind shouldBe Kind.STATEMENTS
+        }
+        withClue("heap") { refusal<ScriptResourceLimitException> { engine.evaluate(hold, null, raised) }.kind shouldBe Kind.HEAP }
+        withClue("input") {
+            refusal<ScriptResourceLimitException> { engine.evaluate(echo, "x".repeat(2000), wide) }.kind shouldBe Kind.INPUT_BYTES
+        }
+        withClue("result") {
+            val result = engine.compile("return 'x'.repeat(2000);")
+            refusal<ScriptResourceLimitException> { engine.evaluate(result, null, wide) }.kind shouldBe Kind.RESULT_BYTES
+        }
+    }
+
+    @Test
+    fun `the ceilings' witnesses complete under a raised runtime - the refusals above are the ceilings'`() {
+        // The same bodies under the raised values as the RUNTIME's own: the non-vacuity half.
+        val engine = JavaScriptEngine(JavaScriptRuntime(JavaScriptRuntimeOptions(maxHeapBytes = 256 * MIB, maxStatements = Long.MAX_VALUE)))
+        engine.evaluate(engine.compile(HOLD_64_MIB), null, limits(maxHeapBytes = 256 * MIB)) shouldBe 64L
+        engine.evaluate(engine.compile("return input.length;"), "x".repeat(2000), limits()) shouldBe 2000L
+        refusal<ScriptTimeoutException> {
+            engine.evaluate(engine.compile(SPIN), null, limits(Duration.ofMillis(500), maxStatements = Long.MAX_VALUE))
+        }
+    }
+
+    private companion object {
+        const val MIB = 1024L * 1024
+        const val SPIN = "let i = 0; for (;;) { i++; }"
+
+        /** 64 one-MiB strings, all kept: over a 16 MiB heap, under 256 MiB. */
+        const val HOLD_64_MIB = "const a = []; for (let i = 0; i < 64; i++) { a.push('x'.repeat(1 << 20) + i); } return a.length;"
     }
 }
