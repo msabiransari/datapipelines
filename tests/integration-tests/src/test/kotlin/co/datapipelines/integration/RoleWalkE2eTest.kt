@@ -342,7 +342,8 @@ class RoleWalkE2eTest {
         // A mapping without a verb condition serves every verb (§7.6 lists all five),
         // although EntryDiscovery records it once as GET for the HTTP walk.
         val registrations = handlers.flatMap { h -> h.verbs.map { h.copy(method = it) } }
-        val registered = registrations.map { routeKey("${it.method} ${it.pattern}") }.toSet()
+        val rawRegistered = registrations.map { "${it.method} ${it.pattern}" }.toSet()
+        val registered = rawRegistered.map(::routeKey).toSet()
         val documented = literals.map { routeKey(it.second) }.toSet()
         val phantom =
             literals.filterNot { routeKey(it.second) in registered }.map { (permission, literal) ->
@@ -363,7 +364,11 @@ class RoleWalkE2eTest {
                 .map { "${it.method} ${it.pattern} ${it.handler} (@RequiredScope ${it.permission})" }
                 .sorted()
         val normalised = literals.count { routeKey(it.second) != it.second }
-        println("event=rolewalk.literals count=${literals.size} normalised=$normalised missing=${missing.size}")
+        val requiredNormalisation = literals.count { it.second !in rawRegistered && routeKey(it.second) in registered }
+        println(
+            "event=rolewalk.literals count=${literals.size} normalised=$normalised " +
+                "requiredNormalisation=$requiredNormalisation missing=${missing.size}",
+        )
         withClue("auth.md §7.6 route literals without a registered route\n") { phantom.joinToString("\n") shouldBe "" }
         withClue("non-public registered routes without an auth.md §7.6 literal\n") { missing.joinToString("\n") shouldBe "" }
         literals.size shouldBeGreaterThanOrEqual MINIMUM_ROUTE_LITERALS
