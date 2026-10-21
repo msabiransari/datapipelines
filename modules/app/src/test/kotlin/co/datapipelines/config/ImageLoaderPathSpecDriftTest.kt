@@ -116,8 +116,7 @@ class ImageLoaderPathSpecDriftTest {
         return dir
     }
 
-    private fun repoFile(relative: String): File =
-        File(repoRoot(), relative).also { check(it.isFile) { "missing $relative" } }
+    private fun repoFile(relative: String): File = File(repoRoot(), relative).also { check(it.isFile) { "missing $relative" } }
 
     private companion object {
         const val EXPECTED = "/app/lib"
