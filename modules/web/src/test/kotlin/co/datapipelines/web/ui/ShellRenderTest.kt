@@ -591,9 +591,9 @@ class ShellRenderTest {
 
     /**
      * #556 (record §3 rule 1): a family's overview is that family's page — its menu item is the
-     * active one, the breadcrumb names it, and the resource browser opens on its tree. The
-     * Pipelines item links its overview; the other four keep their catalogs until their own
-     * overview lands (#579–#582).
+     * active one, the breadcrumb names it, and the resource browser opens on its tree. Every
+     * tree family's item links its overview since #556/#579–#582; Datasources follows since
+     * #583, and the Schedules and API items their homes since #584/#585.
      */
     @Test
     fun `a family overview lights its item, names its crumb and opens its browser tree`() {
@@ -631,7 +631,7 @@ class ShellRenderTest {
     }
 
     @Test
-    fun `the Pipelines item links its overview and the other families keep their catalogs`() {
+    fun `every family item links its overview home`() {
         val html = engine.process("pipelines/list", webContext().apply { fillList() })
         val href = { label: String ->
             Regex(
