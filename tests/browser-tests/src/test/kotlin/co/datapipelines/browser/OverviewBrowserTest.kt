@@ -105,6 +105,8 @@ class OverviewBrowserTest : RestTreeBrowserFixture() {
                 page.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth") as Number
             withClue("no horizontal overflow at $width") { overflow.toInt() shouldBe 0 }
         }
+        page.setViewportSize(WIDE, WIDE_H)
+        page.reload()
     }
 
     @Test
@@ -167,8 +169,6 @@ class OverviewBrowserTest : RestTreeBrowserFixture() {
         OverviewHomeBrowserSupport.screenshots(page, "pipelines", additionalViewports = listOf(MID to MID))
         geometryAt1512()
         noOverflow()
-        page.setViewportSize(WIDE, WIDE_H)
-        page.reload()
         page.locator("[data-overview-view-all]").click()
         page.waitForURL("**/pipelines")
         page.waitForSelector("#pipeline-list-wrapper")
