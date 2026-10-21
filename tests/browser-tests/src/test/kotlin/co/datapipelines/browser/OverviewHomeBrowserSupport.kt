@@ -25,7 +25,7 @@ internal object OverviewHomeBrowserSupport {
         "() => { const root = document.querySelector('[data-overview]');" +
             " return Math.ceil(root.getBoundingClientRect().top + root.scrollHeight + 48); }"
 
-    /** Where all five homes' evidence screenshots land, named by family. */
+    /** Where the Pipelines and three sibling object homes' evidence screenshots land, named by family. */
     val SHOTS: Path = Paths.get("build", "reports", "599-object-family-homes")
 
     /** Each strip or foot cell's number, by its key (`total`, `live`, `in-development`, `actively-developed`, …). */
