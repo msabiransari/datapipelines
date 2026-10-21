@@ -22,10 +22,10 @@ function loadShell() {
   return require(shellPath);
 }
 
-test("the active-section rule mirrors the server: Dashboard exact, others by prefix", () => {
+test("the active-section rule mirrors the server: every section at a segment boundary", () => {
   const shell = loadShell();
   assert.equal(shell.isActiveSection("/dashboard", "/dashboard"), true);
-  assert.equal(shell.isActiveSection("/dashboard", "/dashboard/x"), false);
+  assert.equal(shell.isActiveSection("/dashboard", "/dashboard/x"), true);
   assert.equal(shell.isActiveSection("/pipelines", "/pipelines"), true);
   assert.equal(shell.isActiveSection("/pipelines", "/pipelines/abc-123"), true);
   // /admin is the section prefix even though the link's href is /admin/users.
@@ -38,6 +38,16 @@ test("the active-section rule mirrors the server: Dashboard exact, others by pre
   assert.equal(shell.isActiveSection("/dashboard", "/overview/dashboards"), false);
   assert.equal(shell.isActiveSection(null, "/pipelines"), false);
   assert.equal(shell.isActiveSection("/pipelines", null), false);
+});
+
+test("bare prefixes do not activate any section", () => {
+  const shell = loadShell();
+  for (const section of ["dashboard", "pipelines", "templates", "datasources", "dashboards", "visualizations", "parameter-sets", "executions", "schedules", "api-console", "promotion", "workspaces", "admin", "docs"]) {
+    assert.equal(shell.isActiveSection(`/${section}`, `/${section}x`), false, section);
+    assert.equal(shell.isActiveSection(`/${section}`, `/overview/${section}x`), false, section);
+  }
+  assert.equal(shell.isActiveSection("/dashboard", "/dashboards"), false);
+  assert.equal(shell.isActiveSection("/dashboard", "/overview/dashboards"), false);
 });
 
 // 079 §A: a rail link carries its section, its group and its label; the group and

@@ -38,8 +38,8 @@
  * 3. THE ACTIVE-SECTION STATE. The nav highlight is server-computed
  *    (currentPath) for the first paint; after a boosted swap the nav is NOT
  *    re-rendered, so this mirrors the same rule client-side off
- *    window.location.pathname — Dashboard matches exactly, every other section
- *    is a prefix match on the link's data-nav-section.
+ *    window.location.pathname — every section matches at a segment boundary
+ *    on the link's data-nav-section.
  *
  * 079 §A/§B added the SHELL CHROME's client half. The rail and the top bar live
  * OUTSIDE #app-main, so a boosted swap never re-renders them — everything the
@@ -189,12 +189,15 @@
   var SWAP_SPEC = "outerHTML show:window:top";
 
   /* The nav's active-section rule — mirrors layouts/default.html's server-side
-     currentPath classappend exactly: Dashboard by equality, others by prefix, and a
+     currentPath classappend exactly: every section at a segment boundary, and a
      section's overview (#556: /overview/pipelines) belongs to that section. */
+  function ownsPath(prefix, path) {
+    return path === prefix || path.indexOf(prefix + "/") === 0;
+  }
+
   function isActiveSection(section, path) {
     if (!section || !path) return false;
-    if (section === "/dashboard") return path === "/dashboard";
-    return path.indexOf(section) === 0 || path.indexOf("/overview" + section) === 0;
+    return ownsPath(section, path) || ownsPath("/overview" + section, path);
   }
 
   function syncNavActive(doc, path) {

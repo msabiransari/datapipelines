@@ -2,14 +2,18 @@
  * #554 — the resource browser's pure decisions, kept apart from the DOM so `node --test`
  * drives them (src/test/js/sidebar-state.test.mjs).
  *
- * The browsable family a path belongs to: the menu's own prefix rule (shell.js
- * `isActiveSection`, the layout's `#strings.startsWith`), over the families the browser
+ * The browsable family a path belongs to: the menu's segment-boundary rule (shell.js
+ * `isActiveSection`, the layout's `AppNav` answer), over the families the browser
  * hosts; a family's overview (#556: `/overview/<family>`) belongs to the family. Derived,
  * never stored (record §3 rules 4–6): null on any other page.
  */
 export function familyForPath(path, families) {
   if (typeof path !== "string" || !path) return null;
-  return families.find(family => path.indexOf(`/${family}`) === 0 || path.indexOf(`/overview/${family}`) === 0) ?? null;
+  return families.find(family => ownsPath(`/${family}`, path) || ownsPath(`/overview/${family}`, path)) ?? null;
+}
+
+function ownsPath(prefix, path) {
+  return path === prefix || path.indexOf(prefix + "/") === 0;
 }
 
 /**
