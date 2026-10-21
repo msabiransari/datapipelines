@@ -41,11 +41,12 @@ import org.springframework.web.bind.annotation.GetMapping
  *
  * ## Read-only about endpoints AND keys (179, D17)
  *
- * The keys card lived here until 179; it moved to `/api-keys`, the workspace admin's
- * `MANAGE_API_KEYS` page, and the per-endpoint table now shows each path's ASSOCIATED key
- * names with a manage link for the roles that hold that row. What stays is the endpoints
- * inventory and the MCP connection card — and the top bar's chip, not this page, is where a
- * user copies their own MCP key.
+ * The keys card lived here until 179; it moved to `/api-keys`, the Keys page — its route is
+ * `MCP_KEY_OWN`, every member with a workspace, and keys v2 (A15) made it the ONE creation
+ * path for every kind, the `mcp` key included. The per-endpoint table shows each path's
+ * ASSOCIATED key names with a manage link for the workspace admin and super admin. What
+ * stays is the endpoints inventory and the MCP connection card — and the `mcp` key an
+ * agent presents at `/mcp` is created on the Keys page too.
  */
 @Controller
 class ApiConsoleController(

@@ -71,9 +71,9 @@ data class BindEndpointKeyRequest(
  *
  * Publishing exposes a released pipeline at a URL — an authoring act over content the author
  * already owns (`MANAGE_ENDPOINTS`, D9). Binding hands a CREDENTIAL authority over a subtree:
- * since 179 (D17) that is `MANAGE_API_KEYS`, the workspace admin's row, and the key is
- * addressed by id (the `/api-keys` page) or — the pre-179 shape, kept — by the caller's OWN
- * key's name.
+ * since 179 (D17) that is `API_KEY_BIND` — the workspace admin's and super admin's row — and
+ * the key is addressed by id (the `/api-keys` page) or — the pre-179 shape, kept — by the
+ * caller's OWN key's name.
  */
 @RestController
 @RequestMapping("/api/v1/endpoints")
@@ -152,8 +152,9 @@ class EndpointsController(
     /**
      * §19.5 — bind a key to a node of the tree.
      *
-     * 179 (D17): this route moved from `MANAGE_ENDPOINTS` to `MANAGE_API_KEYS` — association
-     * is the workspace admin's verb now, on both request shapes. The BY-NAME shape is kept
+     * 179 (D17): this route moved from `MANAGE_ENDPOINTS` to `API_KEY_BIND` — association
+     * is the credential verb now, the workspace admin's and super admin's (auth.md §7.6),
+     * on both request shapes. The BY-NAME shape is kept
      * for REST compatibility: it resolves within the caller's OWN keys, exactly as before
      * (an admin binding their own named key), and nothing else changed about it.
      */

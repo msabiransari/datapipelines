@@ -557,8 +557,8 @@ class RoleVisibilityRenderTest {
     // ------------------------------------------------------------------ 179: keys
 
     /**
-     * D17 — the `/api-keys` page's verbs are inside the `MANAGE_API_KEYS` guard
-     * (`canAdminWorkspace` / `isSuperAdmin`) even though the route refuses everyone else:
+     * D17 — the `/api-keys` page's verbs sit inside the admins-only render guard
+     * (`canAdminWorkspace` / `isSuperAdmin`) even where a route admits more:
      * a fragment rendered off its route — a test, a reuse — must not leak the verbs.
      *
      * Keys v2 (A15): the top bar's chip is GONE — the login mint retired, the Keys page the one

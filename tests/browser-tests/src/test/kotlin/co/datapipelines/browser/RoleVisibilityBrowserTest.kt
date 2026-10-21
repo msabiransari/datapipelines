@@ -63,8 +63,9 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
         author.roleBadge() shouldBe "author"
         author.page.navigate("$baseUrl/api-console")
         author.page.waitForSelector(".app-page-h")
-        // 179 (D17): authors PUBLISH endpoints but do not manage API keys — create/delete/
-        // associate are the workspace admin's `MANAGE_API_KEYS`, on /api-keys.
+        // 179 (D17): authors PUBLISH endpoints but do not manage API keys — the Keys page's
+        // verbs render only for the workspace admin and super admin (canAdminWorkspace ||
+        // isSuperAdmin), on /api-keys.
         author.verbs().contains("key-create") shouldBe false
 
         author.page.navigate("$baseUrl/datasources")

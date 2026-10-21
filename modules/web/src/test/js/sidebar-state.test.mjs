@@ -22,6 +22,13 @@ test("pages outside the five families have no browser", () => {
   }
 });
 
+test("bare prefixes have no browser family", () => {
+  for (const family of order) {
+    assert.equal(familyForPath(`/${family}x`, order), null, family);
+    assert.equal(familyForPath(`/overview/${family}x`, order), null, family);
+  }
+});
+
 test("a family the browser does not host is never answered", () => {
   assert.equal(familyForPath("/dashboards/x", ["pipelines", "templates"]), null);
   assert.equal(familyForPath("/templates/x", ["pipelines", "templates"]), "templates");
