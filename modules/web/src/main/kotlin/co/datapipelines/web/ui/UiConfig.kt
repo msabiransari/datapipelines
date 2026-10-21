@@ -75,7 +75,7 @@ class UiConfig {
     fun datasourceSchemaTreeBrowseModel(introspector: co.datapipelines.datasources.SchemaIntrospector): DatasourceSchemaTreeBrowseModel =
         DatasourceSchemaTreeBrowseModel(introspector)
 
-    /** 079 §A, #554: the resource browser's per-family header counts, behind a 60s TTL (see [NavCounts]). */
+    /** 079 §A, #554: the resource browser's per-family header counts, read on every shell render (#574, see [NavCounts]). */
     @Bean
     fun navCounts(
         pipelines: co.datapipelines.pipeline.PipelineRepository,

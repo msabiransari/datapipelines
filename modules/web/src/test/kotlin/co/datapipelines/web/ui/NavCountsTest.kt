@@ -8,17 +8,15 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
 import java.util.UUID
-import kotlin.time.Duration.Companion.seconds
 
 /**
- * #554 — the resource browser header's admitted counts: one catalog-size read per family behind
- * one 60 s cache entry per workspace, the lensed arms answered from the view, an unreadable count
- * omitted (null) and never cached. The sources are recording lambdas, not mocks: what is asserted
+ * #554, #574 — the resource browser header's admitted counts: one catalog-size read per family on
+ * every call (no cache since #574), the lensed arms answered from the view, an unreadable count
+ * omitted (null) and never remembered. The sources are recording lambdas, not mocks: what is asserted
  * is the reads that HAPPENED (a missing read would show as a count, an extra one as a tally).
  */
 class NavCountsTest {
     private val workspace = UUID.randomUUID()
-    private var now = 0L
     private val reads = mutableListOf<Pair<NavigationFamily, UUID>>()
     private var failing = false
 
@@ -41,8 +39,6 @@ class NavCountsTest {
                         values.getValue(family)
                     }
                 },
-            ttl = 60.seconds,
-            ticker = { now },
         )
 
     @Test
@@ -60,30 +56,41 @@ class NavCountsTest {
     }
 
     @Test
-    fun `a second call within the TTL reads nothing and one after it reads again`() {
-        counts.forWorkspace(workspace)
-        reads.clear()
+    fun `every render reads, so a count changed between two renders is the second render's answer`() {
+        val pipelines = intArrayOf(9)
+        val live = NavCounts(mapOf(NavigationFamily.PIPELINES to { _: UUID -> pipelines[0] }))
+        live.forWorkspace(workspace).pipelines shouldBe 9
 
-        now += 59.seconds.inWholeNanoseconds
-        counts.forWorkspace(workspace).pipelines shouldBe 9
+        // #574: a create between two renders, no clock involved — the next render already counts it.
+        pipelines[0] = 10
+        live.forWorkspace(workspace).pipelines shouldBe 10
+    }
+
+    @Test
+    fun `each render reads every family once for the workspace it names`() {
+        val other = UUID.randomUUID()
+        counts.forWorkspace(workspace).pipelines
+        counts.forWorkspace(workspace).templates
+        counts.forWorkspace(other).dashboards
+        reads.count { it.second == workspace } shouldBe 2 * NavigationFamily.entries.size
+        reads.count { it.second == other } shouldBe NavigationFamily.entries.size
+    }
+
+    @Test
+    fun `nothing is read until a value is, and one render's every value costs one read per family`() {
+        val rendered = counts.forWorkspace(workspace)
+        // #574: the shell advice builds this on JSON requests too, which never read a value.
         reads shouldBe emptyList()
 
-        now += 2.seconds.inWholeNanoseconds
-        counts.forWorkspace(workspace).pipelines shouldBe 9
+        rendered.pipelines shouldBe 9
+        rendered.templates shouldBe 27
+        rendered.of(NavigationFamily.PARAMETER_SETS) shouldBe 3
+        rendered.pipelines shouldBe 9
         reads.size shouldBe NavigationFamily.entries.size
     }
 
     @Test
-    fun `each workspace has its own entry`() {
-        val other = UUID.randomUUID()
-        counts.forWorkspace(workspace)
-        counts.forWorkspace(other)
-        reads.map { it.second }.toSet() shouldBe setOf(workspace, other)
-        reads.size shouldBe 2 * NavigationFamily.entries.size
-    }
-
-    @Test
-    fun `a failed read omits every live count and is not cached`() {
+    fun `a failed read omits every live count and is not remembered`() {
         failing = true
         counts.forWorkspace(workspace) shouldBe NavCounts.Counts.NONE
 
@@ -139,7 +146,7 @@ class NavCountsTest {
 
     @Test
     fun `a family without a source has no count`() {
-        val partial = NavCounts(mapOf(NavigationFamily.PIPELINES to { _: UUID -> 5 }), ticker = { now })
+        val partial = NavCounts(mapOf(NavigationFamily.PIPELINES to { _: UUID -> 5 }))
 
         partial.forWorkspace(workspace) shouldBe NavCounts.Counts(5, null)
     }

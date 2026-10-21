@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.196
+**Status:** v1.197
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-20 (#588; #541; #634; #635; #622 merge follow-up; #622; #599; #604; #639; #638; #610; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-20 (#574; #595; #588; #541; #634; #635; #622 merge follow-up; #622; #599; #604; #639; #638; #610; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 ---
 
 ## 1. Purpose
@@ -317,14 +317,15 @@ foreign responses refuse admission, and a changed view clears cached levels befo
   `BrandMarkParityRenderTest` now renders and what its source sweep of every template forbids.
 - **Counts (#554: in the browser header).** The browser header carries the active family's admitted
   count from `NavCounts` — all five families, keyed by the closed `NavigationFamily` set, one cheap
-  `COUNT(*)` each behind a 60-second TTL keyed by workspace; for a lensed principal (a promoter) the count
-  is the SIZE of the admitted set, so the header never says "3 pipelines" beside an empty tree. Counts
-  are no longer repeated beside menu items (record §3). There is no general metadata cache in this
-  tree to reuse — `DatasourceMetadataCache` is keyed by datasource name and `AuthCache` lives
-  in `modules/auth`, which by design cannot see the `pipelines` or `templates` tables — so
-  `NavCounts` copies the former's discipline (ConcurrentHashMap, injected ticker, lazy expiry,
-  misses never cached) rather than its instance. A count that cannot be read — including a lens whose
-  higher environment is unavailable — renders **no count**, never a zero.
+  `COUNT(*)` each; for a lensed principal (a promoter) the count is the SIZE of the admitted set, so
+  the header never says "3 pipelines" beside an empty tree. Counts are no longer repeated beside menu
+  items (record §3). **Freshness (#574):** the counts are read on every shell render, with no cache —
+  the header and the tree are two reads of the same tables in the same navigation, so after a create,
+  release, discard or delete, in the UI or over MCP, they cannot disagree past one navigation (until
+  #574 a 60-second TTL with no eviction let the header say "Pipelines 0" above a new row). The read
+  waits for the first count the page renders, once per request — the shell's model is built for JSON
+  API requests too, and those read none. A count that cannot be read — including a lens whose higher
+  environment is unavailable — renders **no count**, never a zero.
 - **The Admin item follows the reader's authority (143, T315).** It leads only where its
   reader may go, or it is absent: a **super admin** gets `/admin/users` (instance user
   administration, `user.manage`, boosted like every item); a **workspace admin** gets
@@ -3084,6 +3085,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-20 | v1.197 | #574 the browser header's count has one source — renumbered at merge after #595's v1.196 | **§3.4 Counts:** the 60-second TTL sentence and the "no general metadata cache" paragraph give way to the freshness rule — `NavCounts` reads the five counts on every shell render, so the header and the tree cannot disagree past one navigation after a create, release, discard or delete (UI or MCP), and the read is deferred to the first count a render reads, so a JSON API request pays none; the lens rule and the never-zero rule are unchanged. Guards: `PipelineSidebarTreeStateBrowserTest`'s create-then-navigate case (header = the catalog route's total, no clock advance) and `NavCountsTest`'s every-render and nothing-read-until-a-value cases. |
 | 2026-10-20 | v1.196 | #595 §4.25 names five guided families — renumbered at merge after #588's v1.195 | **§4.25:** the stale selection sentence is replaced by the as-built rule — every tree family's menu item links its overview (`/overview/<family>`) since #556/#579–#582, the Datasources item `/overview/datasources` since #583, the Schedules and API items their homes (`/overview/schedules`, `/overview/api-console`) since #584/#585. `ShellRenderTest`'s href case is named for what it asserts (every family item links its overview home) and its #556 KDoc states the as-built links; assertions unchanged. |
 | 2026-10-20 | v1.195 | #588 the five family catalogs' intro sentence names the resource browser — renumbered at merge after #541's v1.194 | **§4.3, §4.6, §4.21, §4.23, §4.24:** the four family catalogs' visible intro sentence (pipelines, templates, dashboards, visualizations) says "Browse the folders in the resource browser's <Family> tree" — the Parameter Sets sentence's one wording since #554 moved the trees out of the rail; each page's comment says the tree lives in the resource browser's panel. **§4.3, §4.6:** the Purpose rows' "folder TREE" and the two owner-ruling paragraphs' last sentence (dates and meaning kept, the control's name changed) and §4.6's filter bullet name the resource browser; **§4.23:** the catalog's two tree reads do; **§3.4:** the icons paragraph's REST-tree sentence does. Guards: `CatalogIntroRenderTest` renders each of the five pages and pins the visible text — no "sidebar", the resource-browser sentence present. |
 | 2026-10-20 | v1.194 | #541 status badges stay in view | **§3.4, §4.6a:** wrapping badges remain inside the browser regardless of name length, without horizontal scrolling. `BrowserResourceRowBrowserTest` measures version/draft boxes and overflow at depths two and three in both themes; the Implements browser case measures the needs-review marker's box without scrolling it into view. |

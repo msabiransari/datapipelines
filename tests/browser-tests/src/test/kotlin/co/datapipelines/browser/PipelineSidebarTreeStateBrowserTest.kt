@@ -128,6 +128,22 @@ class PipelineSidebarTreeStateBrowserTest : RestTreeBrowserFixture() {
     }
 
     @Test
+    fun `the header count equals the catalog total one navigation after a create, with no clock advance`() {
+        readyTree()
+        openTree()
+        val count = "#app-browser .app-browser-count[data-browser-family=pipelines] > span"
+        page.locator(count).first().textContent() shouldBe "0"
+        // #574: the create goes over REST, the door an MCP agent's write shares; no TTL can have run out.
+        seedPipeline("acme/count/one")
+        page.navigate("$baseUrl/templates")
+        page.navigate("$baseUrl/pipelines")
+        // The oracle is the catalog route's own total, not the header's source.
+        val total = page.evaluate("async () => (await (await fetch('/api/v1/pipelines')).json()).data.pagination.total")
+        total shouldBe 1
+        page.locator(count).first().textContent() shouldBe total.toString()
+    }
+
+    @Test
     fun `changed authorization view drops every cached level before the new root is admitted`() {
         readyTree()
         seedPipeline("acme/view/leaf")

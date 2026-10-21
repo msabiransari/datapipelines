@@ -102,7 +102,6 @@ class OverviewVisualizationsE2eTest {
                 repository,
                 ParameterSetRepository(jdbc),
             )
-        header.invalidate(workspace)
         header.forWorkspace(workspace).visualizations shouldBe 3
         println("event=581.parity header=3 objects=4 discarded=1")
         equality(ReadLens.Everything)

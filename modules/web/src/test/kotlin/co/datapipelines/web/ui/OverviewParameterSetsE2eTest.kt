@@ -277,7 +277,6 @@ class OverviewParameterSetsE2eTest {
                 VisualizationRepository(jdbc),
                 repository,
             )
-        counts.invalidate(workspace)
         val counted = counted(ReadLens.Everything)
 
         val header = counts.forWorkspace(workspace).parameterSets
