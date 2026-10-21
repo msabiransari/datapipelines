@@ -1,13 +1,20 @@
 package co.datapipelines.web.config
 
 import co.datapipelines.auth.AuditProperties
+import co.datapipelines.executor.ExecutorConfig
+import co.datapipelines.parameters.ParametersConfig
+import co.datapipelines.visualization.DashboardRuntimeConfig
+import co.datapipelines.web.dashboards.runtime.DashboardRuntimeConfiguration
 import io.kotest.assertions.withClue
+import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.shouldBe
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.Test
+import org.springframework.beans.factory.ObjectProvider
+import org.springframework.beans.factory.support.StaticListableBeanFactory
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import java.sql.Connection
 import java.sql.PreparedStatement
@@ -29,6 +36,11 @@ import javax.sql.DataSource
  *
  * The negative half matters as much: the bound rides a DEDICATED template, so the same repositories'
  * other statements — the heartbeat, the event reads — carry none, and the lifecycle writes keep their own.
+ *
+ * #636 — the four housekeeping statements on the same `dp-scheduled` thread: the dashboard refresh
+ * sweep's UPDATE at the sweep bound, the dashboard refreshes' retention DELETE and the parameter
+ * evaluations' sweep UPDATE and retention DELETE at the retention bound; the runtime's SHARED
+ * `DashboardRefreshRepository` bean stays unbounded.
  */
 class ScheduledJobsStatementBoundsTest {
     private val recording = RecordingDataSource()
@@ -75,10 +87,80 @@ class ScheduledJobsStatementBoundsTest {
         recording.everyTimeout() shouldBe setOf(RETENTION_BOUND)
     }
 
+    @Test
+    fun `the dashboard refresh sweep's UPDATE carries the sweep bound - on the sweeper's own template`() {
+        DashboardRuntimeConfiguration()
+            .dashboardRefreshSweeper(jdbc, DashboardRuntimeConfig(), ExecutorConfig(), SimpleMeterRegistry())
+            .sweepOnce()
+
+        recording.timeoutOf("UPDATE dashboard_refreshes") shouldBe REFRESH_SWEEP_BOUND
+        recording.everyTimeout() shouldBe setOf(REFRESH_SWEEP_BOUND)
+    }
+
+    @Test
+    fun `the runtime's shared dashboard refresh repository stays unbounded - its writes are not housekeeping`() {
+        val shared = DashboardRuntimeConfiguration().dashboardRefreshRepository(jdbc)
+
+        shared.sweepStale(STALE_AFTER_SECONDS)
+        shared.deleteFinishedOlderThan(RETENTION_DAYS)
+
+        recording.timeoutOf("UPDATE dashboard_refreshes") shouldBe UNBOUNDED
+        recording.timeoutOf("DELETE FROM dashboard_refreshes") shouldBe UNBOUNDED
+    }
+
+    @Test
+    fun `the dashboard refreshes' retention DELETE carries the retention bound`() {
+        RetentionSchedulingConfiguration()
+            .dashboardRefreshRetention(jdbc, ExecutionsProperties(), SimpleMeterRegistry())
+            .retainOnce()
+
+        recording.timeoutOf("DELETE FROM dashboard_refreshes") shouldBe RETENTION_BOUND
+        recording.everyTimeout() shouldBe setOf(RETENTION_BOUND)
+    }
+
+    @Test
+    fun `the parameter evaluations' sweep UPDATE carries the retention bound`() {
+        RetentionSchedulingConfiguration()
+            .parameterEvaluationSweeper(jdbc, NO_PARAMETERS_CONFIG, SimpleMeterRegistry())
+            .sweepOnce()
+
+        recording.timeoutOf("UPDATE parameter_evaluations") shouldBe RETENTION_BOUND
+        recording.everyTimeout() shouldBe setOf(RETENTION_BOUND)
+    }
+
+    @Test
+    fun `the parameter evaluations' retention DELETE carries the retention bound`() {
+        RetentionSchedulingConfiguration()
+            .parameterEvaluationRetention(jdbc, ExecutionsProperties(), SimpleMeterRegistry())
+            .retainOnce()
+
+        recording.timeoutOf("DELETE FROM parameter_evaluations") shouldBe RETENTION_BOUND
+        recording.everyTimeout() shouldBe setOf(RETENTION_BOUND)
+    }
+
+    /**
+     * Non-vacuity: one recording across the four #636 statements and the shared bean's unbounded one
+     * holds every value the cases above distinguish — a recorder that saw no `setQueryTimeout`, or saw
+     * one value for all, could not pass them, and cannot pass this.
+     */
+    @Test
+    fun `one recording of the four housekeeping statements and the shared bean holds 10, 25 and 0`() {
+        val registry = SimpleMeterRegistry()
+        DashboardRuntimeConfiguration().dashboardRefreshSweeper(jdbc, DashboardRuntimeConfig(), ExecutorConfig(), registry).sweepOnce()
+        RetentionSchedulingConfiguration().dashboardRefreshRetention(jdbc, ExecutionsProperties(), registry).retainOnce()
+        RetentionSchedulingConfiguration().parameterEvaluationSweeper(jdbc, NO_PARAMETERS_CONFIG, registry).sweepOnce()
+        RetentionSchedulingConfiguration().parameterEvaluationRetention(jdbc, ExecutionsProperties(), registry).retainOnce()
+        DashboardRuntimeConfiguration().dashboardRefreshRepository(jdbc).deleteFinishedOlderThan(RETENTION_DAYS)
+
+        recording.everyTimeout() shouldContainAll setOf(REFRESH_SWEEP_BOUND, RETENTION_BOUND, UNBOUNDED)
+        recording.everyTimeout().size shouldBe 3
+    }
+
     /**
      * Hands out relaxed JDBC doubles and records, per prepared statement, its SQL and the
      * `queryTimeout` set on it ([UNBOUNDED] when none was). A query answers one row: one column, the
-     * database clock for the audit cutoff, a `(table, column)` pair for the keys purge's FK list.
+     * database clock for the audit cutoff, a `(table, column)` pair for the keys purge's FK list, an
+     * `id` for the housekeeping sweeps' `RETURNING id`.
      */
     private class RecordingDataSource : DataSource by mockk(relaxed = true) {
         private val statements = mutableListOf<Pair<String, IntArray>>()
@@ -106,6 +188,7 @@ class ScheduledJobsStatementBoundsTest {
                 every { getObject(1, OffsetDateTime::class.java) } returns OffsetDateTime.now()
                 every { getString("referencing_table") } returns "executions"
                 every { getString("referencing_column") } returns "executed_by"
+                every { getObject("id", UUID::class.java) } returns UUID.randomUUID()
             }
         }
 
@@ -135,6 +218,16 @@ class ScheduledJobsStatementBoundsTest {
 
         /** #326: the hourly retention's bound — under the 30 s shutdown phase. */
         const val RETENTION_BOUND = 25
+
+        /** #636: the dashboard refresh sweep's bound — a sixth of its 60 s cadence, the stale sweep's value. */
+        const val REFRESH_SWEEP_BOUND = 10
+
+        const val STALE_AFTER_SECONDS = 915L
+        const val RETENTION_DAYS = 7L
+
+        /** No `ParametersConfig` bean: the sweeper takes the key's default deadline, as the scheduling slice does. */
+        val NO_PARAMETERS_CONFIG: ObjectProvider<ParametersConfig> =
+            StaticListableBeanFactory().getBeanProvider(ParametersConfig::class.java)
 
         /** A lifecycle bound unlike both, so a statement sent on the lifecycle template cannot pass for the sweep's. */
         const val LIFECYCLE = 3

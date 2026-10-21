@@ -1,6 +1,6 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.46
+**Status:** v1.47
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-10-21
@@ -400,6 +400,8 @@ shipped default. `scripts/compose-env-audit.sh` diffs the compose block against
 pass-through, a diverged default, a variable declared in both tracked files or in neither,
 or a posture-dependent key passed with a default instead of in the valueless form. It runs
 on **every `./gradlew build`**, not when someone remembers to run it.
+It also inventories every app-container environment name, refuses JVM code-loading names,
+and requires a reasoned allowlist for names outside `DATAPIPELINES_*`, rejecting stale entries.
 
 ### 6.3A Promotion: a receiver deployment (055)
 
@@ -480,13 +482,14 @@ through `extraEnv`; an `extraEnv` key that double-maps either DuckDB key fails `
 because Kubernetes does not reject duplicate `env` names and would silently honor the last one.
 CI renders the chart on every push and pull request: the `gate` job runs `scripts/helm-check.sh`,
 a pinned `helm` (version and checksum pin bumped together per DEVELOPMENT.md §10.2) running
-`helm lint --strict` plus the four template cases above — defaults render no `env:` block, both
+`helm lint --strict` plus six template cases — defaults render no `env:` block or driver volume, both
 DuckDB values render exactly their two quoted entries, each `extraEnv` double mapping is refused
-with the template's own message, and the missing `existingSecret` is refused — exiting 0 when
+with the template's own message, a missing `existingSecret` and `extraEnv.LOADER_PATH` are refused,
+and an enabled driver volume renders its read-only mount (with additional PVC/source checks) — exiting 0 when
 every case passes, 1 when a chart check fails, and 2 on a tooling failure (a download or
 checksum-pin mismatch, never a chart verdict).
 
-The `lib/` driver drop-in (§3.5) is not supported by the chart today: it has no volume knob for the Deployment, so a read-only volume at `/app/lib` needs a patched template, and the chart's `extraEnv` does not refuse a `LOADER_PATH` entry (the image's own value must stay in force, §9).
+The `lib/` driver drop-in (§3.5) is opt-in: set `libVolume.enabled: true` and supply exactly one Kubernetes volume source in `libVolume.source` (for example, `{configMap: {name: drivers}}`); the chart mounts it at `/app/lib` with `readOnly: true`, and a `persistentVolumeClaim` source must itself set `readOnly: true`. Populate the source only through a trusted image, init container or CI-written ConfigMap, never through the app (§9). The default is disabled; `extraEnv.LOADER_PATH` is refused at render time so the image's launcher path stays in force.
 
 No sticky session affinity needed. Standard `ClusterIP` service with round-robin or random load balancing.
 
@@ -1194,6 +1197,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-21 | v1.47 | #666 Helm driver drop-in | **§6.4:** opt-in `libVolume.enabled` and one operator-supplied `libVolume.source` mount trusted drivers read-only at `/app/lib`; PVC sources must also be read-only. `extraEnv.LOADER_PATH` is refused with the image-owned-path message. Chart 0.1.2; helm-check covers the default, refusal, ConfigMap mount and PVC/source boundaries; the deploy-file drift guard admits exactly the template refusal and requires it once. |
 | 2026-10-21 | v1.46 | #657 the image's driver drop-in | **§3.5** the `lib/` drop-in paragraph now matches the image: the Dockerfile creates `/app/lib` empty, `root:root` mode `0555`, before `USER`, and sets `ENV LOADER_PATH=/app/lib` — until now it did neither, so a mounted driver was never on the classpath. The value is absolute because `PropertiesLauncher` resolves a relative `loader.path` against `loader.home` (default `${user.dir}`) and the image has no `WORKDIR`: `LOADER_PATH=lib` adds `/lib`. The operator mounts the DRIVER jar read-only at `/app/lib/`; neither compose nor the chart sets `LOADER_PATH` (§9). **§6.4** states that the chart does not support the drop-in today (no volume knob; `extraEnv` does not refuse `LOADER_PATH`). `ImageLoaderPathSpecDriftTest` pins the Dockerfile, this paragraph and Module Structure §5.4.1 to one value and refuses a deploy file that names `LOADER_PATH`. |
 | 2026-10-19 | v1.45 | #571 path-independent Plotly rebuilds | **§6.2A:** patch 0003 salts root-relative inline-CSS paths with the historical build directory, preserving every committed byte from any clone directory. The recipe uses a temporary directory; `scripts/verify-plotly-bundles.sh` rebuilds and compares both bundles for the lander on Plotly vendor or manifest-entry diffs, with distinct match, mismatch and rebuild-failure exits. |
 | 2026-10-16 | v1.44 | #538 audit manifest sizes | **§6.2A:** the vendored Plotly audit now compares all three raw byte lengths and both gzip counts with the manifest, and pins zlib deflate level 9 with gzip framing and mtime 0 in each bundle's size string. Size-only and method-only drift fail the build. |

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # helm-check.sh — render the reference Helm chart (deploy/helm/datapipelines)
-# with a PINNED helm binary: `helm lint --strict` plus four `helm template`
+# with a PINNED helm binary: `helm lint --strict` plus six `helm template`
 # cases whose assertions pin the chart's render-TIME behaviour — the Kotlin
 # drift test HelmDuckDbValuesSpecDriftTest pins only the chart's TEXT (the
 # pregate has no helm binary), so the real engine is exercised here (#411,
@@ -16,7 +16,7 @@
 #         non-strict lint exits non-zero.
 #   (a)   defaults: exit 0; NO DuckDB env entry, NO rendered `value: ""`, no
 #         `env:` block at all (an empty entry would override the image's own
-#         DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY — the #140 trap).
+#         DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY — the #140 trap); no /app/lib.
 #   (b)   both duckdb values set: exit 0; each env name exactly once, with its
 #         quoted value; no rendered `value: ""`.
 #   (c)   the extraEnv double mapping, TWICE: each render exits non-zero AND
@@ -27,6 +27,10 @@
 #   (d)   no secret name (the placeholder OMITTED): exit non-zero AND stderr
 #         carries `existingSecret is required` — pins the `required` guard and
 #         proves the placeholder is load-bearing for (a)–(c).
+#   (e)   extraEnv.LOADER_PATH: exit non-zero with the exact refusal message.
+#   (f)   libVolume enabled with a ConfigMap: exactly one read-only /app/lib
+#         mount and one driver-library volume using that ConfigMap.
+#         PVC sources must also be read-only; empty/multiple sources refused.
 #
 # Tool: helm, PINNED. CI-only by the owner's ruling (2026-10-02): the pregate
 # and gate.sh have no helm stage (no binary on the dev box); this script runs
@@ -198,14 +202,18 @@ else
   n_dbu=$(grep -c 'DATAPIPELINES_DUCKDB_' "$WORK/a.out" || true)
   n_emp=$(grep -c 'value: ""' "$WORK/a.out" || true)
   n_env=$(grep -c '^ *env:' "$WORK/a.out" || true)
+  n_lib=$(grep -c '/app/lib' "$WORK/a.out" || true)
+  n_driver=$(grep -c 'name: driver-library$' "$WORK/a.out" || true)
   if [ "$n_dbu" -ne 0 ]; then
     verdict "(a) defaults" 1 "grep -c 'DATAPIPELINES_DUCKDB_' = $n_dbu (expected 0 — an empty entry would override the image's ENV)"
   elif [ "$n_emp" -ne 0 ]; then
     verdict "(a) defaults" 1 "grep -c 'value: \"\"' = $n_emp (expected 0 — an empty env value still SETS the variable)"
   elif [ "$n_env" -ne 0 ]; then
     verdict "(a) defaults" 1 "grep -c '^ *env:' = $n_env (expected 0 — the env: block renders only when a source is set)"
+  elif [ "$n_lib" -ne 0 ] || [ "$n_driver" -ne 0 ]; then
+    verdict "(a) defaults" 1 "/app/lib count=$n_lib; driver-library count=$n_driver (expected 0 each)"
   else
-    verdict "(a) defaults" 0 "exit 0; 0 DuckDB entries, 0 rendered empty values, no env: block"
+    verdict "(a) defaults" 0 "exit 0; 0 DuckDB entries, 0 rendered empty values, no env: block, no /app/lib or driver-library"
   fi
 fi
 
@@ -269,6 +277,76 @@ elif grep -qF 'existingSecret is required' "$WORK/d.err"; then
 else
   verdict "(d) no secret name" 1 "exit $rc but 'existingSecret is required' is NOT on stderr"
 fi
+
+check_double_mapping "(e) extraEnv names LOADER_PATH" LOADER_PATH /tmp/x \
+  'LOADER_PATH comes from the image, never from extraEnv.LOADER_PATH (deployment.md §9)' \
+  "$WORK/e.out" "$WORK/e.err"
+
+# (f) the enabled volume: match whole blocks, so an unrelated readOnly elsewhere
+# cannot hide a writable mount, a missing source or a misplaced volume.
+rc=0
+"$HELM" template dp "$CHART_DIR" --set "existingSecret=$PLACEHOLDER" \
+  --set libVolume.enabled=true --set-json 'libVolume.source={"configMap":{"name":"drivers"}}' \
+  >"$WORK/f.out" 2>"$WORK/f.err" || rc=$?
+if [ "$rc" -ne 0 ]; then
+  verdict "(f) driver library ConfigMap" 1 "helm template exited $rc (expected 0)"
+else
+  n_lib=$(grep -c 'mountPath: /app/lib$' "$WORK/f.out" || true)
+  n_driver=$(grep -c 'name: driver-library$' "$WORK/f.out" || true)
+  if [ "$n_lib" -eq 1 ] && [ "$n_driver" -eq 2 ] && awk '
+    /^            - name: driver-library$/ {
+      if ((getline) > 0 && $0 == "              mountPath: /app/lib" &&
+          (getline) > 0 && $0 == "              readOnly: true") mounts++
+    }
+    /^        - name: driver-library$/ {
+      if ((getline) > 0 && $0 == "          configMap:" &&
+          (getline) > 0 && $0 == "            name: drivers") volumes++
+    }
+    END { exit !(mounts == 1 && volumes == 1) }
+  ' "$WORK/f.out"; then
+    verdict "(f) driver library ConfigMap" 0 "exit 0; exactly one read-only /app/lib mount and one driver-library ConfigMap volume"
+  else
+    verdict "(f) driver library ConfigMap" 1 "expected exactly one read-only /app/lib mount and one driver-library ConfigMap volume"
+  fi
+fi
+
+# Additional source-boundary checks: a PVC must carry its own readOnly flag too.
+rc=0
+"$HELM" template dp "$CHART_DIR" --set "existingSecret=$PLACEHOLDER" \
+  --set libVolume.enabled=true \
+  --set-json 'libVolume.source={"persistentVolumeClaim":{"claimName":"drivers","readOnly":true}}' \
+  >"$WORK/f-pvc.out" 2>"$WORK/f-pvc.err" || rc=$?
+if [ "$rc" -eq 0 ] && awk '
+  /^        - name: driver-library$/ {
+    if ((getline) > 0 && $0 == "          persistentVolumeClaim:" &&
+        (getline) > 0 && $0 == "            claimName: drivers" &&
+        (getline) > 0 && $0 == "            readOnly: true") volumes++
+  }
+  END { exit !(volumes == 1) }
+' "$WORK/f-pvc.out"; then
+  verdict "(f-pvc) read-only PVC source" 0 "exit 0; PVC source also carries readOnly: true"
+else
+  verdict "(f-pvc) read-only PVC source" 1 "exit $rc; expected a PVC source with readOnly: true"
+fi
+
+check_lib_source_refusal() {  # <label> <source JSON> <verbatim message>
+  local label="$1" source="$2" msg="$3" rc=0
+  "$HELM" template dp "$CHART_DIR" --set "existingSecret=$PLACEHOLDER" \
+    --set libVolume.enabled=true --set-json "libVolume.source=$source" \
+    >"$WORK/$label.out" 2>"$WORK/$label.err" || rc=$?
+  if [ "$rc" -ne 0 ] && grep -qF "$msg" "$WORK/$label.err"; then
+    verdict "(f-$label) invalid library source" 0 "exit $rc with the template's own refusal message"
+  else
+    verdict "(f-$label) invalid library source" 1 "exit $rc; expected the exact source refusal message"
+  fi
+}
+source_message='libVolume.source must contain exactly one trusted volume source (deployment.md §9)'
+check_lib_source_refusal empty '{}' "$source_message"
+check_lib_source_refusal multiple '{"configMap":{"name":"drivers"},"emptyDir":{}}' "$source_message"
+pvc_message='libVolume.source.persistentVolumeClaim.readOnly must be true (deployment.md §9)'
+check_lib_source_refusal writable-pvc '{"persistentVolumeClaim":{"claimName":"drivers","readOnly":false}}' "$pvc_message"
+check_lib_source_refusal implicit-pvc '{"persistentVolumeClaim":{"claimName":"drivers"}}' "$pvc_message"
+check_lib_source_refusal string-pvc '{"persistentVolumeClaim":{"claimName":"drivers","readOnly":"false"}}' "$pvc_message"
 
 if [ "$fails" -eq 0 ]; then
   echo "helm-check: PASS — all cases green (helm ${HELM_VERSION}, chart ${CHART_DIR#"$ROOT"/})"
