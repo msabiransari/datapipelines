@@ -7,7 +7,7 @@
 #
 # WHAT RUNS WHERE —
 #
-#   gate (ubuntu-latest, REQUIRES the runner's Docker daemon; 90-minute budget, #290):
+#   gate (ubuntu-latest, REQUIRES the runner's Docker daemon; 120-minute budget, #290, #669):
 #     ./scripts/helm-check.sh               — the reference Helm chart (deploy/helm/datapipelines)
 #         is linted and rendered by a PINNED helm binary (#411): `helm lint --strict` plus four
 #         template cases — defaults render no `env:` block at all, both `duckdb.*` values render
@@ -48,6 +48,11 @@
 #         step, the red buried under "cancelled". The job now budgets 90 min like
 #         `integration`, and the build step has its own 70-minute ceiling so that even a
 #         hung build leaves the report, the failure summary and the artifact their time.
+#         2026-10-21 (#669): the build step grew to 60–68 min as the browser suite grew
+#         (559 tests, run 39514670172) and hit 70 in runs 39348253765, 39501200887 and
+#         39525815939 (the last a pure timeout, 502 browser tests passed, 0 failed). The
+#         ceilings are raised to 100 (step) and 120 (job), keeping the 20-minute margin, as a
+#         stopgap until #669 moves the browser suite into its own sharded job.
 #     ./scripts/docs-audit.sh               — doc-structure checks over docs/ AND the served
 #         manual: `:modules:mcp-server:docsExport` renders it into build/skill-docs first
 #         (offline — the build step above resolved its classpath; 242a). No network.
@@ -118,8 +123,9 @@ permissions:
 jobs:
   gate:
     runs-on: ubuntu-latest
-    # 90, the integration job's budget, over a measured 48–57 min before #290 (header).
-    timeout-minutes: 90
+    # 90 since #290 over a measured 48–57 min; 120 since #669 (2026-10-21), the build step's
+    # 100 plus the reports' 20 (header).
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
@@ -160,8 +166,9 @@ jobs:
         # gate has always run with it; 2026-09-14: a dag flake stopped CI before four modules
         # had tested, and the report step below then ran their suites instead of reporting).
         # Its own ceiling, 20 min under the job's: a hung build still leaves the steps below
-        # (the reports, the failure summary, the artifact) their time (#290).
-        timeout-minutes: 70
+        # (the reports, the failure summary, the artifact) their time (#290). 100 since #669: the
+        # browser suite took the step to 60–68 min and three runs hit the old 70.
+        timeout-minutes: 100
         run: ./gradlew build ktlintCheck detekt --continue -x :tests:integration-tests:test -x :tests:integration-tests:verifyTestsExecuted
       # koverVerify writes only verify.err; the line-level XML the artifact below needs comes from
       # the report task, run AFTER the build so a failed verification still leaves the report.
@@ -200,7 +207,7 @@ jobs:
       # escaping for the annotation, html.escape for the Markdown summary — GitHub's sanitiser
       # drops a `<WORD>` it reads as a tag, so `expected:<REFUSED> but was:<UNBOUNDED>` would
       # render as `expected: but was:`. A result file that does not parse (a test JVM killed
-      # mid-write — the 70-minute ceiling's own case) is named and skipped, never fatal: the
+      # mid-write — the build step's ceiling's own case) is named and skipped, never fatal: the
       # summary is most needed in exactly that run.
       - name: name the failing tests
         if: always()
