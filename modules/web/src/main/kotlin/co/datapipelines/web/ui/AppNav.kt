@@ -18,8 +18,8 @@ package co.datapipelines.web.ui
  * ## Matching
  *
  * Exactly the rule `shell.js` mirrors client-side after a boosted swap and the rule the
- * layout's `th:classappend` has used since 076: **Home by equality (section /dashboard), everything else by
- * prefix** — `/pipelines/abc` is still "Pipelines", and so is its overview `/overview/pipelines` (#556).
+ * layout consumes: **a section owns its root and slash-delimited descendants** (#659).
+ * `/pipelines/abc` is still "Pipelines", and so is its overview `/overview/pipelines` (#556).
  * [crumbFor] resolves ties by the LONGEST matching section, so a future `/settings/api-keys` row would win
  * over `/settings`.
  */
@@ -40,9 +40,7 @@ object AppNav {
 
     /**
      * One rail item. [section] is the `data-nav-section` the template renders and `shell.js`
-     * matches on; it is a path PREFIX except for Home (section `/dashboard`), which matches
-     * exactly (a prefix rule would light Home up on every path, since `/` prefixes everything —
-     * hence the special case rather than a cleverer general rule).
+     * matches on; it is a path prefix bounded by a slash or the end of the path.
      */
     data class Item(
         val section: String,
@@ -54,7 +52,7 @@ object AppNav {
     val ITEMS: List<Item> =
         listOf(
             // D58 (#10 L3b): the landing item is Home — the route (/dashboard) is unchanged,
-            // only the label renamed, so the exact-match rule below keeps its section.
+            // only the label renamed; its section follows the same segment boundary as every item.
             Item("/dashboard", "Home", null),
             Item("/pipelines", "Pipelines", BUILD),
             Item("/templates", "Templates", BUILD),
@@ -100,18 +98,20 @@ object AppNav {
     }
 
     /**
-     * The 076 rule, restated once so the server, `shell.js` and this table cannot drift. #556:
+     * The segment-boundary rule shared by the layout and mirrored in `shell.js`. #556:
      * a section's overview (`/overview/pipelines`) belongs to that section, so the family item
      * stays active and the crumb names the family on its home page.
      */
     fun matches(
         section: String,
         path: String,
-    ): Boolean =
-        when (section) {
-            "/dashboard" -> path == "/dashboard"
-            else -> path.startsWith(section) || path.startsWith(OVERVIEW_PREFIX + section)
-        }
+    ): Boolean = owns(section, path) || owns(OVERVIEW_PREFIX + section, path)
+
+    /** A prefix owns only its root and slash-delimited descendants, never a bare lookalike. */
+    fun owns(
+        prefix: String,
+        path: String,
+    ): Boolean = path == prefix || path.startsWith("$prefix/")
 
     /**
      * The top bar's breadcrumb for a path: the group (muted, may be null) and the page name
@@ -121,7 +121,7 @@ object AppNav {
     fun crumbFor(path: String?): Pair<String?, String>? {
         val item = activeFor(path)
         if (item != null) return item.group to item.label
-        val off = OFF_RAIL.entries.filter { path != null && path.startsWith(it.key) }.maxByOrNull { it.key.length }
+        val off = OFF_RAIL.entries.filter { path != null && owns(it.key, path) }.maxByOrNull { it.key.length }
         return off?.let { null to it.value }
     }
 
