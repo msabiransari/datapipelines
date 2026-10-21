@@ -114,9 +114,9 @@ class DatasourceOverviewController(
                 caption = "Last connection test",
                 bars =
                     listOf(
-                        bar("ok", "Connection ok", counts.sumOf { it.testedOk }, "released"),
-                        bar("failed", "Connection failed", counts.sumOf { it.testedFailed }, "discarded"),
-                        bar("never", "Never tested", counts.sumOf { it.neverTested }, "draft"),
+                        bar("ok", "Connection ok", counts.sumOf { it.testedOk }, "success"),
+                        bar("failed", "Connection failed", counts.sumOf { it.testedFailed }, "danger"),
+                        bar("never", "Never tested", counts.sumOf { it.neverTested }, "warning"),
                     ),
                 note = "Each datasource carries its latest recorded test — one per datasource, whoever ran it.",
             )

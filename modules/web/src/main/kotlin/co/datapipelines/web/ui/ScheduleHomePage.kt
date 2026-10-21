@@ -85,9 +85,9 @@ internal object ScheduleHomePage {
                 caption = "By condition",
                 bars =
                     listOf(
-                        bar("enabled", "Enabled", summary.enabled.toLong(), "released"),
-                        bar("paused", "Paused", summary.paused.toLong(), "discarded"),
-                        bar("blocked", "Blocked", summary.blocked.toLong(), "draft"),
+                        bar("enabled", "Enabled", summary.enabled.toLong(), "success"),
+                        bar("paused", "Paused", summary.paused.toLong(), "warning"),
+                        bar("blocked", "Blocked", summary.blocked.toLong(), "danger"),
                     ),
                 headings = listOf("Condition", "Schedules"),
             ).withWidths()
@@ -242,11 +242,11 @@ internal object ScheduleHomePage {
             LastRunOutcome.NEVER_RAN -> "No run yet."
         }
 
-    /** The frame's four tones only — warning for a failure, muted for what did not happen. */
+    /** Semantic success and danger for outcomes; mixed while running, muted for what did not happen. */
     private fun LastRunOutcome.tone(): String =
         when (this) {
-            LastRunOutcome.SUCCEEDED -> "released"
-            LastRunOutcome.FAILED -> "draft"
+            LastRunOutcome.SUCCEEDED -> "success"
+            LastRunOutcome.FAILED -> "danger"
             LastRunOutcome.IN_PROGRESS -> "mixed"
             LastRunOutcome.DID_NOT_RUN -> "discarded"
             LastRunOutcome.NEVER_RAN -> "discarded"

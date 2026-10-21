@@ -215,11 +215,11 @@ internal object ApiHomePage {
         return copy(bars = bars.map { it.copy(width = OverviewPage.width(it.value, tallest)) })
     }
 
-    /** The console's own words for each state, and the lifecycle chart's tones (no danger red on an ordinary state). */
+    /** The console's state words: warning for a serving draft, never danger red on an ordinary state. */
     private val STATE_WORDS =
         mapOf(
             EndpointState.SERVING_RELEASE to ("Serving a release" to "released"),
-            EndpointState.SERVING_DRAFT to ("Serving a draft" to "draft"),
+            EndpointState.SERVING_DRAFT to ("Serving a draft" to "warning"),
             EndpointState.NOTHING_TO_SERVE to ("Nothing to serve" to "mixed"),
             EndpointState.LEGACY to ("Legacy path" to "discarded"),
         )

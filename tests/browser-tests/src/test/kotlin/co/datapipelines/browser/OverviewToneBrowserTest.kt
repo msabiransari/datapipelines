@@ -90,7 +90,10 @@ class OverviewToneBrowserTest : RestTreeBrowserFixture() {
         val pairs =
             listOf("in-development" to "live", "in-development" to "retired", "live" to "retired") +
                 listOf("in-development", "live", "retired", "link", "text", "track").map { "live-changes" to it } +
-                listOf("in-development", "live").flatMap { tone -> listOf("track", "panel", "text").map { tone to it } }
+                listOf("in-development", "live").flatMap { tone -> listOf("track", "panel", "text").map { tone to it } } +
+                listOf("success" to "warning", "success" to "danger", "warning" to "danger", "warning" to "live") +
+                listOf("success", "warning", "danger").flatMap { tone -> listOf("track", "panel", "text").map { tone to it } } +
+                listOf("success", "danger").flatMap { tone -> listOf("live-changes", "retired").map { tone to it } }
         pairs.forEach { (first, second) ->
             val a = colours.getValue(first)
             val b = colours.getValue(second)
@@ -172,7 +175,14 @@ class OverviewToneBrowserTest : RestTreeBrowserFixture() {
         const val MIN_SWEEP = 10
 
         /** The tones painted beyond the strip's dot: the legend dot, the column fill and the bar fill. */
-        val SITES = mapOf("in-development" to listOf("legend", "fill", "bar"), "live" to listOf("legend", "fill", "bar"))
+        val SITES =
+            mapOf(
+                "in-development" to listOf("legend", "fill", "bar"),
+                "live" to listOf("legend", "fill", "bar"),
+                "success" to listOf("bar"),
+                "warning" to listOf("bar"),
+                "danger" to listOf("bar"),
+            )
         val GAPS =
             listOf(
                 Gap(setOf("professional", "auto"), "live-changes/link", 0.073491, 633),
@@ -225,7 +235,29 @@ class OverviewToneBrowserTest : RestTreeBrowserFixture() {
             """
             async () => {
               const dot = (key) => document.querySelector('[data-count="' + key + '"] .app-overview-dot');
+              document.querySelectorAll('[data-semantic-probe]').forEach(e => e.remove());
+              const semanticDots = {};
+              const semanticBars = {};
+              for (const tone of ['success', 'warning', 'danger']) {
+                const probe = document.createElement('span');
+                probe.className = 'app-overview-dot';
+                probe.dataset.tone = tone;
+                probe.dataset.semanticProbe = tone;
+                document.querySelector('[data-overview-summary] dl').append(probe);
+                semanticDots[tone] = probe;
+                const bar = document.querySelector('.app-overview-bar:not(.is-zero)').cloneNode(true);
+                bar.dataset.tone = tone;
+                bar.dataset.semanticProbe = tone;
+                document.querySelector('.app-overview-chart').append(bar);
+                semanticBars[tone] = bar.querySelector('.app-overview-bar-fill');
+              }
               const sites = {
+                'success': [semanticDots.success, 'backgroundColor'],
+                'warning': [semanticDots.warning, 'backgroundColor'],
+                'danger': [semanticDots.danger, 'backgroundColor'],
+                'bar-success': [semanticBars.success, 'fill'],
+                'bar-warning': [semanticBars.warning, 'fill'],
+                'bar-danger': [semanticBars.danger, 'fill'],
                 'in-development': [dot('in-development'), 'backgroundColor'],
                 'live': [dot('live'), 'backgroundColor'],
                 'live-changes': [dot('live-changes'), 'backgroundColor'],

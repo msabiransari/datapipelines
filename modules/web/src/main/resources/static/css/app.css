@@ -3908,7 +3908,9 @@ pre.tf-pane-input {
    an ATTRIBUTE (the CSP admits no style), painted by the lifecycle's token: draft warning, released
    success, released with draft changes the info series (#627: never the brand — on light it is the
    body text, on forest, healthcare, ocean and saas the link colour, in the dark half near-white),
-   retired muted — never danger red on an ordinary draft. Nothing here moves, so
+   retired muted — never danger red on an ordinary draft. Semantic success, warning and danger
+   paint ops health, condition and run outcomes, never lifecycle facts. Activity columns stay lifecycle-only.
+   Nothing here moves, so
    prefers-reduced-motion has nothing to stop. */
 :root {
   --overview-chart-h: calc(var(--space-12) * 4); /* 192px: the activity plot, and a bars chart's floor */
@@ -3916,6 +3918,9 @@ pre.tf-pane-input {
   --overview-released: var(--chart-series-2);
   --overview-mixed: var(--chart-series-1);
   --overview-discarded: var(--chart-muted);
+  --overview-success: var(--accent-success);
+  --overview-warning: var(--accent-warning);
+  --overview-danger: var(--accent-danger);
 }
 .app-overview { display: grid; gap: var(--gap-md); min-width: 0; }
 
@@ -3967,6 +3972,10 @@ pre.tf-pane-input {
 .app-overview-dot[data-tone="draft"], [data-tone="draft"] > .app-overview-dot { background: var(--overview-draft); }
 .app-overview-dot[data-tone="released"], [data-tone="released"] > .app-overview-dot { background: var(--overview-released); }
 .app-overview-dot[data-tone="mixed"], [data-tone="mixed"] > .app-overview-dot { background: var(--overview-mixed); }
+.app-overview-dot[data-tone="discarded"], [data-tone="discarded"] > .app-overview-dot { background: var(--overview-discarded); }
+.app-overview-dot[data-tone="success"], [data-tone="success"] > .app-overview-dot { background: var(--overview-success); }
+.app-overview-dot[data-tone="warning"], [data-tone="warning"] > .app-overview-dot { background: var(--overview-warning); }
+.app-overview-dot[data-tone="danger"], [data-tone="danger"] > .app-overview-dot { background: var(--overview-danger); }
 .app-overview-link {
   display: inline-flex;
   align-items: center;
@@ -4154,6 +4163,9 @@ pre.tf-pane-input {
 .app-overview-bar[data-tone="released"] .app-overview-bar-fill { fill: var(--overview-released); }
 .app-overview-bar[data-tone="mixed"] .app-overview-bar-fill { fill: var(--overview-mixed); }
 .app-overview-bar[data-tone="discarded"] .app-overview-bar-fill { fill: var(--overview-discarded); }
+.app-overview-bar[data-tone="success"] .app-overview-bar-fill { fill: var(--overview-success); }
+.app-overview-bar[data-tone="warning"] .app-overview-bar-fill { fill: var(--overview-warning); }
+.app-overview-bar[data-tone="danger"] .app-overview-bar-fill { fill: var(--overview-danger); }
 .app-overview-note {
   display: flex;
   gap: var(--gap-xs);
