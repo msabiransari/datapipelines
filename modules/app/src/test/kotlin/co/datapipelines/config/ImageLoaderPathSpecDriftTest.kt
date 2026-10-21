@@ -23,7 +23,8 @@ import java.io.File
  * code-execution-by-file-drop, and `LOADER_PATH` comes from the image, never from the deployment
  * environment): the directory is created and made `0555` before the image's `USER` line, so it is
  * root-owned and the app user cannot write it; and no compose file or chart template names
- * `LOADER_PATH`, so a deployment cannot point the launcher somewhere writable.
+ * `LOADER_PATH` outside the chart's one render-time refusal, so a deployment cannot point the
+ * launcher somewhere writable.
  *
  * Textual, the [HelmDuckDbValuesSpecDriftTest] shape: it reads the files, it does not build the
  * image. The built image's own proof (printenv, `touch` refused, the loader's debug classpath)
@@ -85,9 +86,12 @@ class ImageLoaderPathSpecDriftTest {
                 File(root, CHART_DIR).walkTopDown().filter { it.isFile }.toList()
         val offenders =
             deployFiles.flatMap { file ->
-                file.readLines().withIndex().filter { LOADER_PATH_TOKEN.containsMatchIn(it.value) }.map {
-                    "${file.relativeTo(root)}:${it.index + 1}"
-                }
+                file
+                    .readLines()
+                    .withIndex()
+                    .filter { LOADER_PATH_TOKEN.containsMatchIn(it.value) }
+                    .filterNot { file.relativeTo(root).path == TEMPLATE && ALLOWED_REFUSAL.matches(it.value.trim()) }
+                    .map { "${file.relativeTo(root)}:${it.index + 1}" }
             }
 
         // The non-vacuity floor: the scan must have read the shipped compose file and the chart's
@@ -95,8 +99,11 @@ class ImageLoaderPathSpecDriftTest {
         withClue("files scanned") {
             deployFiles.map { it.relativeTo(root).path }.containsAll(SCAN_FLOOR) shouldBe true
         }
-        withClue("deploy files naming LOADER_PATH (deployment.md §9: never from the environment)") {
+        withClue("deploy files naming LOADER_PATH (deployment.md §9; only the exact template refusal is admitted)") {
             offenders.shouldBeEmpty()
+        }
+        withClue("the template's exact LOADER_PATH refusal must exist exactly once") {
+            repoFile(TEMPLATE).readLines().count { ALLOWED_REFUSAL.matches(it.trim()) } shouldBe 1
         }
     }
 
@@ -121,6 +128,7 @@ class ImageLoaderPathSpecDriftTest {
     private companion object {
         const val EXPECTED = "/app/lib"
         const val CHART_DIR = "deploy/helm/datapipelines"
+        const val TEMPLATE = "$CHART_DIR/templates/deployment.yaml"
         const val CHANGE_LOG_HEADING = "## Appendix A: Change Log"
         const val DROP_IN_PARAGRAPH = "**The `lib/` drop-in.**"
 
@@ -140,6 +148,12 @@ class ImageLoaderPathSpecDriftTest {
 
         val COMPOSE_FILE = Regex("""compose(\..+)?\.ya?ml""")
         val LOADER_PATH_TOKEN = Regex("""\bLOADER_PATH\b|loader\.path""")
+        val ALLOWED_REFUSAL =
+            Regex
+                .escape(
+                    """{{- if hasKey .Values.extraEnv "LOADER_PATH" }}{{ fail "LOADER_PATH comes from the image, """ +
+                        """never from extraEnv.LOADER_PATH (deployment.md §9)" }}{{- end }}""",
+                ).toRegex()
         val SCAN_FLOOR = listOf("deploy/compose.yml", "$CHART_DIR/templates/deployment.yaml", "$CHART_DIR/values.yaml")
     }
 }
