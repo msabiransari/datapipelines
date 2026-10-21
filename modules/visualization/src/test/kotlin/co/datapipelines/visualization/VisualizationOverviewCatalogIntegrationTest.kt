@@ -84,7 +84,8 @@ class VisualizationOverviewCatalogIntegrationTest {
         }
         // Unlensed the pointer names the draft: the row shows the draft (the pointer rule), so this
         // case goes red on the narrowed half only when index-row search is planted.
-        val unlensed = harness.dashboards.listIn(WORKSPACE, ReadLens.Everything, LifecycleBucket.RELEASED_WITH_DRAFT, "Unreleased title", 0, PAGE)
+        val unlensed =
+            harness.dashboards.listIn(WORKSPACE, ReadLens.Everything, LifecycleBucket.RELEASED_WITH_DRAFT, "Unreleased title", 0, PAGE)
         unlensed.total shouldBe 1
         unlensed.items
             .single()
