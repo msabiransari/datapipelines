@@ -110,7 +110,8 @@ class OAuth2LoginIntegrationTest {
 
         val row =
             jdbc.jdbcTemplate.queryForMap(
-                "SELECT provider, provider_subject, display_name, profile_picture_url FROM users WHERE email = 'octo-alice@datapipelines.co'",
+                "SELECT provider, provider_subject, display_name, profile_picture_url FROM users WHERE email = ?",
+                "octo-alice@datapipelines.co",
             )
         row["provider"] shouldBe "github"
         row["provider_subject"] shouldBe "4242"
