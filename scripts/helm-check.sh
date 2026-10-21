@@ -29,6 +29,8 @@
 #         proves the placeholder is load-bearing for (a)–(c).
 #   (e)   extraEnv.LOADER_PATH: exit non-zero with the exact refusal message; (e2) the
 #         same for loader_path, loader.path and Loader_Path, the spellings the launcher reads.
+#   (e3)  extraEnv.JAVA_TOOL_OPTIONS, JDK_JAVA_OPTIONS, _JAVA_OPTIONS: each refused with the
+#         template's own message (a -D in any of them can override the launcher path).
 #   (f)   libVolume enabled with a ConfigMap: exactly one read-only /app/lib
 #         mount and one driver-library volume using that ConfigMap.
 #         PVC sources must also be read-only; empty/multiple sources refused.
@@ -298,6 +300,14 @@ for key in loader_path loader.path Loader_Path; do
   else
     verdict "(e2) extraEnv names $key" 1 "exit $rc but the exact refusal message is NOT on stderr (red for the wrong reason)"
   fi
+done
+
+# (e3) the JVM reads -D options from these three variables, and a system property wins over
+# the image's environment value, so each is refused like the compose audit's class 8.
+for key in JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS; do
+  check_double_mapping "(e3) extraEnv names $key" "$key" /tmp/x \
+    "extraEnv.$key is refused: a JVM option variable can override the image's launcher path (deployment.md §9)" \
+    "$WORK/e3.out" "$WORK/e3.err"
 done
 
 # (f) the enabled volume: match whole blocks, so an unrelated readOnly elsewhere
