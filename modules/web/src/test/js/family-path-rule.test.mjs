@@ -1,4 +1,4 @@
-// #590: the same table drives ShellRenderTest and all three client path rules.
+// #590: the same table drives FamilyPathRuleParityTest and all three client path rules.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

@@ -2,21 +2,13 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.pipeline.SearchNeedle
 import co.datapipelines.web.ui.site.REPORT_PROBLEM_URL
-import com.fasterxml.jackson.databind.ObjectMapper
-import io.kotest.assertions.withClue
 import io.kotest.matchers.comparables.shouldBeLessThan
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
-import org.springframework.mock.web.MockHttpServletRequest
-import org.springframework.mock.web.MockHttpServletResponse
-import org.springframework.mock.web.MockServletContext
 import org.thymeleaf.context.WebContext
-import org.thymeleaf.spring6.SpringTemplateEngine
-import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver
-import org.thymeleaf.web.servlet.JakartaServletWebApplication
 
 /**
  * 076 §B — the boosted-navigation shell, pinned at the RENDER.
@@ -34,16 +26,7 @@ import org.thymeleaf.web.servlet.JakartaServletWebApplication
  * dropped attribute is invisible to controller tests and to the JS tests.
  */
 class ShellRenderTest {
-    private val engine =
-        SpringTemplateEngine().apply {
-            setTemplateResolver(
-                ClassLoaderTemplateResolver().apply {
-                    prefix = "templates/"
-                    suffix = ".html"
-                    characterEncoding = "UTF-8"
-                },
-            )
-        }
+    private val engine = ShellRenderFixture.engine()
 
     @Test
     fun `every app page renders the boost shell on nav and main`() {
@@ -417,18 +400,7 @@ class ShellRenderTest {
     }
 
     private fun WebContext.fillList() {
-        fillLayoutChrome()
-        setVariable("scopes", setOf("READ"))
-        setVariable("dialects", emptyList<String>())
-        // #350: the /pipelines page is the flat catalog under its own root.
-        setVariable("searching", true)
-        setVariable("rootId", PipelineBrowseModel.CATALOG_ROOT_ID)
-        setVariable("pipelines", emptyList<Any>())
-        setVariable("drafts", emptyMap<Any, Any>())
-        setVariable("q", "")
-        setVariable("offset", 0)
-        setVariable("hasMore", false)
-        setVariable("total", 0)
+        ShellRenderFixture.fillList(this)
     }
 
     private fun WebContext.fillLogin() {
@@ -468,17 +440,7 @@ class ShellRenderTest {
     }
 
     private fun WebContext.fillLayoutChrome() {
-        setVariable("_csrf", mapOf("token" to "t", "parameterName" to "_csrf"))
-        setVariable("workspaceHeaderFragment", "")
-        setVariable("workspaceOptions", emptyList<Any>())
-        setVariable("activeWorkspace", "acme")
-        setVariable("activeTheme", "saas")
-        setVariable("authenticated", true)
-        setVariable("currentPath", "/pipelines")
-        // #513 — UiWorkspaceAdvice's attribute at runtime; the render tests set it by hand.
-        setVariable("searchMaxLength", SearchNeedle.MAX_LENGTH)
-        // 127 — SiteOriginAdvice's attribute at runtime; the render tests set it by hand.
-        setVariable("reportProblemUrl", REPORT_PROBLEM_URL)
+        ShellRenderFixture.fillLayoutChrome(this)
     }
 
     /**
@@ -788,82 +750,7 @@ class ShellRenderTest {
         }
     }
 
-    @Test
-    fun `shared family path fixture has a non-vacuous coverage floor`() {
-        withClue("fixture rows=${familyPaths.size}, floor=$FAMILY_PATH_FLOOR") {
-            (familyPaths.size >= FAMILY_PATH_FLOOR) shouldBe true
-        }
-        familyPaths.any { it.section == null } shouldBe true
-        familyPaths.any { it.family == null } shouldBe true
-        familyPaths.mapNotNull { it.section }.toSet() shouldBe AppNav.ITEMS.map { it.section }.toSet()
-        familyPaths.map { it.path }.distinct().size shouldBe familyPaths.size
-    }
-
-    @Test
-    fun `AppNav agrees with the shared family path fixture`() {
-        familyPaths.forEach { row ->
-            withClue("AppNav path=${row.path}") {
-                AppNav.ITEMS.filter { AppNav.matches(it.section, row.path) }.map { it.section } shouldBe listOfNotNull(row.section)
-                val item = row.section?.let { AppNav.bySection(it).shouldNotBeNull() }
-                AppNav.crumbFor(row.path) shouldBe
-                    if (item != null) item.group to item.label else offRailCrumbs[row.path]?.let { null to it }
-            }
-        }
-    }
-
-    @Test
-    fun `rendered layout agrees with the shared family path fixture`() {
-        familyPaths.forEach { row ->
-            withClue("layout path=${row.path}") {
-                val html =
-                    engine.process(
-                        "pipelines/list",
-                        webContext().apply {
-                            fillList()
-                            setVariable("currentPath", row.path)
-                            setVariable("crumbGroup", AppNav.crumbFor(row.path)?.first)
-                            setVariable("crumbPage", AppNav.crumbFor(row.path)?.second)
-                        },
-                    )
-                val active = Regex("""<a [^>]*class="app-nav-link active"[^>]*>""").findAll(html).toList()
-                active.map { Regex("""data-nav-section="([^"]+)"""").find(it.value).shouldNotBeNull().groupValues[1] } shouldBe
-                    listOfNotNull(row.section)
-                val browser = Regex("""<aside class="app-browser"[^>]*>""").find(html).shouldNotBeNull().value
-                browser.contains("hidden") shouldBe (row.family == null)
-                val panels = PANEL.findAll(html).toList()
-                panels.map { it.groupValues[1] }.toSet() shouldBe familyPaths.mapNotNull { it.family }.toSet()
-                panels.filterNot { it.value.contains("hidden") }.map { it.groupValues[1] } shouldBe listOfNotNull(row.family)
-                val label = row.section?.let { AppNav.bySection(it).shouldNotBeNull().label } ?: offRailCrumbs[row.path] ?: "datapipelines"
-                html.substringAfter("class=\"app-crumb-page\"").substringAfter(">").substringBefore("<") shouldBe label
-            }
-        }
-    }
-
-    private data class FamilyPath(
-        val path: String,
-        val section: String?,
-        val family: String?,
-    )
-
-    private val familyPaths =
-        requireNotNull(javaClass.getResourceAsStream("/shell/family-path-rule.json")) {
-            "Missing shared family path fixture"
-        }.use { input ->
-            ObjectMapper().readTree(input).map { row ->
-                FamilyPath(
-                    row["path"].asText(),
-                    row["section"].takeUnless { it.isNull }?.asText(),
-                    row["family"].takeUnless { it.isNull }?.asText(),
-                )
-            }
-        }
-
-    private val offRailCrumbs =
-        mapOf("/settings/api-keys" to "API keys", "/api-keys" to "API keys", "/settings/password" to "Password", "/settings" to "Settings")
-
     private companion object {
-        const val FAMILY_PATH_FLOOR = 96
-
         /** A menu group's caption: its id suffix and its visible word. */
         val CAPTION = Regex("""<div class="app-nav-section" id="app-nav-group-([a-z]+)">([A-Za-z]+)</div>""")
 
@@ -871,10 +758,5 @@ class ShellRenderTest {
         val PANEL = Regex("""<div class="app-nav-tree app-browser-tree" id="nav-tree-([a-z-]+)" data-nav-tree="([a-z-]+)"[^>]*>""")
     }
 
-    private fun webContext(): WebContext =
-        WebContext(
-            JakartaServletWebApplication
-                .buildApplication(MockServletContext())
-                .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
-        ).withRoles()
+    private fun webContext(): WebContext = ShellRenderFixture.context()
 }
