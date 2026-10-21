@@ -218,9 +218,10 @@ class ScheduledJobsSchedulerTest {
         val jdbc = mockk<NamedParameterJdbcTemplate>()
         every { jdbc.queryForObject(any<String>(), any<Map<String, *>>(), OffsetDateTime::class.java) } returns OffsetDateTime.now()
         every { jdbc.update(any<String>(), any<Map<String, *>>()) } returns 0
-        // #326 — the audit retention and the keys purge are built over a BOUNDED template on this template's
-        // DataSource (RetentionSchedulingConfiguration). The slice's refuses every connection, so those two steps
-        // fail fast and are logged; the slice is about the thread every job ticks on, not their SQL.
+        // #326 — the audit retention and the keys purge, and since #636 the dashboard refreshes' retention and the two
+        // evaluation steps, are built over a BOUNDED template on this template's DataSource
+        // (RetentionSchedulingConfiguration). The slice's refuses every connection, so those five steps fail fast and
+        // are logged; the slice is about the thread every job ticks on, not their SQL.
         val noDatabase = mockk<DataSource> { every { connection } throws SQLException("the scheduling slice has no database") }
         every { jdbc.jdbcTemplate } returns JdbcTemplate(noDatabase)
         val cancellations = InMemoryCancellationRegistry()
