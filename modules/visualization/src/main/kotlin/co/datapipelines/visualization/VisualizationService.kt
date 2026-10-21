@@ -305,16 +305,18 @@ class VisualizationService(
         limit: Int = ArtifactRepository.DEFAULT_PAGE_LIMIT,
     ): ArtifactPage<VisualizationBody> = lifecycle.search(workspaceId, lens, query, offset, limit)
 
-    /** The inventory-filtered catalog; the unfiltered list/search retain their existing pointer rule. */
-    @Suppress("LongParameterList") // the catalog's search, page and inventory bucket
-    fun lifecyclePage(
+    /**
+     * The catalog `lifecycle` filter — [ArtifactLifecycle.listIn], ONE filtered read for both kinds (#597):
+     * the inventory's rule under every lens, the selected-version search under a narrowed one.
+     */
+    fun listIn(
         workspaceId: UUID,
         lens: ReadLens,
-        query: String?,
-        offset: Int,
-        limit: Int,
         bucket: co.datapipelines.pipeline.LifecycleBucket,
-    ): ArtifactPage<VisualizationBody> = repository.lifecyclePage(workspaceId, lens, query, offset, limit, bucket)
+        query: String?,
+        offset: Int = 0,
+        limit: Int = ArtifactRepository.DEFAULT_PAGE_LIMIT,
+    ): ArtifactPage<VisualizationBody> = lifecycle.listIn(workspaceId, lens, bucket, query, offset, limit)
 
     fun currentVersions(workspaceId: UUID): List<CurrentArtifactVersion> = lifecycle.currentVersions(workspaceId)
 

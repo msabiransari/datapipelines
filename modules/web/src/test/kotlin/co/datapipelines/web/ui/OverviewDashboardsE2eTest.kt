@@ -177,14 +177,14 @@ class OverviewDashboardsE2eTest {
         fixture()
         val counted = counted(LensedView.EVERYTHING)
 
-        repository.countIn(workspace, LifecycleBucket.DISCARDED_ONLY, null, null).toLong() shouldBe counted.discardedOnly
-        repository.listIn(workspace, LifecycleBucket.DISCARDED_ONLY, null, null).map { it.record.name } shouldBe listOf("d/discarded")
+        repository.listIn(workspace, LifecycleBucket.DISCARDED_ONLY, null, null).total.toLong() shouldBe counted.discardedOnly
+        repository.listIn(workspace, LifecycleBucket.DISCARDED_ONLY, null, null).items.map { it.record.name } shouldBe listOf("d/discarded")
         withClue("a narrowed read sees RELEASED rows only, so nothing is discarded-only through a lens") {
-            repository.countIn(workspace, LifecycleBucket.DISCARDED_ONLY, setOf("d/discarded"), null) shouldBe 0
+            repository.listIn(workspace, LifecycleBucket.DISCARDED_ONLY, setOf("d/discarded"), null).total shouldBe 0
         }
         withClue("an empty lens reads nothing") {
-            repository.countIn(workspace, LifecycleBucket.RELEASED_ONLY, emptySet(), null) shouldBe 0
-            repository.listIn(workspace, LifecycleBucket.RELEASED_ONLY, emptySet(), null) shouldBe emptyList()
+            repository.listIn(workspace, LifecycleBucket.RELEASED_ONLY, emptySet(), null).total shouldBe 0
+            repository.listIn(workspace, LifecycleBucket.RELEASED_ONLY, emptySet(), null).items shouldBe emptyList()
         }
         withClue("why the catalog does not offer discarded: the workspace's read answers nothing (its 404)") {
             service.findWorking(workspace, ReadLens.Everything, idOf("d/discarded")).shouldBeNull()

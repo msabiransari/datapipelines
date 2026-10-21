@@ -377,7 +377,10 @@ class DashboardService(
         limit: Int = ArtifactRepository.DEFAULT_PAGE_LIMIT,
     ): ArtifactPage<DashboardBody> = lifecycle.search(workspaceId, lens, query, offset, limit)
 
-    /** #580 — the catalog `lifecycle` filter, `q` composed: [ArtifactLifecycle.listIn], the inventory's rule under every lens. */
+    /**
+     * The catalog `lifecycle` filter, `q` composed — [ArtifactLifecycle.listIn], ONE filtered read for both kinds
+     * (#597): the inventory's rule under every lens, the selected-version search under a narrowed one.
+     */
     fun listIn(
         workspaceId: UUID,
         lens: ReadLens,

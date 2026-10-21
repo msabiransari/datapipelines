@@ -105,6 +105,17 @@ internal class ArtifactSql(
             " OR s.description ILIKE CAST(:pattern AS TEXT) ESCAPE '\\')"
 
     /**
+     * [searchMatch]'s narrowed variant (#581's rule, #597): the artifact's name plus the SELECTED
+     * (listed) version's own metadata from `v.body_json` — never the index row's, which mirrors the
+     * current pointer's body and can name a draft a narrowed lens must not see. `v` is the outer
+     * statement's listed-version row, so the search reads exactly what the row shows.
+     */
+    private val searchMatchSelected =
+        "(s.name ILIKE CAST(:pattern AS TEXT) ESCAPE '\\'" +
+            " OR (v.body_json ->> 'display_name') ILIKE CAST(:pattern AS TEXT) ESCAPE '\\'" +
+            " OR (v.body_json ->> 'description') ILIKE CAST(:pattern AS TEXT) ESCAPE '\\')"
+
+    /**
      * The name search's scope (#399; `TemplateRepository`'s shape): the workspace, the live artifacts, and the index row's
      * name, display name or description matching `:pattern` — a bind the repository builds as `%term%` with the term's
      * LIKE metacharacters escaped, so `%`, `_` and `\` match literally and case-insensitively. Never string-built.
@@ -131,7 +142,8 @@ internal class ArtifactSql(
      * #580 — the catalog `lifecycle` filter's scope: [bucket]'s membership ([InventorySource.membership], the inventory's
      * rule over the same versions) REPLACES [liveS], as `PipelineRepository.liveness` does. A [narrowed] lens reads
      * RELEASED versions only and binds its names (`:names`, never empty — the repository answers an empty lens itself);
-     * [searching] adds [searchMatch].
+     * [searching] adds the text half the lens admits: the index row's under the everything lens (#399), the
+     * selected version's own metadata under a narrowed lens (#581's rule, [searchMatchSelected]).
      */
     private fun bucketWhere(
         bucket: LifecycleBucket,
@@ -140,7 +152,7 @@ internal class ArtifactSql(
     ): String =
         "WHERE s.workspace_id = :workspaceId AND ${InventorySource.membership(family, "s", bucket, narrowed)}" +
             (if (narrowed) " AND s.name IN (:names)" else "") +
-            (if (searching) " AND $searchMatch" else "")
+            (if (searching) " AND ${if (narrowed) searchMatchSelected else searchMatch}" else "")
 
     /**
      * The version a filtered row shows. Unlensed: [listedVersion], else (a discarded-only artifact: NULL pointer, no
@@ -169,12 +181,14 @@ internal class ArtifactSql(
          LIMIT :limit OFFSET :offset
         """.trimIndent()
 
-    /** The truthful total of [listIn]. */
+    /** The truthful total of [listIn]: the rows' scope again, `v` joined at [bucketListedVersion] — one row per member. */
     fun countIn(
         bucket: LifecycleBucket,
         narrowed: Boolean,
         searching: Boolean,
-    ): String = "SELECT COUNT(*) FROM $index s ${bucketWhere(bucket, narrowed, searching)}"
+    ): String =
+        "SELECT COUNT(*) FROM $index s JOIN $versions v ON v.$fk = s.id AND v.version = ${bucketListedVersion(narrowed)}" +
+            " ${bucketWhere(bucket, narrowed, searching)}"
 
     val currentVersions =
         """

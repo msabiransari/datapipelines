@@ -75,7 +75,15 @@ class DashboardBrowseModel(
         // A box truncates its own term to the shared bound (#504b) before the call, never refuses.
         val needle = q?.trim()?.takeIf { it.isNotEmpty() }?.take(SearchNeedle.MAX_LENGTH)
         if (lifecycle != null) {
-            val found = dashboards.listIn(workspaceId, view.dashboards, lifecycle, needle, page, PAGE_SIZE)
+            val found =
+                dashboards.listIn(
+                    workspaceId = workspaceId,
+                    lens = view.dashboards,
+                    bucket = lifecycle,
+                    query = needle,
+                    offset = page,
+                    limit = PAGE_SIZE,
+                )
             model.addAttribute("hasMore", found.total > page + PAGE_SIZE)
             model.addAttribute("total", found.total)
             model.addAttribute("dashboards", found.items.map(::DashboardLeafView))
