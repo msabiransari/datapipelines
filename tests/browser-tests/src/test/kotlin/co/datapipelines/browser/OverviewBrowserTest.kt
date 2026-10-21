@@ -161,8 +161,7 @@ class OverviewBrowserTest : RestTreeBrowserFixture() {
             api("POST", "/api/v1/pipelines", pipelineBody("acme/three"))
             page.reload()
             OverviewHomeBrowserSupport.metrics(page, "total" to "3", "in-development" to "1", "actively-developed" to "1")
-            page.locator("[data-chart-table='maturity'] tr[data-row='r0'] td[data-part='draft-open']").textContent().trim() shouldBe "1"
-            page.locator("[data-chart-table='activity'] tbody tr:last-child td[data-part='created']").textContent().trim() shouldBe "3"
+            OverviewHomeBrowserSupport.columnsAndBins(page, created = 3, released = 2, "r0:draft-open" to 1)
             page.locator("[data-task='drafts'] small").innerText().trim() shouldBe "1 pipeline is working toward its first release."
         }
         OverviewHomeBrowserSupport.screenshots(page, "pipelines", additionalViewports = listOf(MID to MID))
@@ -191,17 +190,18 @@ class OverviewBrowserTest : RestTreeBrowserFixture() {
             page.locator("[data-overview-dialog-close]").click()
             dialog().isVisible shouldBe false
         }
-        OverviewHomeBrowserSupport.SHOTS.toFile().mkdirs()
+        val shots = OverviewHomeBrowserSupport.SHOTS
+        shots.toFile().mkdirs()
         listOf(WIDE to WIDE_H, PHONE to PHONE_H).forEach { (width, height) ->
             page.setViewportSize(width, height)
             OverviewHomeBrowserSupport.openDialog(page, "[data-overview-foot] [data-open='definitions']")
-            page.screenshot(Page.ScreenshotOptions().setPath(OverviewHomeBrowserSupport.SHOTS.resolve("pipelines-dialog-definitions-$width.png")))
+            page.screenshot(Page.ScreenshotOptions().setPath(shots.resolve("pipelines-dialog-definitions-$width.png")))
             page.keyboard().press("Escape")
             OverviewHomeBrowserSupport.openDialog(page, "[data-overview-panel='activity'] [data-overview-view-data]")
-            page.screenshot(Page.ScreenshotOptions().setPath(OverviewHomeBrowserSupport.SHOTS.resolve("pipelines-dialog-activity-$width.png")))
+            page.screenshot(Page.ScreenshotOptions().setPath(shots.resolve("pipelines-dialog-activity-$width.png")))
             page.keyboard().press("Escape")
             OverviewHomeBrowserSupport.openDialog(page, "[data-overview-agent]")
-            page.screenshot(Page.ScreenshotOptions().setPath(OverviewHomeBrowserSupport.SHOTS.resolve("pipelines-dialog-prompt-$width.png")))
+            page.screenshot(Page.ScreenshotOptions().setPath(shots.resolve("pipelines-dialog-prompt-$width.png")))
             page.keyboard().press("Escape")
         }
     }
