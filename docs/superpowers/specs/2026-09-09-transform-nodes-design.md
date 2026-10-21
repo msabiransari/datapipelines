@@ -1,6 +1,6 @@
 # Design: SCRIPT nodes — JSONata and JavaScript as template types, one node type, one contract, tested like code
 
-**Status:** v0.7 (2026-10-20, #8 round-two readiness): §4.4 re-verified against the current GraalVM guides and Maven Central — the pin is 25.4.4.1.1, the untrusted policy needs six options §4.4 did not list, the isolate is spawned explicitly, a Context that trips a limit is dead; new §4.6 (the spike that opens round two, eleven ways the round can fail with where each is found, the measurements it must record); D-T16 packaging (the jar carries no isolate — the image fetches its platform's, SHA-256 verified, into a directory a setting names) and D-T17 console output to the application log (owner, 2026-10-20); §12's round-two decisions re-listed; §14 gains lanes 8a/8b. v0.6 (2026-09-28, #272): §4.5 gains the owner's ruling — the evaluation pool's abandonment is the script engine's sandbox bound, the between-steps hooks a runaway guard — and the Reserved names row (a body may not bind a `__` name; `$eval` checked the same way); the 7a note's "`$eval` cannot parse bind expressions" corrected. v0.5 (2026-09-26, #260): §4.5's Depth row corrected — the engine counts depth with its own evaluate entry/exit hooks (the library `Timebox` skipped `isParallelCall` frames, leaking one unit per item on set-level shapes); tail-recursive lambdas are trampolined and stay a wall-clock case. v0.4 (2026-09-24) restated every authorization row in the vocabulary of the permissions-and-keys record (`2026-09-23-permissions-and-keys-design.md`, RATIFIED 2026-09-23, #215), which lands BEFORE the remaining script lanes (owner, 2026-09-24); v0.3 RATIFIED for dispatch (2026-09-23) on the owner's nine rulings R1–R9 (§0.1).
+**Status:** v0.7.1 (2026-10-21, #8 errata before lane 8a — the owner's rulings D1–D5 of 2026-10-20 and the lander's review, store `notes/2026-10-20-javascript-review-response.md`; the plan's six errata, store `notes/2026-10-20-javascript-round-two-plan.md` §10): §4.4 gains the Engine boundary (D1), `sandbox.MaxStackFrames`, CPU ≠ elapsed (the engine's own `close(true)` watchdog is the wall-clock bound, wired through the pool), parse-only compile (D2), the number rule by logical type (D3), the return-shape contract, the input/result byte budgets, the read-only deployment (D5); `Math.random` is refused (no seed exists) and the time zone comes from the builder, not an unverified option name; §4.1 shows the seam as it is in the tree plus the three defaulted fields 8a adds; §4.6 names `loader.path` as the primary mechanism and gains failure modes 12–13 and three measurements; §12 R2-3/R2-4 corrected, R2-8..R2-12 record the five rulings; §14 row 8b's E2E is `ScriptNodeE2eTest` (there is no §10.9), the module fences are corrected, 8a's deliverables grown. The body contract (the statements of `main(input)`, D4) was written into §2.2 by the rename lane and stands. v0.7 (2026-10-20, #8 round-two readiness): §4.4 re-verified against the current GraalVM guides and Maven Central — the pin is 25.4.4.1.1, the untrusted policy needs six options §4.4 did not list, the isolate is spawned explicitly, a Context that trips a limit is dead; new §4.6 (the spike that opens round two, eleven ways the round can fail with where each is found, the measurements it must record); D-T16 packaging (the jar carries no isolate — the image fetches its platform's, SHA-256 verified, into a directory a setting names) and D-T17 console output to the application log (owner, 2026-10-20); §12's round-two decisions re-listed; §14 gains lanes 8a/8b. v0.6 (2026-09-28, #272): §4.5 gains the owner's ruling — the evaluation pool's abandonment is the script engine's sandbox bound, the between-steps hooks a runaway guard — and the Reserved names row (a body may not bind a `__` name; `$eval` checked the same way); the 7a note's "`$eval` cannot parse bind expressions" corrected. v0.5 (2026-09-26, #260): §4.5's Depth row corrected — the engine counts depth with its own evaluate entry/exit hooks (the library `Timebox` skipped `isParallelCall` frames, leaking one unit per item on set-level shapes); tail-recursive lambdas are trampolined and stay a wall-clock case. v0.4 (2026-09-24) restated every authorization row in the vocabulary of the permissions-and-keys record (`2026-09-23-permissions-and-keys-design.md`, RATIFIED 2026-09-23, #215), which lands BEFORE the remaining script lanes (owner, 2026-09-24); v0.3 RATIFIED for dispatch (2026-09-23) on the owner's nine rulings R1–R9 (§0.1).
 **RENAMED.** TRANSFORM was renamed SCRIPT by the script-node-rename lane (owner ruling 2026-10-20):
 the wire value, the codes, the config keys and the docs area changed; nothing the node does changed.
 Supersedes v0.2 (2026-09-17) in place; every v0.2 decision stands, and the pre-dispatch review
@@ -46,7 +46,7 @@ the implementer verifies against, never as the pin.
 | **D-T13** | **Invariants are JSONata booleans, whatever the template's language.** | Assertions stay data, not code — the instinct behind release checks — so every script's guarantees render in one place and cannot have side effects. |
 | **D-T14** | **Two implementation rounds: JSONata first with the whole contract machinery; JavaScript second.** | The seam and the conformance suite are proven on the engine with no isolate before the engine with one arrives; the JS round measures serialisation cost on a working system rather than estimating it. |
 | **D-T15** (new v0.3) | **The JSONata engine is fenced like its JavaScript brother and like every other executor resource: its bounds are stated honestly, it runs on its own bounded pool, its inputs and outputs are capped, and a breach suite proves each bound or records its absence (R7, §4.5).** | A sandbox no test has breached is a belief. The library bounds time and depth between steps only; the executor must own what the library cannot. |
-| **D-T16** (new v0.7, owner 2026-10-20) | **The jar carries no isolate; the image fetches the one for its platform.** The GraalJS isolate is a per-platform native artifact (§4.4). The product jar bundles only the polyglot API and the engine code; the Dockerfile fetches the isolate for its `TARGETARCH` from Maven Central at image build, verified against the published SHA-256, into the directory `datapipelines.script.js.isolate-dir` names (the DuckDB-extension pattern already in the Dockerfile). A non-Docker deployment drops its platform's isolate jar there. Empty or missing → JavaScript disabled, said once at boot (`script.js.unavailable`); never a silent fallback. Local builds and tests take the host platform's isolate through Gradle; all four platform artifacts are pinned in the verification metadata. | Bundling every platform costs ~123 MB on a 186 MB jar for files no deployment runs; bundling one bakes the platform into the jar and an org building an arm64 image from the published jar gets JavaScript silently off. Docker's own `--platform` is the knob orgs already know. Measured 2026-10-20: linux-amd64 isolate 62 459 905 bytes, linux-aarch64 60 719 533, the jar 186 408 039. |
+| **D-T16** (new v0.7, owner 2026-10-20) | **The jar carries no isolate; the image fetches the one for its platform.** The GraalJS isolate is a per-platform native artifact (§4.4). The product jar bundles only the polyglot API and the engine code; the Dockerfile fetches the isolate for its `TARGETARCH` from Maven Central at image build, verified against the published SHA-256, into the directory `datapipelines.script.js.isolate-dir` names (the DuckDB-extension pattern already in the Dockerfile). A non-Docker deployment drops its platform's isolate jar there. **(v0.7.1)** The directory reaches the class path through the boot launcher's `loader.path` (`PropertiesLauncher` is already the jar's `Main-Class`; the image's `ENTRYPOINT` passes `-Dloader.path=/opt/graaljs`) — the primary mechanism of the round-two plan (M1), not a fallback; `isolate-dir` stays the key the boot check verifies and names. Empty or missing → JavaScript disabled, said once at boot (`script.js.unavailable`); never a silent fallback. Local builds and tests take the host platform's isolate through Gradle; all four platform artifacts are pinned in the verification metadata. | Bundling every platform costs ~123 MB on a 186 MB jar for files no deployment runs; bundling one bakes the platform into the jar and an org building an arm64 image from the published jar gets JavaScript silently off. Docker's own `--platform` is the knob orgs already know. Measured 2026-10-20: linux-amd64 isolate 62 459 905 bytes, linux-aarch64 60 719 533, the jar 186 408 039. |
 | **D-T17** (new v0.7, owner 2026-10-20) | **`console.*` output is logged like the application's own logs** — one structured line per call under the logger `script.js.console`, tagged with template id and version, node id and execution id, bounded by `sandbox.MaxOutputStreamSize` / `MaxErrorStreamSize`; `console.error`/`warn` at WARN, the rest at INFO. The same captured text is returned in `templates_evaluate` and the test runner's result (`console: [...]`, capped the same way) so an author — who has no server log — sees it where they debug; a pipeline run logs only. | The owner's ruling (2026-10-20): "those are just like java logs". The author-facing copy is the orchestrator's addition, confirmed at the 8a dispatch; a console line can carry row data, so the log line is bounded, marked and subject to the same retention as every other log line. |
 
 ### 0.1 The owner's rulings of 2026-09-23 (R1–R9)
@@ -305,12 +305,21 @@ projection of §6.
 ### 4.1 The seam
 
 ```kotlin
+// As in the tree (modules/scripting, v0.7.1 re-read 2026-10-21); the three commented fields are 8a's additions.
 interface ScriptEngine {
-    val type: TemplateType
-    fun compile(body: String): CompiledScript                      // parse only
-    fun evaluate(script: CompiledScript, input: Any, limits: EvaluationLimits): Any?
+    val type: ScriptLanguage
+    val capabilities: EngineCapabilities
+    fun compile(body: String): CompiledScript                      // parse only — NO guest statement runs (D2)
+    fun evaluate(script: CompiledScript, input: Any?, limits: EvaluationLimits): Any?
 }
-data class EvaluationLimits(val wallClock: Duration, val maxDepth: Int, val maxHeapBytes: Long?, val maxStatements: Long?)
+data class EvaluationLimits(
+    val wallClock: Duration, val maxDepth: Int,
+    val maxHeapBytes: Long? = null, val maxStatements: Long? = null,
+    val now: Instant? = null,                                        // the pinned clock (R2-4; null → clock reads refuse)
+    // 8a adds, defaulted so no caller changes:
+    val maxInputBytes: Long? = null, val maxResultBytes: Long? = null, // the byte budgets (§4.4); null → the runtime's options
+    val console: ConsoleSink? = null,                                // NOT a bound: where console.* lines go; null discards them
+)
 ```
 
 Its own module (`modules/scripting`), depending on `typesystem` only. Input and output are
@@ -404,18 +413,29 @@ Read from the GraalVM sandboxing and embedding guides on 2026-09-09, re-read 202
   `eclipse-temurin:21-jre` image. Packaging is D-T16.
 - **Sandboxing on Community requires the isolate** (since GraalVM 25.1). Policies
   `CONSTRAINED → ISOLATED → UNTRUSTED` build on each other; `ISOLATED`/`UNTRUSTED` need the isolate. The
-  decision is **`SandboxPolicy.UNTRUSTED`**, one shared `Engine`, one `Context` per evaluation. **The isolate
+  decision is **`SandboxPolicy.UNTRUSTED`**, one `Context` per evaluation, and the Engine boundary of the next bullet. **The isolate
   is never automatic (v0.7):** the builder calls `spawnIsolate(true)` on a builder with an explicit language
   list (`Context.newBuilder("js")` / `Engine.newBuilder("js")`); `engine.IsolateMode=external` (a separate OS
   process) is experimental and not planned.
+- **The Engine boundary (D1, owner 2026-10-20, v0.7.1).** The sandboxing guide ("Sharing Execution Engines") says guest
+  code of different trust domains must be separated at the Engine level — Contexts of one Engine share the isolate heap
+  and the code cache, and GraalVM promises isolation between Engines, not between Contexts. v0.7's "one shared `Engine`"
+  was a documented deviation. Ruled "3 if not then 2": **one Engine per EVALUATION** when lane 8a's spike shows it
+  affordable — spawn + first Context + close median ≤ ~100 ms and p95 ≤ ~250 ms over ≥ 200 cycles, process RSS flat over
+  1 000 cycles (the orchestrator's gate) — else **one Engine per JVM** with the deviation recorded (author `Source`s
+  `cached(false)`, per-Context `sandbox.MaxHeapMemory` well under `engine.MaxIsolateMemory`, the Engine's rebuild path
+  after a fatal trip, and the failure mode "a tenant's hard-heap trip can cancel other tenants' evaluations once" in the
+  KDoc, the handback and deployment.md). One Engine per WORKSPACE was offered and not chosen. No designed data path crosses
+  Contexts in either arm (fresh Context, `HostAccess.UNTRUSTED`, one JSON string in and out, no shared globals); the lander's
+  probe of 2026-10-20 saw a sibling Context survive one hard-heap trip — the spike re-measures it (§4.6).
 - **What `UNTRUSTED` requires (v0.7 — the guide's current list; a missing one refuses to build the Context):**
-  `sandbox.MaxCPUTime` (the node wall clock; checked every `sandbox.MaxCPUTimeCheckInterval`, default 10 ms),
+  `sandbox.MaxCPUTime` (set to the wall clock as the CPU budget — **v0.7.1: CPU time is not elapsed time**; the guide says it excludes time waiting on synchronisation or IO, is checked every `sandbox.MaxCPUTimeCheckInterval`, default 10 ms, with no accuracy guarantee — so the WALL-CLOCK bound is the engine's own watchdog calling `Context.close(true)` at `limits.wallClock`, see the cancellation bullet; whichever trips first wins),
   `sandbox.MaxHeapMemory` (= `datapipelines.script.js.max-heap-mb`, default 256 — **a soft limit: the guide
   says guest code can still cause `OutOfMemory`**), `engine.MaxIsolateMemory` (the isolate's whole heap; every
   Context sharing the Engine shares it, so it is ≥ `pool-size × max-heap-mb` plus headroom —
   `datapipelines.script.js.isolate-memory-mb`), `sandbox.MaxStatements` (the runaway-loop backstop;
   `MaxStatementsIncludeInternal` identical on every Context of the Engine), `sandbox.MaxThreads = 1`,
-  `sandbox.MaxASTDepth`, `sandbox.MaxOutputStreamSize` and `sandbox.MaxErrorStreamSize` (D-T17's caps),
+  `sandbox.MaxASTDepth` (parse depth), `sandbox.MaxOutputStreamSize` and `sandbox.MaxErrorStreamSize` (D-T17's caps), and — optional under the policy, **v0.7.1**: v0.7 wrongly concluded no stack-depth option exists — `sandbox.MaxStackFrames` set from `EvaluationLimits.maxDepth` (runtime guest frames, a different thing from AST depth), so `EngineCapabilities.boundsDepth` is **true** for this engine;
   `in`, `out` and `err` redirected, `allowHostAccess(HostAccess.UNTRUSTED)`, `engine.UntrustedCodeMitigation`
   on. `sandbox.UseLowMemoryTrigger` is unsupported under the policy. `--sandbox.TraceLimits=true` records peak
   usage for sizing. All of these are config keys under `datapipelines.script.js.*` (configuration.md's
@@ -430,22 +450,87 @@ Read from the GraalVM sandboxing and embedding guides on 2026-09-09, re-read 202
   for CPU, statements and output); the Context is cancelled and cannot run guest code again. That matches one
   Context per evaluation: the engine closes it (try-with-resources) and maps the exception to
   `pipeline.script.resource_limit` (detail names the limit) or `pipeline.script.timeout`. Cancellation
-  from outside is `Context.close(true)` from the pool's caller — so, unlike JSONata, this engine reports
-  `interruptible = true` and the abandonment path is the backstop, not the bound (verified in A.0 before the
-  capability is claimed).
+  from outside is `Context.close(true)` — **and only that (v0.7.1):** the lander's probe of 2026-10-20 left a `while(true){}`
+  Context alive after 1.5 s of `Thread.interrupt()`; `close(true)` from another thread stopped it in ~3 ms. The pool's
+  abandonment (`Future.cancel(true)`) therefore reaches nothing by itself: the pool gains a per-slot cancellation hook that
+  an engine registers at the start of `evaluate` (its `close(true)`) and the pool calls BEFORE the interrupt; the engine's
+  own wall-clock watchdog calls the same hook at `limits.wallClock`. So, unlike JSONata, this engine reports
+  `interruptible = true`, meaning exactly "`close(true)` within ~50 ms of the deadline", and the abandonment path is the
+  backstop, not the bound — verified in A.0 before the capability is claimed, and `ScriptEvaluationPoolCancellationTest`
+  proves the slot is free within 2 s of the wall clock.
 - **If the isolate cannot load**, the app starts with JavaScript **disabled** and says so once
   (`script.js.unavailable` at boot; the node and the template refuse at save with the same code) — never a
   silent fallback to the non-isolated interpreter, whose sandbox on Community is the weaker `CONSTRAINED`.
   The fallback knob (`datapipelines.script.js.allow-fallback-runtime`) is **not shipped** (R2-2's lean,
   decided at the 8a dispatch).
-- **Determinism (v0.7):** the engine installs a guest prelude before the body: `Date.now`, `new Date()` with no
-  argument and `Math.random` read the evaluation's pinned clock/seed (`EvaluationLimits.now`, R2-4 — the JS twin of
-  §4.5's `$now()` rule: unpinned → the call refuses), `Intl`/time zone fixed (`js.timezone=UTC`, locale `en-US`).
+- **Determinism (v0.7, corrected v0.7.1):** the engine installs a guest prelude before the body: `Date.now` and `new Date()`
+  with no argument read the evaluation's pinned clock (`EvaluationLimits.now`, R2-4 — the JS twin of §4.5's `$now()` rule:
+  unpinned → the call refuses); **`Math.random` is refused this round** (no seed exists on the limits; v0.7's "pinned seed" was
+  wrong; a seed field is a later decision); the time zone is fixed through the polyglot builder (`Context.Builder.timeZone(ZoneId.of("UTC"))`
+  — the lane verifies the method on the installed API and records the mechanism it used; v0.7's `js.timezone=UTC` was an
+  unverified option name), locale `en-US`. The prelude also lists every other time or entropy source the policy Context
+  exposes (`performance`, `crypto`, timers…) and refuses or records each. The prelude runs in strict mode.
   A guest can in principle undo a prelude, so this is a correctness aid for authors, **not a security
   boundary** — the boundary is the policy above.
+- **Compile is parse only (D2, owner 2026-10-20, v0.7.1).** `compile()` runs outside the pool (`TemplateEvaluateService`,
+  the test runner, the node runner all compile before `pool.run`), so no guest statement may run in it — the plan's
+  "evaluate once at compile to refuse a body that never returns" would have put author code outside the admission
+  boundary (pool-size × heap). The engine parses the wrapped Source in a throwaway policy Context (`Context.parse`, or
+  the nearest equivalent the API offers, recorded); a syntax error maps to `ScriptSyntaxException(line, column)` with the
+  prelude's line offset subtracted; a body that returns nothing or fails at runtime is caught INSIDE the pool by `evaluate`
+  ("main returned nothing" / the guest error). Save still refuses the bad body: 8b runs the template's test cases — and a
+  `{}` probe when there are none — through the pool at save (owner: "tests written with proper input and assert on
+  output, just like the JSONata ones"). A test proves `globalThis.__ran = true; return 1;` leaves no trace after compile.
+- **The number rule (D3, owner 2026-10-20 "by logical type", v0.7.1).** Facts (node 24.21.0; ECMAScript-standard, GraalJS
+  the same): `JSON.parse("9007199254740993")` is 9007199254740992 — an integer above 2^53 rounds in the guest BEFORE the
+  type gate sees it, so "TypeGate catches precision loss" was too strong; `"10.50" + 1` is `"10.501"` — strings give digits,
+  not arithmetic, so the plan's "every BigDecimal as a string" would have turned an identity script over a `DECIMAL` column
+  into a type-gate refusal. The rule, by logical type: **in** — integers within ±2^53 → Number; `BIGINTEGER` and any integer
+  beyond ±2^53 → decimal string; `DECIMAL` → Number when `BigDecimal(d.toString()) == value` (the double round-trips exactly),
+  else decimal string; dates/times as today's strings. **out** — an integral Number → Long (BigInteger beyond Long); a
+  non-integral Number → BigDecimal from the shortest round-trip string; a BigInt → decimal string; a decimal string stays a
+  string. The gate widens: `TypeGate.checkDecimal` accepts a decimal STRING for a `DECIMAL` column (`BigDecimal(s)`; a
+  non-decimal string stays refused with the same failure); the `BIGINTEGER` gate already takes a string. The skill says:
+  "a DECIMAL may arrive as a string when the double would lose digits — `Number(x)` loses digits beyond 15; for exact
+  money use integer minor units". No decimal library in the prelude this round (recorded as the follow-up). §4.6 row 8
+  is read with this rule.
+- **The return-shape contract (v0.7.1; the lander's point 7).** `JSON.stringify` silently repairs an invalid result:
+  `{x:NaN,y:Infinity}` → `{"x":null,"y":null}`; `{a:undefined,f:()=>1,b:1}` → `{"b":1}`; `[1,,undefined,NaN]` →
+  `[1,null,null,null]`; a Promise, a `Map` or a `Set` → `{}`. So `main` returns a synchronous JSON-shaped value — null,
+  boolean, finite number, string, BigInt, array, plain object, recursively — and the prelude's checker walks the result
+  BEFORE `JSON.stringify` and refuses, naming the path: `NaN`/`±Infinity`; `undefined` as an array element, a hole, or the
+  top-level value ("main returned nothing"); a function or symbol; a Promise/thenable; `Map`, `Set`, typed arrays,
+  `ArrayBuffer`, `Date` (the author calls `toISOString()`); cycles. **Product choice:** an OBJECT property that is
+  `undefined` is DROPPED (the JS idiom; the KDoc and the skill say so). The checker is an aid; the host's decode into
+  Map/List/String/Boolean/Number/null is the boundary, and a test proves a reassigned `JSON.stringify` or checker cannot
+  smuggle a non-JSON value past it. Error mapping: `isResourceExhausted()`/`isCancelled()` by limit name (CPU and the
+  watchdog → `pipeline.script.timeout`; heap, statements, stack frames, output streams and the two budgets →
+  `pipeline.script.resource_limit` with the limit named); `isGuestException()` → the guest message (≤ 2 000 chars) with
+  the author-relative line; `isInternalError()` or a dead Engine → named, plus the rebuild path under the per-JVM arm;
+  `isHostException()` cannot happen under the policy (a `Java.type` reference is a guest `ReferenceError`, tested).
+- **Byte budgets (v0.7.1; the lander's point 8).** The console caps bound `console.*`, not the data. `EvaluationLimits` gains
+  `maxInputBytes` and `maxResultBytes` (nullable, defaulted; null → the runtime's options): the serialised input JSON above
+  `maxInputBytes` is refused BEFORE the Context exists (`INPUT_BYTES`); the guest's result string above `maxResultBytes` is
+  refused by the prelude (an aid) AND by the host measuring UTF-8 bytes before parsing (`RESULT_BYTES`, the boundary).
+  Recommended defaults, bound by 8b: 64 MiB each (a 100 000-row table must fit); the executor's `max-value-bytes` (1 MB)
+  stays the cap on a VALUE output, a different thing.
+- **Console semantics (D-T17 made precise, v0.7.1).** The prelude's `console` shim writes every level to ONE stream (`out`)
+  as `"<level>\u0001" + text + "\n"` so order is preserved across levels; the engine parses it after the guest returns or
+  fails, hands at most 200 lines of ≤ 2 000 chars to the `ConsoleSink` with a final "… N more lines dropped" line; a line
+  without the tag is LOG; the `err` stream is the engine's own (a non-empty `err` after a guest failure is appended to the
+  exception message, bounded). Output past `sandbox.MaxOutputStreamSize` fails the evaluation (`resource_limit`, kind
+  `OUTPUT`) — refused at the entry point, not truncated. The JSONata engine ignores the sink.
+- **Read-only deployment (D5, v0.7.1; the lander's point 9).** The Helm chart already runs the container with
+  `readOnlyRootFilesystem: true` and `/tmp` as an emptyDir (`deploy/helm/datapipelines/templates/deployment.yaml`), so a
+  runtime language-resource cache under `/opt` would fail to start the Engine under the chart. Not a choice: the image
+  pre-extracts the language resources at build (`Engine.copyResources(Path, "js")` → `/opt/graaljs/resources`, run by a
+  `main` nothing in the app calls) and the `ENTRYPOINT` passes `-Dpolyglot.engine.resourcePath=/opt/graaljs/resources`;
+  no runtime cache write; `docker run --read-only --tmpfs /tmp` is a PASS gate of the spike (§4.6); deployment.md's
+  read-only row stays true.
 - The implementer proves each limit and each host-access door with a test that violates it
   (`while (true)`, `new Array(1e9)`, a `Java.type` reference, a `fetch`, `console.log` past the cap, a
-  `Date.now()` without a pin) and reads the refusal back. A sandbox no test has breached is a belief.
+  `Date.now()` without a pin, a `Math.random()`, a 2^53 + 1 integer, a `Date` or `NaN` in the result, a result above the
+  byte budget) and reads the refusal back. A sandbox no test has breached is a belief.
 
 ### 4.5 What the JSONata engine bounds, and what it does not (R7; read 2026-09-23 from the library source)
 
@@ -477,18 +562,19 @@ above is generated from that record, not written by hand.
 loaded from the D-T16 directory, one `Context` under `UNTRUSTED` with the full §4.4 option set, `1 + 1`
 evaluated and read back; then `while (true)` refused on time. GraalVM's guide says uber jars are "not
 recommended" and that the class path may need `--add-modules=org.graalvm.polyglot`; nobody on this project
-has run the isolate from a nested jar, and the whole packaging decision rests on it. If the spike fails, the
-alternatives in order are: the external directory on `loader.path` (Spring's `PropertiesLauncher`), then a
-module-path launch in the Dockerfile — each a change to how the app starts, decided with the owner.
+has run the isolate from a nested jar, and the whole packaging decision rests on it. **v0.7.1:** the external directory on `loader.path` (Spring's `PropertiesLauncher`, already the jar's `Main-Class`) is the
+PRIMARY mechanism (the round-two plan's M1; D-T16), not a fallback — the lander's nested-jar probe needed no
+`--add-modules`. If the spike fails on it, the alternative is a module-path launch in the Dockerfile — a change to how the
+app starts, decided with the owner (8a's STOP rule).
 
 **The ways this round fails**, with where each is found and what answers it:
 
 | # | Failure | Found by | Answer |
 |---|---|---|---|
-| 1 | The isolate does not load from our deployment shape (nested jar, class path, `--add-modules`) | A.0, day one | D-T16's directory / launcher change |
+| 1 | The isolate does not load from our deployment shape (`loader.path` directory beside the nested jar, `--add-modules`) | A.0, day one | D-T16's directory on `loader.path` (M1); else the module-path launch, with the owner |
 | 2 | JDK 21 and GraalJS 25.4 disagree at runtime (the guide lists JDK 21; nobody here has run it) | A.0 | pin the previous line, or the JDK moves (its own decision) |
 | 3 | A guest failure crashes the JVM (native code in-process; the Dockerfile records a JNA SIGSEGV precedent) | the breach suite's heap and stack cases | the fault-domain claim is measured, not believed; `engine.IsolateMode=external` is the fallback design, not shipped |
-| 4 | Start-up and per-evaluation cost (isolate boot, a Context per batch, two JSON passes per batch) | the measurements below | `datapipelines.script.js.batch-size` (R2-3) or Context reuse (its own decision) |
+| 4 | Start-up and per-evaluation cost (isolate boot, a Context per batch, two JSON passes per batch) | the measurements below | `row`-mode batches come from `result-batch-size` today; a smaller `datapipelines.script.js.batch-size` ships ONLY if the measurement says so (R2-3), Context reuse only as its own decision (R2-7) |
 | 5 | Memory on the server: the isolate heap sits beside the JVM heap; `pool-size × max-heap-mb` at defaults is 1 GB | sizing in 8b against the VPS (RAM read from the box, never from memory) | defaults chosen from the measured peak (`--sandbox.TraceLimits`), documented in deployment.md |
 | 6 | The heap limit is soft (the guide says so): a guest can exhaust it before the check | the breach suite's three-way record | the input/output caps stay the real bound; the honest-bounds table says UNBOUNDED where it is |
 | 7 | Determinism leaks (`Date.now`, `Math.random`, zone, locale) make one template mean two things on two servers | the conformance suite's determinism case + the prelude tests | §4.4's prelude; stated as an aid, not a boundary |
@@ -496,9 +582,13 @@ module-path launch in the Dockerfile — each a change to how the app starts, de
 | 9 | Dependency plumbing: four platform natives, `truffle-api`/`nativebridge`, lock files and verification metadata from a cold Gradle home, the vulnerability scan, the licence of the Community isolate (not yet read) | the dependency review in 8a | DEVELOPMENT.md §6.2's cold command; the licence read recorded in the handback |
 | 10 | Egress at image build (Maven Central at `docker build`) | a hardened org without egress | D-T16's directory; Maven Central's artifacts are immutable by policy, so a private mirror is an ops choice, not a correctness need (see #8's comments) |
 | 11 | The record itself was thin on the untrusted policy (six required options missing until v0.7) | — | §4.4 as rewritten; the conformance case "the Context builds with exactly the configured set" |
+| 12 | The Engine boundary (v0.7.1): a per-evaluation Engine costs a spawn per batch; a per-JVM Engine shares the isolate heap and code cache across workspaces (the vendor's trust-domain rule) | A.0's D1 measurement (200 spawn cycles p50/p95; RSS over 1 000) | D1: per evaluation when the gate passes, else per JVM with the deviation recorded (§4.4) |
+| 13 | The read-only root (v0.7.1): a runtime resource cache cannot be written under Helm's `readOnlyRootFilesystem` | A.0's `--read-only` container run | D5: resources pre-extracted at image build, `resourcePath` in the `ENTRYPOINT` (§4.4) |
 
 **The measurements the round records** (handback, then `dag-executor.md` §5.3 beside JSONata's table, generated
-not hand-written): isolate load time at boot; Context creation time (p50/p95 over 1 000); the 100 000-row
+not hand-written): isolate load time at boot; Context creation time (p50/p95 over 1 000); **(v0.7.1)** Engine spawn + first Context + close
+(p50/p95 over ≥ 200 cycles) and process RSS over 1 000 cycles — the D1 gate; the `--read-only` run's verdict; the
+`Object.getOwnPropertyNames(globalThis)` list with every time/entropy source refused or absent; the 100 000-row
 `row`-mode run at `result-batch-size` and at two smaller batch sizes (wall, encode/decode share); peak isolate
 heap under `--sandbox.TraceLimits`; the JS breach suite's three-way record (REFUSED / BOUNDED / UNBOUNDED)
 for every §4.4 case; the jar and image sizes before and after.
@@ -878,13 +968,25 @@ record is the authority.
 
 **For round two (re-listed 2026-10-20, v0.7):** R2-1 `console.*` → **ruled** (D-T17: the application log, and
 the evaluate/test result). R2-2 the fallback knob → lean: refuse outright, not shipped (decided at the 8a
-dispatch). R2-3 the measured serialisation cost decides whether `row`-mode batches for JS default to
-`result-batch-size` or a smaller `datapipelines.script.js.batch-size` (§4.6's measurements). R2-4 the JS
-clock pin → the §4.4 prelude (`Date.now()`/`new Date()`/`Math.random` under the isolate, unpinned → refuse),
-the twin of §4.5's `$now()` rule. R2-5 packaging → **ruled** (D-T16). R2-6 the number trap (§4.6 row 8) →
+dispatch). R2-3 `row`-mode batches for JS come from `result-batch-size` as for JSONata; a smaller
+`datapipelines.script.js.batch-size` ships ONLY if §4.6's measurement says a smaller JS batch is needed (v0.7.1: the key
+is not new by default). R2-4 the JS clock pin → the §4.4 prelude (`Date.now()`/`new Date()` under the isolate,
+unpinned → refuse), the twin of §4.5's `$now()` rule; `Math.random` REFUSED this round (v0.7.1 — no seed exists; a seed
+field is a later decision). R2-5 packaging → **ruled** (D-T16). R2-6 the number trap (§4.6 row 8) →
 strings both ways for the big types, refused otherwise. R2-7 Context reuse across batches → not in this round;
 only if R2-3's measurement forces it, and then as its own decision (shared state between batches is the
 risk §11 names).
+
+**Ruled 2026-10-20 after the lander's review (v0.7.1; store `notes/2026-10-20-javascript-review-response.md` §3):**
+R2-8 the Engine boundary → **ruled** D1 ("3 if not then 2": per evaluation when the spike's gate passes, else per JVM with
+the deviation recorded; per workspace not chosen) — §4.4. R2-9 compile → **ruled** D2 (parse only; the pooled test cases /
+`{}` probe refuse a bad body at save) — §4.4, 8b. R2-10 numbers → **ruled** D3 ("1 by logical type"; no decimal library
+this round, a follow-up) — §4.4. R2-11 the UI → **ruled** D4 (the JavaScript template is a template like JSONata: a
+skeleton body yes, NO console panel — console lines render inside each case's result; `function main(input)` and the braces
+are immutable labels around the editable statements, §2.2) — 8b. R2-12 the read-only root → **ruled** D5 (pre-extracted
+resources, no runtime cache write; the owner was to object only if they disagreed, and did not) — §4.4. Still open for a
+later round: a `Math.random` seed; a vetted decimal library in the prelude; Context reuse (R2-7); per-workspace Engines if
+the per-JVM arm ships and a tenant incident shows the shared heap matters.
 
 ---
 
@@ -916,8 +1018,8 @@ follow the scheduler (R8).
 
 | Lane | Fence | Delivers | Depends on |
 |---|---|---|---|
-| **8a — the engine** | `modules/scripting` (+ the version catalog, lock files, verification metadata), `Dockerfile` and `deploy/` for D-T16, `DEVELOPMENT.md` | A.0 the spike (§4.6); `JavaScriptEngine` on the §4.1 seam with the §4.4 option set and prelude; registration in `ScriptEngineConformanceTest`; `JavaScriptBreachTest` in the `breachTest` source set with its own report; the §4.6 measurements; the D-T16 fetch in the image with SHA-256 verification; the dependency review (licence read, cold-home locks). No product surface: the template still refuses at save. | round one on main (it is) |
-| **8b — the wiring** | `templates` (`TemplateTypeBehaviour.Javascript`), `web` (`ScriptConfiguration`, `TemplateValidator`'s default map, `ScriptProperties`, the face label), `dag` (`ScriptNodeRuns.engineFor`), `app` (`ScriptRules`, the config-keys drift test), docs `configuration.md` §3.28 / `dag-executor.md` §5.3 / `templates.md` / `deployment.md`, the skill (`scripts.md`'s "until round two" line) | the engine map gains `JAVASCRIPT` at every site; the boot-time disable path; D-T17 in `templates_evaluate` and the test runner; the config keys with their defaults from 8a's measurements; the E2E of §10.9 run once with a JavaScript body. | 8a merged |
+| **8a — the engine** | `modules/scripting` (+ the version catalog, lock files, verification metadata) — including `ScriptEvaluationPool.kt` for the cancellation hook, `Dockerfile` and `deploy/` for D-T16/D5, `DEVELOPMENT.md` | A.0 the spike (§4.6: packaging, the D1 measurement, the `--read-only` run); `JavaScriptRuntime` (the D1 arm, availability, the ONE factory every Context goes through); `JavaScriptEngine` on the §4.1 seam with the §4.4 option set incl. `MaxStackFrames`, the wall-clock watchdog, parse-only compile, the prelude (clock pin, `Math.random` refused, console shim), the number rule, the return-shape contract, the byte budgets (`EvaluationLimits.maxInputBytes`/`maxResultBytes`/`console`, defaulted); the pool's per-slot cancellation hook (`close(true)` before the interrupt); registration in `ScriptEngineConformanceTest`; `JavaScriptBreachTest` in the `breachTest` source set with its own report; the §4.6 measurements; the D-T16 fetch in the image with SHA-256 verification and the D5 pre-extraction (`JavaScriptResourcesMain`, `resourcePath` in the `ENTRYPOINT`); the dependency review (licence read, cold-home locks, the image scan). No product surface: the template still refuses at save. (v0.7.1) | the SCRIPT rename on main (it is, 8b05522f8) + this errata commit |
+| **8b — the wiring** | `templates` (`TemplateTypeBehaviour.Javascript`), `application` (`TemplateEvaluateService`, the test runner — the pooled cases / `{}` probe at save, D2), `mcp-server` (`TemplatesEvaluateTool`, `TemplateAuthoringTools`: the console in the result), `web` (`ScriptConfiguration`, `TemplateValidator`'s default map, `ScriptProperties`, `ApiErrorCatalog`, `AuthoringStartupCheck`, the face: the skeleton body and the immutable `main` labels, D4), `dag` (`ScriptNodeRuns.engineFor`), `pipeline-contract` (`PipelineErrorCodes`; `ScriptRules` exists in BOTH `pipeline-contract` and `app` — the brief names which), `app` (`ScriptRules`, the config-keys drift test), `typesystem` (`TypeGate.checkDecimal` widening, D3), docs `configuration.md` §3.28 / `dag-executor.md` §5.3 / `templates.md` / `deployment.md`, the skill (`scripts.md`'s "until round two" line, the number sentence) | the engine map gains `JAVASCRIPT` at every site; the boot-time disable path; D-T17 in `templates_evaluate` and the test runner (console lines inside each case's result); the config keys with their defaults from 8a's measurements (the byte budgets, heap, isolate memory, `batch-size` only if measured); `ScriptNodeE2eTest` (`tests/integration-tests/.../ScriptNodeE2eTest.kt` — v0.7.1: there is no §10.9) run once with a JavaScript body. (module fences corrected v0.7.1: the lander's point 10) | 8a merged |
 
 ---
 
@@ -925,6 +1027,7 @@ follow the scheduler (R8).
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-21 | v0.7.1 | orchestrator, after the lander's review and the owner's rulings D1–D5 (2026-10-20) | Errata before lane 8a (plan §10 + review response §4). §4.4: the Engine boundary D1 (per evaluation when the spike's gate passes, else per JVM with the deviation recorded; v0.7's "one shared Engine" was an undocumented deviation from the vendor's trust-domain rule); `sandbox.MaxStackFrames` exists and bounds depth (v0.7 said no stack-depth option); `MaxCPUTime` is CPU not elapsed — the engine's `close(true)` watchdog, wired through a new per-slot pool hook, is the wall-clock bound (the lander's probe: interrupt does nothing, `close(true)` ~3 ms); compile is parse only (D2); the number rule by logical type (D3; "TypeGate catches precision loss" withdrawn; the plan's strings-for-every-BigDecimal withdrawn); the return-shape contract (`JSON.stringify`'s silent repairs refused; `undefined` object properties dropped); the input/result byte budgets; console semantics (one tagged stream, 200 × 2 000, past the cap refuses); the read-only deployment D5 (pre-extracted resources, Helm's `readOnlyRootFilesystem` kept true). Corrections: `Math.random` refused, no seed (v0.7 said a pinned seed); the time zone via the builder (v0.7's `js.timezone=UTC` was unverified); `loader.path` is the PRIMARY packaging mechanism (v0.7 listed it as the first fallback); `batch-size` ships only if measured (v0.7 named it as new); §4.1 shows the seam as it is in the tree (`ScriptLanguage`, `capabilities`, `input: Any?`, `now`) plus 8a's three defaulted fields; §4.6 rows 12–13 and three measurements; §12 R2-8..R2-12 (D1–D5 ruled); §14 row 8b: `ScriptNodeE2eTest` (there was no §10.9), module fences corrected (`TemplateEvaluateService` is `application`, the two tools `mcp-server`, `PipelineErrorCodes` `pipeline-contract`, `ApiErrorCatalog`/`AuthoringStartupCheck` `web`, `ScriptRules` in both `app` and `pipeline-contract`), 8a's deliverables grown. D-T16 notes `loader.path`. The body contract (D4, the statements of `main(input)`) was already written into §2.2 by the rename lane. |
 | 2026-10-20 | v0.7 | orchestrator, with the owner (round-two readiness, #8) | §4.4 re-verified against the current GraalVM sandboxing and embedding guides and Maven Central: pin 25.4.4.1.1, the artifact layout (aggregator poms over `org.graalvm.js:js-isolate-<platform>-community`), the untrusted policy's full required option set (`engine.MaxIsolateMemory`, `sandbox.MaxASTDepth`, the stream caps, `in`, `HostAccess.UNTRUSTED`), `spawnIsolate(true)` explicit, a tripped Context is dead, cancellation from outside; the determinism prelude. New §4.6: the spike, eleven failure modes with where each is found, the measurements. D-T16 packaging (owner): the jar carries no isolate, the image fetches its `TARGETARCH`'s with SHA-256, a directory setting for non-Docker deployments. D-T17 (owner): `console.*` to the application log, and to the evaluate/test result. §12 round-two decisions re-listed (R2-1, R2-5 ruled). §14 lanes 8a/8b. |
 | 2026-09-09 | v0.1 | orchestrator, after the owner's brainstorm | Initial record: six decisions; engine and sandbox facts verified against graalvm.org and Maven Central; decimal-as-string rule. |
 | 2026-09-17 | v0.2 | orchestrator, after the owner's second brainstorm | Rewritten in place. Pure function only — no tempdb handle, no `emit` (D-T4); one Context namespace, `params`/`context` removed from the input object (D-T10); `meta` block; mode moves to the template's contract; **contract, invariants, tests on the version inside the body hash** (D-T7), a scoped D3 exception (D-T8); no Freemarker on transform bodies (D-T9); rejects + strict (D-T11); exact canonical equality + invariants on every case (D-T12); invariants always JSONata (D-T13); `implements` + `needs_review` drift + discovery (§8); `templates_evaluate` returns invariants; two rounds, JSONata first (D-T14); the `UNTRUSTED` host-collection rule and its JSON-text consequence recorded for round two (§4.4); `values` in the result payload considered and dropped (dashboards are a separate runtime); v0.1's O-1..O-5 resolved. |
