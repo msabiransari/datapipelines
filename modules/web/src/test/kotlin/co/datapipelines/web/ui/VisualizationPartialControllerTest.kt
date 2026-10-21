@@ -111,7 +111,8 @@ class VisualizationPartialControllerTest {
         every { visualizations.listAll(workspaceId, narrowed, 0, VisualizationBrowseModel.PAGE_SIZE) } returns emptyList()
         every { visualizations.countAll(workspaceId, narrowed) } returns 0
 
-        controller.catalog(ExtendedModelMap(), MockHttpServletResponse(), q = null, offset = null) shouldBe VisualizationBrowseModel.WRAPPER_VIEW
+        controller.catalog(ExtendedModelMap(), MockHttpServletResponse(), q = null, offset = null) shouldBe
+            VisualizationBrowseModel.WRAPPER_VIEW
 
         verify(exactly = 0) { visualizations.listAll(any(), ReadLens.Everything, any(), any()) }
     }

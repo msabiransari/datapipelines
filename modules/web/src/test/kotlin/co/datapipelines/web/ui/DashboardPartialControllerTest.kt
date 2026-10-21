@@ -230,7 +230,9 @@ class DashboardPartialControllerTest {
         listOf("discarded", "bogus", "<b>draft</b>").forEach { raw ->
             val response = MockHttpServletResponse()
             val refused =
-                shouldThrow<ResponseStatusException> { controller.dashboardCatalog(model, response, q = null, offset = null, lifecycle = raw) }
+                shouldThrow<ResponseStatusException> {
+                    controller.dashboardCatalog(model, response, q = null, offset = null, lifecycle = raw)
+                }
             refused.statusCode shouldBe HttpStatus.BAD_REQUEST
             refused.reason shouldBe CatalogLifecycle.BAD_LIFECYCLE
             response.getHeader(CatalogUrl.HEADER) shouldBe null

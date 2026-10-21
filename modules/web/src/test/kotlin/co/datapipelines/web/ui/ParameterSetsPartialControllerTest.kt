@@ -86,7 +86,10 @@ class ParameterSetsPartialControllerTest {
         authenticate()
         for (raw in listOf("discarded", "DRAFT", "nope")) {
             val response = MockHttpServletResponse()
-            val refused = shouldThrow<ResponseStatusException> { controller.catalog(model, response, offset = null, q = null, lifecycle = raw) }
+            val refused =
+                shouldThrow<ResponseStatusException> {
+                    controller.catalog(model, response, offset = null, q = null, lifecycle = raw)
+                }
             refused.statusCode shouldBe HttpStatus.BAD_REQUEST
             refused.reason shouldBe CatalogLifecycle.BAD_LIFECYCLE
             response.getHeader(CatalogUrl.HEADER) shouldBe null
