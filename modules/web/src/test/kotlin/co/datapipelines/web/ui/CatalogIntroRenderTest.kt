@@ -159,7 +159,7 @@ class CatalogIntroRenderTest {
         setVariable("namePattern", TemplateNameGrammar.pattern)
         setVariable("nameMaxLength", TemplateNameGrammar.maxLength)
         setVariable("nameHint", TemplateNameGrammar.DESCRIPTION)
-        setVariable("skeleton", TransformSkeleton)
+        setVariable("skeleton", ScriptSkeleton)
         setVariable("canAuthor", true)
     }
 

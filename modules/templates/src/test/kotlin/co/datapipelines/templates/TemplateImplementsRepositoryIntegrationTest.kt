@@ -180,7 +180,7 @@ class TemplateImplementsRepositoryIntegrationTest {
     @Test
     fun `implementedBy lists live versions under Everything and only released ones under a narrowing lens`() {
         val rule = fact("rainy = precipitation_mm >= 2.5")
-        val nobody = fact("a rule no transform implements")
+        val nobody = fact("a rule no script implements")
         val template = released("acme/shape/order_lines.jsonata")
         citations.replace(workspaceId, template.id, 1, listOf(rule))
         val v2 = draftVersion(template)

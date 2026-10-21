@@ -7,6 +7,10 @@ import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.BindFailure
+import co.datapipelines.templates.ScriptBlocks
+import co.datapipelines.templates.ScriptContract
+import co.datapipelines.templates.ScriptInvariant
+import co.datapipelines.templates.ScriptTestCase
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDraft
 import co.datapipelines.templates.TemplateDraftService
@@ -16,10 +20,6 @@ import co.datapipelines.templates.TemplateNameGrammar
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.TemplateVersionDetail
-import co.datapipelines.templates.TransformBlocks
-import co.datapipelines.templates.TransformContract
-import co.datapipelines.templates.TransformInvariant
-import co.datapipelines.templates.TransformTestCase
 import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
@@ -82,21 +82,21 @@ private fun parseImports(args: McpArguments): List<TemplateImport> =
     }
 
 /**
- * The transform blocks of §6.2.8/§6.2.36 (7b): `contract`, `invariants`, `tests` — bound
+ * The script blocks of §6.2.8/§6.2.36 (7b): `contract`, `invariants`, `tests` — bound
  * strictly from the tool arguments through the blocks' own mapper, so a typo inside a block
  * is `template.contract_invalid` with `unknown_field` and never a silent drop. Absent
  * arguments stay absent (null) — the validator's `blocks_missing` / `blocks_not_allowed`
  * rules own that verdict.
  */
 @Suppress("UNCHECKED_CAST") // Jackson's convertValue with a typed JavaType is typed by construction
-private fun parseBlocks(args: McpArguments): Triple<TransformContract?, List<TransformInvariant>?, List<TransformTestCase>?> {
+private fun parseBlocks(args: McpArguments): Triple<ScriptContract?, List<ScriptInvariant>?, List<ScriptTestCase>?> {
     fun bind(
         name: String,
         type: com.fasterxml.jackson.databind.JavaType,
     ): Any? {
         val raw = args.rawMap()[name] ?: return null
         return try {
-            TransformBlocks.mapper.convertValue(raw, type)
+            ScriptBlocks.mapper.convertValue(raw, type)
         } catch (err: IllegalArgumentException) {
             // convertValue wraps the mapping failure as IllegalArgumentException; the
             // mapping error rides as its cause.
@@ -109,20 +109,20 @@ private fun parseBlocks(args: McpArguments): Triple<TransformContract?, List<Tra
         }
     }
     val contract =
-        bind("contract", TransformBlocks.mapper.typeFactory.constructType(TransformContract::class.java))
-            as TransformContract?
+        bind("contract", ScriptBlocks.mapper.typeFactory.constructType(ScriptContract::class.java))
+            as ScriptContract?
     val invariants =
         bind(
             "invariants",
-            TransformBlocks.mapper.typeFactory.constructCollectionType(List::class.java, TransformInvariant::class.java),
+            ScriptBlocks.mapper.typeFactory.constructCollectionType(List::class.java, ScriptInvariant::class.java),
         )
-            as List<TransformInvariant>?
+            as List<ScriptInvariant>?
     val tests =
         bind(
             "tests",
-            TransformBlocks.mapper.typeFactory.constructCollectionType(List::class.java, TransformTestCase::class.java),
+            ScriptBlocks.mapper.typeFactory.constructCollectionType(List::class.java, ScriptTestCase::class.java),
         )
-            as List<TransformTestCase>?
+            as List<ScriptTestCase>?
     return Triple(contract, invariants, tests)
 }
 
@@ -151,37 +151,37 @@ private fun parseImplements(args: McpArguments): List<String>? =
         entry as? String ?: throw McpArguments.invalidParams("Each 'implements' entry must be a fact id string.")
     }
 
-/** §6.2.8 — the `implements` description on create (7e; transform types only). */
+/** §6.2.8 — the `implements` description on create (7e; script types only). */
 private const val IMPLEMENTS_CREATE_DESC =
-    "Transform types only (refused on sql/html with template.blocks_not_allowed): the learned facts this " +
-        "transform implements — ids of WORKSPACE facts (definition, exclusion, preference) recorded in this " +
+    "Script types only (refused on sql/html with template.blocks_not_allowed): the learned facts this " +
+        "script implements — ids of WORKSPACE facts (definition, exclusion, preference) recorded in this " +
         "workspace; semantics_list and the definitions on datasources_list show them. A citation is not content: " +
         "it is outside body_hash. An id this workspace cannot cite is template.implements_unresolved. At most 50."
 
 /** §6.2.36 — the `implements` description on update (7e): the inherit / clear / released-version rules. */
 private const val IMPLEMENTS_UPDATE_DESC =
-    "Transform types only: the learned facts this version implements (WORKSPACE definition, exclusion or " +
+    "Script types only: the learned facts this version implements (WORKSPACE definition, exclusion or " +
         "preference ids of this workspace). Omitted, the citations of the version you edit are kept (a new " +
         "draft inherits the released version's); [] clears them. Not content — outside body_hash — so an update " +
         "whose body equals the released version and changes only implements writes them ON the released " +
         "version and opens no draft: that is how you clear needs_review (cite the superseding fact). An id this " +
         "workspace cannot cite is template.implements_unresolved. At most 50."
 
-/** §6.2.8/§6.2.36 — the `contract` block description (7b; transform types only). */
+/** §6.2.8/§6.2.36 — the `contract` block description (7b; script types only). */
 private const val CONTRACT_DESC =
-    "Transform contract (transform types only — refused on sql/html with template.blocks_not_allowed): " +
+    "Script contract (script types only — refused on sql/html with template.blocks_not_allowed): " +
         "{ mode: 'row'|'table'|'value', inputs: { name: { kind: 'table', columns: [{name, type, precision?, scale?, nullable?}] } " +
         "or { kind: 'value', type, precision?, scale? } }, output: { kind: 'table'|'value'|'object', ... }, rejects?: boolean }. " +
         "Types are LogicalType wire names; a row-mode contract requires exactly one table input."
 
 /** §6.2.8/§6.2.36 — the `invariants` block description. */
 private const val INVARIANTS_DESC =
-    "Transform invariants: [{ name, expr, message }] — JSONata over { rows, rejects, inputs }, must be true on every " +
-        "test case and every real execution. May be empty but is required on a transform type."
+    "Script invariants: [{ name, expr, message }] — JSONata over { rows, rejects, inputs }, must be true on every " +
+        "test case and every real execution. May be empty but is required on a script type."
 
 /** §6.2.8/§6.2.36 — the `tests` block description. */
 private const val TESTS_DESC =
-    "Transform test cases: [{ name, input: { rows?, inputs?, meta?, now? }, expect: { output } or { refusal } }] — " +
+    "Script test cases: [{ name, input: { rows?, inputs?, meta?, now? }, expect: { output } or { refusal } }] — " +
         "non-empty, at least one case whose every table input and rows are empty, expect is exactly one of output/refusal. " +
         "Save runs the suite; release re-runs it."
 
@@ -194,7 +194,7 @@ private const val RENDER_CONTEXT_DESC =
 private const val TYPE_FIELD_DESC =
     "Template kind, fixed at creation and identical on every version: 'sql' renders SQL for pipeline nodes " +
         "(requires 'dialect'); 'html' renders HTML through an auto-escaping engine (must have NO 'dialect'); " +
-        "'jsonata' and 'javascript' are transform types — the body is one expression evaluated as a pure function " +
+        "'jsonata' and 'javascript' are script types — the body is one expression evaluated as a pure function " +
         "of its input, engine is 'none', dialect/imports/is_library are refused, and contract/invariants/tests " +
         "blocks are required. 'javascript' is refused at save until round two."
 
@@ -206,7 +206,7 @@ private const val UPDATE_TYPE_FIELD_DESC =
 /** §6.2.8 — the `dialect` description, stating the type/dialect rule (046 §10). */
 private const val DIALECT_FIELD_DESC =
     "SQL execution target. Required when type is 'sql' (the default); forbidden otherwise — html and the " +
-        "transform types declare no dialect."
+        "script types declare no dialect."
 
 /**
  * §6.2.36 — the update tool's `id` description. It is REQUIRED here (§9.6 — the name never
@@ -235,18 +235,17 @@ private const val EXPECTED_HASH_DESC =
         "templates_create/templates_update result. A mismatch is a 409 template.version.conflict; " +
         "re-read and rebase, never retry blindly."
 
-/** §6.2.8/§6.2.36 — the two engine values the model admits (record §2.1: freemarker iff sql/html, none iff a transform type). */
+/** §6.2.8/§6.2.36 — the two engine values the model admits (record §2.1: freemarker iff sql/html, none iff a script type). */
 private val ENGINE_VALUES = setOf(Template.FREEMARKER_ENGINE, Template.NONE_ENGINE)
 
 /** §6.2.8 — the `engine` description, stating the type-conditional rule (record §2.1). */
 private const val ENGINE_FIELD_DESC =
-    "Template engine, matched to the type: 'freemarker' for sql/html, 'none' for the transform types " +
+    "Template engine, matched to the type: 'freemarker' for sql/html, 'none' for the script types " +
         "('jsonata'/'javascript' — the body is evaluated, never rendered). Any other pairing is refused " +
         "with template.validation.engine_unsupported."
 
 /** The engine an omitted `engine` argument means: the type's one legal value (record §2.1). */
-private fun defaultEngineFor(type: TemplateType?): String =
-    if (type?.isTransform == true) Template.NONE_ENGINE else Template.FREEMARKER_ENGINE
+private fun defaultEngineFor(type: TemplateType?): String = if (type?.isScript == true) Template.NONE_ENGINE else Template.FREEMARKER_ENGINE
 
 /**
  * `templates_create` (mcp-server.md §6.2.8). Permission: `template.create`.
@@ -304,7 +303,7 @@ class TemplatesCreateTool(
         val draft =
             TemplateDraft(
                 id = args.string("id"),
-                // The omitted-engine default follows the type (record §2.1): a transform create
+                // The omitted-engine default follows the type (record §2.1): a script create
                 // that names no engine means 'none', not the sql/html default.
                 engine = args.enumString("engine", ENGINE_VALUES, defaultEngineFor(type))!!,
                 type = type,
@@ -625,13 +624,13 @@ class TemplatesRenderTool(
         val workspaceId = ctx.principal.requireWorkspace().id
         val id = args.requiredString("id")
         val (version, type) = resolveVersion(args, workspaceId, id)
-        // 7b (record §9.1): a transform type has nothing to render — the refusal points at
+        // 7b (record §9.1): a script type has nothing to render — the refusal points at
         // the evaluate tool, the way the REST /render twin does.
-        if (type != null && type.isTransform) {
+        if (type != null && type.isScript) {
             throw DatapipelinesException(
                 code = PipelineErrorCodes.Template.RENDER_NOT_APPLICABLE,
                 message =
-                    "Template '$id' has type '${type.wire}' — a transform is evaluated, not rendered; " +
+                    "Template '$id' has type '${type.wire}' — a script is evaluated, not rendered; " +
                         "use templates_evaluate.",
                 details = mapOf("type" to type.wire, "use" to "templates_evaluate"),
             )

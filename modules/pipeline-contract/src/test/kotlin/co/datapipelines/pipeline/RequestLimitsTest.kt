@@ -43,7 +43,7 @@ class RequestLimitsTest {
     @Test
     fun `the domain mapper itself is left alone - stored rows and values keep the library's own bounds`() {
         // A request limit is a statement about REQUEST bytes. The domain mappers also read stored
-        // rows and transform values, where a JSON column 150 levels deep is legitimate data.
+        // rows and script values, where a JSON column 150 levels deep is legitimate data.
         val domain = JsonMapper.builder().build()
         RequestLimits.requestMapper(domain)
         domain.readTree(deep(RequestLimits.MAX_NESTING_DEPTH + 50)).isArray shouldBe true

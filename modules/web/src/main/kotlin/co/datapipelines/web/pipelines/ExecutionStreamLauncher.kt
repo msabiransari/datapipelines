@@ -164,11 +164,11 @@ class ExecutionStreamLauncher(
      */
     private val subPipelineRunner: SubPipelineRunner? = null,
     /**
-     * The TRANSFORM-node collaborators (7c, #7) — handed to the per-run executor; null only in
-     * module-slice wiring, where a TRANSFORM node fails `pipeline.transform.evaluation_failed`
+     * The SCRIPT-node collaborators (7c, #7) — handed to the per-run executor; null only in
+     * module-slice wiring, where a SCRIPT node fails `pipeline.script.evaluation_failed`
      * ("not wired in this runtime"), exactly as [subPipelineRunner] fails a PIPELINE node.
      */
-    private val transformSupport: co.datapipelines.executor.TransformSupport? = null,
+    private val scriptSupport: co.datapipelines.executor.ScriptSupport? = null,
     /**
      * #266 — the emitter's event recorder: the batched one in the application (PersistenceConfiguration),
      * null in module-slice wiring and unit tests, where the emitter's direct default applies.
@@ -444,7 +444,7 @@ class ExecutionStreamLauncher(
             metrics = executorMetrics,
             progress = executionProgress,
             subPipelineRunner = subPipelineRunner,
-            transforms = transformSupport,
+            scripts = scriptSupport,
         )
 
     private companion object {

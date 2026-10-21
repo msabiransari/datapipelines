@@ -14,10 +14,10 @@ import org.junit.jupiter.api.Test
  * (type × engine × dialect × imports × is_library × body) → the refusal code, or accept.
  *
  * The matrix is the contract: `engine` must match the type both ways (`freemarker` iff
- * sql/html, `none` iff a transform type), `dialect` is required on sql and forbidden on every
- * other type, `imports`/`is_library` are refused on a transform type, a Freemarker construct in
- * a transform body is refused (D-T9), a `jsonata` body is compiled through the scripting engine
- * at save, and a `javascript` body is refused until round two (`transform.js.unavailable`).
+ * sql/html, `none` iff a script type), `dialect` is required on sql and forbidden on every
+ * other type, `imports`/`is_library` are refused on a script type, a Freemarker construct in
+ * a script body is refused (D-T9), a `jsonata` body is compiled through the scripting engine
+ * at save, and a `javascript` body is refused until round two (`script.js.unavailable`).
  *
  * Falsified at birth: dropping the `none` arm of the engine rule turns the jsonata-accept row
  * red.
@@ -35,10 +35,10 @@ class TemplateTypeRulesTest {
         val imports: List<TemplateImport> = emptyList(),
         val isLibrary: Boolean = false,
         val body: String = "SELECT 1",
-        /** A transform row needs its blocks to be accepted at all (§2.2); the type-rule rows do not touch them. */
-        val contract: TransformContract? = null,
-        val invariants: List<TransformInvariant>? = null,
-        val tests: List<TransformTestCase>? = null,
+        /** A script row needs its blocks to be accepted at all (§2.2); the type-rule rows do not touch them. */
+        val contract: ScriptContract? = null,
+        val invariants: List<ScriptInvariant>? = null,
+        val tests: List<ScriptTestCase>? = null,
         /** The expected refusal codes — empty means the row must be accepted. */
         val codes: List<String> = emptyList(),
         /** Every expected `freemarker_forbidden` carries its rule in details. */
@@ -46,20 +46,20 @@ class TemplateTypeRulesTest {
     )
 
     private val legalContract =
-        TransformContract(
-            mode = TransformMode.ROW,
+        ScriptContract(
+            mode = ScriptMode.ROW,
             inputs =
                 mapOf(
-                    "orders" to TransformInput.Table(listOf(ContractColumn("order_id", co.datapipelines.typesystem.LogicalType.INTEGER))),
+                    "orders" to ScriptInput.Table(listOf(ContractColumn("order_id", co.datapipelines.typesystem.LogicalType.INTEGER))),
                 ),
-            output = TransformOutput.Table(listOf(ContractColumn("order_id", co.datapipelines.typesystem.LogicalType.INTEGER))),
+            output = ScriptOutput.Table(listOf(ContractColumn("order_id", co.datapipelines.typesystem.LogicalType.INTEGER))),
         )
 
     private val legalCase =
-        TransformTestCase(
+        ScriptTestCase(
             name = "empty",
-            input = TransformTestInput(rows = emptyList(), inputs = emptyMap()),
-            expect = TransformTestExpect(output = TransformBlocks.mapper.readTree("""{"rows": []}""")),
+            input = ScriptTestInput(rows = emptyList(), inputs = emptyMap()),
+            expect = ScriptTestExpect(output = ScriptBlocks.mapper.readTree("""{"rows": []}""")),
         )
 
     private val rows =
@@ -169,20 +169,20 @@ class TemplateTypeRulesTest {
                 codes = listOf(PipelineErrorCodes.Template.SYNTAX_ERROR),
             ),
             Row(
-                name = "javascript + none → transform.js.unavailable",
+                name = "javascript + none → script.js.unavailable",
                 type = TemplateType.JAVASCRIPT,
                 engine = Template.NONE_ENGINE,
                 dialect = null,
-                body = "function transform(input) { return input; }",
-                codes = listOf(PipelineErrorCodes.Transform.JS_UNAVAILABLE),
+                body = "function script(input) { return input; }",
+                codes = listOf(PipelineErrorCodes.Script.JS_UNAVAILABLE),
             ),
             Row(
                 name = "javascript + freemarker → engine_unsupported AND js unavailable",
                 type = TemplateType.JAVASCRIPT,
                 engine = Template.FREEMARKER_ENGINE,
                 dialect = null,
-                body = "function transform(input) { return input; }",
-                codes = listOf(PipelineErrorCodes.Template.ENGINE_UNSUPPORTED, PipelineErrorCodes.Transform.JS_UNAVAILABLE),
+                body = "function script(input) { return input; }",
+                codes = listOf(PipelineErrorCodes.Template.ENGINE_UNSUPPORTED, PipelineErrorCodes.Script.JS_UNAVAILABLE),
             ),
         )
 
@@ -233,7 +233,7 @@ class TemplateTypeRulesTest {
     }
 
     @Test
-    fun `the deserializer defaults an omitted engine to none on a transform create`() {
+    fun `the deserializer defaults an omitted engine to none on a script create`() {
         val outcome =
             TemplateDeserializer().read(
                 """{"type":"jsonata","display_name":"X","description":"Y","body":"rows"}""",
@@ -244,7 +244,7 @@ class TemplateTypeRulesTest {
     }
 
     @Test
-    fun `the deserializer refuses a dialect on a transform type before binding`() {
+    fun `the deserializer refuses a dialect on a script type before binding`() {
         val outcome =
             TemplateDeserializer().read(
                 """{"type":"jsonata","dialect":"POSTGRES","display_name":"X","description":"Y","body":"rows"}""",

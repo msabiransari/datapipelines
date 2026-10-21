@@ -120,7 +120,7 @@ class TemplatesUpdateToolTest {
             val payload = (result.content().single() as io.modelcontextprotocol.spec.McpSchema.TextContent).text()
             payload.contains("987654321") shouldBe false
             val message =
-                co.datapipelines.templates.TransformBlocks.mapper
+                co.datapipelines.templates.ScriptBlocks.mapper
                     .readTree(payload)["error"]["message"]
                     .asText()
             message.any { it.isISOControl() } shouldBe false

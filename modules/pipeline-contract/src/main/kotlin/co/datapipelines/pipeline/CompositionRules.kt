@@ -241,10 +241,10 @@ internal object CompositionRules {
         into: FailureCollector,
     ) {
         val supplied = node.parameters.orEmpty()
-        // 7c (#7): a value-mode TRANSFORM's `context_key` is an implicit optional input on the
+        // 7c (#7): a value-mode SCRIPT's `context_key` is an implicit optional input on the
         // same rule as a calculator key — suppliable here, typed by the pinned contract the
         // body does not carry, so null (ANY) in this map exactly like an ANY-output kind.
-        val childCalculatorKeys = child.calculatorOutputs() + child.transformOutputKeys().associateWith { null }
+        val childCalculatorKeys = child.calculatorOutputs() + child.scriptOutputKeys().associateWith { null }
         child.parameters
             .filterValues { it.required && !it.hasDefault }
             .keys
@@ -404,13 +404,13 @@ internal object CompositionRules {
         path: String,
         into: FailureCollector,
     ) {
-        // 7c (#7): the parent's value-mode TRANSFORM keys resolve as a tier too, untyped
+        // 7c (#7): the parent's value-mode SCRIPT keys resolve as a tier too, untyped
         // (ANY) like an ANY-output calculator key — the contract types them, not the body.
         val tier =
             ParentTier.resolve(
                 parentName,
                 pipeline,
-                pipeline.calculatorOutputs() + pipeline.transformOutputKeys().associateWith { null },
+                pipeline.calculatorOutputs() + pipeline.scriptOutputKeys().associateWith { null },
                 org,
             )
         if (mismatched(tier, target)) {
@@ -478,7 +478,7 @@ internal object CompositionRules {
         // the execute-time binder gives an ANY-output key (078 A5).
         val targetType = target.type ?: return
         val declaration = target.declaration
-        // A child calculator/transform key is typed by the run's contract the body does not carry:
+        // A child calculator/script key is typed by the run's contract the body does not carry:
         // the type check is all this surface can judge (the A6 convention).
         if (declaration == null) {
             typeOnlyCheck(index, node, key, value, targetType, target.description, into)

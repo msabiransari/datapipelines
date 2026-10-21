@@ -8,7 +8,7 @@ package co.datapipelines.scripting
  * [message] is bounded to 2000 characters so an engine message a malicious body
  * influenced cannot blow up a log line, an SSE event or an error payload; the record
  * §7 bounds the mapped code's detail the same way. Carries the
- * `pipeline.transform.evaluation_failed` code.
+ * `pipeline.script.evaluation_failed` code.
  */
 class ScriptEvaluationException(
     message: String,
@@ -16,7 +16,7 @@ class ScriptEvaluationException(
 ) : ScriptingException(CODE, message.bounded(), details = emptyMap(), cause = cause) {
     companion object {
         /** pipeline-contract §13.18 — the script-threw row (record §7). */
-        const val CODE = "pipeline.transform.evaluation_failed"
+        const val CODE = "pipeline.script.evaluation_failed"
 
         /** The bound §7 puts on the mapped detail (`ErrorCodeMapper.MAX_MESSAGE_CHARS`). */
         const val MAX_MESSAGE_CHARS = 2000

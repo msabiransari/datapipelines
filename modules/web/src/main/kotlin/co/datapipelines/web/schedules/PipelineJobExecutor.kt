@@ -536,7 +536,7 @@ class PipelineJobExecutor(
             pipeline.parameters,
             pipeline.calculatorOutputs(),
             pipeline.calculatorOutputGroups(),
-            pipeline.transformOutputKeys(),
+            pipeline.scriptOutputKeys(),
         ).bindOrThrow(parameters)
     }
 

@@ -1110,7 +1110,7 @@ inputs, then served over MCP tools, MCP resources and plain HTTP (`/skill.md`). 
 - **Narrative prose** lives in `modules/mcp-server/src/main/resources/skill/*.md` (flat names —
   the file is the document's name plus `.md`; three layers): the core (`core` — orientation,
   the universal rules stated ONCE, the area index; bounded at 8,000 characters), one area guide
-  per functional area (`pipelines`, `executions`, `templates`, `transforms`, `datasources`,
+  per functional area (`pipelines`, `executions`, `templates`, `scripts`, `datasources`,
   the lake guide, `endpoints`), and per-topic references (`<area>-<topic>`) holding the
   judgment each guide points at. Each file carries exactly three front-matter keys — `area`,
   `layer`, `purpose`. **A rule lives in one document**: an area guide cites the core's rule by

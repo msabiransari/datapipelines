@@ -1,7 +1,7 @@
 package co.datapipelines.visualization
 
 import co.datapipelines.pipeline.PipelineVersionStatus
-import co.datapipelines.pipeline.TransformContractView
+import co.datapipelines.pipeline.ScriptContractView
 import co.datapipelines.typesystem.JsonWireForm
 import co.datapipelines.typesystem.LogicalType
 import io.kotest.assertions.withClue
@@ -136,7 +136,7 @@ class VisualizationBindingContractTest {
                         {"name":"finance/visualizations/contract","display_name":"Contract",
                          "renderer":{"kind":"${renderer.wire}","version":"1"},
                          "inputs":{"revenue":{"columns":[{"name":"amount","type":"DECIMAL","nullable":false}]}},
-                         "transform":{"template":{"name":"finance/transforms/revenue_bars","version":2},"inputs":{"rows":"revenue"}},
+                         "transform":{"template":{"name":"finance/scripts/revenue_bars","version":2},"inputs":{"rows":"revenue"}},
                          "config":$config,"bindings":{"$path":"amount"},
                          "tests":{"cases":[{"name":"rows","fixtures":{"revenue":[{"amount":1}]},
                          "assertions":[{"kind":"rendered"}$assertion]}]}}
@@ -145,7 +145,7 @@ class VisualizationBindingContractTest {
                 ).body
         val contract =
             ValidatorFakes.CONTRACT.copy(
-                output = TransformContractView.Output.Table(listOf(TransformContractView.Column("amount", type, nullable))),
+                output = ScriptContractView.Output.Table(listOf(ScriptContractView.Column("amount", type, nullable))),
             )
         return VisualizationMechanicalCheck(
             renderers = RendererConfigValidators.deep(),

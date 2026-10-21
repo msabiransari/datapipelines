@@ -120,7 +120,7 @@ data class Pipeline(
             }.toMap()
 
     /**
-     * Every value-mode TRANSFORM node's `context_key` (§4.12, transform-nodes design §3.1) —
+     * Every value-mode SCRIPT node's `context_key` (§4.12, transform-nodes design §3.1) —
      * an implicit OPTIONAL execute input exactly like a calculator's key (078 A5): supplied,
      * the node is skipped and the value comes from the caller (`provided_by: "caller"`);
      * unsupplied, the node runs and writes it.
@@ -131,9 +131,9 @@ data class Pipeline(
      * Multi-key nodes do not exist here (one `context_key` per value-mode node), so no
      * all-or-nothing group rides beside it.
      */
-    fun transformOutputKeys(): Set<String> =
+    fun scriptOutputKeys(): Set<String> =
         nodes
-            .filter { it.type == NodeType.TRANSFORM }
+            .filter { it.type == NodeType.SCRIPT }
             .mapNotNull { node -> node.contextKey?.takeUnless(String::isBlank) }
             .toSet()
 

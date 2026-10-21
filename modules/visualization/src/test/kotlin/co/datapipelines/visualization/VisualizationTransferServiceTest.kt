@@ -85,7 +85,7 @@ class VisualizationTransferServiceTest {
         ArtifactTransferService.LIFECYCLE_KEYS.filter { payload.has(it) }.toSet() shouldBe
             setOf("id", "name", "version", "status", "body_hash", "created_at", "updated_at", "current_version", "released_at")
         envelope.get("manifest").get("visualization_body_hash").asText() shouldBe released.detail.bodyHash
-        envelope.get("templates").map { it.get("id").asText() } shouldBe listOf("finance/transforms/revenue_bars")
+        envelope.get("templates").map { it.get("id").asText() } shouldBe listOf("finance/scripts/revenue_bars")
         // Ids are global on one server (C29: another workspace here would be id_taken) — a fresh target is simulated
         // by removing the source rows, then importing the envelope where they were.
         h.visualizationRepository.deleteEntity(WORKSPACE, released.record.id)

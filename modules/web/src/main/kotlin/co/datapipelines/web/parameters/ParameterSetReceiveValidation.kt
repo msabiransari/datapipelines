@@ -210,7 +210,7 @@ private class OverlayStatuses(
 /**
  * The pin checks and the dry render against the overlay: a batch pin's facts (type, dialect) and
  * body scans (interpolation, binds) read the PAYLOAD; everything else delegates to the production
- * renderer. The transform contract of a batch pin is null — a selector pin is `type = 'sql'`, and
+ * renderer. The script contract of a batch pin is null — a selector pin is `type = 'sql'`, and
  * the type check refuses anything else before a contract could be read.
  */
 private class OverlayRenderer(
@@ -262,11 +262,11 @@ private class OverlayRenderer(
         payloads.versionOf(ref.id, ref.version)?.let { SqlBindScanner.scan(it.body) }
             ?: stored.boundParameters(workspaceId, ref)
 
-    override fun transformContract(
+    override fun scriptContract(
         workspaceId: UUID,
         ref: TemplateRef,
-    ): co.datapipelines.pipeline.TransformContractView? =
-        if (payloads.versionOf(ref.id, ref.version) != null) null else stored.transformContract(workspaceId, ref)
+    ): co.datapipelines.pipeline.ScriptContractView? =
+        if (payloads.versionOf(ref.id, ref.version) != null) null else stored.scriptContract(workspaceId, ref)
 }
 
 /**

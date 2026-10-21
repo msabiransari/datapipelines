@@ -13,7 +13,7 @@
   <div class="app-page-h">
     <div>
       <h1 class="ds-headline">Templates</h1>
-      <p class="app-page-sub">Reusable SQL and transforms that pipelines pin by version. A
+      <p class="app-page-sub">Reusable SQL and scripts that pipelines pin by version. A
         template's folder is the first segment of its name. Browse the folders in the resource
         browser's Templates tree, or search the whole catalog here; a template opens in its
         workspace.</p>
@@ -127,16 +127,16 @@
         <div class="u-flex u-gap-md u-mb-md">
           <div class="u-grow">
             <label class="u-block u-secondary u-text-sm u-mb-xs">Type</label>
-            <!-- 7d: `data-transform-types` names the types that carry the three blocks below —
+            <!-- 7d: `data-script-types` names the types that carry the three blocks below —
                  rendered from TemplateType, so the script never keeps its own list. -->
             <select id="create-template-type" name="type" class="ds-input" required
-                    th:attr="data-transform-types=${transformTypes}">
+                    th:attr="data-script-types=${scriptTypes}">
               <option th:each="ty : ${types}" th:value="${ty}" th:text="${ty}"
                       th:selected="${ty == 'sql'}">sql</option>
             </select>
           </div>
           <!-- `dialect` is CONDITIONAL on type: required for `sql`, hidden AND removed from
-               the submitted form for `html` and the transform types. chk_type_dialect is the
+               the submitted form for `html` and the script types. chk_type_dialect is the
                database's backstop and the controller drops the field for them regardless —
                the form is not the authority on that rule (§5.1). -->
           <div class="u-grow" id="create-template-dialect-field">
@@ -153,20 +153,20 @@
         </div>
         <div class="u-mb-md">
           <label class="u-block u-secondary u-text-sm u-mb-xs">Body</label>
-          <!-- 7d: for a transform type the body starts as the record's example body (the blocks
+          <!-- 7d: for a script type the body starts as the record's example body (the blocks
                below are its contract, invariants and tests); switching back to sql/html while
                it is untouched clears it again. -->
           <textarea id="create-template-body" name="body" class="ds-input app-template-body-input"
                     placeholder="SELECT 1" required
-                    th:attr="data-transform-body=${skeleton?.body}"></textarea>
+                    th:attr="data-script-body=${skeleton?.body}"></textarea>
         </div>
-        <!-- 7d (#7, transform-nodes design §2.2): a transform carries a contract, invariants and
+        <!-- 7d (#7, transform-nodes design §2.2): a script carries a contract, invariants and
              tests inside its version — the create runs the suite, and one EMPTY-input case is
              mandatory. Prefilled with the design record's example; hidden AND disabled (so not
-             submitted) unless the type is a transform, exactly as `dialect` is for html. -->
+             submitted) unless the type is a script, exactly as `dialect` is for html. -->
         <div id="create-template-blocks-field" hidden>
           <p class="u-muted u-text-sm u-m0 u-mb-xs">
-            A transform declares its contract, invariants and tests; the create runs the tests.
+            A script declares its contract, invariants and tests; the create runs the tests.
             The example below is the design record's — edit it, or keep it and edit in the
             workspace.
           </p>

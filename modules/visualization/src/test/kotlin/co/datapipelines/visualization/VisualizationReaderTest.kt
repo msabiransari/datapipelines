@@ -36,7 +36,7 @@ class VisualizationReaderTest {
             .columns
             .map { it.name to it.type } shouldBe
             listOf("month" to LogicalType.DATE, "amount" to LogicalType.DECIMAL)
-        body.transform shouldBe TransformBinding(ArtifactRef("finance/transforms/revenue_bars", 2), mapOf("rows" to "revenue"))
+        body.transform shouldBe TransformBinding(ArtifactRef("finance/scripts/revenue_bars", 2), mapOf("rows" to "revenue"))
         body.bindings shouldBe mapOf("data[0].x" to "month_labels", "data[0].y" to "amounts")
         body.presentation?.tokens shouldBe mapOf("series" to "categorical")
         val case = body.tests!!.cases.single()

@@ -84,6 +84,6 @@ class JsonataEvaluationGuardTest {
         val escaped = guard().escaped(RuntimeException("comparator wrap", StackOverflowError("deep")))
         val refusal = escaped.shouldBeInstanceOf<ScriptResourceLimitException>()
         refusal.kind shouldBe ScriptResourceLimitException.Kind.DEPTH
-        refusal.code shouldBe "pipeline.transform.resource_limit"
+        refusal.code shouldBe "pipeline.script.resource_limit"
     }
 }

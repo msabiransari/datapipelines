@@ -8,9 +8,9 @@
   pipeline `{"name": "...", "version": N}` as a sub-execution — declares `pipeline`
   plus optional parameter bindings instead of `source`/`template`), `CALCULATOR`
   (compute one typed value — or, on a multi-output kind, a named set of them — into
-  the Context — see `templates-calculators`), or `TRANSFORM` (evaluate a pinned
+  the Context — see `templates-calculators`), or `SCRIPT` (evaluate a pinned
   `jsonata` template as a pure function over staged data — `inputs`, `output`,
-  `strict`, never `source`; see `transforms-evaluation`)
+  `strict`, never `source`; see `scripts-evaluation`)
 - `source` — a registered datasource name, or the reserved literal `"tempdb"` for the
   per-execution in-memory H2
 - `template` — `{"id": "...sql", "version": N}` (immutable pin)

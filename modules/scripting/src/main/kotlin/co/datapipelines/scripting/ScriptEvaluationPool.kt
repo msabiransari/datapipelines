@@ -49,7 +49,7 @@ fun interface ScriptClock {
  *    finishes: at most [size] evaluation threads are alive at any moment, abandoned ones
  *    included. This is the bulkhead (record §4.3 as corrected at the 7a merge, R7 — the
  *    executor's own fixed pool holds a `dag-executor` thread for an abandoned statement the
- *    same way): a runaway degrades transform capacity, never the rest of the JVM. The
+ *    same way): a runaway degrades script capacity, never the rest of the JVM. The
  *    first reading of §4.3 released the slot at abandonment, which let every abandoned
  *    runaway add one more live thread with no ceiling.
  *  - **An answer means the slot is back.** A caller answered with a value or with the work's
@@ -66,7 +66,7 @@ fun interface ScriptClock {
  *    [ScriptTimeoutException] to the caller. The thread lives on detached.
  *  - **No Micrometer here.** This module has no metrics dependency (typesystem has
  *    none to build on); [abandoned] is the `LongAdder` a caller scrapes into its own
- *    meter (`transform.evaluations.abandoned` is the record's name).
+ *    meter (`script.evaluations.abandoned` is the record's name).
  *
  * NOT a `ThreadPoolExecutor`: the fixed resource here is the CAPACITY, not a worker set —
  * an abandoned evaluation's thread is never handed new work, and its slot comes back only

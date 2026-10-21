@@ -54,9 +54,9 @@ class TemplateErrorCodesSpecDriftTest {
             // refusal (the `datasource.in_use` shape for templates).
             // §13.9 gained `template.in_use` on 2026-09-02 (040 D4) — the used-by delete
             // refusal (the `datasource.in_use` shape for templates).
-            // §13.9 gained the transform codes on 2026-09-23 (7b, #7): bare `template.*`
+            // §13.9 gained the script codes on 2026-09-23 (7b, #7): bare `template.*`
             // spellings — `contract_invalid`, `invariant_invalid`, `test_failed`,
-            // `blocks_not_allowed`, `render_not_applicable` — the record (transform-nodes
+            // `blocks_not_allowed`, `render_not_applicable` — the record (script-nodes
             // design §7) names them without the `validation.` infix.
             // §13.9 gained `template.implements_unresolved` on 2026-09-25 (7e, #7) — the same
             // bare shape, the record's §7 row.

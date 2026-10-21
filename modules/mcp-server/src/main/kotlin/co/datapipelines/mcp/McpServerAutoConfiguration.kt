@@ -388,7 +388,7 @@ class McpServerAutoConfiguration {
             TemplatesCreateTool(templates, authoring, templateValidator, templateDrafts),
             TemplatesUpdateTool(templates, templateDrafts, templateValidator),
             TemplatesRenderTool(templates, templateEngines),
-            // 7b — the transform evaluator (record §9.1): the SAME service the REST evaluate
+            // 7b — the script evaluator (record §9.1): the SAME service the REST evaluate
             // route calls, a plain parameter by the 068/074 pattern.
             TemplatesEvaluateTool(templateEvaluateService),
             // 107 — the bounded purge: sole-DRAFT, author-owned, unpinned only.

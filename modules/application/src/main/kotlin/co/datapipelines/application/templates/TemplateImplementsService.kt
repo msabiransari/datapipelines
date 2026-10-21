@@ -8,7 +8,7 @@ import co.datapipelines.templates.TemplateImplementsRepository
 import java.util.UUID
 
 /**
- * "Which transforms implement this fact?" — the reverse arrow of the semantic link
+ * "Which scripts implement this fact?" — the reverse arrow of the semantic link
  * (transform-nodes design §8.3), as the application layer answers it for the fact surfaces.
  *
  * A port in this layer, not a repository reach, so `SemanticsService` and the listing

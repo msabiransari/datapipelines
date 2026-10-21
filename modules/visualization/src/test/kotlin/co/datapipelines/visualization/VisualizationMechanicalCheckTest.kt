@@ -192,7 +192,7 @@ class VisualizationMechanicalCheckTest {
         withClue("a DRAFT pin passes the fixture run") { draftCheck.run(WORKSPACE, body()).ok shouldBe true }
         // And the same run REFUSES when the pin is gone entirely: the evaluator's refusal names it.
         Fakes.evaluatorRefusal =
-            FixtureEvaluation.Refused("template.not_found", "Template 'finance/transforms/revenue_bars' does not exist.")
+            FixtureEvaluation.Refused("template.not_found", "Template 'finance/scripts/revenue_bars' does not exist.")
         draftCheck.run(WORKSPACE, body()).ok shouldBe false
         Fakes.reset()
     }

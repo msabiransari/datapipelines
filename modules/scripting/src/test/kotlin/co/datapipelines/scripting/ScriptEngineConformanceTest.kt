@@ -180,7 +180,7 @@ class ScriptEngineConformanceTest {
                 }
             caller.start()
             caller.join(10_000)
-            timeout.get().shouldNotBeNull().code shouldBe "pipeline.transform.timeout"
+            timeout.get().shouldNotBeNull().code shouldBe "pipeline.script.timeout"
         }
     }
 }

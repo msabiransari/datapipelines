@@ -77,6 +77,16 @@ class PipelineDeserializerTest {
     }
 
     @Test
+    fun `a TRANSFORM body is refused with type_invalid - the rename left no alias`() {
+        // The script-node rename (2026-10-20): the wire value is SCRIPT, and an old body's
+        // "type": "TRANSFORM" must be REFUSED, never silently accepted as a script.
+        val outcome = deserializer.read(pipelineJson(node(null, type = "TRANSFORM")))
+
+        outcome.shouldBeInstanceOf<DeserializationOutcome.Rejected>()
+        outcome.result.codes shouldContainExactly listOf(Validation.TYPE_INVALID)
+    }
+
+    @Test
     fun `the type_invalid message names every catalogued wire value`() {
         // §12.4's allowed-set, restated in the failure itself: the enum gaining `PIPELINE`, and
         // then `CALCULATOR` (five values now), must show up in what the author is told — a
@@ -84,7 +94,7 @@ class PipelineDeserializerTest {
         val outcome = deserializer.read(pipelineJson(node(null, type = "SELECT")))
 
         val failure = (outcome as DeserializationOutcome.Rejected).result.failures.single()
-        failure.message shouldContain "[DQL, DML, DDL, PIPELINE, CALCULATOR, TRANSFORM]"
+        failure.message shouldContain "[DQL, DML, DDL, PIPELINE, CALCULATOR, SCRIPT]"
         failure.details["allowed"] shouldBe NodeType.WIRE_VALUES
     }
 

@@ -41,7 +41,7 @@ private object NodeOutputSerializer : JsonSerializer<NodeOutput>() {
         when (value) {
             is NodeOutput.Tempdb -> {
                 gen.writeStringField(TABLE, value.table)
-                // TRANSFORM-only companion (§4.7); absent everywhere else, so every existing
+                // SCRIPT-only companion (§4.7); absent everywhere else, so every existing
                 // pipeline's serialized form is byte-identical.
                 value.rejects?.let { gen.writeStringField(REJECTS, it) }
             }
@@ -71,7 +71,7 @@ private object NodeOutputDeserializer : JsonDeserializer<NodeOutput>() {
                 NodeOutput.Tempdb(
                     table = node.path(TABLE).asTextOrNull().orEmpty(),
                     // Absent binds to null, exactly like the other lenient reads above — §12.13
-                    // owns the "rejects on a non-TRANSFORM node" verdict, not binding.
+                    // owns the "rejects on a non-SCRIPT node" verdict, not binding.
                     rejects = node.path(REJECTS).asTextOrNull(),
                 )
             }

@@ -10,7 +10,7 @@ package co.datapipelines.config
  * The bounds are the twins of `ParametersKey` in `modules/parameters` (`app` compiles against `web`
  * only, so it cannot import them); `ParametersConfigKeysSpecDriftTest` there parses THIS file and holds
  * every key and bound equal to the enum, the doc and `application.yml`. Owns its file like
- * `TransformRules` — the validator's companion is the registry, not the home, of the §3.x families.
+ * `ScriptRules` — the validator's companion is the registry, not the home, of the §3.x families.
  */
 internal object ParametersRules {
     private const val PREFIX = "datapipelines.parameters."

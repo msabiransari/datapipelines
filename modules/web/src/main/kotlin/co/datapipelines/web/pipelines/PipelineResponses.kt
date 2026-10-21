@@ -77,7 +77,7 @@ object PipelineResponses {
     /**
      * The release response (rest-api §5.10, pipeline-contract §14): the [full] projection of the
      * version just released plus `warnings` — ALWAYS present, `[]` on a clean release, one
-     * `{code, message, template, version}` per pin that reads `needs_review` (7e, transform-nodes
+     * `{code, message, template, version}` per pin that reads `needs_review` (7e, script-nodes
      * design §8.2). A warning describes what was released; the status is still the release's.
      * #328 — plus `caller_output` (D3): `recorded` | `declared` | `none` | `not_observed`, the
      * one word about what the release did about its caller node's result columns. Additive only.

@@ -75,13 +75,13 @@ data class NodeResult(
      */
     val providedBy: String? = null,
     /**
-     * TRANSFORM nodes only (§4.12, transform-nodes design §5.5): rows read from the table
+     * SCRIPT nodes only (§4.12, transform-nodes design §5.5): rows read from the table
      * input(s). Null on every other node type — no node reported an input count before.
      */
     val rowsIn: Long? = null,
-    /** TRANSFORM nodes only (§4.12): rows the function rejected, written to the rejects table. */
+    /** SCRIPT nodes only (§4.12): rows the function rejected, written to the rejects table. */
     val rowsRejected: Long? = null,
-    /** TRANSFORM nodes only (§4.12): how many invariants were evaluated after the last batch (§5.4). */
+    /** SCRIPT nodes only (§4.12): how many invariants were evaluated after the last batch (§5.4). */
     val invariantsChecked: Int? = null,
 ) {
     companion object {
@@ -196,16 +196,16 @@ data class NodeStats(
     @field:JsonProperty("provided_by") @get:JsonProperty("provided_by") @param:JsonProperty("provided_by")
     val providedBy: String? = null,
     /**
-     * TRANSFORM nodes only (§4.12, transform-nodes design §5.5): rows read from the table
+     * SCRIPT nodes only (§4.12, transform-nodes design §5.5): rows read from the table
      * input(s). Absent from the JSON for every other node type (NON_NULL inclusion), the same
      * additive discipline as the fields above.
      */
     @field:JsonProperty("rows_in") @get:JsonProperty("rows_in") @param:JsonProperty("rows_in")
     val rowsIn: Long? = null,
-    /** TRANSFORM nodes only (§4.12): rows the function rejected. Same additive discipline. */
+    /** SCRIPT nodes only (§4.12): rows the function rejected. Same additive discipline. */
     @field:JsonProperty("rows_rejected") @get:JsonProperty("rows_rejected") @param:JsonProperty("rows_rejected")
     val rowsRejected: Long? = null,
-    /** TRANSFORM nodes only (§4.12): how many invariants ran after the last batch. Same additive discipline. */
+    /** SCRIPT nodes only (§4.12): how many invariants ran after the last batch. Same additive discipline. */
     @field:JsonProperty("invariants_checked") @get:JsonProperty("invariants_checked") @param:JsonProperty("invariants_checked")
     val invariantsChecked: Int? = null,
 ) {

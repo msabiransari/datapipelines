@@ -57,7 +57,7 @@ sealed interface EvidenceVerdict {
 }
 
 /**
- * The template half of a transfer (the spec's §12): a visualization's export carries its pinned transform
+ * The template half of a transfer (the spec's §12): a visualization's export carries its pinned script
  * templates' `imports` closure at the envelope root, and its import lands them FIRST. The template export and import
  * services live in `web` (`TemplateImportService`), which L1c's routes wire here — the parameter-set transfer's
  * composition, lifted behind a port so the transfer SERVICE lives in this module.

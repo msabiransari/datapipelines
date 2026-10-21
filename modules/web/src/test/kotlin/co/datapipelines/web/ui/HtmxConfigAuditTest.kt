@@ -16,7 +16,7 @@ import org.springframework.core.io.support.PathMatchingResourcePatternResolver
  * is refused: its indicator `<style>` (#188, `includeIndicatorStyles:false`) and, measured in
  * #456, its settle step, which copies an element's `style` attribute across a swap with
  * setAttribute whenever the attribute exists — a `style=""` left behind by a CSSOM write became
- * 22 refusals from htmx.min.js on the datasource dialog and the transform face. htmx's default
+ * 22 refusals from htmx.min.js on the datasource dialog and the script face. htmx's default
  * `attributesToSettle` names "style", so the layouts must override it. The two layouts carry
  * the same config by contract (auth.html points at default.html's note); a drift between them
  * is red here too.

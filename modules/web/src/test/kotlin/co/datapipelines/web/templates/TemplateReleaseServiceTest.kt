@@ -224,8 +224,8 @@ class TemplateReleaseServiceTest {
     }
 
     @Test
-    @Suppress("LongMethod") // the fixture is the point: an exhausted pool, a real validator, a stored transform draft
-    fun `release re-runs the suite on a transform draft — a pool refusing at release fails the release`() {
+    @Suppress("LongMethod") // the fixture is the point: an exhausted pool, a real validator, a stored script draft
+    fun `release re-runs the suite on a script draft — a pool refusing at release fails the release`() {
         // 7b §8.1: release re-runs the version's test suite. A suite that passed at save fails
         // at release only if the engine changed — here the evaluation pool is exhausted, so the
         // release is refused with template.test_failed instead of flipping the draft.
@@ -250,7 +250,7 @@ class TemplateReleaseServiceTest {
         Thread.sleep(100)
 
         val runner =
-            co.datapipelines.templates.TransformTestRunner(
+            co.datapipelines.templates.ScriptTestRunner(
                 engines = mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
                 pool = pool,
                 evaluateTimeout = java.time.Duration.ofSeconds(5),
@@ -279,34 +279,34 @@ class TemplateReleaseServiceTest {
             )
 
         val contract =
-            co.datapipelines.templates.TransformContract(
-                mode = co.datapipelines.templates.TransformMode.ROW,
+            co.datapipelines.templates.ScriptContract(
+                mode = co.datapipelines.templates.ScriptMode.ROW,
                 inputs =
                     mapOf(
                         "orders" to
-                            co.datapipelines.templates.TransformInput.Table(
+                            co.datapipelines.templates.ScriptInput.Table(
                                 listOf(
                                     co.datapipelines.templates.ContractColumn("order_id", co.datapipelines.typesystem.LogicalType.INTEGER),
                                 ),
                             ),
                     ),
                 output =
-                    co.datapipelines.templates.TransformOutput.Table(
+                    co.datapipelines.templates.ScriptOutput.Table(
                         listOf(co.datapipelines.templates.ContractColumn("order_id", co.datapipelines.typesystem.LogicalType.INTEGER)),
                     ),
             )
         val case =
-            co.datapipelines.templates.TransformTestCase(
+            co.datapipelines.templates.ScriptTestCase(
                 name = "empty",
-                input = co.datapipelines.templates.TransformTestInput(rows = emptyList(), inputs = emptyMap()),
+                input = co.datapipelines.templates.ScriptTestInput(rows = emptyList(), inputs = emptyMap()),
                 expect =
-                    co.datapipelines.templates.TransformTestExpect(
+                    co.datapipelines.templates.ScriptTestExpect(
                         output =
-                            co.datapipelines.templates.TransformBlocks.mapper
+                            co.datapipelines.templates.ScriptBlocks.mapper
                                 .readTree("""{"rows": []}"""),
                     ),
             )
-        val transformStored =
+        val scriptStored =
             Template(
                 id = "test/t.sql",
                 version = 1,
@@ -323,7 +323,7 @@ class TemplateReleaseServiceTest {
                 tests = listOf(case),
             )
         every { templates.findDraftDetail(workspaceId, "test/t.sql") } returns draft(1)
-        every { templates.findVersion(workspaceId, "test/t.sql", 1) } returns transformStored
+        every { templates.findVersion(workspaceId, "test/t.sql", 1) } returns scriptStored
 
         try {
             val thrown =

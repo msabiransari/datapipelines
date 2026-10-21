@@ -31,7 +31,7 @@ import java.util.UUID
  *    plain list — since #466 the fragment has no sidebar presentation);
  *  - the used-by fragment (#320's three arms, the "nothing pins it" sentence) — the
  *    workspace's Used by tab is its only page now;
- *  - the create modal (Q1(b), the four types, the transform blocks);
+ *  - the create modal (Q1(b), the four types, the script blocks);
  *  - the `needs_review` marker on the rows that carry it;
  *  - the type filter's exact binding (the falsification anchor at the binding the controller
  *    uses).
@@ -129,11 +129,11 @@ class TemplateExplorerRenderTest {
     // ---------------------------------------------------------------- the create modal
 
     @Test
-    fun `the create modal offers the four types and carries the transform blocks, hidden and disabled`() {
+    fun `the create modal offers the four types and carries the script blocks, hidden and disabled`() {
         val html =
             render("templates/list") {
                 fillPage()
-                setVariable("transformTypes", "jsonata,javascript")
+                setVariable("scriptTypes", "jsonata,javascript")
             }
 
         TemplateType.WIRE_VALUES.forEach { ty ->
@@ -145,7 +145,7 @@ class TemplateExplorerRenderTest {
     }
 
     @Test
-    fun `a transform catalog row shows its language as the type badge, with no dialect`() {
+    fun `a script catalog row shows its language as the type badge, with no dialect`() {
         val search =
             render("partials/template-search") {
                 fillSearch()
@@ -216,7 +216,7 @@ class TemplateExplorerRenderTest {
         setVariable("namePattern", co.datapipelines.templates.TemplateNameGrammar.pattern)
         setVariable("nameMaxLength", co.datapipelines.templates.TemplateNameGrammar.maxLength)
         setVariable("nameHint", co.datapipelines.templates.TemplateNameGrammar.DESCRIPTION)
-        setVariable("skeleton", TransformSkeleton)
+        setVariable("skeleton", ScriptSkeleton)
         setVariable("canAuthor", true)
     }
 

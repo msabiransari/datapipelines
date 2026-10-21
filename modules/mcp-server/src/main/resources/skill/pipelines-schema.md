@@ -34,17 +34,17 @@ Minimal single-node pipeline (Postgres source, the single DQL node IS the caller
 }
 ```
 
-**TRANSFORM nodes** — `type: "TRANSFORM"` pins a `jsonata` template and conforms to the
+**SCRIPT nodes** — `type: "SCRIPT"` pins a `jsonata` template and conforms to the
 pinned contract: `inputs` maps each contract input to a staged table or a `"$context_key"`,
 `strict` fails the node on any reject, and `output` is `{ "target": "tempdb", "table",
 "rejects"? }` or `{ "target": "caller" }` in `row`/`table` mode, or absent in `value` mode
 (the node writes `context_key` instead, bindable downstream as `:context_key`). See
-`transforms-evaluation`:
+`scripts-evaluation`:
 
 ```json
 {
   "id": "shape_orders",
-  "type": "TRANSFORM",
+  "type": "SCRIPT",
   "template": {"id": "acme/shape/order_lines.jsonata", "version": 3},
   "inputs": {"orders": "stg_orders", "tz": "$org_timezone"},
   "output": {"target": "tempdb", "table": "order_lines", "rejects": "order_lines_rejected"},

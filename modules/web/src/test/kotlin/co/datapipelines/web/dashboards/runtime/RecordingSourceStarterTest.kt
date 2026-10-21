@@ -72,7 +72,7 @@ class RecordingSourceStarterTest {
             every { parameters } returns emptyMap()
             every { calculatorOutputs(any()) } returns emptyMap()
             every { calculatorOutputGroups(any()) } returns emptyMap()
-            every { transformOutputKeys() } returns emptySet()
+            every { scriptOutputKeys() } returns emptySet()
         }
 
     private fun launch(parameters: Map<String, com.fasterxml.jackson.databind.JsonNode> = emptyMap()) =

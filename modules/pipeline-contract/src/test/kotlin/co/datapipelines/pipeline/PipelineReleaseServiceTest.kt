@@ -209,16 +209,16 @@ class PipelineReleaseServiceTest {
         service.release(workspaceId, pipelineId, "draft-hash", userId).callerOutput shouldBe ReleaseCallerOutput.NONE
     }
 
-    /** #328 B (D3/D4) — a transform caller's contract is the answer: `declared`, record or no record. */
+    /** #328 B (D3/D4) — a script caller's contract is the answer: `declared`, record or no record. */
     @Test
-    fun `a transform caller releases declared - the record never overrides the contract`() {
-        val transformBody =
+    fun `a script caller releases declared - the record never overrides the contract`() {
+        val scriptBody =
             """{"schema_version":1,"name":"test/monthly_revenue","display_name":"M","description":"d",""" +
                 """"parameters":{},"settings":{"tempdb":{"engine":"H2"}},""" +
-                """"nodes":[{"id":"n1","type":"TRANSFORM","source":"pg","template":{"id":"test/t.sql","version":2},""" +
+                """"nodes":[{"id":"n1","type":"SCRIPT","source":"pg","template":{"id":"test/t.sql","version":2},""" +
                 """"output":{"target":"caller"},"depends_on":[]}]}"""
         every { pipelines.findDraftDetail(workspaceId, pipelineId) } returns draftDetail()
-        every { pipelines.findVersionBody(workspaceId, pipelineId, 2) } returns transformBody
+        every { pipelines.findVersionBody(workspaceId, pipelineId, 2) } returns scriptBody
         every { validator.validateOrThrow(any(), workspaceId) } answers { firstArg() }
         every { templates.statusOf(workspaceId, "test/t.sql", 2) } returns PipelineVersionStatus.RELEASED
         // Even WITH a copied record on the row, the declared contract outranks it (D4).

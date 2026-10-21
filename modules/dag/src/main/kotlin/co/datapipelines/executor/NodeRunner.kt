@@ -226,15 +226,15 @@ class NodeRunner(
      */
     private val calculatorKinds: (String) -> CalculatorKind? = CalculatorRegistry::find,
     /**
-     * The TRANSFORM-node collaborators (§4.12): the pinned-version resolver, the script
-     * evaluation pool, the engines and the transform bounds. Null means this runtime has no
-     * transform evaluation wired — a TRANSFORM node then fails with
-     * `pipeline.transform.evaluation_failed`, exactly as a PIPELINE node fails
+     * The SCRIPT-node collaborators (§4.12): the pinned-version resolver, the script
+     * evaluation pool, the engines and the script bounds. Null means this runtime has no
+     * script evaluation wired — a SCRIPT node then fails with
+     * `pipeline.script.evaluation_failed`, exactly as a PIPELINE node fails
      * `child_execution_failed` on an unwired composition port. Production wires it from
-     * `TransformConfiguration`'s pool; dag's own fixtures leave it null unless the node under
-     * test is a TRANSFORM.
+     * `ScriptConfiguration`'s pool; dag's own fixtures leave it null unless the node under
+     * test is a SCRIPT.
      */
-    private val transforms: TransformSupport? = null,
+    private val scripts: ScriptSupport? = null,
 ) {
     /**
      * A CALCULATOR node dispatches to [CalculatorNodeRuns] — its own object for the reason
@@ -249,24 +249,24 @@ class NodeRunner(
     ): NodeResult = CalculatorNodeRuns.run(node, ctx, startedAt, calculatorKinds)
 
     /**
-     * The TRANSFORM leg of [run] (§4.12), beside [runCalculator] for the same reason: this
-     * class is at detekt's size ceiling and the transform run — resolve, input check, batched
+     * The SCRIPT leg of [run] (§4.12), beside [runCalculator] for the same reason: this
+     * class is at detekt's size ceiling and the script run — resolve, input check, batched
      * pooled evaluation, gate, write, invariants, strict — is self-contained in
-     * [TransformNodeRuns].
+     * [ScriptNodeRuns].
      */
-    private suspend fun runTransform(
+    private suspend fun runScript(
         node: ExecutableNode,
         ctx: NodeExecutionContext,
         startedAt: Instant,
     ): NodeResult =
-        TransformNodeRuns.run(
+        ScriptNodeRuns.run(
             node,
             ctx,
             startedAt,
-            transforms
+            scripts
                 ?: throw DatapipelinesException(
-                    code = PipelineErrorCodes.Transform.EVALUATION_FAILED,
-                    message = "TRANSFORM nodes are not wired in this runtime.",
+                    code = PipelineErrorCodes.Script.EVALUATION_FAILED,
+                    message = "SCRIPT nodes are not wired in this runtime.",
                     details = mapOf("node" to node.id),
                 ),
             config,
@@ -298,11 +298,11 @@ class NodeRunner(
         if (node.type == NodeType.CALCULATOR) {
             return runCalculator(node, ctx, startedAt)
         }
-        // A TRANSFORM node is dispatched here too (§4.12): its template is a script, not SQL,
-        // so it never enters render — [TransformNodeRuns] resolves the pinned version's
+        // A SCRIPT node is dispatched here too (§4.12): its template is a script, not SQL,
+        // so it never enters render — [ScriptNodeRuns] resolves the pinned version's
         // contract, evaluates on the script pool and writes tempdb, the Context or the caller.
-        if (node.type == NodeType.TRANSFORM) {
-            return runTransform(node, ctx, startedAt)
+        if (node.type == NodeType.SCRIPT) {
+            return runScript(node, ctx, startedAt)
         }
         val sql = phase(ctx, NodePhase.RENDER, node.id) { render(node, ctx) }
         return dispatchRendered(node, ctx, startedAt, sql)
@@ -407,7 +407,7 @@ class NodeRunner(
                 tempdbWrite(node, bound, ctx, startedAt, resolved)
             }
 
-            NodeType.PIPELINE, NodeType.CALCULATOR, NodeType.TRANSFORM -> {
+            NodeType.PIPELINE, NodeType.CALCULATOR, NodeType.SCRIPT -> {
                 error("unreachable: ${node.type.wire} dispatched before source resolution")
             }
         }
@@ -758,7 +758,7 @@ class NodeRunner(
                     datasourceDdl(node, conn, bound, ctx, startedAt, resolved)
                 }
 
-                NodeType.PIPELINE, NodeType.CALCULATOR, NodeType.TRANSFORM -> {
+                NodeType.PIPELINE, NodeType.CALCULATOR, NodeType.SCRIPT -> {
                     error("unreachable: ${node.type.wire} dispatched before source resolution")
                 }
             }

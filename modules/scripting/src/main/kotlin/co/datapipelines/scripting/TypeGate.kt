@@ -12,7 +12,7 @@ import java.time.OffsetDateTime
 import java.time.ZoneOffset
 
 /**
- * The type gate (transform-nodes design §5.3, R1): every value a transform returns is
+ * The type gate (transform-nodes design §5.3, R1): every value a script returns is
  * checked against the contract's declared output columns — the key set must equal the
  * column set, each value must fit its column's wire form, and numerics follow the
  * record's table. Pure: no I/O, no clock, no configuration read.
@@ -21,7 +21,7 @@ import java.time.ZoneOffset
  *
  * `ColumnSchema.nullable` is `Boolean?` whose absence means "the driver would not say"
  * and must never be read as false — that rule is for INGRESS schemas. At this boundary
- * the columns are the transform's own declared contract, the contract's default is
+ * the columns are the script's own declared contract, the contract's default is
  * `nullable: false`, and the gate reads absence as exactly that: a null is refused
  * unless the declared column positively says `nullable: true`. Deliberately NOT the
  * ColumnSchema KDoc's rule; the two coexist because they answer different questions
@@ -101,7 +101,7 @@ class TypeGate private constructor(
     /**
      * Checks an object-valued output (`kind: object`, R4): the value must be a JSON
      * object whose canonical form fits [maxBytes]. Keys readable by a downstream
-     * TRANSFORM only — that rule is 7c's to enforce; the gate bounds the bytes.
+     * SCRIPT only — that rule is 7c's to enforce; the gate bounds the bytes.
      */
     fun gateObject(
         value: Any?,

@@ -109,10 +109,10 @@ class RecordingExecutionRunner(
      */
     private val executorFactory: ((co.datapipelines.web.sse.WebEventEmitter) -> PipelineExecutor)? = null,
     /**
-     * The TRANSFORM-node collaborators (7c, #7) — handed to the per-run executor, as in
+     * The SCRIPT-node collaborators (7c, #7) — handed to the per-run executor, as in
      * [ExecutionStreamLauncher]; null only in module-slice wiring.
      */
-    private val transformSupport: co.datapipelines.executor.TransformSupport? = null,
+    private val scriptSupport: co.datapipelines.executor.ScriptSupport? = null,
     /**
      * #266 — the emitter's event recorder: the batched one in the application (PersistenceConfiguration),
      * null in module-slice wiring and unit tests, where the emitter's direct default applies.
@@ -212,6 +212,6 @@ class RecordingExecutionRunner(
             metrics = executorMetrics,
             progress = executionProgress,
             subPipelineRunner = subPipelineRunner,
-            transforms = transformSupport,
+            scripts = scriptSupport,
         )
 }
