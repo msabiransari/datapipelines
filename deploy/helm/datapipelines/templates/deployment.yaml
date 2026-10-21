@@ -40,6 +40,7 @@ spec:
           {{- if hasKey .Values.extraEnv "DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY" }}{{ fail "set duckdb.extensionDirectory, not extraEnv.DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY" }}{{- end }}
           {{- if hasKey .Values.extraEnv "DATAPIPELINES_DUCKDB_MEMORY_LIMIT" }}{{ fail "set duckdb.memoryLimit, not extraEnv.DATAPIPELINES_DUCKDB_MEMORY_LIMIT" }}{{- end }}
           {{- range $name := keys .Values.extraEnv }}{{ if eq (upper (replace "." "_" $name)) "LOADER_PATH" }}{{ fail "LOADER_PATH comes from the image, never from extraEnv.LOADER_PATH (deployment.md §9)" }}{{ end }}{{- end }}
+          {{- range $name := keys .Values.extraEnv }}{{ if has (upper $name) (list "JAVA_TOOL_OPTIONS" "JDK_JAVA_OPTIONS" "_JAVA_OPTIONS") }}{{ fail (printf "extraEnv.%s is refused: a JVM option variable can override the image's launcher path (deployment.md §9)" $name) }}{{ end }}{{- end }}
           {{- if or .Values.extraEnv .Values.duckdb.extensionDirectory .Values.duckdb.memoryLimit }}
           env:
             {{- if .Values.duckdb.extensionDirectory }}
