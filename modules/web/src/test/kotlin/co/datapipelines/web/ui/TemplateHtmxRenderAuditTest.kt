@@ -174,7 +174,7 @@ class TemplateHtmxRenderAuditTest {
                 "templates/list" to { c: WebContext -> c.fillTemplateList() },
                 "datasources/list" to { c: WebContext -> c.fillDatasourceList() },
                 // 054, kept through #398: the template WORKSPACE is the fourth screen with
-                // an hx-target — the transform face's Save swaps #template-source and Edit
+                // an hx-target — the script face's Save swaps #template-source and Edit
                 // answers into #tpl-edit-refusal, both of which live in a th:replace'd
                 // FRAGMENT. The workspace page itself renders the CATALOG's targets too.
                 "templates/workspace" to { c: WebContext -> c.fillTemplateEditor() },
@@ -281,7 +281,7 @@ class TemplateHtmxRenderAuditTest {
         setVariable("offset", 0)
         setVariable("hasMore", true)
         setVariable("total", 30)
-        setVariable("skeleton", TransformSkeleton)
+        setVariable("skeleton", ScriptSkeleton)
         setVariable("canAuthor", false)
     }
 
@@ -313,7 +313,7 @@ class TemplateHtmxRenderAuditTest {
         setVariable("selectedStatus", "RELEASED")
         setVariable("releasedAt", Instant.parse("2026-08-11T00:00:00Z"))
         setVariable("releasedBy", UUID.randomUUID().toString())
-        setVariable("skeleton", TransformSkeleton)
+        setVariable("skeleton", ScriptSkeleton)
     }
 
     /** The workspace page's own stamp, shared by the audits that render it. */
@@ -339,7 +339,7 @@ class TemplateHtmxRenderAuditTest {
         setVariable("currentReleaseVersion", 1)
         setVariable("activeTab", "source")
         setVariable("interpolations", emptyList<String>())
-        setVariable("isTransform", false)
+        setVariable("isScript", false)
         setVariable(
             "templateWorkspace",
             TemplateWorkspaceModel.Resolved(

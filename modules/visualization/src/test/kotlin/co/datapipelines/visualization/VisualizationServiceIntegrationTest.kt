@@ -121,9 +121,9 @@ class VisualizationServiceIntegrationTest {
                 AUTHOR,
                 releasePinnedTemplates = true,
             )
-        released.templatesReleased shouldBe listOf(TemplateRef("finance/transforms/revenue_bars", 2))
+        released.templatesReleased shouldBe listOf(TemplateRef("finance/scripts/revenue_bars", 2))
         released.version.detail.status shouldBe PipelineVersionStatus.RELEASED
-        h.templatesReleased shouldBe listOf(TemplateRef("finance/transforms/revenue_bars", 2))
+        h.templatesReleased shouldBe listOf(TemplateRef("finance/scripts/revenue_bars", 2))
 
         val missing = h.visualizations.create(WORKSPACE, h.visualizationDocument("acme/viz/missing"), AUTHOR, WriteSurface.MCP)
         h.templateStatuses.clear()

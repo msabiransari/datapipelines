@@ -308,7 +308,7 @@ private const val VISUALIZATION_DOCUMENT_PROPERTIES =
     "description": {"type": "string", "description": "Optional; 2000 characters max."},
     "renderer": {"type": "object", "description": "{kind, version}: kind is plotly, table or kpi (html and svg are reserved and refused); version is the renderer major the host must provide, as a string (\"4\")."},
     "inputs": {"type": "object", "description": "Named input contracts: {<input>: {columns: [{name, type, nullable}]}}; type is a LogicalType (STRING, INTEGER, DECIMAL, DATE, TIMESTAMP, BOOLEAN, ...). At most 8 inputs, 256 columns each."},
-    "transform": {"type": "object", "description": "Optional: {template: {name, version}, inputs: {<contract input>: <visualization input>}} — a pinned TRANSFORM template whose declared input columns equal the named inputs' columns. Absent: the renderer binds one input directly."},
+    "transform": {"type": "object", "description": "Optional: {template: {name, version}, inputs: {<contract input>: <visualization input>}} — a pinned SCRIPT template whose declared input columns equal the named inputs' columns. Absent: the renderer binds one input directly."},
     "config": {"type": "object", "description": "The renderer's native configuration, stored verbatim and validated against its schema (plotly: a non-empty data array of supported traces). At most 262,144 bytes."},
     "bindings": {"type": "object", "description": "Optional: {<path into config, e.g. data[0].y>: <column of the transform's output, or of the single input>}. Each path must already exist in config; its value is replaced by the column's values at render."},
     "presentation": {"type": "object", "description": "Optional: {title, tokens} — tokens name theme tokens, never colours."},

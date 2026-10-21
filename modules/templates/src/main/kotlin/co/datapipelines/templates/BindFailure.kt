@@ -8,7 +8,7 @@ import java.math.BigDecimal
 import java.math.BigInteger
 
 /**
- * How a Jackson failure to bind a transform-block payload is told to the author (#333).
+ * How a Jackson failure to bind a script-block payload is told to the author (#333).
  *
  * Two kinds of failure reach a strict reader, and they need different words:
  *  - [RULE_UNKNOWN_FIELD] - a typo inside a block (an `UnrecognizedPropertyException`), or the
@@ -35,7 +35,7 @@ class BindFailure private constructor(
     private val reflected: String,
 ) {
     /**
-     * The author-facing sentence: [lead] (`"The transform blocks do not bind"`) and the reason, then
+     * The author-facing sentence: [lead] (`"The script blocks do not bind"`) and the reason, then
      * [unknownFieldAdvice] after an unknown-field reason only.
      */
     fun messageFor(

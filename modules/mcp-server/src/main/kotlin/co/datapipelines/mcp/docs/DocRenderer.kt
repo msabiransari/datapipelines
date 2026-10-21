@@ -187,7 +187,7 @@ class DocRenderer(
                 "pipelines",
                 "executions",
                 "templates",
-                "transforms",
+                "scripts",
                 "datasources",
                 "lake",
                 "endpoints",

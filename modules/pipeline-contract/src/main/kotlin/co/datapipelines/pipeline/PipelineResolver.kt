@@ -50,8 +50,8 @@ data class ResolvedPipeline(
     /**
      * #328 — the pinned version's caller-output record (pipeline-contract §3.3.1): the D2
      * `{name, type, nullable}` array a release copied from its latest qualifying execution,
-     * null when the version has none. The dashboard-save reader answers a non-transform
-     * caller's columns from it (D4); a transform caller's contract outranks it, and a record
+     * null when the version has none. The dashboard-save reader answers a non-script
+     * caller's columns from it (D4); a script caller's contract outranks it, and a record
      * never overrides a declared contract.
      */
     val callerOutputJson: String? = null,

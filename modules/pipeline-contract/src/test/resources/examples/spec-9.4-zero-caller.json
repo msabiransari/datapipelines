@@ -15,11 +15,11 @@
       "depends_on": []
     },
     {
-      "id": "transform",
+      "id": "script",
       "description": "Transform in tempdb.",
       "type": "DQL",
       "source": "tempdb",
-      "template": {"id": "acme/finance/transform.sql", "version": 1},
+      "template": {"id": "acme/finance/script.sql", "version": 1},
       "output": {"target": "tempdb", "table": "int_orders"},
       "depends_on": ["fetch_orders"]
     },
@@ -35,7 +35,7 @@
         "table": "daily_orders_materialized",
         "mode": "append"
       },
-      "depends_on": ["transform"]
+      "depends_on": ["script"]
     }
   ]
 }

@@ -125,7 +125,7 @@ internal object StructuralRules {
             when (val output = node.output) {
                 is NodeOutput.Tempdb -> {
                     register(index, NodeSource.TEMPDB_LITERAL, output.table, "output.table", namespaced, into)
-                    // §12.13 (7c): a TRANSFORM's rejects table shares the tempdb namespace —
+                    // §12.13 (7c): a SCRIPT's rejects table shares the tempdb namespace —
                     // one staging database, one uniqueness rule.
                     output.rejects?.let { register(index, NodeSource.TEMPDB_LITERAL, it, "output.rejects", namespaced, into) }
                 }

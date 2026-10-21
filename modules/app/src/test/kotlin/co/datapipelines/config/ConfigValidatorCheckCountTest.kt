@@ -63,11 +63,11 @@ class ConfigValidatorCheckCountTest {
                 "modules/app/src/main/kotlin/co/datapipelines/config/PostureRules.kt",
                 // 137 — the two §3.27 mail rules, split out for the same size reason.
                 "modules/app/src/main/kotlin/co/datapipelines/config/MailRules.kt",
-                // 7b — the §3.28 transform bounds, split out for the same size reason.
-                "modules/app/src/main/kotlin/co/datapipelines/config/TransformRules.kt",
+                // 7b — the §3.28 script bounds, split out for the same size reason.
+                "modules/app/src/main/kotlin/co/datapipelines/config/ScriptRules.kt",
                 // 224 — the demo-key and key-budget rules, split out for the same size reason.
                 "modules/app/src/main/kotlin/co/datapipelines/config/DemoApiRules.kt",
-                // #194 — the §3.30 parameter-engine bounds, split out like the transform ones.
+                // #194 — the §3.30 parameter-engine bounds, split out like the script ones.
                 "modules/app/src/main/kotlin/co/datapipelines/config/ParametersRules.kt",
                 // #279 — the §3.31 request-limit bounds, split out for the same size reason.
                 "modules/app/src/main/kotlin/co/datapipelines/config/RequestLimitsRules.kt",

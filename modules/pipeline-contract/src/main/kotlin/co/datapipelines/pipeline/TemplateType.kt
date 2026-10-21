@@ -4,8 +4,8 @@ import com.fasterxml.jackson.annotation.JsonCreator
 import com.fasterxml.jackson.annotation.JsonValue
 
 /**
- * A template's kind — `sql`, `html`, or one of the two transform types `jsonata` /
- * `javascript` (template-hierarchy-design §5, since 046; the transform types since 7b,
+ * A template's kind — `sql`, `html`, or one of the two script types `jsonata` /
+ * `javascript` (template-hierarchy-design §5, since 046; the script types since 7b,
  * transform-nodes design §2.1; enums.md §6A).
  *
  * The type is chosen at template **create** and is immutable across every version of the
@@ -20,11 +20,11 @@ import com.fasterxml.jackson.annotation.JsonValue
  * auto-escaping configuration (§6). Pipeline nodes may reference only `sql` templates
  * (`pipeline.validation.template_type_mismatch`, §7).
  *
- * A transform type renders nothing: the body is an expression evaluated as a pure function
+ * A script type renders nothing: the body is an expression evaluated as a pure function
  * of its input object by the `modules/scripting` engine seam, `engine` is `none`, `dialect`,
  * `imports` and `is_library` are refused, and the version carries the contract / invariants /
  * tests blocks (transform-nodes design §2.2). `javascript` is refused at save until round two
- * (`transform.js.unavailable`) — the enum value exists so the wire vocabulary and the CHECK
+ * (`script.js.unavailable`) — the enum value exists so the wire vocabulary and the CHECK
  * constraints are final.
  */
 enum class TemplateType(
@@ -37,8 +37,8 @@ enum class TemplateType(
     JAVASCRIPT("javascript"),
     ;
 
-    /** A transform type evaluates its body as a pure function; it never renders through Freemarker. */
-    val isTransform: Boolean get() = this == JSONATA || this == JAVASCRIPT
+    /** A script type evaluates its body as a pure function; it never renders through Freemarker. */
+    val isScript: Boolean get() = this == JSONATA || this == JAVASCRIPT
 
     companion object {
         /** All wire values, in declaration order — the `supported` detail of validation failures. */

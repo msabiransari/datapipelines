@@ -25,7 +25,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
  *    comfortably above every declared product cap (the largest legitimate body — a pipeline
  *    with a 256K-char template reference, a 4 MiB evaluate RESPONSE being an output, not an
  *    input), and 2× the avatar proxy's own 1 MiB, which therefore stays reachable.
- *  - **Jackson nesting depth, 100**: the transform engine's own depth bound; a request-body
+ *  - **Jackson nesting depth, 100**: the script engine's own depth bound; a request-body
  *    document deeper than that is adversarial — the pipeline/template/parameter schemas are
  *    flat by construction.
  *  - **Jackson string length, 4M chars**: unreachable under the default byte cap (a capped
@@ -78,7 +78,7 @@ object RequestLimits {
      *
      * A route that takes its body as a `String` and parses it itself reads the body through
      * this copy, never through the domain mapper: the domain mappers (`PipelineJson`,
-     * `TemplateJson`, `ExecutorJson`, …) also read stored rows, transform values and JSON
+     * `TemplateJson`, `ExecutorJson`, …) also read stored rows, script values and JSON
      * columns, where a document deeper than a request may be is legitimate data. A request
      * limit is a statement about request bytes, so it lives on the request's copy alone.
      *

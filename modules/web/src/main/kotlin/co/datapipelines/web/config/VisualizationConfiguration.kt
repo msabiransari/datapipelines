@@ -46,7 +46,7 @@ import org.springframework.transaction.support.TransactionTemplate
  * - the template facts are `TemplateContractFacts.over(templateDryRenderer, templateVersionStatuses)` — the
  *   registry lookup and the status read the pipeline save path uses;
  * - the pipeline facts are [PipelineReleaseFactsReader] over the save-time [PipelineResolver], the published-
- *   endpoint [ReadOnlyPipelineRule] and the registry's transform contract;
+ *   endpoint [ReadOnlyPipelineRule] and the registry's script contract;
  * - the set facts read the one [ParameterSetRepository]; the visualization pins are the repository's own;
  * - the release cascade releases a DRAFT transform pin through the template's OWN [TemplateReleaser], and both
  *   services run their atomic work in a [TransactionTemplate] over the metadata transaction manager.
@@ -92,7 +92,7 @@ class VisualizationConfiguration {
         pipelines: PipelineResolver,
         readOnly: ReadOnlyPipelineRule,
         renderer: TemplateDryRenderer,
-    ): PipelineReleaseFacts = PipelineReleaseFactsReader(pipelines, readOnly, renderer::transformContract)
+    ): PipelineReleaseFacts = PipelineReleaseFactsReader(pipelines, readOnly, renderer::scriptContract)
 
     @Bean
     fun parameterSetFacts(sets: ParameterSetRepository): ParameterSetFacts = ParameterSetFacts.over(sets)

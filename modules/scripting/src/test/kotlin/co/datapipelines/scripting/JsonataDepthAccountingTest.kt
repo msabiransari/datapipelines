@@ -18,7 +18,7 @@ import java.time.Duration
  * `isParallelCall` on the frame for the second object pair (`Jsonata.java:1130`), and
  * `Timebox` returns early from BOTH callbacks on such a frame (`Timebox.java:21–29`) —
  * the frame's own exit then skips its `depth--`. The leak made depth a function of INPUT
- * SIZE: a 240-row reshape refused with `pipeline.transform.resource_limit` at the default
+ * SIZE: a 240-row reshape refused with `pipeline.script.resource_limit` at the default
  * `max-depth` of 100. The engine now counts entry/exit itself (no `isParallelCall` skip),
  * so these are the regression gates:
  *
@@ -36,7 +36,7 @@ class JsonataDepthAccountingTest {
     private val minimalShape =
         """( ${'$'}n := 1; inputs.ranked.( { "a": trip_rank, "b": trip_count } ) )"""
 
-    /** The reporting agent's transform, verbatim from #260's first failed attempt. */
+    /** The reporting agent's script, verbatim from #260's first failed attempt. */
     private val tercileShape =
         """( ${'$'}n := ${'$'}count(inputs.ranked); ${'$'}classes := ["top","middle","bottom"]; """ +
             """${'$'}append([], inputs.ranked.( ${'$'}tercile := ${'$'}floor((trip_rank - 1) * 3 / ${'$'}n); """ +

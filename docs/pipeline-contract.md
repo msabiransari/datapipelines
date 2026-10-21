@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.59 (revised — see Change Log)
+**Status:** v1.60 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-10-16
+**Last updated:** 2026-10-21
 
 ---
 
@@ -235,13 +235,13 @@ SQL-sourced source against. This subsection is the source of truth for that reco
   changes no hash and opens no draft.
 - **The one word (D3).** The release response (`caller_output`, rest-api §5.10) and the
   `pipeline.version.released` audit row carry exactly one word — `recorded` (the D1 read found
-  the version's latest run), `declared` (a TRANSFORM caller: the pinned contract is the answer),
+  the version's latest run), `declared` (a SCRIPT caller: the pinned contract is the answer),
   `none` (no caller node), `not_observed` (a SQL caller, nothing observed — today's validator
   behaviour continues for that release). Ids, names, versions and this word are all an audit row
   says; never the column list.
 - **Precedence in the reader (D4).** The dashboard-save reader
   (`PipelineReleaseFacts.releaseOf`) answers a release's `outputColumns` in this order: no
-  caller node → EMPTY; a TRANSFORM caller → its contract's table columns (the record never
+  caller node → EMPTY; a SCRIPT caller → its contract's table columns (the record never
   overrides a declared contract); any other caller node → the version's `caller_output_json`
   parsed to columns, null when there is none. The promotion payload carries the record beside
   `version` and `body_hash`, validated at the receiver (shape, wire types, the bounds) and
@@ -333,19 +333,19 @@ Note: no `output` block. DML's side effect IS the output.
 |---|---|---|---|
 | `id` | string | yes | Node identifier. `[a-z0-9_]+`. Unique within the pipeline. Stable across versions and environments. |
 | `description` | string | yes | Human-readable. Shown in UI editor. |
-| `type` | string (enum) | yes | One of `DQL`, `DML`, `DDL`, `PIPELINE`, `CALCULATOR`, `TRANSFORM`. Drives executor behavior. |
-| `source` | string | yes, except PIPELINE, CALCULATOR and TRANSFORM | Datasource name, OR `"tempdb"` for in-memory staging. Must be a registered datasource name in the env, or `"tempdb"`. Forbidden on `PIPELINE` nodes (§12.9), `CALCULATOR` nodes (§12.10) and `TRANSFORM` nodes (§12.13 — a TRANSFORM is tempdb-only). |
-| `template` | object | yes, except PIPELINE and CALCULATOR | Template reference: `{id, version}`. Immutable. See [Templates spec](templates.md). Forbidden on `PIPELINE` nodes (§12.9) and `CALCULATOR` nodes (§12.10). On `TRANSFORM` nodes it pins a `jsonata`/`javascript` template (§12.13). |
+| `type` | string (enum) | yes | One of `DQL`, `DML`, `DDL`, `PIPELINE`, `CALCULATOR`, `SCRIPT`. Drives executor behavior. |
+| `source` | string | yes, except PIPELINE, CALCULATOR and SCRIPT | Datasource name, OR `"tempdb"` for in-memory staging. Must be a registered datasource name in the env, or `"tempdb"`. Forbidden on `PIPELINE` nodes (§12.9), `CALCULATOR` nodes (§12.10) and `SCRIPT` nodes (§12.13 — a SCRIPT is tempdb-only). |
+| `template` | object | yes, except PIPELINE and CALCULATOR | Template reference: `{id, version}`. Immutable. See [Templates spec](templates.md). Forbidden on `PIPELINE` nodes (§12.9) and `CALCULATOR` nodes (§12.10). On `SCRIPT` nodes it pins a `jsonata`/`javascript` template (§12.13). |
 | `pipeline` | object | PIPELINE nodes only | Child pipeline reference: `{name, version}` — the pinned pipeline version the node executes. Required on `PIPELINE` nodes; absent on SQL node types. See §4.9. |
 | `parameters` | object | no | Child input bindings on a `PIPELINE` node: each key names a child declared parameter or a child calculator `context_key`; each value is a typed literal in the target's §6.3 wire encoding, or `"${ref}"` resolving against the parent's Context tiers (a parent parameter, a parent calculator `context_key`, an org/platform key) at the identical type. See §4.9. |
 | `kind` | string | CALCULATOR nodes only | The catalog calculator this node evaluates ([Calculators §2](calculators.md)). Required on `CALCULATOR` nodes; forbidden on every other type. See §4.10. |
-| `inputs` | object | CALCULATOR and TRANSFORM nodes only | On a `CALCULATOR` node: the kind's inputs, by input name — a `"$name"` string is a **reference** to a Context key; every other JSON value is a literal typed against the kind's declared input type (§4.10). On a `TRANSFORM` node: the pinned contract's inputs, by input name — a `"$name"` string names a Context key, anything else names a tempdb table an ancestor stages (§4.12). Required on both; forbidden on every other type. |
-| `context_key` | string | CALCULATOR nodes on a single-output kind; value-mode TRANSFORM nodes | The Context key this node writes, per §6.1's `[a-z_][a-z0-9_]*`. Deliberately not called `output`: it names a value downstream nodes bind as `:context_key`, never a table. XOR with `context_keys` on a `CALCULATOR` node (§4.10); required on a value-mode `TRANSFORM` node (§4.12); forbidden on every other type. |
+| `inputs` | object | CALCULATOR and SCRIPT nodes only | On a `CALCULATOR` node: the kind's inputs, by input name — a `"$name"` string is a **reference** to a Context key; every other JSON value is a literal typed against the kind's declared input type (§4.10). On a `SCRIPT` node: the pinned contract's inputs, by input name — a `"$name"` string names a Context key, anything else names a tempdb table an ancestor stages (§4.12). Required on both; forbidden on every other type. |
+| `context_key` | string | CALCULATOR nodes on a single-output kind; value-mode SCRIPT nodes | The Context key this node writes, per §6.1's `[a-z_][a-z0-9_]*`. Deliberately not called `output`: it names a value downstream nodes bind as `:context_key`, never a table. XOR with `context_keys` on a `CALCULATOR` node (§4.10); required on a value-mode `SCRIPT` node (§4.12); forbidden on every other type. |
 | `context_keys` | object | CALCULATOR nodes on a multi-output kind | The Context key each of the kind's named outputs is written to, as `{output name: context key}` — every declared output mapped, each key per §6.1. XOR with `context_key`; forbidden on every other type. See §4.10. |
-| `output` | object | conditional | Optional for `DQL` nodes — omitted means `{"target": "caller"}`. Forbidden for `DML` / `DDL` / `CALCULATOR` nodes. On `PIPELINE` nodes, permitted only when the pinned child has a caller node (§12.9). On `TRANSFORM` nodes: required in `row`/`table` mode (`tempdb` or `caller`), forbidden in `value` mode (§4.12). See §4.7. |
+| `output` | object | conditional | Optional for `DQL` nodes — omitted means `{"target": "caller"}`. Forbidden for `DML` / `DDL` / `CALCULATOR` nodes. On `PIPELINE` nodes, permitted only when the pinned child has a caller node (§12.9). On `SCRIPT` nodes: required in `row`/`table` mode (`tempdb` or `caller`), forbidden in `value` mode (§4.12). See §4.7. |
 | `depends_on` | array of string | yes | Parent node IDs. Empty array for source nodes. Must reference existing node IDs. No cycles. **Data flow only** — never an edge added to avoid contention between nodes; the executor owns scheduling (§4.11). |
 | `settings` | object | no | Per-node execution settings. v1 holds one key, `timeout_seconds` — this node's wall-clock deadline. See §4.11. |
-| `strict` | boolean | no | TRANSFORM nodes only: fail the node when the rejects table is non-empty (`pipeline.transform.rejects_strict`). Default `false` (partition — the rejects are written and the run continues). Legal only when the pinned contract declares rejects (§12.13). See §4.12. |
+| `strict` | boolean | no | SCRIPT nodes only: fail the node when the rejects table is non-empty (`pipeline.script.rejects_strict`). Default `false` (partition — the rejects are written and the run continues). Legal only when the pinned contract declares rejects (§12.13). See §4.12. |
 
 ### 4.7 `output` block reference
 
@@ -353,8 +353,8 @@ The `output` block declares where the node's ResultSet goes. Optional for DQL no
 
 | `target` value | Additional fields | Description |
 |---|---|---|
-| `"tempdb"` | `table: string`; TRANSFORM only: `rejects: string` | Stage the ResultSet into the in-memory tempdb under the given table name. Downstream nodes can query it via `source: "tempdb"` SQL referencing the table. A node whose data downstream nodes consume must declare this explicitly. On a `TRANSFORM` node `rejects` names the tempdb table the function's rejected rows go to, required exactly when the pinned contract declares `rejects` (§12.13); the rejects table joins the tempdb namespace's uniqueness rule (§12.1). |
-| `"caller"` | (none — `rejects` is refused, §12.13 R5) | Return the ResultSet as the pipeline's result. **Default when `output` is omitted.** At most one node per pipeline may resolve to this target; zero is legal (write-back pipelines return stats only). A `row`/`table`-mode TRANSFORM may be the caller node only when its contract declares no rejects (§12.13). |
+| `"tempdb"` | `table: string`; SCRIPT only: `rejects: string` | Stage the ResultSet into the in-memory tempdb under the given table name. Downstream nodes can query it via `source: "tempdb"` SQL referencing the table. A node whose data downstream nodes consume must declare this explicitly. On a `SCRIPT` node `rejects` names the tempdb table the function's rejected rows go to, required exactly when the pinned contract declares `rejects` (§12.13); the rejects table joins the tempdb namespace's uniqueness rule (§12.1). |
+| `"caller"` | (none — `rejects` is refused, §12.13 R5) | Return the ResultSet as the pipeline's result. **Default when `output` is omitted.** At most one node per pipeline may resolve to this target; zero is legal (write-back pipelines return stats only). A `row`/`table`-mode SCRIPT may be the caller node only when its contract declares no rejects (§12.13). |
 | `"datasource"` | `datasource: string`, `table: string`, `mode: "replace" \| "append"` | Stream the ResultSet to an external datasource's table. `replace` = TRUNCATE+INSERT in one transaction; `append` = INSERT only. The target table must already exist in the datasource (or be created by a preceding DDL node in the pipeline). |
 
 ### 4.8 `source` field rules
@@ -475,13 +475,13 @@ A PIPELINE node that declares no `timeout_seconds` is not bounded by the node de
 
 ---
 
-### 4.12 JSON structure (TRANSFORM node)
+### 4.12 JSON structure (SCRIPT node)
 
 ```json
 {
   "id": "shape_orders",
   "description": "Order lines at reporting grain; cents to currency; refunds preserved.",
-  "type": "TRANSFORM",
+  "type": "SCRIPT",
   "template": { "id": "acme/shape/order_lines.jsonata", "version": 3 },
   "inputs": { "orders": "stg_orders", "tz": "$org_timezone", "min_total": "$min_total" },
   "output": { "target": "tempdb", "table": "order_lines", "rejects": "order_lines_rejected" },
@@ -490,7 +490,7 @@ A PIPELINE node that declares no `timeout_seconds` is not bounded by the node de
 }
 ```
 
-A TRANSFORM node evaluates the pinned transform template as a **pure function** over staged data
+A SCRIPT node evaluates the pinned script template as a **pure function** over staged data
 and the Context (the transform-nodes design record §3). The language is the pinned template's
 `type` (`jsonata` today, `javascript` in round two); the **mode** (`row`, `table`, `value`) and
 the input/output shapes are the pinned version's **contract** — never repeated on the node, which
@@ -501,22 +501,22 @@ and the output is a function of the template version and its inputs — every ru
 
 | Field | Rule |
 |---|---|
-| `template` | Pinned like every pin; its type must be `jsonata` or `javascript` (`pipeline.validation.transform_template_type`). |
-| `source` | **Forbidden** (`transform_source_forbidden`). A TRANSFORM is tempdb-only: it reads what upstream nodes staged plus the Context, and writes tempdb, the Context or the caller. It never touches a datasource — the read-only rule holds trivially, and every run is reproducible from staged inputs. |
-| `inputs` | The CALCULATOR convention. `"$name"` is a Context key of any tier; anything else is a tempdb table a node this one depends on stages. The key set must equal the contract's input names (`transform_input_contract`); a table no upstream stages or a `$key` nobody writes is `transform_input_unknown`; a value input whose Context type does not fit is `transform_input_contract`. An object-valued key (R4) binds only here. |
-| `output` | **Table output** (`row`/`table` mode): `{ "target": "tempdb", "table", "rejects"? }` or `{ "target": "caller" }` (the caller-node rules of §9 apply unchanged). `rejects` on a `caller` output, or a rejects-declaring contract pinned by a caller node, is `transform_rejects_on_caller` (R5 — rejects are never silently dropped). **Value/object output** (`value` mode): no `output` block — the node writes `context_key` only (R3: no JSON result bodies), obeying every calculator rule: §6.1 name shape, one writer per key, never shadowing a declared parameter (`calculator_output_collision` / `calculator_output_name_invalid` reused), topology-ordered. Any other output/mode pairing is `transform_output_shape`. `rejects` present without the contract declaring it — or absent when it does — is `transform_rejects_undeclared` / `transform_rejects_missing`. |
-| `strict` | Boolean, default `false`. Legal only when the contract declares rejects (`transform_strict_without_rejects`); then a non-empty rejects table fails the node with `pipeline.transform.rejects_strict` (count + first ten reasons). Default is partition: the rejects are written and the run continues. |
+| `template` | Pinned like every pin; its type must be `jsonata` or `javascript` (`pipeline.validation.script_template_type`). |
+| `source` | **Forbidden** (`script_source_forbidden`). A SCRIPT is tempdb-only: it reads what upstream nodes staged plus the Context, and writes tempdb, the Context or the caller. It never touches a datasource — the read-only rule holds trivially, and every run is reproducible from staged inputs. |
+| `inputs` | The CALCULATOR convention. `"$name"` is a Context key of any tier; anything else is a tempdb table a node this one depends on stages. The key set must equal the contract's input names (`script_input_contract`); a table no upstream stages or a `$key` nobody writes is `script_input_unknown`; a value input whose Context type does not fit is `script_input_contract`. An object-valued key (R4) binds only here. |
+| `output` | **Table output** (`row`/`table` mode): `{ "target": "tempdb", "table", "rejects"? }` or `{ "target": "caller" }` (the caller-node rules of §9 apply unchanged). `rejects` on a `caller` output, or a rejects-declaring contract pinned by a caller node, is `script_rejects_on_caller` (R5 — rejects are never silently dropped). **Value/object output** (`value` mode): no `output` block — the node writes `context_key` only (R3: no JSON result bodies), obeying every calculator rule: §6.1 name shape, one writer per key, never shadowing a declared parameter (`calculator_output_collision` / `calculator_output_name_invalid` reused), topology-ordered. Any other output/mode pairing is `script_output_shape`. `rejects` present without the contract declaring it — or absent when it does — is `script_rejects_undeclared` / `script_rejects_missing`. |
+| `strict` | Boolean, default `false`. Legal only when the contract declares rejects (`script_strict_without_rejects`); then a non-empty rejects table fails the node with `pipeline.script.rejects_strict` (count + first ten reasons). Default is partition: the rejects are written and the run continues. |
 | `depends_on` | Sequencing is topology, as for calculators: a `$key` written by another node is bindable only from a node that depends on its writer (`calculator_input_unordered` reused). |
 
-**Every key a `value`-mode TRANSFORM writes is an implicit optional execute input**, exactly like
+**Every key a `value`-mode SCRIPT writes is an implicit optional execute input**, exactly like
 a calculator's (§4.10): supplied by the caller, the node is skipped and its stats carry
 `provided_by: "caller"`; the supplied value is checked against the contract's declared output at
 the node (an `object` output accepts any JSON object under the `max-value-bytes` cap).
 
 **Object keys have one reader (R4).** A key whose writer declares `output.kind: object` may be
-bound only by a TRANSFORM `inputs` entry; a SQL node's `:key`, a calculator input or a `PIPELINE`
+bound only by a SCRIPT `inputs` entry; a SQL node's `:key`, a calculator input or a `PIPELINE`
 node's `parameters` reference to it is refused at pipeline save with
-`pipeline.validation.transform_object_key_bound`, naming the key, its writer and the offending
+`pipeline.validation.script_object_key_bound`, naming the key, its writer and the offending
 node. A caller may supply it at execute time as any JSON object under the cap; it persists as
 jsonb in the execution's Context snapshot.
 
@@ -664,15 +664,15 @@ them spell a key the same way. Lowest precedence first:
 | 1 | **org config** | `org_currency_name`, `org_currency_symbol`, `org_fiscal_start_date`, `org_week_start`, `org_timezone` — the yml path minus the `datapipelines.org.` prefix, dots and dashes as `_`. All typed `STRING`; `org_fiscal_start_date` is an `MM-DD` string the calculator kinds parse | the deployment's `application.yml` (Configuration §3.21) |
 | 2 | **platform** | `current_date` (`DATE`, evaluated in `org_timezone`), `current_timestamp` (`TIMESTAMP`), `execution_id` (`STRING`) | the executor, at execution start |
 | 3 | **declared `parameters`** | whatever §6.2 declares, after defaulting | the pipeline body — declaring a key an org or platform value also provides IS the override, and it is visible in the body |
-| 4 | **execute-time inputs** | declared parameters (§6.3), and every key a `CALCULATOR` or value-mode `TRANSFORM` node writes as an implicit **optional** input (§4.10, §4.12 — supplied → the node is skipped; unsupplied → the node runs; a multi-output calculator's keys are all-or-nothing) | the caller's `parameters` object |
-| 5 | **calculator outputs** | every key a `CALCULATOR` node writes (§4.10 — one, or a multi-output kind's whole mapped set), and every key a value-mode `TRANSFORM` node writes (§4.12 — including an `object`-shaped value, persisted as jsonb under the `datapipelines.transform.max-value-bytes` cap) | the node, at its DAG position |
+| 4 | **execute-time inputs** | declared parameters (§6.3), and every key a `CALCULATOR` or value-mode `SCRIPT` node writes as an implicit **optional** input (§4.10, §4.12 — supplied → the node is skipped; unsupplied → the node runs; a multi-output calculator's keys are all-or-nothing) | the caller's `parameters` object |
+| 5 | **calculator outputs** | every key a `CALCULATOR` node writes (§4.10 — one, or a multi-output kind's whole mapped set), and every key a value-mode `SCRIPT` node writes (§4.12 — including an `object`-shaped value, persisted as jsonb under the `datapipelines.script.max-value-bytes` cap) | the node, at its DAG position |
 
 A calculator output may shadow an org or platform key; it may **never** shadow a declared
 parameter, and one is refused at save time with `pipeline.validation.calculator_output_collision`
-(§12.10) — the same rule binds a value-mode TRANSFORM's key (§12.13). An **object-valued** key
-(a TRANSFORM whose contract declares `output.kind: object`) has ONE reader: another TRANSFORM's
+(§12.10) — the same rule binds a value-mode SCRIPT's key (§12.13). An **object-valued** key
+(a SCRIPT whose contract declares `output.kind: object`) has ONE reader: another SCRIPT's
 `inputs` — a SQL bind, a calculator input or a composition parameter naming it is refused at
-save with `pipeline.validation.transform_object_key_bound` (R4, §4.12). A calculator that RUNS writes over everything below tier 5 — including a caller-supplied
+save with `pipeline.validation.script_object_key_bound` (R4, §4.12). A calculator that RUNS writes over everything below tier 5 — including a caller-supplied
 value for a *different* key — but a key the caller supplied skips its node (§4.10), so the two
 never contest the same key in one run. Org and platform keys are deployment constants, so the
 save-time dry render knows them: a template binding `:org_currency_symbol` validates without the
@@ -785,7 +785,7 @@ There is **no `terminal_node_id` field** and no topology-based auto-detection. T
 
 ### 9.1 Resolution
 
-1. For each DQL or TRANSFORM node, resolve its effective target: the declared `output.target`, or `caller` if `output` is omitted (DQL only — a TRANSFORM's output is always explicit, §4.12).
+1. For each DQL or SCRIPT node, resolve its effective target: the declared `output.target`, or `caller` if `output` is omitted (DQL only — a SCRIPT's output is always explicit, §4.12).
 2. At most one node may resolve to `caller` — this is the **caller node**, and its ResultSet is the pipeline's result.
 3. Zero caller nodes is legal: the pipeline is a pure write-back/ETL pipeline. Execution returns stats only and emits no `data_ready` event.
 
@@ -815,7 +815,7 @@ Two sinks: `cache_to_warehouse` (write-back) and `final_report` (caller return).
 ### 9.4 Zero-caller example (pure ETL)
 
 ```
-fetch_orders ─→ transform ─→ write_to_warehouse  (DQL, output: datasource pg-warehouse)
+fetch_orders ─→ script ─→ write_to_warehouse  (DQL, output: datasource pg-warehouse)
 ```
 
 No node resolves to `caller`. The pipeline returns execution stats only; no `data_ready` event is emitted. ✓
@@ -831,7 +831,7 @@ No node resolves to `caller`. The pipeline returns execution stats only; no `dat
 - Must not be `tempdb` or any name starting and ending with `__` (reserved namespace).
 - **Recommended convention** (not enforced, but LLM prompts and UI defaults should follow):
   - `stg_*` for tables staging raw source data
-  - `int_*` for intermediate transformed tables
+  - `int_*` for intermediate scripted tables
   - Cache tables written to external datasources: name them per the target's convention (often `monthly_revenue_cache`, `daily_orders_materialized`, etc.)
 - Stable across versions and environments. Renaming is a breaking change requiring downstream template SQL updates — bump pipeline version.
 
@@ -1056,28 +1056,28 @@ The `checks[]` rules (§3.3, 140). One code covers every defect, because to the 
 |---|---|
 | `pipeline.validation.check_invalid` | A body carries at most **20** checks. Each check's `id` matches `[a-z0-9_]{1,63}`, is not `tempdb` or the reserved `__…__` namespace, and is unique within the body (the run rows key on it). `name` is 1–200 characters. `datasource` is not `tempdb` and resolves in this environment's registry (the §12.5 rule as for nodes). `sql` is non-blank, carries no `${}` interpolation (a check has no rendering), and every `:name` bind names a DECLARED pipeline parameter — the calculator Context is not available to a check; a cast (`amount::numeric`) is not a bind. `expected.kind` is the closed list `value` \| `range` \| `rows`, with the kind's members present and coherent: `value` needs `value` and `tolerance` ≥ 0; `range` needs `min` ≤ `max`; `rows` needs `rows` ≥ 0 |
 
-### 12.13 Transform validation rules
+### 12.13 Script validation rules
 
-The `TRANSFORM`-node rules (§4.12, transform-nodes design §3.1, R3–R5). Each is decidable from
+The `SCRIPT`-node rules (§4.12, transform-nodes design §3.1, R3–R5). Each is decidable from
 the body plus the pinned version's contract, so an author gets all of them at save time — the
-dry-render analogue for transforms, where "the pipeline and the template agree" is proven, not
+dry-render analogue for scripts, where "the pipeline and the template agree" is proven, not
 hoped. Run-time refusals are §13.18's family.
 
 | Code | Check |
 |---|---|
-| `pipeline.validation.transform_template_type` | A TRANSFORM node's pinned template is `jsonata` or `javascript`. |
-| `pipeline.validation.transform_source_forbidden` | A TRANSFORM node carries no `source` — it is tempdb-only. |
-| `pipeline.validation.transform_input_unknown` | An `inputs` entry names a tempdb table no ancestor stages, or a `$key` no tier and no node writes. |
-| `pipeline.validation.transform_input_contract` | The `inputs` key set differs from the contract's input names (`details.missing` / `details.extra`), a table input is bound to a `$key` or vice versa, or a value input's Context type does not fit the contract's declared type. |
-| `pipeline.validation.transform_output_shape` | The `output` block does not fit the contract's mode: a `target` on `value` mode (R3 — a value-mode TRANSFORM writes its `context_key` only), a missing `context_key` on `value` mode, or a `row`/`table` mode without `{ "target": "tempdb", "table", "rejects"? }` or `{ "target": "caller" }`. |
-| `pipeline.validation.transform_rejects_undeclared` | `output.rejects` is present but the pinned contract declares no rejects (or the node is not a TRANSFORM at all). |
-| `pipeline.validation.transform_rejects_missing` | The pinned contract declares rejects and the node's `output` names no rejects table. |
-| `pipeline.validation.transform_rejects_on_caller` | `rejects` on a `caller` output, or a rejects-declaring contract pinned by a caller node (R5). |
-| `pipeline.validation.transform_strict_without_rejects` | `strict` on a node whose pinned contract declares no rejects (or on a non-TRANSFORM node). |
-| `pipeline.validation.transform_object_key_bound` | A SQL `:bind`, a calculator `inputs` `$reference` or a PIPELINE `parameters` `${ref}` names a Context key whose writer's contract output is `kind: object` (R4 — an object key's one reader is another TRANSFORM's `inputs`). |
+| `pipeline.validation.script_template_type` | A SCRIPT node's pinned template is `jsonata` or `javascript`. |
+| `pipeline.validation.script_source_forbidden` | A SCRIPT node carries no `source` — it is tempdb-only. |
+| `pipeline.validation.script_input_unknown` | An `inputs` entry names a tempdb table no ancestor stages, or a `$key` no tier and no node writes. |
+| `pipeline.validation.script_input_contract` | The `inputs` key set differs from the contract's input names (`details.missing` / `details.extra`), a table input is bound to a `$key` or vice versa, or a value input's Context type does not fit the contract's declared type. |
+| `pipeline.validation.script_output_shape` | The `output` block does not fit the contract's mode: a `target` on `value` mode (R3 — a value-mode SCRIPT writes its `context_key` only), a missing `context_key` on `value` mode, or a `row`/`table` mode without `{ "target": "tempdb", "table", "rejects"? }` or `{ "target": "caller" }`. |
+| `pipeline.validation.script_rejects_undeclared` | `output.rejects` is present but the pinned contract declares no rejects (or the node is not a SCRIPT at all). |
+| `pipeline.validation.script_rejects_missing` | The pinned contract declares rejects and the node's `output` names no rejects table. |
+| `pipeline.validation.script_rejects_on_caller` | `rejects` on a `caller` output, or a rejects-declaring contract pinned by a caller node (R5). |
+| `pipeline.validation.script_strict_without_rejects` | `strict` on a node whose pinned contract declares no rejects (or on a non-SCRIPT node). |
+| `pipeline.validation.script_object_key_bound` | A SQL `:bind`, a calculator `inputs` `$reference` or a PIPELINE `parameters` `${ref}` names a Context key whose writer's contract output is `kind: object` (R4 — an object key's one reader is another SCRIPT's `inputs`). |
 
 `calculator_input_unordered`, `calculator_output_collision` and `calculator_output_name_invalid`
-(§12.10) apply unchanged to a value-mode TRANSFORM's `context_key` and to `$key` bindings whose
+(§12.10) apply unchanged to a value-mode SCRIPT's `context_key` and to `$key` bindings whose
 writer is another node.
 
 ---
@@ -1235,12 +1235,12 @@ Defined and described in [Templates §7](templates.md#7-validation-rules).
 | `template.validation.id_invalid` | 400 | Template `id` fails the identifier rules |
 | `template.validation.new_root_requires_confirmation` | 400 | **The AGENT surface only** (094): `templates_create` refuses an `id` whose ROOT segment has no templates under it yet, unless the call carries `confirm_new_root: true`. Same `details.root` / `details.existing_roots` shape, same `test/` exemption and same REST/UI exemption as `pipeline.validation.new_root_requires_confirmation` |
 | `template.validation.dialect_invalid` | 400 | `dialect` not in the supported enum — or absent on a `sql` template (a dialect is required on `sql` and forbidden on every other type; 046, extended in 7b) |
-| `template.validation.type_invalid` | 400 | `type` not one of `sql`, `html`, `jsonata`, `javascript` (046, template-hierarchy-design §5.4; the transform types since 7b) |
-| `template.validation.dialect_not_allowed` | 400 | `dialect` is present on a template whose type declares none — `html`, `jsonata` or `javascript` (046, template-hierarchy-design §7; extended to the transform types in 7b). Deliberately distinct from `dialect_invalid`: presence on the wrong type and an unknown value are different failures |
+| `template.validation.type_invalid` | 400 | `type` not one of `sql`, `html`, `jsonata`, `javascript` (046, template-hierarchy-design §5.4; the script types since 7b) |
+| `template.validation.dialect_not_allowed` | 400 | `dialect` is present on a template whose type declares none — `html`, `jsonata` or `javascript` (046, template-hierarchy-design §7; extended to the script types in 7b). Deliberately distinct from `dialect_invalid`: presence on the wrong type and an unknown value are different failures |
 | `template.validation.type_immutable` | 400 | A payload attempted to change a template's `type`, which is chosen at create and identical on every version (046, template-hierarchy-design §5.3) |
 | `template.validation.html_entity` | 400 | The body contains an HTML entity where a SQL operator belongs (`&lt;`, `&gt;`, `&amp;`, `&quot;`, `&#39;`) — the body was HTML-escaped between the author and the server (an agent client, a copy from a rendered page). Refused at save with `details.entity` and the first line it appears on, because at execution it surfaces as an opaque driver syntax error far from its cause (2026-09-11). |
 | `template.validation.engine_unsupported` | 400 | `engine` does not match the template's type — `freemarker` iff `sql`/`html`, `none` iff `jsonata`/`javascript` (type-conditional since 7b, transform-nodes design §2.1) |
-| `template.validation.freemarker_forbidden` | 400 | A transform-typed template carried `imports` or `is_library: true`, or its body contains a Freemarker construct (`${`, `<#`, `<@`) — a transform body is evaluated, never rendered (7b, D-T9); `details.rule` names which (`imports` / `is_library` / `body`) |
+| `template.validation.freemarker_forbidden` | 400 | A script-typed template carried `imports` or `is_library: true`, or its body contains a Freemarker construct (`${`, `<#`, `<@`) — a script body is evaluated, never rendered (7b, D-T9); `details.rule` names which (`imports` / `is_library` / `body`) |
 | `template.validation.schema_version_unsupported` | 400 | `schema_version` not a value v1 supports (only `1`) |
 | `template.validation.is_library_without_macros` | 400 | `is_library: true` but body has no macro definitions or has output outside them |
 | `template.validation.import_not_found` | 400 | `imports` entry references a missing template id/version |
@@ -1260,11 +1260,11 @@ Defined and described in [Templates §7](templates.md#7-validation-rules).
 | `template.version.not_eligible` | 409 | Manual switch targeted a template version that is not live and posture-eligible (101, [Versioning §3.4](versioning.md#34-current_version-is-sticky-and-event-driven-d60)) |
 | `template.version.confirm_mismatch` | 400 | The typed-confirm guard on the irreversible template purge dialogs (102): the `confirm` form field did not name what the dialog asked the user to type — the version (`v4`) on a version purge, the template's name on the entity purge. Checked BEFORE the lifecycle service runs ([UI §5.1](ui-screens.md#51-standard-states) typed-confirm) |
 | `template.authoring.disabled` | 403 | An authoring write (create, update/draft, release, discard, delete) on a server with `datapipelines.deployment.authoring-enabled=false` — the template mirror of `pipeline.authoring.disabled` ([Versioning §5.5](versioning.md#55-drafts-are-a-deployment-capability-039)); reads, execution and import are unaffected |
-| `template.contract_invalid` | 400 | A transform template's `contract` block failed a §2.2 rule (transform-nodes design); `details.rule` names which (`row_mode_inputs`, `type_unsupported`, `mode_output_mismatch`, `empty_case_missing`, `row_case_lists_table`, `unknown_field`, `wrong_type`, …) (7b) |
-| `template.invariant_invalid` | 400 | A transform template's invariant does not compile as JSONata, or produced a non-boolean on a test case; `details` names the invariant (and the case) (7b) |
-| `template.test_failed` | 400 | A transform template's test case failed at save or at release (the suite runs on both — §8.1); `details` names the case, the assertion, and a diff bounded to 2 000 chars (7b) |
-| `template.blocks_not_allowed` | 400 | `contract` / `invariants` / `tests` on an `sql` / `html` template — the blocks belong to the transform types only (7b); `implements` likewise (7e, transform-nodes design §2.3) |
-| `template.render_not_applicable` | 400 | `templates_render` / `POST /api/v1/templates/render` on a transform type — there is nothing to render; `details.use` points at `templates_evaluate` (7b) |
+| `template.contract_invalid` | 400 | A script template's `contract` block failed a §2.2 rule (transform-nodes design); `details.rule` names which (`row_mode_inputs`, `type_unsupported`, `mode_output_mismatch`, `empty_case_missing`, `row_case_lists_table`, `unknown_field`, `wrong_type`, …) (7b) |
+| `template.invariant_invalid` | 400 | A script template's invariant does not compile as JSONata, or produced a non-boolean on a test case; `details` names the invariant (and the case) (7b) |
+| `template.test_failed` | 400 | A script template's test case failed at save or at release (the suite runs on both — §8.1); `details` names the case, the assertion, and a diff bounded to 2 000 chars (7b) |
+| `template.blocks_not_allowed` | 400 | `contract` / `invariants` / `tests` on an `sql` / `html` template — the blocks belong to the script types only (7b); `implements` likewise (7e, transform-nodes design §2.3) |
+| `template.render_not_applicable` | 400 | `templates_render` / `POST /api/v1/templates/render` on a script type — there is nothing to render; `details.use` points at `templates_evaluate` (7b) |
 | `template.implements_unresolved` | 400 | An `implements` entry on a template write does not resolve to a fact the writing workspace may cite — absent, not visible from the workspace, a DATASOURCE fact, or a WORKSPACE fact of a kind other than `definition` / `exclusion` / `preference` ([Templates §3.4](templates.md#34-implements-and-drift)). One answer for every case — not-found semantics, never "it exists but you cannot see it"; `details.fact_id` names the first offending entry. Refused before anything is written (7e) |
 
 ### 13.10 Result retrieval
@@ -1402,30 +1402,30 @@ The release-check run's refusals (140, §3.3). Checks are opt-in: a version with
 |---|---|---|
 | `pipeline.check.failed` | 409 | release refused — a check on the version failed or errored; details.checks lists expected/observed/message per failing check; override requires override_checks_reason (≥ 10 chars) |
 
-### 13.18 Transform
+### 13.18 Script
 
-The TRANSFORM node's execution-time refusals (7c, #7; the transform-nodes design record's §7).
+The SCRIPT node's execution-time refusals (7c, #7; the transform-nodes design record's §7).
 The HTTP column is the class the node failure record carries, as for every execution-time
 family in §13.4; through `templates_evaluate` and the save-time test suite these surface
 inside `template.test_failed` (400) or as the tool's own status. The save-time twins of these
-checks are §12.13's ten `pipeline.validation.transform_…` rows.
+checks are §12.13's ten `pipeline.validation.script_…` rows.
 
 | Code | HTTP | Description |
 |---|---|---|
-| `pipeline.transform.input_contract_violation` | 500 | an input violates the contract's declared inputs (record §5.1): the staged schema does not cover a contract column, a `nullable: false` column carried null, a value input's type does not fit. |
-| `pipeline.transform.input_too_large` | 500 | a table input exceeds `datapipelines.transform.max-input-rows` — refused BEFORE loading (record §4.3). |
-| `pipeline.transform.evaluation_failed` | 500 | the script threw; the detail carries the engine message bounded to 2 000 chars (record §7). |
-| `pipeline.transform.timeout` | 504 | the engine's own wall-clock bound fired (`pipeline.node.timeout` is the outer backstop — the engine reports first, record §4.3). |
-| `pipeline.transform.resource_limit` | 500 | a declared resource limit fired — depth (JSONata); heap/statements (JavaScript); `details.kind` names which. |
-| `pipeline.transform.pool_exhausted` | 503 | the evaluation pool's admission bound is full (record §4.3 — a node failure in a run, 503 on the tool/route). |
-| `pipeline.transform.row_shape_mismatch` | 500 | a returned row's key set is not exactly the declared column set, with batch and row number (record §5.3). |
-| `pipeline.transform.value_type_mismatch` | 500 | a returned value does not fit its column's wire form, with batch and row number (record §5.3). |
-| `pipeline.transform.precision_lost` | 500 | a numeric value does not fit its declared precision/scale (record §5.3, R1 — DECIMAL rounds half-even; BIGDECIMAL is exact). |
-| `pipeline.transform.value_too_large` | 500 | a value/object output or a single string above the byte caps (record §4.3: `max-value-bytes`, `max-string-bytes`). |
-| `pipeline.transform.invariant_failed` | 500 | an invariant evaluated to other than `true`; names the invariant and its message (record §5.4). |
-| `pipeline.transform.invariants_too_large` | 500 | the invariants' read-back exceeded `max-input-rows` (record §5.4 — an assertion over an unbounded table is a SQL node or a release check, not an invariant). |
-| `pipeline.transform.rejects_strict` | 500 | `strict: true` and the rejects table is non-empty; carries the count and the first ten reasons (record §5.4). |
-| `transform.js.unavailable` | 400 | a `javascript` template is refused at save until round two's engine ships (record §4.4; 503 at boot). |
+| `pipeline.script.input_contract_violation` | 500 | an input violates the contract's declared inputs (record §5.1): the staged schema does not cover a contract column, a `nullable: false` column carried null, a value input's type does not fit. |
+| `pipeline.script.input_too_large` | 500 | a table input exceeds `datapipelines.script.max-input-rows` — refused BEFORE loading (record §4.3). |
+| `pipeline.script.evaluation_failed` | 500 | the script threw; the detail carries the engine message bounded to 2 000 chars (record §7). |
+| `pipeline.script.timeout` | 504 | the engine's own wall-clock bound fired (`pipeline.node.timeout` is the outer backstop — the engine reports first, record §4.3). |
+| `pipeline.script.resource_limit` | 500 | a declared resource limit fired — depth (JSONata); heap/statements (JavaScript); `details.kind` names which. |
+| `pipeline.script.pool_exhausted` | 503 | the evaluation pool's admission bound is full (record §4.3 — a node failure in a run, 503 on the tool/route). |
+| `pipeline.script.row_shape_mismatch` | 500 | a returned row's key set is not exactly the declared column set, with batch and row number (record §5.3). |
+| `pipeline.script.value_type_mismatch` | 500 | a returned value does not fit its column's wire form, with batch and row number (record §5.3). |
+| `pipeline.script.precision_lost` | 500 | a numeric value does not fit its declared precision/scale (record §5.3, R1 — DECIMAL rounds half-even; BIGDECIMAL is exact). |
+| `pipeline.script.value_too_large` | 500 | a value/object output or a single string above the byte caps (record §4.3: `max-value-bytes`, `max-string-bytes`). |
+| `pipeline.script.invariant_failed` | 500 | an invariant evaluated to other than `true`; names the invariant and its message (record §5.4). |
+| `pipeline.script.invariants_too_large` | 500 | the invariants' read-back exceeded `max-input-rows` (record §5.4 — an assertion over an unbounded table is a SQL node or a release check, not an invariant). |
+| `pipeline.script.rejects_strict` | 500 | `strict: true` and the rejects table is non-empty; carries the count and the first ten reasons (record §5.4). |
+| `script.js.unavailable` | 400 | a `javascript` template is refused at save until round two's engine ships (record §4.4; 503 at boot). |
 
 ### 13.19 Schedules
 
@@ -1545,9 +1545,9 @@ The parameter engine's refusals (#194; the [parameter-engine design record](supe
 
 ### 13.21 Request limits
 
-The platform's transport-level refusals (#279; [Configuration §3.31](configuration.md#331-web-request-limits)). A body over `datapipelines.web.max-request-bytes` is refused at a servlet filter on BOTH JSON surfaces — REST `/api/v1` and MCP `/mcp` — before authentication and before any parser reads a byte of it, so no handler, tool or permission is involved and the refusal carries no principal data (the envelope's `correlation_id` and this code only). The cap is a byte count on the REQUEST body; a response's budget is a different key (`parameter.evaluate.response_too_large` above). Jackson's `StreamReadConstraints` (nesting depth 100, string length 4M chars, number length 1000 digits) are stated explicitly on every request-body mapper rather than inherited, so a body WITHIN the cap that is adversarial for the parser is refused by the parser as a 400 (`details.reason: malformed_json`), not answered from an inherited default that could change under a version bump. The filter is mapped to `/api/v1/*` and `/mcp` only — a form-encoded UI post is Tomcat's `max-http-form-post-size` to bound, and a body sent on a body-less method (GET/HEAD/OPTIONS) is not counted, only drained within `server.tomcat.max-swallow-size`. The stated Jackson constraints hold on the auto-configured REST mapper, the MCP transport's, and — since #291 — every route that parses its own `@RequestBody String` (templates create/update/lifecycle/render/evaluate/import, pipelines create/update/import, execute), each of which reads its body through a REQUEST copy of its domain mapper (`RequestLimits.requestMapper`) and answers a read failure with its family's malformed-body 400, never the 500 backstop. The domain mappers themselves are left alone: they also read stored rows, transform values and JSON columns, where a document deeper than a request may be is legitimate data — a request limit is a statement about request bytes. One set of routes is not yet covered: the parameter-set routes under `web/parameters` parse with the parameters module's strict mapper under the body cap and Jackson's inherited depth (#300).
+The platform's transport-level refusals (#279; [Configuration §3.31](configuration.md#331-web-request-limits)). A body over `datapipelines.web.max-request-bytes` is refused at a servlet filter on BOTH JSON surfaces — REST `/api/v1` and MCP `/mcp` — before authentication and before any parser reads a byte of it, so no handler, tool or permission is involved and the refusal carries no principal data (the envelope's `correlation_id` and this code only). The cap is a byte count on the REQUEST body; a response's budget is a different key (`parameter.evaluate.response_too_large` above). Jackson's `StreamReadConstraints` (nesting depth 100, string length 4M chars, number length 1000 digits) are stated explicitly on every request-body mapper rather than inherited, so a body WITHIN the cap that is adversarial for the parser is refused by the parser as a 400 (`details.reason: malformed_json`), not answered from an inherited default that could change under a version bump. The filter is mapped to `/api/v1/*` and `/mcp` only — a form-encoded UI post is Tomcat's `max-http-form-post-size` to bound, and a body sent on a body-less method (GET/HEAD/OPTIONS) is not counted, only drained within `server.tomcat.max-swallow-size`. The stated Jackson constraints hold on the auto-configured REST mapper, the MCP transport's, and — since #291 — every route that parses its own `@RequestBody String` (templates create/update/lifecycle/render/evaluate/import, pipelines create/update/import, execute), each of which reads its body through a REQUEST copy of its domain mapper (`RequestLimits.requestMapper`) and answers a read failure with its family's malformed-body 400, never the 500 backstop. The domain mappers themselves are left alone: they also read stored rows, script values and JSON columns, where a document deeper than a request may be is legitimate data — a request limit is a statement about request bytes. One set of routes is not yet covered: the parameter-set routes under `web/parameters` parse with the parameters module's strict mapper under the body cap and Jackson's inherited depth (#300).
 
-**Scalar shapes (#333).** Jackson binds a JSON number or boolean into a declared `String` as its text unless the mapper's `Textual` coercion config fails it, and `ALLOW_COERCION_OF_SCALARS` off never reaches that bind (the same mappers also parsed `"1"` into an integer and `1.5` into `1`). The four strict contract readers carry the same lines `ParameterSetJson` and `ArtifactJson` do — `ALLOW_COERCION_OF_SCALARS` and `ACCEPT_FLOAT_AS_INT` off, `Textual` failing the Integer/Float/Boolean shapes, `Boolean` failing Integer — so the value is refused with its PATH and the expected shape, never the value (Jackson's own message quotes it): the pipeline reader (`PipelineJson`, `PipelineDeserializer`) as `pipeline.validation.schema_version_unsupported` with `details.reason: "wrong_type"`; the template reader and the transform blocks (`TemplateJson`, `TransformBlocks`) as `template.contract_invalid` with `details.rule: "wrong_type"`; and the five routes that bind a typed request DTO (`POST /auth/api-keys`, `POST /endpoints`, `POST /endpoints/bindings`, `POST /promotion/push`, `POST /dashboards/bindings`) as `pipeline.execution.invalid_parameter_type` with `details.reason` `wrong_type` / `unknown_key` / `missing` and `details.path`, because they take the body as a tree and bind it through one strict request mapper (`StrictRequestBodies`, built over `RequestLimits.requestMapper`). Unknown keys stay tolerated on the pipeline and template readers (a re-import carries lifecycle keys) and on the promotion batch (a cross-version wire, `ignoreUnknown`), and are refused on the two request DTOs. Every echoed path is clipped and its control characters replaced.
+**Scalar shapes (#333).** Jackson binds a JSON number or boolean into a declared `String` as its text unless the mapper's `Textual` coercion config fails it, and `ALLOW_COERCION_OF_SCALARS` off never reaches that bind (the same mappers also parsed `"1"` into an integer and `1.5` into `1`). The four strict contract readers carry the same lines `ParameterSetJson` and `ArtifactJson` do — `ALLOW_COERCION_OF_SCALARS` and `ACCEPT_FLOAT_AS_INT` off, `Textual` failing the Integer/Float/Boolean shapes, `Boolean` failing Integer — so the value is refused with its PATH and the expected shape, never the value (Jackson's own message quotes it): the pipeline reader (`PipelineJson`, `PipelineDeserializer`) as `pipeline.validation.schema_version_unsupported` with `details.reason: "wrong_type"`; the template reader and the script blocks (`TemplateJson`, `ScriptBlocks`) as `template.contract_invalid` with `details.rule: "wrong_type"`; and the five routes that bind a typed request DTO (`POST /auth/api-keys`, `POST /endpoints`, `POST /endpoints/bindings`, `POST /promotion/push`, `POST /dashboards/bindings`) as `pipeline.execution.invalid_parameter_type` with `details.reason` `wrong_type` / `unknown_key` / `missing` and `details.path`, because they take the body as a tree and bind it through one strict request mapper (`StrictRequestBodies`, built over `RequestLimits.requestMapper`). Unknown keys stay tolerated on the pipeline and template readers (a re-import carries lifecycle keys) and on the promotion batch (a cross-version wire, `ignoreUnknown`), and are refused on the two request DTOs. Every echoed path is clipped and its control characters replaced.
 
 | Code | HTTP | Description |
 |---|---|---|
@@ -1860,7 +1860,7 @@ Pipelines are persisted in the app's own Postgres metadata DB. The DDL authority
 Out of scope for v1.1, tracked for future:
 
 - **Calculators** (v2): pre-execution transformers that read Context and write additional keys (`quarter` from `date`, etc.).
-- **Non-SQL node types** (v2): `EXPRESSION` nodes (no SQL, transform data in/out via expression language), `HTTP` nodes (call external API, stage response).
+- **Non-SQL node types** (v2): `EXPRESSION` nodes (no SQL, script data in/out via expression language), `HTTP` nodes (call external API, stage response).
 - **Conditional execution** (v2): skip nodes based on a Context expression.
 - **Retries** (v2): per-node retry policies.
 - **Streaming** (v2): pipe rows between nodes instead of full materialization.
@@ -1875,6 +1875,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-21 | v1.60 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The TRANSFORM node type is SCRIPT**: the `type` enum, §4.12 "JSON structure (SCRIPT node)", §12.13 "Script validation rules", §13.18 "Script" and its codes `pipeline.script.*`, the node fields' prose (`template`, `inputs`, `strict`, `rejects`) and every cross-reference anchor that carried the old word. A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-16 | v1.59 | 467 (#467) the over-cap screenshot refusal reaches the client | **§13's `visualization.test.screenshot_too_large` row** names the bounded drain: up to the cap + 2 MiB of a declared-over-cap body is read and discarded after the 413, so the close is a FIN after the client's last byte; beyond it Tomcat's swallow and close apply. No code or status change |
 | 2026-10-11 | v1.58 | 504b (#504b) one shared search-needle rule | **§13.21 gains `request.query_too_long`** (400); **§13.20 loses `parameter.validation.query_too_long`** — the #490 refusal becomes the shared `SearchNeedle` rule applied by every search-owning service (pipelines, templates, parameter sets, users, the five `/tree/search` reads) at the same 200-after-trim bound, `details.limit`/`details.length`, the needle never echoed; MCP answers it as `-32602` (§6.2.44 v1.74) and the UI boxes still truncate, never refuse. Landed in the same commit as its constant, the `ApiErrorCatalog` rows (400 + user message), and the doc re-points (§13 row count stays 377: one row out of §13.20, one into §13.21). |
 | 2026-10-09 | v1.57 | 487 (#487) a replay-log read fault is not an expiry — renumbered at merge after #490's v1.56 | **§13.10** `result.storage_unavailable`: **500 → 503** (owner's ruling, 2026-10-09) — a transient fault of the server's own store, like `pipeline.transform.pool_exhausted`. The row also names the read surface it gains: §10.3's replay answers a log read Redis did not answer with this code (`details.reason: event_log_unavailable`) instead of `410 result.expired`. A deliberate status change on a frozen contract: the result-write path's code and behaviour are unchanged (it fails the execution; no HTTP status), and every REST or UI read whose stored result header cannot be parsed — the result cursor, `GET /executions/{id}`, a published endpoint's serve, the execution detail page — now answers this code with 503 where it answered 500. |

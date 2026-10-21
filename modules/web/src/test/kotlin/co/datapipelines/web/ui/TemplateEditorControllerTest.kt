@@ -606,60 +606,60 @@ class TemplateEditorControllerTest {
         response.headers.getFirst("HX-Redirect") shouldBe "/templates/acme/finance/rev.sql?version=2&tab=source"
     }
 
-    // ------------------------------------------------------------------ 7d: the transform face
+    // ------------------------------------------------------------------ 7d: the script face
 
     /**
-     * 7d — a transform template's source column IS the face: the partial answers with the
+     * 7d — a script template's source column IS the face: the partial answers with the
      * face view and carries the four panes and the save precondition, so the workspace's
      * Source tab and the partial agree (TemplateSourceModel's one rule).
      */
     @Test
-    fun `a transform template's source partial is the four-pane face`() {
+    fun `a script template's source partial is the four-pane face`() {
         authenticate()
-        val draft = TransformFixtures.storedSkeleton(version = 1, bodyHash = "hash-transform-draft")
-        every { templates.findLatest(any(), TransformFixtures.NAME) } returns null
-        every { templates.findDraftDetail(any(), TransformFixtures.NAME) } returns
-            draftDetail(1).copy(templateId = TransformFixtures.NAME, bodyHash = "hash-transform-draft")
-        every { templates.findVersion(any(), TransformFixtures.NAME, 1) } returns draft
-        every { templates.listVersions(any(), TransformFixtures.NAME) } returns emptyList()
+        val draft = ScriptFixtures.storedSkeleton(version = 1, bodyHash = "hash-script-draft")
+        every { templates.findLatest(any(), ScriptFixtures.NAME) } returns null
+        every { templates.findDraftDetail(any(), ScriptFixtures.NAME) } returns
+            draftDetail(1).copy(templateId = ScriptFixtures.NAME, bodyHash = "hash-script-draft")
+        every { templates.findVersion(any(), ScriptFixtures.NAME, 1) } returns draft
+        every { templates.listVersions(any(), ScriptFixtures.NAME) } returns emptyList()
 
         val partial = ExtendedModelMap()
-        controller.source(TransformFixtures.NAME, null, partial) shouldBe TransformFace.VIEW
-        partial["isTransform"] shouldBe true
+        controller.source(ScriptFixtures.NAME, null, partial) shouldBe ScriptFace.VIEW
+        partial["isScript"] shouldBe true
         partial["faceEditable"] shouldBe true
-        partial["faceHash"] shouldBe "hash-transform-draft"
-        (partial["panes"] as TransformPanes).contract shouldContain "\"mode\": \"row\""
+        partial["faceHash"] shouldBe "hash-script-draft"
+        (partial["panes"] as ScriptPanes).contract shouldContain "\"mode\": \"row\""
     }
 
     @Test
-    fun `an sql template keeps the Freemarker source column - isTransform is false`() {
+    fun `an sql template keeps the Freemarker source column - isScript is false`() {
         authenticate()
         every { templates.findLatest(any(), "test/my_template.sql") } returns sampleTemplate
         every { templates.findDraftDetail(any(), any()) } returns null
 
         val model = ExtendedModelMap()
         controller.source("test/my_template.sql", null, model) shouldBe "partials/template-source"
-        model["isTransform"] shouldBe false
+        model["isScript"] shouldBe false
     }
 
     /**
-     * 7d — Edit on a released TRANSFORM version copies its three blocks too. Before 7d the copy
+     * 7d — Edit on a released SCRIPT version copies its three blocks too. Before 7d the copy
      * (`asDraft`) carried the body alone, so the draft write was refused `contract_invalid`
-     * blocks_missing — Edit could never open a released transform for editing.
+     * blocks_missing — Edit could never open a released script for editing.
      */
     @Test
-    fun `Edit on a released transform version copies the contract, invariants and tests with the body`() {
+    fun `Edit on a released script version copies the contract, invariants and tests with the body`() {
         authenticate()
-        val released = TransformFixtures.storedSkeleton(version = 1, status = PipelineVersionStatus.RELEASED)
-        every { templates.findDraftDetail(any(), TransformFixtures.NAME) } returnsMany listOf(null, draftDetail(2))
-        every { templates.findVersion(any(), TransformFixtures.NAME, 1) } returns released
-        every { templates.findLatest(any(), TransformFixtures.NAME) } returns released
-        every { templates.findVersionDetail(any(), TransformFixtures.NAME, 1) } returns releasedDetail(1)
+        val released = ScriptFixtures.storedSkeleton(version = 1, status = PipelineVersionStatus.RELEASED)
+        every { templates.findDraftDetail(any(), ScriptFixtures.NAME) } returnsMany listOf(null, draftDetail(2))
+        every { templates.findVersion(any(), ScriptFixtures.NAME, 1) } returns released
+        every { templates.findLatest(any(), ScriptFixtures.NAME) } returns released
+        every { templates.findVersionDetail(any(), ScriptFixtures.NAME, 1) } returns releasedDetail(1)
         val written = slot<TemplateDraft>()
-        every { drafts.write(any(), TransformFixtures.NAME, capture(written), "hash-v1", userId, WriteSurface.SESSION) } returns
+        every { drafts.write(any(), ScriptFixtures.NAME, capture(written), "hash-v1", userId, WriteSurface.SESSION) } returns
             draftDetail(2)
 
-        redirect(controller.edit(TransformFixtures.NAME, 1)).statusCode.value() shouldBe 200
+        redirect(controller.edit(ScriptFixtures.NAME, 1)).statusCode.value() shouldBe 200
 
         written.captured.engine shouldBe Template.NONE_ENGINE
         written.captured.contract shouldBe released.contract

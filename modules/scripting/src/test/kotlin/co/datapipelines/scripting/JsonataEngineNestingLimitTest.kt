@@ -92,7 +92,7 @@ class JsonataEngineNestingLimitTest {
             }
         val refusal = caught.shouldBeInstanceOf<ScriptResourceLimitException>()
         refusal.kind shouldBe ScriptResourceLimitException.Kind.DEPTH
-        refusal.code shouldBe "pipeline.transform.resource_limit"
+        refusal.code shouldBe "pipeline.script.resource_limit"
         // WHO refused matters (#314): the pre-scan's wording proves the body was
         // refused BEFORE the library parsed it — the boundary guard's fallback
         // wording ("the library's recursion overflowed…") would mean the library
@@ -170,7 +170,7 @@ class JsonataEngineNestingLimitTest {
         }
         val refusal = caught.shouldBeInstanceOf<ScriptResourceLimitException>()
         refusal.kind shouldBe ScriptResourceLimitException.Kind.DEPTH
-        refusal.code shouldBe "pipeline.transform.resource_limit"
+        refusal.code shouldBe "pipeline.script.resource_limit"
     }
 
     /**
@@ -204,7 +204,7 @@ class JsonataEngineNestingLimitTest {
         }
         val refusal = caught.shouldBeInstanceOf<ScriptResourceLimitException>()
         refusal.kind shouldBe ScriptResourceLimitException.Kind.DEPTH
-        refusal.code shouldBe "pipeline.transform.resource_limit"
+        refusal.code shouldBe "pipeline.script.resource_limit"
         // The boundary's wording, not the scan's ("refused before parsing"): the library parsed.
         refusal.message shouldContain "overflowed the evaluation stack at compile"
     }
@@ -240,7 +240,7 @@ class JsonataEngineNestingLimitTest {
         }
         val refusal = caught.shouldBeInstanceOf<ScriptResourceLimitException>()
         refusal.kind shouldBe ScriptResourceLimitException.Kind.DEPTH
-        refusal.code shouldBe "pipeline.transform.resource_limit"
+        refusal.code shouldBe "pipeline.script.resource_limit"
         // The direct catch's wording — not the counter's (maxDepth is out of reach) and not the
         // belt's "mid-evaluation" (nothing wrapped the Error on this path).
         refusal.message shouldContain "overflowed the evaluation stack at evaluate"
@@ -274,7 +274,7 @@ class JsonataEngineNestingLimitTest {
         }
         val refusal = caught.shouldBeInstanceOf<ScriptResourceLimitException>()
         refusal.kind shouldBe ScriptResourceLimitException.Kind.DEPTH
-        refusal.code shouldBe "pipeline.transform.resource_limit"
+        refusal.code shouldBe "pipeline.script.resource_limit"
         refusal.message shouldContain "overflowed the evaluation stack mid-evaluation"
     }
 

@@ -3,7 +3,7 @@
 
 A **visualization** is a versioned chart, table or KPI bound to named inputs: its renderer (`plotly`,
 `table` or `kpi`), the renderer's native `config`, the input contracts (named column lists), an optional
-pinned transform template that reshapes the inputs, the `bindings` that inject columns into `config`, and
+pinned script template that reshapes the inputs, the `bindings` that inject columns into `config`, and
 saved test cases. It has no pipeline of its own — it is input-bound and reusable. A **dashboard** pins
 exact pipeline versions as `sources`, places occurrences of pinned visualizations, maps each visualization
 input to a source, and arranges them with groups, actions and controls on a 12-column grid. Both are

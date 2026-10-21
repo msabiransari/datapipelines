@@ -10,7 +10,7 @@ package co.datapipelines.scripting
  * interruptible, so this exception can arrive while the evaluation thread is still
  * running — the pool counts such threads and never joins them; each keeps its pool slot
  * until it ends (the bulkhead). Carries
- * the `pipeline.transform.timeout` code.
+ * the `pipeline.script.timeout` code.
  */
 class ScriptTimeoutException(
     wallClock: java.time.Duration,
@@ -23,6 +23,6 @@ class ScriptTimeoutException(
     ) {
     companion object {
         /** pipeline-contract §13.18 — the engine-timeout row (record §7). */
-        const val CODE = "pipeline.transform.timeout"
+        const val CODE = "pipeline.script.timeout"
     }
 }

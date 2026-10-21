@@ -109,10 +109,10 @@ class TemplateEditorVersionRenderTest {
         val html = render("templates/workspace") { workspacePage() }
 
         // §5's idiom, kept through #398: the page th:replace's the SAME fragment the
-        // /partials/templates/editor/source and /transform-face endpoints return — one
+        // /partials/templates/editor/source and /script-face endpoints return — one
         // `#template-source` definition, so a paint and any swap cannot disagree. The ONE
-        // in-page swap that targets it is the transform face's Save (pinned by
-        // TransformFaceRenderTest against the fragment); an sql draft carries no save
+        // in-page swap that targets it is the script face's Save (pinned by
+        // ScriptFaceRenderTest against the fragment); an sql draft carries no save
         // affordance at all (the body is written through the API), and a version switch is a
         // full navigation — the server re-resolves everything, which is R5 by construction.
         Regex("id=\"template-source\"").findAll(html).count() shouldBe 1
@@ -206,7 +206,7 @@ class TemplateEditorVersionRenderTest {
         setVariable("currentReleaseVersion", null)
         setVariable("activeTab", "source")
         setVariable("interpolations", emptyList<String>())
-        setVariable("isTransform", false)
+        setVariable("isScript", false)
         setVariable("templateWorkspace", workspaceResolved())
         setVariable("usedBy", emptyList<Any>())
         setVariable("usedByCount", 0)

@@ -135,7 +135,7 @@ class ParametersConfiguration {
 
     /**
      * `parameters.selectors.abandoned` (record §11) — the pool's abandoned-statement count as a
-     * gauge, the `transform.evaluations.abandoned` shape. The scrape ALSO calls
+     * gauge, the `script.evaluations.abandoned` shape. The scrape ALSO calls
      * [SelectorPool.abandonedThreadsAlive] (the 194c security pass, observation 4): the prune
      * runs with every scrape, so an abandoned worker's dead `Thread` object is released by the
      * next metrics read instead of accumulating for the process's life.

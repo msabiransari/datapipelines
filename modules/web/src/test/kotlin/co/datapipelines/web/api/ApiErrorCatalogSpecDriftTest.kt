@@ -222,7 +222,7 @@ class ApiErrorCatalogSpecDriftTest {
          * the SAME commit as its constants (both mirrors), its exception class and its catalog
          * row. Re-derived from the document's own parse.
          *
-         * 183 → 189 with 7b (#7, the transform template types): §13.9 gains
+         * 183 → 189 with 7b (#7, the script template types): §13.9 gains
          * `template.validation.freemarker_forbidden` and the five block/surface codes
          * (`contract_invalid`, `invariant_invalid`, `test_failed`, `blocks_not_allowed`,
          * `render_not_applicable`), all 400, landed in the SAME commit as their constants and
@@ -234,8 +234,8 @@ class ApiErrorCatalogSpecDriftTest {
          * in the SAME commit as the constants (both mirrors) and the exception class. Re-derived
          * from the document's own parse.
          *
-         * 188 → 202 with 7c (#7, the TRANSFORM node): the new §13.18's fourteen rows (the
-         * `pipeline.transform.*` execution-time family plus `transform.js.unavailable`), landed in
+         * 188 → 202 with 7c (#7, the SCRIPT node): the new §13.18's fourteen rows (the
+         * `pipeline.script.*` execution-time family plus `script.js.unavailable`), landed in
          * the SAME commit as the constants, the catalog rows (500 family default, 503/504
          * exceptions) and the AuthErrors anchor. Re-derived from the document's own parse.
          *
@@ -363,8 +363,8 @@ class ApiErrorCatalogSpecDriftTest {
          * `pipeline.validation.node_query_timeout_invalid` (§12.8) — both resolve through the
          * `pipeline.validation.` family default (400), no `ApiErrorCatalog` entry needed.
          *
-         * 69 → 79 with 7c (#7, the TRANSFORM node): §12.13's ten rules
-         * (`pipeline.validation.transform_*`), landed in the SAME commit as their constants. All
+         * 69 → 79 with 7c (#7, the SCRIPT node): §12.13's ten rules
+         * (`pipeline.validation.script_*`), landed in the SAME commit as their constants. All
          * 400 like the family default; re-derived from the document's own parse.
          *
          * 79 → 84 with #194 lane A (the shared parameter validator): §12.7's `default_invalid`,

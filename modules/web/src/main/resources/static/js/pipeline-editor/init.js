@@ -115,10 +115,10 @@
       /* 080 §B: node_id → the child execution a PIPELINE node spawned (from
          node_completed's child_execution_id), for the Details pane's Execution row. */
       childExecutions: {},
-      /* 7d (#7): `id@version` → a TRANSFORM pin resolved by graph.js (loadTransformPins) —
+      /* 7d (#7): `id@version` → a SCRIPT pin resolved by graph.js (loadScriptPins) —
          { language, mode, rejects, needsReview }. The Details pane reads the mode and the
          marker here; empty until the lookups land, which the rows say ("resolving…"). */
-      transformPins: {},
+      scriptPins: {},
       selectedNode: null,
       /* 080 §B: the dock's four-tab state machine and the Events tab's log — both
          pure modules (dock.js, events.js) so `node --test` owns their transition
@@ -690,9 +690,9 @@
             field.override = stored[field.key] !== undefined ? stored[field.key] : "";
           });
         }
-        // 7d: the transform pins were the OLD body's lookups — the new graph resolves
+        // 7d: the script pins were the OLD body's lookups — the new graph resolves
         // its own; the Details pane reads "resolving…" until they land.
-        self.transformPins = {};
+        self.scriptPins = {};
 
         // The workspace pin: the executed and previewed version IS the viewed one.
         // canExecute is the server-stamped role grant (the root attribute) — a new
@@ -1203,7 +1203,7 @@
        * SQL types get source / template / output / parameters; a CALCULATOR gets
        * kind / inputs (each expression beside what the last run resolved it to) /
        * writes / value; a PIPELINE gets child / parameters / output / execution; a
-       * TRANSFORM (7d) gets template / language / mode / inputs / output / rejects / strict.
+       * SCRIPT (7d) gets template / language / mode / inputs / output / rejects / strict.
        * Rows are {k, v} objects (195: the CSP build's :key and cell bindings are
        * paths — row[0]/row[1] bracket reads are not spellable).
        */
@@ -1244,8 +1244,8 @@
           // run's own version.
           var childExec = self.runMatchesViewed() ? self.childExecutions[node.id] : null;
           push("Execution", childExec ? childExec + " (child)" : "—");
-        } else if (type === "TRANSFORM") {
-          self.transformRows(node).forEach(function (row) { rows.push({ k: row[0], v: row[1] }); });
+        } else if (type === "SCRIPT") {
+          self.scriptRows(node).forEach(function (row) { rows.push({ k: row[0], v: row[1] }); });
         } else {
           var source = node.source || "tempdb";
           if (node.source === "tempdb") {
@@ -1294,21 +1294,21 @@
         return rows;
       },
 
-      /** 7d: the resolved pin of a TRANSFORM node, or null while (or if) the lookup has not landed. */
-      transformPinFor: function (node) {
+      /** 7d: the resolved pin of a SCRIPT node, or null while (or if) the lookup has not landed. */
+      scriptPinFor: function (node) {
         var util = window.PEGraphUtil;
         var key = util ? util.pinKey(node && node.template) : null;
-        return key && this.transformPins ? this.transformPins[key] || null : null;
+        return key && this.scriptPins ? this.scriptPins[key] || null : null;
       },
 
       /**
-       * 7d (#7, transform-nodes design §9.3) — a TRANSFORM's Details rows: the pin, the
+       * 7d (#7, transform-nodes design §9.3) — a SCRIPT's Details rows: the pin, the
        * language and mode read off the resolved template (the node carries neither — the mode
        * is the contract's, never the node's, §3.1), the inputs map as bound, the output, the
        * reject handling, and the needs-review marker when the pin carries it.
        */
-      transformRows: function (node) {
-        var pin = this.transformPinFor(node);
+      scriptRows: function (node) {
+        var pin = this.scriptPinFor(node);
         var pending = node && node.template && node.template.id ? "resolving…" : "—";
         var inputs = node.inputs ? Object.keys(node.inputs) : [];
         var util = window.PEGraphUtil;
@@ -1322,7 +1322,7 @@
               ? inputs.map(function (k) { return k + " ← " + node.inputs[k]; }).join(" · ")
               : "—",
           ],
-          ["Output", util ? util.transformOutputText(node) : "—"],
+          ["Output", util ? util.scriptOutputText(node) : "—"],
           ["Rejects", node.output && node.output.rejects ? "tempdb." + node.output.rejects : "—"],
           ["Strict", node.strict === true ? "yes — any reject fails the node" : "no"],
         ];
@@ -1431,7 +1431,7 @@
         if (!node) return null;
         var type = String(node.type || "").toUpperCase();
         // 7d: only a statement node runs a statement (SettingsRules' STATEMENT_NODE_TYPES) — a
-        // TRANSFORM reads staged rows through the executor, never a template's SQL.
+        // SCRIPT reads staged rows through the executor, never a template's SQL.
         if (type !== "DQL" && type !== "DML" && type !== "DDL") return null;
         var own = node.settings ? node.settings.query_timeout_seconds : null;
         if (own) return own + "s (this node)";
@@ -1447,7 +1447,7 @@
         var type = String(node.type || "").toUpperCase();
         if (type === "CALCULATOR") return "Evaluation (inputs as resolved by the last run)";
         if (type === "PIPELINE") return "Child mapping (parameters passed down, output back)";
-        if (type === "TRANSFORM") return "Definition (the pinned function, its inputs and output)";
+        if (type === "SCRIPT") return "Definition (the pinned function, its inputs and output)";
         return "Rendered SQL (template body, parameters as binds)";
       },
 
@@ -1500,11 +1500,11 @@
           if (childExec) out.push(comment("-- last child execution: " + childExec));
           return out.join("\n");
         }
-        if (type === "TRANSFORM") {
+        if (type === "SCRIPT") {
           // 7d: the node as a function call — escaped by construction, like the two above.
-          var pin = self.transformPinFor(node);
+          var pin = self.scriptPinFor(node);
           var t = node.template || {};
-          var tfLines = [comment("-- TRANSFORM nodes have no SQL; the pinned template runs as a pure function.")];
+          var tfLines = [comment("-- SCRIPT nodes have no SQL; the pinned template runs as a pure function.")];
           var about = pin ? " " + comment("-- " + [pin.language, pin.mode ? pin.mode + " mode" : null].filter(Boolean).join(", ")) : "";
           tfLines.push("template: " + esc(t.id || "?") + (t.version ? " @ v" + esc(t.version) : "") + about);
           tfLines.push("inputs:");
@@ -1517,7 +1517,7 @@
             tfLines.push("  " + comment("-- none"));
           }
           var util = window.PEGraphUtil;
-          tfLines.push("output: " + esc(util ? util.transformOutputText(node) : "—"));
+          tfLines.push("output: " + esc(util ? util.scriptOutputText(node) : "—"));
           if (node.output && node.output.rejects) {
             tfLines.push("rejects: " + esc("tempdb." + node.output.rejects) + (node.strict === true ? "  " + comment("-- strict: any reject fails the node") : ""));
           }
@@ -1864,7 +1864,7 @@
       legendChips: function () {
         var seen = {};
         var chips = [];
-        var LABELS = { DQL: "DQL", DML: "DML", DDL: "DDL", CALCULATOR: "Calculator", PIPELINE: "Pipeline", TRANSFORM: "Transform" };
+        var LABELS = { DQL: "DQL", DML: "DML", DDL: "DDL", CALCULATOR: "Calculator", PIPELINE: "Pipeline", SCRIPT: "Script" };
         (this.nodes || []).forEach(function (n) {
           var type = String(n.type || "").toUpperCase();
           if (!LABELS[type] || seen[type]) return;
@@ -1990,7 +1990,7 @@
         return String((this.selectedNode && this.selectedNode.type) || "").toLowerCase();
       },
       get selectedNeedsReview() {
-        var pin = this.transformPinFor(this.selectedNode);
+        var pin = this.scriptPinFor(this.selectedNode);
         return !!(pin && pin.needsReview === true);
       },
       get selectedDetailsMeta() {

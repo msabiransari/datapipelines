@@ -4,7 +4,7 @@ plugins { id("datapipelines.common-conventions") }
 dependencies {
     implementation(project(":modules:typesystem"))
     implementation(project(":modules:pipeline-contract")) // Parameter shape
-    // 7b: the transform types' bodies parse (save) and evaluate (test runner) through the
+    // 7b: the script types' bodies parse (save) and evaluate (test runner) through the
     // scripting seam — never through Freemarker (transform-nodes design §2.1, D-T9).
     implementation(project(":modules:scripting"))
 

@@ -1,6 +1,6 @@
 package co.datapipelines.visualization
 
-import co.datapipelines.pipeline.TransformContractView
+import co.datapipelines.pipeline.ScriptContractView
 import java.util.UUID
 
 /**
@@ -12,7 +12,7 @@ import java.util.UUID
  * - `input_contract_invalid` — no inputs, an input name outside the object grammar, an input with no columns,
  *   a column name that is blank, over 128 characters or carries a control character, a duplicate column;
  * - `transform_binding_invalid` — through [TemplateContractFacts]: the pin missing (or DISCARDED), not a
- *   transform, its contract's input names ≠ `transform.inputs`' keys, a value naming no input, a declared
+ *   script, its contract's input names ≠ `transform.inputs`' keys, a value naming no input, a declared
  *   input's columns ≠ the named input's columns (by name, type and nullability — `details.column`), a
  *   visualization input the transform never reads; and, with no transform, more than one input. A DRAFT pin is
  *   accepted here and must be released at the visualization's release (the 142 cascade — §11.4);
@@ -171,11 +171,11 @@ class VisualizationValidator(
                 null
             }
 
-            is TemplatePin.NotTransform -> {
+            is TemplatePin.NotScript -> {
                 bindingInvalid(
                     "transform.template",
-                    "not_a_transform",
-                    "The pinned template is '${pin.type.wire}', not a transform.",
+                    "not_a_script",
+                    "The pinned template is '${pin.type.wire}', not a script.",
                     failures,
                 )
                 null
@@ -183,7 +183,7 @@ class VisualizationValidator(
 
             is TemplatePin.Transform -> {
                 contractBinding(body, transform, pin.contract, failures)
-                (pin.contract.output as? TransformContractView.Output.Table)?.columns?.map { it.name }?.toSet() ?: emptySet()
+                (pin.contract.output as? ScriptContractView.Output.Table)?.columns?.map { it.name }?.toSet() ?: emptySet()
             }
         }
     }
@@ -191,7 +191,7 @@ class VisualizationValidator(
     private fun contractBinding(
         body: VisualizationBody,
         transform: TransformBinding,
-        contract: TransformContractView,
+        contract: ScriptContractView,
         failures: ArtifactFailures,
     ) {
         if (contract.inputs.keys != transform.inputs.keys) {
@@ -223,7 +223,7 @@ class VisualizationValidator(
                     )
                 }
 
-                declared is TransformContractView.Input.Value -> {
+                declared is ScriptContractView.Input.Value -> {
                     bindingInvalid(
                         path,
                         "value_input",
@@ -232,7 +232,7 @@ class VisualizationValidator(
                     )
                 }
 
-                declared is TransformContractView.Input.Table -> {
+                declared is ScriptContractView.Input.Table -> {
                     columnsEqual(path, declared.columns, input, failures)
                 }
             }
@@ -249,7 +249,7 @@ class VisualizationValidator(
 
     private fun columnsEqual(
         path: String,
-        declared: List<TransformContractView.Column>,
+        declared: List<ScriptContractView.Column>,
         input: InputContract,
         failures: ArtifactFailures,
     ) {

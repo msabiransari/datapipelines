@@ -15,9 +15,9 @@ import java.sql.ResultSet
 /**
  * Observes the real H2 cursor and lazy output drain, without replacing either with a fake.
  * Each decoded payload is copied before the production reader puts it in a wire row: H2
- * owns the original string; only the transform owns the copy. Output deliberately drops
+ * owns the original string; only the script owns the copy. Output deliberately drops
  * this column. Weak references therefore measure retained input payload identities, not
- * transient allocation, H2 tables, JVM heap bytes, or all of the transform's objects.
+ * transient allocation, H2 tables, JVM heap bytes, or all of the script's objects.
  * The probe itself retains O(N) weak-reference bookkeeping, never the payloads.
  */
 internal class RetainedInputProbe(

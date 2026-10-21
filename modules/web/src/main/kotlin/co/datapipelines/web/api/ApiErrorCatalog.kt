@@ -72,9 +72,9 @@ object ApiErrorCatalog {
             // 140 §13.17 — release refused because a check on the version failed: a state
             // conflict on the release path, same class as the lifecycle rows above.
             "pipeline.check." to HttpStatus.CONFLICT,
-            // 7c §13.18 — the TRANSFORM node's execution-time refusals: node failures in a run,
+            // 7c §13.18 — the SCRIPT node's execution-time refusals: node failures in a run,
             // 500 like the pipeline.node family; the two gateway-class rows are EXCEPTIONS below.
-            "pipeline.transform." to HttpStatus.INTERNAL_SERVER_ERROR,
+            "pipeline.script." to HttpStatus.INTERNAL_SERVER_ERROR,
             // versioning §5.5: the authoring capability refusal — a promotion receiver's
             // write path refuses, naming the reason. §13.13 documents both mirrors 403.
             "pipeline.authoring." to HttpStatus.FORBIDDEN,
@@ -244,7 +244,7 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Result.EXPIRED to HttpStatus.GONE,
             PipelineErrorCodes.Result.FORMAT_UNSUPPORTED to HttpStatus.BAD_REQUEST,
             // #487 (owner's ruling, 2026-10-09) — Redis did not answer: a transient fault of OUR
-            // store, 503 like `pipeline.transform.pool_exhausted`, against the family's 500. The row is what
+            // store, 503 like `pipeline.script.pool_exhausted`, against the family's 500. The row is what
             // keeps §10.3's unanswered replay read apart from the expiry's 410.
             PipelineErrorCodes.Result.STORAGE_UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
             PipelineErrorCodes.Limits.RATE_LIMIT_EXCEEDED to HttpStatus.TOO_MANY_REQUESTS,
@@ -297,7 +297,7 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Dashboard.REFRESH_RESULT_TOO_LARGE to HttpStatus.UNPROCESSABLE_ENTITY,
             PipelineErrorCodes.Dashboard.REFRESH_NOT_FOUND to HttpStatus.NOT_FOUND,
             PipelineErrorCodes.Dashboard.KEY_KIND_REFUSED to HttpStatus.FORBIDDEN,
-            // §13.9 (7b, the transform types) — 400s, wired explicitly so each code owns a row
+            // §13.9 (7b, the script types) — 400s, wired explicitly so each code owns a row
             // rather than being absorbed by a default (the 025 A2 convention).
             PipelineErrorCodes.Template.FREEMARKER_FORBIDDEN to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Template.CONTRACT_INVALID to HttpStatus.BAD_REQUEST,
@@ -388,13 +388,13 @@ object ApiErrorCatalog {
             // the row is explicit. Emitted over MCP only; the status exists so the envelope's
             // mapping stays total.
             PipelineErrorCodes.Mcp.DOC_NOT_FOUND to HttpStatus.NOT_FOUND,
-            // §13.18 (7c, the TRANSFORM node) — the two rows against the family's 500 default:
+            // §13.18 (7c, the SCRIPT node) — the two rows against the family's 500 default:
             // the engine's own timeout is 504 like its node/statement-level siblings, and the
-            // pool's exhaustion is a transient 503 (record §4.3). `transform.js.unavailable` is
+            // pool's exhaustion is a transient 503 (record §4.3). `script.js.unavailable` is
             // a save-time refusal (400); through the evaluate surface the rest keep the default.
-            PipelineErrorCodes.Transform.TIMEOUT to HttpStatus.GATEWAY_TIMEOUT,
-            PipelineErrorCodes.Transform.POOL_EXHAUSTED to HttpStatus.SERVICE_UNAVAILABLE,
-            PipelineErrorCodes.Transform.JS_UNAVAILABLE to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Script.TIMEOUT to HttpStatus.GATEWAY_TIMEOUT,
+            PipelineErrorCodes.Script.POOL_EXHAUSTED to HttpStatus.SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Script.JS_UNAVAILABLE to HttpStatus.BAD_REQUEST,
             // #194 §13.20 — a taken set name is a 409 (the UNIQUE constraint, the pipeline/template twin);
             // an absent or lens-hidden set a 404; a wrong typed confirmation the caller's 400; the
             // evaluate's whole-request refusals 413 (response budget) and 504 (the house deadline mapping).
@@ -481,10 +481,10 @@ object ApiErrorCatalog {
             "pipeline.check." to "Some release checks failed. Review the checks on this version and try again.",
             "pipeline.execution." to "The pipeline run couldn't be completed.",
             "pipeline.node." to "A step in the pipeline failed while it was running.",
-            // 7c §13.18 — a TRANSFORM node's refusal: the transform, its inputs or its own
+            // 7c §13.18 — a SCRIPT node's refusal: the script, its inputs or its own
             // bounds are the place to look, exactly like the node family above.
-            "pipeline.transform." to
-                "A transform step in the pipeline refused its input or its result. Check the named input or row in the error details.",
+            "pipeline.script." to
+                "A script step in the pipeline refused its input or its result. Check the named input or row in the error details.",
             "pipeline.staging." to "The pipeline ran out of room, or produced a value the temporary database couldn't hold.",
             "datasource.validation." to "These connection details aren't valid. Check them and try again.",
             "template.validation." to "This SQL template isn't valid. Check the reported problem and try again.",

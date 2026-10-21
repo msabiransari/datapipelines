@@ -66,7 +66,7 @@ interface FactEnrichment {
      * Each rule in [DatasourceBlocks.definitions] carries `implemented_by` (7e, transform-nodes
      * design §8.3): the template versions citing it that [templateLens] — the reader's template
      * lens, no default — admits. The listing is where an agent reads a rule first, so it is where
-     * the transform implementing it is found.
+     * the script implementing it is found.
      */
     fun forListing(
         readerWorkspaceId: UUID,

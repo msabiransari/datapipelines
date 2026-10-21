@@ -1,9 +1,9 @@
 # Staging (H2) Specification
 
-**Status:** v1.18 (frozen contract — additive-only changes after this point)
+**Status:** v1.20 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Configuration spec](configuration.md)
-**Last updated:** 2026-09-16
+**Last updated:** 2026-10-21
 
 ---
 
@@ -223,7 +223,7 @@ crosses a returned lease — the next batch may land on a different physical con
 insert is re-prepared per batch (H2's per-session query cache makes that a lookup after the first).
 `stageRows` pulls its child-row sequence in the same batches, holding no lease between them.
 
-**Atomicity is per call, and the caller owns the sibling (7c).** A failed `stage`/`stageRows` rolls back the **partial table it was writing** — never any other table, including one an earlier call of the same node completed. A writer of two tables (the TRANSFORM node's output and rejects pair, dag-executor §6.3.4) drops the completed sibling itself with `execute("DROP TABLE IF EXISTS …")` on any refusal after the first write began, so a failed pair leaves nothing behind.
+**Atomicity is per call, and the caller owns the sibling (7c).** A failed `stage`/`stageRows` rolls back the **partial table it was writing** — never any other table, including one an earlier call of the same node completed. A writer of two tables (the SCRIPT node's output and rejects pair, dag-executor §6.3.4) drops the completed sibling itself with `execute("DROP TABLE IF EXISTS …")` on any refusal after the first write began, so a failed pair leaves nothing behind.
 
 **The drain reports its boundaries (149).** `stage` and `stageRows` take a `StageObserver` (default `NONE`): `connectionRequested`/`connectionAcquired` around the `CREATE TABLE` lease and around each batch's insert lease, `fetchStarted`/`fetchFinished(rows)` around each batch read, `batchWritten(rows, rowsSoFar)` after the lease has RETURNED — the 108 §D rows-so-far figure rides that last call — and, only on failure, `partialTableDropped()` once the partial table's drop succeeded on its fresh lease (the confirmed undo; not reported when the drop failed or timed out, so the write's fate stays unknown to the observer). Every call is made outside the pool's metadata lock and, except `connectionAcquired` (the boundary that says "holding"), outside the lease; the observer must be non-suspending and prompt, since it runs on the drain's own path. The executor bridges it onto the node's operation tracker ([DAG Executor §10](dag-executor.md#10-sse-event-integration)); at capacity one, a node whose sibling holds the pool's only connection is seen WAITING at the `CREATE TABLE` lease, before its first batch — an unobserved wait there read as a slow source query.
 
@@ -756,6 +756,7 @@ Out of scope for v1:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-21 | v1.20 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **§ atomicity, one clause**: a writer of two tables is "the SCRIPT node" (was TRANSFORM). Status moves from v1.18 to v1.20 — it had not followed v1.19's row. A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-09-17 | v1.19 | 155 / #122 §8.2 cadence correction | §8.2: the mid-drain budget re-measurement is at most once per **second** (`BUDGET_CHECK_INTERVAL_MS`), not 250 ms — the doc kept the pre-108 §B number. The two-tier reading is now documented: a cheap non-collecting sample on the cadence (garbage included, over-estimate only), the accurate GC-forcing check deciding only when the cheap one exceeds the budget. No behaviour change. |
 | 2026-09-17 | v1.18 | 149 correction / #125 review | §4.3: `StageObserver.partialTableDropped()` — a failed stage reports its confirmed undo after the drop's lease returned. |
 | 2026-09-16 | v1.17 | 149 / #125 measured node operations | §4.3: `stage`/`stageRows` take a **`StageObserver`** (replacing the 108 `onProgress` lambda; default `NONE`): the CREATE TABLE lease and each batch's fetch, lease request, lease held and accepted batch, reported outside the lease and never under the pool lock. §10 signature updated. |

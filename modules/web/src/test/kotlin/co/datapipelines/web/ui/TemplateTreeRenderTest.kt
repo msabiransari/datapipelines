@@ -368,8 +368,8 @@ class TemplateTreeRenderTest {
         setVariable("namePattern", TemplateNameGrammar.pattern)
         setVariable("nameMaxLength", TemplateNameGrammar.maxLength)
         setVariable("nameHint", TemplateNameGrammar.DESCRIPTION)
-        setVariable("transformTypes", TemplateType.entries.filter { it.isTransform }.joinToString(",") { it.wire })
-        setVariable("skeleton", TransformSkeleton)
+        setVariable("scriptTypes", TemplateType.entries.filter { it.isScript }.joinToString(",") { it.wire })
+        setVariable("skeleton", ScriptSkeleton)
         setVariable("canAuthor", true)
     }
 
@@ -409,7 +409,7 @@ class TemplateTreeRenderTest {
         setVariable("releasedBy", null)
         setVariable("readOnly", true)
         setVariable("interpolations", emptyList<String>())
-        setVariable("isTransform", false)
+        setVariable("isScript", false)
         setVariable("versions", emptyList<VersionRowView>())
     }
 

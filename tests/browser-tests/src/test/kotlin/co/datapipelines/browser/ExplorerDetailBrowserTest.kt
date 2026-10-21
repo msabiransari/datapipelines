@@ -25,7 +25,7 @@ import java.nio.file.Paths
  * over:
  *
  *  - the detail's two-column geometry (`at 1440 the detail is two columns, at 1100 they
- *    stack`) has no surface left — the workspace's own width claims (the transform face's
+ *    stack`) has no surface left — the workspace's own width claims (the script face's
  *    two-by-two above 1100, one column below) are [TemplateWorkspaceBrowserTest]'s, which
  *    did not exist when this case was written;
  *  - the page's tree drawer (below 1100) is the SIDEBAR's phone drawer now —
