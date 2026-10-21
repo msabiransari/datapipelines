@@ -21,7 +21,10 @@ import java.util.function.Consumer
  * - a change is ONE request — the partial — and nothing else;
  * - the URL is REPLACED, never pushed: Back from the catalog returns to the page before it, however
  *   many filter changes happened on it;
- * - Back from an object opened off a filtered list restores that list and those controls.
+ * - Back from an object opened off a filtered list restores that list and those controls: the
+ *   catalogs carry `hx-history="false"` (owner ruling 2026-10-21), so htmx never snapshots a catalog
+ *   — a snapshot keeps the controls' rendered attributes, not their live values — and Back fetches
+ *   the page at its URL, where the server renders both from the same parameters.
  *
  * Every case seeds one DRAFT object of its family in a fresh workspace: `draft` and All show it,
  * `released` shows the filtered empty state, so each step's list is distinguishable by its count.
@@ -121,7 +124,12 @@ class CatalogUrlBrowserTest : VisualizationBrowserSuite() {
         change: () -> Unit,
     ): List<String> {
         val requests = mutableListOf<String>()
-        val record = Consumer<Request> { requests += "${it.method()} ${it.url().removePrefix(baseUrl)}" }
+        // Only what the page REQUESTS: a static asset the swapped markup references (the icon
+        // sprite a row's glyph uses) is a resource load the base page would make too, not a call.
+        val record =
+            Consumer<Request> {
+                if (it.resourceType() == "xhr" || it.resourceType() == "fetch") requests += "${it.method()} ${it.url().removePrefix(baseUrl)}"
+            }
         page.evaluate("() => { window.__settled = 0; document.body.addEventListener('htmx:afterSettle', () => window.__settled++); }")
         page.onRequest(record)
         try {
@@ -238,14 +246,17 @@ class CatalogUrlBrowserTest : VisualizationBrowserSuite() {
 
     /**
      * A.3 of the brief: htmx 2.0.10 snapshots the page for history before it replaces the URL
-     * (`if (historyUpdate.type) saveCurrentPageToHistory()`), so the shell's `htmx:beforeHistorySave`
-     * cleanups now run on the LIVE catalog at every filter change — the trap shell.js's header
-     * note 9 records. Measured: the save fires exactly once per change, and no inline style or
-     * width outside the swapped list differs after it.
+     * (`if (historyUpdate.type) saveCurrentPageToHistory()`), which would run the shell's
+     * `htmx:beforeHistorySave` cleanups on the LIVE catalog at every filter change — the trap
+     * shell.js's header note 9 records. Measured before the catalogs opted out (lane 591): one
+     * save per change, nothing outside the list changed. Since `hx-history="false"` (owner ruling
+     * 2026-10-21) the save does not run at all; this pins both — zero saves, and no inline style
+     * or width outside the swapped list differs (the indicator's width animates, so only its
+     * style attribute is compared).
      */
     @ParameterizedTest
     @EnumSource(Family::class)
-    fun `the history save a replace runs leaves the live page outside the list untouched`(family: Family) {
+    fun `a filter change runs no history save and leaves the live page outside the list untouched`(family: Family) {
         startTrace()
         seedDraft(family)
         open(family, "?lifecycle=draft")
@@ -253,13 +264,14 @@ class CatalogUrlBrowserTest : VisualizationBrowserSuite() {
         val outside =
             """(rootId) => [...document.querySelectorAll('#app-main *')]
               .filter((el) => !el.closest('#' + rootId))
-              .map((el) => (el.id || el.tagName) + '|' + (el.getAttribute('style') || '') + '|' + Math.round(el.getBoundingClientRect().width))
+              .map((el) => (el.id || el.tagName) + '|' + (el.getAttribute('style') || '') + '|' +
+                (el.classList.contains('htmx-indicator') ? 'indicator' : Math.round(el.getBoundingClientRect().width)))
               .join('\n')"""
         val before = page.evaluate(outside, family.rootId) as String
 
         changing(url(family, "?lifecycle=released")) { page.selectOption("#${family.lifecycleId}", "released") }
 
-        (page.evaluate("() => window.__saves") as Number).toInt() shouldBe 1
+        (page.evaluate("() => window.__saves") as Number).toInt() shouldBe 0
         page.evaluate(outside, family.rootId) as String shouldBe before
     }
 }

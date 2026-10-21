@@ -202,8 +202,15 @@ class ModalBackBrowserTest : BrowserSuite() {
         val here = page.url()
         page.locator("nav a[href='/dashboard']").click()
         page.waitForURL("**/dashboard")
+        // A catalog is never cached (#591, hx-history="false"), so its Back is a fetch that
+        // lands after the URL changes: wait for the restore itself, a hit or a miss's swap.
+        page.evaluate(
+            """() => { window.__modalBackRestored = false;
+              document.body.addEventListener('htmx:historyRestore', () => { window.__modalBackRestored = true; }, { once: true }); }""",
+        )
         page.goBack()
         page.waitForURL(here.substringBefore("?") + "**")
+        page.waitForFunction("() => window.__modalBackRestored")
     }
 
     /** `display` = the modal's computed display; `hasStyleAttr` = whether a `style` attribute rides on it. */

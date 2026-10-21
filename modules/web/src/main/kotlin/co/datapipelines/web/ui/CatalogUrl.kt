@@ -18,7 +18,9 @@ import java.nio.charset.StandardCharsets
  *
  * A REPLACE, not a push (ui-screens §5, "The URL describes the list"): the search fires per
  * keystroke after its debounce, and a push would make each keystroke a history entry Back steps
- * through one by one.
+ * through one by one. The catalog pages carry `hx-history="false"` beside it, so Back to a
+ * catalog fetches the page at this URL rather than restoring a snapshot whose controls kept
+ * their first-rendered values.
  *
  * The URL is built ONLY from values the handler already bound and validated — `q` trimmed, the
  * parsed bucket's wire value, the offset, the templates' parsed dialect and type — never from the
