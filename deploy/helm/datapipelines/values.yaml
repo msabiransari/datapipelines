@@ -55,6 +55,18 @@ resources: {}
 temporaryStorage:
   sizeLimit: ""
 
+# Optional JDBC driver drop-in at /app/lib (deployment.md §3.5/§9).
+# Populate only through a trusted image, init container or CI-written ConfigMap,
+# never through the app. The app's mount is always read-only. Supply ONE volume
+# source verbatim; a PVC source must also set readOnly: true. For example:
+# source:
+#   persistentVolumeClaim:
+#     claimName: trusted-drivers
+#     readOnly: true
+libVolume:
+  enabled: false
+  source: {}
+
 autoscaling:
   enabled: true
   minReplicas: 2
