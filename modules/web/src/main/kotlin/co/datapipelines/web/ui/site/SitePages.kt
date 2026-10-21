@@ -276,7 +276,7 @@ object SitePages {
             path = "/compare/dbt",
             title = "dbt alternative without a warehouse: when to use each",
             description =
-                "An honest comparison: dbt scripts inside one warehouse and owns the modelling layer. " +
+                "An honest comparison: dbt transforms inside one warehouse and owns the modelling layer. " +
                     "We join across operational databases without landing anything.",
             view = "site/compare-dbt",
         )

@@ -26,7 +26,9 @@ import kotlin.text.RegexOption.IGNORE_CASE
  *     and the store cites the path; the citation is immutable.
  *   - **English** — "transformation/transformed/transforming/transformer(s)": the verb, the
  *     JCE cipher's `TRANSFORMATION`, the calculators ("pre-execution transformers"), the
- *     dashboards' `WebDashboardTransformer`.
+ *     dashboards' `WebDashboardTransformer`; and, phrase by phrase, the bare verb in marketing
+ *     copy (what dbt does, a demo manifest's preparation step, the login's Connect / Transform /
+ *     Deliver).
  *   - **The rename's own name** — `TRANSFORM→SCRIPT` in the docs and the refusal messages.
  *   - **Removed-key machinery** — `datapipelines.transform.*`, `checkRemovedTransformKeys`,
  *     `REMOVED_TRANSFORM_KEY_SUFFIXES`, `transformLegacyKeysSet`: the refusal names the old
@@ -37,8 +39,8 @@ import kotlin.text.RegexOption.IGNORE_CASE
  *     vocabulary by the owner's block decision. Elsewhere (the MCP schema and docs, §7.6, the
  *     skill) the block's key, `transform.template`/`transform.inputs`, its pin, its output and the
  *     refresh stage are admitted phrase by phrase, so the node noun in the same file stays red (#640).
- *   - **CSS** — the `transform:` property, the SVG `transform` attribute and the pan/zoom/drawer
- *     geometry notes.
+ *   - **CSS** — the `transform:` property, the SVG `transform` attribute, the pan/zoom/drawer
+ *     geometry notes and the shell's "transform and opacity only" motion.
  *   - **Frozen history** — the V33/V36/V47 migrations, the `chk_transform_blocks` pre-V50
  *     constraint name, the migration tests' pre-state rows, the research snapshots.
  *   - **The sample-data fence** — `site/demo/manifest-*.json`'s `transform` key names a
@@ -361,8 +363,12 @@ class ScriptVocabularyGuardTest {
                 ),
                 Triple(
                     Regex("^docs/ui-screens\\.md$"),
-                    Regex("the transform pin with its status|the transform pin not released"),
-                    "the visualization tab's Overview and release dialog (the block's pin)",
+                    Regex(
+                        "the transform pin with its status|the transform pin not released|" +
+                            "transform and opacity only|Motion is `transform` on the drawers|Connect / Transform / Deliver",
+                    ),
+                    "the visualization tab's Overview and release dialog (the block's pin); the shell's motion " +
+                        "(CSS, kept sense 1); the login companion's workflow verb (kept sense 3)",
                 ),
                 Triple(
                     Regex("^docs/module-structure\\.md$"),
@@ -389,6 +395,31 @@ class ScriptVocabularyGuardTest {
                     Regex("\"viewBox\", \"transform\""),
                     "the SVG `transform` attribute is layout geometry (kept sense 1)",
                 ),
+                Triple(
+                    Regex("static/js/shell\\.js$"),
+                    Regex("transform and opacity only"),
+                    "the swap's CSS motion (kept sense 1)",
+                ),
+                Triple(
+                    Regex("(?:static/js/pipeline-editor/graph\\.js|templates/pipelines/editor\\.html)$"),
+                    Regex("pan/zoom transform|before transforms\\."),
+                    "the canvas's CSS pan/zoom transform (kept sense 1)",
+                ),
+                Triple(
+                    Regex("(?:ui/site/SitePages\\.kt|templates/site/compare-dbt\\.html)$"),
+                    Regex("dbt transforms"),
+                    "the marketing comparison's English verb: what dbt does (kept sense 3)",
+                ),
+                Triple(
+                    Regex("templates/site/demo-data\\.html$"),
+                    Regex("the URL, the transform, the licence"),
+                    "a demo manifest's provenance names its data-preparation step (kept sense 3)",
+                ),
+                Triple(
+                    Regex("templates/login\\.html$"),
+                    Regex("<b>Transform</b><small>Reusable logic</small>"),
+                    "the login companion's Connect / Transform / Deliver workflow verb (kept sense 3)",
+                ),
             )
 
         /** Restored kept-sense lines (#640) a path entry must admit — path to line. */
@@ -405,6 +436,11 @@ class ScriptVocabularyGuardTest {
                 "modules/mcp-server/src/main/resources/skill/dashboards.md" to "(or of the transform's output)",
                 "modules/web/src/test/kotlin/co/datapipelines/web/ui/site/SiteHandTypedCountsGuardTest.kt" to
                     "\"d\", \"viewBox\", \"transform\")",
+                "docs/ui-screens.md" to "5. **Motion is `transform` on the drawers and `opacity` on the backdrop**",
+                "modules/web/src/main/resources/static/js/pipeline-editor/graph.js" to
+                    "// whole container carries the pan/zoom transform, so cards scale WITH the canvas",
+                "modules/web/src/main/resources/templates/site/compare-dbt.html" to "dbt transforms in place, inside the engine",
+                "modules/web/src/main/resources/templates/login.html" to "<b>Transform</b><small>Reusable logic</small>",
             )
 
         /** The node noun in those same files stays red: the path entries admit the block, not the word. */
@@ -415,6 +451,10 @@ class ScriptVocabularyGuardTest {
                 "docs/auth.md" to "`GET /partials/templates/transform-face`",
                 "docs/versioning.md" to "a transform template's draft",
                 "modules/mcp-server/src/main/resources/skill/dashboards.md" to "a pinned transform template that reshapes",
+                "docs/ui-screens.md" to "the transform face's Save draft",
+                "modules/web/src/main/resources/static/js/pipeline-editor/graph.js" to "the card says `transform` until the pin resolves",
+                "modules/web/src/main/resources/templates/site/roadmap.html" to "No JSONata or JavaScript transform nodes yet",
+                "modules/web/src/main/resources/templates/login.html" to "<b>Transform</b><small>Node</small>",
             )
     }
 }

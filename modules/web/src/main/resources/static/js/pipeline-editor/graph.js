@@ -870,7 +870,7 @@
 
     // The HTML card overlay (§reference route 1): the extension's label container is
     // pointer-events:none by default (verified against its 1.2.2 source), and its
-    // whole container carries the pan/zoom script, so cards scale WITH the canvas
+    // whole container carries the pan/zoom transform, so cards scale WITH the canvas
     // rather than fighting it. It re-runs the template on `data`/`style` events —
     // which is exactly how state dots and run lines arrive.
     if (this.cy.nodeHtmlLabel) {
@@ -1052,7 +1052,7 @@
    *
    * `offsetHeight` is deliberate: the html-label container carries the canvas's
    * pan/zoom SCRIPT, so `getBoundingClientRect()` returns a scaled number and would
-   * feed the zoom back into the model. `offsetHeight` is layout, before scripts.
+   * feed the zoom back into the model. `offsetHeight` is layout, before transforms.
    *
    * Returns whether a re-layout was started. Bounded at two passes: the second one
    * re-measures the same content and finds nothing to change, and a pathological

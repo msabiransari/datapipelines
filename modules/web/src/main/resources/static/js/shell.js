@@ -630,7 +630,7 @@
      A boosted swap replaces the whole of #app-main between two frames, which is
      the one thing a document load never does badly: a page load fades in from
      the browser's own paint, a swap simply teleports. The entrance is a 150ms
-     fade + 4px slide-up on the NEW #app-main — script and opacity only, so
+     fade + 4px slide-up on the NEW #app-main — transform and opacity only, so
      it cannot move a box and cannot cost a layout shift (§B's CLS budget).
 
      The class comes off on `animationend`, and off ANYWAY after a fallback:

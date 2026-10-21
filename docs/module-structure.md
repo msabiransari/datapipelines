@@ -47,7 +47,7 @@ datapipelines/
 │   ├── graph/                           # the generic Dag<T> primitive, layer 0 (§5.17)
 │   ├── persistence/                     # the generic batching writer — ordered group commit, layer 0 (§5.19)
 │   ├── calculators/                     # [Calculators catalog] — pure kinds, layer 0 (§5.14)
-│   ├── scripting/                       # Script script engine seam, layer 0 (§5.15)
+│   ├── scripting/                       # Script engine seam, layer 0 (§5.15)
 │   ├── pipeline-contract/               # [Pipeline Contract spec]
 │   ├── templates/                       # [Templates spec]
 │   ├── datasources/                     # [Datasources spec]
