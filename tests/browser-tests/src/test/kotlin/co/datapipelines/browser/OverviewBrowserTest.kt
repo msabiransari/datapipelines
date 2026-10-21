@@ -1,6 +1,10 @@
 package co.datapipelines.browser
 
-import com.microsoft.playwright.Locator
+import co.datapipelines.browser.OverviewHomeBrowserSupport.PHONE
+import co.datapipelines.browser.OverviewHomeBrowserSupport.PHONE_H
+import co.datapipelines.browser.OverviewHomeBrowserSupport.WEEKS
+import co.datapipelines.browser.OverviewHomeBrowserSupport.WIDE
+import co.datapipelines.browser.OverviewHomeBrowserSupport.WIDE_H
 import com.microsoft.playwright.Page
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -10,7 +14,6 @@ import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.string.shouldStartWith
 import org.junit.jupiter.api.Test
-import java.nio.file.Paths
 
 /**
  * #556 — the Pipelines overview in real Chromium: the menu's Pipelines item lands on
@@ -23,8 +26,8 @@ import java.nio.file.Paths
  * In development, Actively developed; the foot's Live with changes and Retired), the activity
  * columns and the release-history bars, Continue your work and Quick start, and ONE dialog the
  * openers fill by key. The first case reads the strip, the columns and the bars after two and then
- * three pipelines, takes the screenshots into build/reports/home-frame-overview, and measures the
- * prototype's geometry: at 1512 the strip's four cells are one width, the twelve columns one pitch
+ * three pipelines, takes pipelines-prefixed screenshots into build/reports/599-object-family-homes,
+ * and measures the prototype's geometry: at 1512 the strip's four cells are one width, the twelve columns one pitch
  * and the plot 192px; at 390, 768, 1024 and 1280 nothing overflows the page.
  *
  * The clipboard is stubbed per case (`navigator.clipboard.writeText` resolving or rejecting): the
@@ -54,62 +57,10 @@ class OverviewBrowserTest : RestTreeBrowserFixture() {
         page.waitForFunction("() => window.DatapipelinesSidebarTrees.get('pipelines')?.state.levels.get(null)?.complete")
     }
 
-    /** One strip or foot cell's number, by its key (`total`, `live`, `retired`, …). */
-    private fun metric(key: String): String = page.locator("[data-count='$key'] .app-overview-count-v").innerText().trim()
-
     /** The newest activity column: the week the suite runs in, the last of the twelve. */
     private fun newestWeek() = page.locator("[data-column]:last-child")
 
     private fun dialog() = page.locator("dialog[data-overview-dialog]")
-
-    /** Opens the dialog through the opener [selector] names and waits until it is modal. */
-    private fun openDialog(selector: String) {
-        page.click(selector)
-        page.waitForFunction("() => document.querySelector('dialog[data-overview-dialog]').open")
-    }
-
-    private fun screenshot(
-        name: String,
-        width: Int,
-        height: Int,
-    ) {
-        page.setViewportSize(width, height)
-        page.reload()
-        page.waitForSelector("[data-overview-summary]")
-        page.evaluate("() => document.fonts.ready")
-        page.screenshot(Page.ScreenshotOptions().setPath(SHOTS.resolve("$name.png")))
-        // The shell scrolls an inner container, so a full-page shot stops at the viewport: the page's
-        // whole content is the overview root's own shot.
-        page.locator("[data-overview]").screenshot(Locator.ScreenshotOptions().setPath(SHOTS.resolve("$name-content.png")))
-        page
-            .locator("[data-overview-panel='activity']")
-            .screenshot(Locator.ScreenshotOptions().setPath(SHOTS.resolve("$name-activity.png")))
-    }
-
-    /** The evidence set: the page at 1512, 900 and 390, light then dark, leaving the light theme on. */
-    private fun screenshots() {
-        SHOTS.toFile().mkdirs()
-        listOf("light", "dark").forEach { mode ->
-            themeOn(mode)
-            screenshot("overview-1512-$mode", WIDE, WIDE_H)
-            screenshot("overview-900-$mode", MID, MID)
-            screenshot("overview-390-$mode", PHONE, PHONE_H)
-        }
-        themeOn("light")
-    }
-
-    /**
-     * ViewerAccessBrowserTest's switch: the user's stored theme wins over an emulated colour scheme,
-     * so the screenshots flip it through the top bar's toggle (stored, so it survives a reload).
-     */
-    private fun themeOn(mode: String) {
-        val wanted = "/themes/$mode.css"
-        val current = page.locator("#theme-link").first().getAttribute("href") ?: ""
-        if (current.contains(wanted)) return
-        page.waitForResponse("**/partials/profile/theme") { page.locator("#mode-toggle").click() }
-        page.waitForFunction("() => document.getElementById('theme-link').getAttribute('href').includes('$wanted')")
-        page.locator("html[data-theme='$mode']").waitFor()
-    }
 
     /** The prototype's geometry at 1512: four equal strip cells, twelve columns at one pitch, the plot 192px tall. */
     private fun geometryAt1512() {
@@ -167,8 +118,15 @@ class OverviewBrowserTest : RestTreeBrowserFixture() {
         page.locator(".app-nav-link.active").getAttribute("data-nav-section") shouldBe "/pipelines"
         page.locator("#app-crumbs .app-crumb-page").innerText().trim() shouldBe "Pipelines"
         page.locator("#app-browser").isVisible shouldBe true
-        listOf("total" to "2", "live" to "2", "in-development" to "0", "actively-developed" to "0", "live-changes" to "0", "retired" to "0")
-            .forEach { (key, value) -> withClue(key) { metric(key) shouldBe value } }
+        OverviewHomeBrowserSupport.metrics(
+            page,
+            "total" to "2",
+            "live" to "2",
+            "in-development" to "0",
+            "actively-developed" to "0",
+            "live-changes" to "0",
+            "retired" to "0",
+        )
         page.locator("[data-count='live'] a").getAttribute("href") shouldContain "/pipelines?lifecycle=released"
         withClue("Retired has no page: its foot entry is not a link") {
             page.locator("[data-count='retired'] a").count() shouldBe 0
@@ -202,14 +160,12 @@ class OverviewBrowserTest : RestTreeBrowserFixture() {
         withClue("a created, never released pipeline is In development, actively developed, and this week's third new one") {
             api("POST", "/api/v1/pipelines", pipelineBody("acme/three"))
             page.reload()
-            metric("total") shouldBe "3"
-            metric("in-development") shouldBe "1"
-            metric("actively-developed") shouldBe "1"
+            OverviewHomeBrowserSupport.metrics(page, "total" to "3", "in-development" to "1", "actively-developed" to "1")
             page.locator("[data-chart-table='maturity'] tr[data-row='r0'] td[data-part='draft-open']").textContent().trim() shouldBe "1"
             page.locator("[data-chart-table='activity'] tbody tr:last-child td[data-part='created']").textContent().trim() shouldBe "3"
             page.locator("[data-task='drafts'] small").innerText().trim() shouldBe "1 pipeline is working toward its first release."
         }
-        screenshots()
+        OverviewHomeBrowserSupport.screenshots(page, "pipelines", additionalViewports = listOf(MID to MID))
         geometryAt1512()
         noOverflow()
         page.setViewportSize(WIDE, WIDE_H)
@@ -227,32 +183,25 @@ class OverviewBrowserTest : RestTreeBrowserFixture() {
         seedPipeline("acme/one")
         openOverview()
 
-        openDialog("[data-overview-foot] [data-open='definitions']")
-        page.locator("[data-overview-dialog-title]").innerText().trim() shouldBe "How the summary is counted"
-        page.locator("[data-dialog-section='definitions']").isVisible shouldBe true
-        page.locator("[data-dialog-section='prompt']").isVisible shouldBe false
-        page.locator("[data-dialog-section='definitions']").innerText() shouldContain "These four groups total 1."
-        page.keyboard().press("Escape")
-        page.waitForFunction("() => !document.querySelector('dialog[data-overview-dialog]').open")
-        page.evaluate("() => document.activeElement?.getAttribute('data-open')") shouldBe "definitions"
+        OverviewHomeBrowserSupport.definitionsRoundTrip(page, total = 1)
 
         withClue("the release-history info button opens its own section") {
-            openDialog("[data-overview-panel='maturity'] [data-open='releases']")
+            OverviewHomeBrowserSupport.openDialog(page, "[data-overview-panel='maturity'] [data-open='releases']")
             page.locator("[data-overview-dialog-title]").innerText().trim() shouldBe "Understanding release history"
             page.locator("[data-overview-dialog-close]").click()
             dialog().isVisible shouldBe false
         }
-        SHOTS.toFile().mkdirs()
+        OverviewHomeBrowserSupport.SHOTS.toFile().mkdirs()
         listOf(WIDE to WIDE_H, PHONE to PHONE_H).forEach { (width, height) ->
             page.setViewportSize(width, height)
-            openDialog("[data-overview-foot] [data-open='definitions']")
-            page.screenshot(Page.ScreenshotOptions().setPath(SHOTS.resolve("dialog-definitions-$width.png")))
+            OverviewHomeBrowserSupport.openDialog(page, "[data-overview-foot] [data-open='definitions']")
+            page.screenshot(Page.ScreenshotOptions().setPath(OverviewHomeBrowserSupport.SHOTS.resolve("pipelines-dialog-definitions-$width.png")))
             page.keyboard().press("Escape")
-            openDialog("[data-overview-panel='activity'] [data-overview-view-data]")
-            page.screenshot(Page.ScreenshotOptions().setPath(SHOTS.resolve("dialog-activity-$width.png")))
+            OverviewHomeBrowserSupport.openDialog(page, "[data-overview-panel='activity'] [data-overview-view-data]")
+            page.screenshot(Page.ScreenshotOptions().setPath(OverviewHomeBrowserSupport.SHOTS.resolve("pipelines-dialog-activity-$width.png")))
             page.keyboard().press("Escape")
-            openDialog("[data-overview-agent]")
-            page.screenshot(Page.ScreenshotOptions().setPath(SHOTS.resolve("dialog-prompt-$width.png")))
+            OverviewHomeBrowserSupport.openDialog(page, "[data-overview-agent]")
+            page.screenshot(Page.ScreenshotOptions().setPath(OverviewHomeBrowserSupport.SHOTS.resolve("pipelines-dialog-prompt-$width.png")))
             page.keyboard().press("Escape")
         }
     }
@@ -264,7 +213,7 @@ class OverviewBrowserTest : RestTreeBrowserFixture() {
         readyTree()
         openOverview()
 
-        openDialog("[data-overview-view-data]")
+        OverviewHomeBrowserSupport.openDialog(page, "[data-overview-view-data]")
         page.locator("[data-overview-dialog-title]").innerText().trim() shouldBe "Development activity · 12 weeks"
         val table = page.locator("dialog[data-overview-dialog] table[data-chart-table='activity']")
         table.isVisible shouldBe true
@@ -283,7 +232,7 @@ class OverviewBrowserTest : RestTreeBrowserFixture() {
         startTrace()
         readyTree()
         openOverview()
-        openDialog("[data-overview-agent]")
+        OverviewHomeBrowserSupport.openDialog(page, "[data-overview-agent]")
         page.locator("[data-overview-dialog-title]").innerText().trim() shouldBe "Start with a clear question"
         stubClipboard(refuse = false)
         val requests = mutableListOf<String>()
@@ -315,7 +264,7 @@ class OverviewBrowserTest : RestTreeBrowserFixture() {
         startTrace()
         readyTree()
         openOverview()
-        openDialog("[data-overview-agent]")
+        OverviewHomeBrowserSupport.openDialog(page, "[data-overview-agent]")
         val prompt = page.locator("#overview-prompt")
         prompt.inputValue() shouldContain "In workspace tree-"
         prompt.fill(prompt.inputValue().replace("[question]", "which borough grew fastest?"))
@@ -338,7 +287,7 @@ class OverviewBrowserTest : RestTreeBrowserFixture() {
         startTrace()
         readyTree()
         openOverview()
-        openDialog("[data-overview-prepare]")
+        OverviewHomeBrowserSupport.openDialog(page, "[data-overview-prepare]")
         stubClipboard(refuse = true)
         val requests = mutableListOf<String>()
         page.onRequest { requests += "${it.method()} ${it.url()}" }
@@ -360,12 +309,12 @@ class OverviewBrowserTest : RestTreeBrowserFixture() {
         readyTree()
         seedPipeline("acme/one")
         openOverview()
-        metric("total") shouldBe "1"
+        OverviewHomeBrowserSupport.metrics(page, "total" to "1")
 
         val second = "second-" + generatedPassword("ws").lowercase()
         createWorkspace(second)
         openOverview()
-        metric("total") shouldBe "0"
+        OverviewHomeBrowserSupport.metrics(page, "total" to "0")
         page.locator("#overview-prompt").inputValue() shouldStartWith "In workspace $second, build a draft pipeline"
         page.locator("#overview-prompt").inputValue() shouldNotContain "tree-"
         page.locator("[data-overview-context] b").innerText().trim() shouldBe second
@@ -374,15 +323,10 @@ class OverviewBrowserTest : RestTreeBrowserFixture() {
     }
 
     private companion object {
-        const val WIDE = 1512
-        const val WIDE_H = 900
         const val MID = 900
-        const val PHONE = 390
-        const val PHONE_H = 844
         const val TABLET = 768
         const val LAPTOP = 1024
         const val DESK = 1280
-        const val WEEKS = 12
         const val STRIP_CELLS = 4
 
         /** The plot band (`--overview-chart-h`), unchanged since #556. */
@@ -390,6 +334,5 @@ class OverviewBrowserTest : RestTreeBrowserFixture() {
 
         /** Layout rounds to sub-pixels; one CSS pixel of slack is a different layout, not rounding. */
         const val SUBPIXEL = 0.5
-        val SHOTS = Paths.get("build", "reports", "home-frame-overview")
     }
 }
