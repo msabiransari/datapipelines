@@ -622,7 +622,8 @@ class OverviewRenderTest {
                         ),
                 ),
             )
-        doc.select("[data-overview-summary] dl.app-overview-counts .app-overview-dot").map { it.attr("data-tone") } shouldContainExactly tones
+        doc.select("[data-overview-summary] dl.app-overview-counts .app-overview-dot").map { it.attr("data-tone") } shouldContainExactly
+            tones
     }
 
     private fun page(
