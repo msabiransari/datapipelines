@@ -19,7 +19,7 @@ import java.nio.file.Paths
  * the clipboard and makes no request, a refused clipboard selects the text and says how to finish,
  * and the prompt names the workspace the menu shows after a switch.
  *
- * #home-frame re-cut the page on the approved 2026-10-20 direction: the summary strip (Total, Live,
+ * #638 re-cut the page on the approved 2026-10-20 direction: the summary strip (Total, Live,
  * In development, Actively developed; the foot's Live with changes and Retired), the activity
  * columns and the release-history bars, Continue your work and Quick start, and ONE dialog the
  * openers fill by key. The first case reads the strip, the columns and the bars after two and then
@@ -174,8 +174,8 @@ class OverviewBrowserTest : RestTreeBrowserFixture() {
             page.locator("[data-count='retired'] a").count() shouldBe 0
         }
         // #593: the badge counts the three live groups, as the resource browser's header does. The two are
-        // not compared here: the header reads NavCounts' 60-second cache, filled at 0 when the workspace was
-        // created. OverviewStackedTest pins badge = objects - retired; FamilyRecentE2eTest pins the header's.
+        // not compared here: OverviewStackedTest pins badge = objects - retired; FamilyRecentE2eTest pins the
+        // header's (read on every render since #574, PipelineSidebarTreeStateBrowserTest's create case).
         withClue("#593: View all's badge counts the three live groups") {
             page.locator("[data-overview-view-all-count]").innerText().trim() shouldBe "2"
         }

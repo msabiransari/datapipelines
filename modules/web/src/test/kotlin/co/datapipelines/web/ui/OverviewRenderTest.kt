@@ -40,11 +40,12 @@ import kotlin.math.roundToLong
  * number; the Pipelines guide substitutes the workspace through `th:text`; a family without a
  * guide renders the framework and nothing else (amendment 1: no placeholder prose).
  *
- * #598a: the Pipelines home reads a [ChartsResult] instead, so its cases build one; the four-count
- * and four-bar cases run on the four siblings, which keep those numbers until #599. #home-frame
- * re-cut the Pipelines home on the approved 2026-10-20 direction: the summary strip (four exclusive
- * lifecycle groups summing to Total, plus Actively developed), the activity columns, the release
- * history bars, the task rows and the page's one dialog — each invariant of #598 kept below.
+ * #598a: the Pipelines home reads a [ChartsResult] instead. #638 re-cut the Pipelines home on
+ * the approved 2026-10-20 direction: the summary strip (four exclusive lifecycle groups summing to
+ * Total, plus Actively developed), the activity columns, the release history bars, the task rows
+ * and the page's one dialog — each invariant of #598 kept below. #599: the four siblings are
+ * lifecycle homes too, so the family cases run over all five, each in its own words and routes;
+ * the four-count and four-bar cases went with the STANDARD panel no family renders any more.
  */
 class OverviewRenderTest {
     private val engine =
@@ -58,49 +59,55 @@ class OverviewRenderTest {
             )
         }
 
-    /** Amendment 1: the structural case runs on every family that carries the four counts (#598a: not Pipelines). */
+    /**
+     * #599 — every family's strip is its own: the four exclusive groups sum to Total under the
+     * family's plural, the three live groups link that family's filtered catalog, Retired names the
+     * family and stays unlinked, View all counts the three live groups, and the task rows open the
+     * family's draft and released filters in its words.
+     */
     @ParameterizedTest
-    @EnumSource(OverviewPage.Family::class, names = ["PIPELINES"], mode = EnumSource.Mode.EXCLUDE)
-    fun `one inventory feeds the bars, the counts and the table`(family: OverviewPage.Family) {
-        val doc = render(page(InventoryResult.Available(Inventory(1, 1, 1, 1)), family = family))
+    @EnumSource(OverviewPage.Family::class)
+    fun `every family's strip sums to Total and links its own catalog in its own words`(family: OverviewPage.Family) {
+        val doc =
+            render(
+                page(
+                    InventoryResult.Available(Inventory(draftOnly = 4, releasedOnly = 2, releasedWithDraft = 1, discardedOnly = 3)),
+                    family = family,
+                ),
+            )
+        val area = doc.selectFirst("[data-overview-inventory]").shouldNotBeNull()
+        val route = family.catalogHref
 
-        val bars = doc.select("[data-overview-chart] [data-bar]")
-        bars.map { it.attr("data-bar") } shouldContainExactly listOf("draft", "released", "released-with-draft", "discarded")
-        bars.map { it.selectFirst(".app-overview-bar-v")!!.text() } shouldContainExactly listOf("1", "1", "1", "1")
-        bars.map { it.selectFirst("rect")!!.attr("width") } shouldContainExactly listOf("100.0", "100.0", "100.0", "100.0")
-        bars.map { it.attr("data-tone") } shouldContainExactly listOf("draft", "released", "mixed", "discarded")
-        bars[0].selectFirst("svg")!!.attr("aria-label") shouldBe "Draft only: 1 ${family.singular}"
         doc.selectFirst(".app-overview")!!.attr("data-overview") shouldBe family.navigation.route
+        val strip = area.select("dl.app-overview-counts [data-count]").associate { it.attr("data-count") to value(it) }
+        val foot = area.select("[data-overview-foot] [data-count]").associate { it.attr("data-count") to value(it) }
+        strip shouldBe mapOf("total" to 10L, "live" to 2L, "in-development" to 4L, "actively-developed" to 0L)
+        foot shouldBe mapOf("live-changes" to 1L, "retired" to 3L)
+        LIFECYCLE_GROUPS.sumOf { (strip + foot).getValue(it) } shouldBe strip.getValue("total")
+        area.selectFirst("dl.app-overview-counts dt")!!.text() shouldBe "Total ${family.plural}"
 
-        val counts =
-            doc
-                .select(
-                    "[data-overview-inventory] [data-count]",
-                ).associate { it.attr("data-count") to it.selectFirst("dd")!!.text() }
-        counts shouldBe mapOf("objects" to "4", "with-drafts" to "2", "with-releases" to "2", "discarded" to "1")
-
-        doc.select("[data-overview-table] tbody td").map { it.text() } shouldContainExactly listOf("1", "1", "1", "1")
-        doc.select("[data-overview-unavailable]").shouldBeEmpty()
-    }
-
-    @Test
-    fun `bar widths are shares of the tallest bar and a zero is a zero-width rect beside its 0`() {
-        val doc = render(page(Inventory(draftOnly = 4, releasedOnly = 2, releasedWithDraft = 0, discardedOnly = 1), family = STANDARD))
-
-        val bars = doc.select("[data-overview-chart] [data-bar]")
-        bars.map { it.selectFirst("rect")!!.attr("width") } shouldContainExactly listOf("100.0", "50.0", "0.0", "25.0")
-        bars[2].selectFirst(".app-overview-bar-v")!!.text() shouldBe "0"
-        // The SVG width is an attribute: the CSP admits no style attribute (InlineWidthAuditTest).
-        bars.forEach { it.select("[style]").shouldBeEmpty() }
-    }
-
-    @Test
-    fun `an empty family draws an all-zero chart, not a divide by zero`() {
-        val doc = render(page(Inventory(0, 0, 0, 0), family = STANDARD))
-
-        doc.select("[data-overview-chart] rect").map { it.attr("width") } shouldContainExactly listOf("0", "0", "0", "0")
-        doc.select("[data-overview-inventory] [data-count] dd.app-overview-count-v").map { it.text() } shouldContainExactly
-            listOf("0", "0", "0", "0")
+        area
+            .select("[data-count]")
+            .filter {
+                it.selectFirst("a") != null
+            }.map { it.attr("data-count") to it.selectFirst("a")!!.attr("href") } shouldContainExactly
+            listOf(
+                "live" to "$route?lifecycle=released",
+                "in-development" to "$route?lifecycle=draft",
+                "live-changes" to "$route?lifecycle=released-with-draft",
+            )
+        val retired = doc.selectFirst("[data-count=retired]").shouldNotBeNull()
+        retired.select("a").shouldBeEmpty()
+        retired.attr("title") shouldBe "Retired ${family.plural} have no page."
+        doc.selectFirst("[data-overview-view-all]")!!.attr("href") shouldBe route
+        doc.selectFirst("[data-overview-view-all-count]")!!.text() shouldBe "7"
+        doc.select("[data-task]").map { it.attr("data-task") to it.selectFirst("a")!!.attr("href") } shouldContainExactly
+            listOf("drafts" to "$route?lifecycle=draft", "live" to "$route?lifecycle=released")
+        doc.select("[data-task] b").map { it.text() } shouldContainExactly listOf("Review your drafts", "Explore live ${family.plural}")
+        doc.selectFirst("[data-task=drafts] small")!!.text() shouldBe "4 ${family.plural} are working toward their first release."
+        doc.select("[data-overview-panel]").map { it.attr("data-overview-panel") } shouldContainExactly listOf("activity", "maturity")
+        doc.select("[data-bar=draft], [data-count=objects], [data-overview-review]").shouldBeEmpty()
+        doc.select("[style]").shouldBeEmpty()
     }
 
     /** Amendment 1: the Unavailable case runs on every family, one fixture each. */
@@ -232,7 +239,7 @@ class OverviewRenderTest {
     }
 
     /**
-     * #home-frame / #593 — the summary strip: Total, Live, In development and Actively developed,
+     * #638 / #593 — the summary strip: Total, Live, In development and Actively developed,
      * then the foot's Live with changes and Retired. The four exclusive lifecycle groups (two in
      * the strip, two in its foot) sum to Total, every number read from the one [ChartInventory];
      * the #556 counts, bars and #598 stacked hooks are gone.
@@ -412,9 +419,19 @@ class OverviewRenderTest {
         doc.select("[data-chart-table=maturity] td[data-part=total]").sumOf { it.text().toLong() } shouldBe 11L
     }
 
-    @Test
-    fun `an empty pipelines workspace draws all-zero panels, not a divide by zero`() {
-        val doc = render(pipelines(ChartInventory.empty(NOW, ACTIVE_DAYS)))
+    @ParameterizedTest
+    @EnumSource(OverviewPage.Family::class)
+    fun `an empty workspace draws all-zero panels, not a divide by zero`(family: OverviewPage.Family) {
+        val doc =
+            render(
+                OverviewPage.of(
+                    family,
+                    false,
+                    ChartsResult.Available(ChartInventory.empty(NOW, ACTIVE_DAYS)),
+                    RecentResult.Available(emptyList()),
+                    NOW,
+                ),
+            )
 
         doc.select("[data-overview-inventory] [data-count] .app-overview-count-v").map { it.text() }.distinct() shouldContainExactly
             listOf("0")
@@ -425,9 +442,9 @@ class OverviewRenderTest {
         doc.select(".app-overview-axis span").map { it.text() } shouldContainExactly listOf("", "", "0")
         doc.selectFirst(".app-overview-headline strong")!!.text() shouldBe "0 events"
         doc.selectFirst("[data-overview-panel=activity] .app-overview-panel-foot")!!.text() shouldContain "No events this week"
-        doc.select("[data-overview-note] span").map { it.text() } shouldContainExactly listOf("No pipelines yet.")
+        doc.select("[data-overview-note] span").map { it.text() } shouldContainExactly listOf("No ${family.plural} yet.")
         doc.selectFirst("[data-overview-view-all-count]")!!.text() shouldBe "0"
-        doc.selectFirst("[data-task=drafts] small")!!.text() shouldBe "No pipeline is waiting for its first release."
+        doc.selectFirst("[data-task=drafts] small")!!.text() shouldBe "No ${family.singular} is waiting for its first release."
     }
 
     /** #598b — the configured actively developed window: the metric's note and the definitions dialog both name it. */
@@ -512,23 +529,6 @@ class OverviewRenderTest {
     }
 
     @Test
-    fun `the templates links filter the templates catalog and the discarded bar stays unlinked (#579)`() {
-        val doc = render(page(InventoryResult.Available(Inventory(1, 1, 1, 1)), family = OverviewPage.Family.TEMPLATES))
-
-        doc.select("[data-overview-chart] [data-bar] a").map { it.attr("href") } shouldContainExactly
-            listOf(
-                "/templates?lifecycle=draft",
-                "/templates?lifecycle=released",
-                "/templates?lifecycle=released-with-draft",
-            )
-        doc.selectFirst("[data-bar=discarded] a").shouldBeNull()
-        doc.select("[data-overview-inventory] [data-count] a").map { it.attr("href") } shouldContainExactly
-            listOf("/templates?lifecycle=with-drafts", "/templates?lifecycle=with-releases")
-        doc.selectFirst("[data-overview-view-all]")!!.attr("href") shouldBe "/templates"
-        doc.selectFirst("[data-overview-review]")!!.attr("href") shouldBe "/templates?lifecycle=with-drafts"
-    }
-
-    @Test
     fun `the starter prompt names the active workspace through th-text`() {
         val html = html(page(Inventory(1, 0, 0, 0)), workspace = "<b>acme</b>")
         val doc = Jsoup.parse(html)
@@ -555,25 +555,23 @@ class OverviewRenderTest {
 
     /**
      * A family without a guide renders the frame and none of the guide's regions (amendment 1: no
-     * placeholder prose). Every family is guided today, so the case un-guides one; the script loads
-     * regardless, since the dialog exists on every family (#home-frame).
+     * placeholder prose). Every family is guided today, so the case un-guides each; the script loads
+     * regardless, since the dialog exists on every family (#638).
      */
-    @Test
-    fun `a family without a guide renders the framework and no placeholder prose`() {
-        OverviewPage.Family.entries.filter { it.charts == OverviewStacked.ChartSet.STANDARD }.forEach { family ->
-            val page = OverviewPage.of(family, false, InventoryResult.Available(Inventory(1, 2, 3, 4)), null, NOW)
-            val doc = render(page.copy(guided = false))
+    @ParameterizedTest
+    @EnumSource(OverviewPage.Family::class)
+    fun `a family without a guide renders the framework and no placeholder prose`(family: OverviewPage.Family) {
+        val doc = render(page(InventoryResult.Available(Inventory(1, 2, 3, 4)), recent = null, family = family).copy(guided = false))
 
-            doc.selectFirst("h1")!!.text() shouldBe family.title
-            doc.selectFirst("[data-overview-view-all]")!!.attr("href") shouldBe family.catalogHref
-            doc.select("[data-overview-chart] [data-bar]").size shouldBe 4
-            doc
-                .select(
-                    "[data-overview-intro], [data-overview-prompt], [data-overview-recent], [data-overview-related], " +
-                        "[data-overview-quickstart], [data-overview-agent], .app-overview-subtitle",
-                ).shouldBeEmpty()
-            doc.select("template[data-page-assets]").single().html() shouldContain "/js/overview.mjs"
-        }
+        doc.selectFirst("h1")!!.text() shouldBe family.title
+        doc.selectFirst("[data-overview-view-all]")!!.attr("href") shouldBe family.catalogHref
+        doc.select("dl.app-overview-counts [data-count]").size shouldBe 4
+        doc
+            .select(
+                "[data-overview-intro], [data-overview-prompt], [data-overview-recent], [data-overview-related], " +
+                    "[data-overview-quickstart], [data-overview-agent], .app-overview-subtitle",
+            ).shouldBeEmpty()
+        doc.select("template[data-page-assets]").single().html() shouldContain "/js/overview.mjs"
     }
 
     @Test
@@ -616,26 +614,19 @@ class OverviewRenderTest {
         family: OverviewPage.Family = OverviewPage.Family.PIPELINES,
     ): OverviewPage = page(InventoryResult.Available(inventory), recent, family)
 
-    /** One inventory result for any family: a #598a chart family reads it as its chart group ([charts]). */
+    /** One inventory result for any family, read as its chart group ([charts]): every family is a lifecycle home (#599). */
     private fun page(
         inventory: InventoryResult,
         recent: RecentResult? = RecentResult.Available(emptyList()),
         family: OverviewPage.Family = OverviewPage.Family.PIPELINES,
-    ): OverviewPage =
-        when (family.charts) {
-            OverviewStacked.ChartSet.STANDARD -> {
-                OverviewPage.of(family, false, inventory, recent, NOW)
+    ): OverviewPage {
+        val charts =
+            when (inventory) {
+                is InventoryResult.Available -> ChartsResult.Available(charts(inventory.inventory))
+                is InventoryResult.Unavailable -> ChartsResult.Unavailable(inventory.reason)
             }
-
-            OverviewStacked.ChartSet.LIFECYCLE -> {
-                val charts =
-                    when (inventory) {
-                        is InventoryResult.Available -> ChartsResult.Available(charts(inventory.inventory))
-                        is InventoryResult.Unavailable -> ChartsResult.Unavailable(inventory.reason)
-                    }
-                OverviewPage.of(family, false, charts, recent, NOW)
-            }
-        }
+        return OverviewPage.of(family, false, charts, recent, NOW)
+    }
 
     private fun pipelines(charts: ChartInventory): OverviewPage =
         OverviewPage.of(OverviewPage.Family.PIPELINES, false, ChartsResult.Available(charts), RecentResult.Available(emptyList()), NOW)
@@ -721,7 +712,6 @@ class OverviewRenderTest {
     private companion object {
         val NOW: Instant = Instant.parse("2026-10-17T12:00:00Z")
         const val ACTIVE_DAYS = 14
-        val STANDARD = OverviewPage.Family.TEMPLATES
         const val TEN = 10.0
         const val FULL_TENTHS = 1_000L
         val LIFECYCLE_GROUPS = listOf("live", "in-development", "live-changes", "retired")

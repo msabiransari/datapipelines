@@ -23,6 +23,8 @@ import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
@@ -65,7 +67,9 @@ import javax.crypto.spec.SecretKeySpec
  *    ruling of 2026-10-02 (auth §11A.1's lens clause): the lens governs direct reads, never a bundle;
  * 6. **fail closed**: with the target stopped, the promoter's lists are empty, the gets are
  *    not-found, `pipeline.promotion.lens_unavailable` is logged ONCE for the whole walk (once per
- *    cache window, by construction) and the counter's `unreachable` outcome moved.
+ *    cache window, by construction) and the counter's `unreachable` outcome moved;
+ * 7. **the homes (#599)**: every family's overview — pipelines, templates and the seeded parameter sets,
+ *    visualizations and dashboards — counts only the admitted releases, and the viewer's counts the drafts.
  *
  * ## The route list is the server's own
  * Read off `RequestMappingHandlerMapping` by reflection ([RoleWalkE2eTest]'s way), GET routes
@@ -188,6 +192,108 @@ class PromoterLensSweepTest {
         mcpIsTheNewerSet(keyFor(PROMOTER))
     }
 
+    /**
+     * #599 — every family's home counts only what the lens admits. As the promoter, the summary strip and its
+     * foot, the maturity rows and the twelve weeks' columns are the admitted RELEASES alone: every hidden object
+     * and every visible object's pending DRAFT moves no metric, no column and no bin, Actively developed is 0, the
+     * drafts task row finds none waiting, the activity table is on the page, Recently updated lists the visible
+     * objects with no draft badge, no hidden name reaches the page, and the Released filter the strip links lists
+     * the visible objects only. As the viewer — the control — the same page counts the drafts, so the promoter's
+     * zeros are the lens and not missing rows. Each family seeds its own root ([Home]) and the dashboards'
+     * admitted names differ from the visualizations', so a home that read another family's lens arm goes red.
+     */
+    @ParameterizedTest
+    @EnumSource(Home::class)
+    @Order(3)
+    fun `each family's home counts only what the lens admits, and the viewer's counts the drafts`(home: Home) {
+        ensureSeeded()
+        withClue("#599: the promoter's ${home.route} home") {
+            val page = call("/overview/${home.route}", sessionFor(PROMOTER))
+            page.status shouldBe HTTP_OK
+            val numbers = overviewNumbers(page.body)
+            println("event=lens.sweep.home family=${home.route} principal=promoter numbers=${numbers.filterValues { it != 0 }}")
+            numbers shouldBe home.promoter
+            page.body.contains("data-chart-table=\"activity\"") shouldBe true
+            draftsTask(page.body) shouldBe "No ${home.singular} is waiting for its first release."
+            val recent = page.body.substringAfter("data-overview-recent", "").substringBefore("</section>")
+            home.visible.forEach { recent.contains(it) shouldBe true }
+            recent.contains("ds-badge-warning") shouldBe false
+            (home.hidden + HIDDEN_TOKENS).filter { it in page.body } shouldBe emptyList()
+            val released = call("/${home.route}?lifecycle=released", sessionFor(PROMOTER))
+            released.status shouldBe HTTP_OK
+            home.visible.forEach { released.body.contains(it) shouldBe true }
+            home.hidden.filter { it in released.body } shouldBe emptyList()
+        }
+        withClue("#599: the viewer's ${home.route} home, the control") {
+            val page = call("/overview/${home.route}", sessionFor(VIEWER))
+            val numbers = overviewNumbers(page.body)
+            println("event=lens.sweep.home family=${home.route} principal=viewer numbers=${numbers.filterValues { it != 0 }}")
+            numbers shouldBe home.viewer
+            draftsTask(page.body) shouldBe "1 ${home.singular} is working toward its first release."
+        }
+    }
+
+    /** #599 — Continue your work's drafts row: the In development count, worded. */
+    private fun draftsTask(html: String): String = DRAFTS_TASK.find(html)?.groupValues?.get(1) ?: error("no drafts task row on the page")
+
+    /**
+     * #599 — one family home the sweep reads: its overview route and singular, its seeded objects the
+     * promoter's lens admits ([visible]) and hides ([hidden]), and the home's numbers for each principal.
+     */
+    enum class Home(
+        val route: String,
+        val singular: String,
+        val visible: List<String>,
+        val hidden: List<String>,
+        val promoter: Map<String, Int>,
+        val viewer: Map<String, Int>,
+    ) {
+        /** #556/#598: three Live pipelines with one release each; the viewer adds `draft_only` and `newer`'s DRAFT. */
+        PIPELINES(
+            "pipelines",
+            "pipeline",
+            VISIBLE_PIPELINES,
+            HIDDEN_PIPELINES,
+            releasesOnly(VISIBLE_PIPELINES.size),
+            lifecycleCharts(
+                "total" to 6,
+                "in-development" to 1,
+                "live" to 4,
+                "live-changes" to 1,
+                "r0:draft-open" to 1,
+                "r1:no-draft" to 4,
+                "r1:draft-open" to 1,
+                "activity:released" to 5,
+                "activity:created" to 6,
+                "active" to 2,
+            ),
+        ),
+
+        /** #579: the two visible templates; the viewer counts all five, `draft_only` and `newer.sql`'s DRAFT among them. */
+        TEMPLATES(
+            "templates",
+            "template",
+            VISIBLE_TEMPLATES,
+            HIDDEN_TEMPLATES,
+            releasesOnly(VISIBLE_TEMPLATES.size),
+            lifecycleCharts(
+                "total" to 5,
+                "in-development" to 1,
+                "live" to 3,
+                "live-changes" to 1,
+                "r0:draft-open" to 1,
+                "r1:no-draft" to 3,
+                "r1:draft-open" to 1,
+                "activity:released" to 4,
+                "activity:created" to 5,
+                "active" to 2,
+            ),
+        ),
+        DASHBOARDS("dashboards", "dashboard", VISIBLE_DASHBOARDS, HIDDEN_DASHBOARDS, releasesOnly(2), FOUR_SEEDED),
+        VISUALIZATIONS("visualizations", "visualization", VISIBLE_VISUALIZATIONS, HIDDEN_VISUALIZATIONS, releasesOnly(2), FOUR_SEEDED),
+        PARAMETER_SETS("parameter-sets", "parameter set", VISIBLE_SETS, HIDDEN_SETS, releasesOnly(2), FOUR_SEEDED),
+    }
+
     private fun restIsTheNewerSet(auth: (RequestSpecification) -> RequestSpecification) {
         withClue("REST pipelines: the flat list, the folder level, the root's folder count") {
             names(getJson("/api/v1/pipelines", auth).path("data").path("items"), "name") shouldContainExactlyInAnyOrder VISIBLE_PIPELINES
@@ -233,34 +339,19 @@ class PromoterLensSweepTest {
         }
         treesAreTheNewerSet("pipelines", P, VISIBLE_PIPELINES, auth)
         treesAreTheNewerSet("templates", T, VISIBLE_TEMPLATES, auth)
-        overviewIsTheNewerSet(auth)
-        templatesOverviewIsTheNewerSet(auth)
+        pipelinesCatalogIsTheNewerSet(auth)
+        templatesCatalogIsTheNewerSet(auth)
         staleSidebarParametersAreIgnored("pipelines", "pipeline-list-wrapper", VISIBLE_PIPELINES, auth)
         staleSidebarParametersAreIgnored("templates", "template-list-wrapper", VISIBLE_TEMPLATES, auth)
     }
 
     /**
-     * #556 — the Pipelines overview's three surfaces (the charts, Recently updated, the
-     * lifecycle-filtered catalog) are the admitted set: `lp/newer`'s pending DRAFT is hidden, so it
-     * classifies as released only, the With drafts filter is empty, and no hidden name reaches the
-     * page. The viewer control ([viewerOverviewSeesEverything]) proves the draft is a row, not absent.
-     * #598a: the charts are the total, the four lifecycle groups and the five maturity rows —
-     * through the lens three Live pipelines with one release each, and no draft anywhere. #598b:
-     * the activity chart counts those three releases and three new pipelines, and nobody is
-     * actively developing — no DRAFT is admitted, so that metric is 0. #home-frame: the numbers
-     * are the summary strip's and its foot's, and the hidden tables' cells.
+     * #556 — the Pipelines home's lifecycle-filtered catalog is the admitted set: `lp/newer`'s pending
+     * DRAFT is hidden, so it classifies as released only and the With drafts filter is empty. The home's
+     * own numbers are [each family's home counts only what the lens admits].
      */
-    private fun overviewIsTheNewerSet(auth: (RequestSpecification) -> RequestSpecification) {
-        withClue("#556: the promoter's Pipelines overview counts, lists and filters only the admitted versions") {
-            val page = call("/overview/pipelines", auth)
-            page.status shouldBe HTTP_OK
-            overviewNumbers(page.body) shouldBe
-                pipelineCharts("total" to 3, "live" to 3, "r1:no-draft" to 3, "activity:released" to 3, "activity:created" to 3)
-            page.body.contains("data-chart-table=\"activity\"") shouldBe true
-            val recent = page.body.substringAfter("data-overview-recent", "").substringBefore("</section>")
-            VISIBLE_PIPELINES.forEach { recent.contains(it) shouldBe true }
-            recent.contains("ds-badge-warning") shouldBe false
-            HIDDEN_TOKENS.filter { it in page.body } shouldBe emptyList()
+    private fun pipelinesCatalogIsTheNewerSet(auth: (RequestSpecification) -> RequestSpecification) {
+        withClue("#556: the promoter's Pipelines catalog filters only the admitted versions") {
             val withDrafts = call("/partials/pipelines?lifecycle=with-drafts", auth).body
             (VISIBLE_PIPELINES + HIDDEN_PIPELINES).filter { it in withDrafts } shouldBe emptyList()
             val released = call("/partials/pipelines?lifecycle=released", auth).body
@@ -270,54 +361,23 @@ class PromoterLensSweepTest {
     }
 
     /**
-     * #579 — the Templates overview's three surfaces are the admitted set, exactly as the
-     * Pipelines overview's: `lt/newer.sql`'s pending DRAFT is hidden, so it classifies as
-     * released only, the With drafts filter is empty, and no hidden name reaches the page or
-     * the recent list. Each offered filter's row count is its bar's number.
+     * #579 — the Templates catalog's filters are the admitted set, exactly as the Pipelines catalog's:
+     * `lt/newer.sql`'s pending DRAFT is hidden, so the With drafts filter is empty and Released lists
+     * the two visible templates only.
      */
-    private fun templatesOverviewIsTheNewerSet(auth: (RequestSpecification) -> RequestSpecification) {
-        withClue("#579: the promoter's Templates overview counts, lists and filters only the admitted versions") {
-            val page = call("/overview/templates", auth)
-            page.status shouldBe HTTP_OK
-            overviewNumbers(page.body) shouldBe
-                mapOf(
-                    "objects" to 2,
-                    "with-drafts" to 0,
-                    "with-releases" to 2,
-                    "discarded" to 0,
-                    "draft" to 0,
-                    "released" to 2,
-                    "released-with-draft" to 0,
-                )
-            val recent = page.body.substringAfter("data-overview-recent", "").substringBefore("</section>")
-            VISIBLE_TEMPLATES.forEach { recent.contains(it) shouldBe true }
-            HIDDEN_TEMPLATES.filter { it in recent } shouldBe emptyList()
-            recent.contains("ds-badge-warning") shouldBe false
+    private fun templatesCatalogIsTheNewerSet(auth: (RequestSpecification) -> RequestSpecification) {
+        withClue("#579: the promoter's Templates catalog filters only the admitted versions") {
             val withDrafts = call("/partials/templates?lifecycle=with-drafts", auth).body
             (VISIBLE_TEMPLATES + HIDDEN_TEMPLATES).filter { it in withDrafts } shouldBe emptyList()
             val released = call("/partials/templates?lifecycle=released", auth).body
             VISIBLE_TEMPLATES.forEach { released.contains(it) shouldBe true }
             HIDDEN_TEMPLATES.filter { it in released } shouldBe emptyList()
             Regex("data-leaf-id=").findAll(released).count() shouldBe 2
-            HIDDEN_TOKENS.filter { it in page.body } shouldBe emptyList()
         }
     }
 
-    private fun viewerOverviewSeesEverything(auth: (RequestSpecification) -> RequestSpecification) {
-        withClue("#556: the viewer's overview counts the draft the promoter's does not") {
-            overviewNumbers(call("/overview/pipelines", auth).body) shouldBe
-                pipelineCharts(
-                    "total" to 6,
-                    "in-development" to 1,
-                    "live" to 4,
-                    "live-changes" to 1,
-                    "r0:draft-open" to 1,
-                    "r1:no-draft" to 4,
-                    "r1:draft-open" to 1,
-                    "activity:released" to 5,
-                    "activity:created" to 6,
-                    "active" to 2,
-                )
+    private fun viewerCatalogsSeeEverything(auth: (RequestSpecification) -> RequestSpecification) {
+        withClue("#556: the viewer's catalog lists the drafts the promoter's does not") {
             val withDrafts = call("/partials/pipelines?lifecycle=with-drafts", auth).body
             listOf("$P/draft_only", "$P/newer").forEach { withDrafts.contains(it) shouldBe true }
         }
@@ -326,18 +386,7 @@ class PromoterLensSweepTest {
             templates.status shouldBe HTTP_OK
             templates.body.contains("data-overview=\"templates\"") shouldBe true
         }
-        withClue("#579: the viewer's Templates overview counts every template and each filter's rows are its bar's number") {
-            overviewNumbers(call("/overview/templates", auth).body) shouldBe
-                mapOf(
-                    "objects" to 5,
-                    "with-drafts" to 2,
-                    "with-releases" to 4,
-                    "discarded" to 0,
-                    "draft" to 1,
-                    "released" to 3,
-                    "released-with-draft" to 1,
-                )
-
+        withClue("#579: each offered Templates filter lists exactly its lifecycle group's templates") {
             fun rows(body: String): Int = Regex("data-leaf-id=").findAll(body).count()
             val draftRows = call("/partials/templates?lifecycle=draft", auth).body
             rows(draftRows) shouldBe 1
@@ -365,21 +414,9 @@ class PromoterLensSweepTest {
     }
 
     /**
-     * #598a — the Pipelines overview's numbers as `overviewNumbers` reads them: the total, the four lifecycle parts and
-     * every maturity cell ("bin:part"), each 0 unless named, so a cell the page adds or drops is a difference.
-     * #598b: and the activity chart's — the actively developed headline (`active`) and each part summed over the
-     * twelve weeks (`activity:released`), sums because the seed's week is whatever week the suite runs in.
-     */
-    private fun pipelineCharts(vararg nonZero: Pair<String, Int>): Map<String, Int> =
-        (
-            listOf("total", "in-development", "live", "live-changes", "retired", "active", "activity:released", "activity:created") +
-                listOf("r0", "r1", "r2-3", "r4-9", "r10").flatMap { bin -> listOf("$bin:no-draft", "$bin:draft-open") }
-        ).associateWith { 0 } + nonZero
-
-    /**
      * The overview's four counts and the bars' values, by key (the discarded bar's key is its count's);
      * #598a: and the charts' hidden-table cells, a maturity row's as `row:part` (`r1:no-draft`); #598b:
-     * the week rows' cells summed by part (`activity:created`). #home-frame: the Pipelines strip and
+     * the week rows' cells summed by part (`activity:created`). #638: the Pipelines strip and
      * its foot are counts too (`total`, `live`, …; Actively developed as `active`), only the four
      * lifecycle bars are read as bars, and the derived cells are skipped: a row's `total` is its parts'
      * sum and a bars table's `value` repeats its bar, both pinned by `OverviewRenderTest`.
@@ -498,7 +535,7 @@ class PromoterLensSweepTest {
      * shows — and the viewer sees all of it, so the promoter's not seeing it is the lens.
      */
     @Test
-    @Order(3)
+    @Order(4)
     fun `as the promoter a visible object's DRAFT content is invisible on the node SQL, the checks and the used-by reads`() {
         ensureSeeded()
         val promoter = sessionFor(PROMOTER)
@@ -570,7 +607,7 @@ class PromoterLensSweepTest {
     }
 
     @Test
-    @Order(4)
+    @Order(5)
     fun `as a viewer the same walk sees everything, and the target is never called`() {
         ensureSeeded()
         val before = stubRequests.size
@@ -588,7 +625,7 @@ class PromoterLensSweepTest {
             call("/api/v1/templates?name=$T/newer.sql", auth).body.contains(DRAFT_MARKER) shouldBe true
         }
         reachableGetRoutes().forEach { route -> identifierPairs(route).forEach { (hidden, _) -> call(hidden, auth) } }
-        viewerOverviewSeesEverything(auth)
+        viewerCatalogsSeeEverything(auth)
         names(toolResult(tool("pipelines_list", "{}", keyFor(AUTHOR))), "name") shouldContainExactlyInAnyOrder
             VISIBLE_PIPELINES + HIDDEN_PIPELINES
         browserCounts(call("/pipelines", auth).body).filterKeys { it in TREE_FAMILIES } shouldBe
@@ -613,7 +650,7 @@ class PromoterLensSweepTest {
      * exports: its half is that refusal and the lensed `templates_get`.
      */
     @Test
-    @Order(5)
+    @Order(6)
     fun `as the promoter the export of a visible pipeline carries the hidden template it pins, and its direct read stays absent`() {
         ensureSeeded()
         val auth = sessionFor(PROMOTER)
@@ -637,7 +674,7 @@ class PromoterLensSweepTest {
     }
 
     @Test
-    @Order(6)
+    @Order(7)
     fun `with the target unreachable the promoter sees nothing, is told once per window, and the counter moved`() {
         ensureSeeded()
         val warnings = ListAppender<ILoggingEvent>().also { it.start() }
@@ -915,6 +952,47 @@ class PromoterLensSweepTest {
     private fun keyFor(role: String): String = KEYS.getValue(role).plaintext
 
     companion object {
+        /**
+         * #598a — a family home's numbers as `overviewNumbers` reads them (#599: every family's): the total, the
+         * four lifecycle parts and every maturity cell ("bin:part"), each 0 unless named, so a cell the page adds or
+         * drops is a difference. #598b: and the activity chart's — the actively developed headline (`active`) and
+         * each part summed over the twelve weeks (`activity:released`), sums because the seed's week is whatever
+         * week the suite runs in.
+         */
+        private fun lifecycleCharts(vararg nonZero: Pair<String, Int>): Map<String, Int> =
+            (
+                listOf("total", "in-development", "live", "live-changes", "retired", "active", "activity:released", "activity:created") +
+                    listOf("r0", "r1", "r2-3", "r4-9", "r10").flatMap { bin -> listOf("$bin:no-draft", "$bin:draft-open") }
+            ).associateWith { 0 } + nonZero
+
+        /** #599 — a home through the promoter's lens: [count] Live objects with one release each, created in the twelve weeks, no draft. */
+        private fun releasesOnly(count: Int): Map<String, Int> =
+            lifecycleCharts(
+                "total" to count,
+                "live" to count,
+                "r1:no-draft" to count,
+                "activity:released" to count,
+                "activity:created" to count,
+            )
+
+        /**
+         * #599 — a seeded object family's home for the viewer: `draft_only` In development, two Live (one hidden
+         * from the promoter), `newer` Live with changes; three releases, four objects, two drafts written now.
+         */
+        private val FOUR_SEEDED: Map<String, Int> =
+            lifecycleCharts(
+                "total" to 4,
+                "in-development" to 1,
+                "live" to 2,
+                "live-changes" to 1,
+                "r0:draft-open" to 1,
+                "r1:no-draft" to 2,
+                "r1:draft-open" to 1,
+                "activity:released" to 3,
+                "activity:created" to 4,
+                "active" to 2,
+            )
+
         private const val SESSION_COOKIE = "dp_session"
         private const val CSRF_COOKIE = "dp_csrf"
         private const val CSRF_HEADER = "DP-CSRF-Token"
@@ -942,7 +1020,7 @@ class PromoterLensSweepTest {
 
         /**
          * #556 — one overview count (`data-count`) and one lifecycle bar (`data-bar`) with its number;
-         * #home-frame: a count is a strip cell (`dd`) or a foot cell (`b`, Retired's carries a title).
+         * #638: a count is a strip cell (`dd`) or a foot cell (`b`, Retired's carries a title).
          */
         private val OVERVIEW_COUNT =
             Regex(
@@ -956,10 +1034,13 @@ class PromoterLensSweepTest {
                 RegexOption.DOT_MATCHES_ALL,
             )
 
-        /** #598a — one hidden-table row and one part's cell in it; #home-frame: the cells no chart states on its own. */
+        /** #598a — one hidden-table row and one part's cell in it; #638: the cells no chart states on its own. */
         private val DERIVED_CELLS = setOf("total", "value")
         private val STACKED_ROW = Regex("""<tr data-row="([a-z0-9-]+)"[^>]*>(.*?)</tr>""", RegexOption.DOT_MATCHES_ALL)
         private val STACKED_CELL = Regex("""data-part="([a-z-]+)"[^>]*>(\d+)</td>""")
+
+        /** #599 — Continue your work's drafts row and its sentence. */
+        private val DRAFTS_TASK = Regex("""data-task="drafts">.*?<small>([^<]*)</small>""", RegexOption.DOT_MATCHES_ALL)
 
         /**
          * Floors, not targets — the 2026-09-21 walk: 57 promoter-reachable GET routes, 57
@@ -996,6 +1077,22 @@ class PromoterLensSweepTest {
         private val VISIBLE_PIPELINES = listOf("$P/absent_there", "$P/newer", "$P/pins_hidden")
         private val HIDDEN_TEMPLATES = listOf("$T/draft_only.sql", "$T/on_target_same.sql", "$T/behind.sql")
         private val VISIBLE_TEMPLATES = listOf("$T/absent_there.sql", "$T/newer.sql")
+
+        /**
+         * #599 — the three object families the homes read, one root each. Two of each family are visible (released,
+         * absent on the target, one with a pending DRAFT); `draft_only` is hidden by having no release; the fourth by
+         * the target holding it at the same hash (`on_target_same`), or — a visualization — by being pinned only by a
+         * hidden dashboard (`only_hidden_pin`). The dashboards' admitted names are not the visualizations'.
+         */
+        private const val S = "ls"
+        private const val D = "ld"
+        private const val V = "lv"
+        private val VISIBLE_SETS = listOf("$S/absent_there", "$S/newer")
+        private val HIDDEN_SETS = listOf("$S/draft_only", "$S/on_target_same")
+        private val VISIBLE_DASHBOARDS = listOf("$D/absent_there", "$D/newer")
+        private val HIDDEN_DASHBOARDS = listOf("$D/draft_only", "$D/on_target_same")
+        private val VISIBLE_VISUALIZATIONS = listOf("$V/absent_there", "$V/newer")
+        private val HIDDEN_VISUALIZATIONS = listOf("$V/draft_only", "$V/only_hidden_pin")
         private const val HIDDEN_ENDPOINT = "/lens/v1/hidden_behind"
         private const val VISIBLE_ENDPOINT = "/lens/v1/visible_newer"
 
@@ -1046,7 +1143,7 @@ class PromoterLensSweepTest {
          * What the target holds: `on_target_same` at the same version and hash (nothing to
          * push), `behind` AHEAD of us, `newer` behind us. `draft_only` and `absent_there` are
          * unknown to it — the first is hidden by having no release, the second visible by
-         * being absent there.
+         * being absent there. #599: it holds `ls/on_target_same` and `ld/on_target_same` at their own hash.
          */
         private val INVENTORY =
             """{"schema_version":1,"correlation_id":"stub","data":{"deployment":"uat","authoring_enabled":false,"workspace":"$WS_NAME",""" +
@@ -1055,7 +1152,9 @@ class PromoterLensSweepTest {
                 """{"name":"$P/newer","current_version":2,"body_hash":"hash-old"}],""" +
                 """"templates":[{"name":"$T/on_target_same.sql","current_version":2,"body_hash":"thash-same"},""" +
                 """{"name":"$T/behind.sql","current_version":5,"body_hash":"thash-theirs"},""" +
-                """{"name":"$T/newer.sql","current_version":2,"body_hash":"thash-old"}],"datasources":[]}}"""
+                """{"name":"$T/newer.sql","current_version":2,"body_hash":"thash-old"}],"datasources":[],""" +
+                """"parameter_sets":[{"name":"$S/on_target_same","current_version":1,"body_hash":"$S/on_target_same@1"}],""" +
+                """"dashboards":[{"name":"$D/on_target_same","current_version":1,"body_hash":"$D/on_target_same@1"}]}}"""
 
         private const val PIPELINE_BODY =
             """{"schema_version":1,"name":"lens","display_name":"Lens","description":"",""" +
@@ -1117,6 +1216,7 @@ class PromoterLensSweepTest {
                     seedPipelines(statement, owner)
                     seedTemplates(statement, owner)
                     seedEndpoints(statement, owner)
+                    seedObjectFamilies(statement, owner)
                 }
                 seedKeys(connection)
             }
@@ -1214,6 +1314,111 @@ class PromoterLensSweepTest {
                 }
             }
         }
+
+        /** #599 — one seeded object: its released pointer, its version rows (version to status) and the body each carries. */
+        private class Seeded(
+            val name: String,
+            val current: Int?,
+            val versions: Map<Int, String>,
+            val body: String,
+        )
+
+        /**
+         * #599 — the parameter sets, visualizations and dashboards the homes read ([S], [V], [D]). Every row's hash
+         * is `name@version`, which is what the stub target holds for the `on_target_same` objects. The visible
+         * dashboards source the visible `lp/absent_there` and pin the visible visualizations; the hidden one pins
+         * `lv/only_hidden_pin`, which nothing admitted pins.
+         */
+        private fun seedObjectFamilies(
+            statement: java.sql.Statement,
+            owner: String,
+        ) {
+            seedObjects(statement, owner, "parameter_set", fourOf(S, "on_target_same") { SET_BODY })
+            seedObjects(statement, owner, "visualization", fourOf(V, "only_hidden_pin") { VISUALIZATION_BODY })
+            val pins =
+                mapOf(
+                    "$D/draft_only" to listOf("$V/draft_only"),
+                    "$D/absent_there" to listOf("$V/absent_there", "$V/newer"),
+                    "$D/newer" to listOf("$V/absent_there"),
+                    "$D/on_target_same" to listOf("$V/only_hidden_pin"),
+                )
+            seedObjects(statement, owner, "dashboard", fourOf(D, "on_target_same") { name -> dashboardBody(pins.getValue(name)) })
+        }
+
+        /** `draft_only` (no release), `absent_there` (released), `newer` (released, a DRAFT pending) and one more released. */
+        private fun fourOf(
+            root: String,
+            fourth: String,
+            body: (String) -> String,
+        ): List<Seeded> =
+            listOf(
+                Seeded("$root/draft_only", null, mapOf(1 to "DRAFT"), body("$root/draft_only")),
+                Seeded("$root/absent_there", 1, mapOf(1 to "RELEASED"), body("$root/absent_there")),
+                Seeded("$root/newer", 1, mapOf(1 to "RELEASED", 2 to "DRAFT"), body("$root/newer")),
+                Seeded("$root/$fourth", 1, mapOf(1 to "RELEASED"), body("$root/$fourth")),
+            )
+
+        private fun seedObjects(
+            statement: java.sql.Statement,
+            owner: String,
+            table: String,
+            seeds: List<Seeded>,
+        ) {
+            seeds.forEach { seed ->
+                val id = UUID.randomUUID()
+                statement.execute(
+                    "INSERT INTO ${table}s (id, workspace_id, name, display_name, description, current_version, created_by) " +
+                        "VALUES ('$id', '$WS_ID', '${seed.name}', '${seed.name}', '', ${seed.current ?: "NULL"}, '$owner')",
+                )
+                seed.versions.forEach { (version, status) ->
+                    val released = if (status == "RELEASED") "'$owner', NOW()" else "NULL, NULL"
+                    statement.execute(
+                        "INSERT INTO ${table}_versions " +
+                            "(${table}_id, version, body_json, body_hash, status, created_by, released_by, released_at) VALUES " +
+                            "('$id', $version, '${seed.body}'::jsonb, '${seed.name}@$version', '$status', '$owner', $released)",
+                    )
+                }
+            }
+        }
+
+        /** A stored dashboard body (no `name`, V42): one source on the visible `lp/absent_there`, one tile per pin. */
+        private fun dashboardBody(pins: List<String>): String =
+            MAPPER.writeValueAsString(
+                mapOf(
+                    "display_name" to "Lens",
+                    "description" to "",
+                    "sources" to listOf(mapOf("name" to "src", "pipeline" to mapOf("name" to "$P/absent_there", "version" to 1))),
+                    "visualizations" to
+                        pins.mapIndexed { i, pin ->
+                            mapOf(
+                                "name" to "chart_$i",
+                                "type" to "visualization",
+                                "visualization" to mapOf("name" to pin, "version" to 1),
+                                "inputs" to mapOf("revenue" to mapOf("source" to "src")),
+                            )
+                        },
+                    "layout" to
+                        mapOf(
+                            "grid" to pins.indices.map { mapOf("name" to "chart_$it", "x" to 0, "y" to it * 4, "w" to 6, "h" to 4) },
+                        ),
+                ),
+            )
+
+        /** A stored visualization body (no `name`, V42): #563's revenue chart. */
+        private const val VISUALIZATION_BODY =
+            """{"display_name":"Lens","description":"","renderer":{"kind":"plotly","version":"4"},""" +
+                """"inputs":{"revenue":{"columns":[{"name":"month","type":"DATE","nullable":false},""" +
+                """{"name":"amount","type":"DECIMAL","nullable":false}]}},""" +
+                """"config":{"data":[{"type":"bar","x":[],"y":[]}]},"bindings":{"data[0].x":"month","data[0].y":"amount"},""" +
+                """"tests":{"cases":[{"name":"one month","fixtures":{"revenue":[{"month":"2026-01-01","amount":10.5}]},""" +
+                """"assertions":[{"kind":"rendered"}]}]}}"""
+
+        /** A stored parameter-set body (no `name`, V39): one constant select. */
+        private const val SET_BODY =
+            """{"display_name":"Lens","description":"","parameters":[{"name":"mode","label":"Mode","type":"STRING",""" +
+                """"kind":"SELECT","cardinality":"SINGLE","source":{"constants":[""" +
+                """{"value":"fast","display_value":"FAST","is_default":true},""" +
+                """{"value":"slow","display_value":"SLOW","is_default":false}]}}]}"""
 
         /** Endpoints: one over a hidden pipeline, one over a visible one. */
         private fun seedEndpoints(

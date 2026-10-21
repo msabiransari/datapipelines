@@ -266,8 +266,8 @@ class ScriptImplementsBrowserTest : BrowserSuite() {
 
     /**
      * Refreshes the open levels, waits on the script leaf's marker itself and reads the stage
-     * leaf clean. The fixture's display name is its full path, wider than the rail: the panel
-     * scrolls sideways to the marker (the version badge sits there too) before the two shots.
+     * leaf clean. Even with the full path as its display name, the marker must lie inside
+     * the panel's visible box in both themes, without scrolling to reveal it (#541).
      */
     private fun sidebarMarksScriptOnly(
         stage: String,
@@ -278,7 +278,25 @@ class ScriptImplementsBrowserTest : BrowserSuite() {
         marker.waitFor()
         marker.innerText() shouldBe "needs review"
         page.locator("${treeLeaf(stage)} [data-needs-review]").count() shouldBe 0
-        marker.scrollIntoViewIfNeeded()
+        page.setViewportSize(1440, 1000)
+        val back = mode()
+        for (theme in listOf("light", "dark")) {
+            ensureTheme(theme)
+            val metrics =
+                marker.evaluate(
+                    """(el, panel) => {
+                      const rect = node => { const r = node.getBoundingClientRect();
+                        return {left:r.left, right:r.right, top:r.top, bottom:r.bottom}; };
+                      const p = rect(document.querySelector(panel)), r = rect(el);
+                      return {panel:p, marker:r, inside:r.left >= p.left - 0.5 && r.right <= p.right + 0.5
+                        && r.top >= p.top - 0.5 && r.bottom <= p.bottom + 0.5};
+                    }""",
+                    TREE_PANEL,
+                ) as Map<*, *>
+            println("541-marker|$theme|$metrics")
+            io.kotest.assertions.withClue("$theme needs review inside panel: $metrics") { metrics["inside"] shouldBe true }
+        }
+        ensureTheme(back)
         themedShots("sidebar-leaf", listOf(1440))
     }
 

@@ -24,8 +24,9 @@ import java.nio.file.Paths
  * Desktop: `.pe-topbar` is the heading BLOCK — `.app-page-h` holding the title column (the context
  * line, `h1.ds-headline.pe-crumb-name`, `.pe-version-line`) beside `.app-page-actions` — then the tab
  * strip, then the panes. The heading's top edge and the title's left edge are read against the
- * Pipelines overview's `.app-page-h` at the same viewport: the record's "align the main content's
- * top edge and inset consistently between families".
+ * Pipelines overview's heading at the same viewport — since #638 the v2 frame's `.app-overview-heading`
+ * and its `h1.app-overview-title` (it carried `.app-page-h` before): the record's "align the main
+ * content's top edge and inset consistently between families".
  *
  * Phone (760px and below): the band IS the page (owner ruling 2026-10-18, option (a)) — `.pe-root`
  * is not laid out, the band's controls are reachable and unclipped at 390 and 320, and a graph first
@@ -157,10 +158,10 @@ class PipelineWorkspaceHeadingBrowserTest : BrowserSuite() {
     /** Reads the overview's heading anchors at the current viewport (the alignment's reference side). */
     private fun readOverviewAnchors(prefix: String) {
         page.navigate("$baseUrl/overview/pipelines")
-        page.locator(".app-page-h h1").waitFor()
-        read("$prefix.overview.headingTop", ".app-page-h", "top")
-        read("$prefix.overview.titleLeft", ".app-page-h h1", "left")
-        read("$prefix.overview.titleTop", ".app-page-h h1", "top")
+        page.locator(".app-overview-heading h1.app-overview-title").waitFor()
+        read("$prefix.overview.headingTop", ".app-overview-heading", "top")
+        read("$prefix.overview.titleLeft", ".app-overview-heading h1.app-overview-title", "left")
+        read("$prefix.overview.titleTop", ".app-overview-heading h1.app-overview-title", "top")
     }
 
     private fun readEditorAnchors(prefix: String) {

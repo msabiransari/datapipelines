@@ -801,7 +801,9 @@ intermediate bases; when consumers cannot be established — an orphan helper, a
 file, a changed test resource or build file — coverage is **DEFERRED**: the integration module's
 to Gate A and CI, the browser module's to CI on `next` only (the gate excludes the browser suite, §9.0).
 The selection uses declared class names, never file names. An ambiguous declaration is also
-deferred. At most **five exact classes per test module** run; larger selections (including a
+deferred. A change to `templates/layouts/*.html` adds `JarSmokeE2eTest`, `LocalLoginE2eTest` and
+`WriteSurfaceStampingE2eTest` to the integration selection to exercise shell rendering and the deferred CSRF cookie.
+At most **five exact classes per test module** run; larger selections (including a
 shared base affecting most browser classes) are deferred in their entirety, never truncated.
 Pregate cannot emit an unfiltered `tests/*:test` task. Deferred modules appear in the console,
 the run manifest and the verdict's `deferred=` field; a pregate PASS does not claim those tests

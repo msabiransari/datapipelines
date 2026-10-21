@@ -101,7 +101,11 @@ object InventorySource {
             " WHERE v.${family.foreignKey} = $alias.id$released) a WHERE ${bucket.predicate})"
     }
 
-    /** The three per-object flags every bucket predicate reads. */
+    /**
+     * The three per-object flags every bucket predicate reads — their ONE definition (#592): the
+     * inventory's [admitted] CTE and the catalog's [membership] both select exactly this list over
+     * versions aliased `v`, so a filtered catalog and its count cannot read different flags.
+     */
     private const val FLAGS =
         "bool_or(v.status = 'DRAFT') AS d, bool_or(v.status = 'RELEASED') AS r, bool_or(v.status = 'DISCARDED') AS x"
 
@@ -131,9 +135,7 @@ object InventorySource {
         val admitted = if (narrowed) "AND s.name IN (:names) AND v.$RELEASED_VERSION" else ""
         return """
             WITH admitted AS (
-                SELECT bool_or(v.status = 'DRAFT') AS d,
-                       bool_or(v.status = 'RELEASED') AS r,
-                       bool_or(v.status = 'DISCARDED') AS x$perObject
+                SELECT $FLAGS$perObject
                   FROM ${family.table} s
                   JOIN $versions v ON v.${family.foreignKey} = s.id
                  WHERE s.workspace_id = :workspace $admitted

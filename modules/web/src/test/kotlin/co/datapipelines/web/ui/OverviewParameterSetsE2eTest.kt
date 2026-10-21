@@ -17,6 +17,7 @@ import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.mockk.mockk
+import org.jsoup.Jsoup
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -276,7 +277,6 @@ class OverviewParameterSetsE2eTest {
                 VisualizationRepository(jdbc),
                 repository,
             )
-        counts.invalidate(workspace)
         val counted = counted(ReadLens.Everything)
 
         val header = counts.forWorkspace(workspace).parameterSets
@@ -294,6 +294,29 @@ class OverviewParameterSetsE2eTest {
         val rows: List<ParameterSetsBrowseModel.ParameterSetLeafView>,
         val total: Int,
     )
+
+    /**
+     * #599 A.2 — the Parameter Sets home from a real read: the chart group renders a strip whose four exclusive
+     * groups sum to Total, the inventory's objects, and the page carries the family's guide words, the
+     * starter prompt equal to today's text. RED at the base: the family had no chart group there.
+     */
+    @Test
+    fun `the strip's four metrics sum to Total and the page carries the family's words`() {
+        val now = Instant.now()
+        val charts =
+            inventory.chartsFor(
+                NavigationFamily.PARAMETER_SETS,
+                workspace,
+                LensedView.EVERYTHING,
+                now,
+                OverviewRenderSupport.ACTIVE_DAYS,
+            )
+        val page = OverviewPage.of(OverviewPage.Family.PARAMETER_SETS, false, charts, RecentResult.Available(emptyList()), now)
+        val doc = Jsoup.parse(OverviewRenderSupport.html(page))
+
+        OverviewRenderSupport.assertStripSumsTo(doc, counted(ReadLens.Everything).objects)
+        OverviewRenderSupport.assertGuideWords(doc, OverviewPage.Family.PARAMETER_SETS, WORDS)
+    }
 
     private fun equalityTable(
         lens: ReadLens,
@@ -436,6 +459,40 @@ class OverviewParameterSetsE2eTest {
     }
 
     private companion object {
+        /**
+         * #599 — the parameter-sets guide's words; [OverviewRenderSupport.GuideWords.prompt] is the
+         * textarea's text at the base, byte for byte.
+         */
+        val WORDS =
+            OverviewRenderSupport.GuideWords(
+                subtitle = "Give related views consistent inputs and dependent controls. Understand what’s live and what’s next.",
+                headline = "From inputs to consistent controls.",
+                sentence =
+                    "Define reusable inputs and how their values are evaluated together, once for every view that uses " +
+                        "them.",
+                steps =
+                    listOf(
+                        "Describe" to "The inputs, their defaults and dependencies.",
+                        "Build" to "Your agent creates a draft and evaluates it.",
+                        "Review" to "Try your own choices. Release when ready.",
+                    ),
+                prompt =
+                    "In workspace acme, create a draft parameter set for [use case, such as the dashboard it will drive]. " +
+                        "I need [inputs], with defaults [defaults] and dependencies [how one choice affects another]. Read " +
+                        "the current parameter guide, define each control's type and valid choices, and reuse suitable " +
+                        "existing templates for options that come from data. Choose an existing folder with me if the " +
+                        "destination is unclear, and ask me how any multi-select control should render before you create it. " +
+                        "Verify the draft by evaluating it: a first render, representative choices, and empty or invalid " +
+                        "ones. Explain the dependency order and any unresolved assumptions. Return the draft's name and id, " +
+                        "the templates it depends on and the evaluation evidence. Leave release to me.",
+                howItWorksTitle = "Create, evaluate, then release",
+                howItWorks =
+                    "Parameter sets define reusable inputs and how their values are evaluated together. They give related " +
+                        "views consistent choices and dependent controls. For example, choose a year and then offer only the " +
+                        "periods available within that year.",
+                related = listOf("/overview/templates", "/overview/dashboards"),
+            )
+
         val T0: Instant = Instant.parse("2026-10-01T00:00:00Z")
         const val SECONDS_PER_HOUR = 3600L
     }

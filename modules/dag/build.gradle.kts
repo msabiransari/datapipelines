@@ -18,8 +18,9 @@ dependencies {
     // the executor. The executor's two importers are unchanged; only this edge is new.
     implementation(project(":modules:graph"))
     // #321: `FailureShape` — the two scheduled jobs' failure lines name a store failure by its class
-    // and SQLState, never its message (observability §3.4G). Nothing else of `persistence` is used
-    // here: the batching writer in front of the event record is `web`'s wiring (§4.2 note).
+    // and SQLState, never its message (observability §3.4G); #326: `ScheduledJob`, their failed-tick
+    // counter's name and tag set. Nothing else of `persistence` is used here: the batching writer in
+    // front of the event record is `web`'s wiring (§4.2 note).
     implementation(project(":modules:persistence"))
 
     implementation(libs.kotlinx.coroutines.core)

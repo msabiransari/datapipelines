@@ -93,36 +93,94 @@ class FamilyInventoryTest {
     /**
      * #598a — the chart group keeps forFamily's rules: the caller's own lens, fail closed, never zeros.
      * #598b — the request's clock and the configured window reach the repository unchanged.
+     * #599 — every family reads ITS repository through ITS arm of the view: five distinct lenses, so a
+     * family answered through another family's arm (or another family's repository) misses the stub and fails.
      */
-    @Test
-    fun `the pipelines charts read the pipelines lens once and a failure is unavailable, never zeros`() {
-        val lens = ReadLens.Only(setOf("pipeline"))
-        val view = LensedView(lens, ReadLens.Everything, parameterSets = ReadLens.Everything)
+    @ParameterizedTest
+    @EnumSource(NavigationFamily::class)
+    fun `each family's charts read its own repository with its own lens, once`(family: NavigationFamily) {
         val empty = ChartInventory.empty(NOW, ACTIVE_DAYS)
-        every { pipelines.charts(workspace, lens, NOW, ACTIVE_DAYS) } returns empty
-        service.chartsFor(NavigationFamily.PIPELINES, workspace, view, NOW, ACTIVE_DAYS) shouldBe ChartsResult.Available(empty)
-        verify(exactly = 1) { pipelines.charts(workspace, lens, NOW, ACTIVE_DAYS) }
+        every { pipelines.charts(workspace, P, NOW, ACTIVE_DAYS) } returns empty
+        every { templates.charts(workspace, T, NOW, ACTIVE_DAYS) } returns empty
+        every { dashboards.charts(workspace, D, NOW, ACTIVE_DAYS) } returns empty
+        every { visualizations.charts(workspace, V, NOW, ACTIVE_DAYS) } returns empty
+        every { sets.charts(workspace, S, NOW, ACTIVE_DAYS) } returns empty
 
-        every { pipelines.charts(workspace, ReadLens.Everything, any(), any()) } throws DataAccessResourceFailureException("read failed")
-        service.chartsFor(NavigationFamily.PIPELINES, workspace, LensedView.EVERYTHING, NOW, ACTIVE_DAYS) shouldBe
+        service.chartsFor(family, workspace, FIVE_LENSES, NOW, ACTIVE_DAYS) shouldBe ChartsResult.Available(empty)
+
+        val (read, lens) = repositoryAndLens(family)
+        when (read) {
+            is PipelineRepository -> verify(exactly = 1) { read.charts(workspace, lens, NOW, ACTIVE_DAYS) }
+            is TemplateRepository -> verify(exactly = 1) { read.charts(workspace, lens, NOW, ACTIVE_DAYS) }
+            is DashboardRepository -> verify(exactly = 1) { read.charts(workspace, lens, NOW, ACTIVE_DAYS) }
+            is VisualizationRepository -> verify(exactly = 1) { read.charts(workspace, lens, NOW, ACTIVE_DAYS) }
+            is ParameterSetRepository -> verify(exactly = 1) { read.charts(workspace, lens, NOW, ACTIVE_DAYS) }
+        }
+        verify { listOf(pipelines, templates, dashboards, visualizations, sets).filter { it !== read } wasNot Called }
+    }
+
+    @ParameterizedTest
+    @EnumSource(NavigationFamily::class)
+    fun `a chart read failure is unavailable and never zeros`(family: NavigationFamily) {
+        val failure = DataAccessResourceFailureException("read failed")
+        every { pipelines.charts(workspace, any(), any(), any()) } throws failure
+        every { templates.charts(workspace, any(), any(), any()) } throws failure
+        every { dashboards.charts(workspace, any(), any(), any()) } throws failure
+        every { visualizations.charts(workspace, any(), any(), any()) } throws failure
+        every { sets.charts(workspace, any(), any(), any()) } throws failure
+
+        service.chartsFor(family, workspace, LensedView.EVERYTHING, NOW, ACTIVE_DAYS) shouldBe
             ChartsResult.Unavailable("Inventory could not be read.")
     }
 
     @Test
-    fun `an unavailable view and an uncharted family read nothing`() {
+    fun `an unavailable view reads no family's charts`() {
         val unavailable = LensedView(ReadLens.Everything, ReadLens.Everything, LensedView.Unavailable("target", "unreachable"))
         NavigationFamily.entries.forEach {
             service.chartsFor(it, workspace, unavailable, NOW, ACTIVE_DAYS) shouldBe ChartsResult.Unavailable("unreachable")
         }
-        NavigationFamily.entries.filter { it != NavigationFamily.PIPELINES }.forEach {
-            service.chartsFor(it, workspace, LensedView.EVERYTHING, NOW, ACTIVE_DAYS) shouldBe
-                ChartsResult.Unavailable(FamilyInventory.NOT_CHARTED)
-        }
         verify { listOf(pipelines, templates, dashboards, visualizations, sets) wasNot Called }
     }
+
+    /** #330's lazy dashboard arms: a failed derivation is unavailable for the two artifact families, and Templates never derives them. */
+    @Test
+    fun `a lazy lens failure makes the artifact charts unavailable and other families do not derive the arms`() {
+        var derived = 0
+        val view =
+            LensedView.withLazyDashboardArms(ReadLens.Everything, ReadLens.Everything, ReadLens.Everything) {
+                derived++
+                error("lens read failed")
+            }
+        val empty = ChartInventory.empty(NOW, ACTIVE_DAYS)
+        every { templates.charts(workspace, ReadLens.Everything, NOW, ACTIVE_DAYS) } returns empty
+
+        service.chartsFor(NavigationFamily.TEMPLATES, workspace, view, NOW, ACTIVE_DAYS) shouldBe ChartsResult.Available(empty)
+        derived shouldBe 0
+        listOf(NavigationFamily.DASHBOARDS, NavigationFamily.VISUALIZATIONS).forEach {
+            service.chartsFor(it, workspace, view, NOW, ACTIVE_DAYS) shouldBe ChartsResult.Unavailable("Inventory could not be read.")
+        }
+        verify { listOf(dashboards, visualizations) wasNot Called }
+    }
+
+    private fun repositoryAndLens(family: NavigationFamily): Pair<Any, ReadLens> =
+        when (family) {
+            NavigationFamily.PIPELINES -> pipelines to P
+            NavigationFamily.TEMPLATES -> templates to T
+            NavigationFamily.DASHBOARDS -> dashboards to D
+            NavigationFamily.VISUALIZATIONS -> visualizations to V
+            NavigationFamily.PARAMETER_SETS -> sets to S
+        }
 
     private companion object {
         val NOW: Instant = Instant.parse("2026-10-14T12:00:00Z")
         const val ACTIVE_DAYS = 7
+        val P = ReadLens.Only(setOf("pipeline"))
+        val T = ReadLens.Only(setOf("template"))
+        val D = ReadLens.Only(setOf("dashboard"))
+        val V = ReadLens.Only(setOf("visualization"))
+        val S = ReadLens.Only(setOf("set"))
+
+        /** Five distinct arms, one per family: a family read through another's arm misses its stub. */
+        val FIVE_LENSES = LensedView(P, T, parameterSets = S, visualizations = V, dashboards = D)
     }
 }

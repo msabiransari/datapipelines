@@ -38,7 +38,17 @@ data class ExecutionEventRecord(
  */
 class ExecutionEventRepository(
     private val jdbc: NamedParameterJdbcTemplate,
+    /**
+     * #326 — the retention DELETE's statement bound ([deleteOlderThan], the only statement on it): a
+     * code constant beside the retention's cadence in `web` (`ExecutionEventRetentionScheduler`), never
+     * a key. The appends and reads stay unbounded ([BoundedJdbc]'s dedicated template). 0 (every direct
+     * construction, tests) means unbounded.
+     */
+    statementTimeoutSeconds: Int = 0,
 ) {
+    private val retentionJdbc: NamedParameterJdbcTemplate =
+        BoundedJdbc.bounded(jdbc, statementTimeoutSeconds, "statementTimeoutSeconds")
+
     /**
      * Appends one event.
      *
@@ -210,10 +220,13 @@ class ExecutionEventRepository(
      * would start mid-stream with no `execution_started` and no way to tell that from a real gap.
      * An execution that has not completed keeps every event it has.
      *
+     * On the retention's bound (#326): one statement, so a cancel at the bound (SQLState `57014`)
+     * rolls the whole DELETE back — nothing purged, the next tick retries the same predicate.
+     *
      * @return rows purged.
      */
     fun deleteOlderThan(cutoff: Instant): Int =
-        jdbc.update(
+        retentionJdbc.update(
             """
             DELETE FROM execution_events
              WHERE execution_id IN (

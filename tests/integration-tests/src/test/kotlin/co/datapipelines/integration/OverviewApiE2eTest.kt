@@ -34,7 +34,7 @@ import java.util.UUID
  * rows — the same reads, so the numbers cannot drift. The expected values are spelled out too, so
  * a narrowing that both pages lost together is still red: the viewer sees no key (it created
  * none — the Keys page's `mcp_key.own` view), the promoter sees only the admitted pipeline's two
- * endpoints, the workspace admin sees all five keys. #home-ops (#621): through the same real lens
+ * endpoints, the workspace admin sees all five keys. #639 (#621): through the same real lens
  * the promoter's three endpoint metrics carry the frame's lens note and the keys metric does not,
  * under the heading "Inventory"; a viewer's page carries no lens note.
  *

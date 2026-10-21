@@ -1,13 +1,22 @@
-<!--/* #581 — Visualizations guidance aligned with skill/dashboards.md, authoring steps 3, 7 and 8. */-->
+<!--/* #581 — the Visualizations overview's guide (shell design §8), aligned with skill/dashboards.md's
+     authoring steps 3, 7 and 8: a visualization is authored against test fixtures in the renderer
+     (#353), and live data runs inside a dashboard (the how-it-works note keeps that sentence).
+     #599 re-cut it into the v2 fragments `overview/family.html` includes (guide-pipelines.html's
+     shape): `subtitle` under the title, `quickstart` in the Quick start card (headline, sentence and
+     three short steps condensed from the long ones), `prompt` and `howitworks` as dialog sections
+     (each its own data-dialog-section root, its data-title the dialog's title; the long steps, the
+     relationships and the note moved into How it works), `related` at the foot of Continue your
+     work. The prompt fragment is unchanged. The workspace name is the one the menu shows; the
+     bracketed placeholders are the reader's to fill. Copying sends nothing (overview.mjs). */-->
+<p xmlns:th="http://www.thymeleaf.org" th:fragment="subtitle" class="app-overview-subtitle">Present data as reusable, tested charts, tables and KPIs. Understand what’s live and what’s next.</p>
+
 <th:block xmlns:th="http://www.thymeleaf.org" th:fragment="quickstart">
-  <h2 class="app-overview-quickstart-title" id="overview-quickstart-h">Create with your agent</h2>
-  <ol class="app-overview-steps">
-    <li>Describe the question, the chart, table or KPI you want, and the input fields it should use.</li>
-    <li>Ask a connected agent to build a draft visualization and test normal, empty and boundary fixtures
-      in the renderer.</li>
-    <li>Open the draft's Preview (test fixtures) tab, inspect its labels, units and empty states, and
-      review the agent's test evidence. Someone allowed to release visualizations releases it from
-      its workspace when it is ready.</li>
+  <h2 class="app-overview-quickstart-title" id="overview-quickstart-h">From a question to a tested visualization.</h2>
+  <p class="app-overview-panel-sub">Define the input contract and rendering once, so the presentation can be reused and tested.</p>
+  <ol class="app-overview-steps app-overview-steps-row">
+    <li><b>Describe</b><small>The question, the chart and its input fields.</small></li>
+    <li><b>Build</b><small>Your agent creates a draft and tests its fixtures.</small></li>
+    <li><b>Review</b><small>Check the Preview and test evidence. Release when ready.</small></li>
   </ol>
 </th:block>
 
@@ -31,16 +40,20 @@
 </div>
 
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="howitworks" class="app-overview-dialog-section app-overview-prose"
-     data-dialog-section="howitworks" data-title="What visualizations are for" data-overview-intro hidden>
+     data-dialog-section="howitworks" data-title="Create, test, then release" data-overview-intro hidden>
   <p>
     Visualizations define how data is presented, such as a chart, table or KPI. They include the
     input contract and rendering configuration so the presentation can be reused and tested.
     For example, show each borough's rideshare share in a comparison chart.
   </p>
-</div>
-
-<div xmlns:th="http://www.thymeleaf.org" th:fragment="related" class="app-overview-resources app-overview-prose" data-overview-related>
-  <h3 class="app-overview-sub" id="overview-related-h">Related resources and help</h3>
+  <ol class="app-overview-steps">
+    <li>Describe the question, the chart, table or KPI you want, and the input fields it should use.</li>
+    <li>Ask a connected agent to build a draft visualization and test normal, empty and boundary fixtures
+      in the renderer.</li>
+    <li>Open the draft's Preview (test fixtures) tab, inspect its labels, units and empty states, and
+      review the agent's test evidence. Someone allowed to release visualizations releases it from
+      its workspace when it is ready.</li>
+  </ol>
   <ul class="app-overview-related">
     <li><a hx-boost="true" th:href="@{/overview/pipelines}">Pipelines</a> supply the source columns
       a visualization presents.</li>
@@ -50,4 +63,13 @@
   <p class="app-card-note">Test a visualization with fixtures before using it in a dashboard.
     The visualization's Preview shows fixtures; live data runs inside a dashboard.</p>
   <p><a th:href="@{/docs/mcp-server}">MCP server reference</a></p>
+</div>
+
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="related" class="app-overview-resources app-overview-resources-row" data-overview-related>
+  <span class="app-overview-resources-k">Build on your results</span>
+  <a class="app-overview-link" hx-boost="true" th:href="@{/overview/pipelines}">Pipelines <svg class="ds-icon ds-icon-xs"
+     aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-right"></use></svg></a>
+  <a class="app-overview-link" hx-boost="true" th:href="@{/overview/dashboards}">Dashboards <svg class="ds-icon ds-icon-xs"
+     aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-right"></use></svg></a>
+  <a class="app-overview-link" th:href="@{/docs/mcp-server}">MCP server reference</a>
 </div>

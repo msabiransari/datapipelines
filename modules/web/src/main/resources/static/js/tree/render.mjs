@@ -27,7 +27,11 @@ export function createTreeRenderer(host, state, options) {
     if (control.tagName === "BUTTON") control.type = "button";
     control.tabIndex = -1; control.className = "dp-tree-activate";
     control.append(icon(document, node.kind === "folder" ? "chevron-right" : "file"));
-    const label = document.createElement("span"); control.append(label);
+    // #604 — the row's regions: the label is the title; the badges live in a trailing
+    // metadata region (present even when nothing shows, so the title's box never changes
+    // when a badge appears or leaves). The control stays the line's first child.
+    const label = document.createElement("span"); label.className = "dp-tree-title"; control.append(label);
+    const meta = document.createElement("span"); meta.className = "dp-tree-meta"; control.append(meta);
     const version = document.createElement("span"); version.className = "ds-badge ds-badge-default dp-tree-version";
     const draft = document.createElement("span"); draft.className = "ds-badge ds-badge-warning dp-tree-draft";
     draft.textContent = "draft"; draft.title = "pending release";
@@ -35,10 +39,10 @@ export function createTreeRenderer(host, state, options) {
     const review = document.createElement("span"); review.className = "ds-badge ds-badge-warning dp-tree-review";
     review.setAttribute("data-needs-review", ""); review.textContent = "needs review";
     review.title = "A fact this template cites was retired or superseded — re-verify before you lean on it.";
-    control.append(version, draft, review); line.append(control);
+    meta.append(version, draft, review); line.append(control);
     const group = document.createElement("div"); group.className = "dp-tree-group"; group.setAttribute("role", "group"); item.append(group);
     groups.set(node.key, group);
-    const row = { item, control, label, version, draft, review, group, node };
+    const row = { item, control, label, meta, version, draft, review, group, node };
     control.addEventListener("click", event => {
       const live = row.node; focusedKey = live.key; item.focus();
       if (live.kind === "folder") { event.preventDefault(); toggle(live.key); }
@@ -97,9 +101,9 @@ export function createTreeRenderer(host, state, options) {
       row.version.hidden = node.kind !== "artifact" || !number;
       if (number && row.version.textContent !== `v${number}`) row.version.textContent = `v${number}`;
       row.draft.hidden = node.kind !== "artifact" || !node.draftVersion;
-      if (row.draft.hidden) row.draft.remove(); else if (!row.draft.isConnected) row.control.append(row.draft);
+      if (row.draft.hidden) row.draft.remove(); else if (!row.draft.isConnected) row.meta.append(row.draft);
       row.review.hidden = node.kind !== "artifact" || node.needsReview !== true;
-      if (row.review.hidden) row.review.remove(); else if (row.control.lastChild !== row.review) row.control.append(row.review);
+      if (row.review.hidden) row.review.remove(); else if (row.meta.lastChild !== row.review) row.meta.append(row.review);
       if (node.kind === "artifact" && row.control.tagName === "A") {
         const href = options.getHref(node); if (row.control.getAttribute("href") !== href) row.control.setAttribute("href", href);
         if (selectedKey === node.key) row.control.setAttribute("aria-current", "page"); else row.control.removeAttribute("aria-current");

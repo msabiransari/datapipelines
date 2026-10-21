@@ -63,6 +63,67 @@ done < "$F/pregate-argv.log"
 ok 'real pregate defers browser coverage and limits every Gradle invocation'
 ok 'every pregate Gradle invocation passes --build-cache (#480)'
 
+# #596: console and retained manifest must name the module's actual full-run home.
+for module in browser-tests integration-tests; do
+  case "$module" in
+    browser-tests) destination='CI on next'; reason=CI-next-required ;;
+    integration-tests) destination='Gate A and CI'; reason=Gate-A-and-CI-required ;;
+  esac
+  D="$T/deferral-$module"
+  pgres::_fixture "$D"
+  mkdir -p "$D/tests/$module"
+  printf '// changed build\n' >> "$D/tests/$module/build.gradle.kts"
+  plan="$(pg2b::plan_module "$module" "$D/tests/$module/build.gradle.kts" \
+    "$D/tests/$module/src/test/kotlin" "$D/tests/$module/build.gradle.kts" 2> "$T/deferral.out")"
+  [ "$plan" = deferred ] || fail "$module build change was not deferred"
+  grep -qF "deferred to $destination)" "$T/deferral.out" || fail "$module deferral destination: $(cat "$T/deferral.out")"
+  pgres::_run_fixture "$D" || fail "$module deferral fixture"
+  grep -q "stage=2b-$module status=deferred .*${reason}" "$D"/.pregate-logs/runs/*/MANIFEST.txt || fail "$module manifest destination"
+done
+ok 'browser deferrals name CI on next; integration deferrals name Gate A and CI (console and manifest)'
+
+# #576: exercise the real git-diff planner, including a committed layout-only diff.
+L="$T/layout fixture"
+pgres::_fixture "$L"
+layout='modules/web/src/main/resources/templates/layouts/default.html'
+mkdir -p "$L/$(dirname "$layout")"
+printf '<html>base</html>\n' > "$L/$layout"
+(cd "$L" && git add -A && git commit -qm 'layout fixture base' && git branch -f main HEAD)
+printf '<html>changed shell</html>\n' >> "$L/$layout"
+(cd "$L" && git add "$layout" && git commit -qm 'layout-only change')
+(cd "$L" && bash scripts/pregate.sh --plan HEAD^) > "$T/layout-plan"
+cat "$T/layout-plan"
+expected=$'focused\nco.datapipelines.integration.JarSmokeE2eTest\nco.datapipelines.integration.LocalLoginE2eTest\nco.datapipelines.integration.WriteSurfaceStampingE2eTest'
+actual="$(sed -n '/^selection tests\/integration-tests:$/,/^deferred=/p' "$T/layout-plan" | sed '1d;$d')"
+[ "$actual" = "$expected" ] || fail "layout-only selection: expected [$expected], got [$actual]"
+! grep -q '^selection tests/browser-tests:' "$T/layout-plan" || fail 'layout selected browser tests'
+ok 'committed layout-only diff selects exactly the three shell-render integration classes'
+
+# A diff path with spaces still selects the fixed names, and repeated layouts or
+# a changed allowlisted class must not consume the budget twice.
+printf '<html>second shell</html>\n' > "$L/$(dirname "$layout")/another shell.html"
+isrc="$L/tests/integration-tests/src/test/kotlin/co/x"
+printf 'package co.datapipelines.integration\nclass JarSmokeE2eTest {\n    @org.junit.jupiter.api.Test\n    fun run() {}\n}\n' > "$isrc/ShellWitness.kt"
+(cd "$L" && bash scripts/pregate.sh --plan HEAD^) > "$T/layout-deduplicated"
+actual="$(sed -n '/^selection tests\/integration-tests:$/,/^deferred=/p' "$T/layout-deduplicated" | sed '1d;$d')"
+[ "$actual" = "$expected" ] || fail 'layout and changed-test union was not deduplicated'
+ok 'layout diff path with spaces and changed allowlisted class preserve the exact three-class selection'
+
+# Union and deduplicate ordinary changed classes before applying the same budget.
+for n in 1 2 3; do
+  printf 'package co.x\nclass Extra%sTest {\n    @org.junit.jupiter.api.Test\n    fun run() {}\n}\n' "$n" > "$isrc/Extra${n}Test.kt"
+  (cd "$L" && bash scripts/pregate.sh --plan HEAD^) > "$T/layout-budget-$n"
+  if [ "$n" -le 2 ]; then
+    grep -q '^focused$' "$T/layout-budget-$n" || fail "layout union with $n classes not focused"
+    grep -q "^co.x.Extra${n}Test$" "$T/layout-budget-$n" || fail 'changed class missing from layout union'
+  else
+    grep -q '^deferred=tests/integration-tests$' "$T/layout-budget-$n" || fail 'six-class layout union not deferred'
+    grep '^stage=2b ' "$T/layout-budget-$n" | grep -q 'command=(none)' || fail 'deferred layout union emitted argv'
+  fi
+done
+cat "$T/layout-budget-3"
+ok 'layout classes union with changed tests; five stay focused and six defer without truncation'
+
 # #480: the cache is the pregate's alone. gate.sh's clean build and CI must compile from cold,
 # so neither may pass the flag, and no project file may turn caching on for every build.
 for cold in "$ROOT/scripts/gate.sh" "$ROOT"/.github/workflows/*.yml; do

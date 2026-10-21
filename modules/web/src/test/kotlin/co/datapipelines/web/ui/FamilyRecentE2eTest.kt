@@ -189,7 +189,6 @@ class FamilyRecentE2eTest {
     @Test
     fun `the browser header count is the inventory without its discarded-only objects`() {
         fixture()
-        navCounts.invalidate(workspace)
         val counted =
             (
                 inventory.forFamily(

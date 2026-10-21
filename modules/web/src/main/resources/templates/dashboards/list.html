@@ -3,8 +3,8 @@
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
   <!-- #400 — the dashboards CATALOG (ui-screens.md §4.21, the /pipelines catalog's shape).
-        The L3b tree page is retired: the folder tree moved into the global sidebar, beneath
-        Dashboards (the parent ruling #396; #350's pattern). What stays here is the flat,
+        The L3b tree page is retired: the folder tree lives in the resource browser's Dashboards
+        panel (#554); a leaf there opens the dashboard's workspace. What stays here is the flat,
         server-paged catalog — every dashboard the caller may read, or the matches of the
         search — each row a link into the workspace /dashboards/{id}. A draft-only
         dashboard's row says so (list.html's promise survives as a ROW state); opening one is
@@ -17,7 +17,7 @@
         Dashboards are authored through agents over the
         <a th:href="@{/docs/mcp-server}">MCP server</a> — ask your agent to create one, giving
         it a folder path like <code>finance/dashboards/revenue_overview</code>. Browse the
-        folders in the sidebar's Dashboards tree, or search the whole catalog here; a
+        folders in the resource browser's Dashboards tree, or search the whole catalog here; a
         dashboard opens in its workspace, and one with no release yet says so.
       </p>
     </div>

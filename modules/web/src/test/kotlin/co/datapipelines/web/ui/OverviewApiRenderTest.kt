@@ -62,7 +62,7 @@ class OverviewApiRenderTest {
     }
 
     /**
-     * #home-ops — the page the CONTROLLER builds, rendered: four metrics whose notes are the tiles'
+     * #639 — the page the CONTROLLER builds, rendered: four metrics whose notes are the tiles'
      * help sentences and whose dots are their state bars' tones, the View all badge equal to the
      * Endpoints metric, the two panels with descriptions and info dialogs, the console and keys
      * task rows above the two sections, the guide's v2 quick start with How a program gets access
@@ -157,7 +157,7 @@ class OverviewApiRenderTest {
         prompt.`val`() shouldContain "endpoints_create"
         prompt.`val`() shouldContain "endpoints_get"
         prompt.children().shouldBeEmpty()
-        // #home-ops moved the guide around the prompt, never the prompt: its text is the base's, byte for byte.
+        // #639 moved the guide around the prompt, never the prompt: its text is the base's, byte for byte.
         prompt.`val`() shouldBe
             "In workspace <b>acme</b>, publish the released pipeline [pipeline] as a read-only GET endpoint. Read " +
             "the endpoints reference in the manual first. Use the category [category] (our namespace, never " +
@@ -175,7 +175,7 @@ class OverviewApiRenderTest {
     }
 
     @Test
-    fun `the MCP card is the console's - the placeholder config and the catalog's tool count, no Copy`() {
+    fun `the MCP card is the console's - the placeholder config and the catalog's tool count, and the one Copy config button`() {
         val html = html(page())
         val card = Jsoup.parse(html).select("[data-mcp-connection]").single()
 
@@ -187,7 +187,8 @@ class OverviewApiRenderTest {
         config shouldContain "\"DP-API-Key\": \"dpk_…\""
         card.text() shouldContain "The config wants an MCP key where the placeholder stands"
         card.text() shouldNotContain "top bar"
-        card.select("[data-overview-copy], button").shouldBeEmpty()
+        card.select("[data-mcp-copy]").single().attr("type") shouldBe "button"
+        card.select("[data-overview-copy]").shouldBeEmpty()
         // The only dpk_ on the whole page is the config's placeholder.
         Regex("dpk_").findAll(html).count() shouldBe 1
     }

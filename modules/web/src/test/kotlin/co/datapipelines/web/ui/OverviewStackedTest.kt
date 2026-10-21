@@ -14,7 +14,7 @@ import kotlin.math.roundToLong
 import kotlin.random.Random
 
 /**
- * #598a/#598b, re-cut by #home-frame — the Pipelines home's arithmetic over random inventories:
+ * #598a/#598b, re-cut by #638 — the Pipelines home's arithmetic over random inventories:
  * the summary strip's four exclusive groups (two in the strip, two in its foot) sum to Total and
  * View all counts all but Retired; every activity column's stacks tile its height from the
  * baseline in tenths (no gap, no overlap however the shares round), the busiest week full height;

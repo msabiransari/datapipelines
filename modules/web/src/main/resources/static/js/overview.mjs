@@ -1,5 +1,5 @@
 // #556 — the family overview's interactions (templates/overview/family.html, guide-*.html):
-// Copy prompt, and since #home-frame the page's one <dialog>, the starter prompt's question field
+// Copy prompt, and since #638 the page's one <dialog>, the starter prompt's question field
 // and Reset.
 //
 // Copy: the prompt is the textarea's CURRENT text, edits included, and it goes to the clipboard and
@@ -25,7 +25,8 @@
 // document: the listeners are document-level, so they serve every overview a boosted navigation
 // brings in without re-binding.
 
-export const COPIED_MS = 1500;
+import { copyText } from "./copy-text.mjs";
+export { COPIED_MS } from "./copy-text.mjs";
 export const COPIED_STATUS = "Prompt copied to the clipboard.";
 export const MANUAL_STATUS = "Copy is not available here. The prompt is selected: press Ctrl+C (⌘C on a Mac) to copy it.";
 export const MANUAL_LABEL = "Select and copy";
@@ -33,21 +34,10 @@ export const PLACEHOLDER = "[question]";
 
 /** Copies [field]'s text through [clipboard]; resolves "copied" or "manual", never rejects. */
 export async function copyPrompt(field, button, status, clipboard, schedule = setTimeout) {
-  const label = button.getAttribute("data-copy-label") || button.textContent;
-  try {
-    if (!clipboard || typeof clipboard.writeText !== "function") throw new Error("clipboard unavailable");
-    await clipboard.writeText(field.value);
-  } catch (_) {
-    field.focus();
-    field.select();
-    button.textContent = MANUAL_LABEL;
-    status.textContent = MANUAL_STATUS;
-    return "manual";
-  }
-  button.textContent = "Copied";
-  status.textContent = COPIED_STATUS;
-  schedule(() => { button.textContent = label; }, COPIED_MS);
-  return "copied";
+  return copyText(field.value, {
+    button, status, select: () => { field.focus(); field.select(); },
+    copiedStatus: COPIED_STATUS, manualStatus: MANUAL_STATUS, manualLabel: MANUAL_LABEL,
+  }, clipboard, schedule);
 }
 
 /** The click target's prompt parts, or null when the click is not a Copy prompt button. */

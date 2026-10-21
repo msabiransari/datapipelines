@@ -2,9 +2,9 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
-  <!-- #350 — the pipelines CATALOG (ui-screens.md §4.3). The folder tree moved into the global
-       sidebar, beneath Pipelines (workspace spec §5, D7); a leaf there opens the pipeline's
-       workspace. What stays here is the catalog landing the spec retains (§3.2): one flat,
+  <!-- #350 — the pipelines CATALOG (ui-screens.md §4.3). The folder tree lives in the resource
+       browser's Pipelines panel (#554); a leaf there opens the pipeline's workspace. What stays
+       here is the catalog landing the spec retains (§3.2): one flat,
        server-paged list of full paths — every pipeline the caller may read, or the matches of
        the search — each row a link into /pipelines/{id} (owner ruling 2026-10-02). There is no
        second tree and no detail pane: the workspace is the one place a pipeline is read,
@@ -17,7 +17,8 @@
         Pipelines are authored through agents over the
         <a th:href="@{/docs/mcp-server}">MCP server</a> — ask your agent to create one, giving it
         a folder path like <code>nyc/mobility/revenue_by_borough</code>. Browse the folders in the
-        sidebar's Pipelines tree, or search the whole catalog here; a pipeline opens in its workspace.
+        resource browser's Pipelines tree, or search the whole catalog here; a pipeline opens in
+        its workspace.
       </p>
     </div>
     <div class="app-page-actions">

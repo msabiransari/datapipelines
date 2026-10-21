@@ -5,7 +5,7 @@
 // touches the click target's closest()/querySelector(), the field's value/focus/select and the
 // button's textContent/attribute. Every network door is a recorder that must stay empty.
 //
-// #home-frame adds the page's one dialog (open by key, title as text, the table twin borrowed and
+// #638 adds the page's one dialog (open by key, title as text, the table twin borrowed and
 // given back, focus returned on close, backdrop and close-button clicks), the question field (it
 // fills [question] by index, never over a reader's edit) and Reset, over a small tree stand-in
 // (FakeNode) whose selectors are the module's: `[attr]` and a tag name.

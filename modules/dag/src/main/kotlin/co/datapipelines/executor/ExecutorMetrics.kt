@@ -20,6 +20,8 @@ import java.util.UUID
 class ExecutorMetrics(
     private val registry: MeterRegistry,
 ) {
+    private var concurrencySlots: ExecutionSlots? = null
+
     /** `datapipelines.executions.total{status,pipeline_id}` + the duration timer. */
     fun executionFinished(
         pipelineId: UUID,
@@ -106,12 +108,23 @@ class ExecutorMetrics(
         registry.counter(EXECUTIONS_PROGRESS_WRITE_FAILED).increment()
     }
 
-    /** Binds `datapipelines.executions.concurrent` to the live slot count. */
+    /**
+     * Binds `datapipelines.executions.concurrent` once, by the execution-slot owner's wiring.
+     * Rebinding the same pool is a no-op; a different pool is a wiring error.
+     *
+     * @throws IllegalStateException if another slot pool is already bound.
+     */
+    @Synchronized
     fun bindConcurrency(slots: ExecutionSlots) {
+        check(concurrencySlots == null || concurrencySlots === slots) {
+            "The concurrency gauge is already bound to a different execution-slot pool"
+        }
+        if (concurrencySlots === slots) return
         Gauge
             .builder(EXECUTIONS_CONCURRENT, slots) { it.inFlight.toDouble() }
             .description("Executions currently holding an execution slot")
             .register(registry)
+        concurrencySlots = slots
     }
 
     companion object {

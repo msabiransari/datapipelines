@@ -1,6 +1,7 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.application.lens.LensedView
+import co.datapipelines.pipeline.Activity
 import co.datapipelines.pipeline.Inventory
 import co.datapipelines.pipeline.NavigationFamily
 import co.datapipelines.pipeline.SearchNeedle
@@ -49,20 +50,24 @@ class OverviewVisualizationsRenderTest {
         prompt shouldContain "Leave release to me."
         doc.select("[data-overview-related] a").map { it.attr("href") } shouldBe
             listOf("/overview/pipelines", "/overview/dashboards", "/docs/mcp-server")
-        doc.select("[data-bar] a").map { it.attr("href") } shouldBe
-            listOf("/visualizations?lifecycle=draft", "/visualizations?lifecycle=released", "/visualizations?lifecycle=released-with-draft")
-        doc.select("[data-bar=discarded] a").isEmpty() shouldBe true
-        requireNotNull(doc.selectFirst("[data-overview-review]")).attr("href") shouldBe "/visualizations?lifecycle=with-drafts"
+        doc.select("[data-overview-inventory] [data-count] a").map { it.attr("href") } shouldBe
+            listOf("/visualizations?lifecycle=released", "/visualizations?lifecycle=draft", "/visualizations?lifecycle=released-with-draft")
+        doc.select("[data-count=retired] a").isEmpty() shouldBe true
+        doc.select("[data-task] a").map { it.attr("href") } shouldBe
+            listOf("/visualizations?lifecycle=draft", "/visualizations?lifecycle=released")
         doc.select("[data-overview-quickstart] ol li").size shouldBe 3
         doc.select("[data-overview-intro]").text() shouldContain "each borough's rideshare share"
-        doc.select("[data-overview-quickstart]").text() shouldContain "Preview (test fixtures)"
+        // #599: the long steps moved into How it works, which keeps the test-surface sentence (#353).
+        doc.select("[data-dialog-section=howitworks]").text() shouldContain "Preview (test fixtures)"
+        doc.select("[data-dialog-section=howitworks]").text() shouldContain "live data runs inside a dashboard"
     }
 
     @Test
     fun `an empty workspace shows zeros the empty line and the prompt`() {
         val doc = Jsoup.parse(html(page(InventoryResult.Available(Inventory(0, 0, 0, 0)))))
-        doc.select("[data-count] dd.app-overview-count-v").map { it.text() } shouldBe listOf("0", "0", "0", "0")
-        doc.select("[data-overview-chart] rect").map { it.attr("width") } shouldBe listOf("0", "0", "0", "0")
+        doc.select("[data-count] .app-overview-count-v").map { it.text() }.distinct() shouldBe listOf("0")
+        doc.select("[data-column] rect").map { it.attr("height") }.distinct() shouldBe listOf("0")
+        doc.select("[data-overview-panel=maturity] rect").map { it.attr("width") }.distinct() shouldBe listOf("0")
         doc.select("[data-overview-recent-empty]").isEmpty() shouldBe false
         doc.select("#overview-prompt").isEmpty() shouldBe false
     }
@@ -70,17 +75,24 @@ class OverviewVisualizationsRenderTest {
     @Test
     fun `a throwing visualization repository renders unavailable without numbers or chart`() {
         val repository = mockk<VisualizationRepository>()
-        every { repository.inventory(any(), any()) } throws IllegalStateException("Injected read failure")
-        val inventory =
+        every { repository.charts(any(), any(), any(), any()) } throws IllegalStateException("Injected read failure")
+        val charts =
             FamilyInventory(mockk(), mockk(), mockk(), repository, mockk())
-                .forFamily(NavigationFamily.VISUALIZATIONS, UUID.randomUUID(), LensedView.EVERYTHING)
-        inventory shouldBe InventoryResult.Unavailable("Inventory could not be read.")
+                .chartsFor(
+                    NavigationFamily.VISUALIZATIONS,
+                    UUID.randomUUID(),
+                    LensedView.EVERYTHING,
+                    NOW,
+                    OverviewRenderSupport.ACTIVE_DAYS,
+                )
+        charts shouldBe ChartsResult.Unavailable("Inventory could not be read.")
+        val inventory = InventoryResult.Unavailable("Inventory could not be read.")
         val doc = Jsoup.parse(html(page(inventory)))
         val area = requireNotNull(doc.selectFirst("[data-overview-inventory]"))
         area.text() shouldContain "The inventory is unavailable."
         Regex("""\d""").containsMatchIn(area.text()) shouldBe false
         area.text() shouldNotContain "0"
-        area.select("[data-count], [data-overview-chart], [data-overview-table]").isEmpty() shouldBe true
+        area.select("[data-count], [data-overview-panel], [data-overview-table]").isEmpty() shouldBe true
     }
 
     @Test
@@ -123,13 +135,24 @@ class OverviewVisualizationsRenderTest {
         doc.select("[data-overview-copy]").isEmpty() shouldBe false
     }
 
+    /** #599: the lifecycle home reads a chart group; an unknown inventory is the same reason as an unknown chart group. */
     private fun page(inventory: InventoryResult) =
         OverviewPage.of(
             OverviewPage.Family.VISUALIZATIONS,
             false,
-            inventory,
+            when (inventory) {
+                is InventoryResult.Available -> {
+                    ChartsResult.Available(
+                        OverviewRenderSupport.chartsOf(inventory.inventory, Activity.empty(NOW, OverviewRenderSupport.ACTIVE_DAYS)),
+                    )
+                }
+
+                is InventoryResult.Unavailable -> {
+                    ChartsResult.Unavailable(inventory.reason)
+                }
+            },
             RecentResult.Available(emptyList()),
-            Instant.parse("2026-10-17T12:00:00Z"),
+            NOW,
         )
 
     private fun html(
@@ -159,5 +182,9 @@ class OverviewVisualizationsRenderTest {
         context.setVariable(OverviewController.MODEL, page)
         variables.forEach { (name, value) -> context.setVariable(name, value) }
         return engine.process(template, context)
+    }
+
+    private companion object {
+        val NOW: Instant = Instant.parse("2026-10-17T12:00:00Z")
     }
 }

@@ -19,6 +19,7 @@ import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.mockk.mockk
+import org.jsoup.Jsoup
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -101,7 +102,6 @@ class OverviewVisualizationsE2eTest {
                 repository,
                 ParameterSetRepository(jdbc),
             )
-        header.invalidate(workspace)
         header.forWorkspace(workspace).visualizations shouldBe 3
         println("event=581.parity header=3 objects=4 discarded=1")
         equality(ReadLens.Everything)
@@ -181,6 +181,30 @@ class OverviewVisualizationsE2eTest {
         service.lifecyclePage(workspace, ReadLens.NOTHING, null, 0, PAGE, bucket).total shouldBe 0
         repository.recent(workspace, ReadLens.NOTHING) shouldBe emptyList()
         repository.recent(workspace, ReadLens.Everything).size shouldBe 5
+    }
+
+    /**
+     * #599 A.2 — the Visualizations home from a real read: the chart group renders a strip whose four exclusive
+     * groups sum to Total, the inventory's objects, and the page carries the family's guide words, the
+     * starter prompt equal to today's text. RED at the base: the family had no chart group there.
+     */
+    @Test
+    fun `the strip's four metrics sum to Total and the page carries the family's words`() {
+        fixture()
+        val now = Instant.now()
+        val charts =
+            inventory.chartsFor(
+                NavigationFamily.VISUALIZATIONS,
+                workspace,
+                LensedView.EVERYTHING,
+                now,
+                OverviewRenderSupport.ACTIVE_DAYS,
+            )
+        val page = OverviewPage.of(OverviewPage.Family.VISUALIZATIONS, false, charts, RecentResult.Available(emptyList()), now)
+        val doc = Jsoup.parse(OverviewRenderSupport.html(page))
+
+        OverviewRenderSupport.assertStripSumsTo(doc, counted(ReadLens.Everything).objects)
+        OverviewRenderSupport.assertGuideWords(doc, OverviewPage.Family.VISUALIZATIONS, WORDS)
     }
 
     private fun fixture() {
@@ -280,6 +304,36 @@ class OverviewVisualizationsE2eTest {
     }
 
     private companion object {
+        /**
+         * #599 — the visualizations guide's words; [OverviewRenderSupport.GuideWords.prompt] is the
+         * textarea's text at the base, byte for byte.
+         */
+        val WORDS =
+            OverviewRenderSupport.GuideWords(
+                subtitle = "Present data as reusable, tested charts, tables and KPIs. Understand what’s live and what’s next.",
+                headline = "From a question to a tested visualization.",
+                sentence =
+                    "Define the input contract and rendering once, so the presentation can be reused and tested.",
+                steps =
+                    listOf(
+                        "Describe" to "The question, the chart and its input fields.",
+                        "Build" to "Your agent creates a draft and tests its fixtures.",
+                        "Review" to "Check the Preview and test evidence. Release when ready.",
+                    ),
+                prompt =
+                    "In workspace acme, create a draft visualization for [question] using [chart, table or KPI]. The " +
+                        "input should contain [fields and their meaning]. Read the current visualization guidance, define the " +
+                        "input contract, labels, units and bindings, and include representative normal, empty and boundary " +
+                        "test cases. Run the supported renderer tests and report any remaining visual checks. Return the " +
+                        "draft link, expected input and test evidence. Leave release to me.",
+                howItWorksTitle = "Create, test, then release",
+                howItWorks =
+                    "Visualizations define how data is presented, such as a chart, table or KPI. They include the input " +
+                        "contract and rendering configuration so the presentation can be reused and tested. For example, show " +
+                        "each borough's rideshare share in a comparison chart.",
+                related = listOf("/overview/pipelines", "/overview/dashboards"),
+            )
+
         val AT: Instant = Instant.parse("2026-10-01T12:00:00Z")
         const val PAGE = 30
     }
