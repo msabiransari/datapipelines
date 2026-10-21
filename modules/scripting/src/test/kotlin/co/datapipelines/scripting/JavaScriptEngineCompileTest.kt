@@ -1,7 +1,6 @@
 package co.datapipelines.scripting
 
 import co.datapipelines.scripting.ScriptingTestSupport.javaScript
-import co.datapipelines.scripting.ScriptingTestSupport.js
 import co.datapipelines.scripting.ScriptingTestSupport.limits
 import co.datapipelines.scripting.ScriptingTestSupport.refusal
 import io.kotest.assertions.withClue
@@ -29,9 +28,10 @@ class JavaScriptEngineCompileTest {
     }
 
     @Test
-    fun `compile runs nothing - a body's side effect leaves no trace`() {
-        javaScript.compile("globalThis.__ran = true; return 1;")
-        js("return typeof __ran;") shouldBe "undefined"
+    fun `compile runs nothing - top-level code that would throw does not throw`() {
+        // Not a global side effect read back later: every evaluation has its own realm, so a global
+        // written at compile could never be seen and such a test could not fail (lane 8a, F-compile).
+        javaScript.compile("return 1; } throw new Error('compile ran the body'); {")
     }
 
     @Test

@@ -101,9 +101,17 @@ class JavaScriptEngine(
             return ScriptSyntaxException(line, column, syntaxMessage(err.message.orEmpty()))
         }
         if (err.isResourceExhausted) {
+            // The parser's own cap reads "Resource exhausted: Stack overflow" (measured: arrays and
+            // parentheses trip between 900 and 1 100 levels at MaxASTDepth 1 000); a message naming
+            // another limit keeps that limit's kind rather than being called nesting.
+            val other = JavaScriptErrors.limitKind(err.message.orEmpty())?.takeIf { it != ScriptResourceLimitException.Kind.DEPTH }
             return ScriptResourceLimitException(
-                ScriptResourceLimitException.Kind.DEPTH,
-                "the body nests deeper than the parser allows (sandbox.MaxASTDepth ${runtime.options.maxAstDepth}): ${err.message}",
+                other ?: ScriptResourceLimitException.Kind.DEPTH,
+                if (other != null) {
+                    err.message.orEmpty()
+                } else {
+                    "the body nests deeper than the parser allows (sandbox.MaxASTDepth ${runtime.options.maxAstDepth}): ${err.message}"
+                },
             )
         }
         return ScriptEvaluationException("the JavaScript engine could not parse the body: ${err.message}", err)
