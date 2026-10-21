@@ -480,8 +480,8 @@ class ShellRenderTest {
     }
 
     /**
-     * D58 (#10 L3b): the landing item is RENAMED Home — the route (/dashboard) is unchanged. #554 (record §3): Dashboards, Visualizations and
-     * Parameter Sets leave Build for Explore, in that order, between Build and Operate.
+     * D58 (#10 L3b): the landing item is RENAMED Home — the route (/dashboard) is unchanged.
+     * #554 (record §3): Dashboards, Visualizations and Parameter Sets leave Build for Explore, in that order, between Build and Operate.
      */
     @Test
     fun `the landing item is Home and the three read-and-compose families sit in Explore`() {
