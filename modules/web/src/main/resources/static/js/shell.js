@@ -176,13 +176,12 @@
  *     place (one class on the bar — no third copy of the control), and the
  *     chord drives that button, so the band has search by button and by chord.
  *
- * 15. A late history miss never lands (#660): abort its xhr on a newer miss,
+ * 14. A late history miss never lands (#660): abort its xhr on a newer miss,
  *     cache hit, boosted request or foreign popstate, keeping screen and URL aligned.
  *
  * Testability: the module exports the pure halves for `node --test`
  * (modules/web/src/test/js/shell.test.mjs); init() is idempotent and installs
- * every listener on document.body (plus one keydown on document, for the menu),
- * which survives all swaps.
+ * persistent body/document/window listeners once across all swaps.
  */
 (function () {
   "use strict";
