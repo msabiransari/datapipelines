@@ -3,7 +3,7 @@
 **Status:** v1.5 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** (all other specs — this spec operationalizes them into code structure)
-**Last updated:** 2026-09-01
+**Last updated:** 2026-10-21
 
 ---
 
@@ -369,11 +369,11 @@ At runtime the operator points the launcher at the directory with `loader.path` 
 
 ```
 java -Dloader.path=lib -jar datapipelines-app.jar
-# or, in the container image:
-ENV LOADER_PATH=lib
+# or, in the container image (absolute: the image sets no WORKDIR, so a relative entry would resolve against /):
+ENV LOADER_PATH=/app/lib
 ```
 
-The deployment image therefore ships an empty `lib/` and sets `LOADER_PATH=lib` so a drop-in works with no rebuild and no re-configuration ([Deployment §6](deployment.md) owns the image contents).
+The deployment image therefore ships an empty, read-only `/app/lib` (`root:root`, mode `0555`, created before the image drops to its app user) and sets `LOADER_PATH=/app/lib` so a drop-in works with no rebuild and no re-configuration ([Deployment §6](deployment.md) owns the image contents; the operator mounts the driver jar read-only there, [Deployment §3.5](deployment.md#35-jdbc-driver-matrix-what-ships-in-the-image)). The path is absolute because `loader.home` defaults to the working directory and the image sets no `WORKDIR`: `LOADER_PATH=lib` would put `/lib`, the OS library directory, on the classpath. `ImageLoaderPathSpecDriftTest` pins the Dockerfile and this section to the same value.
 
 The wiring lives in `app` (it owns the runnable artifact) even though the drivers are a `datasources` concern. A driver that is neither bundled nor dropped in fails datasource save with `datasource.driver_not_loaded` — see [Datasources §10](datasources.md#10-jdbc-driver-packaging) for the licensing rationale and the full driver matrix.
 
@@ -1258,7 +1258,7 @@ Before considering the module structure "ready":
 - [ ] `./gradlew build` succeeds from clean state.
 - [ ] The §4.2 allowed-dependency verification task passes (no module declares an edge outside its row).
 - [ ] `./gradlew -Poracle bootJar` produces a JAR containing `ojdbc11`; the default `bootJar` does not.
-- [ ] A driver dropped into `lib/` is picked up at runtime with `LOADER_PATH=lib` (§5.4.1).
+- [ ] A driver mounted read-only into `/app/lib/` is picked up at runtime with the image's `LOADER_PATH=/app/lib` (§5.4.1).
 - [ ] Flyway migrations live only in `app`; no other module declares a Flyway dependency.
 - [ ] Only `dag` and `web` declare a Redis dependency.
 - [ ] All unit tests pass.
@@ -1279,6 +1279,7 @@ Before considering the module structure "ready":
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-21 | #657 the image's driver drop-in | 657 | §5.4.1: the container value is `LOADER_PATH=/app/lib` (was `lib`), absolute because `loader.home` defaults to the working directory and the image sets no `WORKDIR` — `lib` would have meant `/lib`. The image now ships the empty, read-only `/app/lib` the section promised (the Dockerfile created none and set no `LOADER_PATH`); the readiness checklist names the same path. `ImageLoaderPathSpecDriftTest` pins the Dockerfile and this section together. No module, dependency edge or public API changes. |
 | 2026-10-21 | #640 the script-node rename | script-node-rename (#640, V50, owner ruling 2026-10-20) | The script engine seam, script bodies and the SCRIPT node in the module notes and their design references (was transform); no module, dependency edge or public API changes. A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-20 | #326 the scheduled jobs' statement bounds | 326 | Additive: §5.6's public API gains `BoundedJdbc` (#311's bounded-template construction, lifted and shared) and its `persistence` note names `ScheduledJob`; §5.19's public API gains `ScheduledJob` (strings only — no Micrometer, no JDBC). No dependency edge changes. |
 | 2026-09-29 | #321 the scheduled jobs' failure lines | 321 | §4.2's allowed map gains `dag → persistence` (the root map and `modules/dag/build.gradle.kts` follow it; owner's ruling on the lane's question, 2026-09-29): `StaleExecutionSweeper` and `ExecutionEventRetention` log a store failure by `FailureShape`'s class and SQLState, never by its message (observability §3.4G). The edge is for `FailureShape` only — `dag` still does not sit on the batching writer (§4.2 note). §4.1's layer-4 row and §5.6's dependency line follow; §5.6's line also names the declared `scripting` and `graph` edges it had missed. |

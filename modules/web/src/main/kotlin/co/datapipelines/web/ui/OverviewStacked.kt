@@ -149,9 +149,6 @@ sealed interface Panel {
 object OverviewStacked {
     /** Which inventory a family's overview carries. */
     enum class ChartSet {
-        /** The four counts and the four-bar lifecycle chart (#556). No family carries it since #599 (a removal follow-up). */
-        STANDARD,
-
         /** The lifecycle strip, the activity columns and the release history (#598, #638). */
         LIFECYCLE,
     }

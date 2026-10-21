@@ -35,7 +35,11 @@
        and the search keeps focus and value. #580: the lifecycle select is the overview's
        drill-down (`?lifecycle=`, the inventory's buckets, the pipelines catalog's control); each
        control carries the other. -->
-  <div class="u-row-md app-catalog-search">
+  <!-- #591: every swap answers HX-Replace-Url (web CatalogUrl), so the address bar describes the
+       list. hx-history="false" keeps the catalog out of htmx's history cache: a snapshot holds
+       the controls' rendered attributes, not their live values, so Back would restore the list
+       under a stale search and select; Back fetches the page at its URL instead (ui-screens §5). -->
+  <div class="u-row-md app-catalog-search" hx-history="false">
     <input type="search" id="dashboard-filter-q" name="q" th:value="${q}"
            placeholder="Search dashboards..." aria-label="Search dashboards"
            th:attr="hx-get=@{/partials/dashboards}, hx-target='#dash-list-wrapper', hx-swap='outerHTML'"

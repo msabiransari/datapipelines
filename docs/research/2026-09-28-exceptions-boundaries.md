@@ -2,6 +2,8 @@
 
 [Main report](2026-09-28-exceptions-and-telemetry-audit.md). This is a source snapshot, not a delivery tracker.
 
+> Pointer (2026-10-21, #640/#665): the `Transform*` paths cited below were renamed by the SCRIPT node rename — `TemplateTransformFaceController.kt` → `TemplateScriptFaceController.kt`, `TransformFaceModel.kt` → `ScriptFaceModel.kt`, `TransformSuiteRun.kt` → `ScriptSuiteRun.kt` (all in `modules/web/.../web/ui/`). Line numbers are the snapshot's; the text is not rewritten.
+
 Read-only source audit on 2026-09-28, HEAD `e4cd69e2d358ed61e9e40a583c8bf470665f477e`.
 
 ## Scope and method

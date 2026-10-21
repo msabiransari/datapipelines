@@ -1,9 +1,9 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.45
+**Status:** v1.46
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-10-19
+**Last updated:** 2026-10-21
 
 ---
 
@@ -76,7 +76,7 @@ Which drivers are present is a **packaging** property of the artifact, not a con
 | `ORACLE` | **No** (OTN license) | Rebuild with `./gradlew -Poracle bootJar`, **or** drop `ojdbc11.jar` into `lib/` |
 | `MYSQL` | **No** (GPL-2.0 + FOSS exception, redistribution unverified) | Rebuild with `./gradlew -Pmysql bootJar`, **or** drop `mysql-connector-j.jar` into `lib/` |
 
-**The `lib/` drop-in.** Spring Boot's loader adds `lib/` (relative to the JAR's working directory) to the application classpath. For the container, mount the JAR at `/app/lib/`; for bare JVM, place it beside `datapipelines-app.jar`. This is the no-rebuild path — the operator accepts the driver's license by supplying it.
+**The `lib/` drop-in.** Spring Boot's `PropertiesLauncher` adds every jar in `loader.path` to the application classpath ([Module Structure §5.4.1](module-structure.md)). For the container, mount the DRIVER jar read-only into `/app/lib/`: the image ships that directory empty, `root:root` mode `0555`, and sets `ENV LOADER_PATH=/app/lib` itself (absolute, because a relative entry resolves against the working directory and the image sets no `WORKDIR`); neither `deploy/compose.yml` nor the Helm chart sets `LOADER_PATH`. For bare JVM, place it in a `lib/` directory beside `datapipelines-app.jar` and start with `-Dloader.path=lib` (relative to the working directory) or an absolute path. This is the no-rebuild path — the operator accepts the driver's license by supplying it.
 
 Registering a datasource whose dialect has no driver on the classpath fails at save time with `datasource.driver_not_loaded` ([Datasources §9](datasources.md#9-validation-rules)) — a deployment/packaging error, not a bad payload. The same payload succeeds after the driver is supplied.
 
@@ -485,6 +485,8 @@ DuckDB values render exactly their two quoted entries, each `extraEnv` double ma
 with the template's own message, and the missing `existingSecret` is refused — exiting 0 when
 every case passes, 1 when a chart check fails, and 2 on a tooling failure (a download or
 checksum-pin mismatch, never a chart verdict).
+
+The `lib/` driver drop-in (§3.5) is not supported by the chart today: it has no volume knob for the Deployment, so a read-only volume at `/app/lib` needs a patched template, and the chart's `extraEnv` does not refuse a `LOADER_PATH` entry (the image's own value must stay in force, §9).
 
 No sticky session affinity needed. Standard `ClusterIP` service with round-robin or random load balancing.
 
@@ -1192,6 +1194,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-21 | v1.46 | #657 the image's driver drop-in | **§3.5** the `lib/` drop-in paragraph now matches the image: the Dockerfile creates `/app/lib` empty, `root:root` mode `0555`, before `USER`, and sets `ENV LOADER_PATH=/app/lib` — until now it did neither, so a mounted driver was never on the classpath. The value is absolute because `PropertiesLauncher` resolves a relative `loader.path` against `loader.home` (default `${user.dir}`) and the image has no `WORKDIR`: `LOADER_PATH=lib` adds `/lib`. The operator mounts the DRIVER jar read-only at `/app/lib/`; neither compose nor the chart sets `LOADER_PATH` (§9). **§6.4** states that the chart does not support the drop-in today (no volume knob; `extraEnv` does not refuse `LOADER_PATH`). `ImageLoaderPathSpecDriftTest` pins the Dockerfile, this paragraph and Module Structure §5.4.1 to one value and refuses a deploy file that names `LOADER_PATH`. |
 | 2026-10-19 | v1.45 | #571 path-independent Plotly rebuilds | **§6.2A:** patch 0003 salts root-relative inline-CSS paths with the historical build directory, preserving every committed byte from any clone directory. The recipe uses a temporary directory; `scripts/verify-plotly-bundles.sh` rebuilds and compares both bundles for the lander on Plotly vendor or manifest-entry diffs, with distinct match, mismatch and rebuild-failure exits. |
 | 2026-10-16 | v1.44 | #538 audit manifest sizes | **§6.2A:** the vendored Plotly audit now compares all three raw byte lengths and both gzip counts with the manifest, and pins zlib deflate level 9 with gzip framing and mtime 0 in each bundle's size string. Size-only and method-only drift fail the build. |
 | 2026-10-15 | v1.43 | #531 the default heatmap keeps crisp cells under the CSP | **§6.2A:** a second numbered Plotly source patch sets the heatmap’s `image-rendering` fallbacks through the CSSOM instead of a style attribute; both custom bundles are rebuilt at the fixed path and their hashes and sizes move together in the manifest. The unminified comparison contains only the heatmap import and write changes; minified identifier allocation also changes. |

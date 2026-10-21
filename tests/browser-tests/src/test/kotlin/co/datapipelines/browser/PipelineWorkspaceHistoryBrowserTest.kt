@@ -282,6 +282,7 @@ class PipelineWorkspaceHistoryBrowserTest : BrowserSuite() {
         repeat(2) {
             leaveThroughTheUi()
             val hitsBefore = counter("hit")
+            val missesBefore = counter("miss")
             val restoresBefore = counter("restore")
             page.goBack()
             waitForRestore(restoresBefore)
@@ -289,7 +290,7 @@ class PipelineWorkspaceHistoryBrowserTest : BrowserSuite() {
             page.waitForSelector(".pe-root")
 
             counter("hit") shouldBeGreaterThanOrEqual hitsBefore + 1
-            counter("miss") shouldBe 0
+            counter("miss") shouldBe missesBefore
             stackDepth() shouldBe 1
             sqlPaneCount() shouldBe 0
             val identityAfter = runtimeIdentity()
@@ -305,9 +306,14 @@ class PipelineWorkspaceHistoryBrowserTest : BrowserSuite() {
             executeOnce(2)
             page.locator(".pe-status:has-text('Completed')").waitFor()
 
-            // Forward to the list and back again: one restore cycle per iteration.
+            // Forward to the list and back again: one restore cycle per iteration. The list is
+            // never cached (#591, hx-history="false"), so Forward fetches it: wait for that
+            // restore, or its late swap lands over the workspace the Back below restores.
+            val restoresBeforeForward = counter("restore")
             page.goForward()
             page.waitForURL("**/pipelines")
+            waitForRestore(restoresBeforeForward)
+            page.waitForSelector("#pipeline-list-wrapper")
             val restoresBeforeBack = counter("restore")
             page.goBack()
             waitForRestore(restoresBeforeBack)
@@ -895,12 +901,14 @@ class PipelineWorkspaceHistoryBrowserTest : BrowserSuite() {
         // helper hands it to htmx — a cache HIT that restores the workspace the reader left.
         val handed = (page.evaluate("() => window.WorkspaceHistory.stats().handedToHtmx") as Number).toInt()
         val beforeWorkspace = counter("restore")
+        // The list itself was a miss (#591: a catalog is never cached); the workspace must not be.
+        val missesBefore = counter("miss")
         page.goForward()
         waitForRestore(beforeWorkspace)
         waitActivated()
         expectView(1, "flow", "v1 · released · current", "sql_v1")
         stackDepth() shouldBe 1
-        counter("miss") shouldBe 0
+        counter("miss") shouldBe missesBefore
         (page.evaluate("() => window.WorkspaceHistory.stats().handedToHtmx") as Number).toInt() shouldBe handed + 1
         val restored = runtimeIdentity()
 
