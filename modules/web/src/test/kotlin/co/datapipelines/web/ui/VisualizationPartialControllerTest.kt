@@ -37,6 +37,7 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.springframework.http.HttpStatus
+import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.ExtendedModelMap
 import org.springframework.web.server.ResponseStatusException
@@ -90,14 +91,14 @@ class VisualizationPartialControllerTest {
         every { visualizations.countAll(workspaceId, ReadLens.Everything) } returns 0
 
         val all = ExtendedModelMap()
-        controller.catalog(all, q = null, offset = null) shouldBe VisualizationBrowseModel.WRAPPER_VIEW
+        controller.catalog(all, MockHttpServletResponse(), q = null, offset = null) shouldBe VisualizationBrowseModel.WRAPPER_VIEW
         all["rootId"] shouldBe VisualizationBrowseModel.PAGE_ROOT_ID
         all["visualizations"] shouldBe emptyList<Any>()
 
         every { visualizations.search(workspaceId, ReadLens.Everything, "rev", 0, VisualizationBrowseModel.PAGE_SIZE) } returns
             ArtifactPage(emptyList(), 0)
         val searched = ExtendedModelMap()
-        controller.catalog(searched, q = "rev", offset = null)
+        controller.catalog(searched, MockHttpServletResponse(), q = "rev", offset = null)
         searched["q"] shouldBe "rev"
         searched["rootId"] shouldBe VisualizationBrowseModel.PAGE_ROOT_ID
     }
@@ -110,7 +111,8 @@ class VisualizationPartialControllerTest {
         every { visualizations.listAll(workspaceId, narrowed, 0, VisualizationBrowseModel.PAGE_SIZE) } returns emptyList()
         every { visualizations.countAll(workspaceId, narrowed) } returns 0
 
-        controller.catalog(ExtendedModelMap(), q = null, offset = null) shouldBe VisualizationBrowseModel.WRAPPER_VIEW
+        controller.catalog(ExtendedModelMap(), MockHttpServletResponse(), q = null, offset = null) shouldBe
+            VisualizationBrowseModel.WRAPPER_VIEW
 
         verify(exactly = 0) { visualizations.listAll(any(), ReadLens.Everything, any(), any()) }
     }

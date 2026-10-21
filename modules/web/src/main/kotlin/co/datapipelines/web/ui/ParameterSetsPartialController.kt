@@ -4,6 +4,7 @@ import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.web.api.currentPrincipal
+import jakarta.servlet.http.HttpServletResponse
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
@@ -24,6 +25,9 @@ import org.springframework.web.bind.annotation.RequestParam
  * stale `scope` or `prefix` is not a bound parameter, so it is ignored like any other unknown query
  * value and the request answers the catalog list: degrading to the page's own list costs a stale
  * client nothing, where a 400 would add a refusal path for a parameter no client sends.
+ *
+ * #591: the answer carries the catalog URL of the list it renders ([CatalogUrl]) — `/parameter-sets`,
+ * the page's address, never this route's.
  */
 @Controller
 class ParameterSetsPartialController(
@@ -35,6 +39,7 @@ class ParameterSetsPartialController(
     @RequiredScope(Permission.PARAMETER_SET_READ)
     fun catalog(
         model: Model,
+        response: HttpServletResponse,
         // The pager's offset (the catalog template's prev/next links); page one when absent.
         @RequestParam(required = false) offset: Int?,
         // #415 — the catalog's name search.
@@ -43,6 +48,7 @@ class ParameterSetsPartialController(
         @RequestParam(required = false) lifecycle: String?,
     ): String {
         val bucket = CatalogLifecycle.parse(lifecycle, CatalogLifecycle.PARAMETER_SETS)
+        CatalogUrl.replace(response, CatalogUrl.PARAMETER_SETS, q, bucket, offset)
         val principal = currentPrincipal()
         return browse.fillWrapper(model, principal.requireWorkspace().id, lens.viewFor(principal), q, offset ?: 0, bucket)
     }
