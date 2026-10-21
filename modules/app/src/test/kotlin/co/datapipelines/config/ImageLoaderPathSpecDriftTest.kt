@@ -151,8 +151,9 @@ class ImageLoaderPathSpecDriftTest {
         val ALLOWED_REFUSAL =
             Regex
                 .escape(
-                    """{{- if hasKey .Values.extraEnv "LOADER_PATH" }}{{ fail "LOADER_PATH comes from the image, """ +
-                        """never from extraEnv.LOADER_PATH (deployment.md §9)" }}{{- end }}""",
+                    """{{- range ${'$'}name := keys .Values.extraEnv }}{{ if eq (upper (replace "." "_" ${'$'}name)) "LOADER_PATH" }}""" +
+                        """{{ fail "LOADER_PATH comes from the image, never from extraEnv.LOADER_PATH (deployment.md §9)" }}""" +
+                        """{{ end }}{{- end }}""",
                 ).toRegex()
         val SCAN_FLOOR = listOf("deploy/compose.yml", "$CHART_DIR/templates/deployment.yaml", "$CHART_DIR/values.yaml")
     }

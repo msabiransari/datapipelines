@@ -27,7 +27,8 @@
 #   (d)   no secret name (the placeholder OMITTED): exit non-zero AND stderr
 #         carries `existingSecret is required` — pins the `required` guard and
 #         proves the placeholder is load-bearing for (a)–(c).
-#   (e)   extraEnv.LOADER_PATH: exit non-zero with the exact refusal message.
+#   (e)   extraEnv.LOADER_PATH: exit non-zero with the exact refusal message; (e2) the
+#         same for loader_path, loader.path and Loader_Path, the spellings the launcher reads.
 #   (f)   libVolume enabled with a ConfigMap: exactly one read-only /app/lib
 #         mount and one driver-library volume using that ConfigMap.
 #         PVC sources must also be read-only; empty/multiple sources refused.
@@ -281,6 +282,23 @@ fi
 check_double_mapping "(e) extraEnv names LOADER_PATH" LOADER_PATH /tmp/x \
   'LOADER_PATH comes from the image, never from extraEnv.LOADER_PATH (deployment.md §9)' \
   "$WORK/e.out" "$WORK/e.err"
+
+# (e2) Spring Boot's launcher reads loader.path from the environment as loader.path,
+# loader_path or LOADER_PATH (launch.SystemPropertyUtils: as given, dots to underscores,
+# then upper-cased), so the refusal must match every spelling. --set-json, because --set
+# would nest a dotted key.
+for key in loader_path loader.path Loader_Path; do
+  rc=0
+  "$HELM" template dp "$CHART_DIR" --set "existingSecret=$PLACEHOLDER" \
+    --set-json "extraEnv={\"$key\":\"/tmp/x\"}" >"$WORK/e2.out" 2>"$WORK/e2.err" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    verdict "(e2) extraEnv names $key" 1 "helm template exited 0 (expected the render-time refusal)"
+  elif grep -qF 'LOADER_PATH comes from the image, never from extraEnv.LOADER_PATH (deployment.md §9)' "$WORK/e2.err"; then
+    verdict "(e2) extraEnv names $key" 0 "exit $rc with the template's own refusal message"
+  else
+    verdict "(e2) extraEnv names $key" 1 "exit $rc but the exact refusal message is NOT on stderr (red for the wrong reason)"
+  fi
+done
 
 # (f) the enabled volume: match whole blocks, so an unrelated readOnly elsewhere
 # cannot hide a writable mount, a missing source or a misplaced volume.
