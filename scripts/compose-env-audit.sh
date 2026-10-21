@@ -133,12 +133,17 @@ passed = dict(re.findall(r"^      (DATAPIPELINES_[A-Z0-9_]+): (.*)$", svc.group(
 # no default to compare, so it is collected separately.
 unset_unless_set = set(re.findall(r"^      (DATAPIPELINES_[A-Z0-9_]+):\s*$", svc.group(1), re.M))
 
-# Inventory valued AND valueless names independently of the app's namespace.
-names_in_block = set(re.findall(r"^      ([A-Z_][A-Z0-9_]*):", svc.group(1), re.M))
+# Inventory valued AND valueless names independently of the app's namespace — EVERY key
+# at the block's indent, lower-case and dotted ones included: Spring Boot's loader reads
+# `loader.path` from the environment as `loader.path`, `loader_path` or `LOADER_PATH`
+# (launch.SystemPropertyUtils), and Spring resolves `spring.config.import` verbatim.
+names_in_block = set(re.findall(r"^      ([^\s#:][^:\s]*):", svc.group(1), re.M))
 foreign_names = {name for name in names_in_block if not name.startswith("DATAPIPELINES_")}
 
-# These change JVM code loading. The refusal is independent of the allowlist below.
+# These change JVM code loading. The refusal is independent of the allowlist below and is
+# matched on the loader's own normalization (upper-cased, dots to underscores).
 DENIED_NAMES = {"LOADER_PATH", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS"}
+denied_in_block = {name for name in names_in_block if name.upper().replace(".", "_") in DENIED_NAMES}
 FOREIGN_ALLOWLIST: dict[str, str] = {
     "SAMPLE_DB_USER": "App bootstrap datasource manifest username (datasources.md §8A.2)",
     "SAMPLE_PG_PASSWORD": "App bootstrap PostgreSQL datasource manifest credential (datasources.md §8A.2)",
@@ -255,7 +260,7 @@ def commented(path):
     return re.findall(r"^#\s*([A-Z][A-Z0-9_]*)=(.*)$", open(path).read(), re.M)
 
 failures = []
-for name in sorted(names_in_block & DENIED_NAMES):
+for name in sorted(denied_in_block):
     failures.append(f"8 compose passes {name} to the app container — refused: it changes what code "
                     f"the JVM runs (deployment.md §9); remove the line")
 for name in sorted(foreign_names - FOREIGN_ALLOWLIST.keys()):
