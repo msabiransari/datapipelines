@@ -132,12 +132,13 @@ class OverviewDashboardsRenderTest {
     }
 
     @Test
-    fun `the overview path belongs to Dashboards and the singular path to nothing`() {
-        AppNav.activeFor("/overview/dashboards")!!.section shouldBe "/dashboards"
-        AppNav.crumbFor("/overview/dashboards")!!.second shouldBe "Dashboards"
-        val singular = AppNav.activeFor("/overview/dashboard")
-        (singular?.section == "/dashboard") shouldBe false
-        (singular?.section == "/dashboards") shouldBe false
+    fun `the overview path belongs to Dashboards and the singular path to Home`() {
+        AppNav.activeFor("/overview/dashboards").shouldNotBeNull().section shouldBe "/dashboards"
+        AppNav.crumbFor("/overview/dashboards").shouldNotBeNull().second shouldBe "Dashboards"
+        // #659: Home follows the same boundary and overview rule as every other section.
+        AppNav.activeFor("/overview/dashboard").shouldNotBeNull().section shouldBe "/dashboard"
+        AppNav.crumbFor("/overview/dashboard").shouldNotBeNull().second shouldBe "Home"
+        AppNav.matches("/dashboards", "/overview/dashboard") shouldBe false
     }
 
     private fun through(dashboards: DashboardRepository): OverviewPage {
