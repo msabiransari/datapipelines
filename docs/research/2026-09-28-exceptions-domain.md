@@ -2,6 +2,8 @@
 
 [Main report](2026-09-28-exceptions-and-telemetry-audit.md). This is a source snapshot, not a delivery tracker.
 
+> Pointer (2026-10-21, #640/#665): the `Transform*` paths cited below were renamed by the SCRIPT node rename — `TransformNodeRuns.kt` → `ScriptNodeRuns.kt`, `TransformRunSupport.kt` → `ScriptRunSupport.kt` (`modules/dag/.../executor/`), `TransformTestRunner.kt` → `ScriptTestRunner.kt` (`modules/templates/.../templates/`). Line numbers are the snapshot's; the text is not rewritten.
+
 Read-only source review against checkout e4cd69e2. No runtime failures injected or tests run; consequences below are source-derived, not reproduced incidents. No runtime code changed; see the main report for related GitHub issues and tracking limitations.
 
 ## Scope and inventory
