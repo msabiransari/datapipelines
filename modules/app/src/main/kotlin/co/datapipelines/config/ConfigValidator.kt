@@ -67,7 +67,7 @@ class ConfigValidator(
          * `UiRules.checkUiActivelyDevelopedDays` (§3.10). 36 since the script-node rename added
          * `ScriptRules.checkRemovedTransformKeys` (§3.28 — the removed `datapipelines.transform.*` keys).
          */
-        internal const val CHECK_COUNT = 36
+        internal const val CHECK_COUNT = 37
 
         /**
          * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
@@ -117,6 +117,8 @@ class ConfigValidator(
             checkUiTheme(snapshot, violations, warnings)
             UiRules.checkUiActivelyDevelopedDays(snapshot, violations)
             checkOidcProviders(snapshot, violations)
+            // §3.4 (#655) — each provider entry against its protocol, its own file like the mail rules.
+            AuthProviderRules.checkProviderProtocols(snapshot, violations)
             checkResultTtlOrdering(snapshot, violations)
             checkEndpointsTimeoutOrdering(snapshot, violations)
             DemoApiRules.enforceDemoApiRules(snapshot, violations)
@@ -325,7 +327,9 @@ class ConfigValidator(
          * (the stock `google` entry binds empty when its env vars are unset) — a typo'd
          * env var degrades one provider to that WARN, while "nothing to log in with at
          * all" stays a refusal. The per-field checks apply only to entries the operator
-         * demonstrably meant to configure (a present client-id).
+         * demonstrably meant to configure (a present client-id); the protocol-specific keys
+         * (`issuer-uri` for `oidc`, the endpoints for `oauth2`, #655) are
+         * [AuthProviderRules.checkProviderProtocols]'.
          */
         private fun checkOidcProviders(
             snapshot: ConfigSnapshot,
@@ -340,7 +344,6 @@ class ConfigValidator(
                 if (provider.clientId.isBlank()) return@forEach
                 val label = provider.name.ifBlank { "<unnamed>" }
                 if (provider.clientSecret.isBlank()) violations += "OIDC provider '$label': client-secret is empty."
-                if (provider.issuerUri.isBlank()) violations += "OIDC provider '$label': issuer-uri is empty."
             }
         }
 
@@ -970,30 +973,18 @@ class ConfigValidator(
             )
 
         /**
-         * The configured OIDC providers, read by index so a malformed entry (e.g. a missing
-         * `name`) is *reported* by the §7 checks rather than silently skipped by a binder.
+         * The configured providers, through the SAME Binder `AuthProperties` is bound with (#655).
+         * The list is taken whole from the highest-precedence source that names any element of
+         * it — so an index-by-index Environment lookup, which this was until #655, could read an
+         * entry the application never binds: a test that re-declares `providers[1]` as an OIDC
+         * entry would have inherited the shipped `github` entry's `protocol: oauth2` and endpoints
+         * from application.yml. A missing `name` still binds as empty and is reported, never skipped.
          */
-        private fun oidcProviders(environment: Environment): List<OidcProviderSnapshot> {
-            val providers = mutableListOf<OidcProviderSnapshot>()
-            var index = 0
-            while (true) {
-                val prefix = "datapipelines.auth.oidc.providers[$index]"
-                val name = environment.getProperty("$prefix.name")
-                val clientId = environment.getProperty("$prefix.client-id")
-                val clientSecret = environment.getProperty("$prefix.client-secret")
-                val issuerUri = environment.getProperty("$prefix.issuer-uri")
-                if (listOfNotNull(name, clientId, clientSecret, issuerUri).isEmpty()) break
-                providers +=
-                    OidcProviderSnapshot(
-                        name = name.orEmpty(),
-                        clientId = clientId.orEmpty(),
-                        clientSecret = clientSecret.orEmpty(),
-                        issuerUri = issuerUri.orEmpty(),
-                    )
-                index++
-            }
-            return providers
-        }
+        private fun oidcProviders(environment: Environment): List<OidcProviderSnapshot> =
+            Binder
+                .get(environment)
+                .bind("datapipelines.auth.oidc.providers", Bindable.listOf(OidcProviderSnapshot::class.java))
+                .orElse(emptyList())
 
         /**
          * The vendored theme names, or **null** when the design-system assets are not on the
@@ -1279,19 +1270,71 @@ internal data class MailSnapshot(
     val enabled: Boolean get() = !host.isNullOrBlank() && !from.isNullOrBlank()
 }
 
-/** One `datapipelines.auth.oidc.providers[]` entry (auth.md §11.1), bound by relaxed binding. */
+/**
+ * One `datapipelines.auth.oidc.providers[]` entry (auth.md §11.1), bound by relaxed binding —
+ * the §7-checked keys only; `AuthProperties.Provider` is the full binding.
+ */
 internal data class OidcProviderSnapshot(
     val name: String = "",
     val clientId: String = "",
     val clientSecret: String = "",
+    val protocol: String = AuthProviderRules.PROTOCOL_OIDC,
     val issuerUri: String = "",
+    val authorizationUri: String = "",
+    val tokenUri: String = "",
+    val userInfoUri: String = "",
+    val userNameAttribute: String = "",
+    val scopes: List<String> = emptyList(),
+    val emailsUri: String? = null,
 ) {
+    /**
+     * Credentials present and the protocol's own keys present — what the hardened posture's
+     * "an external provider is configured" means (§3.23). Shape errors are
+     * [AuthProviderRules]' to name; this only answers whether the entry is complete.
+     */
+    val isFullyConfigured: Boolean
+        get() =
+            clientId.isNotBlank() &&
+                clientSecret.isNotBlank() &&
+                when (protocol) {
+                    AuthProviderRules.PROTOCOL_OIDC -> {
+                        issuerUri.isNotBlank()
+                    }
+
+                    AuthProviderRules.PROTOCOL_OAUTH2 -> {
+                        listOf(authorizationUri, tokenUri, userInfoUri, userNameAttribute).all { it.isNotBlank() } &&
+                            scopes.isNotEmpty()
+                    }
+
+                    else -> {
+                        false
+                    }
+                }
+
+    /** The `oauth2`-only keys this entry sets — an `oidc` entry must set none ([AuthProviderRules]). */
+    fun oauth2OnlyKeysSet(): List<String> =
+        listOfNotNull(
+            "authorization-uri".takeIf { authorizationUri.isNotBlank() },
+            "token-uri".takeIf { tokenUri.isNotBlank() },
+            "user-info-uri".takeIf { userInfoUri.isNotBlank() },
+            "user-name-attribute".takeIf { userNameAttribute.isNotBlank() },
+            "scopes".takeIf { scopes.isNotEmpty() },
+            "emails-uri".takeIf { !emailsUri.isNullOrBlank() },
+        )
+
     override fun toString() =
         "OidcProviderSnapshot(" +
             "name=$name, " +
             "clientId=$clientId, " +
             "clientSecret=<redacted>, " +
-            "issuerUri=$issuerUri)"
+            "protocol=$protocol, " +
+            "issuerUri=$issuerUri, " +
+            "authorizationUri=$authorizationUri, " +
+            "tokenUri=$tokenUri, " +
+            "userInfoUri=$userInfoUri, " +
+            "userNameAttribute=$userNameAttribute, " +
+            "scopes=$scopes, " +
+            "emailsUri=$emailsUri)"
 }
 
 internal data class ValidationReport(

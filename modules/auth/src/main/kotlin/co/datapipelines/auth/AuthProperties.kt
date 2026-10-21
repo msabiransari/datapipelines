@@ -71,11 +71,49 @@ data class AuthProperties(
         val providers: List<Provider> = emptyList(),
     )
 
+    /**
+     * One `datapipelines.auth.oidc.providers[]` entry (auth.md §5.1, §11.1). Two protocols
+     * (#655): an `oidc` entry names only its `issuer-uri` and is discovered; an `oauth2` entry
+     * — a provider that speaks OAuth 2.0 without OpenID Connect, GitHub being the shipped one —
+     * names its endpoints explicitly, and its identity comes from the user-info endpoint and,
+     * when [emailsUri] is set, the verified primary address of the emails endpoint.
+     */
     data class Provider(
         val name: String = "",
         val clientId: String = "",
         val clientSecret: String = "",
+        /**
+         * `protocol` (#655): `oidc` (the default — discovery from [issuerUri], an ID token, the
+         * `openid profile email` scopes) or `oauth2` (no discovery: [authorizationUri],
+         * [tokenUri], [userInfoUri], [userNameAttribute] and [scopes] are required and
+         * [issuerUri] must be empty). Any other value refuses startup (ConfigValidator §7).
+         */
+        val protocol: String = PROTOCOL_OIDC,
+        /** `issuer-uri`: an `oidc` entry's discovery root. Must be EMPTY on an `oauth2` entry. */
         val issuerUri: String = "",
+        /** `authorization-uri` (`oauth2` only): where the browser is sent to authorize. */
+        val authorizationUri: String = "",
+        /** `token-uri` (`oauth2` only): the server-side code-for-token exchange. */
+        val tokenUri: String = "",
+        /** `user-info-uri` (`oauth2` only): the identity endpoint, read once with the access token. */
+        val userInfoUri: String = "",
+        /**
+         * `user-name-attribute` (`oauth2` only): the user-info attribute whose value becomes
+         * `users.provider_subject` — a STABLE, provider-assigned id (GitHub: `id`, never the
+         * renameable `login`).
+         */
+        val userNameAttribute: String = "",
+        /** `scopes` (`oauth2` only; an `oidc` entry always asks for `openid profile email`). */
+        val scopes: List<String> = emptyList(),
+        /**
+         * `emails-uri` (`oauth2` only, optional): an endpoint answering a list of
+         * `{email, primary, verified}` rows (GitHub's `/user/emails`). When set, the login's
+         * address is the `primary` row and it counts as verified only when that row says
+         * `verified: true` — the user-info `email` attribute is never read, and
+         * [trustEmailWithoutVerifiedClaim] has no effect. Unset, the user-info attributes
+         * `email`/`email_verified` are judged under the OIDC rules.
+         */
+        val emailsUri: String? = null,
         val displayName: String? = null,
         /**
          * `trust-email-without-verified-claim` (auth.md §5.1, #187): for an IdP that never
@@ -98,7 +136,18 @@ data class AuthProperties(
          * entries are bare hostnames and are validated where the allowlist is built.
          */
         val pictureHosts: List<String> = emptyList(),
-    )
+    ) {
+        /** True for an OAuth 2.0 (non-OIDC) entry — registered with explicit endpoints, no ID token. */
+        val isOAuth2: Boolean get() = protocol == PROTOCOL_OAUTH2
+
+        companion object {
+            /** The OpenID Connect protocol: discovery, ID token, `openid` scope. The default. */
+            const val PROTOCOL_OIDC = "oidc"
+
+            /** OAuth 2.0 without OpenID Connect (#655): explicit endpoints, a user-info identity. */
+            const val PROTOCOL_OAUTH2 = "oauth2"
+        }
+    }
 
     /**
      * There is deliberately **no** `algorithm` key (AU-API-7): Configuration §3.4
