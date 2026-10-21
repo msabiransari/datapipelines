@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.44 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.45 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-10-21
@@ -102,7 +102,7 @@ The switch is `datapipelines.observability.logging.format` ([configuration.md §
 | `mcp-server` | tool calls (tool name + caller), transport errors |
 | `web` | request log (method, path, status, duration), CORS preflight, SSE connections opened/closed |
 
-The tables below catalogue twelve namespaces: `audit`, `dashboard`, `datasource`, `endpoint`, `execution`, `pipeline`, `shutdown`, `parameter`, `lake`, `mail`, `persistence` and `scheduler`. All twelve currently catalogued namespaces are enforced by `ObservabilityEventCatalogParityTest` (#439, #443): the `event=<namespace>.<name>` literals under `modules/<module>/src/main/kotlin` and the backticked names in these tables' event column must agree in both directions. Per-namespace non-vacuity floors prevent an empty extraction from passing. This is a source-text check (comments count), not an AST or runtime inventory; uncatalogued code namespaces remain outside it. Computed event identities in files logging an enforced namespace are refused. The two exact retained `audit_log write failed` formats in `AuditLogger.kt` (§3.4G) carry an audit-row identity in `event={}` rather than a structured-log identity; each exception is pinned to that file and required exactly once. `audit_event={}` is a separate field.
+The tables below catalogue thirteen namespaces: `audit`, `dashboard`, `datasource`, `endpoint`, `execution`, `pipeline`, `shutdown`, `parameter`, `lake`, `mail`, `persistence`, `scheduler` and `retention`. All thirteen currently catalogued namespaces are enforced by `ObservabilityEventCatalogParityTest` (#439, #443): the `event=<namespace>.<name>` literals under `modules/<module>/src/main/kotlin` and the backticked names in these tables' event column must agree in both directions. Per-namespace non-vacuity floors prevent an empty extraction from passing. This is a source-text check (comments count), not an AST or runtime inventory; uncatalogued code namespaces remain outside it. Computed event identities in files logging an enforced namespace are refused. The two exact retained `audit_log write failed` formats in `AuditLogger.kt` (§3.4G) carry an audit-row identity in `event={}` rather than a structured-log identity; each exception is pinned to that file and required exactly once. `audit_event={}` is a separate field.
 
 #### 3.4A The pool-retirement events (094)
 
@@ -653,6 +653,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-21 | v1.45 | #637 retention event-catalogue parity | **§3.4's namespace sentence** now lists thirteen namespaces, including `retention`; `ObservabilityEventCatalogParityTest` enforces the existing `retention.step_failed` row with a non-vacuity floor of one. No event added or renamed. |
 | 2026-10-21 | v1.44 | 636 (#636) the housekeeping statements' bounds | **§3.4J** `dashboard.refresh_sweep_failed` and `dashboard.refresh_retention_failed`, and **§3.4M** `parameter.evaluation_sweep_failed` and `parameter.evaluation_retention_failed`, gain "or was cancelled at its bound (`sql_state=57014`)" with their bound (the refresh sweep's 10 s, the retention tick's 25 s) and their `tick_failed` job; **§4.1** `tick_failed` lists eight `job` values; **§3.4I** `retention.step_failed` counts every step under its job, only what escaped the step's own catch; **§3.4H** names the dashboard refresh sweep among the `dp-scheduled` jobs and the four bounds in `shutdown.scheduled_jobs_incomplete` (the pool reaper is the one unbounded job left). No event added or renamed. |
 | 2026-10-20 | v1.43 | 326 (#326) the scheduled jobs' statement bounds | **§3.4I** `execution.sweep_failed` and `execution.event_retention_failed`, and **§3.4N** `audit.retention_failed`, gain "or was cancelled at its bound (`sql_state=57014`)"; **§3.4I** gains the `retention.step_failed` row, cited by §3.4H and §7 but defined nowhere until now; **§3.4H**'s `shutdown.scheduled_jobs_incomplete` row says the bounds sit under the 30 s shutdown phase and names the steps that are not bounded. **§4.1** gains `datapipelines.scheduled_jobs.tick_failed` (counter, tag `job` from a closed set of four). The bounds are code constants (sweep 10 s, retention 25 s), not keys. No log line's fields change. |
 | 2026-10-20 | v1.42 | #569 | The concurrency gauge is bound by the execution-slot bean, once per instance. Executor construction does not register it; rebinding the same pool is a no-op and a different pool fails fast. |
