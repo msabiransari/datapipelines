@@ -8,13 +8,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
-import org.springframework.mock.web.MockHttpServletRequest
-import org.springframework.mock.web.MockHttpServletResponse
-import org.springframework.mock.web.MockServletContext
 import org.thymeleaf.context.WebContext
-import org.thymeleaf.spring6.SpringTemplateEngine
-import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver
-import org.thymeleaf.web.servlet.JakartaServletWebApplication
 
 /**
  * 076 §B — the boosted-navigation shell, pinned at the RENDER.
@@ -32,16 +26,7 @@ import org.thymeleaf.web.servlet.JakartaServletWebApplication
  * dropped attribute is invisible to controller tests and to the JS tests.
  */
 class ShellRenderTest {
-    private val engine =
-        SpringTemplateEngine().apply {
-            setTemplateResolver(
-                ClassLoaderTemplateResolver().apply {
-                    prefix = "templates/"
-                    suffix = ".html"
-                    characterEncoding = "UTF-8"
-                },
-            )
-        }
+    private val engine = ShellRenderFixture.engine()
 
     @Test
     fun `every app page renders the boost shell on nav and main`() {
@@ -415,18 +400,7 @@ class ShellRenderTest {
     }
 
     private fun WebContext.fillList() {
-        fillLayoutChrome()
-        setVariable("scopes", setOf("READ"))
-        setVariable("dialects", emptyList<String>())
-        // #350: the /pipelines page is the flat catalog under its own root.
-        setVariable("searching", true)
-        setVariable("rootId", PipelineBrowseModel.CATALOG_ROOT_ID)
-        setVariable("pipelines", emptyList<Any>())
-        setVariable("drafts", emptyMap<Any, Any>())
-        setVariable("q", "")
-        setVariable("offset", 0)
-        setVariable("hasMore", false)
-        setVariable("total", 0)
+        ShellRenderFixture.fillList(this)
     }
 
     private fun WebContext.fillLogin() {
@@ -466,17 +440,7 @@ class ShellRenderTest {
     }
 
     private fun WebContext.fillLayoutChrome() {
-        setVariable("_csrf", mapOf("token" to "t", "parameterName" to "_csrf"))
-        setVariable("workspaceHeaderFragment", "")
-        setVariable("workspaceOptions", emptyList<Any>())
-        setVariable("activeWorkspace", "acme")
-        setVariable("activeTheme", "saas")
-        setVariable("authenticated", true)
-        setVariable("currentPath", "/pipelines")
-        // #513 — UiWorkspaceAdvice's attribute at runtime; the render tests set it by hand.
-        setVariable("searchMaxLength", SearchNeedle.MAX_LENGTH)
-        // 127 — SiteOriginAdvice's attribute at runtime; the render tests set it by hand.
-        setVariable("reportProblemUrl", REPORT_PROBLEM_URL)
+        ShellRenderFixture.fillLayoutChrome(this)
     }
 
     /**
@@ -794,10 +758,5 @@ class ShellRenderTest {
         val PANEL = Regex("""<div class="app-nav-tree app-browser-tree" id="nav-tree-([a-z-]+)" data-nav-tree="([a-z-]+)"[^>]*>""")
     }
 
-    private fun webContext(): WebContext =
-        WebContext(
-            JakartaServletWebApplication
-                .buildApplication(MockServletContext())
-                .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
-        ).withRoles()
+    private fun webContext(): WebContext = ShellRenderFixture.context()
 }
