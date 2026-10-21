@@ -44,12 +44,13 @@ import java.time.Duration
  * - **The cadence is a code constant, not a configuration key:** one hour is far under any
  *  sane retention window (default 7 days); a knob nobody should turn is not worth a
  *  documented key (same rule the sweep set).
- * - **So is every statement bound (#326):** the event DELETE, the audit retention's cutoff read and
- *  batches, and the keys purge's three statements carry
- *  [ExecutionEventRetentionScheduler.RETENTION_STATEMENT_TIMEOUT_SECONDS] — the audit retention and the
- *  keys purge by being built here over a [BoundedJdbc] template (every statement they send is theirs to
- *  bound), the event DELETE through its repository's own bound (`EngineConfiguration`). The dashboard and
- *  parameter-evaluation steps are not bounded yet.
+ * - **So is every statement bound (#326, #636):** the event DELETE, the audit retention's cutoff read and
+ *  batches, the keys purge's three statements, the dashboard refreshes' DELETE and the parameter
+ *  evaluations' sweep UPDATE and retention DELETE carry
+ *  [ExecutionEventRetentionScheduler.RETENTION_STATEMENT_TIMEOUT_SECONDS] — all but the event DELETE by
+ *  being built here over a [BoundedJdbc] template (every statement they send is theirs to bound; the two
+ *  repositories are built in place, so the runtime's own writes on the shared beans stay unbounded), the
+ *  event DELETE through its repository's own bound (`EngineConfiguration`).
  * - **The annotation lives here, not in `dag`:** `dag` ships no Spring configuration; it owns
  *  the idempotent [ExecutionEventRetention], this module owns the scheduling.
  */
@@ -78,35 +79,52 @@ class RetentionSchedulingConfiguration {
     @Bean
     fun keyRetentionPurge(jdbc: NamedParameterJdbcTemplate): KeyRetentionPurge = KeyRetentionPurge(retentionStatements(jdbc))
 
-    /** Finished dashboard refreshes ride the event retention's tick and cutoff (#10 L2, metadata-db §8.1). */
+    /**
+     * Finished dashboard refreshes ride the event retention's tick, cutoff and statement bound (#10 L2, metadata-db §8.1;
+     * the bound #636).
+     */
     @Bean
     fun dashboardRefreshRetention(
         jdbc: NamedParameterJdbcTemplate,
         properties: ExecutionsProperties,
-    ): DashboardRefreshRetention = DashboardRefreshRetention(DashboardRefreshRepository(jdbc), properties.eventRetentionDays)
+        meterRegistry: MeterRegistry,
+    ): DashboardRefreshRetention =
+        DashboardRefreshRetention(DashboardRefreshRepository(retentionStatements(jdbc)), properties.eventRetentionDays, meterRegistry)
 
     /**
      * #376: a RUNNING evaluation record past the evaluate deadline (plus the sweeper's margin) is closed INCOMPLETE. The
      * repository is built here from the jdbc template, as the dashboard refreshes' is, so the scheduling slice
      * (`ScheduledJobsSchedulerTest`) loads this configuration without the engine's; the deadline is the engine's own
-     * `ParametersConfig` bean, which the application always has — the slice, which has none, gets the key's default.
+     * `ParametersConfig` bean, which the application always has — the slice, which has none, gets the key's default. Its
+     * `UPDATE` takes the retention tick's statement bound (#636).
      */
     @Bean
     fun parameterEvaluationSweeper(
         jdbc: NamedParameterJdbcTemplate,
         parameters: ObjectProvider<ParametersConfig>,
+        meterRegistry: MeterRegistry,
     ): ParameterEvaluationSweeper =
         ParameterEvaluationSweeper(
-            ParameterEvaluationRepository(jdbc),
+            ParameterEvaluationRepository(retentionStatements(jdbc)),
             parameters.getIfAvailable(::ParametersConfig).evaluateTimeoutSeconds,
+            meterRegistry,
         )
 
-    /** #376: finished evaluation records ride the event retention's tick and cutoff — no key of their own (§11.5). */
+    /**
+     * #376: finished evaluation records ride the event retention's tick and cutoff — no key of their own (§11.5) — and,
+     * since #636, its statement bound.
+     */
     @Bean
     fun parameterEvaluationRetention(
         jdbc: NamedParameterJdbcTemplate,
         properties: ExecutionsProperties,
-    ): ParameterEvaluationRetention = ParameterEvaluationRetention(ParameterEvaluationRepository(jdbc), properties.eventRetentionDays)
+        meterRegistry: MeterRegistry,
+    ): ParameterEvaluationRetention =
+        ParameterEvaluationRetention(
+            ParameterEvaluationRepository(retentionStatements(jdbc)),
+            properties.eventRetentionDays,
+            metrics = meterRegistry,
+        )
 
     @Bean
     fun executionEventRetentionScheduler(
@@ -128,7 +146,10 @@ class RetentionSchedulingConfiguration {
             meterRegistry,
         )
 
-    /** The audit retention's and the keys purge's template: every statement on the retention tick's bound. */
+    /**
+     * The template of every step built here — the audit retention, the keys purge, the dashboard refreshes' retention and
+     * the two parameter-evaluation steps: every statement on the retention tick's bound.
+     */
     private fun retentionStatements(jdbc: NamedParameterJdbcTemplate): NamedParameterJdbcTemplate =
         BoundedJdbc.bounded(
             jdbc,
@@ -164,12 +185,14 @@ class RetentionSchedulingConfiguration {
  * a metadata-DB fault into its own WARN; this catches what is left, so nothing reaches the
  * scheduler thread the stale-execution sweep and the pool reaper share.
  *
- * ## Failed ticks are counted (#326)
- * A step that throws and belongs to one of the counted jobs ([ScheduledJob]) adds one to
+ * ## Failed ticks are counted (#326, #636)
+ * Every step belongs to one of the counted jobs ([ScheduledJob]); a step that throws adds one to
  * [ScheduledJob.FAILED_TICK_METER] under its `job` tag. The keys purge has no catch of its own (one
  * transaction — its KDoc says why), so its failures, a statement cancelled at the bound included, are
- * counted HERE; the event and audit retentions count the faults they catch themselves, and this adds
- * only what escaped them, so no failure is counted twice.
+ * counted HERE; the event and audit retentions, the dashboard refreshes' retention and the two
+ * parameter-evaluation steps count the `DataAccessException`s they catch themselves (a cancel at the
+ * bound among them), and this adds only what escaped them — any other exception — so no failure is
+ * counted twice: one failure takes one of the two paths, never both.
  */
 class ExecutionEventRetentionScheduler(
     private val retention: ExecutionEventRetention,
@@ -183,7 +206,7 @@ class ExecutionEventRetentionScheduler(
 ) {
     private val failedTicks: Map<ScheduledJob, Counter> =
         metrics?.let { registry ->
-            listOf(ScheduledJob.EVENT_RETENTION, ScheduledJob.KEYS_PURGE, ScheduledJob.AUDIT_RETENTION).associateWith { job ->
+            COUNTED_JOBS.associateWith { job ->
                 Counter
                     .builder(ScheduledJob.FAILED_TICK_METER)
                     .description(ScheduledJob.FAILED_TICK_DESCRIPTION)
@@ -196,10 +219,10 @@ class ExecutionEventRetentionScheduler(
     fun retain() {
         step("execution_events", ScheduledJob.EVENT_RETENTION) { retention.retainOnce() }
         // #10 L2: finished dashboard refreshes go with the events that describe them (metadata-db §8.1).
-        step("dashboard_refreshes") { dashboardRefreshRetention.retainOnce() }
+        step("dashboard_refreshes", ScheduledJob.DASHBOARD_REFRESH_RETENTION) { dashboardRefreshRetention.retainOnce() }
         // #376: the stale sweep first, so a record it closes ages out with the rest; then the retention batch.
-        step("parameter_evaluation_sweep") { evaluationSweeper.sweepOnce() }
-        step("parameter_evaluations") { evaluationRetention.retainOnce() }
+        step("parameter_evaluation_sweep", ScheduledJob.PARAMETER_EVALUATION_SWEEP) { evaluationSweeper.sweepOnce() }
+        step("parameter_evaluations", ScheduledJob.PARAMETER_EVALUATION_RETENTION) { evaluationRetention.retainOnce() }
         step("keys", ScheduledJob.KEYS_PURGE) { keyPurge.purgeOnce() }
         step("audit_log", ScheduledJob.AUDIT_RETENTION) { auditRetention.purgeOnce() }
     }
@@ -207,7 +230,7 @@ class ExecutionEventRetentionScheduler(
     @Suppress("TooGenericExceptionCaught") // the point IS any failure: one ERROR line, the next step runs
     private inline fun step(
         name: String,
-        job: ScheduledJob? = null,
+        job: ScheduledJob,
         block: () -> Unit,
     ) {
         try {
@@ -220,7 +243,7 @@ class ExecutionEventRetentionScheduler(
                 e.javaClass.simpleName,
                 FailureShape.sqlState(e),
             )
-            job?.let { failedTicks[it]?.increment() }
+            failedTicks[job]?.increment()
         }
     }
 
@@ -228,15 +251,28 @@ class ExecutionEventRetentionScheduler(
         /** One hour — see [RetentionSchedulingConfiguration] for why this is not a config key. */
         const val RETENTION_INTERVAL_MILLIS = 3_600_000L
 
+        /** The jobs this tick runs, one per step — the failed-tick series it registers. */
+        private val COUNTED_JOBS =
+            listOf(
+                ScheduledJob.EVENT_RETENTION,
+                ScheduledJob.DASHBOARD_REFRESH_RETENTION,
+                ScheduledJob.PARAMETER_EVALUATION_SWEEP,
+                ScheduledJob.PARAMETER_EVALUATION_RETENTION,
+                ScheduledJob.KEYS_PURGE,
+                ScheduledJob.AUDIT_RETENTION,
+            )
+
         /**
          * #326 — the statement bound of the event DELETE, the audit retention's cutoff read and batches, and
-         * the keys purge's three statements: a JDBC `queryTimeout`. Not a config key, the cadence's reason.
+         * the keys purge's three statements; #636 — the dashboard refreshes' DELETE, the parameter
+         * evaluations' sweep UPDATE and retention DELETE: a JDBC `queryTimeout`. Not a config key, the cadence's reason.
          * Twenty-five seconds is under `spring.lifecycle.timeout-per-shutdown-phase` (30 s), so a SIGTERM
          * during a hung statement ends inside the phase; every healthy statement here is far shorter (the
          * audit batch is 5 000 rows by index — measured by #326 in milliseconds), so the bound fires only on
          * a hang, a statement queued behind a lock that never goes. A cancel (SQLState `57014`) rolls back that
          * statement — the whole keys purge, which is one transaction; one audit batch, whose predecessors stay
-         * committed — and the next hourly tick retries from the same predicate.
+         * committed; the one refresh DELETE, evaluation sweep UPDATE or evaluation batch — and the next hourly
+         * tick retries from the same predicate.
          */
         const val RETENTION_STATEMENT_TIMEOUT_SECONDS = 25
 

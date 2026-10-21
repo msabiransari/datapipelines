@@ -8,24 +8,24 @@ import java.nio.file.Path
 import java.nio.file.Paths
 
 /**
- * #599 — what the three object homes' browser cases share on the v2 frame: the summary strip's and its
- * foot's numbers, the activity columns and the release-history bins as the hidden tables state them, the
+ * #599, #647 — what the Pipelines and sibling object homes' browser cases share on the v2 frame:
+ * the summary strip's and its foot's numbers, the activity columns and the release-history bins as the hidden tables state them, the
  * definitions dialog's round trip with focus returned to its button, and the evidence screenshots at 1512
- * and 390 in each theme. The Pipelines case ([OverviewBrowserTest]) keeps its own copies.
+ * and 390 in each theme, with an optional intermediate viewport for the Pipelines home.
  */
 internal object OverviewHomeBrowserSupport {
-    private const val WIDE = 1512
-    private const val WIDE_H = 900
-    private const val PHONE = 390
-    private const val PHONE_H = 844
-    private const val WEEKS = 12
+    const val WIDE = 1512
+    const val WIDE_H = 900
+    const val PHONE = 390
+    const val PHONE_H = 844
+    const val WEEKS = 12
 
     /** The viewport height that shows the whole overview: its root's top, its scroll height and a margin. */
     private const val FULL_HEIGHT =
         "() => { const root = document.querySelector('[data-overview]');" +
             " return Math.ceil(root.getBoundingClientRect().top + root.scrollHeight + 48); }"
 
-    /** Where the screenshots land, beside the Pipelines home's (`build/reports/home-frame-overview`). */
+    /** Where the Pipelines and three sibling object homes' evidence screenshots land, named by family. */
     val SHOTS: Path = Paths.get("build", "reports", "599-object-family-homes")
 
     /** Each strip or foot cell's number, by its key (`total`, `live`, `in-development`, `actively-developed`, …). */
@@ -63,13 +63,21 @@ internal object OverviewHomeBrowserSupport {
         }
     }
 
+    /** Opens the dialog through [selector] and waits until it is modal. */
+    fun openDialog(
+        page: Page,
+        selector: String,
+    ) {
+        page.click(selector)
+        page.waitForFunction("() => document.querySelector('dialog[data-overview-dialog]').open")
+    }
+
     /** The foot's info button opens the definitions section; Escape closes the dialog and focus returns to the button. */
     fun definitionsRoundTrip(
         page: Page,
         total: Int,
     ) {
-        page.click("[data-overview-foot] [data-open='definitions']")
-        page.waitForFunction("() => document.querySelector('dialog[data-overview-dialog]').open")
+        openDialog(page, "[data-overview-foot] [data-open='definitions']")
         page.locator("[data-overview-dialog-title]").innerText().trim() shouldBe "How the summary is counted"
         page.locator("[data-dialog-section='definitions']").isVisible shouldBe true
         page.locator("[data-dialog-section='prompt']").isVisible shouldBe false
@@ -79,15 +87,19 @@ internal object OverviewHomeBrowserSupport {
         page.evaluate("() => document.activeElement?.getAttribute('data-open')") shouldBe "definitions"
     }
 
-    /** The evidence set for [family]: the page at 1512 and 390, light then dark, leaving the light theme on and the page at 1512. */
+    /**
+     * The evidence set for [family]: 1512 and 390, plus [additionalViewports], in each theme.
+     * Leaves the light theme on and the page at 1512. Siblings keep their original two viewports.
+     */
     fun screenshots(
         page: Page,
         family: String,
+        additionalViewports: List<Pair<Int, Int>> = emptyList(),
     ) {
         SHOTS.toFile().mkdirs()
         listOf("light", "dark").forEach { mode ->
             themeOn(page, mode)
-            listOf(WIDE to WIDE_H, PHONE to PHONE_H).forEach { (width, height) ->
+            (listOf(WIDE to WIDE_H) + additionalViewports + (PHONE to PHONE_H)).forEach { (width, height) ->
                 page.setViewportSize(width, height)
                 page.reload()
                 page.waitForSelector("[data-overview-summary]")
@@ -107,7 +119,7 @@ internal object OverviewHomeBrowserSupport {
         page.waitForSelector("[data-overview-summary]")
     }
 
-    /** [OverviewBrowserTest]'s switch: the stored theme wins over an emulated colour scheme, so flip the top bar's toggle. */
+    /** The shared theme switch: the stored theme wins over an emulated colour scheme, so flip the top bar's toggle. */
     private fun themeOn(
         page: Page,
         mode: String,

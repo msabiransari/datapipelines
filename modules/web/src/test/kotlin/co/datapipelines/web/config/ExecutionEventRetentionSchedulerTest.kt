@@ -155,15 +155,16 @@ class ExecutionEventRetentionSchedulerTest {
 
         counted.retain()
 
-        failedTicks(registry) shouldBe mapOf("event_retention" to 0.0, "keys_purge" to 1.0, "audit_retention" to 0.0)
+        failedTicks(registry) shouldBe COUNTED.associateWith { if (it == "keys_purge") 1.0 else 0.0 }
     }
 
     /**
-     * What escaped a job's own catch is counted under that job; a step outside the counted set (the
-     * dashboard and evaluation steps — not bounded, not counted) adds nothing, and a quiet tick nothing.
+     * What escaped a job's own catch is counted under that job — every step is a counted job since #636
+     * (the dashboard refreshes' retention and the two evaluation steps count what they catch themselves;
+     * this is what escaped them) — and a quiet tick counts nothing.
      */
     @Test
-    fun `only a counted job's escaped failure is counted - never an uncounted step's, never a quiet tick`() {
+    fun `every step's escaped failure is counted once under its own job - never a quiet tick`() {
         val registry = SimpleMeterRegistry()
         val counted = ExecutionEventRetentionScheduler(events, keys, audit, dashboards, evaluationSweeper, evaluations, registry)
         // Read before anything below registers a counter by reading it: the closed tag set, as built.
@@ -172,7 +173,7 @@ class ExecutionEventRetentionSchedulerTest {
             .counters()
             .map { it.id.getTag(ScheduledJob.JOB_TAG) }
             .toSet() shouldBe
-            setOf("event_retention", "keys_purge", "audit_retention")
+            COUNTED.toSet()
 
         counted.retain()
         failedTicks(registry).values.sum() shouldBe 0.0
@@ -184,11 +185,11 @@ class ExecutionEventRetentionSchedulerTest {
         every { audit.purgeOnce() } throws IllegalStateException("f")
         counted.retain()
 
-        failedTicks(registry) shouldBe mapOf("event_retention" to 1.0, "keys_purge" to 0.0, "audit_retention" to 1.0)
+        failedTicks(registry) shouldBe COUNTED.associateWith { if (it == "keys_purge") 0.0 else 1.0 }
     }
 
     private fun failedTicks(registry: SimpleMeterRegistry): Map<String, Double> =
-        listOf("event_retention", "keys_purge", "audit_retention").associateWith { job ->
+        COUNTED.associateWith { job ->
             registry.counter(ScheduledJob.FAILED_TICK_METER, ScheduledJob.JOB_TAG, job).count()
         }
 
@@ -202,5 +203,18 @@ class ExecutionEventRetentionSchedulerTest {
             logger.detachAppender(appender)
         }
         return appender.list.toList()
+    }
+
+    private companion object {
+        /** The tick's `job` tags, literals (#326's three, #636's three) — never read back from the enum under test. */
+        val COUNTED =
+            listOf(
+                "event_retention",
+                "dashboard_refresh_retention",
+                "parameter_evaluation_sweep",
+                "parameter_evaluation_retention",
+                "keys_purge",
+                "audit_retention",
+            )
     }
 }

@@ -3,6 +3,7 @@ package co.datapipelines.web.dashboards.runtime
 import co.datapipelines.application.dashboards.RefreshAdmission
 import co.datapipelines.executor.ExecutionSlots
 import co.datapipelines.persistence.FailureShape
+import co.datapipelines.persistence.ScheduledJob
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.visualization.ActionScope
 import co.datapipelines.visualization.ArtifactJson
@@ -34,6 +35,7 @@ import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
 import org.springframework.dao.DataAccessResourceFailureException
+import org.springframework.dao.QueryTimeoutException
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
@@ -256,6 +258,47 @@ class RuntimeSupportTest {
         DashboardRefreshRetention(repository, 7).retainOnce() shouldBe 0
         shouldThrow<IllegalArgumentException> { DashboardRefreshRetention(repository, 0) }
     }
+
+    /**
+     * #636: a failed sweep tick — a statement that threw, or was cancelled at its bound (`57014`) — is one
+     * `tick_failed{job=dashboard_refresh_sweep}`; a tick that succeeds, empty or not, is none.
+     */
+    @Test
+    fun `a failed sweep tick is counted once under job=dashboard_refresh_sweep - a good tick never`() {
+        val repository = mockk<DashboardRefreshRepository>()
+        val registry = SimpleMeterRegistry()
+        val sweeper = DashboardRefreshSweeper(repository, 915, registry)
+        every { repository.sweepStale(915) } returns listOf(UUID.randomUUID())
+        sweeper.sweepOnce()
+        every { repository.sweepStale(915) } returns emptyList()
+        sweeper.sweepOnce()
+        failedTicks(registry, "dashboard_refresh_sweep") shouldBe 0.0
+
+        every { repository.sweepStale(915) } throws QueryTimeoutException("canceling statement due to statement timeout")
+        sweeper.sweepOnce() shouldBe 0
+
+        failedTicks(registry, "dashboard_refresh_sweep") shouldBe 1.0
+    }
+
+    @Test
+    fun `a failed retention step is counted once under job=dashboard_refresh_retention - a good step never`() {
+        val repository = mockk<DashboardRefreshRepository>()
+        val registry = SimpleMeterRegistry()
+        val retention = DashboardRefreshRetention(repository, 7, registry)
+        every { repository.deleteFinishedOlderThan(7) } returns 3
+        retention.retainOnce()
+        failedTicks(registry, "dashboard_refresh_retention") shouldBe 0.0
+
+        every { repository.deleteFinishedOlderThan(7) } throws QueryTimeoutException("canceling statement due to statement timeout")
+        retention.retainOnce() shouldBe 0
+
+        failedTicks(registry, "dashboard_refresh_retention") shouldBe 1.0
+    }
+
+    private fun failedTicks(
+        registry: SimpleMeterRegistry,
+        job: String,
+    ): Double = registry.counter(ScheduledJob.FAILED_TICK_METER, ScheduledJob.JOB_TAG, job).count()
 
     // ---- DashboardMetrics -------------------------------------------------------------------------------------
 

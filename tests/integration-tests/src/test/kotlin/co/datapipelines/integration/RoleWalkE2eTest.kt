@@ -64,6 +64,8 @@ import javax.crypto.spec.SecretKeySpec
  * - Every catalog row that places a route is claimed by ≥ 1 walked handler, and every handler's
  *   permission has a catalog row (gate 3, the REST half); every doc MCP tool answers as a known
  *   tool (the MCP half — an unknown tool is a row nothing implements).
+ * - Every §7.6 route literal matches a registered method and pattern, and every non-public
+ *   route outside the promotion receiver family is a literal (gate 3, variable names ignored).
  *
  * ## Non-vacuity
  * The route count, and per role the allowed AND refused counts, are printed
@@ -332,6 +334,62 @@ class RoleWalkE2eTest {
         // The walk reaches past `web`: the health controller lives in `modules/app`.
         handlers.map { it.handler } shouldContainAll listOf("HealthController#health", "HealthController#ready")
         handlers.size shouldBeGreaterThanOrEqual MINIMUM_HANDLERS
+        assertRouteLiterals(handlers)
+    }
+
+    private fun assertRouteLiterals(handlers: List<EntryDiscovery.HandlerEntry>) {
+        val literals = permissionRows.flatMap { (permission, cells) -> cells.routes.map { permission to it } }
+        // A mapping without a verb condition serves every verb (§7.6 lists all five),
+        // although EntryDiscovery records it once as GET for the HTTP walk.
+        val registrations = handlers.flatMap { h -> h.verbs.map { h.copy(method = it) } }
+        val rawRegistered = registrations.map { "${it.method} ${it.pattern}" }.toSet()
+        val registered = rawRegistered.map(::routeKey).toSet()
+        val documented = literals.map { routeKey(it.second) }.toSet()
+        val phantom =
+            literals.filterNot { routeKey(it.second) in registered }.map { (permission, literal) ->
+                val nearest =
+                    registrations.minWithOrNull(
+                        compareBy<EntryDiscovery.HandlerEntry> { it.method != literal.substringBefore(' ') }
+                            .thenBy { editDistance(routeKey(literal), routeKey("${it.method} ${it.pattern}")) }
+                            .thenBy { "${it.method} ${it.pattern} ${it.handler}" },
+                    )
+                val nearestRoute = nearest?.let { "${it.method} ${it.pattern} (${it.handler})" }
+                "$permission: $literal — nearest registered route: $nearestRoute"
+            }
+        // No exemptions: each governed handler must have a literal in an existing catalog row.
+        val missing =
+            registrations
+                .filterNot { it.public || it.pattern.startsWith(PROMOTION_RECEIVER_PREFIX) }
+                .filterNot { routeKey("${it.method} ${it.pattern}") in documented }
+                .map { "${it.method} ${it.pattern} ${it.handler} (@RequiredScope ${it.permission})" }
+                .sorted()
+        val normalised = literals.count { routeKey(it.second) != it.second }
+        val requiredNormalisation = literals.count { it.second !in rawRegistered && routeKey(it.second) in registered }
+        println(
+            "event=rolewalk.literals count=${literals.size} normalised=$normalised " +
+                "requiredNormalisation=$requiredNormalisation missing=${missing.size}",
+        )
+        withClue("auth.md §7.6 route literals without a registered route\n") { phantom.joinToString("\n") shouldBe "" }
+        withClue("non-public registered routes without an auth.md §7.6 literal\n") { missing.joinToString("\n") shouldBe "" }
+        literals.size shouldBeGreaterThanOrEqual MINIMUM_ROUTE_LITERALS
+    }
+
+    private fun routeKey(literal: String): String = ROUTE_VARIABLE.replace(literal, "{}")
+
+    private fun editDistance(
+        left: String,
+        right: String,
+    ): Int {
+        var previous = IntArray(right.length + 1) { it }
+        left.forEachIndexed { i, a ->
+            val current = IntArray(right.length + 1)
+            current[0] = i + 1
+            right.forEachIndexed { j, b ->
+                current[j + 1] = minOf(current[j] + 1, previous[j + 1] + 1, previous[j] + if (a == b) 0 else 1)
+            }
+            previous = current
+        }
+        return previous[right.length]
     }
 
     // ------------------------------------------------------------------ the walk
@@ -542,6 +600,11 @@ class RoleWalkE2eTest {
          */
         private const val MINIMUM_ROUTES = 65
         private const val MINIMUM_HANDLERS = 105
+        private const val MINIMUM_ROUTE_LITERALS = 335
+
+        // Include nested braces in a variable's regex constraint, such as an id's length quantifier.
+        private val ROUTE_VARIABLE = Regex("\\{(?:[^{}]|\\{[^{}]*})+}")
+
         private const val MINIMUM_TOOLS = 61
         private const val ALLOWED_FLOOR = 25
         private const val VIEWER_REFUSED_FLOOR = 40
