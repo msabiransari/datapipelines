@@ -1,9 +1,9 @@
 # MCP Server Specification
 
-**Status:** v1.74 (frozen contract — additive-only changes after this point)
+**Status:** v1.75 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
-**Last updated:** 2026-10-11
+**Last updated:** 2026-10-21
 
 ---
 
@@ -3118,6 +3118,7 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-21 | v1.75 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The template-type and node prose say script**: the script contract / invariants / tests descriptions, the `scripts` docs area and `skill/scripts-contracts`, the `templates_*` refusal reason `type_not_script`, the key `datapipelines.script.evaluate-timeout-seconds`; the visualization write tools' block property stays `transform` (restored in this lane's third round; `ArtifactWriteSchemaReaderParityTest` pins schema = reader keys). A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-11 | v1.74 | 504b (#504b) one shared search-needle rule | **§6.2.2 `pipelines_list` and §6.2.6 `templates_list` say what `q` matches and its bound**: the `inputSchema`'s `q` description now states the case-insensitive substring match, the columns actually searched (name, display name and description on pipelines; name and display name on templates — #424's understatements corrected), that a present `prefix` wins, and the shared 200-after-trim bound (#490, [pipeline-contract §13.21](pipeline-contract.md) v1.58). A longer `q` on ANY list tool is refused JSON-RPC `-32602 invalid params` (§9.1) naming the limit, the length and `request.query_too_long`, before any read and without echoing the term — the mapping moved from `parameter_sets_list`'s own catch to the dispatcher, so all three tools answer identically. REST answers the same term with `400` ([REST §21.2](rest-api.md#212-routes) v2.95). No tool, argument name, count or permission changed. |
 | 2026-10-09 | v1.73 | 490 (#490) the search needle's bound | **§6.2.44 `parameter_sets_list`**: `q` is bounded at 200 characters after the trim — the `inputSchema`'s `q` description says so, and a longer `q` is refused JSON-RPC `-32602 invalid params` (§9.1, the route a non-string `q` already takes) naming the limit, the length and `parameter.validation.query_too_long`, before any read and without echoing the term. The bound is `ParameterSetService`'s, shared with REST (`400`, [REST §21.2](rest-api.md#212-routes) v2.91); no tool, argument, count or permission changed. |
 | 2026-10-08 | v1.72 | 419 (#419) the `parameter_sets_list` `q` search | **§6.2.44 `parameter_sets_list` gains the optional `q`**: with no `prefix` and a non-blank `q` it searches name, display name and description case-insensitively through the same lensed `ParameterSetService.search` the first-party pages use, answering `{q, parameter_sets, returned, total}` — no `folders` (a search is not a level), and `total` is the full match count so an agent sees a truncated `limit`. A present `prefix` (including `""`) still browses and `q` is ignored — the branch switch is `has("prefix")`, not `string`, so an absent prefix with a blank/absent `q` keeps today's root browse byte-identically. No tool, argument name, count or permission changed; the `inputSchema` gains one property ([REST §21.2](rest-api.md#212-routes) v2.89). |

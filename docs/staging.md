@@ -1,9 +1,9 @@
 # Staging (H2) Specification
 
-**Status:** v1.18 (frozen contract — additive-only changes after this point)
+**Status:** v1.20 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Configuration spec](configuration.md)
-**Last updated:** 2026-09-16
+**Last updated:** 2026-10-21
 
 ---
 
@@ -756,6 +756,7 @@ Out of scope for v1:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-21 | v1.20 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **§ atomicity, one clause**: a writer of two tables is "the SCRIPT node" (was TRANSFORM). Status moves from v1.18 to v1.20 — it had not followed v1.19's row. A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-09-17 | v1.19 | 155 / #122 §8.2 cadence correction | §8.2: the mid-drain budget re-measurement is at most once per **second** (`BUDGET_CHECK_INTERVAL_MS`), not 250 ms — the doc kept the pre-108 §B number. The two-tier reading is now documented: a cheap non-collecting sample on the cadence (garbage included, over-estimate only), the accurate GC-forcing check deciding only when the cheap one exceeds the budget. No behaviour change. |
 | 2026-09-17 | v1.18 | 149 correction / #125 review | §4.3: `StageObserver.partialTableDropped()` — a failed stage reports its confirmed undo after the drop's lease returned. |
 | 2026-09-16 | v1.17 | 149 / #125 measured node operations | §4.3: `stage`/`stageRows` take a **`StageObserver`** (replacing the 108 `onProgress` lambda; default `NONE`): the CREATE TABLE lease and each batch's fetch, lease request, lease held and accepted batch, reported outside the lease and never under the pool lock. §10 signature updated. |

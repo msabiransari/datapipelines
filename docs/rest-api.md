@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v2.97 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.98 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-10-16
+**Last updated:** 2026-10-21
 
 ---
 
@@ -2807,6 +2807,7 @@ browser persistence. Clients must reject foreign/stale responses even after abor
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-21 | v2.98 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The template-type and node prose say script**: a script caller / type / body, §8.7A "Evaluate a script template", the pipeline editor's SCRIPT card, the key `datapipelines.script.evaluate-timeout-seconds`; no route or field changes. A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-16 | v2.97 | 467 (#467) the over-cap screenshot refusal reaches the client | **§22's `visualization.test.screenshot_too_large` row**: the `Content-Length` refusal no longer closes mid-body — the route drains a declaration of up to 6 MiB after the 413 so a write-then-read client receives it; beyond that bound a reset may still replace it. No route, code, status or cap change |
 | 2026-10-16 | v2.96 | 533 (#533) the templates tree carries `needs_review` | **§24** (additive): a template artifact node carries `needs_review` — true when its LISTED version cites a retired or superseded learned fact ([Templates §3.4](templates.md#34-implements-and-drift)), false otherwise; null on folders and on the pipelines, dashboards, visualizations and parameter-sets nodes. The flag comes from ONE citation read per page over the page's own rows (name and listed version) — the read the pipeline release's `template_needs_review` warning uses — so a narrowing view is answered about the released versions it lists. The 1 MiB budget counts the flag on every template artifact. The sidebar's Templates tree renders it as the catalog row's **needs review** marker ([UI Screens §4.6a](ui-screens.md)). No route, permission or other field changed. |
 | 2026-10-11 | v2.95 | 504b (#504b) the shared search-needle refusal on every REST search | **§5.7, §8.5, §16.3, §21.2 and §24**: a `q` over 200 characters after the trim is refused `400 request.query_too_long` with `details.limit` and `details.length`, before any read and never echoed — one rule ([pipeline-contract §13.21](pipeline-contract.md) v1.58) applied by the service that owns each search, replacing §21.2's parameter-only `parameter.validation.query_too_long` (#490) and giving the pipelines, templates, user and five `/tree/search` listings the same refusal. Blank `q` still means no search everywhere; the UI boxes still truncate and never meet the refusal; the MCP list tools answer the same term as `-32602` ([MCP §6.2.44](mcp-server.md) v1.74). A narrowing of accepted input only for terms no box could send; no route, field, permission or other code changed. |

@@ -1,9 +1,9 @@
 # DAG Executor Specification
 
-**Status:** v1.32 (revised — see Change Log)
+**Status:** v1.33 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract spec](pipeline-contract.md), [Templates spec](templates.md), [Datasources spec](datasources.md), [Staging spec](staging.md)
-**Last updated:** 2026-10-20
+**Last updated:** 2026-10-21
 
 ---
 
@@ -1620,6 +1620,7 @@ document a customer can read before they need it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-21 | v1.33 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The TRANSFORM node is the SCRIPT node throughout**: the node-type prose and its section anchors, the `pipeline.script.*` refusal codes, the `datapipelines.script.*` budget keys and the meter `script.evaluations.abandoned` (was `transform.…`). A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-20 | v1.32 | #569 | The concurrency gauge is bound by the execution-slot bean, once per instance. Executor construction does not register it; rebinding the same pool is a no-op and a different pool fails fast. |
 | 2026-10-03 | v1.31 | #403 never-started reservation release | **§11.2/§11.3**: REST and MCP release before-start failures using atomic execution-id compare-and-delete; started reservations stay claimed. Stored JSON field names corrected to camelCase; crashed originals and attached followers retain the id-free 410. |
 | 2026-10-02 | v1.30 | 328 (#328) the result history gains the schema | **The result-history bookkeeping** (`recordResult` — the surfaces' write that fills `result_row_count` / `result_size_bytes` after `execute` returns the result ref) now also records `result_schema_json` (V47) — the materialized result's columns as the driver reported them, `{name, type, nullable}` (pipeline-contract §3.3.1). History, not availability: it survives the Redis TTL, and the release flip copies it. Past the record bounds (256 columns, 128 characters per name) the record is NULL with a `warn` — never a failed execution. A `direct`/`directSink` delivery (a PIPELINE child, a dashboard refresh) writes no stored result and therefore no record, exactly as it writes no row count. |

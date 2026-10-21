@@ -1,9 +1,9 @@
 # Templates Specification
 
-**Status:** v1.21 (frozen contract — additive-only changes after this point)
+**Status:** v1.22 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Configuration Reference](configuration.md), [Metadata DB spec](metadata-db.md)
-**Last updated:** 2026-10-16
+**Last updated:** 2026-10-21
 
 ---
 
@@ -787,6 +787,7 @@ ORDER BY r.total DESC
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-21 | v1.22 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The script template types**: "script types", §"Script templates", the CHECK `chk_script_blocks`, the script face and its editor, the `script.*` codes. A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-16 | v1.21 | 533 (#533) the sidebar tree's mark | §3.4 (additive clause): the sidebar's REST tree is a read path of `needs_review` — its template leaves take the mark from the same retired-citation expression, in ONE citation read per page keyed by name and listed version (the port the pipeline release's warning uses), not from the template projection; [REST §24](rest-api.md) v2.96 carries it as the node's `needs_review`. No rule, code or status changed. |
 | 2026-10-02 | v1.20 | 333 (#333) the strict contract readers | §3.3: a JSON number or boolean where a template field or a transform block declares a STRING (and a string or float where it declares an integer) is refused, never bound as text — Jackson's `StringDeserializer` takes a scalar as text unless the `Textual` coercion config fails it, and `ALLOW_COERCION_OF_SCALARS` off never reached that bind. `template.contract_invalid` gains `details.rule: "wrong_type"` (the keys `rule`, `field`, `path` are unchanged); an `unknown_field` echo is clipped to 160 characters. No new code, no status change; `TemplateDraft`'s `ignoreUnknown` stays. |
 | 2026-09-30 | v1.19 | 320 (#320) dependency guards | §5.1/§5.4: the `template.in_use` guard now covers **visualizations** (a `transform.template` pin) beside pipelines and parameter sets, and every verb that removes a version — the DRAFT purges included, which ran no pin check before. `templates_used_by` gains `visualization_references`; the template screen's per-version count and "Used by" card list sets and visualizations; the lifecycle dialogs name them. The pipeline purge's exclusive-draft offer skips a draft template a set or a visualization also pins ([Versioning §3.5.3](versioning.md#353-the-reverse-arrows-into-other-families-320)). |

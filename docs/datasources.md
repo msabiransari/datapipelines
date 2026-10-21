@@ -1,9 +1,9 @@
 # Datasources Specification
 
-**Status:** v2.52 (frozen contract — additive-only changes after this point)
+**Status:** v2.53 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
-**Last updated:** 2026-10-03
+**Last updated:** 2026-10-21
 
 ---
 
@@ -1733,6 +1733,7 @@ fixture) get their Testcontainers twin.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-21 | v2.53 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **§ WORKSPACE rules, one sentence**: "A WORKSPACE rule can be implemented by a script" (was "a transform"); the cited design record keeps its filename. A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-03 | v2.52 | 405 (#405) a datasource's own timeout tightens the probe | **§7D's clamps paragraph:** `timeout_seconds` clamps to `min(dialect ceiling, the datasource's own query_timeout_seconds)` — a tightening only, never a loosening; v2.51's "not consulted (its `0` means no limit)" was false for a stored datasource, whose value the V1 CHECK and the validator hold at ≥ 1. A datasource set to 20 s gave its nodes 20 s and its probe up to the dialect ceiling; the probe now gets 20 s too, and the payload's `timeout_seconds` reports it. The `tempdb` scratch check (no datasource) keeps the H2 ceiling. Code: `SqlProbe.probe`'s bound (`timeoutBoundFor`); the MCP argument bound (`maxTimeoutSeconds`) is unchanged. |
 | 2026-10-02 | v2.51 | 167 (#167) the probe's timeout ceiling | **§7D's clamps paragraph:** `timeout_seconds` clamps to the node's statement timeout for the datasource's dialect (Configuration §3.2's by-dialect value when set, else `node-query-timeout-seconds`), no longer to a static 30; the datasource's own `query_timeout_seconds` is not consulted (its `0` means no limit). The payload and a timeout's `details` report `timeout_seconds`, the timeout the statement ran under. Code: `SqlProbe` takes the executor's two values at all three construction sites (the MCP tool, the release-check runner, the learned-fact recorder); `MAX_TIMEOUT_SECONDS` is gone. |
 | 2026-10-02 | v2.50 | lane 204 (#204 L2/L4/L5/L6) | **§4.2A:** the in-process boundaries keep their promises at the pool build — the file-roots rule re-runs on every build with the file itself resolved (a final-component symlink aimed outside every root, a moved file, or a narrowed/removed root refuses the build with the catalogued `datasource.validation.workspace_forbidden`; nothing poisoned — a clean path builds again), and a restricted password rotated outside the pool (a second instance, a restore, a hand edit) is repaired at the next pool-growth failure: H2's `28000` rides the lease failure, the pool is evicted, and the next acquisition rebuilds through the bootstrap, which re-rotates. **§9:** the restricted user bounds one H2 file's author-facing SQL — not the owner credential's own powers, nor another process opening the file; that boundary is the declared roots. Code: `DatasourceFileRoots.underRootRefusal`, `ConnectionPoolManager.buildHikariPool`, `HikariConnectionPool.leaseConnection`, `H2InProcessPool.build`, `DefaultDatasourceRegistry` (the second gate's wiring). |
