@@ -1,9 +1,9 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.47
+**Status:** v1.48
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 ---
 
@@ -76,7 +76,7 @@ Which drivers are present is a **packaging** property of the artifact, not a con
 | `ORACLE` | **No** (OTN license) | Rebuild with `./gradlew -Poracle bootJar`, **or** drop `ojdbc11.jar` into `lib/` |
 | `MYSQL` | **No** (GPL-2.0 + FOSS exception, redistribution unverified) | Rebuild with `./gradlew -Pmysql bootJar`, **or** drop `mysql-connector-j.jar` into `lib/` |
 
-**The `lib/` drop-in.** Spring Boot's `PropertiesLauncher` adds every jar in `loader.path` to the application classpath ([Module Structure §5.4.1](module-structure.md)). For the container, mount the DRIVER jar read-only into `/app/lib/`: the image ships that directory empty, `root:root` mode `0555`, and sets `ENV LOADER_PATH=/app/lib` itself (absolute, because a relative entry resolves against the working directory and the image sets no `WORKDIR`); neither `deploy/compose.yml` nor the Helm chart sets `LOADER_PATH`. For bare JVM, place it in a `lib/` directory beside `datapipelines-app.jar` and start with `-Dloader.path=lib` (relative to the working directory) or an absolute path. This is the no-rebuild path — the operator accepts the driver's license by supplying it.
+**The `lib/` drop-in.** Spring Boot's `PropertiesLauncher` adds every jar in `loader.path` to the application classpath ([Module Structure §5.4.1](module-structure.md)). For the container, mount the DRIVER jar read-only into `/app/lib/`: the image ships that directory empty, `root:root` mode `0555`, and sets `ENV LOADER_PATH=/app/lib,/opt/graaljs` itself: the drop-in directory, then the directory holding the image's JavaScript isolate jar, as one list because a `-Dloader.path` would override the variable, and each entry absolute because a relative entry resolves against the working directory and the image sets no `WORKDIR`. Neither `deploy/compose.yml` nor the Helm chart sets `LOADER_PATH`. For bare JVM, place it in a `lib/` directory beside `datapipelines-app.jar` and start with `-Dloader.path=lib` (relative to the working directory) or an absolute path. This is the no-rebuild path — the operator accepts the driver's license by supplying it.
 
 Registering a datasource whose dialect has no driver on the classpath fails at save time with `datasource.driver_not_loaded` ([Datasources §9](datasources.md#9-validation-rules)) — a deployment/packaging error, not a bad payload. The same payload succeeds after the driver is supplied.
 
@@ -1197,6 +1197,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-21 | v1.48 | #8 lane 8a the JavaScript isolate (owner ruling 2026-10-21) | **§3.5** the `lib/` drop-in paragraph quotes the image's value as it now is, `ENV LOADER_PATH=/app/lib,/opt/graaljs`: the drop-in directory, then `/opt/graaljs`, where the image fetches its platform's SHA-256-pinned GraalJS isolate jar. One list in one `ENV` because `PropertiesLauncher` reads a `-Dloader.path` before the variable — an ENTRYPOINT `-Dloader.path=/opt/graaljs` would have silently dropped the drop-in (measured in lane 8a). The mount point, its mode and the never-from-the-environment rule are unchanged. `ImageLoaderPathSpecDriftTest` pins the new value. Renumbered at merge after #666's v1.47. The engine's operator-facing configuration and the rest of the image's JavaScript story are lane 8b's. |
 | 2026-10-21 | v1.47 | #666 Helm driver drop-in | **§6.4:** opt-in `libVolume.enabled` and one operator-supplied `libVolume.source` mount trusted drivers read-only at `/app/lib`; PVC sources must also be read-only. `extraEnv.LOADER_PATH` is refused with the image-owned-path message, in every spelling the launcher reads (`loader_path`, `loader.path`: Spring Boot's `SystemPropertyUtils` tries the key as given, dots to underscores, then upper-cased). `JAVA_TOOL_OPTIONS`, `JDK_JAVA_OPTIONS` and `_JAVA_OPTIONS` in `extraEnv` are refused too, as the compose audit's class 8 refuses them (#679). Chart 0.1.2; helm-check covers the default, refusal, ConfigMap mount and PVC/source boundaries; the deploy-file drift guard admits exactly the template refusal and requires it once. |
 | 2026-10-21 | v1.46 | #657 the image's driver drop-in | **§3.5** the `lib/` drop-in paragraph now matches the image: the Dockerfile creates `/app/lib` empty, `root:root` mode `0555`, before `USER`, and sets `ENV LOADER_PATH=/app/lib` — until now it did neither, so a mounted driver was never on the classpath. The value is absolute because `PropertiesLauncher` resolves a relative `loader.path` against `loader.home` (default `${user.dir}`) and the image has no `WORKDIR`: `LOADER_PATH=lib` adds `/lib`. The operator mounts the DRIVER jar read-only at `/app/lib/`; neither compose nor the chart sets `LOADER_PATH` (§9). **§6.4** states that the chart does not support the drop-in today (no volume knob; `extraEnv` does not refuse `LOADER_PATH`). `ImageLoaderPathSpecDriftTest` pins the Dockerfile, this paragraph and Module Structure §5.4.1 to one value and refuses a deploy file that names `LOADER_PATH`. |
 | 2026-10-19 | v1.45 | #571 path-independent Plotly rebuilds | **§6.2A:** patch 0003 salts root-relative inline-CSS paths with the historical build directory, preserving every committed byte from any clone directory. The recipe uses a temporary directory; `scripts/verify-plotly-bundles.sh` rebuilds and compares both bundles for the lander on Plotly vendor or manifest-entry diffs, with distinct match, mismatch and rebuild-failure exits. |
