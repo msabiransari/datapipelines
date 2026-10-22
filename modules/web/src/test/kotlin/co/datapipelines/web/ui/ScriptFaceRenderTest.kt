@@ -31,8 +31,8 @@ class ScriptFaceRenderTest {
                     face()
                     setVariable("faceEditable", editable)
                     setVariable("faceJavascript", true)
-                    setVariable("scriptMainOpen", ScriptSkeleton.mainOpen)
-                    setVariable("scriptMainClose", ScriptSkeleton.mainClose)
+                    setVariable("scriptMainOpen", ScriptSkeleton.MAIN_OPEN)
+                    setVariable("scriptMainClose", ScriptSkeleton.MAIN_CLOSE)
                     setVariable("panes", ScriptFixtures.skeletonPanes.copy(body = "return input.rows;"))
                 }
             html shouldContain "data-tf-main-open>function main(input) {</code>"

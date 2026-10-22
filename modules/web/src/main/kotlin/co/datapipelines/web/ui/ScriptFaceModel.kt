@@ -53,8 +53,8 @@ internal object ScriptFace {
         model.addAttribute("panes", ScriptPanes.of(displayed))
         model.addAttribute("faceLanguage", languageOf(displayed.type.wire))
         model.addAttribute("faceJavascript", displayed.type == co.datapipelines.pipeline.TemplateType.JAVASCRIPT)
-        model.addAttribute("scriptMainOpen", ScriptSkeleton.mainOpen)
-        model.addAttribute("scriptMainClose", ScriptSkeleton.mainClose)
+        model.addAttribute("scriptMainOpen", ScriptSkeleton.MAIN_OPEN)
+        model.addAttribute("scriptMainClose", ScriptSkeleton.MAIN_CLOSE)
     }
 
     /** The body pane's language label — the type IS the language (D-T2). */
@@ -234,8 +234,8 @@ data class FaceRefusal(
  */
 internal object ScriptSkeleton {
     /** Immutable editor labels, excluded from the body sent to save. */
-    const val mainOpen = "function main(input) {"
-    const val mainClose = "}"
+    const val MAIN_OPEN = "function main(input) {"
+    const val MAIN_CLOSE = "}"
 
     /** Statements only; the engine supplies main(input). The shared example's contract follows. */
     val javascriptBody: String =
