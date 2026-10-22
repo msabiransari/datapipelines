@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.203
+**Status:** v1.204
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-21 (#642; #654; #591; #659; #589; #640); 2026-10-20 (#574; #595; #588; #541; #634; #635; #622 merge follow-up; #622; #599; #604; #639; #638; #610; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-22 (#644); 2026-10-21 (#642; #654; #591; #659; #589; #640); 2026-10-20 (#574; #595; #588; #541; #634; #635; #622 merge follow-up; #622; #599; #604; #639; #638; #610; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 ---
 
 ## 1. Purpose
@@ -256,8 +256,9 @@ names the limit in the status row instead of the generic failed state. See [REST
 The widget's source, root, context, href and activation callback are host parameters. Selection-only hosts
 use buttons. The common renderer owns roving focus, arrow navigation, Home/End and activation; focus is
 separate from current-page selection, and the focus ring answers keyboard focus alone, drawn on the
-focused row's line and never around the subtree its item contains (#516) — a mouse click leaves the
-selected-row tint. Labels use text sinks and fixed vendored lucide icons.
+focused row's line and never around the subtree its item contains (#516) — one ring: the vendored global
+`:focus-visible` box-shadow is reset on tree items (#644). A mouse click leaves the selected-row tint.
+Labels use text sinks and fixed vendored lucide icons.
 
 **The row (#604).** The browser column sits on the record's browser surface: `--surface-overlay`, one step
 above the page. A row is a card there — the activate (`.dp-tree-activate`) paints the 12px padding
@@ -3095,6 +3096,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-22 | v1.204 | #644 one keyboard ring per tree row — renumbered at merge after #642's v1.203 | **§3.4:** the first-party tree stylesheet resets the vendored global focus shadow on tree items, leaving #516's outline on the row line as the only ring. Both tree browser cases read the item's computed box-shadow as well as the line outline. |
 | 2026-10-21 | v1.203 | #642 semantic overview tones | **§4.25:** success, warning and danger bridge the design-system fills for ops status, alongside the four lifecycle tones. **§4.5d, §4.18a, §4.20:** datasource health, API serving-draft posture, schedule conditions and last-run outcomes use their semantic words. Guards: `OverviewToneCssTest`, the frame and three homes' render tests, token audits and `OverviewToneBrowserTest`'s semantic equality and distance pairs. |
 | 2026-10-21 | v1.202 | #654 the catalog transport rows name the resource browser, not the sidebar — renumbered at merge after #591's v1.201 | **§4.3, §4.6:** the two htmx rows' and the tree-transport bullets' sentence names the resource browser as the caller of the REST tree/search routes (§3.4, rest-api §24) — #554 moved the trees there and #588 named the control; **§4.23:** the parameter-sets tree paragraph does the same; **§4.4:** the template-reference picker note reuses the resource browser's REST tree component; **§3.2:** the page-script bullet's loader sentence says the resource browser's trees and the REST tree host; **§4.6:** the row-link bullet says the preserved shell. Dated ruling quotes (§4.3, §4.6) and the change log keep their words. Wording only: no code, route, permission or test change; the docs audit is the guard. |
 | 2026-10-21 | v1.201 | #591 a catalog's address bar describes its list — renumbered at merge after #640's v1.198, #589's v1.199 and #659's v1.200 | **§5:** new normative paragraph "The URL describes the list" — the five `lifecycle` catalogs' partials answer `HX-Replace-Url` built by `CatalogUrl` from the bound, validated `q` / `lifecycle` / `offset` (and the templates' dialect and type); replace, not push; the filter blocks carry `hx-history="false"` so Back to a catalog refetches the page at its URL instead of restoring a snapshot with stale controls (owner ruling 2026-10-21). Guards: `CatalogUrlTest`, the five partial-controller tests, `CatalogUrlBrowserTest`. Three browser cases that Backed or Forwarded onto a catalog as a cache HIT now expect its miss (`PipelineWorkspaceHistoryBrowserTest` ×2 — the workspace legs still assert no miss; `ModalBackBrowserTest` waits for the restore; `TemplateWorkspaceBrowserTest` — the template leg still hits, the catalog leg is the one restore fetch); follow-up #660 (a late miss response). |
