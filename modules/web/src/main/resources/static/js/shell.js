@@ -176,13 +176,28 @@
  *     place (one class on the bar — no third copy of the control), and the
  *     chord drives that button, so the band has search by button and by chord.
  *
+ * 14. A late history miss never lands (#660): abort its xhr on a newer miss,
+ *     cache hit, boosted request or foreign popstate, keeping screen and URL aligned.
+ *
  * Testability: the module exports the pure halves for `node --test`
  * (modules/web/src/test/js/shell.test.mjs); init() is idempotent and installs
- * every listener on document.body (plus one keydown on document, for the menu),
- * which survives all swaps.
+ * persistent body/document/window listeners once across all swaps.
  */
 (function () {
   "use strict";
+
+  var pendingHistoryMiss = null;
+
+  function abortHistoryMiss() {
+    var miss = pendingHistoryMiss;
+    pendingHistoryMiss = null;
+    if (!miss) return;
+    try {
+      miss.xhr.abort();
+    } catch (e) {
+      /* An already discarded xhr needs no further cleanup. */
+    }
+  }
 
   var MAIN_ID = "app-main";
   var MAIN_SELECTOR = "#app-main";
@@ -1436,6 +1451,28 @@
       pending.purgeOrphans(doc);
     });
 
+    /* #660 — htmx's miss onload swaps without checking the current address.
+       Keep only its latest xhr; abort before a superseding navigation can restore.
+       Never veto the miss event: htmx sends the request only when it is allowed. */
+    doc.body.addEventListener("htmx:historyCacheMiss", function (evt) {
+      abortHistoryMiss();
+      pendingHistoryMiss = { xhr: evt.detail.xhr, path: evt.detail.path };
+    });
+    var clearHistoryMiss = function (evt) {
+      if (pendingHistoryMiss && evt.detail && evt.detail.xhr === pendingHistoryMiss.xhr) {
+        pendingHistoryMiss = null;
+      }
+    };
+    doc.body.addEventListener("htmx:historyCacheMissLoad", clearHistoryMiss);
+    doc.body.addEventListener("htmx:historyCacheMissLoadError", clearHistoryMiss);
+    doc.body.addEventListener("htmx:historyCacheHit", abortHistoryMiss);
+    doc.body.addEventListener("htmx:beforeRequest", function (evt) {
+      if (evt.detail && evt.detail.boosted) abortHistoryMiss();
+    });
+    window.addEventListener("popstate", function (evt) {
+      if (!evt.state || !evt.state.htmx) abortHistoryMiss();
+    });
+
     /* #358 — the history SHAPE guard (the named history-scoping hook this file owns).
        The layout's `hx-history-elt` on #app-main scopes the cache to the workspace
        region from now on, but a session that straddles the change still holds entries
@@ -1875,6 +1912,7 @@
   }
 
   var api = {
+    pendingHistoryMiss: function () { return pendingHistoryMiss ? pendingHistoryMiss.path : null; },
     isActiveSection: isActiveSection,
     syncNavActive: syncNavActive,
     applyBoostSwap: applyBoostSwap,
