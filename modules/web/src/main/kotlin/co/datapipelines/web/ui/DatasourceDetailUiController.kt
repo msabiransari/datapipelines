@@ -39,7 +39,7 @@ class DatasourceDetailUiController(
     private val semantics: co.datapipelines.application.semantics.SemanticsService,
     // 7e — the template lens the facts' `implemented_by` is read through (no default).
     private val lens: co.datapipelines.application.lens.PromoterLens,
-) {
+) : ShellPage {
     /** The page: the LAKE registry for a LAKE datasource, the schema tree for every other dialect. */
     @GetMapping("/datasources/{name}")
     @RequiredScope(Permission.DATASOURCE_READ)

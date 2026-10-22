@@ -10,7 +10,6 @@ import co.datapipelines.web.ui.site.REPORT_PROBLEM_URL
 import co.datapipelines.web.ui.site.REPO_URL
 import co.datapipelines.web.ui.site.isPublicOrigin
 import jakarta.servlet.http.HttpServletRequest
-import org.springframework.stereotype.Controller
 import org.springframework.web.bind.annotation.ControllerAdvice
 import org.springframework.web.bind.annotation.ModelAttribute
 
@@ -24,11 +23,17 @@ import org.springframework.web.bind.annotation.ModelAttribute
  * advice, so no site controller can forget it and the label cannot disagree with the
  * host it is served on.
  *
+ * Selection rule (#652): `assignableTypes = [ShellPage::class]` — the attributes are
+ * computed for controllers whose views render inside the shell or the site chrome, and
+ * for nothing else. A `@RestController` never implements [ShellPage], so its handlers
+ * pays none of them; until #652 the selector was `annotations = [Controller::class]`,
+ * which matched `@RestController` through its meta-annotation.
+ *
  * The offline render (`SitePageRenderer`) bypasses Spring MVC entirely, so it computes
  * the same attribute from its mock request's server name — the static export passes the
  * public origin's host, which is how the exported site reads "Try the live demo".
  */
-@ControllerAdvice(annotations = [Controller::class])
+@ControllerAdvice(assignableTypes = [ShellPage::class])
 class SiteOriginAdvice {
     @ModelAttribute("publicOrigin")
     fun publicOrigin(request: HttpServletRequest): Boolean = isPublicOrigin(request.serverName)

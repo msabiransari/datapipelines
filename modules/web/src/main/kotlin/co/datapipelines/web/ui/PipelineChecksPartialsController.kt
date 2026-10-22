@@ -56,7 +56,7 @@ class PipelineChecksPartialsController(
     private val checkRuns: PipelineCheckRunRepository,
     /** 178 — the promoter lens on the checks read (the GET is READ_RESOURCES; the POST is an author's). */
     private val lens: PromoterLens,
-) {
+) : ShellPage {
     @GetMapping("/partials/pipelines/{id}/versions/{version}/checks")
     @RequiredScope(Permission.PIPELINE_READ)
     fun checks(

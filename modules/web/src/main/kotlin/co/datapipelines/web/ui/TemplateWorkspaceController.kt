@@ -37,7 +37,7 @@ class TemplateWorkspaceController(
     /** 178 — the promoter lens: the page resolves and renders the caller's view. */
     private val lens: PromoterLens,
     private val actors: ActorNames,
-) {
+) : ShellPage {
     @GetMapping("/templates/{*name}")
     @RequiredScope(Permission.TEMPLATE_READ)
     fun workspace(

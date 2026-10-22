@@ -40,7 +40,7 @@ class PromotionUiController(
     private val promotionService: PromotionService,
     private val client: PromotionTargetClient,
     private val themeResolver: ThemeResolver,
-) {
+) : ShellPage {
     private val log = LoggerFactory.getLogger(PromotionUiController::class.java)
 
     /**

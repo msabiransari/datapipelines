@@ -33,7 +33,7 @@ class DashboardPartialController(
     private val browse: DashboardBrowseModel,
     // #400 — the family's service: the Overview/Versions/Keys tabs' lensed reads.
     private val dashboards: co.datapipelines.visualization.DashboardService,
-) {
+) : ShellPage {
     @GetMapping("/dashboard-stats")
     @RequiredScope(Permission.PIPELINE_READ)
     fun stats(model: Model): String {

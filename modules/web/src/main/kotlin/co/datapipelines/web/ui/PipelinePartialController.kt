@@ -41,7 +41,7 @@ class PipelinePartialController(
     private val browse: PipelineBrowseModel,
     /** 178 — the promoter lens: every fragment here renders the caller's view. */
     private val lens: PromoterLens,
-) {
+) : ShellPage {
     @GetMapping("/partials/pipelines")
     @RequiredScope(Permission.PIPELINE_READ)
     fun list(

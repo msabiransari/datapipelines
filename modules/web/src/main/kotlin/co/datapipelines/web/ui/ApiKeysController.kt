@@ -23,7 +23,7 @@ import org.springframework.web.bind.annotation.GetMapping
 @Controller
 class ApiKeysController(
     private val themeResolver: ThemeResolver,
-) {
+) : ShellPage {
     @GetMapping("/settings/api-keys")
     @RequiredScope(Permission.MCP_KEY_OWN)
     fun apiKeys(

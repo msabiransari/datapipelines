@@ -25,7 +25,7 @@ class UserSettingsController(
     private val themeResolver: ThemeResolver,
     private val uiProperties: UiProperties,
     private val localPasswordService: LocalPasswordService,
-) {
+) : ShellPage {
     @GetMapping("/settings")
     @RequiredScope(Permission.PROFILE_READ)
     fun settings(

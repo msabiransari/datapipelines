@@ -29,7 +29,7 @@ import java.util.UUID
  * current-first default on purpose: that is the intended UI change (spec §3.2).
  */
 @Controller
-class PipelineEditorController {
+class PipelineEditorController : ShellPage {
     @GetMapping("/pipelines/{id}/editor")
     @RequiredScope(Permission.PIPELINE_READ)
     fun editor(

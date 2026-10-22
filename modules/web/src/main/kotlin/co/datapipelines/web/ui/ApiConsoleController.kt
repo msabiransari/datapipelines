@@ -58,7 +58,7 @@ class ApiConsoleController(
     /** The MCP card's values — shared with the API home (#585) so the two cards cannot drift. */
     private val mcpConnection: McpConnectionCard,
     private val themeResolver: ThemeResolver,
-) {
+) : ShellPage {
     @GetMapping("/api-console")
     @RequiredScope(Permission.ENDPOINT_READ)
     fun console(
