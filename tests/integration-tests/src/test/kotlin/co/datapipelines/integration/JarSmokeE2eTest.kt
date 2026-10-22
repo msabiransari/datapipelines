@@ -17,6 +17,7 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.file.Files
+import java.nio.file.Path
 import java.security.SecureRandom
 import java.sql.DriverManager
 import java.time.Instant
@@ -52,6 +53,7 @@ import javax.crypto.spec.SecretKeySpec
  * wired onto the integration test task, so the smoke always runs the CURRENT tree.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@Suppress("LargeClass") // One packaged-application fixture; splitting the walk would repeat its process and database boot.
 class JarSmokeE2eTest {
     private val http: HttpClient = HttpClient.newHttpClient()
 
@@ -377,147 +379,31 @@ class JarSmokeE2eTest {
 
     @Test
     fun `a raised statement ceiling lets the REST wall clock cancel javascript and the one-slot pool recovers`() {
-        val architecture = if (System.getProperty("os.arch") == "aarch64") "aarch64" else "amd64"
-        val platform =
-            when {
-                System.getProperty("os.name").startsWith("Linux") -> "linux-$architecture"
-                System.getProperty("os.name").startsWith("Mac") -> "darwin-$architecture"
-                else -> "windows-$architecture"
-            }
-        val isolate =
-            javaClass.classLoader
-                .getResources("META-INF/MANIFEST.MF")
-                .asSequence()
-                .firstOrNull { it.toString().contains("/js-isolate-$platform-community/") }
-                ?: error("the real-engine test runtime must contain the $platform isolate")
-        val jarUrl = (isolate.openConnection() as java.net.JarURLConnection).jarFileURL
-        val directory = Files.createTempDirectory("jar-smoke-enabled-isolate")
-        Files.createSymbolicLink(
-            directory.resolve("js-isolate.jar"),
-            java.nio.file.Path
-                .of(jarUrl.toURI()),
-        )
+        val directory = linkedRuntimeIsolate()
         val childPort = java.net.ServerSocket(0).use { it.localPort }
         val childBase = "http://127.0.0.1:$childPort"
         val log = Files.createTempFile("jar-smoke-js-timeout", ".log").toFile()
-        val javaBin = File(System.getProperty("java.home"), "bin/java").absolutePath
-        val builder = ProcessBuilder(javaBin, "-jar", jarFile().absolutePath).redirectErrorStream(true).redirectOutput(log)
-        builder.environment().putAll(appEnvironment())
-        builder.environment()["SERVER_PORT"] = childPort.toString()
-        builder.environment()["DATAPIPELINES_AUTH_BASE_URL"] = childBase
-        builder.environment()["LOADER_PATH"] = directory.toString()
-        builder.environment()["DATAPIPELINES_SCRIPT_JS_ISOLATE_DIR"] = directory.toString()
-        builder.environment()["DATAPIPELINES_SCRIPT_JS_MAX_STATEMENTS"] = Long.MAX_VALUE.toString()
-        builder.environment()["DATAPIPELINES_SCRIPT_POOL_SIZE"] = "1"
-        builder.environment()["DATAPIPELINES_SCRIPT_POOL_QUEUE"] = "1"
-        builder.environment()["DATAPIPELINES_SCRIPT_EVALUATE_TIMEOUT_SECONDS"] = "2"
-        val child = builder.start()
+        val child = startTimeoutJar(directory, childPort, childBase, log)
         val json =
             com.fasterxml.jackson.databind
                 .ObjectMapper()
         try {
-            val deadline =
-                System.nanoTime() +
-                    java.time.Duration
-                        .ofSeconds(60)
-                        .toNanos()
-            while (true) {
-                check(child.isAlive) { "enabled jar died: ${log.readText().takeLast(4000)}" }
-                val healthy =
-                    runCatching {
-                        http
-                            .send(
-                                HttpRequest
-                                    .newBuilder(URI.create("$childBase/health"))
-                                    .timeout(java.time.Duration.ofSeconds(1))
-                                    .build(),
-                                HttpResponse.BodyHandlers.ofString(),
-                            ).statusCode() == 200
-                    }.getOrDefault(false)
-                if (healthy) break
-                check(System.nanoTime() < deadline) { "enabled jar boot timed out: ${log.readText().takeLast(4000)}" }
-                Thread.sleep(100)
-            }
+            awaitChildHealth(child, childBase, log)
             log.readText().lineSequence().count { it.contains("script.js: isolate loaded from") } shouldBe 1
 
-            fun create(
-                id: String,
-                body: String,
-                expect: Map<String, Any>,
-            ): com.fasterxml.jackson.databind.JsonNode {
-                val columns = listOf(mapOf("name" to "id", "type" to "INTEGER"))
-                val args =
-                    mapOf(
-                        "id" to id,
-                        "display_name" to "Timeout probe",
-                        "description" to "wall clock and pool recovery",
-                        "type" to "javascript",
-                        "body" to body,
-                        "contract" to
-                            mapOf(
-                                "mode" to "value",
-                                "inputs" to
-                                    mapOf("data" to mapOf("kind" to "table", "columns" to columns)),
-                                "output" to mapOf("kind" to "value", "type" to "INTEGER"),
-                            ),
-                        "invariants" to emptyList<Any>(),
-                        "tests" to
-                            listOf(
-                                mapOf(
-                                    "name" to "empty input",
-                                    "input" to
-                                        mapOf("inputs" to mapOf("data" to emptyList<Any>())),
-                                    "expect" to expect,
-                                ),
-                            ),
-                    )
-                val rpc =
-                    mapOf(
-                        "jsonrpc" to "2.0",
-                        "id" to 86,
-                        "method" to "tools/call",
-                        "params" to mapOf("name" to "templates_create", "arguments" to args),
-                    )
-                val request =
-                    HttpRequest
-                        .newBuilder(URI.create("$childBase/mcp"))
-                        .header("Content-Type", "application/json")
-                        .header("Accept", "application/json, text/event-stream")
-                        .header("DP-API-Key", mcpKey)
-                        .POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(rpc)))
-                        .build()
-                val response = http.send(request, HttpResponse.BodyHandlers.ofString())
-                response.statusCode() shouldBe 200
-                val text =
-                    response
-                        .body()
-                        .lineSequence()
-                        .firstOrNull { it.startsWith("data:") }
-                        ?.removePrefix("data:") ?: response.body()
-                return json.readTree(text)["result"]
-            }
             val prefix = "test/jar_timeout_" + UUID.randomUUID().toString().take(8)
-            create(prefix + "_loop", "console.log('before timeout'); while(true){}", mapOf("refusal" to "pipeline.script.timeout"))
+            createTimeoutProbe(
+                childBase,
+                json,
+                prefix + "_loop",
+                "console.log('before timeout'); while(true){}",
+                mapOf("refusal" to "pipeline.script.timeout"),
+            ).path("isError")
+                .asBoolean(false) shouldBe false
+            createTimeoutProbe(childBase, json, prefix + "_next", "return input.inputs.data.length;", mapOf("output" to 0))
                 .path("isError")
                 .asBoolean(false) shouldBe false
-            create(prefix + "_next", "return input.inputs.data.length;", mapOf("output" to 0))
-                .path("isError")
-                .asBoolean(false) shouldBe false
-            val csrfResponse =
-                http.send(
-                    HttpRequest
-                        .newBuilder(URI.create("$childBase/dashboard"))
-                        .header("Cookie", "dp_session=$adminSession")
-                        .build(),
-                    HttpResponse.BodyHandlers.ofString(),
-                )
-            val token =
-                csrfResponse
-                    .headers()
-                    .allValues("set-cookie")
-                    .first { it.startsWith("dp_csrf=") }
-                    .substringAfter("dp_csrf=")
-                    .substringBefore(';')
+            val token = csrfTokenAt(childBase)
 
             fun evaluate(id: String): HttpResponse<String> {
                 val request =
@@ -567,6 +453,155 @@ class JarSmokeE2eTest {
             }
             directory.toFile().deleteRecursively()
         }
+    }
+
+    private fun startTimeoutJar(
+        directory: Path,
+        childPort: Int,
+        childBase: String,
+        log: File,
+    ): Process {
+        val javaBin = File(System.getProperty("java.home"), "bin/java").absolutePath
+        val builder = ProcessBuilder(javaBin, "-jar", jarFile().absolutePath).redirectErrorStream(true).redirectOutput(log)
+        builder.environment().putAll(appEnvironment())
+        builder.environment()["SERVER_PORT"] = childPort.toString()
+        builder.environment()["DATAPIPELINES_AUTH_BASE_URL"] = childBase
+        builder.environment()["LOADER_PATH"] = directory.toString()
+        builder.environment()["DATAPIPELINES_SCRIPT_JS_ISOLATE_DIR"] = directory.toString()
+        builder.environment()["DATAPIPELINES_SCRIPT_JS_MAX_STATEMENTS"] = Long.MAX_VALUE.toString()
+        builder.environment()["DATAPIPELINES_SCRIPT_POOL_SIZE"] = "1"
+        builder.environment()["DATAPIPELINES_SCRIPT_POOL_QUEUE"] = "1"
+        builder.environment()["DATAPIPELINES_SCRIPT_EVALUATE_TIMEOUT_SECONDS"] = "2"
+        return builder.start()
+    }
+
+    private fun awaitChildHealth(
+        child: Process,
+        childBase: String,
+        log: File,
+    ) {
+        val deadline =
+            System.nanoTime() +
+                java.time.Duration
+                    .ofSeconds(60)
+                    .toNanos()
+        while (true) {
+            check(child.isAlive) { "enabled jar died: ${log.readText().takeLast(4000)}" }
+            val healthy =
+                runCatching {
+                    http
+                        .send(
+                            HttpRequest
+                                .newBuilder(URI.create("$childBase/health"))
+                                .timeout(java.time.Duration.ofSeconds(1))
+                                .build(),
+                            HttpResponse.BodyHandlers.ofString(),
+                        ).statusCode() == 200
+                }.getOrDefault(false)
+            if (healthy) break
+            check(System.nanoTime() < deadline) { "enabled jar boot timed out: ${log.readText().takeLast(4000)}" }
+            Thread.sleep(100)
+        }
+    }
+
+    private fun csrfTokenAt(childBase: String): String {
+        val csrfResponse =
+            http.send(
+                HttpRequest
+                    .newBuilder(URI.create("$childBase/dashboard"))
+                    .header("Cookie", "dp_session=$adminSession")
+                    .build(),
+                HttpResponse.BodyHandlers.ofString(),
+            )
+        return csrfResponse
+            .headers()
+            .allValues("set-cookie")
+            .first { it.startsWith("dp_csrf=") }
+            .substringAfter("dp_csrf=")
+            .substringBefore(';')
+    }
+
+    private fun linkedRuntimeIsolate(): Path {
+        val architecture = if (System.getProperty("os.arch") == "aarch64") "aarch64" else "amd64"
+        val platform =
+            when {
+                System.getProperty("os.name").startsWith("Linux") -> "linux-$architecture"
+                System.getProperty("os.name").startsWith("Mac") -> "darwin-$architecture"
+                else -> "windows-$architecture"
+            }
+        val isolate =
+            javaClass.classLoader
+                .getResources("META-INF/MANIFEST.MF")
+                .asSequence()
+                .firstOrNull { it.toString().contains("/js-isolate-$platform-community/") }
+                ?: error("the real-engine test runtime must contain the $platform isolate")
+        val jarUrl = (isolate.openConnection() as java.net.JarURLConnection).jarFileURL
+        val directory = Files.createTempDirectory("jar-smoke-enabled-isolate")
+        Files.createSymbolicLink(
+            directory.resolve("js-isolate.jar"),
+            java.nio.file.Path
+                .of(jarUrl.toURI()),
+        )
+        return directory
+    }
+
+    private fun createTimeoutProbe(
+        childBase: String,
+        json: com.fasterxml.jackson.databind.ObjectMapper,
+        id: String,
+        body: String,
+        expect: Map<String, Any>,
+    ): com.fasterxml.jackson.databind.JsonNode {
+        val columns = listOf(mapOf("name" to "id", "type" to "INTEGER"))
+        val args =
+            mapOf(
+                "id" to id,
+                "display_name" to "Timeout probe",
+                "description" to "wall clock and pool recovery",
+                "type" to "javascript",
+                "body" to body,
+                "contract" to
+                    mapOf(
+                        "mode" to "value",
+                        "inputs" to
+                            mapOf("data" to mapOf("kind" to "table", "columns" to columns)),
+                        "output" to mapOf("kind" to "value", "type" to "INTEGER"),
+                    ),
+                "invariants" to emptyList<Any>(),
+                "tests" to
+                    listOf(
+                        mapOf(
+                            "name" to "empty input",
+                            "input" to
+                                mapOf("inputs" to mapOf("data" to emptyList<Any>())),
+                            "expect" to expect,
+                        ),
+                    ),
+            )
+        val rpc =
+            mapOf(
+                "jsonrpc" to "2.0",
+                "id" to 86,
+                "method" to "tools/call",
+                "params" to mapOf("name" to "templates_create", "arguments" to args),
+            )
+        val request =
+            HttpRequest
+                .newBuilder(URI.create("$childBase/mcp"))
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json, text/event-stream")
+                .header("DP-API-Key", mcpKey)
+                .POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(rpc)))
+                .build()
+        val response = http.send(request, HttpResponse.BodyHandlers.ofString())
+        response.statusCode() shouldBe 200
+        val text =
+            response
+                .body()
+                .lineSequence()
+                .firstOrNull { it.startsWith("data:") }
+                ?.removePrefix("data:") ?: response.body()
+        return json.readTree(text)["result"]
     }
 
     // ------------------------------------------------------------------ boot machinery

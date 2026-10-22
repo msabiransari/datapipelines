@@ -54,6 +54,7 @@ import java.util.UUID
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
 )
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
+@Suppress("LargeClass") // One ordered lake/staging fixture shared by the two language walks.
 class ScriptNodeE2eTest {
     @LocalServerPort
     private var port: Int = 0
@@ -687,23 +688,8 @@ class ScriptNodeE2eTest {
     @Test
     @Order(16)
     fun `javascript row and table nodes preserve a large integer and exact decimal digits across real staging`() {
-        val source = "test/js_numeric_source.sql"
-        val hash =
-            createSqlTemplate(
-                source,
-                "H2",
-                """
-                SELECT CAST(9007199254740993 AS BIGINT) AS "id",
-                  CAST(10.50 AS DECIMAL(4,2)) AS "money", CAST(12345678901234567890 AS DECIMAL(20,0)) AS "wide"
-                """.trimIndent(),
-            )
-        releaseTemplate(source, hash)
-        val columns =
-            listOf(
-                mapOf("name" to "id", "type" to "BIGINTEGER"),
-                mapOf("name" to "money", "type" to "DECIMAL", "precision" to 4, "scale" to 2),
-                mapOf("name" to "wide", "type" to "BIGDECIMAL", "precision" to 20, "scale" to 0),
-            )
+        val source = seedNumericSource()
+        val columns = numericColumns()
         val output = columns + listOf("id_kind", "money_kind", "wide_kind").map { mapOf("name" to it, "type" to "STRING") }
         for (mode in listOf("row", "table")) {
             val id = "test/js_numeric_$mode"
@@ -725,27 +711,7 @@ class ScriptNodeE2eTest {
                 }
             val cases = listOf(mapOf("name" to "empty input", "input" to input, "expect" to mapOf("output" to emptyList<Any>())))
             createScriptTemplate(id, body, contract, emptyList(), cases, language = "javascript")
-            val nodes =
-                listOf(
-                    mapOf(
-                        "id" to "numbers",
-                        "type" to "DQL",
-                        "description" to "numeric source",
-                        "source" to "tempdb",
-                        "template" to mapOf("id" to source, "version" to 1),
-                        "output" to mapOf("target" to "tempdb", "table" to "numbers"),
-                        "depends_on" to emptyList<String>(),
-                    ),
-                    mapOf(
-                        "id" to "identity",
-                        "type" to "SCRIPT",
-                        "description" to "identity",
-                        "template" to mapOf("id" to id, "version" to 1),
-                        "inputs" to mapOf("numbers" to "numbers"),
-                        "output" to mapOf("target" to "caller"),
-                        "depends_on" to listOf("numbers"),
-                    ),
-                )
+            val nodes = numericNodes(source, id)
             val pipeline =
                 createPipeline(
                     "test/js_numeric_$mode",
@@ -772,6 +738,53 @@ class ScriptNodeE2eTest {
             println("8b numeric mode=$mode row=$row")
         }
     }
+
+    private fun seedNumericSource(): String {
+        val source = "test/js_numeric_source.sql"
+        val hash =
+            createSqlTemplate(
+                source,
+                "H2",
+                """
+                SELECT CAST(9007199254740993 AS BIGINT) AS "id",
+                  CAST(10.50 AS DECIMAL(4,2)) AS "money", CAST(12345678901234567890 AS DECIMAL(20,0)) AS "wide"
+                """.trimIndent(),
+            )
+        releaseTemplate(source, hash)
+        return source
+    }
+
+    private fun numericColumns(): List<Map<String, Any>> =
+        listOf(
+            mapOf("name" to "id", "type" to "BIGINTEGER"),
+            mapOf("name" to "money", "type" to "DECIMAL", "precision" to 4, "scale" to 2),
+            mapOf("name" to "wide", "type" to "BIGDECIMAL", "precision" to 20, "scale" to 0),
+        )
+
+    private fun numericNodes(
+        source: String,
+        id: String,
+    ): List<Map<String, Any>> =
+        listOf(
+            mapOf(
+                "id" to "numbers",
+                "type" to "DQL",
+                "description" to "numeric source",
+                "source" to "tempdb",
+                "template" to mapOf("id" to source, "version" to 1),
+                "output" to mapOf("target" to "tempdb", "table" to "numbers"),
+                "depends_on" to emptyList<String>(),
+            ),
+            mapOf(
+                "id" to "identity",
+                "type" to "SCRIPT",
+                "description" to "identity",
+                "template" to mapOf("id" to id, "version" to 1),
+                "inputs" to mapOf("numbers" to "numbers"),
+                "output" to mapOf("target" to "caller"),
+                "depends_on" to listOf("numbers"),
+            ),
+        )
 
     private fun evaluateRest(
         id: String,
