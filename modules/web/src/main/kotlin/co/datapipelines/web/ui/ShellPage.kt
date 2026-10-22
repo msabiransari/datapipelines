@@ -10,7 +10,7 @@ package co.datapipelines.web.ui
  *
  * Three kinds of `@Controller` deliberately do NOT implement it:
  *
- * - a `@RestController` never does — JSON handlers pay no shell read (the #574
+ * - a `@RestController` never does — its handlers pay no shell read (the #574
  *   measurement: before #652 the selector `annotations = [Controller::class]` matched
  *   `@RestController` through its meta-annotation, so every JSON API request paid two
  *   `users` reads and a `workspaces` list inside one `GET /api/v1/pipelines/tree`);
@@ -18,6 +18,10 @@ package co.datapipelines.web.ui
  *   `SitemapController`, `LlmsTxtController`) — does not;
  * - the one standalone page, [co.datapipelines.web.visualizations.VisualizationPreviewController]
  *   (session-less, capability-authenticated, self-supplied `activeTheme`), does not.
+ *
+ * Selection is per bean. A marked page controller's `@ResponseBody` methods still run
+ * the advices: the markdown read on DocsController, the secret read on
+ * ApiKeysPartialController and the edit POST on TemplateEditorController.
  *
  * `ShellPageGuardTest` pins the partition over the sources; `ShellAdviceSelectionTest`
  * pins the Spring-side selection (`ControllerAdviceBean.isApplicableToBeanType`, the

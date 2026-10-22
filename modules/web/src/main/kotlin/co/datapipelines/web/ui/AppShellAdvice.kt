@@ -23,7 +23,7 @@ import org.springframework.web.bind.annotation.ModelAttribute
  *
  * Selection rule (#652): `assignableTypes = [ShellPage::class]` — the shell model is
  * computed for controllers whose views render inside the shell, and for nothing else. A
- * `@RestController` never implements [ShellPage], so a JSON handler pays none of these
+ * `@RestController` never implements [ShellPage], so its handlers pay none of these
  * reads; until #652 the selector was `annotations = [Controller::class]`, which matched
  * `@RestController` through its meta-annotation and made every JSON API request pay two
  * `users` reads and a `workspaces` list it never shows.
@@ -40,7 +40,7 @@ import org.springframework.web.bind.annotation.ModelAttribute
  *   Dashboard and for off-rail screens; the template then renders the page alone.
  * - **`navCounts`** — the resource browser header's per-family counts (#554; the rail's two
  *   badges before it), as ONE attribute whose values [NavCounts] reads on the first one the
- *   template asks for (#574: no cache, and a JSON request — which since #652 never reaches
+ *   template asks for (#574: no cache, and a REST request — which since #652 never reaches
  *   this advice — asks for none). A value is null when there is no workspace or the count
  *   could not be read; the template omits that count rather than rendering a zero it does
  *   not know to be true.
