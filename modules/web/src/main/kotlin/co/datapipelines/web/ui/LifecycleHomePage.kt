@@ -52,7 +52,14 @@ internal object LifecycleHomePage {
     ): List<OverviewPage.TaskRow> =
         listOfNotNull(
             family.filtered(LifecycleBucket.DRAFT_ONLY)?.let { href ->
-                OverviewPage.TaskRow("drafts", "file", "Review your drafts", OverviewWords.drafts(family, inventory?.draftOnly), href, "draft")
+                OverviewPage.TaskRow(
+                    "drafts",
+                    "file",
+                    "Review your drafts",
+                    OverviewWords.drafts(family, inventory?.draftOnly),
+                    href,
+                    "draft",
+                )
             },
             family.filtered(LifecycleBucket.RELEASED_ONLY)?.let { href ->
                 OverviewPage.TaskRow(
