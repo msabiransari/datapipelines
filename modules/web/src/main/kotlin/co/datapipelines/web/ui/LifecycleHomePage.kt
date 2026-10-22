@@ -75,7 +75,9 @@ internal object LifecycleHomePage {
 
     /** The heading eyebrow's icon for a family route: the [Family]'s own, else the sibling homes' rail icons. */
     fun iconFor(family: String): String =
-        OverviewPage.Family.entries.firstOrNull { it.navigation.route == family }?.icon ?: SIBLING_ICONS[family] ?: DEFAULT_ICON
+        OverviewPage.Family.entries
+            .firstOrNull { it.navigation.route == family }
+            ?.icon ?: SIBLING_ICONS[family] ?: DEFAULT_ICON
 
     private fun page(
         family: OverviewPage.Family,

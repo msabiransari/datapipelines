@@ -304,13 +304,24 @@ data class OverviewPage(
 
     companion object {
         /** The builders live in [LifecycleHomePage]; these delegates keep the frame's face (#670). */
-        fun of(family: Family, lensed: Boolean, charts: ChartsResult, recent: RecentResult?, now: Instant): OverviewPage =
-            LifecycleHomePage.of(family, lensed, charts, recent, now)
+        fun of(
+            family: Family,
+            lensed: Boolean,
+            charts: ChartsResult,
+            recent: RecentResult?,
+            now: Instant,
+        ): OverviewPage = LifecycleHomePage.of(family, lensed, charts, recent, now)
 
-        fun tasks(family: Family, inventory: Inventory?): List<TaskRow> = LifecycleHomePage.tasks(family, inventory)
+        fun tasks(
+            family: Family,
+            inventory: Inventory?,
+        ): List<TaskRow> = LifecycleHomePage.tasks(family, inventory)
 
         fun iconFor(family: String): String = LifecycleHomePage.iconFor(family)
 
-        internal fun width(value: Long, tallest: Long): String = LifecycleHomePage.width(value, tallest)
+        internal fun width(
+            value: Long,
+            tallest: Long,
+        ): String = LifecycleHomePage.width(value, tallest)
     }
 }
