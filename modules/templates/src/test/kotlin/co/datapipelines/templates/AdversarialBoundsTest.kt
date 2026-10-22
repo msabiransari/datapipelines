@@ -31,7 +31,12 @@ import org.junit.jupiter.api.Test
 class AdversarialBoundsTest {
     private val workspaceId = java.util.UUID.randomUUID()
 
-    private fun validator() = TemplateValidator(LibraryResolver { _ -> InMemoryTemplateRegistry() })
+    private fun validator() =
+        TemplateValidator(
+            scriptEngines =
+                mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
+            libraryResolver = LibraryResolver { _ -> InMemoryTemplateRegistry() },
+        )
 
     @Test
     fun `validation work grows linearly with the body, not quadratically`() {

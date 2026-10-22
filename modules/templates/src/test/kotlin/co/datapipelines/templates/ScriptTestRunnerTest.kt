@@ -35,7 +35,12 @@ class ScriptTestRunnerTest {
     )
 
     private fun validatorWith(runner: ScriptTestRunner) =
-        TemplateValidator(LibraryResolver { _ -> InMemoryTemplateRegistry() }, suiteRunner = runner)
+        TemplateValidator(
+            scriptEngines =
+                mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
+            libraryResolver = LibraryResolver { _ -> InMemoryTemplateRegistry() },
+            suiteRunner = runner,
+        )
 
     /** The record §2.2's example contract (row mode, rejects, the two invariants). */
     private val exampleContract =

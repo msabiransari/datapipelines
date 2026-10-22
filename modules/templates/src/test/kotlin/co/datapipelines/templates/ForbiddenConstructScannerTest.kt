@@ -28,8 +28,11 @@ class ForbiddenConstructScannerTest {
     private fun flagged(body: String): Boolean = ForbiddenConstructScanner.scan(body).isNotEmpty()
 
     private fun rejected(body: String): List<String> =
-        TemplateValidator(LibraryResolver { _ -> InMemoryTemplateRegistry() })
-            .validate(TemplateFixtures.draft(body = body), java.util.UUID.randomUUID())
+        TemplateValidator(
+            scriptEngines =
+                mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
+            libraryResolver = LibraryResolver { _ -> InMemoryTemplateRegistry() },
+        ).validate(TemplateFixtures.draft(body = body), java.util.UUID.randomUUID())
             .codes
 
     @Test

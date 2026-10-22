@@ -1,6 +1,6 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.48
+**Status:** v1.49
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-10-22
@@ -470,6 +470,31 @@ Each pod has its own volume; Kubernetes removes it with the pod. Size it for con
 queries and see [Configuration §3.24](configuration.md#324-lake-datasource-engine-limits-dp-lake)
 for explicit paths and cleanup after a process crash. Docker Compose uses the image's writable
 `/tmp`; custom read-only deployments must mount a writable temporary directory too.
+
+JavaScript (#8 lane 8b) uses `/opt/graaljs/js-isolate.jar` in the image, selected for the image
+platform and checksum-verified at build. `DATAPIPELINES_SCRIPT_JS_ISOLATE_DIR=/opt/graaljs`
+must name one directory in the launcher's effective `loader.path` system property or, when
+unset, `LOADER_PATH` environment list (the image: `/app/lib,/opt/graaljs`). Startup refuses a
+configured directory outside that list or without `js-isolate.jar`; the check never adds a
+class-path entry. A bare jar without the isolate starts with JavaScript disabled, said once
+at INFO; a JavaScript save/evaluate refuses `script.js.unavailable`, while JSONata works.
+
+The image pre-installs native resources in the root-owned, read-only
+`/opt/graaljs/resources` cache and passes
+`-Dpolyglot.engine.userResourceCache=/opt/graaljs/resources`. This is why the read-only root
+remains supported: no language resources are installed at runtime. A Docker tmpfs at `/tmp`
+must permit native-library mapping (for example `--tmpfs /tmp:rw,exec`); `noexec` fails in JNA
+before JavaScript starts. Non-Docker deployments
+must pre-install resources for their platform using `JavaScriptResourcesMain` and set the
+same cache property before starting with a read-only root.
+
+One Engine per JVM shares its isolate heap across fresh per-evaluation Contexts (8a's measured
+D1 arm; author Sources are not cached). The default isolate ceiling is
+`pool-size × js.max-heap-mb + 256` MiB (1280 at 4 × 256), outside `-Xmx`; an explicit ceiling
+must exceed all pool slots' heaps. A tenant's hard isolate-heap trip can cancel another
+tenant's evaluation once; subsequent evaluations rebuild the Engine. Include both heaps in
+container sizing; each Context's heap limit is soft.
+
 
 The two DuckDB operator keys (configuration.md §3.25) are named chart values:
 `duckdb.extensionDirectory` (env `DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY`) and
@@ -1197,7 +1222,9 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-22 | v1.49 | 8b (#8) | Documents the isolate directory/loader agreement, pre-installed resources on read-only roots, shared-isolate failure mode and memory sizing. |
 | 2026-10-21 | v1.48 | #8 lane 8a the JavaScript isolate (owner ruling 2026-10-21) | **§3.5** the `lib/` drop-in paragraph quotes the image's value as it now is, `ENV LOADER_PATH=/app/lib,/opt/graaljs`: the drop-in directory, then `/opt/graaljs`, where the image fetches its platform's SHA-256-pinned GraalJS isolate jar. One list in one `ENV` because `PropertiesLauncher` reads a `-Dloader.path` before the variable — an ENTRYPOINT `-Dloader.path=/opt/graaljs` would have silently dropped the drop-in (measured in lane 8a). The mount point, its mode and the never-from-the-environment rule are unchanged. `ImageLoaderPathSpecDriftTest` pins the new value. Renumbered at merge after #666's v1.47. The engine's operator-facing configuration and the rest of the image's JavaScript story are lane 8b's. |
+| JavaScript isolate | `js-isolate.jar` is in `datapipelines.script.js.isolate-dir`, which is one loader-path entry; the native resource cache is pre-installed and read-only; startup logs one isolate-loaded line |
 | 2026-10-21 | v1.47 | #666 Helm driver drop-in | **§6.4:** opt-in `libVolume.enabled` and one operator-supplied `libVolume.source` mount trusted drivers read-only at `/app/lib`; PVC sources must also be read-only. `extraEnv.LOADER_PATH` is refused with the image-owned-path message, in every spelling the launcher reads (`loader_path`, `loader.path`: Spring Boot's `SystemPropertyUtils` tries the key as given, dots to underscores, then upper-cased). `JAVA_TOOL_OPTIONS`, `JDK_JAVA_OPTIONS` and `_JAVA_OPTIONS` in `extraEnv` are refused too, as the compose audit's class 8 refuses them (#679). Chart 0.1.2; helm-check covers the default, refusal, ConfigMap mount and PVC/source boundaries; the deploy-file drift guard admits exactly the template refusal and requires it once. |
 | 2026-10-21 | v1.46 | #657 the image's driver drop-in | **§3.5** the `lib/` drop-in paragraph now matches the image: the Dockerfile creates `/app/lib` empty, `root:root` mode `0555`, before `USER`, and sets `ENV LOADER_PATH=/app/lib` — until now it did neither, so a mounted driver was never on the classpath. The value is absolute because `PropertiesLauncher` resolves a relative `loader.path` against `loader.home` (default `${user.dir}`) and the image has no `WORKDIR`: `LOADER_PATH=lib` adds `/lib`. The operator mounts the DRIVER jar read-only at `/app/lib/`; neither compose nor the chart sets `LOADER_PATH` (§9). **§6.4** states that the chart does not support the drop-in today (no volume knob; `extraEnv` does not refuse `LOADER_PATH`). `ImageLoaderPathSpecDriftTest` pins the Dockerfile, this paragraph and Module Structure §5.4.1 to one value and refuses a deploy file that names `LOADER_PATH`. |
 | 2026-10-19 | v1.45 | #571 path-independent Plotly rebuilds | **§6.2A:** patch 0003 salts root-relative inline-CSS paths with the historical build directory, preserving every committed byte from any clone directory. The recipe uses a temporary directory; `scripts/verify-plotly-bundles.sh` rebuilds and compares both bundles for the lander on Plotly vendor or manifest-entry diffs, with distinct match, mismatch and rebuild-failure exits. |

@@ -37,7 +37,11 @@ class ImportPrologueInjectionTest {
 
     private fun validator(): TemplateValidator {
         val registry = InMemoryTemplateRegistry(listOf(library))
-        return TemplateValidator(LibraryResolver { _ -> registry })
+        return TemplateValidator(
+            scriptEngines =
+                mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
+            libraryResolver = LibraryResolver { _ -> registry },
+        )
     }
 
     private fun engineWith(vararg versions: TemplateVersion): TemplateEngine =

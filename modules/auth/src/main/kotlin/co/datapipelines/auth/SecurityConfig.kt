@@ -7,6 +7,8 @@ import org.springframework.context.annotation.Configuration
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity
 import org.springframework.security.config.http.SessionCreationPolicy
+import org.springframework.security.oauth2.client.endpoint.RestClientAuthorizationCodeTokenResponseClient
+import org.springframework.security.oauth2.client.oidc.userinfo.OidcUserService
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestRedirectFilter
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestResolver
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepository
@@ -56,6 +58,8 @@ class SecurityConfig(
     private val oidcSuccessHandler: OidcSuccessHandler,
     private val oauth2LoginFailureHandler: OAuth2LoginFailureHandler,
     private val oauth2IdentityUserService: OAuth2IdentityUserService,
+    private val providerTokenResponseClient: RestClientAuthorizationCodeTokenResponseClient,
+    private val providerOidcUserService: OidcUserService,
     private val authorizedClientRepository: OAuth2AuthorizedClientRepository,
     private val scopeInterceptor: ScopeInterceptor,
     private val forcedPasswordChangeInterceptor: ForcedPasswordChangeInterceptor,
@@ -188,7 +192,8 @@ class SecurityConfig(
      * rejection at the success handler.
      *
      * #655: `protocol: oauth2` registrations (no `openid` scope) resolve their identity through
-     * [OAuth2IdentityUserService]; OIDC registrations keep Spring's OIDC user service. The
+     * [OAuth2IdentityUserService]; OIDC registrations use Spring's OIDC user service with a
+     * bounded user-info delegate. Both protocols' token exchanges share the configured bound. The
      * authorized client — the provider's access token — is never stored
      * ([NoStoreAuthorizedClientRepository]).
      */
@@ -201,7 +206,11 @@ class SecurityConfig(
         http.oauth2Login { oauth ->
             oauth.successHandler(oidcSuccessHandler)
             oauth.failureHandler(oauth2LoginFailureHandler)
-            oauth.userInfoEndpoint { it.userService(oauth2IdentityUserService) }
+            oauth.tokenEndpoint { it.accessTokenResponseClient(providerTokenResponseClient) }
+            oauth.userInfoEndpoint {
+                it.userService(oauth2IdentityUserService)
+                it.oidcUserService(providerOidcUserService)
+            }
             oauth.authorizedClientRepository(authorizedClientRepository)
             oauth.authorizationEndpoint {
                 it.authorizationRequestRepository(authorizationRequestRepository)

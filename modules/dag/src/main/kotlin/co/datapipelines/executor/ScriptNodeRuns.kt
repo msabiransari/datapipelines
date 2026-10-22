@@ -9,6 +9,8 @@ import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.scripting.CanonicalJson
 import co.datapipelines.scripting.CompiledScript
+import co.datapipelines.scripting.ConsoleLevel
+import co.datapipelines.scripting.ConsoleSink
 import co.datapipelines.scripting.EvaluationLimits
 import co.datapipelines.scripting.ScriptEngine
 import co.datapipelines.scripting.ScriptEvaluationPool
@@ -70,6 +72,10 @@ class ScriptSupport(
     val maxStringBytes: Long = 1_048_576,
     val maxDepth: Int = 100,
     val readBatchSize: Int = 10_000,
+    val maxHeapBytes: Long? = null,
+    val maxStatements: Long? = null,
+    val maxResultBytes: Long? = null,
+    val maxInputBytes: Long? = null,
 ) {
     init {
         require(maxInputRows > 0) { "maxInputRows must be positive, was $maxInputRows" }
@@ -224,7 +230,7 @@ internal object ScriptNodeRuns {
         return support.engines[language]
             ?: throw DatapipelinesException(
                 code = PipelineErrorCodes.Script.JS_UNAVAILABLE,
-                message = "No engine for type '${type.wire}' yet (javascript ships in round two).",
+                message = co.datapipelines.pipeline.JAVASCRIPT_UNAVAILABLE_MESSAGE,
                 details = mapOf("node" to node.id, "type" to type.wire),
             )
     }
@@ -260,6 +266,35 @@ internal object ScriptNodeRuns {
             wallClock = Duration.ofSeconds(wallClock),
             maxDepth = support.maxDepth,
             now = ctx.values[ContextKeys.CURRENT_TIMESTAMP] as? Instant,
+            maxHeapBytes = support.maxHeapBytes,
+            maxStatements = support.maxStatements,
+            maxResultBytes = support.maxResultBytes,
+            maxInputBytes = support.maxInputBytes,
+            console =
+                ConsoleSink { line ->
+                    val event = org.slf4j.LoggerFactory.getLogger("script.js.console")
+                    val builder =
+                        when (line.level) {
+                            ConsoleLevel.WARN, ConsoleLevel.ERROR -> event.atWarn()
+                            ConsoleLevel.LOG, ConsoleLevel.INFO, ConsoleLevel.DEBUG -> event.atInfo()
+                        }
+                    builder
+                        .addKeyValue("template", node.template.id)
+                        .addKeyValue("version", node.template.version)
+                        .addKeyValue("node", node.id)
+                        .addKeyValue("execution", ctx.executionId)
+                        .addKeyValue("level", line.level.name.lowercase())
+                        .addKeyValue("text", line.text)
+                        .log(
+                            "script.js.console template={} version={} node={} execution={} level={} text={}",
+                            node.template.id,
+                            node.template.version,
+                            node.id,
+                            ctx.executionId,
+                            line.level.name.lowercase(),
+                            line.text,
+                        )
+                },
         )
     }
 

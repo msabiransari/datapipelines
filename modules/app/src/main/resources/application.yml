@@ -161,6 +161,7 @@ datapipelines:
     # §3.4 — optional; empty = no bootstrap admin (auth.md §4.4).
     bootstrap-admin-email: ${DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL:}
     oidc:
+      provider-read-timeout-seconds: ${DATAPIPELINES_AUTH_OIDC_PROVIDER_READ_TIMEOUT_SECONDS:10}
       providers:
         # client-id/client-secret default to EMPTY: an unset entry is ignored with a
         # WARN (OidcConfig, configuration.md §7), so a local-accounts-only deployment
@@ -519,6 +520,20 @@ datapipelines:
     max-value-bytes: ${DATAPIPELINES_SCRIPT_MAX_VALUE_BYTES:1048576}
     max-string-bytes: ${DATAPIPELINES_SCRIPT_MAX_STRING_BYTES:1048576}
     max-depth: ${DATAPIPELINES_SCRIPT_MAX_DEPTH:100}
+    # GraalJS ceilings (#8 lane 8b); the isolate heap sits beside the JVM heap.
+    js:
+      # Empty: JavaScript is disabled unless the isolate is on the test runtime class path.
+      isolate-dir: ${DATAPIPELINES_SCRIPT_JS_ISOLATE_DIR:}
+      max-heap-mb: ${DATAPIPELINES_SCRIPT_JS_MAX_HEAP_MB:256}
+      # Empty: pool-size × max-heap-mb + 256 MiB headroom for the shared isolate.
+      isolate-memory-mb: ${DATAPIPELINES_SCRIPT_JS_ISOLATE_MEMORY_MB:}
+      max-statements: ${DATAPIPELINES_SCRIPT_JS_MAX_STATEMENTS:100000000}
+      max-ast-depth: ${DATAPIPELINES_SCRIPT_JS_MAX_AST_DEPTH:1000}
+      max-stack-frames: ${DATAPIPELINES_SCRIPT_JS_MAX_STACK_FRAMES:1000}
+      # The stream cap refuses excess output; the author console also caps 200 × 2000 chars.
+      max-output-bytes: ${DATAPIPELINES_SCRIPT_JS_MAX_OUTPUT_BYTES:1048576}
+      max-result-mb: ${DATAPIPELINES_SCRIPT_JS_MAX_RESULT_MB:64}
+      max-input-mb: ${DATAPIPELINES_SCRIPT_JS_MAX_INPUT_MB:64}
   # The scheduler (#9; configuration.md §3.29, scheduler design revision §7.2). Appended after the
   # whole datapipelines: tree (the reparenting lesson — MISTAKES.md).
   scheduler:

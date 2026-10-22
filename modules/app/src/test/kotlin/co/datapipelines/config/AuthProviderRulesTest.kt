@@ -14,6 +14,26 @@ import org.springframework.mock.env.MockEnvironment
  * "a provider is configured" for an OAuth 2.0 entry.
  */
 class AuthProviderRulesTest {
+    @Test
+    fun `provider read timeout rejects zero negative malformed and overflowing values by name`() {
+        for (raw in listOf("0", "abc", "-5", "", "1.5", "9223372036854775808")) {
+            val refused = ConfigValidator.validate(ConfigSnapshots.valid().copy(providerReadTimeoutSeconds = raw)).violations
+            refused shouldHaveSize 1
+            refused.single() shouldContain "datapipelines.auth.oidc.provider-read-timeout-seconds"
+            refused.single() shouldContain "'$raw'"
+            refused.single() shouldContain "§3.4"
+        }
+    }
+
+    @Test
+    fun `positive and absent provider read timeouts validate and the snapshot preserves raw values`() {
+        for (raw in listOf(null, "1", "10", " 7 ")) {
+            ConfigValidator.validate(ConfigSnapshots.valid().copy(providerReadTimeoutSeconds = raw)).violations.shouldBeEmpty()
+        }
+        val env = MockEnvironment().withProperty("datapipelines.auth.oidc.provider-read-timeout-seconds", "abc")
+        ConfigValidator.snapshotFrom(env).providerReadTimeoutSeconds shouldBe "abc"
+    }
+
     /** The shipped `github` entry's shape (application.yml), credentials set. */
     private fun github() =
         OidcProviderSnapshot(

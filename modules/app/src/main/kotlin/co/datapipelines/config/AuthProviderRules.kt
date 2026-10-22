@@ -4,14 +4,33 @@ import java.net.URI
 import java.net.URISyntaxException
 
 /**
- * §7 / §3.4 (#655) — the shape of each sign-in provider entry, by protocol. Owns its file like
+ * §7 / §3.4 (#655, #682) — provider entry shapes and the shared HTTP read timeout. Owns its file like
  * `MailRules`: the validator's companion is the registry, not the home, of the rule families.
  *
- * Applies only to entries the operator demonstrably meant to configure (a present `client-id`),
+ * Provider-shape rules apply only to entries meant to be configured (a present `client-id`),
  * exactly like the companion's "at least one authentication method" rule: the stock entries
  * ship with empty client ids and must not refuse a local-accounts deployment.
  */
 internal object AuthProviderRules {
+    /** §7 / §3.4 — zero would disable the HTTP timeout, so only positive integers are valid. */
+    fun checkProviderReadTimeout(
+        snapshot: ConfigSnapshot,
+        violations: MutableList<String>,
+    ) {
+        snapshot.providerReadTimeoutSeconds?.let { raw ->
+            val parsed = raw.trim().toLongOrNull()
+            if (parsed == null || parsed < 1) {
+                violations += "datapipelines.auth.oidc.provider-read-timeout-seconds '$raw' is not a positive integer (§3.4)."
+            } else if (parsed > MAX_PROVIDER_TIMEOUT_SECONDS) {
+                violations +=
+                    "datapipelines.auth.oidc.provider-read-timeout-seconds '$raw' exceeds $MAX_PROVIDER_TIMEOUT_SECONDS seconds " +
+                    "(§3.4): the HTTP client's signed 32-bit milliseconds must not overflow."
+            }
+        }
+    }
+
+    private const val MAX_PROVIDER_TIMEOUT_SECONDS = Int.MAX_VALUE / 1000L
+
     /** The two values `protocol` accepts (auth.md §5.1). */
     const val PROTOCOL_OIDC = "oidc"
     const val PROTOCOL_OAUTH2 = "oauth2"

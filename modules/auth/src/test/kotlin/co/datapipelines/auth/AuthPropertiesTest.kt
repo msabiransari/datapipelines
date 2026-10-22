@@ -2,12 +2,30 @@ package co.datapipelines.auth
 
 import io.kotest.matchers.booleans.shouldBeFalse
 import io.kotest.matchers.booleans.shouldBeTrue
+import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
+import org.springframework.boot.context.properties.bind.Bindable
+import org.springframework.boot.context.properties.bind.Binder
+import org.springframework.mock.env.MockEnvironment
 
 /** Auth configuration: domain allowlisting and safe diagnostic strings. */
 class AuthPropertiesTest {
+    @Test
+    fun `provider read timeout defaults to ten seconds and binds beside the providers list`() {
+        AuthProperties().oidc.providerReadTimeoutSeconds shouldBe 10L
+        val env =
+            MockEnvironment()
+                .withProperty("datapipelines.auth.oidc.provider-read-timeout-seconds", "7")
+                .withProperty("datapipelines.auth.oidc.providers[0].name", "example")
+        val bound = Binder.get(env).bind("datapipelines.auth", Bindable.of(AuthProperties::class.java)).get()
+        bound.oidc.providerReadTimeoutSeconds shouldBe 7L
+        bound.oidc.providers
+            .single()
+            .name shouldBe "example"
+    }
+
     @Test
     fun `provider diagnostic strings redact the client secret directly and through parent properties`() {
         val secret = "provider-secret-regression-655"

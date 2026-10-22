@@ -3,7 +3,6 @@ package co.datapipelines.auth
 import org.springframework.core.ParameterizedTypeReference
 import org.springframework.http.MediaType
 import org.springframework.http.RequestEntity
-import org.springframework.http.client.SimpleClientHttpRequestFactory
 import org.springframework.security.oauth2.client.http.OAuth2ErrorResponseErrorHandler
 import org.springframework.security.oauth2.client.userinfo.DefaultOAuth2UserService
 import org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest
@@ -16,8 +15,6 @@ import org.springframework.security.oauth2.core.user.OAuth2User
 import org.springframework.web.client.RestClientException
 import org.springframework.web.client.RestClientResponseException
 import org.springframework.web.client.RestOperations
-import org.springframework.web.client.RestTemplate
-import java.time.Duration
 
 /**
  * The identity of an OAuth 2.0 (non-OIDC) login (auth.md §5.5, #655). Spring calls this
@@ -49,10 +46,10 @@ import java.time.Duration
  */
 class OAuth2IdentityUserService(
     private val authProperties: AuthProperties,
-    private val restOperations: RestOperations = boundedRestTemplate(),
+    private val restOperations: RestOperations = OidcConfig.boundedRestTemplate(authProperties),
     private val delegate: OAuth2UserService<OAuth2UserRequest, OAuth2User> =
         DefaultOAuth2UserService().apply {
-            setRestOperations(boundedRestTemplate().apply { errorHandler = OAuth2ErrorResponseErrorHandler() })
+            setRestOperations(OidcConfig.boundedRestTemplate(authProperties).apply { errorHandler = OAuth2ErrorResponseErrorHandler() })
         },
 ) : OAuth2UserService<OAuth2UserRequest, OAuth2User> {
     override fun loadUser(userRequest: OAuth2UserRequest): OAuth2User {
@@ -150,26 +147,6 @@ class OAuth2IdentityUserService(
         /** Spring's own code for a malformed user-info answer, reused for the missing subject. */
         const val INVALID_USER_INFO_RESPONSE = "invalid_user_info_response"
 
-        /**
-         * Connect and read ceiling for each provider read made here (#655). Spring's default
-         * client has none, so a provider that accepts the connection and never answers would
-         * hold a request thread for as long as the TCP stack allows.
-         */
-        val READ_TIMEOUT: Duration = Duration.ofSeconds(10)
-
         private val ROWS = object : ParameterizedTypeReference<List<Any?>>() {}
-
-        /**
-         * Spring's user-info client type (a [RestTemplate]) with [READ_TIMEOUT]. The user-info
-         * delegate adds Spring's OAuth2 error handler; the emails read keeps the default one, so
-         * every non-2xx is a [RestClientResponseException] it can name.
-         */
-        fun boundedRestTemplate(): RestTemplate =
-            RestTemplate(
-                SimpleClientHttpRequestFactory().apply {
-                    setConnectTimeout(READ_TIMEOUT)
-                    setReadTimeout(READ_TIMEOUT)
-                },
-            )
     }
 }

@@ -29,7 +29,7 @@ private const val EVALUATE_NOW_DESC =
  * `templates_render` (explicit `version`, else the working version — the draft when one
  * exists, else the latest released), applies the contract's input check, evaluates on the
  * evaluation pool under `evaluate-timeout-seconds`, gates the output and runs the
- * invariants, and answers `{ output, rejects, invariants }`. A refusal is the code with
+ * invariants, and answers `{ output, rejects, invariants, console }`. A refusal is the code with
  * its detail; the audit row carries `tool`, `template` and `version` — never the input
  * object or the output (record §9.5).
  */
@@ -41,7 +41,7 @@ class TemplatesEvaluateTool(
             name = "templates_evaluate",
             description =
                 "Evaluate a script template ('jsonata'/'javascript') over a caller-supplied input object and " +
-                    "return { output, rejects, invariants } — no staging, no Context. Use this to run a script's " +
+                    "return { output, rejects, invariants, console } — no staging, no Context. Use this to run a script's " +
                     "body against one input the way its test suite does (sql_probe's twin; templates_render is for " +
                     "sql/html and refuses a script type with template.render_not_applicable). The version " +
                     "resolves as templates_render does: omitted, the working version (the draft when one exists, " +
@@ -95,6 +95,7 @@ class TemplatesEvaluateTool(
         return mapOf(
             "output" to result.output,
             "rejects" to result.rejects,
+            "console" to result.consolePayload(),
             "invariants" to
                 result.invariants.map { verdict ->
                     mapOf("name" to verdict.name, "passed" to verdict.passed, "message" to verdict.message)

@@ -1,7 +1,12 @@
 package co.datapipelines.web.config
 
 import co.datapipelines.application.templates.TemplateEvaluateService
+import co.datapipelines.scripting.Availability
+import co.datapipelines.scripting.JavaScriptEngine
+import co.datapipelines.scripting.JavaScriptRuntime
+import co.datapipelines.scripting.JavaScriptRuntimeOptions
 import co.datapipelines.scripting.JsonataEngine
+import co.datapipelines.scripting.ScriptEngine
 import co.datapipelines.scripting.ScriptEvaluationPool
 import co.datapipelines.scripting.ScriptLanguage
 import co.datapipelines.templates.ScriptTestRunner
@@ -21,6 +26,37 @@ import java.time.Duration
  */
 @Configuration
 class ScriptConfiguration {
+    /** The process-wide isolate, closed with the application context (D1, measured by 8a). */
+    @Bean(destroyMethod = "close")
+    fun javaScriptRuntime(properties: ScriptProperties): JavaScriptRuntime =
+        JavaScriptRuntime(
+            JavaScriptRuntimeOptions(
+                isolateMemoryBytes = properties.isolateMemoryMb * MIB,
+                maxHeapBytes = properties.js.maxHeapMb * MIB,
+                maxStatements = properties.js.maxStatements,
+                maxAstDepth = properties.js.maxAstDepth,
+                maxStackFrames = properties.js.maxStackFrames,
+                maxOutputBytes = properties.js.maxOutputBytes.toLong(),
+                maxResultBytes = properties.js.maxResultMb * MIB,
+                maxInputBytes = properties.js.maxInputMb * MIB,
+            ),
+        )
+
+    /** The single registry shared by save validation, the test runner and node execution. */
+    @Bean
+    fun scriptEngines(runtime: JavaScriptRuntime): Map<ScriptLanguage, ScriptEngine> =
+        buildMap {
+            put(ScriptLanguage.JSONATA, JsonataEngine())
+            if (runtime.availability() is Availability.Available) put(ScriptLanguage.JAVASCRIPT, JavaScriptEngine(runtime))
+        }
+
+    /** Probe at boot and report JavaScript's availability once, at INFO (D-T16). */
+    @Bean
+    fun javaScriptStartupCheck(
+        runtime: JavaScriptRuntime,
+        properties: ScriptProperties,
+    ): JavaScriptStartupCheck = JavaScriptStartupCheck(runtime, properties)
+
     /**
      * The bounded script-evaluation pool (transform-nodes design §4.3, R7; the 7a bulkhead):
      * every production evaluation — the save/release test suite, `templates_evaluate`, the
@@ -45,9 +81,10 @@ class ScriptConfiguration {
     fun scriptTestRunner(
         pool: ScriptEvaluationPool,
         properties: ScriptProperties,
+        engines: Map<ScriptLanguage, ScriptEngine>,
     ): ScriptTestRunner =
         ScriptTestRunner(
-            engines = mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
+            engines = engines,
             pool = pool,
             evaluateTimeout = Duration.ofSeconds(properties.evaluateTimeoutSeconds),
             suiteTimeout = Duration.ofSeconds(properties.suiteTimeoutSeconds),
@@ -55,6 +92,10 @@ class ScriptConfiguration {
             maxStringBytes = properties.maxStringBytes,
             maxValueBytes = properties.maxValueBytes,
             maxDepth = properties.maxDepth,
+            maxHeapBytes = properties.js.maxHeapMb * MIB,
+            maxStatements = properties.js.maxStatements,
+            maxResultBytes = properties.js.maxResultMb * MIB,
+            maxInputBytes = properties.js.maxInputMb * MIB,
         )
 
     /**
@@ -97,6 +138,7 @@ class ScriptConfiguration {
         pool: ScriptEvaluationPool,
         properties: ScriptProperties,
         stagingProperties: StagingH2Properties,
+        engines: Map<ScriptLanguage, ScriptEngine>,
     ): co.datapipelines.executor.ScriptSupport =
         co.datapipelines.executor.ScriptSupport(
             resolver =
@@ -114,11 +156,19 @@ class ScriptConfiguration {
                     }
                 },
             pool = pool,
-            engines = mapOf(ScriptLanguage.JSONATA to JsonataEngine()),
+            engines = engines,
             maxInputRows = properties.maxInputRows,
             maxValueBytes = properties.maxValueBytes,
             maxStringBytes = properties.maxStringBytes,
             maxDepth = properties.maxDepth,
+            maxHeapBytes = properties.js.maxHeapMb * MIB,
+            maxStatements = properties.js.maxStatements,
+            maxResultBytes = properties.js.maxResultMb * MIB,
+            maxInputBytes = properties.js.maxInputMb * MIB,
             readBatchSize = stagingProperties.resultBatchSize,
         )
+
+    private companion object {
+        const val MIB = 1024L * 1024L
+    }
 }

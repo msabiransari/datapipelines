@@ -199,6 +199,7 @@ class TemplatesEvaluateToolTest {
 
         assertSoftly {
             (direct as Map<*, *>)["output"] shouldBe mapOf("rows" to listOf(mapOf("order_id" to 7)))
+            direct["console"] shouldBe emptyList<Any>()
             val row = sink.calls().single { it.details["tool"] == "templates_evaluate" }
             row.details["template"] shouldBe "test/xform.jsonata"
             row.details["outcome"] shouldBe "success"

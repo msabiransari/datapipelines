@@ -1,9 +1,9 @@
 # DAG Executor Specification
 
-**Status:** v1.33 (revised — see Change Log)
+**Status:** v1.34 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract spec](pipeline-contract.md), [Templates spec](templates.md), [Datasources spec](datasources.md), [Staging spec](staging.md)
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 ---
 
@@ -585,7 +585,7 @@ Abandoning is safe only because the node body is a detached `async` whose value 
 
 #### The script engine seam (7a)
 
-SCRIPT nodes (round one: JSONata) will evaluate through a dedicated seam in the new layer-0
+SCRIPT nodes evaluate through the dedicated seam in layer-0
 module `modules/scripting` — `ScriptEngine` (compile once, evaluate many, JSON in, JSON out),
 `ScriptEvaluationPool`, and the type gate. The module ships as a pure library first (7a); the
 executor itself gains its edge, its configuration block and its catalog rows when the SCRIPT
@@ -655,10 +655,24 @@ node lands (7c). What is already true and binding:
   Error never escapes the seam. The ceiling sits under the evaluate-time default
   (100): compile bounds STATIC nesting (stack safety), evaluate bounds RUNTIME depth
   (steps and non-tail lambda recursion, which no static scan can see).
-- **A heap bound is not enforceable in-process; input and output caps bound a well-formed
-  evaluation; a malicious body can still exhaust the heap.** `EngineCapabilities` states this
-  (`boundsHeap = false`, `interruptible = false`) so the callers document what a limit means
-  instead of guessing.
+- **JSONata has no in-process heap bound** (`boundsHeap = false`, `interruptible = false`);
+  JavaScript bounds heap softly and supports cancellation via `close(true)` (`interruptible = true`).
+  Both engines run through the same admission pool; capabilities state the measured bounds.
+
+| Script bound | JSONata | JavaScript isolate (#8, 8a measurements; 8b wiring) |
+|---|---|---|
+| CPU | No CPU-specific budget | `sandbox.MaxCPUTime`, the wall-clock duration in CPU time; checked periodically |
+| Wall clock | Between-step checks; pool abandonment for builtins | Watchdog calls `Context.close(true)` at the wall clock; CPU budget beside it, whichever trips first |
+| Heap | Unbounded in-process | SOFT per Context, 256 MiB; isolate hard cap shared across pool slots (1280 MiB at defaults) |
+| Statements | No statement ceiling | Hard 100,000,000; empty loop trips in under 500 ms in 8a |
+| Stack frames | `max-depth` at evaluate entry/exit | `min(max-depth + 4 prelude frames, js.max-stack-frames)`; runtime ceiling 1000 |
+| Output streams | No console | Each stream 1 MiB; resource_limit kind OUTPUT; sink capped at 200 lines × 2000 chars |
+| Result bytes | Executor's value/string caps | 64 MiB serialized result; checked before host parsing; RESULT_BYTES |
+| Input bytes | Executor's row caps | 64 MiB serialized input; before any Context; INPUT_BYTES |
+
+Every evaluate response includes `console`; a pipeline run logs bounded lines under
+`script.js.console`, tagged `template`, `version`, `node`, `execution`, `level`, `text`.
+WARN/error levels log at WARN and the others at INFO. No result or input is logged implicitly.
 
 ### 5.4 Why fail-fast (not partial)
 
@@ -1620,6 +1634,7 @@ document a customer can read before they need it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-22 | v1.34 | 8b (#8) | §5.3 documents both engines, the per-engine bounds and structured console logging. |
 | 2026-10-21 | v1.33 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The TRANSFORM node is the SCRIPT node throughout**: the node-type prose and its section anchors, the `pipeline.script.*` refusal codes, the `datapipelines.script.*` budget keys and the meter `script.evaluations.abandoned` (was `transform.…`). A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-20 | v1.32 | #569 | The concurrency gauge is bound by the execution-slot bean, once per instance. Executor construction does not register it; rebinding the same pool is a no-op and a different pool fails fast. |
 | 2026-10-03 | v1.31 | #403 never-started reservation release | **§11.2/§11.3**: REST and MCP release before-start failures using atomic execution-id compare-and-delete; started reservations stay claimed. Stored JSON field names corrected to camelCase; crashed originals and attached followers retain the id-free 410. |
