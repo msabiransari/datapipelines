@@ -2,9 +2,12 @@ package co.datapipelines.web.ui
 
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
+import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.fail
+import org.junit.jupiter.api.io.TempDir
 import java.io.File
+import java.nio.file.Path
 
 /**
  * #652 — the shell partition over the web module's sources: the four shell advices select
@@ -23,6 +26,38 @@ import java.io.File
  * not slip past the guard.
  */
 class ShellPageGuardTest {
+    @Test
+    fun `the walk includes constructorless controllers and qualified handler mappings`(
+        @TempDir directory: Path,
+    ) {
+        val source = directory.resolve("Controllers.kt").toFile()
+        source.writeText(
+            """
+            @Controller
+            class PageController : ShellPage {
+            }
+            @org.springframework.web.bind.annotation.RestController
+            class RestController : ShellPage {
+            }
+            @Controller
+            class SkillController {
+                @GetMapping("/text")
+                @ResponseBody
+                fun text(): String = "text"
+                @org.springframework.web.bind.annotation.RequestMapping("/page")
+                fun page(): String = "page"
+            }
+            """.trimIndent(),
+        )
+        val controllers = controllersIn(source, directory.toFile())
+        controllers.map { it.name } shouldBe listOf("PageController", "RestController", "SkillController")
+        controllers.single { it.name == "PageController" }.implementsShellPage shouldBe true
+        controllers.single { it.kind == Kind.REST_CONTROLLER }.implementsShellPage shouldBe true
+        val violations = mutableListOf<String>()
+        assertReason(controllers.single { it.name == "SkillController" }, violations)
+        violations.size shouldBe 1
+    }
+
     @Test
     fun `every bare @Controller declares ShellPage or a named exception`() {
         val violations = mutableListOf<String>()
@@ -163,7 +198,7 @@ class ShellPageGuardTest {
                 pending += trimmed
                 return@forEachIndexed
             }
-            val match = CLASS_HEADER.matchEntire(trimmed) ?: return@forEachIndexed
+            val match = CLASS_HEADER.find(trimmed) ?: return@forEachIndexed
             val window = pending.joinToString("\n")
             val kind =
                 when {
@@ -211,15 +246,15 @@ class ShellPageGuardTest {
     }
 
     private companion object {
-        private val CLASS_HEADER = Regex("""(?:public |abstract )?class (\w+)(\(|\s*\{)""")
-        private val MAPPING = Regex("""@(?:Get|Post|Put|Delete|Patch)Mapping""")
+        private val CLASS_HEADER = Regex("""^(?:(?:public|internal|abstract|open|final)\s+)*class\s+(\w+)\b""")
+        private val MAPPING = Regex("""@(?:[\w.]+\.)?(?:Request|Get|Post|Put|Delete|Patch)Mapping\b""")
         private val CONTROLLER_ANNOTATION = Regex("""@(?:[\w.]+\.)?Controller\b""")
         private val REST_ANNOTATION = Regex("""@(?:[\w.]+\.)?RestController\b""")
 
         /** The walk at the lane's base saw 299 .kt files; the walk is broken below this. */
         private const val FILE_FLOOR = 250
 
-        /** 85 controller classes (58 @Controller + 27 @RestController) at the lane's tip. */
+        /** 84 web controller classes (58 @Controller + 26 @RestController) at the lane's tip. */
         private const val CONTROLLER_FLOOR = 80
 
         /** 54 page controllers implement ShellPage at the lane's tip; a floor catches mass unmarking. */
