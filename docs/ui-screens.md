@@ -1459,6 +1459,9 @@ pipelines twin's own function); an unknown `tab` resolves to Source.
 **The tabs — the floor (#398; six, the pipelines workspace's shape, regrouped only where the
 family differs):**
 
+Keyboard focus on a `.tw-tab` shows one ring: the vendored global `:focus-visible` box-shadow
+is reset on the tab, leaving its own outline (#684).
+
 - **Source** (the default): the VIEWED version's body — the source column for `sql`/`html`
   (R5: a selected version is read-only, with its badge and release provenance; the editable
   textarea carries the WORKING draft only), or the **script face** for `jsonata`/`javascript`
@@ -3099,6 +3102,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-22 | v1.207 | #684 one keyboard ring on template workspace tabs | **§4.7:** `.tw-tab` resets the vendored global focus shadow, retaining its own outline as the only ring. `TemplateWorkspaceBrowserTest` reads both computed properties after keyboard focus. |
 | 2026-10-22 | v1.206 | #652 the shell advices run for shell pages only — renumbered at merge after #660's v1.205 | **§3, §3.4:** the four `@ControllerAdvice`s (`UiWorkspaceAdvice`, `AppShellAdvice`, `ReleaseFlashAdvice`, `SiteOriginAdvice`) select on `assignableTypes = [ShellPage]` — the marker every shell-page controller implements and no `@RestController` does — so a JSON API request pays none of the shell's reads (the old `annotations = [Controller]` selector matched REST through its meta-annotation: two `users` reads and a `workspaces` list per JSON request). §3's intro names the partition; §3.4 carries the normative paragraph with the four named exceptions (`SkillController`, `SitemapController`, `LlmsTxtController` — text-only; `VisualizationPreviewController` — session-less capability page that self-supplies `activeTheme`). No route, template or attribute value changes; every shell page renders exactly as before. Guards: `ShellPageGuardTest`, `ShellAdviceSelectionTest`. |
 | 2026-10-21 | v1.205 | #660 a late history miss never lands — renumbered at merge after #644's v1.204 | **§3.2:** `shell.js` aborts a pending history-miss xhr when another navigation supersedes it. Guards: `shell.test.mjs` and the held-catalog-response case in `PipelineWorkspaceHistoryBrowserTest`. No route or authorization change. |
 | 2026-10-22 | v1.204 | #644 one keyboard ring per tree row — renumbered at merge after #642's v1.203 | **§3.4:** the first-party tree stylesheet resets the vendored global focus shadow on tree items, leaving #516's outline on the row line as the only ring. Both tree browser cases read the item's computed box-shadow as well as the line outline. |
