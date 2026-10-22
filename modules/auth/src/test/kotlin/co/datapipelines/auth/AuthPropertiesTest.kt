@@ -2,10 +2,25 @@ package co.datapipelines.auth
 
 import io.kotest.matchers.booleans.shouldBeFalse
 import io.kotest.matchers.booleans.shouldBeTrue
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 
-/** Email domain allowlist (auth.md §4.3): empty = open, otherwise case-insensitive match. */
+/** Auth configuration: domain allowlisting and safe diagnostic strings. */
 class AuthPropertiesTest {
+    @Test
+    fun `provider diagnostic strings redact the client secret directly and through parent properties`() {
+        val secret = "provider-secret-regression-655"
+        val provider = AuthProperties.Provider(name = "github", clientSecret = secret)
+        val oidc = AuthProperties.Oidc(providers = listOf(provider))
+        val props = AuthProperties(oidc = oidc)
+
+        for (value in listOf(provider, oidc, props)) {
+            value.toString() shouldNotContain secret
+            value.toString() shouldContain "clientSecret=[REDACTED]"
+        }
+    }
+
     @Test
     fun `an empty allowlist permits any domain (open provisioning)`() {
         AuthProperties().isDomainAllowed("anyone@random.com").shouldBeTrue()

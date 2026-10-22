@@ -137,6 +137,9 @@ data class AuthProperties(
          */
         val pictureHosts: List<String> = emptyList(),
     ) {
+        /** A provider may appear inside its parent configuration's diagnostic string. */
+        override fun toString(): String = "Provider(name=$name, protocol=$protocol, clientSecret=[REDACTED])"
+
         /** True for an OAuth 2.0 (non-OIDC) entry — registered with explicit endpoints, no ID token. */
         val isOAuth2: Boolean get() = protocol == PROTOCOL_OAUTH2
 
