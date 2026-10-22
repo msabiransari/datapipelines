@@ -1,8 +1,12 @@
 package co.datapipelines.auth
 
+import jakarta.servlet.http.HttpServletRequest
+import jakarta.servlet.http.HttpServletResponse
 import org.slf4j.LoggerFactory
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.security.core.Authentication
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClient
 import org.springframework.security.oauth2.client.registration.ClientRegistration
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository
 import org.springframework.security.oauth2.client.registration.ClientRegistrations
@@ -11,19 +15,26 @@ import org.springframework.security.oauth2.client.web.DefaultOAuth2Authorization
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestCustomizers
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestRedirectFilter
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestResolver
+import org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepository
+import org.springframework.security.oauth2.core.AuthorizationGrantType
+import org.springframework.security.oauth2.core.ClientAuthenticationMethod
 
 /**
- * Builds the OIDC `ClientRegistrationRepository` from the generic provider list
- * (`datapipelines.auth.oidc.providers`, auth.md §5.1/§5.2). Provider-agnostic: each
- * entry supplies only `name`, `client-id`, `client-secret`, `issuer-uri` and an
- * optional `display-name`.
+ * Builds the login `ClientRegistrationRepository` from the generic provider list
+ * (`datapipelines.auth.oidc.providers`, auth.md §5.1/§5.2). Provider-agnostic, and two
+ * protocols (#655):
  *
- * The `issuer-uri` triggers OIDC discovery at startup via
- * [ClientRegistrations.fromIssuerLocation] — fetching `.well-known/openid-configuration`
- * to auto-populate the authorization, token, userinfo and JWKS endpoints. (The §5.2
- * sketch calls `.issuerUri()` on the bare builder, which stores the issuer but does
- * NOT discover endpoints; `fromIssuerLocation` is the mechanism auth.md §5.1
- * actually describes, so login works against any compliant provider.)
+ * - **`oidc`** (the default): the entry supplies `name`, `client-id`, `client-secret`,
+ *   `issuer-uri` and an optional `display-name`. The `issuer-uri` triggers OIDC discovery
+ *   at startup via [ClientRegistrations.fromIssuerLocation] — fetching
+ *   `.well-known/openid-configuration` to auto-populate the authorization, token, userinfo
+ *   and JWKS endpoints. (The §5.2 sketch calls `.issuerUri()` on the bare builder, which
+ *   stores the issuer but does NOT discover endpoints; `fromIssuerLocation` is the mechanism
+ *   auth.md §5.1 actually describes, so login works against any compliant provider.)
+ * - **`oauth2`**: a provider that is OAuth 2.0 without OpenID Connect (GitHub) has no
+ *   discovery document and no ID token, so its endpoints, scopes and subject attribute are
+ *   configured explicitly and NOTHING is fetched at startup. Without the `openid` scope,
+ *   Spring routes the login to the plain user-info service — [OAuth2IdentityUserService].
  */
 @Configuration
 class OidcConfig {
@@ -99,21 +110,109 @@ class OidcConfig {
         return configured.trimEnd('/')
     }
 
+    /**
+     * The no-store authorized-client repository (#655). Spring Boot otherwise registers an
+     * `AuthenticatedPrincipalOAuth2AuthorizedClientRepository` over an in-memory client
+     * service, so every login would leave its provider ACCESS TOKEN in this JVM's heap, keyed
+     * by user, for the life of the process — a GitHub OAuth-app token does not expire. Nothing
+     * here calls a provider on the user's behalf after login: the token is needed only inside
+     * the user-info request, and the session is the internal `dp_session` JWT.
+     */
+    @Bean
+    fun authorizedClientRepository(): OAuth2AuthorizedClientRepository = NoStoreAuthorizedClientRepository
+
+    /** The identity source of `protocol: oauth2` logins (#655); OIDC registrations never reach it. */
+    @Bean
+    fun oauth2IdentityUserService(authProperties: AuthProperties): OAuth2IdentityUserService = OAuth2IdentityUserService(authProperties)
+
     private fun toRegistration(
         p: AuthProperties.Provider,
         baseUrl: String,
     ): ClientRegistration {
         require(p.name.isNotBlank()) { "Each OIDC provider requires a non-blank 'name' (auth.md §11.1)" }
-        require(p.issuerUri.isNotBlank()) { "OIDC provider '${p.name}' requires an 'issuer-uri'" }
-        return ClientRegistrations
-            .fromIssuerLocation(p.issuerUri)
+        val builder =
+            when (p.protocol) {
+                AuthProperties.Provider.PROTOCOL_OIDC -> oidcBuilder(p)
+
+                AuthProperties.Provider.PROTOCOL_OAUTH2 -> oauth2Builder(p)
+
+                else -> throw IllegalArgumentException(
+                    "Provider '${p.name}': protocol '${p.protocol}' is not one of " +
+                        "${AuthProperties.Provider.PROTOCOL_OIDC}, ${AuthProperties.Provider.PROTOCOL_OAUTH2}",
+                )
+            }
+        return builder
             .registrationId(p.name)
             .clientId(p.clientId)
             .clientSecret(p.clientSecret)
             .clientName(p.displayName ?: p.name)
-            .scope("openid", "profile", "email")
             // ABSOLUTE, from datapipelines.auth.base-url — never the {baseUrl} template.
             .redirectUri("$baseUrl/login/oauth2/code/${p.name}")
             .build()
     }
+
+    /** `oidc`: discovery from the issuer, the three standard scopes. */
+    private fun oidcBuilder(p: AuthProperties.Provider): ClientRegistration.Builder {
+        require(p.issuerUri.isNotBlank()) { "OIDC provider '${p.name}' requires an 'issuer-uri'" }
+        return ClientRegistrations
+            .fromIssuerLocation(p.issuerUri)
+            .scope("openid", "profile", "email")
+    }
+
+    /**
+     * `oauth2` (#655): every endpoint explicit, no HTTP at startup. `client_secret_basic` is the
+     * client authentication Spring's own GitHub template (`CommonOAuth2Provider.GITHUB`) uses.
+     * The scopes must not include `openid` — that would route the login to the OIDC user
+     * service, which demands an ID token this protocol never returns.
+     */
+    private fun oauth2Builder(p: AuthProperties.Provider): ClientRegistration.Builder {
+        val required =
+            mapOf(
+                "authorization-uri" to p.authorizationUri,
+                "token-uri" to p.tokenUri,
+                "user-info-uri" to p.userInfoUri,
+                "user-name-attribute" to p.userNameAttribute,
+            )
+        required.forEach { (key, value) -> require(value.isNotBlank()) { "OAuth 2.0 provider '${p.name}' requires '$key'" } }
+        require(p.scopes.isNotEmpty()) { "OAuth 2.0 provider '${p.name}' requires 'scopes'" }
+        require(p.scopes.none { it.equals("openid", ignoreCase = true) }) {
+            "OAuth 2.0 provider '${p.name}' must not request the 'openid' scope (that is protocol: oidc)"
+        }
+        return ClientRegistration
+            .withRegistrationId(p.name)
+            .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+            .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+            .authorizationUri(p.authorizationUri)
+            .tokenUri(p.tokenUri)
+            .userInfoUri(p.userInfoUri)
+            .userNameAttributeName(p.userNameAttribute)
+            .scope(p.scopes)
+    }
+}
+
+/**
+ * Stores nothing and loads nothing ([OidcConfig.authorizedClientRepository]): the login flow
+ * saves the authorized client after the success handler has already run, and no code path
+ * here ever loads one back.
+ */
+internal object NoStoreAuthorizedClientRepository : OAuth2AuthorizedClientRepository {
+    override fun <T : OAuth2AuthorizedClient> loadAuthorizedClient(
+        clientRegistrationId: String,
+        principal: Authentication?,
+        request: HttpServletRequest,
+    ): T? = null
+
+    override fun saveAuthorizedClient(
+        authorizedClient: OAuth2AuthorizedClient,
+        principal: Authentication?,
+        request: HttpServletRequest,
+        response: HttpServletResponse,
+    ) = Unit
+
+    override fun removeAuthorizedClient(
+        clientRegistrationId: String,
+        principal: Authentication?,
+        request: HttpServletRequest,
+        response: HttpServletResponse,
+    ) = Unit
 }

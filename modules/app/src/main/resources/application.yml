@@ -174,10 +174,21 @@ datapipelines:
           # NOT derivable from the issuer: Google serves pictures from lh3 (measured).
           # Empty (the default) = no fetch; avatars render initials instead.
           picture-hosts: ${DATAPIPELINES_AUTH_GOOGLE_PICTURE_HOSTS:lh3.googleusercontent.com}
+        # GitHub is OAuth 2.0 WITHOUT OpenID Connect (#655): no discovery document, no ID
+        # token, no `openid` scope — so it cannot be an issuer-uri entry. `protocol: oauth2`
+        # names the endpoints; the identity is GET /user (`id` → users.provider_subject) and
+        # the address is the PRIMARY row of GET /user/emails, accepted only when that row is
+        # verified (the public `email` of /user is never read). auth.md §5.1, §5.5.
         - name: github
+          protocol: oauth2
           client-id: ${GITHUB_CLIENT_ID:}
           client-secret: ${GITHUB_CLIENT_SECRET:}
-          issuer-uri: https://github.com/login/oauth
+          authorization-uri: https://github.com/login/oauth/authorize
+          token-uri: https://github.com/login/oauth/access_token
+          user-info-uri: https://api.github.com/user
+          user-name-attribute: id
+          scopes: [read:user, user:email]
+          emails-uri: https://api.github.com/user/emails
           display-name: "Sign in with GitHub"
           picture-hosts: avatars.githubusercontent.com
         # Microsoft (Entra ID) — SINGLE-TENANT only in v1 (auth.md §11.1): the

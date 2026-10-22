@@ -250,6 +250,14 @@ class AuthConfiguration {
     ): OidcSuccessHandler =
         OidcSuccessHandler(userService, jwtService, auditLogger, authProperties, workspaceService, clientAddressResolver, mailNotices)
 
+    /** The provider-login failure path (auth.md §5.5): WARN, audit, opaque redirect. */
+    @Bean
+    fun oauth2LoginFailureHandler(
+        auditLogger: AuditLogger,
+        clientAddressResolver: ClientAddressResolver,
+        authProperties: AuthProperties,
+    ): OAuth2LoginFailureHandler = OAuth2LoginFailureHandler(auditLogger, clientAddressResolver, authProperties)
+
     @Bean
     fun scopeInterceptor(
         authErrorWriter: AuthErrorWriter,

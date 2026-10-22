@@ -79,6 +79,8 @@ class ConfigValidatorCheckCountTest {
                 "modules/app/src/main/kotlin/co/datapipelines/config/RedisRules.kt",
                 // #598b — the §3.10 actively developed window, split out for the same size reason.
                 "modules/app/src/main/kotlin/co/datapipelines/config/UiRules.kt",
+                // #655 — the §3.4 provider-protocol rule, split out for the same size reason.
+                "modules/app/src/main/kotlin/co/datapipelines/config/AuthProviderRules.kt",
             )
     }
 }
