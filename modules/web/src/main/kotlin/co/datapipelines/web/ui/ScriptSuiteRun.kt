@@ -82,7 +82,7 @@ internal class ScriptSuiteRun(
 
     /**
      * Compiles the draft once for the whole detail pass, or null. The gate refused every shape
-     * that reaches here without these (blocks_missing, the JavaScript round-two refusal), so
+     * that reaches here without these (blocks_missing, the JavaScript availability refusal), so
      * an absent one is an empty list, not a crash.
      */
     private fun compile(draft: TemplateDraft): Compiled? {
@@ -126,6 +126,7 @@ internal class ScriptSuiteRun(
                     expected = case.expect.output?.let { bounded(CanonicalJson.write(it)) },
                     actualRefusal = outcome.code,
                     refusalMessage = bounded(outcome.message),
+                    console = outcome.console,
                 )
             }
 
@@ -148,6 +149,7 @@ internal class ScriptSuiteRun(
                 expectedRefusal = expectedRefusal,
                 actual = bounded(CanonicalJson.write(outcome.output)),
                 invariants = invariants,
+                console = outcome.console,
             )
         }
         val expected = ScriptBlocks.mapper.convertValue(case.expect.output, Any::class.java)
@@ -159,6 +161,7 @@ internal class ScriptSuiteRun(
             expected = difference?.let { bounded(CanonicalJson.write(it.expected)) },
             actual = difference?.let { bounded(CanonicalJson.write(it.actual)) },
             invariants = invariants,
+            console = outcome.console,
         )
     }
 
@@ -224,6 +227,7 @@ data class CaseResult(
     val actualRefusal: String? = null,
     val refusalMessage: String? = null,
     val invariants: List<InvariantResult> = emptyList(),
+    val console: List<co.datapipelines.scripting.ConsoleLine> = emptyList(),
 )
 
 /** One invariant's verdict on one case (record §9.1's `{ name, passed, message }`). */

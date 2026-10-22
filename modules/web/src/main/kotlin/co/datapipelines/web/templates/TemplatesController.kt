@@ -547,6 +547,7 @@ class TemplatesController(
             mapOf(
                 "output" to result.output,
                 "rejects" to result.rejects,
+                "console" to result.consolePayload(),
                 "invariants" to
                     result.invariants.map { verdict ->
                         mapOf("name" to verdict.name, "passed" to verdict.passed, "message" to verdict.message)

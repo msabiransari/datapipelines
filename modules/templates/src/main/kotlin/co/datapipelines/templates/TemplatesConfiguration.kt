@@ -72,6 +72,7 @@ class TemplatesConfiguration {
     @Bean
     fun templateValidator(
         libraryResolver: LibraryResolver,
+        scriptEngines: Map<co.datapipelines.scripting.ScriptLanguage, co.datapipelines.scripting.ScriptEngine>,
         properties: TemplatesProperties,
         // The §8.1 test suite: the runner bean lives in web's EngineConfiguration (the pool and
         // the script.* knobs are the app's wiring, not this module's). ObjectProvider keeps
@@ -85,6 +86,7 @@ class TemplatesConfiguration {
         TemplateValidator(
             libraryResolver,
             properties.maxBodyChars,
+            scriptEngines = scriptEngines,
             suiteRunner = runner.ifAvailable,
             citableFacts = citableFacts.getIfAvailable { CitableFacts.NONE },
         )

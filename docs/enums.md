@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.35 (living document — updated as enums evolve)
+**Status:** v1.36 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -168,7 +168,7 @@ These are **not** `(reserved)` values in the enums.md sense: all five are accept
 | `sql` | The template renders SQL for pipeline nodes. Requires a `dialect`. Default, and the only kind that existed before 2026-09-02 (046) — every stored template backfilled to it. |
 | `html` | The template renders HTML through a second, auto-escaping engine configuration (design §6). Declares no `dialect`; **no pipeline node may reference it** (`pipeline.validation.template_type_mismatch`). |
 | `jsonata` | A script: the body is one JSONata expression evaluated as a pure function of its input object (7b). `engine: none`, no `dialect`, no `imports`, `is_library` false; the version carries `contract` / `invariants` / `tests` blocks inside its `body_hash`. |
-| `javascript` | A script in JavaScript (GraalJS isolate) — the enum value, the CHECKs and the wire vocabulary are final, but **save is refused with `script.js.unavailable` until round two's engine ships** (7b; §4.4 of the record). |
+| `javascript` | A script in the GraalJS isolate. The body stores the statements of `main(input)`; save runs its cases on the pool. Absent isolate → `script.js.unavailable` (D-T16; #8 lane 8b). |
 
 Fixed at template **create** and identical on every version of a template (`template.validation.type_immutable`). Serialization is the lowercase wire value (`"sql"` / `"html"` / `"jsonata"` / `"javascript"`), per the case convention above. There are no reserved future values — component sub-typing (kpi, aggrid, svg, form, …) belongs to the future dashboard abstraction and is deliberately absent here (design §2).
 
@@ -1074,6 +1074,7 @@ No mail for skipped ticks or pause/resume. Empty recipients means off; recipient
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-22 | v1.36 | 8b (#8) | The JavaScript type is enabled with the isolate and stores main(input) statements. |
 | 2026-10-21 | v1.35 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The `node_type` row `TRANSFORM` is `SCRIPT`**; the template-type rows say "the script types" / "a script"; the error-prefix row is `pipeline.script.*`; the JavaScript save refusal is `script.js.unavailable`; the 503 example names `pipeline.script.pool_exhausted`. A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-09 | v1.34 | 487 (#487) | The HTTP status table moves `result.storage_unavailable` from 500 to 503 ([Pipeline Contract §13.10](pipeline-contract.md#1310-result-retrieval) v1.56) and names `pipeline.transform.pool_exhausted` beside it, the 503 the catalog already carried. |
 | 2026-10-03 | v1.33 | 442a (#442) | §15 audit details gain counts/events without addresses; new §42 defines NotificationEvent and its defaults. Settings delivered; mail remains off pending part b. |

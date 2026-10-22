@@ -48,6 +48,8 @@ dependencies {
     // runtime explicitly — the same declared exception modules/datasources makes for its
     // own per-dialect container suites, and likewise excluded from lock state below.
     testRuntimeOnly(libs.mysql.connector.j)
+    // #8 lane 8b: exercise JavaScript through the real pool and native isolate.
+    testRuntimeOnly(libs.graalvm.js.isolate.community)
 }
 
 // mysql-connector-j is on this module's test runtime WITHOUT the -Pmysql flag (see the

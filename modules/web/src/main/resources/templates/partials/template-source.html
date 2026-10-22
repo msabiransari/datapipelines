@@ -65,7 +65,9 @@
 
     <!-- The body of the SELECTED version — the preview surface 041 built, reused: the same
          pane, the same tokenizer treatment. Never a textarea, never a form control. -->
+    <code th:if="${faceJavascript == true}" class="u-mono" data-tf-main-open th:text="${scriptMainOpen}">function main(input) {</code>
     <pre id="versionBody" class="te-preview-pane te-readonly" th:text="${template?.body ?: ''}">SELECT 1</pre>
+    <code th:if="${faceJavascript == true}" class="u-mono" data-tf-main-close th:text="${scriptMainClose}">}</code>
   </th:block>
 
   <!-- EDITABLE: the working version, which is the only edit target there is. -->

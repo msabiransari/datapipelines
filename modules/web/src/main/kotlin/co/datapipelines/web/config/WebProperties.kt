@@ -486,4 +486,26 @@ data class ScriptProperties(
     val maxStringBytes: Long = 1_048_576,
     /** Expression depth bound (the JSONata library's own default; recursion is time's job — §4.5). */
     val maxDepth: Int = 100,
-)
+    /** GraalJS isolate bounds (#8, lane 8b); the isolate heap is outside the JVM heap. */
+    val js: Js = Js(),
+) {
+    /** One shared isolate: every pool slot's heap plus 256 MiB headroom, computed once at wiring. */
+    val isolateMemoryMb: Long = js.isolateMemoryMb?.toLong() ?: (poolSize.toLong() * js.maxHeapMb + ISOLATE_HEADROOM_MB)
+
+    /** The JavaScript runtime's ceilings; per-evaluation limits may only lower these. */
+    data class Js(
+        val isolateDir: String? = null,
+        val maxHeapMb: Int = 256,
+        val isolateMemoryMb: Int? = null,
+        val maxStatements: Long = 100_000_000,
+        val maxAstDepth: Int = 1000,
+        val maxStackFrames: Int = 1000,
+        val maxOutputBytes: Int = 1_048_576,
+        val maxResultMb: Int = 64,
+        val maxInputMb: Int = 64,
+    )
+
+    private companion object {
+        const val ISOLATE_HEADROOM_MB = 256L
+    }
+}

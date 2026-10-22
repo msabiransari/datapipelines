@@ -15,8 +15,27 @@ contract and a test suite — write the empty and wrong-data cases before the ri
 A template's `type` is `jsonata` or `javascript` (the script types) beside `sql`/`html`. A
 script sets `engine: "none"` (evaluated, never rendered) and takes **no** `dialect`, no
 `imports`, no `is_library`; a Freemarker construct in its body is refused with
-`template.validation.freemarker_forbidden`. `javascript` exists in the vocabulary but is
-refused at save with `script.js.unavailable` until round two — author `jsonata` today.
+`template.validation.freemarker_forbidden`. JavaScript saves when the isolate is installed;
+otherwise save refuses with `script.js.unavailable`.
+
+A JSONata body is one expression. A JavaScript body is the **statements of `main(input)`**:
+`input` is in scope, `return` the result, and define helpers as nested functions; never write
+`function main` or its outer braces yourself — the engine supplies that immutable frame.
+Both are pure: no modules, `require` or `export`; `Date.now()` reads the pinned run time,
+and `Math.random()` is refused.
+
+Numbers cross by logical type: BIGINTEGER and BIGDECIMAL use their normal decimal-string
+wire form; other integers beyond ±2^53 and DECIMALs whose double would lose digits arrive as
+decimal strings and are written back as strings. Use
+`BigInt(input.rows[0].id)` for large integer arithmetic and `String(x)` to return it;
+`Number(x)` can lose digits, so for exact money use integer minor units.
+
+Return a synchronous JSON value: no `NaN`/`Infinity`, functions, promises, `Map`/`Set`/`Date`
+(call `toISOString()` first); an `undefined` object property is dropped, but an `undefined`
+array element or top-level return is refused. `console.*` lines are returned by evaluate,
+logged by pipeline runs and shown inside each case result, capped at 200 lines × 2000 chars.
+The mandatory empty-input case runs through the real engine on the pool at save, so a body
+that returns nothing does not save.
 
 Every script version carries three bound blocks — `contract`, `invariants`, `tests` —
 inside its `body_hash` (`scripts-contracts` holds their shape). A workspace rule someone

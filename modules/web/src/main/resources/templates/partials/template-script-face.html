@@ -78,8 +78,10 @@
     <input type="hidden" name="bodyHash" th:value="${faceHash}">
     <div class="tf-pane tf-pane-body">
       <label for="tf-body" class="tf-pane-label"><span>Body</span><span class="ds-caption" th:text="${faceLanguage}">JSONata</span></label>
+      <code th:if="${faceJavascript == true}" class="u-mono" data-tf-main-open th:text="${scriptMainOpen}">function main(input) {</code>
       <textarea id="tf-body" name="body" class="ds-textarea app-template-body-input tf-pane-input" spellcheck="false"
                 th:text="${panes.body}">rows</textarea>
+      <code th:if="${faceJavascript == true}" class="u-mono" data-tf-main-close th:text="${scriptMainClose}">}</code>
     </div>
     <div class="tf-pane">
       <label for="tf-contract" class="tf-pane-label"><span>Contract</span><span class="ds-caption">JSON</span></label>
@@ -102,7 +104,9 @@
   <div th:if="${canAuthor != true or faceEditable != true}" class="tf-panes" data-tf-readonly>
     <section class="tf-pane tf-pane-body">
       <h3 class="tf-pane-label"><span>Body</span><span class="ds-caption" th:text="${faceLanguage}">JSONata</span></h3>
+      <code th:if="${faceJavascript == true}" class="u-mono" data-tf-main-open th:text="${scriptMainOpen}">function main(input) {</code>
       <pre id="tf-body-ro" class="te-readonly tf-pane-input" th:text="${panes.body}">rows</pre>
+      <code th:if="${faceJavascript == true}" class="u-mono" data-tf-main-close th:text="${scriptMainClose}">}</code>
     </section>
     <section class="tf-pane">
       <h3 class="tf-pane-label"><span>Contract</span><span class="ds-caption">JSON</span></h3>

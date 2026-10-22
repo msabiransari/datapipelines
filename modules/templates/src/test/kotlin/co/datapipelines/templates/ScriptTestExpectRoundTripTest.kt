@@ -74,8 +74,11 @@ class ScriptTestExpectRoundTripTest {
             )
 
         val rules =
-            TemplateValidator(LibraryResolver { _ -> InMemoryTemplateRegistry() })
-                .validate(draft, workspaceId)
+            TemplateValidator(
+                scriptEngines =
+                    mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
+                libraryResolver = LibraryResolver { _ -> InMemoryTemplateRegistry() },
+            ).validate(draft, workspaceId)
                 .failures
                 .map { it.details["rule"] }
 
@@ -121,8 +124,11 @@ class ScriptTestExpectRoundTripTest {
             )
 
         val failures =
-            TemplateValidator(LibraryResolver { _ -> InMemoryTemplateRegistry() })
-                .validate(draft, workspaceId)
+            TemplateValidator(
+                scriptEngines =
+                    mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
+                libraryResolver = LibraryResolver { _ -> InMemoryTemplateRegistry() },
+            ).validate(draft, workspaceId)
                 .failures
 
         failures.map { it.details["rule"] } shouldContain "expect_shape"

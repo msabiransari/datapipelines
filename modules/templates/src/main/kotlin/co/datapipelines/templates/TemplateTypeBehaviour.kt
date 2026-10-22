@@ -47,7 +47,7 @@ sealed interface TemplateTypeBehaviour {
     /**
      * The type's body checks, run after the shared length cap. The Freemarker types share the
      * source scan / parse / AST scan / library-structure pipeline; a script type compiles
-     * through the scripting engine (or, for `javascript`, refuses until round two).
+     * through the registered scripting engine, refusing if its isolate is absent.
      */
     fun validateBody(
         draft: TemplateDraft,
@@ -132,10 +132,7 @@ sealed interface TemplateTypeBehaviour {
             }
     }
 
-    /**
-     * `javascript` — the type exists so the enum, the CHECKs and the docs are final; the body
-     * is refused at save until round two's GraalJS isolate ships (record §2.1, §4.4).
-     */
+    /** `javascript` — parse the statements of main(input) when the isolate is installed. */
     object Javascript : TemplateTypeBehaviour {
         override val type = TemplateType.JAVASCRIPT
         override val engine = Template.NONE_ENGINE
@@ -150,16 +147,40 @@ sealed interface TemplateTypeBehaviour {
             draft: TemplateDraft,
             scriptEngines: Map<ScriptLanguage, ScriptEngine>,
             trace: ValidationTrace,
-        ): List<TemplateValidationFailure> =
-            listOf(
-                TemplateValidationFailure(
-                    code = PipelineErrorCodes.Script.JS_UNAVAILABLE,
-                    message =
-                        "A 'javascript' template cannot be saved yet: the GraalJS isolate engine ships in " +
-                            "round two (transform-nodes design §4.4). Only 'jsonata' saves today.",
-                    details = mapOf("type" to type.wire),
-                ),
-            )
+        ): List<TemplateValidationFailure> {
+            val engine =
+                scriptEngines[ScriptLanguage.JAVASCRIPT]
+                    ?: return listOf(
+                        TemplateValidationFailure(
+                            code = PipelineErrorCodes.Script.JS_UNAVAILABLE,
+                            message = co.datapipelines.pipeline.JAVASCRIPT_UNAVAILABLE_MESSAGE,
+                            details = mapOf("type" to type.wire),
+                        ),
+                    )
+            return try {
+                engine.compile(draft.body)
+                emptyList()
+            } catch (err: ScriptSyntaxException) {
+                listOf(
+                    TemplateValidationFailure(
+                        code = PipelineErrorCodes.Template.SYNTAX_ERROR,
+                        message = err.message ?: "the body does not parse",
+                        details = mapOf("line" to err.line, "column" to err.column),
+                    ),
+                )
+            } catch (err: ScriptResourceLimitException) {
+                // #314's compile-time nesting ceiling refuses the BODY before the library parses it: on the save and
+                // validate paths that is a validation failure like a syntax error (the 400 failure list every caller
+                // renders), never the script family's catalogued 500 — the 307 merge's security pass.
+                listOf(
+                    TemplateValidationFailure(
+                        code = PipelineErrorCodes.Template.SYNTAX_ERROR,
+                        message = err.message ?: "the body exceeds a resource limit",
+                        details = mapOf("kind" to err.kind.name),
+                    ),
+                )
+            }
+        }
     }
 
     /** The refusal texts the two kinds of type produce for a wrong `engine`. */

@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v2.98 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.99 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 ---
 
@@ -1100,7 +1100,7 @@ Content-Type: application/json
 
 Templates declare no parameter schema — variables are declared by the pipelines that reference the template, and validated there by dry-render ([Pipeline Contract §7.4](pipeline-contract.md#74-template-variable-resolution)).
 
-`type` is chosen here and never changes afterwards: `sql` (the default) requires `dialect` and is what pipeline nodes reference; `html` declares no `dialect`, renders through an auto-escaping engine configuration, and cannot be referenced by a pipeline node (templates.md §3.2, 046); `jsonata` and `javascript` are the script types (7b) — `engine: "none"`, no `dialect`, no `imports`, `is_library: false`, and the three blocks `contract` / `invariants` / `tests` are required on create and update (templates.md §3.3; `javascript` is refused until round two).
+`type` is chosen here and never changes afterwards: `sql` (the default) requires `dialect` and is what pipeline nodes reference; `html` declares no `dialect`, renders through an auto-escaping engine configuration, and cannot be referenced by a pipeline node (templates.md §3.2, 046); `jsonata` and `javascript` are the script types (7b) — `engine: "none"`, no `dialect`, no `imports`, `is_library: false`, and the three blocks `contract` / `invariants` / `tests` are required on create and update (templates.md §3.3; JavaScript requires the installed isolate, otherwise `script.js.unavailable`).
 
 A script body may carry **`implements`** (7e, [Templates §3.4](templates.md#34-implements-and-drift)): an array of learned-fact ids — WORKSPACE `definition`/`exclusion`/`preference` facts of this workspace, at most 50 — the rules this script implements. Not content: outside `body_hash`. An id the workspace cannot cite is `400 template.implements_unresolved` (`details.fact_id`, `details.reason`); on `sql`/`html` the field is `400 template.blocks_not_allowed`.
 
@@ -1285,11 +1285,12 @@ The evaluate route — the MCP `templates_evaluate` tool's REST twin, the same s
 {
   "output": { "rows": [], "rejects": [ { "row": { "order_id": 1, "amount_cents": 1250, "customer_id": null }, "reason": "customer_id missing" } ] },
   "rejects": [ { "row": { "order_id": 1, "amount_cents": 1250, "customer_id": null }, "reason": "customer_id missing" } ],
-  "invariants": [ { "name": "one_to_one", "passed": true, "message": "every input row is accepted or rejected, never lost" } ]
+  "invariants": [ { "name": "one_to_one", "passed": true, "message": "every input row is accepted or rejected, never lost" } ],
+  "console": []
 }
 ```
 
-A refusal is the code with its detail — the contract's input check, the type gate, or the engine's own (the record's §7 mapping; §13.18 lands with 7c). Permission: `template.evaluate` (the render row's twin — auth.md §7.6).
+`console` is always present: a list such as `[{"level":"log","text":"mapped 2 rows"}]`, empty when unused. A failed evaluation retains lines emitted before failure under `details.console`. A refusal is the code with its detail — the contract's input check, the type gate, or the engine's own (the record's §7 mapping; §13.18 lands with 7c). Permission: `template.evaluate` (the render row's twin — auth.md §7.6).
 
 ### 8.8 Import template library
 
@@ -2807,6 +2808,7 @@ browser persistence. Clients must reject foreign/stale responses even after abor
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-22 | v2.99 | 8b (#8) | JavaScript save/evaluate is enabled with the isolate; §8.7A adds the always-present console key and failed-evaluation console detail. |
 | 2026-10-21 | v2.98 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The template-type and node prose say script**: a script caller / type / body, §8.7A "Evaluate a script template", the pipeline editor's SCRIPT card, the key `datapipelines.script.evaluate-timeout-seconds`; no route or field changes. A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-16 | v2.97 | 467 (#467) the over-cap screenshot refusal reaches the client | **§22's `visualization.test.screenshot_too_large` row**: the `Content-Length` refusal no longer closes mid-body — the route drains a declaration of up to 6 MiB after the 413 so a write-then-read client receives it; beyond that bound a reset may still replace it. No route, code, status or cap change |
 | 2026-10-16 | v2.96 | 533 (#533) the templates tree carries `needs_review` | **§24** (additive): a template artifact node carries `needs_review` — true when its LISTED version cites a retired or superseded learned fact ([Templates §3.4](templates.md#34-implements-and-drift)), false otherwise; null on folders and on the pipelines, dashboards, visualizations and parameter-sets nodes. The flag comes from ONE citation read per page over the page's own rows (name and listed version) — the read the pipeline release's `template_needs_review` warning uses — so a narrowing view is answered about the released versions it lists. The 1 MiB budget counts the flag on every template artifact. The sidebar's Templates tree renders it as the catalog row's **needs review** marker ([UI Screens §4.6a](ui-screens.md)). No route, permission or other field changed. |

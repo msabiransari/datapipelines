@@ -50,7 +50,12 @@ class TemplateRefusalGoldenTest {
         maxBodyChars: Int = TemplateValidator.DEFAULT_MAX_BODY_CHARS,
     ): TemplateValidator {
         val registry = InMemoryTemplateRegistry(registered.toList())
-        return TemplateValidator(LibraryResolver { _ -> registry }, maxBodyChars = maxBodyChars)
+        return TemplateValidator(
+            scriptEngines =
+                mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
+            libraryResolver = LibraryResolver { _ -> registry },
+            maxBodyChars = maxBodyChars,
+        )
     }
 
     /** The corpus: one entry per refusal path, in declaration order. */

@@ -81,6 +81,12 @@
               <dd><pre class="tf-diff" data-tf-actual th:text="${c.actual}">12.5</pre></dd>
             </th:block>
           </dl>
+          <ul th:if="${!#lists.isEmpty(c.console)}" class="tf-console" data-tf-console>
+            <li th:each="line : ${c.console}">
+              <code th:text="${#strings.toLowerCase(line.level.name())}">log</code>
+              <pre class="tf-diff u-mono" th:text="${line.text}">console text</pre>
+            </li>
+          </ul>
           <ul class="tf-invariants" th:if="${!#lists.isEmpty(c.invariants)}">
             <li th:each="i : ${c.invariants}" th:classappend="${i.passed} ? 'tf-inv-pass' : 'tf-inv-fail'"
                 th:attr="data-tf-invariant=${i.name}, data-tf-holds=${i.passed}">

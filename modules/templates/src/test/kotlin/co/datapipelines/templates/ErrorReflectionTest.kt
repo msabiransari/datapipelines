@@ -55,8 +55,11 @@ class ErrorReflectionTest {
     fun `a validation failure never echoes an unbounded body back to the caller`() {
         val hostileId = "A".repeat(5_000) + "\n"
         val result =
-            TemplateValidator(LibraryResolver { _ -> InMemoryTemplateRegistry() })
-                .validate(TemplateFixtures.draft(id = hostileId), java.util.UUID.randomUUID())
+            TemplateValidator(
+                scriptEngines =
+                    mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
+                libraryResolver = LibraryResolver { _ -> InMemoryTemplateRegistry() },
+            ).validate(TemplateFixtures.draft(id = hostileId), java.util.UUID.randomUUID())
 
         result.codes shouldContain PipelineErrorCodes.Template.ID_INVALID
         val failure = result.failures.single { it.code == PipelineErrorCodes.Template.ID_INVALID }
