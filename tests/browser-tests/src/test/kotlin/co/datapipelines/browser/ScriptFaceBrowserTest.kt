@@ -58,6 +58,7 @@ class ScriptFaceBrowserTest : BrowserSuite() {
         // The face: four panes, the example's body, the draft's hash as the save precondition.
         listOf("#tf-body", "#tf-contract", "#tf-invariants", "#tf-tests").forEach { page.locator(it).waitFor() }
         page.locator("#tf-body").inputValue() shouldContain "customer_id missing"
+        page.locator("[data-tf-main-open]").count() shouldBe 0
         val hashBefore = page.locator("[data-tf-hash]").getAttribute("title")
         facesShots("face-author")
 
@@ -101,6 +102,53 @@ class ScriptFaceBrowserTest : BrowserSuite() {
         page.locator("[data-role-note='read-only']").isVisible shouldBe true
         page.locator("#tf-contract-ro").innerText() shouldContain "\"mode\": \"row\""
         themedShots("face-viewer")
+        drainCspViolations().shouldBeEmpty()
+    }
+
+    @Test
+    fun `javascript keeps the main frame outside the stored body and renders escaped console inside each case`() {
+        startTrace()
+        val author =
+            seedLocalUser(
+                uniqueEmail("js-author-" + suffix()),
+                generatedPassword("pw"),
+                mustChange = false,
+                isAdmin = false,
+                role = "author",
+            )
+        login(author.email, author.oneTimePassword)
+        page.waitForURL("**/dashboard")
+        val stem = "js8b_" + suffix()
+        val name = "test/$stem.javascript"
+        createThroughTheModal(name, "javascript")
+        openInEditor(stem, "javascript")
+        page.locator("#tf-body").waitFor()
+        page.locator("[data-tf-main-open]").innerText() shouldBe "function main(input) {"
+        page.locator("[data-tf-main-close]").innerText() shouldBe "}"
+        page.locator("#tf-body [data-tf-main-open]").count() shouldBe 0
+        val statements = "console.log('<img src=x onerror=alert(1)>');\n" + page.locator("#tf-body").inputValue()
+        statements.contains("function main") shouldBe false
+        page.locator("#tf-body").fill(statements)
+        page.locator("[data-tf-main-open]").innerText() shouldBe "function main(input) {"
+        runSuite()
+        page.locator("#tf-result [data-tf-outcome='green']").waitFor()
+        val console = page.locator("li.tf-case[data-tf-case='empty input'] [data-tf-console]")
+        console.locator("pre").innerText() shouldBe "<img src=x onerror=alert(1)>"
+        console.locator("img").count() shouldBe 0
+        page.waitForResponse({ it.url().contains("/partials/templates/script-face/save") }) { page.click("#tf-save") }.status() shouldBe 200
+        page.locator("[data-tf-outcome='saved']").waitFor()
+        val stored =
+            page.evaluate(
+                """async (name) => {
+                const res = await fetch('/api/v1/templates?name=' + encodeURIComponent(name));
+                if (!res.ok) throw new Error('template read failed: ' + res.status);
+                return (await res.json()).data.body;
+            }""",
+                name,
+            ) as String
+        stored shouldBe statements
+        stored.contains("function main") shouldBe false
+        page.locator("[data-tf-main-open]").innerText() shouldBe "function main(input) {"
         drainCspViolations().shouldBeEmpty()
     }
 
@@ -161,12 +209,15 @@ class ScriptFaceBrowserTest : BrowserSuite() {
         page.locator("#template-source [data-verb='script-save']").count() shouldBe 0
     }
 
-    private fun createThroughTheModal(name: String) {
+    private fun createThroughTheModal(
+        name: String,
+        language: String = "jsonata",
+    ) {
         page.navigate("$baseUrl/templates")
         page.click("text=Create Template")
         page.locator("#create-template-modal").isVisible shouldBe true
         page.fill("#create-template-modal input[name=name]", name)
-        page.selectOption("#create-template-type", "jsonata")
+        page.selectOption("#create-template-type", language)
         // The type's blocks: shown, enabled, prefilled with the record's example; no dialect.
         page.locator("#create-template-blocks-field").isVisible shouldBe true
         page.locator("#create-template-contract").isEnabled shouldBe true
@@ -200,10 +251,13 @@ class ScriptFaceBrowserTest : BrowserSuite() {
     }
 
     /** The workspace is the row's destination (#398) — a full navigation, no "Open in editor" hop. */
-    private fun openInEditor(stem: String) {
+    private fun openInEditor(
+        stem: String,
+        language: String = "jsonata",
+    ) {
         page.navigate("$baseUrl/templates?q=$stem")
         page
-            .locator("a.tpl-result", Page.LocatorOptions().setHasText("$stem.jsonata"))
+            .locator("a.tpl-result", Page.LocatorOptions().setHasText("$stem.$language"))
             .first()
             .click()
         page.waitForURL("**/templates/test/**")

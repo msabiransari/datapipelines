@@ -24,6 +24,57 @@ import org.thymeleaf.web.servlet.JakartaServletWebApplication
  */
 class ScriptFaceRenderTest {
     @Test
+    fun `javascript frame labels wrap the editable and read-only statements without entering the body`() {
+        for (editable in listOf(true, false)) {
+            val html =
+                render(ScriptFace.VIEW) {
+                    face()
+                    setVariable("faceEditable", editable)
+                    setVariable("faceJavascript", true)
+                    setVariable("scriptMainOpen", ScriptSkeleton.mainOpen)
+                    setVariable("scriptMainClose", ScriptSkeleton.mainClose)
+                    setVariable("panes", ScriptFixtures.skeletonPanes.copy(body = "return input.rows;"))
+                }
+            html shouldContain "data-tf-main-open>function main(input) {</code>"
+            html shouldContain "data-tf-main-close>}</code>"
+            val bodyId = if (editable) "tf-body" else "tf-body-ro"
+            val content =
+                Regex("<(textarea|pre)[^>]*id=\"$bodyId\"[^>]*>(.*?)</(textarea|pre)>", RegexOption.DOT_MATCHES_ALL)
+                    .find(html)
+                    ?.groupValues
+                    ?.get(2)
+            content shouldBe "return input.rows;"
+        }
+        render(ScriptFace.VIEW) { face() } shouldNotContain "data-tf-main-open"
+    }
+
+    @Test
+    fun `each case contains console text even on failure and authored markup stays inert`() {
+        val text = "<img src=x onerror=alert(1)>"
+        val suite =
+            SuiteResult(
+                false,
+                "template.test_failed",
+                cases =
+                    listOf(
+                        CaseResult(
+                            "empty input",
+                            false,
+                            actualRefusal = "pipeline.script.evaluation_failed",
+                            console =
+                                listOf(co.datapipelines.scripting.ConsoleLine(co.datapipelines.scripting.ConsoleLevel.LOG, text)),
+                        ),
+                    ),
+            )
+        val html = render(ScriptFace.RESULT_VIEW) { result(suite = suite) }
+        html shouldContain "data-tf-console"
+        html shouldContain "&lt;img src=x onerror=alert(1)&gt;"
+        html shouldNotContain "<img src=x"
+        val case = html.substringAfter("data-tf-case=\"empty input\"")
+        case shouldContain "data-tf-console"
+    }
+
+    @Test
     fun `the workspace paints the face for a script - no Render tab, no Freemarker preview, the face posts its own suite and save`() {
         val html = render("templates/workspace") { page() }
 

@@ -42,6 +42,15 @@ class ScriptConfigKeysSpecDriftTest {
         shipped["$PREFIX.max-value-bytes"] shouldBe "\${DATAPIPELINES_SCRIPT_MAX_VALUE_BYTES:1048576}"
         shipped["$PREFIX.max-string-bytes"] shouldBe "\${DATAPIPELINES_SCRIPT_MAX_STRING_BYTES:1048576}"
         shipped["$PREFIX.max-depth"] shouldBe "\${DATAPIPELINES_SCRIPT_MAX_DEPTH:100}"
+        shipped["$PREFIX.js.isolate-dir"] shouldBe "\${DATAPIPELINES_SCRIPT_JS_ISOLATE_DIR:}"
+        shipped["$PREFIX.js.max-heap-mb"] shouldBe "\${DATAPIPELINES_SCRIPT_JS_MAX_HEAP_MB:256}"
+        shipped["$PREFIX.js.isolate-memory-mb"] shouldBe "\${DATAPIPELINES_SCRIPT_JS_ISOLATE_MEMORY_MB:}"
+        shipped["$PREFIX.js.max-statements"] shouldBe "\${DATAPIPELINES_SCRIPT_JS_MAX_STATEMENTS:100000000}"
+        shipped["$PREFIX.js.max-ast-depth"] shouldBe "\${DATAPIPELINES_SCRIPT_JS_MAX_AST_DEPTH:1000}"
+        shipped["$PREFIX.js.max-stack-frames"] shouldBe "\${DATAPIPELINES_SCRIPT_JS_MAX_STACK_FRAMES:1000}"
+        shipped["$PREFIX.js.max-output-bytes"] shouldBe "\${DATAPIPELINES_SCRIPT_JS_MAX_OUTPUT_BYTES:1048576}"
+        shipped["$PREFIX.js.max-result-mb"] shouldBe "\${DATAPIPELINES_SCRIPT_JS_MAX_RESULT_MB:64}"
+        shipped["$PREFIX.js.max-input-mb"] shouldBe "\${DATAPIPELINES_SCRIPT_JS_MAX_INPUT_MB:64}"
     }
 
     @Test
@@ -76,6 +85,57 @@ class ScriptConfigKeysSpecDriftTest {
                 ConfigSnapshots.valid().copy(scriptAbandonGraceSeconds = 0),
             )
         zeroGrace.violations.any { it.startsWith("datapipelines.script.abandon-grace-seconds") } shouldBe true
+    }
+
+    @Test
+    fun `the YAML binds JavaScript overrides and preserves the neighboring root settings`() {
+        val environment =
+            org.springframework.mock.env
+                .MockEnvironment()
+        environment.propertySources.addLast(
+            org.springframework.core.env
+                .MapPropertySource("shipped", shipped),
+        )
+        mapOf(
+            "$PREFIX.pool-size" to "2",
+            "$PREFIX.js.isolate-dir" to "/opt/graaljs",
+            "$PREFIX.js.max-heap-mb" to "128",
+            "$PREFIX.js.max-statements" to "123",
+            "$PREFIX.js.max-ast-depth" to "456",
+            "$PREFIX.js.max-stack-frames" to "789",
+            "$PREFIX.js.max-output-bytes" to "8192",
+            "$PREFIX.js.max-result-mb" to "2",
+            "$PREFIX.js.max-input-mb" to "3",
+        ).forEach { (key, value) -> environment.setProperty(key, value) }
+
+        fun bind() =
+            org.springframework.boot.context.properties.bind.Binder
+                .get(environment)
+                .bind(
+                    PREFIX,
+                    org.springframework.boot.context.properties.bind.Bindable
+                        .of(co.datapipelines.web.config.ScriptProperties::class.java),
+                ).get()
+        val properties = bind()
+        properties.poolSize shouldBe 2
+        properties.evaluateTimeoutSeconds shouldBe 10
+        properties.maxDepth shouldBe 100
+        properties.isolateMemoryMb shouldBe 512
+        properties.js shouldBe
+            co.datapipelines.web.config.ScriptProperties.Js(
+                isolateDir = "/opt/graaljs",
+                maxHeapMb = 128,
+                maxStatements = 123,
+                maxAstDepth = 456,
+                maxStackFrames = 789,
+                maxOutputBytes = 8192,
+                maxResultMb = 2,
+                maxInputMb = 3,
+            )
+        environment.setProperty("$PREFIX.js.isolate-memory-mb", "1024")
+        bind().isolateMemoryMb shouldBe 1024
+        environment.getProperty("datapipelines.scheduler.enabled", Boolean::class.java) shouldBe true
+        environment.getProperty("datapipelines.mail.message-stream") shouldBe ""
     }
 
     /** The default out of a `${'$'}{VAR:default}` placeholder — what an unset variable resolves to. */
@@ -119,6 +179,15 @@ class ScriptConfigKeysSpecDriftTest {
             listOf(
                 "$PREFIX.abandon-grace-seconds",
                 "$PREFIX.evaluate-timeout-seconds",
+                "$PREFIX.js.isolate-dir",
+                "$PREFIX.js.isolate-memory-mb",
+                "$PREFIX.js.max-ast-depth",
+                "$PREFIX.js.max-heap-mb",
+                "$PREFIX.js.max-input-mb",
+                "$PREFIX.js.max-output-bytes",
+                "$PREFIX.js.max-result-mb",
+                "$PREFIX.js.max-stack-frames",
+                "$PREFIX.js.max-statements",
                 "$PREFIX.max-depth",
                 "$PREFIX.max-input-rows",
                 "$PREFIX.max-string-bytes",
@@ -128,6 +197,6 @@ class ScriptConfigKeysSpecDriftTest {
                 "$PREFIX.suite-timeout-seconds",
             )
 
-        val KEY_REGEX = Regex("""datapipelines\.script\.[a-z0-9-]+""")
+        val KEY_REGEX = Regex("""datapipelines\.script(\.js)?\.[a-z0-9-]+""")
     }
 }

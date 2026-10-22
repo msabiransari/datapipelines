@@ -52,6 +52,9 @@ internal object ScriptFace {
         model.addAttribute("faceHashShort", displayed.bodyHash.take(SHORT_HASH))
         model.addAttribute("panes", ScriptPanes.of(displayed))
         model.addAttribute("faceLanguage", languageOf(displayed.type.wire))
+        model.addAttribute("faceJavascript", displayed.type == co.datapipelines.pipeline.TemplateType.JAVASCRIPT)
+        model.addAttribute("scriptMainOpen", ScriptSkeleton.mainOpen)
+        model.addAttribute("scriptMainClose", ScriptSkeleton.mainClose)
     }
 
     /** The body pane's language label — the type IS the language (D-T2). */
@@ -146,7 +149,7 @@ internal object ScriptFace {
 
     /**
      * Which pane a failure belongs to — the rule names are 7b's (`TemplateValidator`), and a
-     * failure no pane owns (a stale hash, the JavaScript round-two refusal) names none.
+     * failure no pane owns (a stale hash, the JavaScript availability refusal) names none.
      */
     fun paneOf(failure: TemplateValidationFailure): String? {
         val rule = failure.details["rule"] as? String
@@ -227,9 +230,26 @@ data class FaceRefusal(
  * example — a `row` contract with rejects, its two invariants and its three cases (empty,
  * right, wrong data), with the body that satisfies them. The create runs the suite, so a
  * skeleton that failed would make the modal unusable; `ScriptFaceModelTest` saves it
- * through the real gate. JSONata: `javascript` is refused at save until round two.
+ * through the real gate. Both language bodies satisfy the same contract, invariants and cases.
  */
 internal object ScriptSkeleton {
+    /** Immutable editor labels, excluded from the body sent to save. */
+    const val mainOpen = "function main(input) {"
+    const val mainClose = "}"
+
+    /** Statements only; the engine supplies main(input). The shared example's contract follows. */
+    val javascriptBody: String =
+        """
+        return {
+          rows: input.rows.filter(row => row.customer_id != null).map(row => ({
+            order_id: row.order_id, amount: row.amount_cents / 100, customer_id: row.customer_id
+          })),
+          rejects: input.rows.filter(row => row.customer_id == null).map(row => ({
+            row: row, reason: "customer_id missing"
+          }))
+        };
+        """.trimIndent()
+
     val body: String =
         """
         {

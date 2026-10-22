@@ -24,7 +24,11 @@ class TemplateValidatorTest {
 
     private fun validator(vararg registered: TemplateVersion): TemplateValidator {
         val registry = InMemoryTemplateRegistry(registered.toList())
-        return TemplateValidator(LibraryResolver { _ -> registry })
+        return TemplateValidator(
+            scriptEngines =
+                mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
+            libraryResolver = LibraryResolver { _ -> registry },
+        )
     }
 
     @Test
@@ -314,7 +318,13 @@ class TemplateValidatorTest {
         // TPL-SEC-3: the cap exists to keep an adversarial body away from the parser, so it is
         // enforced before parsing — and must be fast, since it runs on the request thread.
         val registry = InMemoryTemplateRegistry()
-        val validator = TemplateValidator(LibraryResolver { _ -> registry }, maxBodyChars = 1_000)
+        val validator =
+            TemplateValidator(
+                scriptEngines =
+                    mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
+                libraryResolver = LibraryResolver { _ -> registry },
+                maxBodyChars = 1_000,
+            )
         val overCap = "SELECT 1 ".repeat(200)
 
         val trace = ValidationTrace()

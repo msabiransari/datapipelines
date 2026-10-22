@@ -1,8 +1,8 @@
 # Configuration Reference
 
-**Status:** v1.60 (single source of truth for every config key)
+**Status:** v1.61 (single source of truth for every config key)
 **Owner:** datapipelines.co core
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 ---
 
@@ -486,7 +486,16 @@ The budgets every script evaluation runs under — the save/release test suite o
 | `datapipelines.script.max-input-rows` | `100000` | Row cap on any table input — the `rows` batch or any table input — refused BEFORE evaluation with the record §4.3's input-cap code (§13.18, 7c) |
 | `datapipelines.script.max-value-bytes` | `1048576` | Cap on a value/object output (the record §4.3's value-cap code, §13.18, 7c) — a Context value is not a table |
 | `datapipelines.script.max-string-bytes` | `1048576` | Cap on a single string in any returned row (the same §4.3 code, with the row number) |
-| `datapipelines.script.max-depth` | `100` | Expression depth bound — counted at every evaluate entry and exit by the engine itself: nested evaluation, non-tail lambda recursion included; set-level work over hundreds of rows evaluates (the 7a `isParallelCall` leak is gone, #260); a tail-recursive lambda is trampolined by the library and the wall clock is its bound (the engine's measured bounds, dag-executor §5.3) |
+| `datapipelines.script.max-depth` | `100` | Expression depth bound; also the JS stack-frame bound (plus four prelude frames, capped by `js.max-stack-frames`) — counted at every evaluate entry and exit by the engine itself: nested evaluation, non-tail lambda recursion included; set-level work over hundreds of rows evaluates (the 7a `isParallelCall` leak is gone, #260); a tail-recursive lambda is trampolined by the library and the wall clock is its bound (the engine's measured bounds, dag-executor §5.3) |
+| `datapipelines.script.js.isolate-dir` | `empty` | Absolute directory containing `js-isolate.jar`; must be one entry of `loader.path` (system property) or `LOADER_PATH` (environment). No class-path mutation. Unset and no isolate on the class path disables JavaScript, reported once at INFO; JSONata remains available. |
+| `datapipelines.script.js.max-heap-mb` | `256` | Per-Context heap, MiB; SOFT. All concurrent Contexts share the isolate heap, outside the JVM heap. |
+| `datapipelines.script.js.isolate-memory-mb` | `empty` | Unset → `pool-size × max-heap-mb + 256` MiB (1280 at defaults). Explicit value must be at least 32 MiB and strictly larger than `pool-size × max-heap-mb`; a derived byte budget that overflows is refused by name. |
+| `datapipelines.script.js.max-statements` | `100000000` | Hard guest-statement ceiling; internal prelude excluded. |
+| `datapipelines.script.js.max-ast-depth` | `1000` | Parse-time nesting ceiling, including runtime eval. |
+| `datapipelines.script.js.max-stack-frames` | `1000` | Guest stack-frame ceiling; minimum of this and `max-depth + 4` prelude frames. |
+| `datapipelines.script.js.max-output-bytes` | `1048576` | Each console stream cap; at least 4096 bytes. Excess output refuses with resource_limit / OUTPUT; returned console lines are separately capped at 200 × 2000 chars. |
+| `datapipelines.script.js.max-result-mb` | `64` | Serialized result budget, MiB, at least 1; measured before host parsing. |
+| `datapipelines.script.js.max-input-mb` | `64` | Serialized input budget, MiB, at least 1; refused before the Context starts. |
 
 **Removed keys (script-node-rename lane, owner ruling 2026-10-20):** the nine budgets lived at `datapipelines.transform.*` before the TRANSFORM→SCRIPT node-type rename. There is no alias: a `datapipelines.transform.*` key binds nothing, and startup refuses BY NAME (§7, `checkRemovedTransformKeys`) telling the operator to rename it. This is the §3.17 rule again — a removed key is refused for being set at all, value notwithstanding.
 
@@ -1066,6 +1075,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-22 | v1.61 | 8b (#8) | §3.28 gains the nine JavaScript keys, their measured defaults, derived isolate memory and launcher agreement; max-depth also bounds JavaScript stack frames. |
 | 2026-10-21 | v1.60 | 655 (#655) GitHub sign-in, answers #154 part 2 | **§3.4 gains seven per-provider rows:** `protocol` (default `oidc`), `authorization-uri`, `token-uri`, `user-info-uri`, `user-name-attribute`, `scopes` (all empty by default, required for `oauth2`) and `emails-uri` (unset, optional). §1's provider sentence names both protocols and the GitHub env pair; the §5 YAML gains the `github` entry as shipped; §7's authentication-method rule is per protocol and gains the entry-against-protocol rule (unknown protocol, missing key, `issuer-uri` on `oauth2`, `oauth2` keys on `oidc`, `openid` scope, non-https endpoint — each naming the provider and the key). `deploy/secrets.env.example` gains empty `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` lines. |
 | 2026-10-21 | v1.59 | 636 (#636) the housekeeping statements' bounds | **§3.11**'s "not a key" note names the four housekeeping statements #636 bounds — the dashboard refresh sweep's UPDATE at 10 s (`REFRESH_SWEEP_STATEMENT_TIMEOUT_SECONDS`), the dashboard refreshes' DELETE and the parameter evaluations' sweep UPDATE and batch DELETE at the retention tick's 25 s — and links metadata-db §8.4 and §8.5. No key added. |
 | 2026-10-20 | v1.58 | V50 (#640, script-node-rename lane, owner ruling 2026-10-20) | **The TRANSFORM→SCRIPT node-type rename, §3.28's keys move with it**: the nine script budgets now live at `datapipelines.script.*` (env `DATAPIPELINES_SCRIPT_*`) with no alias; **§7 gains `checkRemovedTransformKeys`** (`CHECK_COUNT` 35 → 36): any set `datapipelines.transform.*` key refuses startup BY NAME pointing at its replacement — presence, not value, is the signal (the §3.17 rule). `ScriptConfigKeysSpecDriftTest` (7b's, renamed) still pins the new keys in this document, `application.yml` and the validator. Renumbered at merge after #326's v1.57. |

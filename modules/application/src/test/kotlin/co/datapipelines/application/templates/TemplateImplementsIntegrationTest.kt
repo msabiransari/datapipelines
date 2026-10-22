@@ -87,7 +87,10 @@ class TemplateImplementsIntegrationTest {
         service = TemplateImplementsService(facts, citations)
         validator =
             TemplateValidator(
-                LibraryResolver { workspace -> RepositoryTemplateRegistry(templates, REGISTRY_CACHE, workspace) },
+                scriptEngines =
+                    mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
+                libraryResolver =
+                    LibraryResolver { workspace -> RepositoryTemplateRegistry(templates, REGISTRY_CACHE, workspace) },
                 citableFacts = service,
             )
         drafts = TemplateDraftService(templates, AuthoringGuard(true), citations)

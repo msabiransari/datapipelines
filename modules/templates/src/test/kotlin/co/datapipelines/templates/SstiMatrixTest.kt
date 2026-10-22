@@ -38,7 +38,12 @@ import java.io.StringWriter
  */
 class SstiMatrixTest {
     private val workspaceId = java.util.UUID.randomUUID()
-    private val validator = TemplateValidator(LibraryResolver { _ -> InMemoryTemplateRegistry() })
+    private val validator =
+        TemplateValidator(
+            scriptEngines =
+                mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
+            libraryResolver = LibraryResolver { _ -> InMemoryTemplateRegistry() },
+        )
     private val engines = mutableListOf<TemplateEngine>()
 
     @AfterEach

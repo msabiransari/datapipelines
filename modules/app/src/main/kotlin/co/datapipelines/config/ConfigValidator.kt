@@ -921,6 +921,19 @@ class ConfigValidator(
                         Long::class.java,
                     ),
                 scriptMaxDepth = environment.getProperty("datapipelines.script.max-depth", Long::class.java),
+                scriptJs =
+                    mapOf(
+                        "datapipelines.script.js.isolate-dir" to environment.getProperty("datapipelines.script.js.isolate-dir"),
+                        "datapipelines.script.js.max-heap-mb" to environment.getProperty("datapipelines.script.js.max-heap-mb"),
+                        "datapipelines.script.js.isolate-memory-mb" to environment.getProperty("datapipelines.script.js.isolate-memory-mb"),
+                        "datapipelines.script.js.max-statements" to environment.getProperty("datapipelines.script.js.max-statements"),
+                        "datapipelines.script.js.max-ast-depth" to environment.getProperty("datapipelines.script.js.max-ast-depth"),
+                        "datapipelines.script.js.max-stack-frames" to environment.getProperty("datapipelines.script.js.max-stack-frames"),
+                        "datapipelines.script.js.max-output-bytes" to environment.getProperty("datapipelines.script.js.max-output-bytes"),
+                        "datapipelines.script.js.max-result-mb" to environment.getProperty("datapipelines.script.js.max-result-mb"),
+                        "datapipelines.script.js.max-input-mb" to environment.getProperty("datapipelines.script.js.max-input-mb"),
+                    ),
+                scriptJsLoaderPath = ScriptRules.effectiveLoaderPath(),
                 // §3.30 (#194) — the parameter engine's limits, raw strings (a malformed value is a named violation).
                 parameters = ParametersRules.KEYS.associateWith { environment.getProperty(it) },
                 // §3.33 (#10) — the dashboard documents' bounds, raw strings (a malformed value is a named violation).
@@ -1160,6 +1173,10 @@ internal data class ConfigSnapshot(
     val scriptMaxValueBytes: Long? = null,
     val scriptMaxStringBytes: Long? = null,
     val scriptMaxDepth: Long? = null,
+    /** §3.28 JavaScript bounds, raw so malformed values produce named startup violations. */
+    val scriptJs: Map<String, String?> = emptyMap(),
+    /** Launcher's path: system property first, then environment, never Spring application properties. */
+    val scriptJsLoaderPath: String? = null,
     /** §3.30 (#194) — every `datapipelines.parameters.*` key as its raw string (`ParametersRules.KEYS`). */
     val parameters: Map<String, String?> = emptyMap(),
     /** §3.33 (#10) — every `datapipelines.visualization.*` key as its raw string (`VisualizationRules.KEYS`). */
@@ -1236,6 +1253,7 @@ internal data class ConfigSnapshot(
             "scriptMaxValueBytes=$scriptMaxValueBytes, " +
             "scriptMaxStringBytes=$scriptMaxStringBytes, " +
             "scriptMaxDepth=$scriptMaxDepth, " +
+            "scriptJs=$scriptJs, scriptJsLoaderPath=$scriptJsLoaderPath, " +
             "parameters=$parameters, " +
             "webMaxRequestBytes=$webMaxRequestBytes, " +
             "orgTimezone=$orgTimezone, " +
