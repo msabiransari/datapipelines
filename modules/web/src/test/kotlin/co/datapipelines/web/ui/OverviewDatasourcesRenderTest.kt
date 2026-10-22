@@ -83,6 +83,9 @@ class OverviewDatasourcesRenderTest {
         doc.select("[data-overview-panel] .app-overview-panel-sub").map { it.text() } shouldContainExactly
             listOf("The last recorded test per datasource, one outcome each.", "Every datasource once, by its SQL dialect.")
         doc.select("[data-overview-panel] [data-open]").map { it.attr("data-open") } shouldContainExactly listOf("health", "dialect")
+        doc.select("[data-chart=health] [data-bar]").map { it.attr("data-tone") } shouldContainExactly
+            listOf("success", "danger", "warning")
+        doc.select("[data-chart=dialect] [data-bar]").map { it.attr("data-tone") } shouldContainExactly listOf("mixed", "mixed")
         val health = doc.selectFirst("[data-overview-dialog] [data-dialog-section=health]").shouldNotBeNull()
         health.text() shouldContain "whoever ran it"
         health.text() shouldContain "never a blank"

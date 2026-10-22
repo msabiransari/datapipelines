@@ -608,6 +608,24 @@ class OverviewRenderTest {
         doc.selectFirst("[data-overview-context]")!!.text() shouldContain "only what your promotion view shows"
     }
 
+    @Test
+    fun `semantic metric tones pass through the summary strip by word`() {
+        val base = page(Inventory(draftOnly = 1, releasedOnly = 0, releasedWithDraft = 0, discardedOnly = 0))
+        val inventory = base.inventory.shouldNotBeNull()
+        val tones = listOf("success", "warning", "danger")
+        val doc =
+            render(
+                base.copy(
+                    inventory =
+                        inventory.copy(
+                            metrics = tones.map { OverviewPage.Metric(it, it, 1, null, null, tone = it) },
+                        ),
+                ),
+            )
+        doc.select("[data-overview-summary] dl.app-overview-counts .app-overview-dot").map { it.attr("data-tone") } shouldContainExactly
+            tones
+    }
+
     private fun page(
         inventory: Inventory,
         recent: RecentResult? = RecentResult.Available(emptyList()),

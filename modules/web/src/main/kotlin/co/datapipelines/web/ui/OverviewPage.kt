@@ -78,6 +78,8 @@ data class OverviewPage(
      * [href] its filtered catalog (null: unlinked), [tone] the status dot (null: none), [lensed]
      * whether the number passed the promoter lens (#621), [title] the hover sentence (Retired's
      * "have no page"). [value] is null only for a number a sibling cannot state.
+     * [tone] uses draft, released, mixed, discarded (lifecycle) or success, warning, danger
+     * (ops status); see the overview token block in `app.css`.
      */
     data class Metric(
         val key: String,
@@ -158,7 +160,8 @@ data class OverviewPage(
     /**
      * One chart bar: [width] is the SVG rect's width in a 0–100 viewBox (the tallest bar is 100,
      * a zero is 0 — never a visible minimum), [tone] the token family that paints it, [label]
-     * the accessible sentence.
+     * the accessible sentence. [tone] uses draft, released, mixed, discarded (lifecycle) or
+     * success, warning, danger (ops status); see the overview token block in `app.css`.
      */
     data class Bar(
         val key: String,

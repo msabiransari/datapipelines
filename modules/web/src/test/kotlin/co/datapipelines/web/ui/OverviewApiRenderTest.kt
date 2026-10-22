@@ -87,6 +87,10 @@ class OverviewApiRenderTest {
             doc.selectFirst("[data-chart=endpoint-state] [data-bar=serving-release]")!!.attr("data-tone")
         doc.selectFirst("[data-count=draft] .app-overview-dot")!!.attr("data-tone") shouldBe
             doc.selectFirst("[data-chart=endpoint-state] [data-bar=serving-draft]")!!.attr("data-tone")
+        doc.selectFirst("[data-count=draft] .app-overview-dot")!!.attr("data-tone") shouldBe "warning"
+        doc.selectFirst("[data-count=release] .app-overview-dot")!!.attr("data-tone") shouldBe "released"
+        doc.select("[data-chart=endpoint-state] [data-bar]").map { it.attr("data-tone") } shouldContainExactly
+            listOf("released", "warning", "mixed", "discarded")
         doc.selectFirst("[data-overview-view-all-count]")!!.text() shouldBe "3"
         doc.select("[data-overview-panel] .app-overview-panel-sub").map { it.text() } shouldContainExactly
             listOf("Every published path once, by what a call to it runs now.", "Live keys only, one bar per kind.")
