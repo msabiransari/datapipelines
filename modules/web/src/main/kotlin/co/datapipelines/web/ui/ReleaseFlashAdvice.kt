@@ -1,7 +1,6 @@
 package co.datapipelines.web.ui
 
 import jakarta.servlet.http.HttpServletRequest
-import org.springframework.stereotype.Controller
 import org.springframework.web.bind.annotation.ControllerAdvice
 import org.springframework.web.bind.annotation.ModelAttribute
 
@@ -14,8 +13,18 @@ import org.springframework.web.bind.annotation.ModelAttribute
  * that could carry text. A request without the code pays one map lookup; a request with the
  * code and nothing (or nothing qualifying) held gets `null` and the layout renders the
  * generic sentence.
+ *
+ * Selection rule (#652): `assignableTypes = [ShellPage::class]` — a `@RestController`
+ * never implements [ShellPage], so this advice does not run for JSON handlers at all.
+ *
+ * The one-shot consumption, spelled out: [releasedFlashMessage] returns null unless the
+ * request carries `?ok=released_with_templates`; only then does [ReleaseFlash.consumeMessage]
+ * run — it reads the held names AND REMOVES the session attribute first, and only then
+ * checks the pipeline id. So a JSON request without the parameter never consumed anything,
+ * and one crafted WITH the parameter would have eaten the next shell render's flash. Since
+ * #652 neither is reachable: JSON handlers never reach this advice.
  */
-@ControllerAdvice(annotations = [Controller::class])
+@ControllerAdvice(assignableTypes = [ShellPage::class])
 class ReleaseFlashAdvice(
     private val flash: ReleaseFlash,
 ) {

@@ -30,7 +30,7 @@ class PipelineUiController(
     private val themeResolver: ThemeResolver,
     /** 178 — the promoter lens: the page renders the caller's view. */
     private val lens: PromoterLens,
-) {
+) : ShellPage {
     @GetMapping("/pipelines")
     @RequiredScope(Permission.PIPELINE_READ)
     fun list(

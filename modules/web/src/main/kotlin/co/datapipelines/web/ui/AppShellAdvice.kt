@@ -6,7 +6,6 @@ import co.datapipelines.auth.User
 import co.datapipelines.auth.UserRepository
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.security.core.context.SecurityContextHolder
-import org.springframework.stereotype.Controller
 import org.springframework.web.bind.annotation.ControllerAdvice
 import org.springframework.web.bind.annotation.ModelAttribute
 
@@ -20,7 +19,14 @@ import org.springframework.web.bind.annotation.ModelAttribute
  * and the layout's pre-076 chrome, and it is pinned by `UiLayoutChromeAdviceTest`; folding
  * four more attributes and two repositories into it would make one class the answer to
  * "what does the layout need" and one test the answer to "did it get it". Two advices, two
- * concerns, both applied to every `@Controller`.
+ * concerns, both applied to every shell page (`ShellPage`, #652).
+ *
+ * Selection rule (#652): `assignableTypes = [ShellPage::class]` — the shell model is
+ * computed for controllers whose views render inside the shell, and for nothing else. A
+ * `@RestController` never implements [ShellPage], so a JSON handler pays none of these
+ * reads; until #652 the selector was `annotations = [Controller::class]`, which matched
+ * `@RestController` through its meta-annotation and made every JSON API request pay two
+ * `users` reads and a `workspaces` list it never shows.
  *
  * The attributes:
  *
@@ -34,9 +40,10 @@ import org.springframework.web.bind.annotation.ModelAttribute
  *   Dashboard and for off-rail screens; the template then renders the page alone.
  * - **`navCounts`** — the resource browser header's per-family counts (#554; the rail's two
  *   badges before it), as ONE attribute whose values [NavCounts] reads on the first one the
- *   template asks for (#574: no cache, and a JSON request, which this advice also serves, asks
- *   for none). A value is null when there is no workspace or the count could not be read;
- *   the template omits that count rather than rendering a zero it does not know to be true.
+ *   template asks for (#574: no cache, and a JSON request — which since #652 never reaches
+ *   this advice — asks for none). A value is null when there is no workspace or the count
+ *   could not be read; the template omits that count rather than rendering a zero it does
+ *   not know to be true.
  *
  * One extra `users` read per render is added by `currentUser`. That is the shape the app
  * already had — `ThemeResolver.resolve` reads the same row on every request, and most
@@ -44,7 +51,7 @@ import org.springframework.web.bind.annotation.ModelAttribute
  * row out of the security filter onto the principal) is an `auth` change this round is fenced
  * out of.
  */
-@ControllerAdvice(annotations = [Controller::class])
+@ControllerAdvice(assignableTypes = [ShellPage::class])
 class AppShellAdvice(
     private val userRepository: UserRepository,
     private val navCounts: NavCounts,

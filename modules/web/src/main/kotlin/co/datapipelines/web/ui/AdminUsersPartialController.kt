@@ -51,7 +51,7 @@ class AdminUsersPartialController(
     private val workspaces: WorkspaceService,
     private val mailProperties: MailProperties,
     private val mailSends: MailSendRepository,
-) {
+) : ShellPage {
     @GetMapping("/partials/admin/users")
     @RequiredScope(Permission.USER_MANAGE)
     fun search(

@@ -33,7 +33,7 @@ import org.springframework.web.bind.annotation.ResponseBody
 @Controller
 class ApiKeysPartialController(
     private val apiKeyService: ApiKeyService,
-) {
+) : ShellPage {
     /**
      * The key [keyId]'s plaintext, as `text/plain` for the copy handler — the caller must be
      * its CREATOR. 404 when there is nothing copyable: not the creator's key, no sealed copy,

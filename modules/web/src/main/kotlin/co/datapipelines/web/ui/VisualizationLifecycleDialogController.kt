@@ -49,7 +49,7 @@ class VisualizationLifecycleDialogController(
     private val visualizations: VisualizationService,
     private val dialogs: VisualizationLifecycleDialogModel,
     private val audit: AuditEventSink,
-) {
+) : ShellPage {
     // ------------------------------------------------------------------ release
 
     @GetMapping("/release")

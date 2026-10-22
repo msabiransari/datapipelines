@@ -34,7 +34,7 @@ class OverviewController(
     private val themeResolver: ThemeResolver,
     private val lens: PromoterLens,
     private val ui: UiProperties,
-) {
+) : ShellPage {
     @GetMapping("/overview/pipelines")
     @RequiredScope(Permission.PIPELINE_READ)
     fun pipelines(

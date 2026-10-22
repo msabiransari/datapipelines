@@ -40,7 +40,7 @@ import java.util.UUID
 class ScheduleOverviewController(
     private val schedules: ScheduleService,
     private val themeResolver: ThemeResolver,
-) {
+) : ShellPage {
     private val log = LoggerFactory.getLogger(ScheduleOverviewController::class.java)
 
     @GetMapping(PATH)

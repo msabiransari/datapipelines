@@ -31,7 +31,7 @@ class ApiOverviewController(
     private val reads: ApiHomeReads,
     private val mcpConnection: McpConnectionCard,
     private val themeResolver: ThemeResolver,
-) {
+) : ShellPage {
     private val log = LoggerFactory.getLogger(ApiOverviewController::class.java)
 
     @GetMapping(PATH)

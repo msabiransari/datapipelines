@@ -55,7 +55,7 @@ class TemplatePartialController(
     private val authoring: AuthoringGuard,
     /** 178 — the promoter lens: every fragment here renders the caller's view. */
     private val lens: PromoterLens,
-) {
+) : ShellPage {
     @GetMapping("/partials/templates")
     @RequiredScope(Permission.TEMPLATE_READ)
     fun list(

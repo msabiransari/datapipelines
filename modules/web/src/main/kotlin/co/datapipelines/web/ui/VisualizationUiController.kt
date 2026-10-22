@@ -39,7 +39,7 @@ class VisualizationUiController(
     private val themeResolver: ThemeResolver,
     /** 178 — the promoter lens: the pages render the caller's view. */
     private val lens: PromoterLens,
-) {
+) : ShellPage {
     @GetMapping("/visualizations")
     @RequiredScope(Permission.VISUALIZATION_READ)
     fun list(

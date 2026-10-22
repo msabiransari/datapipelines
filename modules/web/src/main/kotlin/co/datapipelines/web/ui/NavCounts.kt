@@ -81,8 +81,9 @@ class NavCounts(
      * #574: the values may be DEFERRED — [forWorkspace] hands back counts whose live read runs on
      * the first property read and is kept for this instance, so one render makes one read and a
      * request that renders nothing makes none. The shell advice that builds this attribute runs
-     * for every `@Controller`, `@RestController` included, so without the deferral every JSON API
-     * call would pay the five counts it never shows. Equality is by value (it forces the read).
+     * for every shell page (`ShellPage`, #652), so a JSON API call pays no counts at all; the
+     * deferral still bounds a shell render to the counts its template actually shows. Equality
+     * is by value (it forces the read).
      */
     class Counts private constructor(
         private val values: Lazy<Map<NavigationFamily, Int>>,
