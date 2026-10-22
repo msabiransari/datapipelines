@@ -259,7 +259,7 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
         }
     }
 
-    /** #516's keyboard ring stays on the LINE and takes the card's radius; the control draws none. */
+    /** #516's keyboard ring stays on the LINE at the card's radius; #644 resets the item's global shadow. */
     @Suppress("UNCHECKED_CAST")
     @Test
     fun `the keyboard ring rides the row line rounded to the card's radius, never the control`() {
@@ -279,7 +279,7 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
               const lcs = getComputedStyle(line), ccs = getComputedStyle(control);
               return { lineOutlineWidth: lcs.outlineWidth, lineOutlineStyle: lcs.outlineStyle,
                 lineRadius: parseFloat(lcs.borderTopLeftRadius), controlRadius: parseFloat(ccs.borderTopLeftRadius),
-                controlOutlineStyle: ccs.outlineStyle };
+                controlOutlineStyle: ccs.outlineStyle, itemBoxShadow: getComputedStyle(document.activeElement).boxShadow };
             }""",
             ) as Map<String, Any?>
         record("ring", ring)
@@ -292,6 +292,7 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
             near("ring.lineRadius", num("ring.controlRadius"), 0.05)
             near("ring.controlRadius", 8.0, 0.05)
             withClue("ring.controlOutlineStyle") { readings["ring.controlOutlineStyle"] shouldBe "none" }
+            withClue("ring.itemBoxShadow") { readings["ring.itemBoxShadow"] shouldBe "none" }
         }
     }
 }
