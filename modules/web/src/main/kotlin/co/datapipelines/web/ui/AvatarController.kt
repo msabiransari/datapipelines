@@ -45,8 +45,9 @@ import java.util.concurrent.TimeUnit
  * row, written only by `OidcSuccessHandler` from the IdP's `picture` claim. On top of that:
  *
  * - **Allowlisted hosts only** — `datapipelines.auth.oidc.providers[*].picture-hosts`
- *   ([AuthProperties.Provider.pictureHosts]), the union across providers. Empty (the shipped
- *   default) fetches nothing and every request answers 404 — the avatar falls back to
+ *   ([AuthProperties.Provider.pictureHosts]), the union across enabled providers (a blank
+ *   client-id adds no host, #651). Empty (the shipped default) fetches nothing and every
+ *   request answers 404 — the avatar falls back to
  *   initials, exactly the no-OIDC-picture rendering. A malicious or compromised IdP can
  *   therefore point the fetch only at hosts the operator has already named.
  * - **Scheme and authority checks** — `http`/`https` only, no `userinfo` component, a host
@@ -205,14 +206,19 @@ class AvatarHosts(
 ) {
     val names: Set<String> =
         authProperties.oidc.providers
-            .flatMap { it.pictureHosts }
-            .map { it.trim().lowercase() }
-            .filter { it.isNotEmpty() }
-            .onEach { entry ->
-                require(isBareHostname(entry)) {
-                    "datapipelines.auth.oidc.providers[*].picture-hosts entry '$entry' is not a bare hostname " +
-                        "(no scheme, port, path, userinfo or wildcard)"
-                }
+            .flatMap { provider ->
+                // Validate even dormant entries before deciding whether their hosts contribute.
+                val entries =
+                    provider.pictureHosts
+                        .map { it.trim().lowercase() }
+                        .filter { it.isNotEmpty() }
+                        .onEach { entry ->
+                            require(isBareHostname(entry)) {
+                                "datapipelines.auth.oidc.providers[*].picture-hosts entry '$entry' is not a bare hostname " +
+                                    "(no scheme, port, path, userinfo or wildcard)"
+                            }
+                        }
+                if (provider.isEnabled) entries else emptyList()
             }.toSet()
 
     private fun isBareHostname(entry: String): Boolean =

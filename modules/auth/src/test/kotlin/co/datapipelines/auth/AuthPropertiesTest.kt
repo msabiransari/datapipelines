@@ -9,6 +9,15 @@ import org.junit.jupiter.api.Test
 /** Auth configuration: domain allowlisting and safe diagnostic strings. */
 class AuthPropertiesTest {
     @Test
+    fun `a provider is enabled only with a non-blank client id`() {
+        AuthProperties.Provider().isEnabled.shouldBeFalse()
+        AuthProperties.Provider(clientId = "").isEnabled.shouldBeFalse()
+        AuthProperties.Provider(clientId = " \t\n").isEnabled.shouldBeFalse()
+        AuthProperties.Provider(clientId = "id").isEnabled.shouldBeTrue()
+        AuthProperties.Provider(clientId = " id ").isEnabled.shouldBeTrue()
+    }
+
+    @Test
     fun `provider diagnostic strings redact the client secret directly and through parent properties`() {
         val secret = "provider-secret-regression-655"
         val provider = AuthProperties.Provider(name = "github", clientSecret = secret)

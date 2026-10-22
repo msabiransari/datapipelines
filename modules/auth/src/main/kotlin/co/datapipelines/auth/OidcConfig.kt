@@ -50,7 +50,7 @@ class OidcConfig {
         // method at all" remains a ConfigValidator startup refusal.
         val providers =
             authProperties.oidc.providers.filter { provider ->
-                if (provider.clientId.isBlank()) {
+                if (!provider.isEnabled) {
                     log.warn(
                         "OIDC provider '{}' ignored: client-id is empty (set its client-id or remove the entry)",
                         provider.name.ifBlank { "<unnamed>" },
