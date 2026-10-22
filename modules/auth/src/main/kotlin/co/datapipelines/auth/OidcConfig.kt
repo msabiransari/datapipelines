@@ -191,8 +191,8 @@ class OidcConfig {
 }
 
 /**
- * Stores nothing and loads nothing ([OidcConfig.authorizedClientRepository]): the login flow
- * saves the authorized client after the success handler has already run, and no code path
+ * Stores nothing and loads nothing ([OidcConfig.authorizedClientRepository]): Spring's login
+ * filter saves the authorized client before invoking the success handler, and no code path
  * here ever loads one back.
  */
 internal object NoStoreAuthorizedClientRepository : OAuth2AuthorizedClientRepository {
