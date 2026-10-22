@@ -44,10 +44,15 @@ class VisualizationBrowseModel(
         val needle = q?.trim()?.takeIf { it.isNotEmpty() }?.take(SearchNeedle.MAX_LENGTH)
         val (rows, total) =
             if (lifecycle != null) {
-                visualizations.lifecyclePage(workspaceId, view.visualizations, needle, page, PAGE_SIZE, lifecycle).let {
-                    it.items to
-                        it.total
-                }
+                visualizations
+                    .listIn(
+                        workspaceId = workspaceId,
+                        lens = view.visualizations,
+                        bucket = lifecycle,
+                        query = needle,
+                        offset = page,
+                        limit = PAGE_SIZE,
+                    ).let { it.items to it.total }
             } else if (needle == null) {
                 visualizations.listAll(workspaceId, view.visualizations, page, PAGE_SIZE) to
                     visualizations.countAll(workspaceId, view.visualizations)

@@ -459,10 +459,13 @@ class ArtifactLifecycle<B : Any>(
     }
 
     /**
-     * #580 — the catalog `lifecycle` filter under every lens over ONE SQL rule, the inventory's
-     * ([ArtifactRepository.listIn]): a narrowing lens passes its names, so the total equals the inventory's
-     * [bucket] count under the same lens. Unlike [listAll]'s narrowed path, which reads the current pointer, an
-     * admitted artifact whose pointer sits on a draft over an older release is a member here (Amendment 6).
+     * The catalog `lifecycle` filter under every lens, ONE filtered read for both kinds (#580 + #581, consolidated
+     * by #597): [bucket]'s membership is the inventory's rule ([ArtifactRepository.listIn]), so the total equals the
+     * inventory's [bucket] count under the same lens; under a narrowed lens the rows sit at a selected RELEASED
+     * version — the admitted current release first, the newest release as fallback — and the search reads that
+     * selected version's own metadata, never the index row's, so a hidden draft's indexed title or description
+     * matches nothing. Unlike [listAll]'s narrowed path, which reads the current pointer, an admitted artifact whose
+     * pointer sits on a draft over an older release is a member here (Amendment 6).
      */
     fun listIn(
         workspaceId: UUID,
@@ -477,10 +480,7 @@ class ArtifactLifecycle<B : Any>(
                 ReadLens.Everything -> null
                 is ReadLens.Only -> lens.names
             }
-        return ArtifactPage(
-            repository.listIn(workspaceId, bucket, names, query, offset, limit),
-            repository.countIn(workspaceId, bucket, names, query),
-        )
+        return repository.listIn(workspaceId, bucket, names, query, offset, limit)
     }
 
     /** The promoter lens's input — every live artifact's current RELEASED version (versioning §10.2). */

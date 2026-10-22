@@ -17,10 +17,11 @@ import org.junit.jupiter.api.Test
 import java.util.UUID
 
 /**
- * #580 — the repository module's own proof of the catalog `lifecycle` filter ([ArtifactRepository.listIn] /
- * [ArtifactRepository.countIn], one SQL shape for both kinds) and the Dashboards Recently updated adapter: real
- * lifecycle writes put one object in each inventory bucket, and every bucket's listed names and total equal the
- * inventory's count for it, unlensed and narrowed; a narrowed row is always at a RELEASED version.
+ * #580 + #581 — the repository module's own proof of the catalog `lifecycle` filter's ONE filtered read
+ * ([ArtifactRepository.listIn], one SQL shape for both kinds, rows and truthful total in one page) and the
+ * Dashboards Recently updated adapter: real lifecycle writes put one object in each inventory bucket, and every
+ * bucket's listed names and total equal the inventory's count for it, unlensed and narrowed; a narrowed row is
+ * always at a RELEASED version.
  */
 class ArtifactLifecycleFilterIntegrationTest {
     @BeforeEach
@@ -44,16 +45,16 @@ class ArtifactLifecycleFilterIntegrationTest {
         val body = ValidatorFakes.dashboardDocument(DocumentFixtures.dashboard()).body
         seed(repository, body, body.copy(displayName = "Changed dashboard"))
 
-        repository.listIn(WORKSPACE, LifecycleBucket.WITH_DRAFTS, null, "both").names() shouldContainExactly
+        repository.listIn(WORKSPACE, LifecycleBucket.WITH_DRAFTS, null, "both").items.names() shouldContainExactly
             listOf(name(repository, "both"))
-        repository.countIn(WORKSPACE, LifecycleBucket.WITH_DRAFTS, null, "both") shouldBe 1
+        repository.listIn(WORKSPACE, LifecycleBucket.WITH_DRAFTS, null, "both").total shouldBe 1
         // The term is literal: `%` matches only a `%`, never everything.
-        repository.countIn(WORKSPACE, LifecycleBucket.WITH_DRAFTS, null, "%") shouldBe 0
-        repository.listIn(WORKSPACE, LifecycleBucket.WITH_DRAFTS, null, null, offset = 1, limit = 1).names() shouldContainExactly
+        repository.listIn(WORKSPACE, LifecycleBucket.WITH_DRAFTS, null, "%").total shouldBe 0
+        repository.listIn(WORKSPACE, LifecycleBucket.WITH_DRAFTS, null, null, offset = 1, limit = 1).items.names() shouldContainExactly
             listOf(name(repository, "draft_only"))
-        repository.listIn(WORKSPACE, LifecycleBucket.WITH_DRAFTS, emptySet(), null).shouldBeEmpty()
-        repository.countIn(WORKSPACE, LifecycleBucket.WITH_DRAFTS, emptySet(), null) shouldBe 0
-        repository.countIn(OTHER_WORKSPACE, LifecycleBucket.RELEASED_ONLY, null, null) shouldBe 1
+        repository.listIn(WORKSPACE, LifecycleBucket.WITH_DRAFTS, emptySet(), null).items.shouldBeEmpty()
+        repository.listIn(WORKSPACE, LifecycleBucket.WITH_DRAFTS, emptySet(), null).total shouldBe 0
+        repository.listIn(OTHER_WORKSPACE, LifecycleBucket.RELEASED_ONLY, null, null).total shouldBe 1
     }
 
     @Test
@@ -115,18 +116,22 @@ class ArtifactLifecycleFilterIntegrationTest {
             val inventory = repository.inventory(WORKSPACE, names?.let { ReadLens.Only(it) } ?: ReadLens.Everything)
             LifecycleBucket.entries.forEach { bucket ->
                 withClue("${repository.kind} $bucket narrowed=${names != null}") {
-                    val rows = repository.listIn(WORKSPACE, bucket, names, null)
-                    rows.names() shouldContainExactly expected[bucket].orEmpty().map { name(repository, it) }
-                    repository.countIn(WORKSPACE, bucket, names, null).toLong() shouldBe bucket.countIn(inventory)
-                    if (names != null) rows.forEach { it.detail.status shouldBe PipelineVersionStatus.RELEASED }
+                    val page = repository.listIn(WORKSPACE, bucket, names, null)
+                    page.items.names() shouldContainExactly expected[bucket].orEmpty().map { name(repository, it) }
+                    page.total.toLong() shouldBe bucket.countIn(inventory)
+                    if (names != null) page.items.forEach { it.detail.status shouldBe PipelineVersionStatus.RELEASED }
                 }
             }
         }
         // `both` through the lens shows its RELEASED version 1, never the draft on top of it.
-        val both = repository.listIn(WORKSPACE, LifecycleBucket.RELEASED_ONLY, all, null).single { it.record.name.endsWith("/both") }
+        val both =
+            repository
+                .listIn(WORKSPACE, LifecycleBucket.RELEASED_ONLY, all, null)
+                .items
+                .single { it.record.name.endsWith("/both") }
         both.detail.version shouldBe 1
         // Unlensed, a discarded-only row (NULL pointer, no draft) lists its newest version.
-        val discarded = repository.listIn(WORKSPACE, LifecycleBucket.DISCARDED_ONLY, null, null).single()
+        val discarded = repository.listIn(WORKSPACE, LifecycleBucket.DISCARDED_ONLY, null, null).items.single()
         discarded.detail.status shouldBe PipelineVersionStatus.DISCARDED
     }
 

@@ -106,7 +106,7 @@ class OverviewVisualizationsE2eTest {
         println("event=581.parity header=3 objects=4 discarded=1")
         equality(ReadLens.Everything)
         equality(ReadLens.Only(setOf("a/draft", "b/released", "c/both", "d/discarded")))
-        repository.lifecyclePage(workspace, ReadLens.Everything, null, 0, PAGE, LifecycleBucket.DISCARDED_ONLY).total shouldBe 1
+        repository.listIn(workspace, LifecycleBucket.DISCARDED_ONLY, null, null).total shouldBe 1
         val id = repository.findRecordByName(workspace, "d/discarded")?.id ?: error("fixture absent")
         service.findWorking(workspace, ReadLens.Everything, id) shouldBe null
     }
@@ -122,7 +122,7 @@ class OverviewVisualizationsE2eTest {
         service.listAll(workspace, ReadLens.Everything).map { it.record.name }.contains("e/pointer_draft") shouldBe true
         service.listAll(workspace, lens).map { it.record.name } shouldBe listOf("c/both")
         println("event=581.unfiltered pointer_draft viewer=true promoter=false inventory_promoter=true")
-        val filtered = service.lifecyclePage(workspace, lens, null, 0, PAGE, LifecycleBucket.RELEASED_ONLY)
+        val filtered = service.listIn(workspace, lens, LifecycleBucket.RELEASED_ONLY, null, 0, PAGE)
         filtered.items.map { it.detail.version } shouldBe listOf(1, 1)
         val hidden = lens(ReadLens.Only(setOf("b/released")))
         entries(hidden).map { it.name } shouldBe listOf("b/released")
@@ -131,11 +131,11 @@ class OverviewVisualizationsE2eTest {
         model["total"] shouldBe 0
         entries().map { it.name }.contains("a/draft") shouldBe true
         service
-            .lifecyclePage(workspace, ReadLens.Everything, null, 0, PAGE, LifecycleBucket.WITH_DRAFTS)
+            .listIn(workspace, ReadLens.Everything, LifecycleBucket.WITH_DRAFTS, null, 0, PAGE)
             .items
             .map { it.record.name }
             .contains("a/draft") shouldBe true
-        service.lifecyclePage(workspace, lens, null, 0, PAGE, LifecycleBucket.WITH_DRAFTS).total shouldBe 0
+        service.listIn(workspace, lens, LifecycleBucket.WITH_DRAFTS, null, 0, PAGE).total shouldBe 0
     }
 
     @Test
@@ -172,13 +172,13 @@ class OverviewVisualizationsE2eTest {
         insert("many/itemX", listOf("DRAFT"))
         insert("many/item_0", listOf("DRAFT"), workspaceId = other)
         val bucket = LifecycleBucket.WITH_DRAFTS
-        val first = service.lifecyclePage(workspace, ReadLens.Everything, "item_", 0, 25, bucket)
-        val next = service.lifecyclePage(workspace, ReadLens.Everything, "item_", 25, 25, bucket)
+        val first = service.listIn(workspace, ReadLens.Everything, bucket, "item_", 0, 25)
+        val next = service.listIn(workspace, ReadLens.Everything, bucket, "item_", 25, 25)
         first.total shouldBe PAGE
         first.items.size shouldBe 25
         next.items.size shouldBe PAGE - 25
         (first.items.map { it.record.id }.toSet() intersect next.items.map { it.record.id }.toSet()).isEmpty() shouldBe true
-        service.lifecyclePage(workspace, ReadLens.NOTHING, null, 0, PAGE, bucket).total shouldBe 0
+        service.listIn(workspace, ReadLens.NOTHING, bucket, null, 0, PAGE).total shouldBe 0
         repository.recent(workspace, ReadLens.NOTHING) shouldBe emptyList()
         repository.recent(workspace, ReadLens.Everything).size shouldBe 5
     }

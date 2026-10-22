@@ -39,7 +39,7 @@ class OverviewVisualizationsControllerTest {
     @Test
     fun `both routes preserve the bucket search paging and narrowed lens`() {
         VisualizationUiFixtures.authenticate(workspace, WorkspaceRole.PROMOTER)
-        every { service.lifecyclePage(workspace, lens, "rev", 25, 25, LifecycleBucket.WITH_DRAFTS) } returns ArtifactPage(emptyList(), 26)
+        every { service.listIn(workspace, lens, LifecycleBucket.WITH_DRAFTS, "rev", 25, 25) } returns ArtifactPage(emptyList(), 26)
         val full = ExtendedModelMap()
         page.list(full, MockHttpServletRequest(), " rev ", 25, "with-drafts") shouldBe VisualizationUiController.LIST_VIEW
         val fragment = ExtendedModelMap()
