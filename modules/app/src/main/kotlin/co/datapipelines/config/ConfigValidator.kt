@@ -66,8 +66,10 @@ class ConfigValidator(
          * `RedisRules.checkRedisTimeoutBounds` (§3.1). 35 since #598b added
          * `UiRules.checkUiActivelyDevelopedDays` (§3.10). 36 since the script-node rename added
          * `ScriptRules.checkRemovedTransformKeys` (§3.28 — the removed `datapipelines.transform.*` keys).
+         * 37 since #655 added `AuthProviderRules.checkProviderProtocols` (§3.4).
+         * 38 since #682 added `AuthProviderRules.checkProviderReadTimeout` (§3.4).
          */
-        internal const val CHECK_COUNT = 37
+        internal const val CHECK_COUNT = 38
 
         /**
          * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
@@ -119,6 +121,7 @@ class ConfigValidator(
             checkOidcProviders(snapshot, violations)
             // §3.4 (#655) — each provider entry against its protocol, its own file like the mail rules.
             AuthProviderRules.checkProviderProtocols(snapshot, violations)
+            AuthProviderRules.checkProviderReadTimeout(snapshot, violations)
             checkResultTtlOrdering(snapshot, violations)
             checkEndpointsTimeoutOrdering(snapshot, violations)
             DemoApiRules.enforceDemoApiRules(snapshot, violations)
@@ -875,6 +878,7 @@ class ConfigValidator(
                     !environment.getProperty("datapipelines.auth.local.bootstrap-password-hash").isNullOrBlank(),
                 localLockoutMaxFailures = environment.getProperty("datapipelines.auth.local.lockout.max-failures"),
                 localLockoutDurationMinutes = environment.getProperty("datapipelines.auth.local.lockout.duration-minutes"),
+                providerReadTimeoutSeconds = environment.getProperty("datapipelines.auth.oidc.provider-read-timeout-seconds"),
                 // 050/R2 §7 — the executor concurrency alias pair (raw values; presence is the signal).
                 executorMaxConcurrentGlobal = environment.getProperty("datapipelines.executor.max-concurrent-executions-global"),
                 executorMaxConcurrentPerInstance = environment.getProperty("datapipelines.executor.max-concurrent-executions-per-instance"),
@@ -1123,6 +1127,8 @@ internal data class ConfigSnapshot(
     /** Raw strings so a non-numeric value becomes a NAMED violation instead of a binder crash. */
     val localLockoutMaxFailures: String? = null,
     val localLockoutDurationMinutes: String? = null,
+    /** §3.4 — raw so malformed provider timeouts produce a named startup violation. */
+    val providerReadTimeoutSeconds: String? = null,
     /** §3.2/§7 — raw values; ALIAS presence is the deprecation signal (050/R2). */
     val executorMaxConcurrentGlobal: String? = null,
     val executorMaxConcurrentPerInstance: String? = null,

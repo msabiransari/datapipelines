@@ -161,6 +161,7 @@ datapipelines:
     # §3.4 — optional; empty = no bootstrap admin (auth.md §4.4).
     bootstrap-admin-email: ${DATAPIPELINES_AUTH_BOOTSTRAP_ADMIN_EMAIL:}
     oidc:
+      provider-read-timeout-seconds: ${DATAPIPELINES_AUTH_OIDC_PROVIDER_READ_TIMEOUT_SECONDS:10}
       providers:
         # client-id/client-secret default to EMPTY: an unset entry is ignored with a
         # WARN (OidcConfig, configuration.md §7), so a local-accounts-only deployment
