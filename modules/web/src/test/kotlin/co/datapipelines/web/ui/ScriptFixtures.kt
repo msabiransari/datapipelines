@@ -38,7 +38,12 @@ internal object ScriptFixtures {
 
     /** 7b's validator bean, as TemplatesConfiguration builds it — the suite runner included. */
     fun validator(runner: ScriptTestRunner = runner()): TemplateValidator =
-        TemplateValidator(LibraryResolver { _ -> EMPTY_REGISTRY }, suiteRunner = runner)
+        TemplateValidator(
+            scriptEngines =
+                mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
+            libraryResolver = LibraryResolver { _ -> EMPTY_REGISTRY },
+            suiteRunner = runner,
+        )
 
     /** The skeleton's panes, as the create modal submits them. */
     val skeletonPanes: ScriptPanes

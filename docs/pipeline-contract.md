@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.60 (revised — see Change Log)
+**Status:** v1.61 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 ---
 
@@ -492,7 +492,7 @@ A PIPELINE node that declares no `timeout_seconds` is not bounded by the node de
 
 A SCRIPT node evaluates the pinned script template as a **pure function** over staged data
 and the Context (the transform-nodes design record §3). The language is the pinned template's
-`type` (`jsonata` today, `javascript` in round two); the **mode** (`row`, `table`, `value`) and
+`type` (`jsonata` or `javascript`, when its isolate is installed); the **mode** (`row`, `table`, `value`) and
 the input/output shapes are the pinned version's **contract** — never repeated on the node, which
 conforms to it at save time (§12.13). The function has no handle to tempdb, the network, the
 filesystem or the clock: iteration is the executor's job (`row` mode reads the single table input
@@ -1416,7 +1416,7 @@ checks are §12.13's ten `pipeline.validation.script_…` rows.
 | `pipeline.script.input_too_large` | 500 | a table input exceeds `datapipelines.script.max-input-rows` — refused BEFORE loading (record §4.3). |
 | `pipeline.script.evaluation_failed` | 500 | the script threw; the detail carries the engine message bounded to 2 000 chars (record §7). |
 | `pipeline.script.timeout` | 504 | the engine's own wall-clock bound fired (`pipeline.node.timeout` is the outer backstop — the engine reports first, record §4.3). |
-| `pipeline.script.resource_limit` | 500 | a declared resource limit fired — depth (JSONata); heap/statements (JavaScript); `details.kind` names which. |
+| `pipeline.script.resource_limit` | 500 | a declared resource limit fired — depth (JSONata); heap/statements/stack/output/input bytes/result bytes (JavaScript); `details.kind` names which. |
 | `pipeline.script.pool_exhausted` | 503 | the evaluation pool's admission bound is full (record §4.3 — a node failure in a run, 503 on the tool/route). |
 | `pipeline.script.row_shape_mismatch` | 500 | a returned row's key set is not exactly the declared column set, with batch and row number (record §5.3). |
 | `pipeline.script.value_type_mismatch` | 500 | a returned value does not fit its column's wire form, with batch and row number (record §5.3). |
@@ -1425,7 +1425,7 @@ checks are §12.13's ten `pipeline.validation.script_…` rows.
 | `pipeline.script.invariant_failed` | 500 | an invariant evaluated to other than `true`; names the invariant and its message (record §5.4). |
 | `pipeline.script.invariants_too_large` | 500 | the invariants' read-back exceeded `max-input-rows` (record §5.4 — an assertion over an unbounded table is a SQL node or a release check, not an invariant). |
 | `pipeline.script.rejects_strict` | 500 | `strict: true` and the rejects table is non-empty; carries the count and the first ten reasons (record §5.4). |
-| `script.js.unavailable` | 400 | a `javascript` template is refused at save until round two's engine ships (record §4.4; 503 at boot). |
+| `script.js.unavailable` | 400 | the JavaScript isolate is not installed (D-T16): disabled and reported once at INFO at boot, refused at save/evaluate; never a 503. |
 
 ### 13.19 Schedules
 
@@ -1875,6 +1875,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-22 | v1.61 | 8b (#8) | JavaScript is available through the shared seam; script.js.unavailable means an absent isolate, never boot 503; resource_limit covers the byte and output limits. |
 | 2026-10-21 | v1.60 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The TRANSFORM node type is SCRIPT**: the `type` enum, §4.12 "JSON structure (SCRIPT node)", §12.13 "Script validation rules", §13.18 "Script" and its codes `pipeline.script.*`, the node fields' prose (`template`, `inputs`, `strict`, `rejects`) and every cross-reference anchor that carried the old word. A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-16 | v1.59 | 467 (#467) the over-cap screenshot refusal reaches the client | **§13's `visualization.test.screenshot_too_large` row** names the bounded drain: up to the cap + 2 MiB of a declared-over-cap body is read and discarded after the 413, so the close is a FIN after the client's last byte; beyond it Tomcat's swallow and close apply. No code or status change |
 | 2026-10-11 | v1.58 | 504b (#504b) one shared search-needle rule | **§13.21 gains `request.query_too_long`** (400); **§13.20 loses `parameter.validation.query_too_long`** — the #490 refusal becomes the shared `SearchNeedle` rule applied by every search-owning service (pipelines, templates, parameter sets, users, the five `/tree/search` reads) at the same 200-after-trim bound, `details.limit`/`details.length`, the needle never echoed; MCP answers it as `-32602` (§6.2.44 v1.74) and the UI boxes still truncate, never refuse. Landed in the same commit as its constant, the `ApiErrorCatalog` rows (400 + user message), and the doc re-points (§13 row count stays 377: one row out of §13.20, one into §13.21). |

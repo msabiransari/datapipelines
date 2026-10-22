@@ -9,13 +9,17 @@ purpose: Evaluating a script — templates_evaluate, the run-time pool and bound
 ## The probe: `templates_evaluate`
 
 `templates_render` refuses a script type with `template.render_not_applicable`; the probe
-is **`templates_evaluate`** (`{ id, version?, input, now? }` → `{ output, rejects, invariants
+is **`templates_evaluate`** (`{ id, version?, input, now? }` → `{ output, rejects, invariants, console
 }`), and a successful evaluate of a draft counts as its render for the render-before-you-run
-check. A `javascript` or `sql`/`html` id passed to evaluate is `template.contract_invalid`
+check. A `sql`/`html` id passed to evaluate is `template.contract_invalid`
 (`rule: type_not_script`); an unknown one is `template.not_found`.
 
+`console` is always a list of `{ level, text }` (empty when unused); lines captured before
+an evaluation fails remain in `details.console`. A missing isolate refuses JavaScript with
+`script.js.unavailable`.
+
 The bounds: one case ≤ `datapipelines.script.evaluate-timeout-seconds`, the suite ≤
-`datapipelines.script.suite-timeout-seconds`; the depth bound (`max-depth`, default 100) counts
+`datapipelines.script.suite-timeout-seconds`; the JSONata depth bound (`max-depth`, default 100) counts
 every evaluate entry and exit — nested expressions and non-tail lambda recursion alike, and
 set-level work over hundreds of rows evaluates at the default (#260) — while a tail-recursive
 lambda is trampolined by the library, so the wall clock is the bound that catches that shape. A

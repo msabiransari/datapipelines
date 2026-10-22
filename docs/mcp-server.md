@@ -1,9 +1,9 @@
 # MCP Server Specification
 
-**Status:** v1.75 (frozen contract — additive-only changes after this point)
+**Status:** v1.76 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 ---
 
@@ -523,7 +523,7 @@ Create a new template.
     "properties": {
       "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}(/[a-z0-9][a-z0-9_.-]{0,63}){1,9}$", "description": "Template id, and a FOLDER PATH: 2-10 lower-case '/'-separated segments (acme/finance/daily_orders.sql). A FOLDER IS REQUIRED — a bare 'daily_orders.sql' is refused with template.validation.id_invalid and details.reason='folder_required'; put experiments under test/, and shared macros under <owner>/lib/. Keep a template under the same prefix as the pipelines that read it. Optional; auto-generated if omitted. There is no rename, so choose the folder now."},
       "engine": {"type": "string", "enum": ["freemarker", "none"], "default": "freemarker", "description": "Template engine, matched to the type: 'freemarker' for sql/html, 'none' for the script types ('jsonata'/'javascript' — the body is evaluated, never rendered). Any other pairing is refused with template.validation.engine_unsupported."},
-      "type": {"type": "string", "enum": ["sql", "html", "jsonata", "javascript"], "default": "sql", "description": "Template kind, fixed at creation and identical on every version: 'sql' renders SQL for pipeline nodes (requires 'dialect'); 'html' renders HTML through an auto-escaping engine (must have NO 'dialect'); 'jsonata' and 'javascript' are script types — the body is one expression evaluated as a pure function of its input, engine is 'none', dialect/imports/is_library are refused, and contract/invariants/tests blocks are required. 'javascript' is refused at save until round two."},
+      "type": {"type": "string", "enum": ["sql", "html", "jsonata", "javascript"], "default": "sql", "description": "Template kind, fixed at creation and identical on every version: 'sql' renders SQL for pipeline nodes (requires 'dialect'); 'html' renders HTML through an auto-escaping engine (must have NO 'dialect'); 'jsonata' and 'javascript' are script types — a JSONata expression or the statements of main(input), evaluated as a pure function of its input, engine is 'none', dialect/imports/is_library are refused, and contract/invariants/tests blocks are required. JavaScript requires the installed isolate; otherwise save refuses with script.js.unavailable."},
       "dialect": {"type": "string", "enum": ["POSTGRES", "ORACLE", "MSSQL", "MYSQL", "H2", "DUCKDB", "SQLITE", "LAKE"], "description": "SQL execution target. Required when type is 'sql' (the default); forbidden otherwise — html and the script types declare no dialect."},
       "display_name": {"type": "string"},
       "description": {"type": "string", "description": "Free text. State the variables the body expects and their types — the template declares none."},
@@ -1766,7 +1766,7 @@ Evaluate a script template over a caller-supplied input object (7b, transform-no
 ```json
 {
   "name": "templates_evaluate",
-  "description": "Evaluate a script template ('jsonata'/'javascript') over a caller-supplied input object and return { output, rejects, invariants } — no staging, no Context. Use this to run a script's body against one input the way its test suite does (sql_probe's twin; templates_render is for sql/html and refuses a script type with template.render_not_applicable). The version resolves as templates_render does: omitted, the working version (the draft when one exists, else the latest released). A refusal is the code with its detail — a type-gate refusal, an input-contract violation, or an engine refusal (timeout, resource limit, pool exhausted).",
+  "description": "Evaluate a script template ('jsonata'/'javascript') over a caller-supplied input object and return { output, rejects, invariants, console } — no staging, no Context. Use this to run a script's body against one input the way its test suite does (sql_probe's twin; templates_render is for sql/html and refuses a script type with template.render_not_applicable). The version resolves as templates_render does: omitted, the working version (the draft when one exists, else the latest released). A refusal is the code with its detail — a type-gate refusal, an input-contract violation, or an engine refusal (timeout, resource limit, pool exhausted).",
   "inputSchema": {
     "type": "object",
     "required": ["id", "input"],
@@ -1783,7 +1783,7 @@ Evaluate a script template over a caller-supplied input object (7b, transform-no
 
 **Permission:** `template.evaluate` — the `templates_render` row (R6: evaluating untrusted code on the server is the same authoring act as rendering). The catalog declares the tool **not mutating**.
 
-**Returns:** `{ output, rejects, invariants: [ { name, passed, message } ] }`. `output` is the function's return after the type gate (the rows array, `{ rows, rejects }` when the contract declares rejects, or the one value/object in value mode); `rejects` is the rejected half with its reasons; each invariant verdict is `{ name, passed, message }`.
+**Returns:** `{ output, rejects, invariants: [ { name, passed, message } ], console: [ { level, text } ] }`. `output` is the function's return after the type gate (the rows array, `{ rows, rejects }` when the contract declares rejects, or the one value/object in value mode); `rejects` is the rejected half with its reasons; each invariant verdict is `{ name, passed, message }`. `console` is always present (empty when unused), for example `[{"level":"log","text":"mapped 2 rows"}]`; failures retain captured lines under `details.console`.
 
 **Errors:** an unknown id or version is `template.not_found`; an `sql`/`html` id is `template.contract_invalid` with `details.rule: "type_not_script"`; an input that violates the contract is the record §5.1's input-check code; an evaluation failure is the engine's own typed refusal (evaluation failure, timeout, resource limit, pool exhausted) or the type gate's (shape, value, precision, size) — §13.18 names them (7c). The `mcp.tool.called` audit row carries `tool`, `template`, `version` and `outcome` — never the input object or the output (§9.5).
 
@@ -3118,6 +3118,7 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-22 | v1.76 | 8b (#8) | The type description and §6.2.43 describe JavaScript availability, statement bodies and console results. |
 | 2026-10-21 | v1.75 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The template-type and node prose say script**: the script contract / invariants / tests descriptions, the `scripts` docs area and `skill/scripts-contracts`, the `templates_*` refusal reason `type_not_script`, the key `datapipelines.script.evaluate-timeout-seconds`; the visualization write tools' block property stays `transform` (restored in this lane's third round; `ArtifactWriteSchemaReaderParityTest` pins schema = reader keys). A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-11 | v1.74 | 504b (#504b) one shared search-needle rule | **§6.2.2 `pipelines_list` and §6.2.6 `templates_list` say what `q` matches and its bound**: the `inputSchema`'s `q` description now states the case-insensitive substring match, the columns actually searched (name, display name and description on pipelines; name and display name on templates — #424's understatements corrected), that a present `prefix` wins, and the shared 200-after-trim bound (#490, [pipeline-contract §13.21](pipeline-contract.md) v1.58). A longer `q` on ANY list tool is refused JSON-RPC `-32602 invalid params` (§9.1) naming the limit, the length and `request.query_too_long`, before any read and without echoing the term — the mapping moved from `parameter_sets_list`'s own catch to the dispatcher, so all three tools answer identically. REST answers the same term with `400` ([REST §21.2](rest-api.md#212-routes) v2.95). No tool, argument name, count or permission changed. |
 | 2026-10-09 | v1.73 | 490 (#490) the search needle's bound | **§6.2.44 `parameter_sets_list`**: `q` is bounded at 200 characters after the trim — the `inputSchema`'s `q` description says so, and a longer `q` is refused JSON-RPC `-32602 invalid params` (§9.1, the route a non-string `q` already takes) naming the limit, the length and `parameter.validation.query_too_long`, before any read and without echoing the term. The bound is `ParameterSetService`'s, shared with REST (`400`, [REST §21.2](rest-api.md#212-routes) v2.91); no tool, argument, count or permission changed. |

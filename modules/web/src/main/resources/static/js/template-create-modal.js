@@ -56,9 +56,13 @@
     field.hidden = !isScript;
     var blocks = field.querySelectorAll('textarea');
     for (var i = 0; i < blocks.length; i++) blocks[i].disabled = !isScript;
-    var example = body.getAttribute('data-script-body') || '';
-    if (isScript && body.value === '') body.value = example;
-    if (!isScript && body.value === example) body.value = '';
+    var jsonataExample = body.getAttribute('data-script-body') || '';
+    var javascriptExample = body.getAttribute('data-javascript-body') || '';
+    var example = type.value === 'javascript' ? javascriptExample : jsonataExample;
+    var untouched = body.value === '' || body.value === jsonataExample || body.value === javascriptExample;
+    if (untouched) body.value = isScript ? example : '';
+    var frame = document.querySelectorAll('[data-create-js-frame]');
+    for (var j = 0; j < frame.length; j++) frame[j].hidden = type.value !== 'javascript';
   }
   // 076 §D: arm immediately when this fragment arrives in a boosted swap
   // (DOMContentLoaded has long fired); wait for the parse only on a cold load.

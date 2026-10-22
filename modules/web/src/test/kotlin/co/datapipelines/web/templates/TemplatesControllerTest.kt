@@ -644,6 +644,7 @@ class TemplatesControllerTest {
             controller.evaluate("""{"name":"test/xform.jsonata","input":{"rows":[],"inputs":{}}}""")
 
         (response.data["output"] as Map<*, *>)["rows"] shouldBe emptyList<Any>()
+        response.data["console"] shouldBe emptyList<Any>()
         (response.data["invariants"] as List<*>).single().let {
             (it as Map<*, *>)["name"] shouldBe "one_to_one"
         }

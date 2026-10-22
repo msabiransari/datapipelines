@@ -45,7 +45,12 @@ class TemplateNameGrammarTest {
 
     @Test
     fun `save - every illegal name is id_invalid, every legal one is not`() {
-        val validator = TemplateValidator(LibraryResolver { _ -> InMemoryTemplateRegistry() })
+        val validator =
+            TemplateValidator(
+                scriptEngines =
+                    mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
+                libraryResolver = LibraryResolver { _ -> InMemoryTemplateRegistry() },
+            )
         LEGAL.forEach { name ->
             withClue("save must accept: '$name'") {
                 validator
@@ -66,7 +71,12 @@ class TemplateNameGrammarTest {
 
     @Test
     fun `save - a flat name is refused with reason folder_required, a malformed one with reason grammar`() {
-        val validator = TemplateValidator(LibraryResolver { _ -> InMemoryTemplateRegistry() })
+        val validator =
+            TemplateValidator(
+                scriptEngines =
+                    mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
+                libraryResolver = LibraryResolver { _ -> InMemoryTemplateRegistry() },
+            )
 
         // The point of `reason`: an agent that sent `scratch` must learn to send `test/scratch`,
         // and an agent that sent `_helper` must NOT — `test/_helper` is illegal too, so telling

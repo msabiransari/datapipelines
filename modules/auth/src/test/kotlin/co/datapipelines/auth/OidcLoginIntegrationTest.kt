@@ -43,10 +43,10 @@ import java.util.Base64
  * auth.md §5 makes the *real* provider normative: real issuer discovery, the real
  * authorization-code exchange, the real JWKS fetch. Every one of those is an HTTP round
  * trip from this JVM to a container and back, and the callback hop is three of them behind
- * one request. Spring Security's token-exchange and JWK clients are the shipped defaults,
- * which carry **no** timeouts of their own — so the only clock on the flow is this test's
- * own [HttpRequest.timeout], and when it fires the failure is an `HttpTimeoutException`
- * from the driver rather than any statement about the product.
+ * one request. The token exchange and user-info now use the configured provider timeout
+ * (#682); the JWK client keeps Spring's default. The driver also has its own
+ * [HttpRequest.timeout]; when that fires the failure is an `HttpTimeoutException`
+ * from the driver rather than a provider-timeout verdict from the product.
  *
  * That is exactly what happened: at a 30 s per-request budget the suite failed
  * intermittently during loaded full gates while passing in isolation every time. The

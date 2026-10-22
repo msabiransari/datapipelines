@@ -31,6 +31,7 @@ internal object ConfigSnapshots {
             dbEncryptionKey = secret(32),
             uiTheme = "saas",
             uiActivelyDevelopedDays = "14",
+            providerReadTimeoutSeconds = "10",
             oidcProviders =
                 listOf(
                     OidcProviderSnapshot(
