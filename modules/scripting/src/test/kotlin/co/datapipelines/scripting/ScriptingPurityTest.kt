@@ -51,7 +51,7 @@ class ScriptingPurityTest {
                 file
                     .readLines()
                     .withIndex()
-                    .filter { (_, line) -> FORBIDDEN_IMPORT.containsMatchIn(line) }
+                    .filter { (_, line) -> FORBIDDEN_IMPORT.containsMatchIn(line) && line.trim() !in ALLOWED_IMPORTS }
                     .map { (index, line) -> "${file.name}:${index + 1}: ${line.trim()}" }
             }
 
@@ -136,6 +136,14 @@ class ScriptingPurityTest {
          */
         val FORBIDDEN_IMPORT =
             Regex("""^import (java\.(io|net|nio|sql)|javax\.|jakarta\.|org\.springframework\.|java\.time\.Clock)""")
+
+        /**
+         * The named exceptions (#8 lane 8a), each an exact import line: the stream TYPES the
+         * polyglot API takes for a Context's `in`/`out`/`err` (the JavaScript engine redirects all
+         * three to memory — `InputStream.nullInputStream()` and the module's own `BoundedBuffer`).
+         * Neither opens anything; a file, path, socket or any other java.io/java.nio type stays refused.
+         */
+        val ALLOWED_IMPORTS = setOf("import java.io.InputStream", "import java.io.OutputStream")
 
         /**
          * Ambient state a pure function may not read. `now(` covers `Instant.now` and

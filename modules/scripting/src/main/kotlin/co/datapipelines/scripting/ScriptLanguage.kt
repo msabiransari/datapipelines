@@ -8,13 +8,13 @@ package co.datapipelines.scripting
  * template service, dashboard runtime) without a contract dependency. The template lane (7b)
  * maps the two.
  *
- * `JAVASCRIPT` exists so round two's engine can implement the same seam without touching
- * this vocabulary; no engine for it ships yet.
+ * `JAVASCRIPT` is [JavaScriptEngine] (#8 lane 8a), on the same seam and vocabulary; no
+ * product surface selects it yet (a javascript template is still refused until lane 8b).
  */
 enum class ScriptLanguage {
     /** JSONata, via `com.dashjoin:jsonata`, in-process. */
     JSONATA,
 
-    /** JavaScript (GraalJS polyglot isolate) — round two; reserved, not implemented. */
+    /** JavaScript (ECMAScript 2025, pinned), via the GraalJS polyglot isolate: [JavaScriptEngine]. */
     JAVASCRIPT,
 }
