@@ -8,11 +8,12 @@
 // 1. The layering row (§4.2 + the root build's allowed-dependency map) — no route to a
 //    database, HTTP client or Spring context is even compilable, and `ScriptingPurityTest`
 //    refuses an I/O, network or JDBC import in `src/main` the `CalculatorPurityTest` way.
-// 2. The resource bounds are measured, not believed: `JsonataBreachTest` runs the bomb
-//    corpus in the `breachSuite` task below and writes `build/reports/jsonata-breach.md`,
-//    whose table is what dag-executor.md publishes. (`ScriptEngine.capabilities` reports
-//    which limits the engine can actually enforce; the heap is explicitly NOT one of them
-//    in-process.)
+// 2. The resource bounds are measured, not believed: `JsonataBreachTest` and
+//    `JavaScriptBreachTest` run their bomb corpora in the `breachSuite` task below and write
+//    `build/reports/jsonata-breach.md` and `javascript-breach.md`, whose tables are what
+//    dag-executor.md publishes; `JavaScriptMeasurementsTest` writes the JavaScript engine's
+//    costs beside them. (`ScriptEngine.capabilities` reports which limits each engine can
+//    actually enforce; the heap is NOT one of them in-process — only the JavaScript isolate's.)
 plugins { id("datapipelines.common-conventions") }
 
 dependencies {
@@ -23,6 +24,17 @@ dependencies {
     implementation("com.fasterxml.jackson.core:jackson-databind")
     // The pool's abandonment log (§4.3): SLF4J API only; the registry lives in `app`.
     implementation(libs.slf4j.api)
+    // The JavaScript engine (transform-nodes design §4.4, D-T16; #8 lane 8a): the polyglot API and
+    // the isolate's two declared dependencies, explicit so the boot jar carries everything the
+    // isolate needs EXCEPT the native binary itself.
+    implementation(libs.graalvm.polyglot)
+    implementation(libs.graalvm.nativebridge)
+    implementation(libs.graalvm.truffle.api)
+    // The binary is TEST runtime only: the aggregator pom pulls all four platform isolates (~245 MB,
+    // once, in the Gradle cache) so the lockfile is the same on every machine and polyglot picks the
+    // host's at runtime. The jar never carries one — the image fetches its platform's (Dockerfile,
+    // D-T16) onto the loader path (`LOADER_PATH`); a jar run without it reports JavaScript unavailable.
+    testRuntimeOnly(libs.graalvm.js.isolate.community)
 }
 
 // ---- the breach suite: its own source set, its own task, its own 512m JVM (#289) ----------
@@ -67,12 +79,16 @@ detekt { source.from("src/test/breach/kotlin") }
 
 val breachSuite =
     tasks.register<Test>("breachSuite") {
-        description = "Runs the JSONata breach suite alone in its own 512m JVM and writes build/reports/jsonata-breach.md."
+        description =
+            "Runs the JSONata and JavaScript breach suites and the JavaScript measurements alone in their own 512m JVM " +
+            "and writes build/reports/jsonata-breach.md, javascript-breach.md and javascript-measurements.md."
         group = "verification"
         testClassesDirs = breachTest.output.classesDirs
         classpath = breachTest.runtimeClasspath
         shouldRunAfter(tasks.named("test"))
         outputs.file(layout.buildDirectory.file("reports/jsonata-breach.md"))
+        outputs.file(layout.buildDirectory.file("reports/javascript-breach.md"))
+        outputs.file(layout.buildDirectory.file("reports/javascript-measurements.md"))
     }
 // A configure action of its own, so it lands AFTER the conventions' `withType<Test>()` defaults
 // (`dp.test.heap`, `dp.test.forks`) whatever the order Gradle runs a register block in.

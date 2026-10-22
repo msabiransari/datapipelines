@@ -46,6 +46,33 @@ RUN case "$TARGETARCH" in \
 # pass-through defaults to the same path (deploy/compose.yml).
 ENV DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY=/opt/duckdb/extensions
 
+# The JavaScript engine's isolate (#8, transform-nodes design §4.4, D-T16): GraalJS runs author
+# scripts inside a polyglot ISOLATE, a native library with its own heap, so the jar carries the
+# polyglot API and the isolate's two bridge dependencies but never the binary itself — one
+# platform's isolate is ~62 MB compressed, and a jar holding all four would carry ~245 MB of which
+# a container uses one. The image fetches the one its TARGETARCH needs from Maven Central and
+# checks it against the pinned sha256 (Maven Central publishes the sums; the ARG pins them so a
+# swapped artifact fails the build at `sha256sum -c`, not at runtime). The version ARG is the
+# catalog's `graalvm` version (gradle/libs.versions.toml): a polyglot upgrade re-pins the version
+# AND both sums here, and DockerfileGraalJsPinTest fails until it does. A jar run without this
+# directory on its loader path reports JavaScript unavailable; nothing else changes.
+ARG GRAALJS_VERSION=25.4.4.1.1
+ARG GRAALJS_SHA256_LINUX_AMD64=8a892a57d16eaac0460b413d0773751a0f3e4ce7714029a40d957220675acc72
+ARG GRAALJS_SHA256_LINUX_AARCH64=94a8529711a72678b219104a13c2875b25717dfbff1f109685430e2061899dde
+RUN case "$TARGETARCH" in \
+      amd64) gp=linux-amd64; sum=$GRAALJS_SHA256_LINUX_AMD64 ;; \
+      arm64) gp=linux-aarch64; sum=$GRAALJS_SHA256_LINUX_AARCH64 ;; \
+      *) echo "unsupported TARGETARCH for the GraalJS isolate: '$TARGETARCH'" >&2; exit 1 ;; \
+    esac && \
+    mkdir -p /opt/graaljs && \
+    curl -fsSL -o /opt/graaljs/js-isolate.jar \
+      "https://repo1.maven.org/maven2/org/graalvm/js/js-isolate-$gp-community/${GRAALJS_VERSION}/js-isolate-$gp-community-${GRAALJS_VERSION}.jar" && \
+    echo "$sum  /opt/graaljs/js-isolate.jar" | sha256sum -c -
+
+# The isolate directory the engine reports in its availability reason (8b binds the key; until
+# then the variable is read by nothing and harmless).
+ENV DATAPIPELINES_SCRIPT_JS_ISOLATE_DIR=/opt/graaljs
+
 COPY modules/app/build/libs/datapipelines-*.jar /app/datapipelines.jar
 
 # The JDBC driver drop-in (module-structure.md §5.4.1): the jar's PropertiesLauncher adds
@@ -56,8 +83,30 @@ COPY modules/app/build/libs/datapipelines-*.jar /app/datapipelines.jar
 # root:root 0555 BEFORE `USER`: a directory the app user could write would be
 # code-execution-by-file-drop (deployment.md §9, the lib/ checklist line). The value lives
 # here, never in compose or the chart (ImageLoaderPathSpecDriftTest refuses a deploy file naming it).
+# The second entry is the GraalJS isolate directory above (#8): ONE list, so the drop-in and the
+# isolate share a single source of truth — a `-Dloader.path` on the command line would REPLACE
+# this variable, not extend it (PropertiesLauncher reads the system property first; measured in
+# lane 8a), and the drop-in would silently vanish.
 RUN mkdir -p /app/lib && chmod 0555 /app/lib
-ENV LOADER_PATH=/app/lib
+ENV LOADER_PATH=/app/lib,/opt/graaljs
+
+# Pre-install the isolate's native resources (D5) as root, at build time: on its first Engine,
+# polyglot unpacks the isolate library and libtruffleattach into a resource cache, by default
+# under the user's home, which a read-only root refuses. JavaScriptResourcesMain points that
+# cache at /opt/graaljs/resources and starts one Engine through the engine's own factory, so
+# polyglot's installer writes the cache in its own layout (Engine.copyResources is NOT used: it
+# copies the isolate but not libtruffleattach, which HotSpot needs — measured in lane 8a) and the
+# build fails here if the isolate cannot start. The ENTRYPOINT points the same property at the same
+# directory. The cache stays root-owned and is made readable by all and writable by none:
+# polyglot creates its per-resource directories 0700, which the app user cannot read, and a
+# cache it cannot read is one it tries to re-install into (measured in lane 8a: refused, the
+# Engine fails). So nothing is written at runtime, and the app user cannot replace a library it
+# loads (the /app/lib reasoning above). The chmod names the cache, not /opt/graaljs: touching the
+# fetched jar's mode here would copy all 62 MB of it into this layer a second time (measured in
+# lane 8a); the jar is already root-owned 0644 from the fetch, readable and not writable by the app.
+RUN java -Dloader.main=co.datapipelines.scripting.JavaScriptResourcesMain -cp /app/datapipelines.jar \
+      org.springframework.boot.loader.launch.PropertiesLauncher /opt/graaljs/resources && \
+    chmod -R a+rX,a-w /opt/graaljs/resources
 
 USER datapipelines
 EXPOSE 8080
@@ -83,4 +132,6 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
   CMD wget -qO /dev/null http://localhost:8080/ready || exit 1
 
-ENTRYPOINT ["java", "-jar", "/app/datapipelines.jar"]
+# The resource cache JavaScriptResourcesMain filled at build time (above); no other runtime flag
+# for the engine — the isolate reaches the classpath through LOADER_PATH.
+ENTRYPOINT ["java", "-Dpolyglot.engine.userResourceCache=/opt/graaljs/resources", "-jar", "/app/datapipelines.jar"]

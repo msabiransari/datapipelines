@@ -223,6 +223,20 @@ Or run from your IDE: main class `co.datapipelines.DatapipelinesApplicationKt`, 
 
 The app starts on `http://localhost:8080`.
 
+**The JavaScript isolate is in the image, never in the jar (#8).** The jar carries the polyglot
+API; the GraalJS isolate binary (`org.graalvm.polyglot:js-isolate-community`) is a test-runtime
+dependency only, so `bootRun` and a bare `java -jar` report JavaScript unavailable (no product
+path selects it before #8's lane 8b). The Dockerfile's runtime stage fetches the `TARGETARCH`'s
+isolate jar from Maven Central into `/opt/graaljs` and checks it against the pinned sum
+(`GRAALJS_VERSION`, `GRAALJS_SHA256_LINUX_AMD64` / `_AARCH64`; a mismatch fails the build at
+`sha256sum -c`), puts it on the class path through `LOADER_PATH=/app/lib,/opt/graaljs`, and runs
+`JavaScriptResourcesMain` as root to unpack the isolate's native resources into
+`/opt/graaljs/resources`, made read-only for everyone; the ENTRYPOINT names that cache with
+`-Dpolyglot.engine.userResourceCache`, so a read-only root filesystem runs it. A GraalVM bump is
+three edits that must agree — the catalog's `graalvm`, the version ARG and both sums —
+and `DockerfileGraalJsPinTest` stays red until the sums are those of the jars the tests ran.
+`./app.sh --start` builds it unchanged; the image build needs network access to repo1.maven.org.
+
 ### 6.1 Run from IntelliJ IDEA
 
 1. **Run → Edit Configurations → + → Application.**
@@ -262,7 +276,11 @@ This resolves every resolvable configuration in every module and rewrites all
 diff like any dependency review — it shows exactly which versions moved — and
 commit it in the same commit as the catalog/build-file change that caused it.
 A lockfile diff with no corresponding dependency change means something drifted
-that you did not intend; investigate, don't commit.
+that you did not intend; investigate, don't commit. A dependency added to a library
+module moves the lock of every module that resolves it too: #8's GraalVM API in
+`scripting` added sixteen lines to its own lock and the same seven (its runtime class
+path's GraalVM jars) to each of the ten locks whose runtime class path reaches `scripting` —
+additions only, every one a GraalVM artifact.
 
 - To move a single module (say, bump only SLF4J): change the version, then
   `./gradlew resolveAndLockAll --write-locks --update-locks org.slf4j:slf4j-api`.
@@ -303,7 +321,9 @@ records each artifact's checksum. **Run it against a COLD `GRADLE_USER_HOME`** (
 already holds parent POMs Gradle reads off the metadata graph, so the writer never
 records them and only CI's cold job finds the gap (2026-09-29, the jackson 2.21.6 bump:
 `jackson-modules-java8-2.21.6.pom` was missing on every CI job while the laptop was green). Review the diff like the lockfile diff:
-new entries must be exactly the artifacts your change introduced.
+new entries must be exactly the artifacts your change introduced — on every configuration,
+test runtime included: #8's test-only isolate aggregator records all four platform binaries
+(under both `org.graalvm.polyglot` and `org.graalvm.js`), though none of them ships in the jar.
 
 #### Hand-verified entries
 
@@ -728,13 +748,14 @@ the counts, 2 for a root that is not a directory, and 3 when no result XML is fo
 rather than retyped so two lanes' numbers are comparable; a modules-only glob under-reported the
 total for four consecutive rounds before it existed.
 
-**The breach suite is a task of its own (#289).** `JsonataBreachTest` lives in
-`modules/scripting/src/test/breach` and runs ALONE in `:modules:scripting:breachSuite`, a 512m test
+**The breach suite is a task of its own (#289).** `JsonataBreachTest` and, since #8,
+`JavaScriptBreachTest` (with `JavaScriptMeasurementsTest`, the JavaScript engine's costs) live in
+`modules/scripting/src/test/breach` and run ALONE in `:modules:scripting:breachSuite`, a 512m test
 JVM of its own, never inside the module's `test` (which runs at the conventions' `dp.test.heap`).
 It hangs off `check`, so the gate's two `build` stages and CI's build step run it with no stage
 of their own; a filtered `:modules:scripting:test` no longer touches it, and
-`./gradlew :modules:scripting:breachSuite` regenerates `build/reports/jsonata-breach.md` (the
-table dag-executor.md pastes). Its results land in `build/test-results/breachSuite/` — the
+`./gradlew :modules:scripting:breachSuite` regenerates `build/reports/jsonata-breach.md` and
+`javascript-breach.md` (the tables dag-executor.md pastes) and `javascript-measurements.md`. Its results land in `build/test-results/breachSuite/` — the
 recount's `test-results/**` glob counts them; `verifyBreachSuiteExecuted` is its zero-test
 guard. A red there reads one of two ways, both named in the XML and the report: a prediction
 that no longer holds (reconcile the doc), or a `SKIPPED` row — the case could not start with the
