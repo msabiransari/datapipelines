@@ -6,13 +6,18 @@ import co.datapipelines.auth.WorkspaceService
 import co.datapipelines.pipeline.SearchNeedle
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.security.core.context.SecurityContextHolder
-import org.springframework.stereotype.Controller
 import org.springframework.web.bind.annotation.ControllerAdvice
 import org.springframework.web.bind.annotation.ModelAttribute
 
 /**
- * Fills the layout's workspace switcher for every [Controller] screen (ui-screens.md §3):
+ * Fills the layout's workspace switcher for every [ShellPage] screen (ui-screens.md §3):
  * the caller's memberships and the ACTIVE workspace's name.
+ *
+ * Selection rule (#652): `assignableTypes = [ShellPage::class]` — the shell model is
+ * computed for controllers whose views render inside the shell, and for nothing else. A
+ * `@RestController` never implements [ShellPage], so a JSON handler pays none of these
+ * reads; until #652 the selector was `annotations = [Controller::class]`, which matched
+ * `@RestController` through its meta-annotation.
  *
  * Also supplies the global layout chrome attributes so no controller can forget them:
  * `activeTheme` (a missing value renders a `themes/null.css` URL, which 404s and leaves
@@ -31,7 +36,7 @@ import org.springframework.web.bind.annotation.ModelAttribute
  * The top bar's MCP-key chip (179, D16) is GONE — keys v2 A15 retired the login mint, and
  * the Keys page is the one creation path — so this advice no longer reads keys at all.
  */
-@ControllerAdvice(annotations = [Controller::class])
+@ControllerAdvice(assignableTypes = [ShellPage::class])
 class UiWorkspaceAdvice(
     private val workspaceService: WorkspaceService,
     private val themeResolver: ThemeResolver,

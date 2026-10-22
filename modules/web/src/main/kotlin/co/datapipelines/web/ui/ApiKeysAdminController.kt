@@ -63,7 +63,7 @@ class ApiKeysAdminController(
     private val dashboards: co.datapipelines.visualization.DashboardService,
     private val userRepository: UserRepository,
     private val themeResolver: ThemeResolver,
-) {
+) : ShellPage {
     @GetMapping("/api-keys")
     @RequiredScope(Permission.MCP_KEY_OWN)
     fun page(

@@ -15,7 +15,7 @@ class UiController(
     private val themeResolver: ThemeResolver,
     private val oidcRegistrations: OidcRegistrations,
     private val authProperties: AuthProperties,
-) {
+) : ShellPage {
     /**
      * The login screen (auth.md §5A).
      *

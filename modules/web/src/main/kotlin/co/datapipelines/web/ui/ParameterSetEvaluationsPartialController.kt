@@ -25,7 +25,7 @@ class ParameterSetEvaluationsPartialController(
     private val history: ParameterSetEvaluationsBrowseModel,
     /** 178 — the promoter lens: every fragment here renders the caller's view. */
     private val lens: PromoterLens,
-) {
+) : ShellPage {
     @GetMapping("/partials/parameter-sets/{id}/evaluations")
     @RequiredScope(Permission.PARAMETER_SET_READ)
     fun list(

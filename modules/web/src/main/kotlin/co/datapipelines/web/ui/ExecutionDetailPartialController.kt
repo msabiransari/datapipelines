@@ -34,7 +34,7 @@ class ExecutionDetailPartialController(
     private val resultStore: ResultStore,
     private val cursor: ResultCursor,
     private val cancellation: ExecutionCancellationService,
-) {
+) : ShellPage {
     @GetMapping("/{id}/result")
     @RequiredScope(Permission.EXECUTION_RESULT_READ)
     fun result(

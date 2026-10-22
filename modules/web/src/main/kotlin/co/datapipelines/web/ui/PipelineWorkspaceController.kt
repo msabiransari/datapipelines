@@ -47,7 +47,7 @@ class PipelineWorkspaceController(
      * [PipelineBrowseModel.fillWorkspaceTabs] so the two surfaces cannot drift.
      */
     private val browse: PipelineBrowseModel,
-) {
+) : ShellPage {
     // NOT a constructor parameter: Spring injects the app's servlet ObjectMapper into an
     // ObjectMapper-typed parameter even when it has a default, and that mapper lacks the
     // contract modules (see PipelineEditorController, 032). Guarded by

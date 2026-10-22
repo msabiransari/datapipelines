@@ -27,7 +27,7 @@ class TemplateUiController(
     private val themeResolver: ThemeResolver,
     /** 178 — the promoter lens: the page renders the caller's view. */
     private val lens: PromoterLens,
-) {
+) : ShellPage {
     @GetMapping("/templates")
     @RequiredScope(Permission.TEMPLATE_READ)
     fun list(

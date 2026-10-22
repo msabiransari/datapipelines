@@ -23,7 +23,7 @@ import org.springframework.web.bind.annotation.RequestParam
 @Controller
 class SearchController(
     private val search: SearchBrowseModel,
-) {
+) : ShellPage {
     @GetMapping("/partials/search")
     @RequiredScope(Permission.PIPELINE_READ)
     fun results(

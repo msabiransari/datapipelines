@@ -1,6 +1,7 @@
 package co.datapipelines.web.ui.site
 
 import co.datapipelines.web.ui.DocsCatalog
+import co.datapipelines.web.ui.ShellPage
 import jakarta.servlet.http.HttpServletResponse
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
@@ -21,7 +22,7 @@ import org.springframework.web.bind.annotation.GetMapping
 @Controller
 class SiteHubController(
     private val docs: DocsCatalog,
-) {
+) : ShellPage {
     @GetMapping("/use-cases")
     fun useCases(
         model: Model,

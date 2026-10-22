@@ -39,7 +39,7 @@ class TemplateEditorController(
     private val reads: TemplateService,
     private val lens: PromoterLens,
     actors: ActorNames,
-) {
+) : ShellPage {
     /** The source column's one rule, shared with the script face's routes (7d). */
     private val source = TemplateSourceModel(reads, actors)
 

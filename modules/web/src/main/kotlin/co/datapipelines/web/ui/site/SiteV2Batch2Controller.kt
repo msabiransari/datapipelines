@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui.site
 
+import co.datapipelines.web.ui.ShellPage
 import jakarta.servlet.http.HttpServletResponse
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
@@ -12,7 +13,7 @@ import org.springframework.web.bind.annotation.GetMapping
  * because the batch is a unit: everything the seven pages need lives beside each other.
  */
 @Controller
-class SiteV2Batch2Controller {
+class SiteV2Batch2Controller : ShellPage {
     // ---- Site v2 batch 2 (111): seven more intent pages. Same shape: GET, anonymous, no DB read.
     @GetMapping("/compare/fivetran-airbyte")
     fun compareFivetranAirbyte(

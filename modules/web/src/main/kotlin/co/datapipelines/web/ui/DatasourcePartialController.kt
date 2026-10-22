@@ -55,7 +55,7 @@ class DatasourcePartialController(
      * that could disagree with the refusal the user would hit a moment later.
      */
     private val references: DatasourceReferences,
-) {
+) : ShellPage {
     @GetMapping("/partials/datasources")
     @RequiredScope(Permission.DATASOURCE_READ)
     fun list(

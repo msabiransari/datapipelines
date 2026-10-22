@@ -39,7 +39,7 @@ import java.util.UUID
 class DatasourceOverviewController(
     private val repository: DatasourceRepository,
     private val themeResolver: ThemeResolver,
-) {
+) : ShellPage {
     private val log = LoggerFactory.getLogger(DatasourceOverviewController::class.java)
 
     @GetMapping(PATH)

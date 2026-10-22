@@ -58,7 +58,7 @@ class DashboardWorkspaceController(
     private val lens: PromoterLens,
     /** #473 — the dock's History pane is the refreshes partial, server-rendered at load. */
     private val browse: DashboardBrowseModel,
-) {
+) : ShellPage {
     @GetMapping("/dashboards/{id}")
     @RequiredScope(Permission.DASHBOARD_READ)
     fun workspace(

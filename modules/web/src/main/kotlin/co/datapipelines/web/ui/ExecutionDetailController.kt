@@ -28,7 +28,7 @@ class ExecutionDetailController(
     private val resultStore: ResultStore,
     private val resultUrlFactory: ResultUrlFactory,
     private val events: ExecutionEventRepository,
-) {
+) : ShellPage {
     @GetMapping("/executions/{id}")
     @RequiredScope(Permission.EXECUTION_READ)
     fun detail(
