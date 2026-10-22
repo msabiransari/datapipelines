@@ -2,6 +2,7 @@ package co.datapipelines.application.templates
 
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.TemplateType
+import co.datapipelines.scripting.ConsoleLine
 import co.datapipelines.templates.ScriptTestInput
 import co.datapipelines.templates.ScriptTestRunner
 import co.datapipelines.templates.TemplateRepository
@@ -33,7 +34,11 @@ class TemplateEvaluateService(
         val output: Any?,
         val rejects: List<Map<String, Any?>>,
         val invariants: List<ScriptTestRunner.InvariantVerdict>,
-    )
+        val console: List<ConsoleLine> = emptyList(),
+    ) {
+        /** Wire form for adapters that do not depend on the scripting module. */
+        fun consolePayload(): List<Map<String, String>> = console.map { mapOf("level" to it.level.name.lowercase(), "text" to it.text) }
+    }
 
     /**
      * Evaluates the working (or [version]'d) version of [name] over [input].
@@ -72,8 +77,8 @@ class TemplateEvaluateService(
         val engine =
             runner.engineFor(resolved.type)
                 ?: throw DatapipelinesException(
-                    code = PipelineErrorCodes.Template.RENDER_NOT_APPLICABLE,
-                    message = "No engine for type '${resolved.type.wire}' yet (javascript ships in round two).",
+                    code = PipelineErrorCodes.Script.JS_UNAVAILABLE,
+                    message = co.datapipelines.pipeline.JAVASCRIPT_UNAVAILABLE_MESSAGE,
                     details = mapOf("type" to resolved.type.wire),
                 )
         val script = engine.compile(resolved.body)
@@ -93,18 +98,31 @@ class TemplateEvaluateService(
                 )
         ) {
             is ScriptTestRunner.RunOutcome.Refused -> {
-                throw DatapipelinesException(
-                    code = outcome.code,
-                    message = outcome.message,
-                    details = mapOf("template_id" to name, "version" to resolved.version),
-                )
+                throw evaluationRefusal(name, resolved.version, outcome)
             }
 
             is ScriptTestRunner.RunOutcome.Evaluated -> {
-                Evaluation(outcome.output, outcome.rejects, outcome.invariants)
+                Evaluation(outcome.output, outcome.rejects, outcome.invariants, outcome.console)
             }
         }
     }
+
+    private fun evaluationRefusal(
+        name: String,
+        version: Int,
+        outcome: ScriptTestRunner.RunOutcome.Refused,
+    ): DatapipelinesException =
+        DatapipelinesException(
+            code = outcome.code,
+            message = outcome.message,
+            details =
+                outcome.details +
+                    mapOf(
+                        "template_id" to name,
+                        "version" to version,
+                        "console" to outcome.console.map { mapOf("level" to it.level.name.lowercase(), "text" to it.text) },
+                    ),
+        )
 
     private fun notFound(
         name: String,

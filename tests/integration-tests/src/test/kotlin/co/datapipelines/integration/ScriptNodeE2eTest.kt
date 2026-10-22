@@ -54,6 +54,7 @@ import java.util.UUID
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
 )
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
+@Suppress("LargeClass") // One ordered lake/staging fixture shared by the two language walks.
 class ScriptNodeE2eTest {
     @LocalServerPort
     private var port: Int = 0
@@ -441,6 +442,369 @@ class ScriptNodeE2eTest {
         terciles["rows_out"].asLong() shouldBe ICEBERG_ROWS.toLong()
     }
 
+    @Test
+    @Order(11)
+    fun `a javascript script splits 2000 ranked lake rows into terciles through the real pool`() {
+        val started = System.nanoTime()
+        val jsTemplate = "test/it_terciles.javascript"
+        val jsBody =
+            """
+            const ranked = input.inputs.ranked;
+            const third = Math.ceil(ranked.length / 3);
+            console.log("ranked " + ranked.length + " rows");
+            return ranked.map(row => ({id: row.id, trip_rank: row.trip_rank,
+              volume_class: row.trip_rank <= third ? "top" : row.trip_rank <= third * 2 ? "middle" : "bottom"}));
+            """.trimIndent()
+        createScriptTemplate(jsTemplate, jsBody, tercilesContract(), emptyList(), tercilesTests(), language = "javascript")
+
+        val tercilePipeline =
+            createPipeline(
+                "test/script_terciles_js",
+                mapOf(
+                    "schema_version" to 1,
+                    "name" to "test/script_terciles_js",
+                    "display_name" to "Script Terciles E2E",
+                    "description" to "#260 E2E",
+                    "parameters" to emptyMap<String, Any>(),
+                    "nodes" to tercileNodes(jsTemplate),
+                ),
+                expectedStatus = 201,
+            )
+
+        val events = execute(tercilePipeline, emptyMap())
+        withClue("the run's events: ${events.last()}") { events.last().first shouldBe "data_ready" }
+        val executionId = events.last().second["execution_id"].asText()
+
+        // The default result page is 1000 rows; the leg wants every row it ranked.
+        val full =
+            given()
+                .port(port)
+                .asSession(ADMIN_SESSION)
+                .queryParam("offset", 0)
+                .queryParam("limit", ICEBERG_ROWS)
+                .`when`()
+                .get("/api/v1/executions/$executionId/result")
+                .then()
+                .statusCode(200)
+                .extract()
+                .body()
+                .asString()
+        val result = mapper.readTree(full)["data"]
+        result["total_rows"].asLong() shouldBe ICEBERG_ROWS.toLong()
+        result["schema"].map { it["name"].asText() } shouldBe listOf("id", "trip_rank", "volume_class")
+        // 2000 rows: ranks 1..667 top, 668..1334 middle, 1335..2000 bottom.
+        result["rows"][0][1].asInt() shouldBe 1
+        result["rows"][0][2].asText() shouldBe "top"
+        result["rows"][667][2].asText() shouldBe "middle"
+        result["rows"][1334][2].asText() shouldBe "bottom"
+        result["rows"][1999][2].asText() shouldBe "bottom"
+
+        val terciles = nodeStats(executionId).single { it["node_id"].asText() == "terciles" }
+        terciles["status"].asText() shouldBe "SUCCESS"
+        terciles["rows_in"].asLong() shouldBe ICEBERG_ROWS.toLong()
+        terciles["rows_out"].asLong() shouldBe ICEBERG_ROWS.toLong()
+        println("8b JavaScript terciles: rows=2000 elapsed_ms=" + (System.nanoTime() - started) / 1_000_000)
+    }
+
+    @Test
+    @Order(12)
+    fun `javascript save parses only then runs the mandatory empty case and both evaluate surfaces return console`() {
+        val contract = shapeContract()
+        val body =
+            """
+            console.log("<img src=x onerror=alert(1)>");
+            return {rows: input.rows.filter(row => row.customer_id != null).map(row => ({
+              order_id: row.order_id, amount: row.amount_cents / 100, customer_id: row.customer_id
+            })), rejects: input.rows.filter(row => row.customer_id == null).map(row => ({row: row, reason: "customer_id missing"}))};
+            """.trimIndent()
+        val id = "test/js_shape.javascript"
+        createScriptTemplate(id, body, contract, shapeInvariants(), shapeTests(), release = false, language = "javascript")
+        val input =
+            mapOf(
+                "rows" to listOf(mapOf("order_id" to 1, "amount_cents" to 1250, "customer_id" to null)),
+                "inputs" to emptyMap<String, Any>(),
+            )
+        val (mcp, error) = callTool(nextMcpId(), "templates_evaluate", mapOf("id" to id, "input" to input))
+        withClue(mcp.toString()) { error shouldBe false }
+        mcp["rejects"].size() shouldBe 1
+        mcp["invariants"][0]["passed"].asBoolean() shouldBe true
+        mcp["console"][0]["level"].asText() shouldBe "log"
+        mcp["console"][0]["text"].asText() shouldBe "<img src=x onerror=alert(1)>"
+        val rest = evaluateRest(id, input, 200)
+        rest["console"] shouldBe mcp["console"]
+        println("8b REST console response: $rest")
+        println("8b MCP console response: $mcp")
+
+        val base =
+            mapOf(
+                "display_name" to "JS refusal",
+                "description" to "save-time cases",
+                "type" to "javascript",
+                "contract" to contract,
+                "invariants" to emptyList<Any>(),
+            )
+
+        fun save(
+            suffix: String,
+            statements: String,
+            cases: List<Map<String, Any?>>,
+        ): Pair<JsonNode, Boolean> =
+            callTool(
+                nextMcpId(),
+                "templates_create",
+                base + mapOf("id" to "test/js_$suffix.javascript", "body" to statements, "tests" to cases),
+            )
+        val (noCases, noCasesError) = save("no_cases", "const a = 1;", emptyList())
+        noCasesError shouldBe true
+        noCases.toString().contains("empty_case_missing") shouldBe true
+        val (noReturn, noReturnError) = save("no_return", "const a = 1;", shapeTests().take(1))
+        noReturnError shouldBe true
+        noReturn["error"]["code"].asText() shouldBe "template.test_failed"
+        noReturn.toString().contains("main returned nothing") shouldBe true
+        println("8b pooled no-return refusal: $noReturn")
+        val (badExpect, badExpectError) = save("bad_expect", body, shapeTests().take(1).map { it + ("expect" to mapOf("output" to 42)) })
+        badExpectError shouldBe true
+        badExpect.toString().contains("template.test_failed") shouldBe true
+        val (syntax, syntaxError) = save("syntax", "if (x {", shapeTests())
+        syntaxError shouldBe true
+        syntax["error"]["details"]["failures"][0]["details"]["line"].asInt() shouldBe 1
+        syntax["error"]["details"]["failures"][0]["details"]["column"].asInt() shouldBe 7
+        syntax.toString().contains("template.validation.syntax_error") shouldBe true
+        println("8b author-relative syntax refusal: $syntax")
+    }
+
+    @Test
+    @Order(13)
+    fun `a javascript failure retains console and its pool slot accepts the next evaluation`() {
+        val id = "test/js_failure.javascript"
+        val body = "console.warn('before failure'); throw new Error('failure witness');"
+        val cases =
+            listOf(
+                mapOf(
+                    "name" to "empty input",
+                    "input" to mapOf("rows" to emptyList<Any>(), "inputs" to emptyMap<String, Any>()),
+                    "expect" to mapOf("refusal" to "pipeline.script.evaluation_failed"),
+                ),
+            )
+        createScriptTemplate(id, body, shapeContract(), emptyList(), cases, release = false, language = "javascript")
+        val refused = evaluateRest(id, mapOf("rows" to emptyList<Any>(), "inputs" to emptyMap<String, Any>()), 500)
+        refused["details"]["console"][0]["text"].asText() shouldBe "before failure"
+        val (mcp, error) =
+            callTool(
+                nextMcpId(),
+                "templates_evaluate",
+                mapOf(
+                    "id" to id,
+                    "input" to mapOf("rows" to emptyList<Any>(), "inputs" to emptyMap<String, Any>()),
+                ),
+            )
+        error shouldBe true
+        withClue(mcp.toString()) { mcp.toString().contains("before failure") shouldBe true }
+        evaluateRest(
+            "test/js_shape.javascript",
+            mapOf("rows" to emptyList<Any>(), "inputs" to emptyMap<String, Any>()),
+            200,
+        )["console"].size() shouldBe
+            1
+    }
+
+    @Test
+    @Order(14)
+    fun `javascript resource refusals name the kind on REST and MCP, retain console and release the one-slot pool`() {
+        val input = mapOf("rows" to emptyList<Any>(), "inputs" to emptyMap<String, Any>())
+        val large = "x".repeat(1_048_576)
+        for ((kind, body) in listOf(
+            "STATEMENTS" to "console.log('before limit'); while(true){}",
+            "OUTPUT" to "console.log('before limit'); console.log('x'.repeat(2097152)); return input.rows;",
+            "RESULT_BYTES" to "console.log('before limit'); return 'x'.repeat(1048577);",
+            "INPUT_BYTES" to "console.log('before limit'); return input.rows;",
+        )) {
+            val id = "test/js_limit_" + kind.lowercase()
+            val expected =
+                if (kind ==
+                    "INPUT_BYTES"
+                ) {
+                    mapOf("output" to emptyList<Any>())
+                } else {
+                    mapOf("refusal" to "pipeline.script.resource_limit")
+                }
+            val cases = listOf(mapOf("name" to "empty input", "input" to input, "expect" to expected))
+            val columns = listOf(mapOf("name" to "text", "type" to "STRING"))
+            val contract =
+                mapOf(
+                    "mode" to "row",
+                    "inputs" to mapOf("data" to mapOf("kind" to "table", "columns" to columns)),
+                    "output" to mapOf("kind" to "table", "columns" to columns),
+                )
+            createScriptTemplate(id, body, contract, emptyList(), cases, release = false, language = "javascript")
+            val evaluationInput = if (kind == "INPUT_BYTES") input + ("rows" to listOf(mapOf("text" to large))) else input
+            val started = System.nanoTime()
+            val rest = evaluateRest(id, evaluationInput, 500)
+            rest["code"].asText() shouldBe "pipeline.script.resource_limit"
+            rest["details"]["kind"].asText() shouldBe kind
+            rest["message"].asText().contains(kind) shouldBe true
+            if (kind != "INPUT_BYTES") rest["details"]["console"][0]["text"].asText() shouldBe "before limit"
+            if (kind == "STATEMENTS") {
+                withClue("statement refusal took " + (System.nanoTime() - started) / 1_000_000 + " ms") {
+                    ((System.nanoTime() - started) < Duration.ofSeconds(1).toNanos()) shouldBe true
+                }
+            }
+            val (mcp, error) = callTool(nextMcpId(), "templates_evaluate", mapOf("id" to id, "input" to evaluationInput))
+            error shouldBe true
+            mcp["error"]["code"].asText() shouldBe "pipeline.script.resource_limit"
+            mcp["error"]["details"]["kind"].asText() shouldBe kind
+            evaluateRest("test/js_shape.javascript", input, 200)["console"].size() shouldBe 1
+            println("8b resource kind=$kind REST=$rest")
+        }
+    }
+
+    @Test
+    @Order(15)
+    fun `javascript console preserves order, truncates long lines and reports dropped lines`() {
+        val id = "test/js_console_caps"
+        val body = "for (let i=0;i<201;i++) console.log(i); console.warn('x'.repeat(3000)); return {rows:[], rejects:[]};"
+        val input = mapOf("rows" to emptyList<Any>(), "inputs" to emptyMap<String, Any>())
+        createScriptTemplate(id, body, shapeContract(), emptyList(), shapeTests().take(1), release = false, language = "javascript")
+        val console = evaluateRest(id, input, 200)["console"]
+        console.size() shouldBe 201
+        console[0]["text"].asText() shouldBe "0"
+        console[199]["text"].asText() shouldBe "199"
+        console[200]["text"].asText() shouldBe "… 2 more lines dropped"
+        val longId = "test/js_console_long"
+        createScriptTemplate(
+            longId,
+            "console.warn('x'.repeat(3000)); return {rows:[], rejects:[]};",
+            shapeContract(),
+            emptyList(),
+            shapeTests().take(1),
+            release = false,
+            language = "javascript",
+        )
+        val longLine = evaluateRest(longId, input, 200)["console"][0]
+        longLine["level"].asText() shouldBe "warn"
+        longLine["text"].asText().length shouldBe 2000
+    }
+
+    @Test
+    @Order(16)
+    fun `javascript row and table nodes preserve a large integer and exact decimal digits across real staging`() {
+        val source = seedNumericSource()
+        val columns = numericColumns()
+        val output = columns + listOf("id_kind", "money_kind", "wide_kind").map { mapOf("name" to it, "type" to "STRING") }
+        for (mode in listOf("row", "table")) {
+            val id = "test/js_numeric_$mode"
+            val rows = if (mode == "row") "input.rows" else "input.inputs.numbers"
+            val body =
+                "return $rows.map(row => ({id: row.id, money: row.money, wide: row.wide, " +
+                    "id_kind: typeof row.id, money_kind: typeof row.money, wide_kind: typeof row.wide}));"
+            val contract =
+                mapOf(
+                    "mode" to mode,
+                    "inputs" to mapOf("numbers" to mapOf("kind" to "table", "columns" to columns)),
+                    "output" to mapOf("kind" to "table", "columns" to output),
+                )
+            val input =
+                if (mode == "row") {
+                    mapOf("rows" to emptyList<Any>(), "inputs" to emptyMap<String, Any>())
+                } else {
+                    mapOf("inputs" to mapOf("numbers" to emptyList<Any>()))
+                }
+            val cases = listOf(mapOf("name" to "empty input", "input" to input, "expect" to mapOf("output" to emptyList<Any>())))
+            createScriptTemplate(id, body, contract, emptyList(), cases, language = "javascript")
+            val nodes = numericNodes(source, id)
+            val pipeline =
+                createPipeline(
+                    "test/js_numeric_$mode",
+                    mapOf(
+                        "schema_version" to 1,
+                        "name" to "test/js_numeric_$mode",
+                        "display_name" to "JavaScript numeric $mode",
+                        "description" to "precision",
+                        "parameters" to emptyMap<String, Any>(),
+                        "nodes" to nodes,
+                    ),
+                    201,
+                )
+            val events = execute(pipeline, emptyMap())
+            withClue(events.last().toString()) { events.last().first shouldBe "data_ready" }
+            val result = resultOf(events.last().second["execution_id"].asText())
+            val row = result["rows"][0]
+            row[0].asText() shouldBe "9007199254740993"
+            row[1].decimalValue().compareTo(java.math.BigDecimal("10.50")) shouldBe 0
+            row[2].asText() shouldBe "12345678901234567890"
+            row[3].asText() shouldBe "string"
+            row[4].asText() shouldBe "number"
+            row[5].asText() shouldBe "string"
+            println("8b numeric mode=$mode row=$row")
+        }
+    }
+
+    private fun seedNumericSource(): String {
+        val source = "test/js_numeric_source.sql"
+        val hash =
+            createSqlTemplate(
+                source,
+                "H2",
+                """
+                SELECT CAST(9007199254740993 AS BIGINT) AS "id",
+                  CAST(10.50 AS DECIMAL(4,2)) AS "money", CAST(12345678901234567890 AS DECIMAL(20,0)) AS "wide"
+                """.trimIndent(),
+            )
+        releaseTemplate(source, hash)
+        return source
+    }
+
+    private fun numericColumns(): List<Map<String, Any>> =
+        listOf(
+            mapOf("name" to "id", "type" to "BIGINTEGER"),
+            mapOf("name" to "money", "type" to "DECIMAL", "precision" to 4, "scale" to 2),
+            mapOf("name" to "wide", "type" to "BIGDECIMAL", "precision" to 20, "scale" to 0),
+        )
+
+    private fun numericNodes(
+        source: String,
+        id: String,
+    ): List<Map<String, Any>> =
+        listOf(
+            mapOf(
+                "id" to "numbers",
+                "type" to "DQL",
+                "description" to "numeric source",
+                "source" to "tempdb",
+                "template" to mapOf("id" to source, "version" to 1),
+                "output" to mapOf("target" to "tempdb", "table" to "numbers"),
+                "depends_on" to emptyList<String>(),
+            ),
+            mapOf(
+                "id" to "identity",
+                "type" to "SCRIPT",
+                "description" to "identity",
+                "template" to mapOf("id" to id, "version" to 1),
+                "inputs" to mapOf("numbers" to "numbers"),
+                "output" to mapOf("target" to "caller"),
+                "depends_on" to listOf("numbers"),
+            ),
+        )
+
+    private fun evaluateRest(
+        id: String,
+        input: Map<String, Any?>,
+        status: Int,
+    ): JsonNode {
+        val response =
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .asSession(ADMIN_SESSION)
+                .body(mapOf("name" to id, "input" to input))
+                .post("/api/v1/templates/evaluate")
+                .then()
+                .statusCode(status)
+                .extract()
+                .asString()
+        return mapper.readTree(response)[if (status == 200) "data" else "error"]
+    }
+
     // ------------------------------------------------------------ the graph
 
     // ------------------------------------------------------------ fixture builders
@@ -567,6 +931,7 @@ class ScriptNodeE2eTest {
         invariants: List<Map<String, Any?>>,
         tests: List<Map<String, Any?>>,
         release: Boolean = true,
+        language: String = "jsonata",
     ) {
         val (payload, isError) =
             callTool(
@@ -576,7 +941,7 @@ class ScriptNodeE2eTest {
                     "id" to id,
                     "display_name" to id,
                     "description" to "7c E2E script",
-                    "type" to "jsonata",
+                    "type" to language,
                     "body" to body,
                     "contract" to contract,
                     "invariants" to invariants,
@@ -787,6 +1152,12 @@ class ScriptNodeE2eTest {
         @JvmStatic
         fun properties(registry: DynamicPropertyRegistry) {
             registry.add("management.server.port") { "0" }
+            registry.add("datapipelines.script.pool-size") { "1" }
+            registry.add("datapipelines.script.pool-queue") { "1" }
+            registry.add("datapipelines.script.evaluate-timeout-seconds") { "2" }
+            registry.add("datapipelines.script.js.max-input-mb") { "1" }
+            registry.add("datapipelines.script.js.max-result-mb") { "1" }
+
             registry.add("spring.datasource.url") { postgres.jdbcUrl }
             registry.add("spring.datasource.username") { postgres.username }
             registry.add("spring.datasource.password") { postgres.password }
@@ -935,7 +1306,7 @@ private const val TERCILES_BODY =
         """${'$'}append([], inputs.ranked.( ${'$'}tercile := ${'$'}floor((trip_rank - 1) * 3 / ${'$'}n); """ +
         """{ "id": id, "trip_rank": trip_rank, "volume_class": ${'$'}classes[${'$'}tercile] } )) )"""
 
-private fun tercileNodes(): List<Map<String, Any?>> =
+private fun tercileNodes(script: String = TERCILES_TEMPLATE): List<Map<String, Any?>> =
     listOf(
         mapOf(
             "id" to "rank_zones",
@@ -950,7 +1321,7 @@ private fun tercileNodes(): List<Map<String, Any?>> =
             "id" to "terciles",
             "description" to "terciles by per-item block over the ranked rows (#260)",
             "type" to "SCRIPT",
-            "template" to mapOf("id" to TERCILES_TEMPLATE, "version" to 1),
+            "template" to mapOf("id" to script, "version" to 1),
             "inputs" to mapOf("ranked" to "ranked_trips"),
             "output" to mapOf("target" to "caller"),
             "depends_on" to listOf("rank_zones"),

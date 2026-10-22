@@ -194,9 +194,10 @@ private const val RENDER_CONTEXT_DESC =
 private const val TYPE_FIELD_DESC =
     "Template kind, fixed at creation and identical on every version: 'sql' renders SQL for pipeline nodes " +
         "(requires 'dialect'); 'html' renders HTML through an auto-escaping engine (must have NO 'dialect'); " +
-        "'jsonata' and 'javascript' are script types — the body is one expression evaluated as a pure function " +
-        "of its input, engine is 'none', dialect/imports/is_library are refused, and contract/invariants/tests " +
-        "blocks are required. 'javascript' is refused at save until round two."
+        "'jsonata' and 'javascript' are script types — a JSONata expression or the statements of main(input), " +
+        "evaluated as a pure function of its input, engine is 'none', dialect/imports/is_library are refused, " +
+        "and contract/invariants/tests blocks are required. JavaScript requires the installed isolate; otherwise " +
+        "save refuses with script.js.unavailable."
 
 /** §6.2.36 — `type` on an UPDATE: inherited from the working version when absent (136 §D / T289b). */
 private const val UPDATE_TYPE_FIELD_DESC =

@@ -7,6 +7,7 @@ import java.net.URI
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.Executors
 
 /**
  * An in-process, GitHub-SHAPED OAuth 2.0 provider (#655) — the oracle for the `protocol: oauth2`
@@ -37,6 +38,7 @@ class OAuth2ProviderStub : AutoCloseable {
     )
 
     private val server: HttpServer = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+    private val executor = Executors.newCachedThreadPool()
 
     val recorded: MutableList<Recorded> = CopyOnWriteArrayList()
 
@@ -50,14 +52,28 @@ class OAuth2ProviderStub : AutoCloseable {
 
     @Volatile var emailsStatus: Int = OK
 
+    @Volatile var tokenDelayMillis: Long = 0
+
+    @Volatile var userDelayMillis: Long = 0
+
+    @Volatile var emailsDelayMillis: Long = 0
+
+    @Volatile var tokenStatus: Int = OK
+
+    @Volatile var tokenBody: String = TOKEN_RESPONSE
+
     val wellKnownHits: Int get() = recorded.count { it.path.contains("/.well-known") }
 
     init {
+        server.executor = executor
         server.createContext("/") { exchange -> exchange.use { handle(it) } }
         server.start()
     }
 
-    override fun close() = server.stop(0)
+    override fun close() {
+        server.stop(0)
+        executor.shutdownNow()
+    }
 
     fun requestsTo(path: String): List<Recorded> = recorded.filter { it.path == path }
 
@@ -74,11 +90,21 @@ class OAuth2ProviderStub : AutoCloseable {
             )
         when (path) {
             AUTHORIZE -> authorize(exchange)
-            TOKEN -> json(exchange, OK, """{"access_token":"$ACCESS_TOKEN","token_type":"bearer","scope":"read:user,user:email"}""")
-            USER -> json(exchange, OK, user)
-            EMAILS -> json(exchange, emailsStatus, emails)
+            TOKEN -> delayedJson(exchange, tokenDelayMillis, tokenStatus, tokenBody)
+            USER -> delayedJson(exchange, userDelayMillis, OK, user)
+            EMAILS -> delayedJson(exchange, emailsDelayMillis, emailsStatus, emails)
             else -> json(exchange, NOT_FOUND, """{"message":"Not Found"}""")
         }
+    }
+
+    private fun delayedJson(
+        exchange: HttpExchange,
+        delayMillis: Long,
+        status: Int,
+        payload: String,
+    ) {
+        Thread.sleep(delayMillis)
+        json(exchange, status, payload)
     }
 
     private fun authorize(exchange: HttpExchange) {
@@ -107,6 +133,7 @@ class OAuth2ProviderStub : AutoCloseable {
         const val EMAILS = "/user/emails"
         const val CODE = "stub-code"
         const val ACCESS_TOKEN = "gho_stubAccessToken655"
+        const val TOKEN_RESPONSE = """{"access_token":"$ACCESS_TOKEN","token_type":"bearer","scope":"read:user,user:email"}"""
 
         private const val OK = 200
         private const val FOUND = 302

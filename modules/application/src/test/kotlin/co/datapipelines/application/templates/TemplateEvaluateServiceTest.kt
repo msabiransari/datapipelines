@@ -82,14 +82,14 @@ class TemplateEvaluateServiceTest {
             tests = emptyList(),
         )
 
-    private fun service(): TemplateEvaluateService {
+    private fun service(javascript: co.datapipelines.scripting.ScriptEngine? = null): TemplateEvaluateService {
         val runner =
             ScriptTestRunner(
                 engines =
-                    mapOf(
-                        co.datapipelines.scripting.ScriptLanguage.JSONATA to
-                            co.datapipelines.scripting.JsonataEngine(),
-                    ),
+                    buildMap {
+                        put(co.datapipelines.scripting.ScriptLanguage.JSONATA, co.datapipelines.scripting.JsonataEngine())
+                        if (javascript != null) put(co.datapipelines.scripting.ScriptLanguage.JAVASCRIPT, javascript)
+                    },
                 pool =
                     co.datapipelines.scripting.ScriptEvaluationPool(
                         2,
@@ -101,6 +101,71 @@ class TemplateEvaluateServiceTest {
                 suiteTimeout = Duration.ofSeconds(30),
             )
         return TemplateEvaluateService(templates, runner)
+    }
+
+    @Test
+    fun `javascript reaches the same pool and invariant gate and returns console`() {
+        every { templates.findWorking(workspaceId, stored.id) } returns stored.copy(type = TemplateType.JAVASCRIPT)
+        val delegate = co.datapipelines.scripting.JsonataEngine()
+        val javascript =
+            object : co.datapipelines.scripting.ScriptEngine by delegate {
+                override val type = co.datapipelines.scripting.ScriptLanguage.JAVASCRIPT
+
+                override fun evaluate(
+                    script: co.datapipelines.scripting.CompiledScript,
+                    input: Any?,
+                    limits: co.datapipelines.scripting.EvaluationLimits,
+                ): Any? {
+                    limits.console?.accept(co.datapipelines.scripting.ConsoleLine(co.datapipelines.scripting.ConsoleLevel.LOG, "mapped"))
+                    return delegate.evaluate(script, input, limits)
+                }
+            }
+        val result =
+            service(javascript).evaluate(
+                workspaceId,
+                stored.id,
+                null,
+                ScriptTestInput(rows = listOf(mapOf("order_id" to 1, "amount_cents" to 1250)), inputs = emptyMap()),
+            )
+        result.consolePayload() shouldBe listOf(mapOf("level" to "log", "text" to "mapped"))
+        result.invariants.single().passed shouldBe true
+        val unavailable =
+            shouldThrow<DatapipelinesException> {
+                service().evaluate(workspaceId, stored.id, null, ScriptTestInput(rows = emptyList(), inputs = emptyMap()))
+            }
+        unavailable.code shouldBe PipelineErrorCodes.Script.JS_UNAVAILABLE
+        unavailable.message shouldBe co.datapipelines.pipeline.JAVASCRIPT_UNAVAILABLE_MESSAGE
+    }
+
+    @Test
+    fun `a failed javascript evaluation retains console and resource kind for both adapters`() {
+        every { templates.findWorking(workspaceId, stored.id) } returns stored.copy(type = TemplateType.JAVASCRIPT)
+        val delegate = co.datapipelines.scripting.JsonataEngine()
+        val javascript =
+            object : co.datapipelines.scripting.ScriptEngine by delegate {
+                override val type = co.datapipelines.scripting.ScriptLanguage.JAVASCRIPT
+
+                override fun evaluate(
+                    script: co.datapipelines.scripting.CompiledScript,
+                    input: Any?,
+                    limits: co.datapipelines.scripting.EvaluationLimits,
+                ): Any? {
+                    limits.console?.accept(
+                        co.datapipelines.scripting.ConsoleLine(co.datapipelines.scripting.ConsoleLevel.ERROR, "before failure"),
+                    )
+                    throw co.datapipelines.scripting.ScriptResourceLimitException(
+                        co.datapipelines.scripting.ScriptResourceLimitException.Kind.OUTPUT,
+                        "witness",
+                    )
+                }
+            }
+        val failure =
+            shouldThrow<DatapipelinesException> {
+                service(javascript).evaluate(workspaceId, stored.id, null, ScriptTestInput(rows = emptyList(), inputs = emptyMap()))
+            }
+        failure.code shouldBe PipelineErrorCodes.Script.RESOURCE_LIMIT
+        failure.details["kind"] shouldBe "OUTPUT"
+        failure.details["console"] shouldBe listOf(mapOf("level" to "error", "text" to "before failure"))
     }
 
     @Test

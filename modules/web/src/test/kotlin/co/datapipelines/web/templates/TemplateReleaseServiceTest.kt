@@ -267,7 +267,10 @@ class TemplateReleaseServiceTest {
             }
         val realValidator =
             co.datapipelines.templates.TemplateValidator(
-                co.datapipelines.templates.LibraryResolver { _ -> emptyRegistry },
+                scriptEngines =
+                    mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
+                libraryResolver =
+                    co.datapipelines.templates.LibraryResolver { _ -> emptyRegistry },
                 suiteRunner = runner,
             )
         val releaseService =

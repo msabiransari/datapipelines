@@ -2,6 +2,7 @@ package co.datapipelines.auth
 
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.longs.shouldBeLessThan
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
@@ -28,6 +29,7 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
 import java.util.Base64
+import kotlin.time.TimeSource
 
 /**
  * The `protocol: oauth2` login end to end (#655): the real Spring Security chain, the real
@@ -76,12 +78,35 @@ class OAuth2LoginIntegrationTest {
         stub.user = OAuth2ProviderStub.GITHUB_USER
         stub.emails = OAuth2ProviderStub.VERIFIED_PRIMARY
         stub.emailsStatus = HTTP_OK
+        stub.tokenDelayMillis = 0
     }
 
     @AfterAll
     fun closeOrigin() {
         origin.close()
         stub.close()
+    }
+
+    @Test
+    fun `a stalled token exchange reaches the audited login failure within the configured timeout`() {
+        val floor = lastAuditId()
+        val callback = location(send("GET", location(send("GET", "$base/oauth2/authorization/github"))))
+        stub.tokenDelayMillis = TOKEN_DELAY_MILLIS
+        val start = TimeSource.Monotonic.markNow()
+        val landing = send("GET", callback)
+        val elapsed = start.elapsedNow().inWholeMilliseconds
+        println("token exchange timeout elapsed_ms=$elapsed")
+        elapsed shouldBeLessThan TOKEN_BUDGET_MILLIS
+        landing.statusCode() shouldBe HTTP_FOUND
+        location(landing) shouldContain "/login?error=oidc_error"
+        jar["dp_session"].shouldBeNull()
+        val rows =
+            jdbc.jdbcTemplate.queryForList(
+                "SELECT details_json->>'reason' AS reason FROM audit_log WHERE id > ? AND event = 'auth.login.oidc_error'",
+                floor,
+            )
+        rows shouldHaveSize 1
+        rows.single()["reason"] shouldBe "invalid_token_response"
     }
 
     @Test
@@ -295,6 +320,8 @@ class OAuth2LoginIntegrationTest {
         /** The signed authorization-request carrier (`CookieOAuth2AuthorizationRequestRepository`, auth.md §5.4). */
         const val AUTHORIZATION_REQUEST_COOKIE = "dp_oauth2_authz"
         const val SECRET_BYTES = 32
+        const val TOKEN_DELAY_MILLIS = 3000L
+        const val TOKEN_BUDGET_MILLIS = 2000L
         const val HTTP_OK = 200
         const val HTTP_FOUND = 302
         const val HTTP_SERVER_ERROR = 500
@@ -317,6 +344,7 @@ class OAuth2LoginIntegrationTest {
             registry.add("server.address") { "127.0.0.1" }
             registry.add("datapipelines.jwt.secret") { Base64.getEncoder().encodeToString(ByteArray(SECRET_BYTES) { 7 }) }
             registry.add("datapipelines.auth.base-url") { "http://localhost:${origin.originPort}" }
+            registry.add("datapipelines.auth.oidc.provider-read-timeout-seconds") { "1" }
             val p = "datapipelines.auth.oidc.providers[0]"
             registry.add("$p.name") { "github" }
             registry.add("$p.protocol") { "oauth2" }

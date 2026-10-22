@@ -20,12 +20,11 @@ import com.fasterxml.jackson.annotation.JsonValue
  * auto-escaping configuration (§6). Pipeline nodes may reference only `sql` templates
  * (`pipeline.validation.template_type_mismatch`, §7).
  *
- * A script type renders nothing: the body is an expression evaluated as a pure function
+ * A script type renders nothing: the body is a JSONata expression or the statements of main(input), evaluated as a pure function
  * of its input object by the `modules/scripting` engine seam, `engine` is `none`, `dialect`,
  * `imports` and `is_library` are refused, and the version carries the contract / invariants /
- * tests blocks (transform-nodes design §2.2). `javascript` is refused at save until round two
- * (`script.js.unavailable`) — the enum value exists so the wire vocabulary and the CHECK
- * constraints are final.
+ * tests blocks (transform-nodes design §2.2). JavaScript requires the installed isolate;
+ * absent, it is refused at save with `script.js.unavailable`.
  */
 enum class TemplateType(
     /** The wire value (`type` field of the Template JSON, `type` column of `template_versions`). */
