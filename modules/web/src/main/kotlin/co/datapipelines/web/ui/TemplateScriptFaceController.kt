@@ -54,7 +54,7 @@ class TemplateScriptFaceController(
     private val drafts: TemplateDraftService,
     runner: ScriptTestRunner,
     script: ScriptProperties,
-) {
+) : ShellPage {
     private val source = TemplateSourceModel(reads, actors)
     private val suite = ScriptSuiteRun(validator, runner, Duration.ofSeconds(script.suiteTimeoutSeconds))
 

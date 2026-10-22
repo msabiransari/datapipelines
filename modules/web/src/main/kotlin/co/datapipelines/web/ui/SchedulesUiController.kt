@@ -35,7 +35,7 @@ import java.time.ZoneId
 @Controller
 class SchedulesUiController(
     private val themeResolver: ThemeResolver,
-) {
+) : ShellPage {
     @GetMapping("/schedules")
     @RequiredScope(Permission.SCHEDULE_READ)
     fun page(

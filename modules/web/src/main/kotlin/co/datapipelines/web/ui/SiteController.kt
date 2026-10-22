@@ -31,7 +31,7 @@ import org.springframework.web.bind.annotation.GetMapping
  * TITLE has to speak the searcher's words.
  */
 @Controller
-class SiteController {
+class SiteController : ShellPage {
     @GetMapping("/")
     fun home(
         model: Model,

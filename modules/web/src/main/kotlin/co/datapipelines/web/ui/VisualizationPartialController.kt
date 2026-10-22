@@ -35,7 +35,7 @@ class VisualizationPartialController(
     private val tabs: VisualizationTabModel,
     /** 178 — the promoter lens: every fragment here renders the caller's view. */
     private val lens: PromoterLens,
-) {
+) : ShellPage {
     /**
      * The `/visualizations` catalog's swap root: the flat list, every readable visualization or the matches of `q`.
      * #591: the answer carries the catalog URL of the list it renders ([CatalogUrl]).

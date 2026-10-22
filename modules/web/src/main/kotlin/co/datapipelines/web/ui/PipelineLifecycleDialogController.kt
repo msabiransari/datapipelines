@@ -45,7 +45,7 @@ class PipelineLifecycleDialogController(
     private val audit: AuditEventSink,
     /** #407 — the one-shot, session-held cascade names the workspace's release flash renders. */
     private val releaseFlash: ReleaseFlash,
-) {
+) : ShellPage {
     // ------------------------------------------------------------------ release
 
     @GetMapping("/partials/pipelines/{id}/lifecycle/release")

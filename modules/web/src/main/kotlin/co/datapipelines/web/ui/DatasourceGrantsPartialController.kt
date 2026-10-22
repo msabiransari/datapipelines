@@ -50,7 +50,7 @@ class DatasourceGrantsPartialController(
     private val grants: DatasourceGrantRepository,
     private val actorNames: ActorNames,
     private val auditLogger: AuditLogger,
-) {
+) : ShellPage {
     /** The dialog: the grants this datasource holds, plus the add form. */
     @GetMapping("/partials/datasources/{name}/grants")
     @RequiredScope(Permission.DATASOURCE_GRANT)

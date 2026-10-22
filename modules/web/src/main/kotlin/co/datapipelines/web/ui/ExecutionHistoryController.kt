@@ -24,7 +24,7 @@ import java.util.UUID
 class ExecutionHistoryController(
     private val pipelines: PipelineRepository,
     private val browse: ExecutionHistoryBrowseModel,
-) {
+) : ShellPage {
     @GetMapping("/executions")
     @RequiredScope(Permission.EXECUTION_READ)
     @Suppress("LongParameterList") // the filter bar's fields, one parameter each (the §5 idiom)

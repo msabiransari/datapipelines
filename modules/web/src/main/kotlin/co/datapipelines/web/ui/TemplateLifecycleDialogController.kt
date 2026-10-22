@@ -44,7 +44,7 @@ class TemplateLifecycleDialogController(
     private val templates: TemplateRepository,
     private val dialogs: TemplateLifecycleDialogModel,
     private val audit: AuditEventSink,
-) {
+) : ShellPage {
     // ------------------------------------------------------------------ release
 
     @GetMapping("/partials/templates/lifecycle/release")

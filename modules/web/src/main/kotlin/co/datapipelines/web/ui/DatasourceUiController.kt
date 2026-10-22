@@ -27,7 +27,7 @@ class DatasourceUiController(
     private val browse: DatasourceBrowseModel,
     private val workspacesProperties: WorkspacesProperties,
     private val themeResolver: ThemeResolver,
-) {
+) : ShellPage {
     @GetMapping("/datasources")
     @RequiredScope(Permission.DATASOURCE_READ)
     fun list(

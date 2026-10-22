@@ -53,7 +53,7 @@ class PipelineNodeSqlPartialController(
     /** 178 — the promoter lens gate: a hidden pipeline answers exactly as an absent one. */
     private val pipelineService: PipelineService,
     private val lens: PromoterLens,
-) {
+) : ShellPage {
     private val resolver = NodeSqlResolver(pipelines, templates, templateEngines)
 
     // The tree mapper for the `parameters` query value — the contract's own (the stored-body
