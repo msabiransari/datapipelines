@@ -15,6 +15,22 @@ import org.junit.jupiter.api.Test
  */
 @Suppress("LargeClass") // the §7 rules as one table of cases over one snapshot builder
 class ConfigValidatorTest {
+    @Test
+    fun `provider read timeout zero refuses startup through the full validator`() {
+        val report = ConfigValidator.validate(validSnapshot().copy(providerReadTimeoutSeconds = "0"))
+        report.violations.shouldHaveSize(1)
+        report.violations.single().shouldContain("datapipelines.auth.oidc.provider-read-timeout-seconds '0'")
+    }
+
+    @Test
+    fun `provider read timeout above the HTTP millisecond ceiling is refused`() {
+        val report = ConfigValidator.validate(validSnapshot().copy(providerReadTimeoutSeconds = "2147484"))
+        report.violations.shouldHaveSize(1)
+        report.violations.single().shouldContain("2147483")
+        report.violations.single().shouldContain("§3.4")
+        ConfigValidator.validate(validSnapshot().copy(providerReadTimeoutSeconds = "2147483")).violations.shouldBeEmpty()
+    }
+
     /** The shared §7 baseline and secret generator ([ConfigSnapshots]) — one copy, two suites. */
     private fun secret(bytes: Int): String = ConfigSnapshots.secret(bytes)
 

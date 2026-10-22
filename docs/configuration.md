@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Status:** v1.61 (single source of truth for every config key)
+**Status:** v1.63 (single source of truth for every config key)
 **Owner:** datapipelines.co core
 **Last updated:** 2026-10-22
 
@@ -130,6 +130,7 @@ Read downward. The statement bound is the driver's and drivers honour it unevenl
 | `datapipelines.auth.local.lockout.duration-minutes` | `15` | How long a locked account refuses local login. An admin unlock or password reset clears the lock early |
 | `datapipelines.auth.cookie-secure` | (empty) | The `Secure` flag on the cookies this deployment mints (`dp_session`, `dp_oauth2_authz`, `dp_csrf`). **Empty = derived from `base-url`'s scheme**: an explicit `http://` base-url drops the flag so local login works over plain HTTP, anything else keeps it. `true`/`false` pin it. The `hardened` posture ships `true` (§3.23) — a hardened deployment runs https, and a dropped flag there puts the session cookie on the wire |
 | `datapipelines.auth.allow-local-only` | `false` | The operator's **explicit acknowledgement** that a `hardened` deployment has no OIDC provider configured and authenticates with local password accounts only. Inert under `development`. Under `hardened`, startup is refused unless either an OIDC provider is fully configured or this is `true`, and setting it logs the acknowledgement (§3.23, §7) |
+| `datapipelines.auth.oidc.provider-read-timeout-seconds` | `10` | Connect and read timeout in seconds for the code-for-token exchange (both protocols), OAuth2 user-info, emails and OIDC user-info reads. Positive integer, at most 2147483 seconds (the HTTP client stores signed 32-bit milliseconds); zero means infinite in the HTTP client and is refused. JWKS keeps Spring's default; startup discovery is separate. Mirrored in application.yml, defaults.env, secrets.env.example, compose.yml. |
 | `datapipelines.auth.oidc.providers[].protocol` | `oidc` | Per-provider (auth.md §5.1, #655): `oidc` builds the entry through discovery from `issuer-uri`; `oauth2` builds it from the five keys below with no HTTP at startup — for a provider that speaks OAuth 2.0 without OpenID Connect (GitHub). Anything else refuses startup naming the provider |
 | `datapipelines.auth.oidc.providers[].authorization-uri` | (empty) | Per-provider, `oauth2` only and required there (auth.md §5.1): the consent endpoint. `https://`, or plain `http://` to `localhost` / `127.0.0.1` only. Set on an `oidc` entry it refuses startup — discovery would ignore it |
 | `datapipelines.auth.oidc.providers[].token-uri` | (empty) | Per-provider, `oauth2` only and required there: the code-for-token exchange, called with `client_secret_basic` and `Accept: application/json`. Same scheme rule |
@@ -486,7 +487,16 @@ The budgets every script evaluation runs under — the save/release test suite o
 | `datapipelines.script.max-input-rows` | `100000` | Row cap on any table input — the `rows` batch or any table input — refused BEFORE evaluation with the record §4.3's input-cap code (§13.18, 7c) |
 | `datapipelines.script.max-value-bytes` | `1048576` | Cap on a value/object output (the record §4.3's value-cap code, §13.18, 7c) — a Context value is not a table |
 | `datapipelines.script.max-string-bytes` | `1048576` | Cap on a single string in any returned row (the same §4.3 code, with the row number) |
-| `datapipelines.script.max-depth` | `100` | Expression depth bound — counted at every evaluate entry and exit by the engine itself: nested evaluation, non-tail lambda recursion included; set-level work over hundreds of rows evaluates (the 7a `isParallelCall` leak is gone, #260); a tail-recursive lambda is trampolined by the library and the wall clock is its bound (the engine's measured bounds, dag-executor §5.3) |
+| `datapipelines.script.max-depth` | `100` | Expression depth bound; also the JS stack-frame bound (plus four prelude frames, capped by `js.max-stack-frames`) — counted at every evaluate entry and exit by the engine itself: nested evaluation, non-tail lambda recursion included; set-level work over hundreds of rows evaluates (the 7a `isParallelCall` leak is gone, #260); a tail-recursive lambda is trampolined by the library and the wall clock is its bound (the engine's measured bounds, dag-executor §5.3) |
+| `datapipelines.script.js.isolate-dir` | `empty` | Absolute directory containing `js-isolate.jar`; must be one entry of `loader.path` (system property) or `LOADER_PATH` (environment). No class-path mutation. Unset and no isolate on the class path disables JavaScript, reported once at INFO; JSONata remains available. |
+| `datapipelines.script.js.max-heap-mb` | `256` | Per-Context heap, MiB; SOFT. All concurrent Contexts share the isolate heap, outside the JVM heap. |
+| `datapipelines.script.js.isolate-memory-mb` | `empty` | Unset → `pool-size × max-heap-mb + 256` MiB (1280 at defaults). Explicit value must be at least 32 MiB and strictly larger than `pool-size × max-heap-mb`; a derived byte budget that overflows is refused by name. |
+| `datapipelines.script.js.max-statements` | `100000000` | Hard guest-statement ceiling; internal prelude excluded. |
+| `datapipelines.script.js.max-ast-depth` | `1000` | Parse-time nesting ceiling, including runtime eval. |
+| `datapipelines.script.js.max-stack-frames` | `1000` | Guest stack-frame ceiling; minimum of this and `max-depth + 4` prelude frames. |
+| `datapipelines.script.js.max-output-bytes` | `1048576` | Each console stream cap; at least 4096 bytes. Excess output refuses with resource_limit / OUTPUT; returned console lines are separately capped at 200 × 2000 chars. |
+| `datapipelines.script.js.max-result-mb` | `64` | Serialized result budget, MiB, at least 1; measured before host parsing. |
+| `datapipelines.script.js.max-input-mb` | `64` | Serialized input budget, MiB, at least 1; refused before the Context starts. |
 
 **Removed keys (script-node-rename lane, owner ruling 2026-10-20):** the nine budgets lived at `datapipelines.transform.*` before the TRANSFORM→SCRIPT node-type rename. There is no alias: a `datapipelines.transform.*` key binds nothing, and startup refuses BY NAME (§7, `checkRemovedTransformKeys`) telling the operator to rename it. This is the §3.17 rule again — a removed key is refused for being set at all, value notwithstanding.
 
@@ -694,6 +704,7 @@ datapipelines:
 
   auth:
     oidc:
+      provider-read-timeout-seconds: ${DATAPIPELINES_AUTH_OIDC_PROVIDER_READ_TIMEOUT_SECONDS:10}
       providers:
         # client-id defaulting to empty = the entry is IGNORED with a WARN (§7);
         # a local-accounts-only deployment starts with zero OIDC providers.
@@ -1026,6 +1037,7 @@ On startup, the app validates:
 - At least one authentication method: a fully-configured provider or `datapipelines.auth.local.enabled=true`. Fully configured means non-empty `client-id` and `client-secret` plus, for `protocol: oidc`, `issuer-uri`, and for `protocol: oauth2`, `authorization-uri`, `token-uri`, `user-info-uri`, `user-name-attribute` and a non-empty `scopes`. A provider entry with an empty `client-id` is ignored with a WARN — it does not count, and it is not a violation on its own.
 - **Each provider entry against its protocol (#655, auth.md §5.1),** every violation naming the provider and the key: `protocol` is `oidc` or `oauth2`; an `oidc` entry has an `issuer-uri` and none of the `oauth2`-only keys; an `oauth2` entry has the five required keys, no `issuer-uri` and no `openid` scope, and every endpoint it names (`emails-uri` included) is `https://` with a host — plain `http://` only to `localhost` / `127.0.0.1`. The provider list is read as the application binds it (the Binder), so a higher-precedence source that re-declares the list replaces it whole and never inherits a key from `application.yml`'s entry at the same index. The `hardened` posture's "a provider is configured" (§3.23) uses the same per-protocol completeness.
 - `datapipelines.auth.local.bootstrap-password` and `datapipelines.auth.local.bootstrap-password-hash` are never both set; either seed requires `datapipelines.auth.local.enabled=true` AND `datapipelines.auth.bootstrap-admin-email` — each violation names both keys.
+- `datapipelines.auth.oidc.provider-read-timeout-seconds` is a positive integer no greater than 2147483 (§3.4; signed 32-bit milliseconds); zero would disable the HTTP timeout and is refused.
 - `datapipelines.auth.local.lockout.max-failures` and `datapipelines.auth.local.lockout.duration-minutes` are positive integers.
 - The deprecated executor alias `datapipelines.executor.max-concurrent-executions-global` (050/R2): set alone → its value runs and startup logs one WARN naming `max-concurrent-executions-per-instance`; set together with the new key and differing → startup REFUSES naming both keys.
 - `result.ttl-min-seconds` ≤ `result.ttl-default-seconds` ≤ `result.ttl-max-seconds`.
@@ -1066,7 +1078,9 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-10-22 | v1.61 | #651 enabled-provider avatar hosts | §3.4's `picture-hosts` allowlist includes only providers with a non-blank `client-id`, using the same predicate as sign-in registration. Dormant entries are still validated for shape at startup but contribute no hosts. No key, default, route or permission changes. |
+| 2026-10-22 | v1.63 | #651 enabled-provider avatar hosts | §3.4's `picture-hosts` allowlist includes only providers with a non-blank `client-id`, using the same predicate as sign-in registration. Dormant entries are still validated for shape at startup but contribute no hosts. No key, default, route or permission changes. |
+| 2026-10-22 | v1.62 | 8b (#8) — renumbered at merge after #682's v1.61 | §3.28 gains the nine JavaScript keys, their measured defaults, derived isolate memory and launcher agreement; max-depth also bounds JavaScript stack frames. |
+| 2026-10-22 | v1.61 | #682, answers #683 | Configurable provider connect/read timeout, deploy mirrors and startup validation (§3.4, §5, §7); per-provider defaults drift-guarded. |
 | 2026-10-21 | v1.60 | 655 (#655) GitHub sign-in, answers #154 part 2 | **§3.4 gains seven per-provider rows:** `protocol` (default `oidc`), `authorization-uri`, `token-uri`, `user-info-uri`, `user-name-attribute`, `scopes` (all empty by default, required for `oauth2`) and `emails-uri` (unset, optional). §1's provider sentence names both protocols and the GitHub env pair; the §5 YAML gains the `github` entry as shipped; §7's authentication-method rule is per protocol and gains the entry-against-protocol rule (unknown protocol, missing key, `issuer-uri` on `oauth2`, `oauth2` keys on `oidc`, `openid` scope, non-https endpoint — each naming the provider and the key). `deploy/secrets.env.example` gains empty `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` lines. |
 | 2026-10-21 | v1.59 | 636 (#636) the housekeeping statements' bounds | **§3.11**'s "not a key" note names the four housekeeping statements #636 bounds — the dashboard refresh sweep's UPDATE at 10 s (`REFRESH_SWEEP_STATEMENT_TIMEOUT_SECONDS`), the dashboard refreshes' DELETE and the parameter evaluations' sweep UPDATE and batch DELETE at the retention tick's 25 s — and links metadata-db §8.4 and §8.5. No key added. |
 | 2026-10-20 | v1.58 | V50 (#640, script-node-rename lane, owner ruling 2026-10-20) | **The TRANSFORM→SCRIPT node-type rename, §3.28's keys move with it**: the nine script budgets now live at `datapipelines.script.*` (env `DATAPIPELINES_SCRIPT_*`) with no alias; **§7 gains `checkRemovedTransformKeys`** (`CHECK_COUNT` 35 → 36): any set `datapipelines.transform.*` key refuses startup BY NAME pointing at its replacement — presence, not value, is the signal (the §3.17 rule). `ScriptConfigKeysSpecDriftTest` (7b's, renamed) still pins the new keys in this document, `application.yml` and the validator. Renumbered at merge after #326's v1.57. |

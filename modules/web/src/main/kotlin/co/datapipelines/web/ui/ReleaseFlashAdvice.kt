@@ -15,14 +15,16 @@ import org.springframework.web.bind.annotation.ModelAttribute
  * generic sentence.
  *
  * Selection rule (#652): `assignableTypes = [ShellPage::class]` — a `@RestController`
- * never implements [ShellPage], so this advice does not run for JSON handlers at all.
+ * never implements [ShellPage], so this advice does not run for `@RestController` handlers.
  *
  * The one-shot consumption, spelled out: [releasedFlashMessage] returns null unless the
  * request carries `?ok=released_with_templates`; only then does [ReleaseFlash.consumeMessage]
  * run — it reads the held names AND REMOVES the session attribute first, and only then
- * checks the pipeline id. So a JSON request without the parameter never consumed anything,
+ * checks the pipeline id. So a REST request without the parameter never consumed anything,
  * and one crafted WITH the parameter would have eaten the next shell render's flash. Since
- * #652 neither is reachable: JSON handlers never reach this advice.
+ * #652 neither is reachable through a `@RestController`. Selection is per bean: the
+ * `@ResponseBody` methods on the marked DocsController, ApiKeysPartialController and
+ * TemplateEditorController still reach this advice, including its one-shot consumption.
  */
 @ControllerAdvice(assignableTypes = [ShellPage::class])
 class ReleaseFlashAdvice(

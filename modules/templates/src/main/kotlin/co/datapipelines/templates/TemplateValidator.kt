@@ -2,7 +2,6 @@ package co.datapipelines.templates
 
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.TemplateType
-import co.datapipelines.scripting.JsonataEngine
 import co.datapipelines.scripting.ScriptEngine
 import co.datapipelines.scripting.ScriptLanguage
 import co.datapipelines.scripting.ScriptResourceLimitException
@@ -46,8 +45,7 @@ import co.datapipelines.typesystem.LogicalType
 class TemplateValidator(
     private val libraryResolver: LibraryResolver,
     private val maxBodyChars: Int = DEFAULT_MAX_BODY_CHARS,
-    private val scriptEngines: Map<ScriptLanguage, ScriptEngine> =
-        mapOf(ScriptLanguage.JSONATA to JsonataEngine()),
+    private val scriptEngines: Map<ScriptLanguage, ScriptEngine> = emptyMap(),
     /**
      * The test suite of §8.1 — present in production wiring (EngineConfiguration's runner bean
      * via [TemplatesConfiguration]), absent in unit constructions that test the static rules.
@@ -315,8 +313,8 @@ class TemplateValidator(
 
     /**
      * The shared length cap, then the type's own body pipeline ([TemplateTypeBehaviour] —
-     * the Freemarker scan/parse for `sql`/`html`, the engine compile for `jsonata`, the
-     * round-two refusal for `javascript`).
+     * the Freemarker scan/parse for `sql`/`html`, the engine compile for script types and the
+     * availability refusal when the JavaScript isolate is absent).
      */
     private fun addBodyFailures(
         draft: TemplateDraft,

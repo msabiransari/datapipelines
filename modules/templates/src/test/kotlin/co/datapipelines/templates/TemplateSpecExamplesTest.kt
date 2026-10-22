@@ -34,7 +34,12 @@ class TemplateSpecExamplesTest {
     @Test
     fun `the Appendix A library validates as a library`() {
         val registry = InMemoryTemplateRegistry()
-        val validator = TemplateValidator(LibraryResolver { _ -> registry })
+        val validator =
+            TemplateValidator(
+                scriptEngines =
+                    mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
+                libraryResolver = LibraryResolver { _ -> registry },
+            )
 
         validator
             .validate(TemplateFixtures.draft(id = "test/lib_aggregate.sql", isLibrary = true, body = LIB_AGGREGATE), workspaceId)
@@ -55,7 +60,11 @@ class TemplateSpecExamplesTest {
                 body = MONTHLY_REVENUE,
             )
 
-        TemplateValidator(LibraryResolver { _ -> registry }).validate(draft, workspaceId).isValid.shouldBeTrue()
+        TemplateValidator(
+            scriptEngines =
+                mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
+            libraryResolver = LibraryResolver { _ -> registry },
+        ).validate(draft, workspaceId).isValid.shouldBeTrue()
 
         registry.put(
             TemplateFixtures.version(
@@ -115,7 +124,11 @@ class TemplateSpecExamplesTest {
         val registry = InMemoryTemplateRegistry(listOf(v1, v2))
         val draft = TemplateFixtures.draft(imports = listOf(TemplateImport("test/lib.sql", 2, "newer")))
 
-        TemplateValidator(LibraryResolver { _ -> registry }).validate(draft, workspaceId).isValid.shouldBeTrue()
+        TemplateValidator(
+            scriptEngines =
+                mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
+            libraryResolver = LibraryResolver { _ -> registry },
+        ).validate(draft, workspaceId).isValid.shouldBeTrue()
     }
 
     private companion object {

@@ -5,12 +5,18 @@ import jakarta.servlet.http.HttpServletResponse
 import org.slf4j.LoggerFactory
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.http.client.SimpleClientHttpRequestFactory
+import org.springframework.http.converter.FormHttpMessageConverter
 import org.springframework.security.core.Authentication
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClient
+import org.springframework.security.oauth2.client.endpoint.RestClientAuthorizationCodeTokenResponseClient
+import org.springframework.security.oauth2.client.http.OAuth2ErrorResponseErrorHandler
+import org.springframework.security.oauth2.client.oidc.userinfo.OidcUserService
 import org.springframework.security.oauth2.client.registration.ClientRegistration
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository
 import org.springframework.security.oauth2.client.registration.ClientRegistrations
 import org.springframework.security.oauth2.client.registration.InMemoryClientRegistrationRepository
+import org.springframework.security.oauth2.client.userinfo.DefaultOAuth2UserService
 import org.springframework.security.oauth2.client.web.DefaultOAuth2AuthorizationRequestResolver
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestCustomizers
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestRedirectFilter
@@ -18,6 +24,10 @@ import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequest
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepository
 import org.springframework.security.oauth2.core.AuthorizationGrantType
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod
+import org.springframework.security.oauth2.core.http.converter.OAuth2AccessTokenResponseHttpMessageConverter
+import org.springframework.web.client.RestClient
+import org.springframework.web.client.RestTemplate
+import java.time.Duration
 
 /**
  * Builds the login `ClientRegistrationRepository` from the generic provider list
@@ -124,6 +134,52 @@ class OidcConfig {
     /** The identity source of `protocol: oauth2` logins (#655); OIDC registrations never reach it. */
     @Bean
     fun oauth2IdentityUserService(authProperties: AuthProperties): OAuth2IdentityUserService = OAuth2IdentityUserService(authProperties)
+
+    /** Code-for-token exchange for both protocols, retaining Spring's OAuth converters and errors. */
+    @Bean
+    fun providerTokenResponseClient(authProperties: AuthProperties): RestClientAuthorizationCodeTokenResponseClient {
+        val client =
+            RestClient
+                .builder()
+                .requestFactory(boundedRequestFactory(authProperties))
+                .messageConverters {
+                    it.clear()
+                    it.add(FormHttpMessageConverter())
+                    it.add(OAuth2AccessTokenResponseHttpMessageConverter())
+                }.defaultStatusHandler(OAuth2ErrorResponseErrorHandler())
+                .build()
+        return RestClientAuthorizationCodeTokenResponseClient().apply { setRestClient(client) }
+    }
+
+    /** OIDC user-info uses the same bound; Spring still owns ID-token validation and JWKS. */
+    @Bean
+    fun providerOidcUserService(authProperties: AuthProperties): OidcUserService {
+        val rest = boundedRestTemplate(authProperties)
+        rest.errorHandler = OAuth2ErrorResponseErrorHandler()
+        val delegate = DefaultOAuth2UserService()
+        delegate.setRestOperations(rest)
+        return OidcUserService().apply { setOauth2UserService(delegate) }
+    }
+
+    companion object {
+        /** The shared connect/read policy for login-thread provider reads (#682). */
+        fun boundedRequestFactory(authProperties: AuthProperties): SimpleClientHttpRequestFactory {
+            val seconds = authProperties.oidc.providerReadTimeoutSeconds
+            require(seconds in 1..MAX_PROVIDER_TIMEOUT_SECONDS) {
+                "datapipelines.auth.oidc.provider-read-timeout-seconds '$seconds' must be in 1..$MAX_PROVIDER_TIMEOUT_SECONDS (§3.4)"
+            }
+            val timeout = Duration.ofSeconds(seconds)
+            return SimpleClientHttpRequestFactory().apply {
+                setConnectTimeout(timeout)
+                setReadTimeout(timeout)
+            }
+        }
+
+        /** Emails retain ordinary HTTP errors; user-info delegates install OAuth2 error handling. */
+        fun boundedRestTemplate(authProperties: AuthProperties): RestTemplate = RestTemplate(boundedRequestFactory(authProperties))
+
+        private const val MAX_PROVIDER_TIMEOUT_SECONDS = Int.MAX_VALUE / 1000L
+    }
 
     private fun toRegistration(
         p: AuthProperties.Provider,

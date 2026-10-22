@@ -25,7 +25,7 @@ import org.springframework.web.bind.annotation.ModelAttribute
  *
  * Selection rule (#652): `assignableTypes = [ShellPage::class]` — the attributes are
  * computed for controllers whose views render inside the shell or the site chrome, and
- * for nothing else. A `@RestController` never implements [ShellPage], so a JSON handler
+ * for nothing else. A `@RestController` never implements [ShellPage], so its handlers
  * pays none of them; until #652 the selector was `annotations = [Controller::class]`,
  * which matched `@RestController` through its meta-annotation.
  *

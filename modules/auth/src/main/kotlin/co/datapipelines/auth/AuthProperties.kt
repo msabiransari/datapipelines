@@ -69,6 +69,13 @@ data class AuthProperties(
 ) {
     data class Oidc(
         val providers: List<Provider> = emptyList(),
+        /**
+         * Connect and read timeout for the token exchange (both protocols), OAuth2 user-info,
+         * emails and OIDC user-info reads. JWKS keeps Spring's default; discovery is separate.
+         * Must be 1..2147483 seconds: zero means infinite in SimpleClientHttpRequestFactory,
+         * and larger values overflow its signed 32-bit millisecond fields.
+         */
+        val providerReadTimeoutSeconds: Long = 10,
     )
 
     /**

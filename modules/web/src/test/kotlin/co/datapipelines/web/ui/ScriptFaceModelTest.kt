@@ -23,6 +23,21 @@ class ScriptFaceModelTest {
     private val identity = ScriptFace.Identity(ScriptFixtures.NAME, "jsonata", Template.NONE_ENGINE, "Order lines", "d")
 
     @Test
+    fun `javascript uses statements only and the frame is separate model text`() {
+        ScriptSkeleton.javascriptBody shouldContain "return {"
+        ScriptSkeleton.javascriptBody shouldNotContain "function main"
+        val stored = ScriptFixtures.storedSkeleton().copy(type = TemplateType.JAVASCRIPT, body = ScriptSkeleton.javascriptBody)
+        val model = org.springframework.ui.ExtendedModelMap()
+        ScriptFace.fill(model, stored, false)
+        model["faceJavascript"] shouldBe true
+        model["scriptMainOpen"] shouldBe "function main(input) {"
+        model["scriptMainClose"] shouldBe "}"
+        (model["panes"] as ScriptPanes).body shouldBe ScriptSkeleton.javascriptBody
+        ScriptFace.fill(model, stored.copy(type = TemplateType.JSONATA), false)
+        model["faceJavascript"] shouldBe false
+    }
+
+    @Test
     fun `syntax refusals never reflect a pane value in the message or line`() {
         val panes = ScriptFixtures.skeletonPanes
         listOf(

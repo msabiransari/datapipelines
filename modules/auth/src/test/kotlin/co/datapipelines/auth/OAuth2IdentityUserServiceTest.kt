@@ -1,10 +1,12 @@
 package co.datapipelines.auth
 
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.longs.shouldBeLessThan
 import io.kotest.matchers.maps.shouldNotContainKey
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -15,6 +17,7 @@ import org.springframework.security.oauth2.core.AuthorizationGrantType
 import org.springframework.security.oauth2.core.OAuth2AccessToken
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException
 import java.time.Instant
+import kotlin.time.TimeSource
 
 /**
  * [OAuth2IdentityUserService] against the GitHub-shaped stub over real HTTP (#655): the
@@ -31,6 +34,8 @@ class OAuth2IdentityUserServiceTest {
         stub.user = OAuth2ProviderStub.GITHUB_USER
         stub.emails = OAuth2ProviderStub.VERIFIED_PRIMARY
         stub.emailsStatus = OK
+        stub.userDelayMillis = 0
+        stub.emailsDelayMillis = 0
     }
 
     @AfterAll
@@ -39,7 +44,11 @@ class OAuth2IdentityUserServiceTest {
     private fun service(emailsUri: String? = "${stub.base}${OAuth2ProviderStub.EMAILS}") =
         OAuth2IdentityUserService(
             AuthProperties(
-                oidc = AuthProperties.Oidc(listOf(AuthProperties.Provider(name = "github", protocol = "oauth2", emailsUri = emailsUri))),
+                oidc =
+                    AuthProperties.Oidc(
+                        listOf(AuthProperties.Provider(name = "github", protocol = "oauth2", emailsUri = emailsUri)),
+                        providerReadTimeoutSeconds = 1,
+                    ),
             ),
         )
 
@@ -60,6 +69,31 @@ class OAuth2IdentityUserServiceTest {
     }
 
     private fun failureOf(block: () -> Unit): String = shouldThrow<OAuth2AuthenticationException>(block).error.errorCode
+
+    @Test
+    fun `a delayed emails response fails within the configured read timeout`() {
+        stub.emailsDelayMillis = DELAY_MILLIS
+        val start = TimeSource.Monotonic.markNow()
+        val result = runCatching { service().loadUser(request()) }
+        val elapsed = start.elapsedNow().inWholeMilliseconds
+        println("emails timeout elapsed_ms=$elapsed")
+        elapsed shouldBeLessThan BUDGET_MILLIS
+        val failure = result.exceptionOrNull().shouldBeInstanceOf<OAuth2AuthenticationException>()
+        failure.error.errorCode shouldBe OAuth2IdentityUserService.INVALID_EMAILS_RESPONSE
+        failure.error.description shouldContain "emails endpoint read failed (ResourceAccessException)"
+    }
+
+    @Test
+    fun `a delayed user-info response fails within the configured read timeout`() {
+        stub.userDelayMillis = DELAY_MILLIS
+        val start = TimeSource.Monotonic.markNow()
+        val result = runCatching { service().loadUser(request()) }
+        val elapsed = start.elapsedNow().inWholeMilliseconds
+        println("oauth2 user-info timeout elapsed_ms=$elapsed")
+        elapsed shouldBeLessThan BUDGET_MILLIS
+        val failure = result.exceptionOrNull().shouldBeInstanceOf<OAuth2AuthenticationException>()
+        failure.error.errorCode shouldBe OAuth2IdentityUserService.INVALID_USER_INFO_RESPONSE
+    }
 
     @Test
     fun `the principal carries the OIDC-shaped keys - sub as a string, the verified primary, name and picture`() {
@@ -135,5 +169,7 @@ class OAuth2IdentityUserServiceTest {
     private companion object {
         const val OK = 200
         const val SERVER_ERROR = 500
+        const val DELAY_MILLIS = 3000L
+        const val BUDGET_MILLIS = 2000L
     }
 }
