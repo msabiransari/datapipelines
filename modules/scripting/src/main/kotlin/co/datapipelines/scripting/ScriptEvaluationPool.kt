@@ -60,10 +60,16 @@ fun interface ScriptClock {
  *    fast, typed refusal, never a caller hung behind someone else's evaluation.
  *  - **Abandonment.** `run` awaits at most `limits.wallClock + [abandonGrace]`
  *    (§4.3: an evaluation is abandoned once it has outlived its wall clock BY the
- *    grace). Past that: `Future.cancel(true)` — whose interrupt reaches nothing in
- *    the JSONata engine (no `Thread.interrupted()` anywhere in its sources) — one
- *    ERROR log naming the script, [abandoned] incremented, and
- *    [ScriptTimeoutException] to the caller. The thread lives on detached.
+ *    grace). Past that: the slot's [ScriptCancellation] first — an engine that can be
+ *    stopped from outside registered its stop there (the JavaScript engine's
+ *    `Context.close(true)`, which ends a running body within milliseconds, so the thread
+ *    ends and the slot comes back) — then `Future.cancel(true)`, whose interrupt reaches
+ *    nothing in either engine (no `Thread.interrupted()` anywhere in the JSONata
+ *    sources; the JavaScript isolate ignores it), one ERROR log naming the script,
+ *    [abandoned] incremented, and [ScriptTimeoutException] to the caller. A JSONata
+ *    thread lives on detached until its work ends; for JavaScript the engine's own
+ *    watchdog has normally stopped the body at its wall clock already, and the pool's
+ *    call is the backstop, not the mechanism.
  *  - **No Micrometer here.** This module has no metrics dependency (typesystem has
  *    none to build on); [abandoned] is the `LongAdder` a caller scrapes into its own
  *    meter (`script.evaluations.abandoned` is the record's name).
@@ -130,10 +136,11 @@ class ScriptEvaluationPool internal constructor(
         acquireSlot(limits)
         // From here the evaluation THREAD owns both permits: it returns them when the work
         // ends — normally, by failure, or long after its caller abandoned it (the bulkhead).
-        val task = FutureTask(work)
+        val cancellation = ScriptCancellation()
+        val task = FutureTask { ScriptCancellation.runWith(cancellation, work) }
         val thread = slotOwningThread(task)
         return try {
-            await(task, thread, limits, label)
+            await(task, thread, cancellation, limits, label)
         } catch (err: InterruptedException) {
             throw awaitInterrupted(err)
         }
@@ -213,6 +220,7 @@ class ScriptEvaluationPool internal constructor(
     private fun <T> await(
         task: FutureTask<T>,
         thread: Thread,
+        cancellation: ScriptCancellation,
         limits: EvaluationLimits,
         label: String,
     ): T {
@@ -231,12 +239,14 @@ class ScriptEvaluationPool internal constructor(
             abandonedThreads.add(thread)
             log.error(
                 "event=script_evaluation_abandoned script={} budget_ms={} grace_ms={} - the " +
-                    "engine cannot interrupt a running evaluation; the thread is left to " +
-                    "finish or die with the JVM and keeps its pool slot until it ends",
+                    "evaluation is stopped through its slot's cancellation when its engine " +
+                    "registered one; otherwise the thread is left to finish or die with the " +
+                    "JVM and keeps its pool slot until it ends",
                 label,
                 limits.wallClock.toMillis(),
                 abandonGrace.toMillis(),
             )
+            cancellation.cancel()
             task.cancel(true)
             throw ScriptTimeoutException(limits.wallClock, label)
         } catch (

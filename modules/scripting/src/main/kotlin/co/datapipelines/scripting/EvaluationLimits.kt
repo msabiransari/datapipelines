@@ -21,16 +21,29 @@ import java.time.Instant
  *   library and never nests; the wall clock bounds that shape). The JSONata engine
  *   enforces it with its own evaluate entry/exit hooks (checked at every entry and
  *   exit — #260; the library's `Timebox` skipped `isParallelCall` frames).
- * @param maxHeapBytes heap budget in bytes, or null when the caller declares none. No
- *   in-process engine can enforce this today (`EngineCapabilities.boundsHeap` is false);
- *   carrying the field keeps the seam stable for the round-two isolate, which can.
- * @param maxStatements statement budget, or null when the caller declares none. Same
- *   story as [maxHeapBytes]: reserved for the isolate engine (`boundsStatements`).
+ * @param maxHeapBytes heap budget in bytes, or null when the caller declares none (the engine's
+ *   own default then applies). The JSONata engine cannot enforce it in-process
+ *   (`EngineCapabilities.boundsHeap` is false); the JavaScript isolate can, softly — the sandbox
+ *   checks retained heap, so an allocation may overshoot before the Context is cancelled.
+ * @param maxStatements statement budget, or null when the caller declares none (the engine's own
+ *   default then applies). Enforced by the JavaScript isolate (`boundsStatements`); the JSONata
+ *   engine has no statement count.
  * @param now the instant `$now()` and `$millis()` return, or null. A script is a pure
  *   function of its inputs (D-T4), so production callers always pin this to the
  *   execution's `current_timestamp` — a template is reproducible because the clock is an
  *   input, not an ambient read. When null, the engine refuses any body that calls the
  *   clock functions (the refusal fires when the body actually evaluates them).
+ * @param maxInputBytes the serialized input's budget in UTF-8 bytes, or null for the engine's own
+ *   default. The JavaScript engine refuses a larger input BEFORE its sandbox exists
+ *   ([ScriptResourceLimitException.Kind.INPUT_BYTES]); the JSONata engine passes its input by
+ *   reference and ignores the field.
+ * @param maxResultBytes the serialized result's budget in UTF-8 bytes, or null for the engine's own
+ *   default ([ScriptResourceLimitException.Kind.RESULT_BYTES]). Not the executor's cap on a VALUE
+ *   output, which is a different, smaller thing. The JSONata engine ignores the field.
+ * @param console not a bound: where the body's `console.*` lines go; null discards them. The
+ *   JavaScript engine hands at most 200 lines of at most 2 000 characters each, in the order they
+ *   were written, after the evaluation returns or fails; the JSONata engine has no console and
+ *   ignores the field.
  */
 data class EvaluationLimits(
     val wallClock: Duration,
@@ -38,6 +51,9 @@ data class EvaluationLimits(
     val maxHeapBytes: Long? = null,
     val maxStatements: Long? = null,
     val now: Instant? = null,
+    val maxInputBytes: Long? = null,
+    val maxResultBytes: Long? = null,
+    val console: ConsoleSink? = null,
 ) {
     init {
         require(!wallClock.isNegative && wallClock != Duration.ZERO) {
@@ -49,6 +65,12 @@ data class EvaluationLimits(
         }
         require(maxStatements == null || maxStatements > 0) {
             "maxStatements must be positive when present, was $maxStatements"
+        }
+        require(maxInputBytes == null || maxInputBytes > 0) {
+            "maxInputBytes must be positive when present, was $maxInputBytes"
+        }
+        require(maxResultBytes == null || maxResultBytes > 0) {
+            "maxResultBytes must be positive when present, was $maxResultBytes"
         }
     }
 }

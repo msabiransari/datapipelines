@@ -36,8 +36,12 @@ import java.time.ZoneOffset
  *    [GateRefusal.PrecisionLost].
  *  - `DECIMAL(p, s)` — a JSON number, ROUNDED HALF-EVEN to scale `s` (R1: `0.1 * 3`
  *    becomes `0.30`), then checked against `p`; overflow of `p` after rounding is
- *    [GateRefusal.PrecisionLost].
- *  - `DECIMAL` without scale (approximate origin) — stored as-is.
+ *    [GateRefusal.PrecisionLost]. A decimal STRING is accepted as the exact value it
+ *    names (#8: the JavaScript engine writes a DECIMAL whose double would lose digits as
+ *    a string) and goes through the same rounding and check; a non-decimal string is
+ *    [GateRefusal.ValueTypeMismatch].
+ *  - `DECIMAL` without scale (approximate origin) — stored as-is (a decimal string as
+ *    the exact `BigDecimal` it names).
  *  - `BIGDECIMAL(p, s)` — a JSON string, EXACT: scale above `s` or integer digits
  *    above `p` is [GateRefusal.PrecisionLost], never rounded; a value WITHIN the
  *    declaration is normalised to the declared scale (`"12.5"` → `"12.50"`). Note the
@@ -254,9 +258,15 @@ class TypeGate private constructor(
         column: ColumnSchema,
         rowNumber: Int?,
     ): GateResult {
-        val number =
-            value as? Number
-                ?: return refuseType(column, rowNumber, "number", value)
+        // A decimal STRING is the JavaScript engine's spelling of a DECIMAL whose double would lose
+        // digits (#8, D3: numbers by logical type) — accepted as the exact value it names; a string
+        // that is not a decimal stays the type refusal it always was.
+        val number: Number =
+            when (value) {
+                is Number -> value
+                is String -> runCatching { BigDecimal(value) }.getOrNull()
+                else -> null
+            } ?: return refuseType(column, rowNumber, "number or decimal string", value)
         val declaredScale =
             column.scale
                 ?: return GateResult.Pass(number)

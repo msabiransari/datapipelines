@@ -15,7 +15,11 @@ import java.io.File
  * authority that promises it) and deployment.md's drop-in paragraph (the operator's recipe).
  *
  * The spec promised `ENV LOADER_PATH=lib` for months while the image set nothing — the drift this
- * guard exists for. The value is ABSOLUTE on purpose: `PropertiesLauncher` resolves a relative
+ * guard exists for. Since #8 lane 8a the value is a LIST, `/app/lib,/opt/graaljs`: the drop-in
+ * directory, then the JavaScript isolate's (module-structure §5.15). One list in one ENV, never a
+ * `-Dloader.path` beside it (owner ruling 2026-10-21): `PropertiesLauncher` reads the system
+ * property before the environment, so a `-Dloader.path` for the isolate would silently drop the
+ * drop-in (measured in lane 8a). Each entry is ABSOLUTE on purpose: `PropertiesLauncher` resolves a relative
  * `loader.path` entry against `loader.home`, which defaults to `${user.dir}`, and the image sets
  * no `WORKDIR`, so `lib` would put `/lib`, the OS library directory, on the classpath.
  *
@@ -34,10 +38,13 @@ class ImageLoaderPathSpecDriftTest {
     private val dockerfile: List<String> by lazy { repoFile("Dockerfile").readLines() }
 
     @Test
-    fun `the Dockerfile sets LOADER_PATH exactly once to the absolute drop-in directory`() {
+    fun `the Dockerfile sets LOADER_PATH exactly once to the absolute drop-in and isolate directories`() {
         val values = dockerfile.mapNotNull { ENV_LINE.matchEntire(it.trim())?.groupValues?.get(1) }
 
-        withClue("Dockerfile `ENV LOADER_PATH=` lines") { values shouldContainExactly listOf(EXPECTED) }
+        withClue("Dockerfile `ENV LOADER_PATH=` lines") { values shouldContainExactly listOf(IMAGE_LOADER_PATH) }
+        withClue("no instruction passes a `loader.path` system property, which would override the ENV") {
+            dockerfile.filter { !it.trim().startsWith("#") && it.contains("-Dloader.path") }.shouldBeEmpty()
+        }
     }
 
     @Test
@@ -64,7 +71,7 @@ class ImageLoaderPathSpecDriftTest {
 
         for ((where, pattern) in SPEC_SITES) {
             val values = pattern.findAll(spec).map { it.groupValues[1] }.toList()
-            withClue("module-structure.md $where") { values shouldContainExactly listOf(EXPECTED) }
+            withClue("module-structure.md $where") { values shouldContainExactly listOf(IMAGE_LOADER_PATH) }
         }
     }
 
@@ -75,7 +82,7 @@ class ImageLoaderPathSpecDriftTest {
 
         withClue("deployment.md's one `$DROP_IN_PARAGRAPH` paragraph") { paragraph shouldHaveSize 1 }
         withClue("it names the mount point") { paragraph.single() shouldContain "`$EXPECTED/`" }
-        withClue("it quotes the image's ENV") { paragraph.single() shouldContain "`ENV LOADER_PATH=$EXPECTED`" }
+        withClue("it quotes the image's ENV") { paragraph.single() shouldContain "`ENV LOADER_PATH=$IMAGE_LOADER_PATH`" }
     }
 
     @Test
@@ -127,6 +134,9 @@ class ImageLoaderPathSpecDriftTest {
 
     private companion object {
         const val EXPECTED = "/app/lib"
+
+        /** The image's whole `LOADER_PATH`: the drop-in directory, then the JavaScript isolate's (#8). */
+        const val IMAGE_LOADER_PATH = "$EXPECTED,/opt/graaljs"
         const val CHART_DIR = "deploy/helm/datapipelines"
         const val TEMPLATE = "$CHART_DIR/templates/deployment.yaml"
         const val CHANGE_LOG_HEADING = "## Appendix A: Change Log"
