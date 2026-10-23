@@ -143,7 +143,7 @@ class AuthLayoutRenderTest {
                 "login",
                 webContext().apply {
                     fillLogin()
-                    setVariable("providers", listOf(mapOf("registrationId" to "google", "displayName" to "Google")))
+                    setVariable("providers", listOf(mapOf("registrationId" to "google", "displayName" to "Sign in with Google")))
                 },
             )
 
@@ -155,7 +155,8 @@ class AuthLayoutRenderTest {
             { html shouldContain "lucide-sprite.svg#database" },
             { html shouldContain "lucide-sprite.svg#code" },
             { html shouldContain "lucide-sprite.svg#chart-line" },
-            { html shouldContain "Continue with Google" },
+            { html shouldContain "Sign in with Google" },
+            { html shouldNotContain "Continue with" },
             { html shouldContain "or with email" },
             { html shouldContain "id=\"login-password-toggle\"" },
             { html shouldContain "/js/login.js" },
@@ -163,7 +164,7 @@ class AuthLayoutRenderTest {
             { html shouldNotContain "<canvas" },
             { html shouldNotContain "<script>" },
             { html shouldNotContain listOf("app-auth", "dag").joinToString("-") },
-            { html.indexOf("Continue with Google") shouldBeLessThan html.indexOf("login-email") },
+            { html.indexOf("Sign in with Google") shouldBeLessThan html.indexOf("login-email") },
         )
         val oidcOnly =
             engine.process(
@@ -171,10 +172,11 @@ class AuthLayoutRenderTest {
                 webContext().apply {
                     fillLogin()
                     setVariable("localEnabled", false)
-                    setVariable("providers", listOf(mapOf("registrationId" to "google", "displayName" to "Google")))
+                    setVariable("providers", listOf(mapOf("registrationId" to "google", "displayName" to "Sign in with Google")))
                 },
             )
-        oidcOnly shouldContain "Continue with Google"
+        oidcOnly shouldContain "Sign in with Google"
+        oidcOnly shouldNotContain "Continue with"
         oidcOnly shouldNotContain "/js/login.js"
         oidcOnly shouldNotContain "id=\"login-password-toggle\""
         oidcOnly shouldNotContain "id=\"login-email\""
