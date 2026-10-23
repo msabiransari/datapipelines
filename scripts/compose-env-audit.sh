@@ -195,6 +195,8 @@ DECLARED_OVERRIDES = {
 # keeps the empty app default and check 5 compares THAT against application.yml as usual.
 IMAGE_DEFAULT_VARS = {
     "DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY": "/opt/duckdb/extensions",
+    # D-T16: JavaScript uses the pre-installed platform isolate in the image.
+    "DATAPIPELINES_SCRIPT_JS_ISOLATE_DIR": "/opt/graaljs",
 }
 
 # A value assembled ENTIRELY from `${OTHER:+literal}` fragments — the concatenation form.
