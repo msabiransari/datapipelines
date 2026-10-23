@@ -6,7 +6,6 @@ import co.datapipelines.pipeline.LifecycleBucket
 import co.datapipelines.pipeline.NavigationFamily
 import co.datapipelines.pipeline.ReadLens
 import java.time.Instant
-import java.util.Locale
 
 /**
  * #556 — what one family overview renders (`overview/family.html`, shell design §8), built in ONE
@@ -23,6 +22,9 @@ import java.util.Locale
  * template renders that sentence and no number, never a zero. [recent] is null for a family whose
  * Recently updated adapter does not exist yet ([FamilyRecent.supports]); [guided] marks the
  * families whose introduction and agent guidance are written (`overview/guide-<family>.html`).
+ *
+ * The lifecycle home's builders live in [LifecycleHomePage]; the companion's `of`, `tasks`,
+ * `iconFor` and `width` are one-line delegates there (#670).
  */
 data class OverviewPage(
     val family: String,
@@ -301,135 +303,25 @@ data class OverviewPage(
     }
 
     companion object {
-        /**
-         * #598a — the page for a [OverviewStacked.ChartSet.LIFECYCLE] [family] from one chart read
-         * (the lifecycle and maturity charts, one snapshot) and one recent read, at [now]. An
-         * unknown chart group is the frame's unavailable sentence, never a zero.
-         */
+        /** The builders live in [LifecycleHomePage]; these delegates keep the frame's face (#670). */
         fun of(
             family: Family,
             lensed: Boolean,
             charts: ChartsResult,
             recent: RecentResult?,
             now: Instant,
-        ): OverviewPage {
-            require(family.charts == OverviewStacked.ChartSet.LIFECYCLE) { "$family carries the four counts, not the charts" }
-            val available = (charts as? ChartsResult.Available)?.charts
-            return page(
-                family,
-                lensed,
-                available?.let { OverviewStacked.panel(family, it, lensed) },
-                (charts as? ChartsResult.Unavailable)?.reason,
-                recent?.let {
-                    recentPanel(family, it, now).copy(
-                        review = null,
-                        tasks = tasks(family, available?.lifecycle),
-                        description = "A clear next step for your ${family.plural}",
-                    )
-                },
-            )
-        }
+        ): OverviewPage = LifecycleHomePage.of(family, lensed, charts, recent, now)
 
-        /**
-         * #638 — Continue your work's two rows for a lifecycle family: the drafts awaiting
-         * their first release ([inventory]'s In development count worded; no number when the
-         * inventory is unknown) and the live objects to run. A family whose catalog offers no such
-         * filter gets no row for it.
-         */
         fun tasks(
             family: Family,
             inventory: Inventory?,
-        ): List<TaskRow> =
-            listOfNotNull(
-                family.filtered(LifecycleBucket.DRAFT_ONLY)?.let { href ->
-                    TaskRow("drafts", "file", "Review your drafts", OverviewWords.drafts(family, inventory?.draftOnly), href, "draft")
-                },
-                family.filtered(LifecycleBucket.RELEASED_ONLY)?.let { href ->
-                    TaskRow(
-                        "live",
-                        "play",
-                        "Explore live ${family.plural}",
-                        "Run a released ${family.singular} with your own inputs.",
-                        href,
-                        "released",
-                    )
-                },
-            )
+        ): List<TaskRow> = LifecycleHomePage.tasks(family, inventory)
 
-        /** The heading eyebrow's icon for a family route: the [Family]'s own, else the sibling homes' rail icons. */
-        fun iconFor(family: String): String =
-            Family.entries.firstOrNull { it.navigation.route == family }?.icon ?: SIBLING_ICONS[family] ?: DEFAULT_ICON
+        fun iconFor(family: String): String = LifecycleHomePage.iconFor(family)
 
-        private fun page(
-            family: Family,
-            lensed: Boolean,
-            inventory: InventoryPanel?,
-            unavailable: String?,
-            recent: RecentPanel?,
-        ): OverviewPage =
-            OverviewPage(
-                family = family.navigation.route,
-                title = family.title,
-                catalogHref = family.catalogHref,
-                lensed = lensed,
-                inventory = inventory,
-                unavailable = unavailable,
-                recent = recent,
-                guided = family.guided,
-            )
-
-        private fun recentPanel(
-            family: Family,
-            recent: RecentResult,
-            now: Instant,
-        ): RecentPanel {
-            val review =
-                family.filtered(LifecycleBucket.WITH_DRAFTS)?.let { href -> Link(href, REVIEW_DRAFTS) }
-            val section =
-                RecentSection(
-                    heading = RECENTLY_UPDATED,
-                    note = RECENT_NOTE,
-                    entries =
-                        when (recent) {
-                            is RecentResult.Available -> {
-                                recent.entries.map {
-                                    RecentItem(
-                                        name = it.name,
-                                        href = it.href,
-                                        datetime = it.modifiedAt.toString(),
-                                        ago = RelativeTime.since(it.modifiedAt, now),
-                                        absolute = RelativeTime.absolute(it.modifiedAt),
-                                        hasDraft = it.hasDraft,
-                                    )
-                                }
-                            }
-
-                            is RecentResult.Unavailable -> {
-                                null
-                            }
-                        },
-                    unavailable = (recent as? RecentResult.Unavailable)?.reason,
-                    emptyNote = RECENT_EMPTY,
-                )
-            return RecentPanel(review, listOf(section))
-        }
-
-        /** [value] as a share of [tallest] in the chart's 0–100 viewBox; an all-zero chart is all zero. */
         internal fun width(
             value: Long,
             tallest: Long,
-        ): String = if (tallest == 0L) "0" else String.format(Locale.ROOT, "%.1f", value * PERCENT / tallest)
-
-        private const val PERCENT = 100.0
-        private const val DEFAULT_ICON = "layout-grid"
-
-        /** The three homes whose controllers build their page directly (rail icons, shell record §3). */
-        private val SIBLING_ICONS = mapOf("datasources" to "database", "schedules" to "calendar-clock", "api-console" to "activity")
-
-        /** The recent card's words, model-owned since #583 — the template renders what it is given. */
-        const val REVIEW_DRAFTS = "Review drafts"
-        const val RECENTLY_UPDATED = "Recently updated"
-        const val RECENT_NOTE = "The latest changes in this workspace, newest first. Not a personal history."
-        const val RECENT_EMPTY = "Nothing here yet. The starter prompt above is a good first step."
+        ): String = LifecycleHomePage.width(value, tallest)
     }
 }
