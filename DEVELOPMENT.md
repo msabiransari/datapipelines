@@ -1323,6 +1323,9 @@ entries are SECRET-targeted and path-scoped with `condition = "AND"`
 secret co-located with an allowlisted token still fires), each with a reason +
 date comment, and the config EXTENDS the gitleaks default ruleset (a bare
 custom config silently replaces it — that mistake was made and caught here).
+The full-history scan runs by hand and is expected to exit 0 on `main`; a
+finding in a committed test fixture is triaged with a path + exact-value
+allowlist entry, never by reshaping the fixture's history.
 
 #### Container scanning (trivy)
 
