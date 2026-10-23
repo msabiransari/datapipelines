@@ -576,11 +576,12 @@ class ScreenshotUploadTransportTest {
             path: String,
             body: HttpRequest.BodyPublisher,
             capability: String? = null,
+            requestTimeout: Duration = Duration.ofMillis(SOCKET_TIMEOUT.toLong()),
         ): Response {
             val request =
                 HttpRequest
                     .newBuilder(URI("http://127.0.0.1:$port$path"))
-                    .timeout(Duration.ofMillis(SOCKET_TIMEOUT.toLong()))
+                    .timeout(requestTimeout)
                     .expectContinue(false)
                     .header("Content-Type", "image/png")
                     .apply { capability?.let { header("DP-Upload-Token", it) } }
