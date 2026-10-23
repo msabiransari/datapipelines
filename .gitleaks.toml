@@ -112,3 +112,73 @@ condition = "AND"
 paths = ['''tests/integration-tests/src/test/kotlin/co/datapipelines/integration/WriteSurfaceStampingE2eTest\.kt$''']
 regexTarget = "secret"
 regexes = ['''^dGVzdC1qd3Qtc2VjcmV0LWZvci12aWEtc3RhbXBpbmctMzI=$''']
+
+# modules/app logging/SyntheticPlants.kt — four `planted-secret-…` markers from
+# the shared redaction corpus (#337-b): synthetic log text exercising the §9.2
+# scrubber, whose KDoc states "No value is a real credential: every secret is a
+# `planted-secret-` marker". These four trip `generic-api-key` on entropy
+# alone. Exact values, deliberately NOT a `^planted-secret-[a-z0-9]+$` shape:
+# the next plant that trips is triaged on its own merits, not auto-suppressed.
+# (2026-10-22)
+[[allowlists]]
+description = "SyntheticPlants.kt: redaction-corpus planted-secret markers (2026-10-22)"
+condition = "AND"
+paths = ['''modules/app/src/test/kotlin/co/datapipelines/logging/SyntheticPlants\.kt$''']
+regexTarget = "secret"
+regexes = [
+  '''^planted-secret-z9$''',
+  '''^planted-secret-z10$''',
+  '''^planted-secret-z11$''',
+  '''^planted-secret-z2$''',
+]
+
+# tests/integration-tests ScheduledRunSurfacesE2eTest.kt — `scheduler-275` is
+# the provider subject / email local part of the scheduler stand-in's SYSTEM
+# identity in the #275 fixture's seed row (`scheduler-275@keys.invalid`), a
+# username the product mints for its own schedule runner; it carries no secret
+# material. (2026-10-22)
+[[allowlists]]
+description = "ScheduledRunSurfacesE2eTest.kt: scheduler stand-in identity subject (2026-10-22)"
+condition = "AND"
+paths = ['''tests/integration-tests/src/test/kotlin/co/datapipelines/integration/ScheduledRunSurfacesE2eTest\.kt$''']
+regexTarget = "secret"
+regexes = ['''^scheduler-275$''']
+
+# tests/integration-tests KeysV2MigrationTest.kt — two synthetic pre-migration
+# key ids (`dpk_` + fabricated characters) seeded into the pre-V37 fixture
+# database for the keys-v2 B4 dry run: the inactive owner's key (`dpk_V37I…`,
+# at HEAD `:66`) and a promoter's key (`dpk_V35P…`, HISTORY-ONLY — introduced
+# at d53ded9a7 and carried by no commit's tree today, so only a path +
+# exact-value entry can clear it). Fixture row ids, not credentials.
+# (2026-10-22)
+[[allowlists]]
+description = "KeysV2MigrationTest.kt: synthetic pre-migration key ids (2026-10-22)"
+condition = "AND"
+paths = ['''tests/integration-tests/src/test/kotlin/co/datapipelines/integration/KeysV2MigrationTest\.kt$''']
+regexTarget = "secret"
+regexes = [
+  '''^dpk_V35PROMOT01$''',
+  '''^dpk_V37INACTIV1$''',
+]
+
+# modules/app config/ConfigValidatorDemoApiTest.kt — a deliberately MALFORMED
+# demo key (`dpk_SHOR…`: the id part is not twelve base32 characters) fed to
+# ConfigValidator in a test asserting startup REFUSES it; it validates nothing
+# and unlocks nothing. (2026-10-22)
+[[allowlists]]
+description = "ConfigValidatorDemoApiTest.kt: deliberately malformed demo key (2026-10-22)"
+condition = "AND"
+paths = ['''modules/app/src/test/kotlin/co/datapipelines/config/ConfigValidatorDemoApiTest\.kt$''']
+regexTarget = "secret"
+regexes = ['''^dpk_SHORT0\.a_very_long_secret_part$''']
+
+# tests/integration-tests McpSaveWorkspaceDatasourceE2eTest.kt — `lane134-oth…`
+# is the FOREIGN workspace's slug in the MCP save-workspace-datasource E2E
+# (the jwt() workspace argument and the `INSERT INTO workspaces` seed row), a
+# plain name string, not a credential. (2026-10-22)
+[[allowlists]]
+description = "McpSaveWorkspaceDatasourceE2eTest.kt: foreign workspace slug (2026-10-22)"
+condition = "AND"
+paths = ['''tests/integration-tests/src/test/kotlin/co/datapipelines/integration/McpSaveWorkspaceDatasourceE2eTest\.kt$''']
+regexTarget = "secret"
+regexes = ['''^lane134-other$''']

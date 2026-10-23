@@ -63,7 +63,7 @@
         <th:block th:each="provider : ${providers}">
           <a th:href="@{/oauth2/authorization/{id}(id=${provider.registrationId})}"
              class="ds-button app-login-provider" hx-boost="false"
-             th:text="'Continue with ' + ${provider.displayName}">Continue with Provider</a>
+             th:text="${provider.displayName}">Provider</a>
         </th:block>
         <div th:if="${localEnabled} and ${!#lists.isEmpty(providers)}" class="app-login-separator">or with email</div>
         <!--/* th:action supplies exactly one automatic CSRF hidden input (098 §D).

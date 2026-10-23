@@ -215,6 +215,35 @@ class AvatarControllerTest {
     }
 
     @Test
+    fun `a dormant provider's picture host is not allowlisted - 404 without a network hop`() {
+        val properties =
+            authProperties.copy(
+                oidc =
+                    AuthProperties.Oidc(
+                        providers =
+                            authProperties.oidc.providers +
+                                AuthProperties.Provider(name = "github", clientId = "", pictureHosts = listOf("localhost")),
+                    ),
+            )
+        AvatarHosts(
+            AuthProperties(oidc = AuthProperties.Oidc(providers = listOf(AuthProperties.Provider(clientId = "id")))),
+        ).names shouldBe emptySet()
+        LoopbackFetcher().use { fetcher ->
+            val controller = AvatarController(userRepository, AvatarHosts(properties), fetcher)
+            val path = "/dormant-provider-651"
+            authenticate()
+            every { userRepository.findById(userId) } returns userWith("http://localhost$path")
+
+            controller.avatar().statusCode.value() shouldBe 404
+            hitCount(path) shouldBe 0
+
+            every { userRepository.findById(userId) } returns userWith(url(path))
+            controller.avatar().statusCode.value() shouldBe 200
+            hitCount(path) shouldBe 1
+        }
+    }
+
+    @Test
     fun `a URL with a userinfo component answers 404 without a network hop`() {
         authenticate()
         val before = totalHits()
@@ -468,6 +497,7 @@ class AvatarControllerTest {
 
         image("/ok")
         image("/cached")
+        image("/dormant-provider-651")
         image("/port")
         image("/svg", type = "image/svg+xml")
         RASTER.forEach { (path, type) -> image(path, type) }

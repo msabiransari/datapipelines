@@ -147,6 +147,12 @@ data class AuthProperties(
         /** A provider may appear inside its parent configuration's diagnostic string. */
         override fun toString(): String = "Provider(name=$name, protocol=$protocol, clientSecret=[REDACTED])"
 
+        /**
+         * The one definition of an enabled provider: sign-in registration and the avatar
+         * allowlist both read it (#651). A blank client-id leaves the entry dormant.
+         */
+        val isEnabled: Boolean get() = clientId.isNotBlank()
+
         /** True for an OAuth 2.0 (non-OIDC) entry — registered with explicit endpoints, no ID token. */
         val isOAuth2: Boolean get() = protocol == PROTOCOL_OAUTH2
 

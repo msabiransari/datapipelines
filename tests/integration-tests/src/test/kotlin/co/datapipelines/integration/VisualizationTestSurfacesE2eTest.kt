@@ -38,9 +38,11 @@ import java.io.ByteArrayOutputStream
 import java.net.URLEncoder
 import java.net.http.HttpRequest
 import java.sql.DriverManager
+import java.time.Duration
 import java.util.Base64
 import java.util.UUID
 import javax.imageio.ImageIO
+import kotlin.time.TimeSource
 
 /**
  * **The visualization test workflow on the REAL wire (#353, L4b)** — 352's backend through the routes, the
@@ -571,7 +573,7 @@ class VisualizationTestSurfacesE2eTest {
             }
         if (chunked) {
             ScreenshotUploadTransportTest.WireCapture(port).use { wire ->
-                val response = ScreenshotUploadTransport.post(wire.port, path + query, body, capability)
+                val response = sendUpload(wire.port, path + query, body, capability)
                 wire.await()
                 wire.declared shouldBe -1L
                 wire.chunked shouldBe true
@@ -579,7 +581,38 @@ class VisualizationTestSurfacesE2eTest {
                 return response
             }
         }
-        return ScreenshotUploadTransport.post(port, path + query, body, capability)
+        return sendUpload(port, path + query, body, capability)
+    }
+
+    /** Functional acceptance has its own request budget; the dedicated wire/drain controls retain their 10 s default. */
+    private fun sendUpload(
+        targetPort: Int,
+        path: String,
+        body: HttpRequest.BodyPublisher,
+        capability: String,
+    ): Response {
+        val started = TimeSource.Monotonic.markNow()
+        try {
+            val response =
+                ScreenshotUploadTransport.post(
+                    targetPort,
+                    path,
+                    body,
+                    capability,
+                    requestTimeout = Duration.ofSeconds(UPLOAD_REQUEST_TIMEOUT_SECONDS),
+                )
+            println(
+                "event=cap.screenshot.request declared=${body.contentLength()} status=${response.statusCode} " +
+                    "elapsed_ms=${started.elapsedNow().inWholeMilliseconds}",
+            )
+            return response
+        } catch (error: java.io.IOException) {
+            println(
+                "event=cap.screenshot.request declared=${body.contentLength()} failure=${error.javaClass.simpleName} " +
+                    "elapsed_ms=${started.elapsedNow().inWholeMilliseconds}",
+            )
+            throw error
+        }
     }
 
     private fun edit(
@@ -737,6 +770,7 @@ class VisualizationTestSurfacesE2eTest {
         const val CAPABILITY_CHARS = 43
         const val SCREENSHOT_CAP = 4 * 1024 * 1024
         const val PLATFORM_CAP = 2 * 1024 * 1024
+        const val UPLOAD_REQUEST_TIMEOUT_SECONDS = 30L
 
         val DOCUMENT =
             """
