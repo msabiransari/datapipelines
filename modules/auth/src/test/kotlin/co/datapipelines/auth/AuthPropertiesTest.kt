@@ -13,6 +13,15 @@ import org.springframework.mock.env.MockEnvironment
 /** Auth configuration: domain allowlisting and safe diagnostic strings. */
 class AuthPropertiesTest {
     @Test
+    fun `a provider is enabled only with a non-blank client id`() {
+        AuthProperties.Provider().isEnabled.shouldBeFalse()
+        AuthProperties.Provider(clientId = "").isEnabled.shouldBeFalse()
+        AuthProperties.Provider(clientId = " \t\n").isEnabled.shouldBeFalse()
+        AuthProperties.Provider(clientId = "id").isEnabled.shouldBeTrue()
+        AuthProperties.Provider(clientId = " id ").isEnabled.shouldBeTrue()
+    }
+
+    @Test
     fun `provider read timeout defaults to ten seconds and binds beside the providers list`() {
         AuthProperties().oidc.providerReadTimeoutSeconds shouldBe 10L
         val env =
