@@ -202,8 +202,9 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
     /** The resting state (#701): one line per row — a truncating title, its badges beside
      *  it, the glyph centred, 12px padding, an 8px radius, the 4px rhythm, the overlay
      *  surface, hover on a sibling, the folder glyph following its expansion. */
+    @Suppress("LongMethod") // one document carries the ruling's geometry, truncation, glyph and badge measurements
     @Test
-    fun `a row is one line - a 12px title truncating with an ellipsis, its badges on the same line, a centred glyph, 12px padding, 8px radius, 4px between rows, on the overlay surface`() {
+    fun `a row is one line - a truncating title, its badges beside it, a centred glyph, the 4px rhythm on the overlay surface`() {
         startTrace()
         readyTree()
         seedPipeline("row/alpha")
