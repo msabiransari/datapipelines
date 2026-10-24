@@ -37,10 +37,9 @@ object SiteFaqsCluster {
             ),
             FaqEntry(
                 "How do I revoke one agent?",
-                "Delete its key from the top bar's MCP-key chip, and the agent stops working within about a minute, " +
-                    "the validation cache's TTL; your next sign-in mints you a fresh one. No shared password to " +
-                    "rotate, and nobody else's key is touched. Revocation and the validation cache are " +
-                    "docs/auth.md §11.4.",
+                "Revoke its key on the Keys page, and the agent stops working within about a minute, " +
+                    "the validation cache's TTL. No shared password to rotate, and nobody else's key is " +
+                    "touched. Revocation and the validation cache are docs/auth.md §11.4.",
                 "docs/auth.md §11.4",
             ),
             FaqEntry(
@@ -64,9 +63,10 @@ object SiteFaqsCluster {
             ),
             FaqEntry(
                 "What role does the agent's key carry?",
-                "Yours, capped at author: the key is created at sign-in and acts as you in that workspace. " +
-                    "A viewer's key browses and runs, an author's also creates and edits drafts, a promoter's reads " +
-                    "released content, and a workspace admin's acts as an author. The rule is docs/auth.md §7.5.",
+                "The one you chose at creation: the Keys page dialog offers exactly the roles whose permissions " +
+                    "are a subset of yours, and viewer is never one of them. An author-role key browses, runs and " +
+                    "drafts, a promoter-role key reads released content, and a workspace-admin-role key also " +
+                    "administers the workspace. The rule is docs/auth.md §7.5.",
                 "docs/auth.md §7.5",
             ),
             FaqEntry(
@@ -79,11 +79,11 @@ object SiteFaqsCluster {
             FaqEntry(
                 "The tools did not come back: what now?",
                 "Read the refusal: auth.api_key.missing means the header did not arrive; invalid or expired means " +
-                    "wrong, revoked or the owner is deactivated; auth.key_issuer_role_lost means the key is real " +
-                    "but your role does not reach that tool. A silently ignored browser session is expected, " +
-                    "because /mcp takes API keys only. " +
-                    "The troubleshooting list is docs/mcp-server.md §4.2.",
-                "docs/mcp-server.md §4.2",
+                    "wrong, revoked or expired; auth.principal_deactivated means the key's identity or MCP-key " +
+                    "creator is deactivated; auth.role_required means the key's own role does not reach that tool. " +
+                    "A silently ignored browser session is expected, because /mcp takes API keys only. " +
+                    "The refusal codes are docs/auth.md §13.7; the transport is docs/mcp-server.md §4.2.",
+                "docs/auth.md §13.7",
             ),
         )
 

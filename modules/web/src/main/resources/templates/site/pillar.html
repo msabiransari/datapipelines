@@ -41,7 +41,7 @@
   <section class="section band" aria-labelledby="gov-title">
     <div class="container">
       <p class="kicker">What "governed" means here</p>
-      <h2 id="gov-title" class="ds-headline">Read-only by default, one key per person, every call audited</h2>
+      <h2 id="gov-title" class="ds-headline">Read-only by default, keys with roles, every call audited</h2>
       <div class="features-grid">
         <article class="card">
           <!-- claim: docs/datasources.md §5.7 -->
@@ -55,8 +55,8 @@
         </article>
         <article class="card">
           <!-- claim: docs/auth.md §7.1–7.6 -->
-          <h3>One key per person, per workspace</h3>
-          <p>Your MCP key is created when you sign in to a workspace and shown in the top bar, where you can copy it or delete it to rotate. It is stored as an Argon2id hash, pinned to that workspace, and it carries your role there: viewer, author, promoter or workspace admin. Instance administration stays with signed-in people and is never granted to a key. Change someone's role and their key follows within a minute.</p>
+          <h3>Each key has its own role and identity</h3>
+          <p>An MCP key is created on the Keys page by a member whose role may create one, and it carries the role that creator chose for it: author, promoter or workspace admin. It is stored as an Argon2id hash, pinned to that workspace, and it acts as an identity of its own. Instance administration stays with signed-in people and is never granted to a key. Later changes to the member's role do not change the key's role; narrowing or rotating one means revoking it on the Keys page and creating another.</p>
         </article>
         <article class="card">
           <!-- claim: docs/auth.md §7.3, docs/auth.md §11.4 -->

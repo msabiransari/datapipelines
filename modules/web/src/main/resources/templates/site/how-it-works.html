@@ -25,7 +25,7 @@
     <div class="container">
       <p class="eyebrow">Run it, then build on it</p>
       <h1 id="hiw-hero-title" class="ds-display">How it works: the MCP server tutorial, end to end on your laptop</h1>
-      <!-- claim: docs/deployment.md Appendix B (the demo quickstart), docs/mcp-server.md §3 (the endpoint), docs/rest-api.md §19 (the published endpoint) -->
+      <!-- claim: docs/deployment.md Appendix B (the demo quickstart), docs/auth.md §7.4 (the key is created on the Keys page), docs/mcp-server.md §3 (the endpoint), docs/rest-api.md §19 (the published endpoint) -->
       <p class="lede">Eight steps, each executed on a fresh checkout before it was written here. Start the server with sample data. Create your key on the Keys page. Connect Claude Code, Cursor or Copilot over MCP. Let the agent author and run a pipeline, release it, publish it as an API, bind a key to that API, and call it. Every command, config block and response below is copied from that run.</p>
       <div class="actions">
         <a class="btn btn-primary" href="#quickstart">Start at step 1 <span aria-hidden="true">&rarr;</span></a>
@@ -78,8 +78,8 @@
       <div>
         <figure class="media-frame">
         <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Keys page</span><span class="tag">Screenshot</span></div>
-        <img src="/site/img/keys.png" width="1440" height="900" loading="lazy" alt="The Keys page: the new-key dialog with the kind and role choice, and the table of keys with their role, whose key they act as, and who created them.">
-        <figcaption>The Keys page: choose the kind and the role, copy the shown-once key, revoke it there.</figcaption>
+        <img src="/site/img/keys.png" width="1440" height="900" loading="lazy" alt="The Keys page: the table of keys with each key's kind, the role it carries, the identity it acts as, and who created it, beside the New API key button.">
+        <figcaption>The Keys page: create with New API key, copy the shown-once key, revoke it there.</figcaption>
         </figure>
       </div>
       <p><strong>What you see.</strong> The key acts as its own identity holding the role you gave it. An author-role key can create and run; a promoter-role key reads and promotes. For the demo workspace a workspace admin can offer any of the three roles, and an author exactly one: their own. The subset rule decides, never a promise.</p>
@@ -313,11 +313,6 @@ anything. Stop after reporting.</code></pre>
           <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Templates</span><span class="tag">Screenshot</span></div>
           <img src="/site/img/template-used-by.png" width="1440" height="900" loading="lazy" alt="A shared template's detail with its version list and the pipelines pinning each version.">
           <figcaption>A shared template's version list, with the pipelines pinning each version.</figcaption>
-        </figure>
-        <figure class="media-frame">
-          <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>API keys</span><span class="tag">Screenshot</span></div>
-          <img src="/site/img/keys.png" width="1440" height="900" loading="lazy" alt="The top bar's right side: the MCP-key chip with its prefix, a Copy button and a delete-to-rotate button.">
-          <figcaption>Your MCP key. Copy it from the top bar.</figcaption>
         </figure>
         <figure class="media-frame">
           <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Executions</span><span class="tag">Screenshot</span></div>
@@ -737,7 +732,7 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/auth.md §7.7 -->
           <h3>A key has a kind, and the kind decides its reach</h3>
-          <p><span th:text="|${#strings.capitalize(facts.apiKeyKindCountWord)} kinds.|">Three kinds.</span> A <code>user</code> key is the agent's MCP key. It acts as its member, capped at author, and reaches <code>/mcp</code> and nothing else. An <code>endpoint</code> key carries the <em>api caller</em> role and authorises the published paths it is <em>bound</em> to. A <code>server</code> key opens the promotion routes and nothing else.</p>
+          <p><span th:text="|${#strings.capitalize(facts.apiKeyKindCountWord)} kinds.|">Four kinds.</span> A <code>mcp</code> key is the agent's key: its own identity at the role its creator chose, reaching <code>/mcp</code> and nothing else. An <code>endpoint</code> key carries the <em>api caller</em> role for the published paths it is <em>bound</em> to. A <code>server</code> key opens the promotion routes. A <code>dashboard</code> key serves one external app's embeds.</p>
           <!-- claim: docs/auth.md §7.7 (the confinement is central) -->
           <p>The confinement is decided centrally, before any handler's annotation is read. A new route cannot become quietly reachable to a key of the wrong kind.</p>
           <a class="card-link" th:href="@{/docs/auth}">Read the spec &rarr;</a>
@@ -765,7 +760,7 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/auth.md §5.1, §4.7, §7.1–7.7 -->
           <h3>OIDC SSO + agent keys that carry a role</h3>
-          <p>Humans sign in through OIDC SSO. An agent's key acts as its person, capped at author. A program's API key acts as its own identity. Separate principals, separate blast radii.</p>
+          <p>Humans sign in through OIDC SSO. An agent's key is an identity of its own, holding the role its creator chose for it. A program's API key is an identity too. Separate principals, separate blast radii.</p>
         </article>
 
         <article class="card ds-hover-lift">

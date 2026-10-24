@@ -119,7 +119,7 @@
    }
   },
   "/mcp-server-for-sql-databases": {
-   "status": "unchanged",
+   "status": "rewritten",
    "anchors": [
     "pillar-title",
     "pain-title",
@@ -140,20 +140,12 @@
      "text": "Don't point an agent at production with write credentials"
     },
     {
-     "level": "H2",
-     "text": "Read-only by default, one key per person, every call audited"
-    },
-    {
      "level": "H3",
      "text": "Read-only is enforced, not advisory"
     },
     {
      "level": "H3",
      "text": "And the credential still does the real work"
-    },
-    {
-     "level": "H3",
-     "text": "One key per person, per workspace"
     },
     {
      "level": "H3",
@@ -247,7 +239,14 @@
      "level": "H2",
      "text": "Point your agent at the demo first"
     }
-   ]
+   ],
+   "retired": {
+    "anchors": {},
+    "headings": {
+     "Read-only by default, one key per person, every call audited": "662 review F1: keys v2 allows independently named keys; the replacement says keys with roles and retains the section anchor",
+     "One key per person, per workspace": "662 review F1: the login-minted single key was retired; the replacement describes each key's own role and identity"
+    }
+   }
   },
   "/mcp-server/postgres": {
    "status": "unchanged",
@@ -979,10 +978,6 @@
     },
     {
      "level": "H2",
-     "text": "Copy your MCP key from the top bar"
-    },
-    {
-     "level": "H2",
      "text": "Paste one config block"
     },
     {
@@ -1028,7 +1023,8 @@
      "Claude Code": "173 (SEO coverage before indexing): the per-client config block became an H2 named for the measured phrase — \"The Claude Code MCP server config\" (claude code mcp server, 880/mo); no anchor existed.",
      "Cursor — ~/.cursor/mcp.json": "173 (SEO coverage before indexing): became the H2 \"The Cursor MCP server config — ~/.cursor/mcp.json\" (cursor mcp server, 720/mo); no anchor existed.",
      "GitHub Copilot in VS Code — .vscode/mcp.json": "173 (SEO coverage before indexing): became the H2 \"The GitHub Copilot MCP server config — .vscode/mcp.json\", the same shape as its two siblings; no anchor existed.",
-     "Mint a key for that one agent": "179/D16: the key is minted at sign-in and copied from the top bar's chip; there is no minting ceremony to headline any more"
+     "Mint a key for that one agent": "179/D16: the key is minted at sign-in and copied from the top bar's chip; there is no minting ceremony to headline any more",
+     "Copy your MCP key from the top bar": "662: keys v2 (docs/auth.md §7.4, A15) retired the top-bar chip; the key is created on the Keys page and the step heading says so"
     }
    }
   },
