@@ -322,6 +322,12 @@ class ScheduleNotificationDeliveryE2eTest {
                 .filter { it.contains("event=scheduler.notification.sent") && it.contains("domain=deliver.test") }
                 .shouldNotBeEmpty()
         }
+        // The Security list: a line names its schedule and run, so an operator can find the notice
+        // without the address. backlog_full is about the queue, not one schedule.
+        val scoped =
+            lines.captured.filter { it.contains("event=scheduler.notification.") && !it.contains("notification.backlog_full") }
+        scoped.shouldNotBeEmpty()
+        scoped.filterNot { SCHEDULE_ID.containsMatchIn(it) && RUN_ID.containsMatchIn(it) } shouldBe emptyList()
     }
 
     // ------------------------------------------------------------------------------- the message
@@ -700,6 +706,8 @@ class ScheduleNotificationDeliveryE2eTest {
 
         /** Any address of the two test domains. */
         private val ADDRESS = Regex("""[A-Za-z0-9._%+-]+@(deliver|elsewhere)\.test""")
+        private val SCHEDULE_ID = Regex("""schedule_id=[0-9a-f]{8}-[0-9a-f-]{27}""")
+        private val RUN_ID = Regex("""run_id=[0-9a-f]{8}-[0-9a-f-]{27}""")
 
         private const val OPS = "ops@deliver.test"
         private const val LEAD = "lead@deliver.test"

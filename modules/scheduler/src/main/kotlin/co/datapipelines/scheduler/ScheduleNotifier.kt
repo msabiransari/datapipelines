@@ -77,10 +77,11 @@ class ScheduleNotifier(
         recovered.forEach { delivery ->
             metrics.notificationSettled(DeliveryState.UNCERTAIN)
             LOG.warn(
-                "event=scheduler.notification.uncertain delivery_id={} notification_id={} run_id={} domain={} attempts={} " +
-                    "code={} message=\"a send was claimed and never settled; it may have been sent and is not retried\"",
+                "event=scheduler.notification.uncertain delivery_id={} notification_id={} schedule_id={} run_id={} domain={} " +
+                    "attempts={} code={} message=\"a send was claimed and never settled; it may have been sent and is not retried\"",
                 delivery.id,
                 delivery.eventId,
+                delivery.scheduleId,
                 delivery.runId,
                 delivery.recipientDomain,
                 delivery.attempts,
@@ -110,7 +111,13 @@ class ScheduleNotifier(
             } catch (
                 @Suppress("TooGenericExceptionCaught") e: RuntimeException,
             ) {
-                LOG.error("event=scheduler.notification.render_failed delivery_id={} error={}", claim.id, e.javaClass.simpleName)
+                LOG.error(
+                    "event=scheduler.notification.render_failed delivery_id={} schedule_id={} run_id={} error={}",
+                    claim.id,
+                    claim.notice.scheduleId,
+                    claim.notice.runId,
+                    e.javaClass.simpleName,
+                )
                 return MailOutcome.Refused(DeliveryCodes.RENDER_FAILED)
             }
         val mail = NotificationMail(claim.recipient, rendered.subject, rendered.text, rendered.html, claim.messageId)
@@ -120,7 +127,13 @@ class ScheduleNotifier(
             @Suppress("TooGenericExceptionCaught") e: RuntimeException,
         ) {
             // The port promises not to throw; if it does, nobody can say whether the relay took it.
-            LOG.error("event=scheduler.notification.port_failed delivery_id={} error={}", claim.id, e.javaClass.simpleName)
+            LOG.error(
+                "event=scheduler.notification.port_failed delivery_id={} schedule_id={} run_id={} error={}",
+                claim.id,
+                claim.notice.scheduleId,
+                claim.notice.runId,
+                e.javaClass.simpleName,
+            )
             MailOutcome.Uncertain(DeliveryCodes.INTERRUPTED)
         }
     }
@@ -139,8 +152,11 @@ class ScheduleNotifier(
             } == true
         if (!written) {
             LOG.warn(
-                "event=scheduler.notification.settle_lost delivery_id={} message=\"the claim was recovered before it settled\"",
+                "event=scheduler.notification.settle_lost delivery_id={} schedule_id={} run_id={} " +
+                    "message=\"the claim was recovered before it settled\"",
                 claim.id,
+                claim.notice.scheduleId,
+                claim.notice.runId,
             )
             return
         }
@@ -156,6 +172,7 @@ class ScheduleNotifier(
             line,
             claim.id,
             claim.eventId,
+            claim.notice.scheduleId,
             claim.notice.runId,
             claim.notice.outcome.wire,
             claim.recipientDomain,
@@ -227,7 +244,7 @@ class ScheduleNotifier(
         val LOG = LoggerFactory.getLogger(ScheduleNotifier::class.java)
 
         /** The fields of every settle line (observability.md §3.4E): ids, the notice, the DOMAIN, the attempt count, the code. */
-        const val FIELDS = "delivery_id={} notification_id={} run_id={} notice={} domain={} attempts={} code={}"
+        const val FIELDS = "delivery_id={} notification_id={} schedule_id={} run_id={} notice={} domain={} attempts={} code={}"
     }
 }
 

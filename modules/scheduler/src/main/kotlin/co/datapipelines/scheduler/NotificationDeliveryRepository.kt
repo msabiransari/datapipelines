@@ -99,7 +99,7 @@ class NotificationDeliveryRepository(
                  WHERE state = 'pending' AND sending_since < :staleBefore
                 RETURNING id, event_id, recipient, attempts
             )
-            SELECT m.id, m.event_id, m.recipient, m.attempts, e.run_id, e.outcome
+            SELECT m.id, m.event_id, m.recipient, m.attempts, e.schedule_id, e.run_id, e.outcome
               FROM moved m JOIN schedule_notification_events e ON e.id = m.event_id
             """.trimIndent(),
             mapOf(
@@ -111,6 +111,7 @@ class NotificationDeliveryRepository(
             RecoveredDelivery(
                 id = rs.getObject("id", UUID::class.java),
                 eventId = rs.getObject("event_id", UUID::class.java),
+                scheduleId = rs.getObject("schedule_id", UUID::class.java),
                 runId = rs.getObject("run_id", UUID::class.java),
                 outcome = NotificationOutcome.fromWire(rs.getString("outcome")),
                 recipientDomain = rs.getString("recipient").substringAfterLast('@'),
@@ -166,6 +167,7 @@ data class ClaimedDelivery(
 data class RecoveredDelivery(
     val id: UUID,
     val eventId: UUID,
+    val scheduleId: UUID,
     val runId: UUID,
     val outcome: NotificationOutcome,
     val recipientDomain: String,

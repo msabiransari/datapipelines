@@ -197,13 +197,13 @@ The scheduler ([Scheduler](scheduler.md)) logs its own work under `scheduler.*`.
 
 | INFO | `scheduler.notification.enqueued` (#442b) | A run transition (or a block) wrote its notice: one event row and its deliveries, in the transition's own transaction | `schedule_id`, `run_id`, `notification_id`, `notice` (the checkbox), `outcome`, `queued`, `refused` (`<code>:<count>`, or `0`) |
 | WARN | `scheduler.notification.backlog_full` (#442b) | More than `notifications.backlog-max` deliveries were pending: the notice's remaining deliveries were written `failed` / `backlog_full` | `notification_id`, `backlog_max` |
-| INFO | `scheduler.notification.sent` (#442b) | The SMTP relay accepted one delivery — not proof it reached an inbox | `delivery_id`, `notification_id`, `run_id`, `notice`, `domain` (the recipient's domain only), `attempts`, `code` (`-`) |
+| INFO | `scheduler.notification.sent` (#442b) | The SMTP relay accepted one delivery — not proof it reached an inbox | `delivery_id`, `notification_id`, `schedule_id`, `run_id`, `notice`, `domain` (the recipient's domain only), `attempts`, `code` (`-`) |
 | INFO | `scheduler.notification.retry` (#442b) | A send provably never reached the relay (connect, 4xx, credentials); the delivery is `pending` again after the backoff | the same fields; `code` is the sanitized reason |
 | WARN | `scheduler.notification.failed` (#442b) | A delivery is finally `failed`: refused (5xx, invalid address), out of tries, or found with mail off or its domain outside a narrowed allowlist at send | the same fields |
 | WARN | `scheduler.notification.uncertain` (#442b) | A delivery may have been sent — the connection failed after the message went out, or a claim a dead instance left was recovered (`code=interrupted`). Never retried automatically; a person may resend | the same fields (a recovered claim adds `message`) |
-| ERROR | `scheduler.notification.render_failed` (#442b) | A notice could not be rendered (a defect); the delivery is `failed` / `render_failed`, nothing was sent | `delivery_id`, `error` (the exception class) |
-| ERROR | `scheduler.notification.port_failed` (#442b) | The mail port threw instead of answering (a defect); the delivery is `uncertain` / `interrupted` | `delivery_id`, `error` (the exception class) |
-| WARN | `scheduler.notification.settle_lost` (#442b) | A send finished after its claim had already been recovered as interrupted; the recovered state stands | `delivery_id`, `message` |
+| ERROR | `scheduler.notification.render_failed` (#442b) | A notice could not be rendered (a defect); the delivery is `failed` / `render_failed`, nothing was sent | `delivery_id`, `schedule_id`, `run_id`, `error` (the exception class) |
+| ERROR | `scheduler.notification.port_failed` (#442b) | The mail port threw instead of answering (a defect); the delivery is `uncertain` / `interrupted` | `delivery_id`, `schedule_id`, `run_id`, `error` (the exception class) |
+| WARN | `scheduler.notification.settle_lost` (#442b) | A send finished after its claim had already been recovered as interrupted; the recovered state stands | `delivery_id`, `schedule_id`, `run_id`, `message` |
 
 The notification lines carry ids, the notice and the recipient's DOMAIN; never an address, a subject or a body. A notice's history of record is the run's trail (`notification_enqueued` / `_sent` / `_failed` / `_uncertain`, whose details carry no domain either) and its delivery rows ([Metadata DB §4.40](metadata-db.md#440-schedule_notification_deliveries)).
 
