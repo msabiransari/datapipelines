@@ -171,7 +171,11 @@ class HelmScriptJsValuesSpecDriftTest {
         // scripts/helm-check.sh catches it live; this catches it textually, in the pregate).
         val orLine = template.lines().filter { OR_CLAUSE_REGEX.containsMatchIn(it) }.single()
         val orKeys =
-            VALUE_KEY_REGEX.findAll(orLine).map { it.groupValues[1] }.sorted().toList()
+            VALUE_KEY_REGEX
+                .findAll(orLine)
+                .map { it.groupValues[1] }
+                .sorted()
+                .toList()
         val lines = template.lines()
         val guardedKeys =
             lines
