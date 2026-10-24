@@ -27,7 +27,7 @@ import java.sql.DriverManager
  *    their source plus the pipeline's event listing them — asserted at the TABLE.
  *
  * Falsification recorded in the handback: removing the checkbox's `name` makes the POST
- * carry no consent, the server refuses `template_not_released`, and step 4 goes red.
+ * carry no consent, the server refuses `dependency_not_released`, and step 4 goes red.
  */
 class ReleaseCascadeBrowserTest : BrowserSuite() {
     private fun ready() {
@@ -147,7 +147,7 @@ class ReleaseCascadeBrowserTest : BrowserSuite() {
         val dialog = openDialog(releaseButton())
         // Located by the arm's hook, NOT by name — so stripping the checkbox's `name` (the
         // consent the POST carries) is caught at the release arm below, where it matters
-        // (the server refuses template_not_released and no success toast lands), and not by
+        // (the server refuses dependency_not_released and no success toast lands), and not by
         // a selector that never finds the box.
         val consent = dialog.locator("[data-consent-input]")
         consent.waitFor()

@@ -15,6 +15,8 @@ import co.datapipelines.pipeline.ReleaseCheckGate
 import co.datapipelines.pipeline.TemplateReleaser
 import co.datapipelines.pipeline.TemplateReviewMarks
 import co.datapipelines.pipeline.TemplateVersionStatuses
+import co.datapipelines.pipeline.release.PipelineReleaseCoordination
+import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import co.datapipelines.templates.TemplateRepository
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -96,6 +98,7 @@ class PipelineLifecycleConfiguration {
         templateReleaser: TemplateReleaser,
         reviewMarks: TemplateReviewMarks,
         dashboards: PipelineVersionConsumers,
+        bounds: co.datapipelines.pipeline.release.ReleaseBounds,
     ): PipelineReleaseService =
         PipelineReleaseService(
             pipelines,
@@ -107,6 +110,7 @@ class PipelineLifecycleConfiguration {
             transactions = TransactionTemplate(metadataTransactionManager),
             reviewMarks = reviewMarks,
             dashboards = dashboards,
+            bounds = bounds,
         )
 
     /**
@@ -187,6 +191,7 @@ class PipelineLifecycleConfiguration {
         }
 
     @Bean
+    @Suppress("LongParameterList") // one collaborator per seam; #517 added the release coordinator and the writer guard
     fun pipelineService(
         pipelines: PipelineRepository,
         validator: PipelineValidator,
@@ -196,5 +201,19 @@ class PipelineLifecycleConfiguration {
         draftTemplates: ExclusiveDraftTemplates,
         // #320 — the dashboards that pin a release: `pipeline.version.pinned`'s `referencing_dashboards`.
         dashboards: PipelineVersionConsumers,
-    ): PipelineService = PipelineService(pipelines, validator, drafts, releases, authoring, draftTemplates, dashboards)
+        // #517 — every release through the one coordinator; every pin-affecting verb under the workspace writer guard.
+        coordination: PipelineReleaseCoordination,
+        guard: ReleaseMutationGuard,
+    ): PipelineService =
+        PipelineService(
+            pipelines,
+            validator,
+            drafts,
+            releases,
+            authoring,
+            draftTemplates,
+            dashboards,
+            coordination = coordination,
+            guard = guard,
+        )
 }

@@ -11,6 +11,8 @@ import co.datapipelines.pipeline.PipelineReleaseService
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.RequestLimits
+import co.datapipelines.pipeline.release.ReleaseBounds
+import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiResponse
 import co.datapipelines.web.api.CorrelationId
@@ -19,7 +21,9 @@ import co.datapipelines.web.api.Pagination
 import co.datapipelines.web.api.RequestBodies
 import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.api.writeSurface
+import co.datapipelines.web.release.ReleasePlanBody
 import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.node.ObjectNode
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
@@ -74,6 +78,8 @@ class PipelinesController(
     private val checkRuns: co.datapipelines.application.checks.PipelineCheckRunRepository,
     /** 178 — the promoter lens: every read below passes the caller's view, never `Everything`. */
     private val lens: PromoterLens,
+    /** #517 — the configured release bounds (configuration §3.35); the plan body is read within `max-wire-bytes`. */
+    private val releaseBounds: ReleaseBounds = ReleaseBounds(),
 ) {
     /**
      * §5.1 — create; the server assigns id, version 1 (**DRAFT**, D55), owner and timestamps.
@@ -235,20 +241,26 @@ class PipelinesController(
 
     /**
      * §5.10 — release (lock) the draft: `pipeline.version.not_draft` when none exists,
-     * §12 re-validation on the draft body, `pipeline.release.template_not_released` when a
+     * §12 re-validation on the draft body, `pipeline.release.dependency_not_released` when a
      * pinned template version is still a draft, `pipeline.version.conflict` on a stale hash,
      * and — for a body carrying `checks[]` — `pipeline.check.failed` when the gate's fresh
      * run did not pass, unless [overrideChecksReason] (≥ 10 characters) rides the request
      * (140; audited on the release event). `release_pinned_templates=true` (142) is the
      * consent to release the DRAFT template versions the body pins in the same transaction,
      * templates first — each audited as `template.version.released` with the cascade source,
-     * the pipeline's event listing them; the refusal's `details.pins_not_released` is what a
-     * client reads to decide whether to retry with it. Same query carrier as the override
-     * flag, for the same reason: the endpoint has no body.
+     * the pipeline's event listing them; the refusal's `details.blockers` (the shared shape,
+     * #517) is what a client reads to decide whether to retry with it. Same query carrier as
+     * the override flag; the optional body below is the plan, not this consent.
      * The body is the released version's projection plus `warnings` (7e, transform-nodes design
      * §8.2): `[]` on a clean release, one `pipeline.release.template_needs_review` per pinned
      * version that cites a retired learned fact — a warning, never a refusal.
      * UI-driven in practice (D4: agents never release); no MCP tool is exposed.
+     *
+     * #517 (release-dependencies record §6): an optional JSON body carries a release plan — `tree_hash`,
+     * `include_dependencies`, `check_overrides` — and the release then runs the generic dependency cascade; the response
+     * appends `dependencies_released` only to such a request, so a request without a plan answers exactly the bytes it
+     * always did. Every release, either way, is one transaction through the release coordinator, which writes the audit
+     * rows inside it (the call to [LifecycleVerbs.auditRelease] below then emits nothing).
      */
     @PostMapping("/{id}/release")
     @RequiredScope(Permission.PIPELINE_RELEASE)
@@ -257,22 +269,37 @@ class PipelinesController(
         @RequestHeader(value = IfMatchHeader.NAME, required = false) ifMatch: String?,
         @RequestParam(value = "override_checks_reason", required = false) overrideChecksReason: String? = null,
         @RequestParam(value = "release_pinned_templates", required = false, defaultValue = "false") releasePinnedTemplates: Boolean = false,
+        @RequestBody(required = false) body: String? = null,
     ): ApiResponse<JsonNode> {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
+        val expectedHash = IfMatchHeader.required(ifMatch)
+        val plan = ReleasePlanBody.parse(body, ReleaseFamily.PIPELINE, releaseBounds)
         val released =
             pipelines.release(
                 workspaceId,
                 id,
-                IfMatchHeader.required(ifMatch),
+                expectedHash,
                 principal.userId,
                 overrideChecksReason,
                 releasePinnedTemplates,
+                plan,
             )
         LifecycleVerbs.auditRelease(audit, principal, workspaceId, id, released)
         // 7e: the body carries `warnings` (transform-nodes design §8.2) — a pinned version that
         // cites a retired learned fact is released and reported, never refused.
-        return ApiResponse.of(PipelineResponses.released(released))
+        val response = PipelineResponses.released(released)
+        if (plan?.present == true) {
+            val listed = (response as ObjectNode).putArray("dependencies_released")
+            released.dependenciesReleased.forEach {
+                listed
+                    .addObject()
+                    .put("family", it.family.wire)
+                    .put("name", it.name)
+                    .put("version", it.version)
+            }
+        }
+        return ApiResponse.of(response)
     }
 
     /**

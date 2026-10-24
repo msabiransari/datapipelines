@@ -122,10 +122,9 @@ class PipelineReleaseServiceTest {
 
         val error = shouldThrow<DatapipelinesException> { service.release(workspaceId, pipelineId, "draft-hash", userId) }
 
-        error.code shouldBe PipelineErrorCodes.Versioning.RELEASE_TEMPLATE_NOT_RELEASED
-        error.details["template_id"] shouldBe "test/t.sql"
-        error.details["template_version"] shouldBe 2
-        error.details["template_status"] shouldBe "DRAFT"
+        error.code shouldBe PipelineErrorCodes.Versioning.RELEASE_DEPENDENCY_NOT_RELEASED
+        // #517 §14: the shared blockers shape — the typed identity, the status and the reason, never the old flat keys.
+        blockersOf(error) shouldBe listOf(Triple("test/t.sql", 2, "DRAFT/not_included"))
         verify(exactly = 0) { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any()) }
     }
 
@@ -531,17 +530,13 @@ class PipelineReleaseServiceTest {
         val error =
             shouldThrow<DatapipelinesException> { cascading(releaser).release(workspaceId, pipelineId, "draft-hash", userId) }
 
-        error.code shouldBe PipelineErrorCodes.Versioning.RELEASE_TEMPLATE_NOT_RELEASED
-        error.message shouldBe "Template 'test/t.sql' version 2 is not released; release the template first."
-        error.details["template_id"] shouldBe "test/t.sql"
-        error.details["template_version"] shouldBe 2
-        error.details["template_status"] shouldBe "DRAFT"
-        // 142: the refusal ALSO lists every non-RELEASED pin (deduplicated) so a client can
+        error.code shouldBe PipelineErrorCodes.Versioning.RELEASE_DEPENDENCY_NOT_RELEASED
+        error.message shouldBe
+            "Release blocked: 2 dependencies are not released. Release them first, or include the drafts in this release."
+        // 142, in #517's shared shape: the refusal lists EVERY non-RELEASED pin (deduplicated) so a client can
         // decide whether a retry with release_pinned_templates=true would succeed.
-        @Suppress("UNCHECKED_CAST")
-        val pins = error.details["pins_not_released"] as List<Map<String, Any?>>
-        pins.map { it["template_id"] to it["template_version"] } shouldBe listOf("test/t.sql" to 2, "test/u.sql" to 1)
-        pins.map { it["template_status"] } shouldBe listOf("DRAFT", "DRAFT")
+        blockersOf(error) shouldBe listOf(Triple("test/t.sql", 2, "DRAFT/not_included"), Triple("test/u.sql", 1, "DRAFT/not_included"))
+        error.details["blockers_truncated"] shouldBe false
         releaser.released shouldBe emptyList()
         verify(exactly = 0) { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any()) }
     }
@@ -591,17 +586,17 @@ class PipelineReleaseServiceTest {
             shouldThrow<DatapipelinesException> {
                 cascading(releaser).release(workspaceId, pipelineId, "draft-hash", userId, releasePinnedTemplates = true)
             }
-        missing.code shouldBe PipelineErrorCodes.Versioning.RELEASE_TEMPLATE_NOT_RELEASED
-        missing.details["template_id"] shouldBe "test/u.sql"
-        missing.details["template_status"] shouldBe "MISSING"
+        missing.code shouldBe PipelineErrorCodes.Versioning.RELEASE_DEPENDENCY_NOT_RELEASED
+        // The consented DRAFT (test/t.sql) is included, so it is no blocker; only the MISSING pin is.
+        blockersOf(missing) shouldBe listOf(Triple("test/u.sql", 1, "MISSING/missing"))
 
         every { templates.statusOf(workspaceId, "test/u.sql", 1) } returns PipelineVersionStatus.DISCARDED
         val discarded =
             shouldThrow<DatapipelinesException> {
                 cascading(releaser).release(workspaceId, pipelineId, "draft-hash", userId, releasePinnedTemplates = true)
             }
-        discarded.code shouldBe PipelineErrorCodes.Versioning.RELEASE_TEMPLATE_NOT_RELEASED
-        discarded.details["template_status"] shouldBe "DISCARDED"
+        discarded.code shouldBe PipelineErrorCodes.Versioning.RELEASE_DEPENDENCY_NOT_RELEASED
+        blockersOf(discarded) shouldBe listOf(Triple("test/u.sql", 1, "DISCARDED/discarded"))
 
         // The pin scan refuses BEFORE the cascade starts: test/t.sql (a releasable DRAFT) was
         // never released on the way to the refusal.
@@ -752,5 +747,13 @@ class PipelineReleaseServiceTest {
         every { pipelines.findDraftDetail(workspaceId, pipelineId) } returns null
         shouldThrow<DatapipelinesException> { service.purge(workspaceId, pipelineId, "draft-hash") }
             .code shouldBe PipelineErrorCodes.Versioning.NOT_DRAFT
+    }
+
+    /** The shared refusal's blockers (#517 §14) as (name, version, "status/reason") — the family is always `template` here. */
+    private fun blockersOf(error: DatapipelinesException): List<Triple<String, Int, String>> {
+        @Suppress("UNCHECKED_CAST")
+        val blockers = error.details["blockers"] as List<Map<String, Any?>>
+        blockers.map { it["family"] }.toSet() shouldBe setOf("template")
+        return blockers.map { Triple(it["name"] as String, it["version"] as Int, "${it["status"]}/${it["reason"]}") }
     }
 }

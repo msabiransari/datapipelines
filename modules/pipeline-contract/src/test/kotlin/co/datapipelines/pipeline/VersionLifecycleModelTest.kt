@@ -137,7 +137,7 @@ class VersionLifecycleModelTest {
     private fun excluded(row: VersionLifecycleTable.Row): Boolean =
         row.edge.contains("template twin") ||
             row.citedCodes.any { it.startsWith("template.") } ||
-            row.outcome.contains("template_not_released")
+            row.outcome.contains("dependency_not_released")
 
     private fun replayRow(
         row: VersionLifecycleTable.Row,

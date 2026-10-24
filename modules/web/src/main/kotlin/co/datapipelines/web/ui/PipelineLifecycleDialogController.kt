@@ -89,8 +89,8 @@ class PipelineLifecycleDialogController(
         // 140: a failing check run refuses with pipeline.check.failed unless the dialog's
         // override disclosure supplied the reason — it arrives audited on the release event.
         // 142: the consent checkbox ("Also release these N draft templates") posts
-        // releasePinnedTemplates; without it a DRAFT pin refuses template_not_released as
-        // it always has, and the server — never the checkbox — is the guard.
+        // releasePinnedTemplates; without it a DRAFT pin refuses dependency_not_released (the
+        // §14 code since #517), and the server — never the checkbox — is the guard.
         val released =
             pipelines.release(workspaceId, id, bodyHash, principal.userId, overrideChecksReason, releasePinnedTemplates)
         // T187 — the release is the D4 human step; it is audited on every surface that offers
