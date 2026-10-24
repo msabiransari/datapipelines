@@ -558,7 +558,7 @@ class PipelineServiceIntegrationTest {
                 service.release(WORKSPACE_ID, created.record.id, checkNotNull(draft.version).bodyHash, owner)
             }
 
-        error.code shouldBe PipelineErrorCodes.Versioning.RELEASE_TEMPLATE_NOT_RELEASED
+        error.code shouldBe PipelineErrorCodes.Versioning.RELEASE_DEPENDENCY_NOT_RELEASED
         withClue("nothing was released: the draft is still there") {
             service.findDraft(WORKSPACE_ID, ReadLens.Everything, created.record.id) shouldNotBe null
         }

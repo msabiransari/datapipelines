@@ -99,6 +99,8 @@ class PromotionConfiguration {
         dashboardPromotion: co.datapipelines.web.visualizations.DashboardPromotion,
         // O7 — the batch's family arms are count-bounded before any member binds.
         visualizationConfig: co.datapipelines.visualization.VisualizationConfig,
+        // #517 — the workspace writer guard the batch's transaction acquires first.
+        guard: co.datapipelines.pipeline.release.ReleaseMutationGuard,
     ): PromotionReceiveService =
         PromotionReceiveService(
             inventory,
@@ -113,6 +115,7 @@ class PromotionConfiguration {
             visualizationPromotion,
             dashboardPromotion,
             visualizationConfig,
+            guard,
         )
 
     /**

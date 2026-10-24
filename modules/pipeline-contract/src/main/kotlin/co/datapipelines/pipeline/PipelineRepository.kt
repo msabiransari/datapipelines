@@ -1,5 +1,6 @@
 package co.datapipelines.pipeline
 
+import co.datapipelines.pipeline.release.RaceSavepoint
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.RowMapper
@@ -1180,7 +1181,8 @@ class PipelineRepository(
      * Null when that number is already taken (the sequential case: the `NOT EXISTS` guard
      * suppresses the insert) — the caller re-reads via [findVersionDetail] and classifies
      * per §9.2's table. A TRUE concurrent same-version insert still loses on the PK and
-     * raises the DuplicateKeyException for the same classification.
+     * raises the DuplicateKeyException for the same classification — under a savepoint inside the
+     * writer guard's transaction (#517), so the caller's classification read still answers.
      */
     @Suppress("LongParameterList") // the row's whole shape; a parameter object would just rename these ten
     fun insertReleasedVersion(
@@ -1196,25 +1198,27 @@ class PipelineRepository(
         actor: UUID,
         callerOutputJson: String? = null,
     ): PipelineVersionDetail? =
-        jdbc
-            .query(
-                INSERT_RELEASED_VERSION_SQL,
-                mapOf(
-                    "pipelineId" to pipelineId,
-                    "workspaceId" to workspaceId,
-                    "version" to version,
-                    "name" to name,
-                    "displayName" to displayName,
-                    "description" to description,
-                    "bodyJson" to bodyJson,
-                    "bodyHash" to bodyHash,
-                    "releasedAt" to releasedAt?.let(Timestamp::from),
-                    "actor" to actor,
-                    // #328 — the pushed release's caller-output record; see importPipelineVersion.
-                    "callerOutputJson" to callerOutputJson,
-                ),
-                DETAIL_MAPPER,
-            ).singleOrNull()
+        RaceSavepoint.attempt(jdbc.jdbcTemplate) {
+            jdbc
+                .query(
+                    INSERT_RELEASED_VERSION_SQL,
+                    mapOf(
+                        "pipelineId" to pipelineId,
+                        "workspaceId" to workspaceId,
+                        "version" to version,
+                        "name" to name,
+                        "displayName" to displayName,
+                        "description" to description,
+                        "bodyJson" to bodyJson,
+                        "bodyHash" to bodyHash,
+                        "releasedAt" to releasedAt?.let(Timestamp::from),
+                        "actor" to actor,
+                        // #328 — the pushed release's caller-output record; see importPipelineVersion.
+                        "callerOutputJson" to callerOutputJson,
+                    ),
+                    DETAIL_MAPPER,
+                ).singleOrNull()
+        }
 
     // ---------------------------------------------------------------------------------------------
     // Constraint translation
@@ -1264,13 +1268,16 @@ class PipelineRepository(
      * and `pipeline_versions_pkey` when both computed the same next number — the loser of
      * two simultaneous first-writes must re-read and rebase either way, and the response's
      * job is to point it at what it lost to.
+     *
+     * Inside the writer guard's transaction (#517) the statement runs under a savepoint, so the
+     * winner read still answers (guarded writers never race here; an unguarded one still can).
      */
     private fun <T> mappingDraftRace(
         pipelineId: UUID,
         block: () -> T,
     ): T =
         try {
-            block()
+            RaceSavepoint.attempt(jdbc.jdbcTemplate, block)
         } catch (e: DuplicateKeyException) {
             val message = e.mostSpecificCause.message
             if (message?.contains(DRAFT_INDEX) != true && message?.contains(DRAFT_PK) != true) throw e

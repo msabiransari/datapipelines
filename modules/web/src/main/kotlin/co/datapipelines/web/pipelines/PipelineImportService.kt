@@ -19,6 +19,9 @@ import co.datapipelines.pipeline.RequestLimits
 import co.datapipelines.pipeline.TemplateDryRenderer
 import co.datapipelines.pipeline.ValidationResult
 import co.datapipelines.pipeline.WriteSurface
+import co.datapipelines.pipeline.release.GuardedTransaction
+import co.datapipelines.pipeline.release.ReleaseFamily
+import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
@@ -26,6 +29,7 @@ import co.datapipelines.web.api.RequestBodies
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import org.springframework.dao.DuplicateKeyException
+import org.springframework.transaction.support.TransactionOperations
 import java.time.Instant
 import java.util.UUID
 
@@ -66,6 +70,13 @@ class PipelineImportService(
     private val orgContext: OrgContext = OrgContext.DEFAULTS,
     /** Null disables the §0.5 bind scan — the seeder path, whose content is authored here. */
     private val templates: TemplateDryRenderer? = null,
+    /**
+     * #517 — the import's metadata transaction (a `TransactionTemplate` over `metadataTransactionManager` in production)
+     * and the workspace writer guard it acquires first (record §4.3: imports are pin-affecting writers). A promotion
+     * receive's outer transaction is joined. The defaults run directly, as a directly constructed test always did.
+     */
+    private val transactions: TransactionOperations = GuardedTransaction.DIRECT,
+    private val guard: ReleaseMutationGuard = ReleaseMutationGuard.NONE,
 ) {
     /** What the import stored, plus whether the pipeline row was created (`201`) or gained a version (`200`). */
     data class Imported(
@@ -101,6 +112,19 @@ class PipelineImportService(
         SERVER_FIELDS.forEach(tree::remove)
 
         val pipeline = deserializer.readOrThrow(MAPPER.writeValueAsString(tree))
+        // #517: validation reads every pin target, so it runs under the guard with the write.
+        return GuardedTransaction.run(transactions, guard, workspaceId, ReleaseFamily.PIPELINE) {
+            validateAndLand(workspaceId, requestedId, pipeline, preserved, actorId)
+        }
+    }
+
+    private fun validateAndLand(
+        workspaceId: UUID,
+        requestedId: UUID?,
+        pipeline: Pipeline,
+        preserved: Preserved?,
+        actorId: UUID,
+    ): Imported {
         // BEFORE §12: a body that binds an org key this deployment does not define is a
         // configuration conflict (409), not an authoring defect (400), and the two have different
         // people fixing them. The validator would also refuse it — as an unknown reference — so
@@ -226,7 +250,7 @@ class PipelineImportService(
     private fun importNextLocal(
         workspaceId: UUID,
         requestedId: UUID?,
-        pipeline: co.datapipelines.pipeline.Pipeline,
+        pipeline: Pipeline,
         canonical: String,
         actorId: UUID,
     ): Imported {
@@ -266,7 +290,7 @@ class PipelineImportService(
     private fun importPreserved(
         workspaceId: UUID,
         requestedId: UUID?,
-        pipeline: co.datapipelines.pipeline.Pipeline,
+        pipeline: Pipeline,
         canonical: String,
         preserved: Preserved,
         actorId: UUID,
@@ -349,7 +373,7 @@ class PipelineImportService(
         workspaceId: UUID,
         pipelineId: UUID,
         preserved: Preserved,
-        pipeline: co.datapipelines.pipeline.Pipeline,
+        pipeline: Pipeline,
         canonical: String,
         declared: String,
         actorId: UUID,
@@ -369,7 +393,8 @@ class PipelineImportService(
                 preserved.callerOutputJson,
             )
         } catch (e: DuplicateKeyException) {
-            // The row appeared between the read and the insert — classify by what is there now.
+            // The row appeared between the read and the insert — classify by what is there now (the insert ran
+            // under a savepoint inside the guarded transaction, #517, so this read still answers).
             throw versionConflict(pipelines.findVersionDetail(workspaceId, pipelineId, preserved.version), preserved, e)
         }
 

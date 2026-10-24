@@ -524,6 +524,9 @@ class DomainConfiguration {
         validator: PipelineValidator,
         orgContext: co.datapipelines.pipeline.OrgContext,
         dryRenderer: TemplateDryRenderer,
+        // #517 — the import's metadata transaction and the workspace writer guard it acquires first.
+        metadataTransactionManager: org.springframework.transaction.PlatformTransactionManager,
+        guard: co.datapipelines.pipeline.release.ReleaseMutationGuard,
     ): PipelineImportService =
         PipelineImportService(
             pipelines = pipelines,
@@ -533,6 +536,10 @@ class DomainConfiguration {
             // producing plausible wrong numbers on its first run.
             orgContext = orgContext,
             templates = dryRenderer,
+            transactions =
+                org.springframework.transaction.support
+                    .TransactionTemplate(metadataTransactionManager),
+            guard = guard,
         )
 
     @Bean
@@ -543,7 +550,20 @@ class DomainConfiguration {
         // (owner ruling 2026-09-25: an import keeps what resolves here, drops the rest).
         citableFacts: co.datapipelines.templates.CitableFacts,
         citations: co.datapipelines.templates.TemplateImplementsRepository,
-    ): TemplateImportService = TemplateImportService(templates, validator, citableFacts, citations)
+        // #517 — one guarded metadata transaction per entry.
+        metadataTransactionManager: org.springframework.transaction.PlatformTransactionManager,
+        guard: co.datapipelines.pipeline.release.ReleaseMutationGuard,
+    ): TemplateImportService =
+        TemplateImportService(
+            templates,
+            validator,
+            citableFacts,
+            citations,
+            transactions =
+                org.springframework.transaction.support
+                    .TransactionTemplate(metadataTransactionManager),
+            guard = guard,
+        )
 }
 
 /**
