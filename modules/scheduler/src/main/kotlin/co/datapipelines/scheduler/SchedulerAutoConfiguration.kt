@@ -107,8 +107,9 @@ class SchedulerAutoConfiguration {
         transactions: SchedulerTransactions,
         @Qualifier("schedulerClock") clock: Clock,
         metrics: SchedulerMetrics,
+        outbox: NotificationOutbox,
         workerName: SchedulerWorkerName,
-    ): RunLedger = RunLedger(runs, schedules, transactions.template, clock, metrics, workerName.value)
+    ): RunLedger = RunLedger(runs, schedules, transactions.template, clock, metrics, outbox, workerName.value)
 
     /**
      * The admission gate — the lifecycle bean that stops BEFORE the execution drain (record §7.2,

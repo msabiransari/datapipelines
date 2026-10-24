@@ -190,8 +190,9 @@ data class ScheduleRun(
 )
 
 /**
- * The trail's kinds (`schedule_run_events.kind`, record §7.1, R10). Slice 4's notification kinds
- * widen the table's CHECK when they land; none is reserved here.
+ * The trail's kinds (`schedule_run_events.kind`, record §7.1, R10). Slice 4's four notification
+ * kinds (#442b, V51) record a notice queued for a run and each delivery's outcome — ids, event and
+ * code only, never an address.
  */
 enum class TrailKind(
     val wire: String,
@@ -206,6 +207,10 @@ enum class TrailKind(
     UNKNOWN("unknown"),
     UPDATED_AFTER_UNKNOWN("updated_after_unknown"),
     UNBLOCKED("unblocked"),
+    NOTIFICATION_ENQUEUED("notification_enqueued"),
+    NOTIFICATION_SENT("notification_sent"),
+    NOTIFICATION_FAILED("notification_failed"),
+    NOTIFICATION_UNCERTAIN("notification_uncertain"),
     ;
 
     companion object {

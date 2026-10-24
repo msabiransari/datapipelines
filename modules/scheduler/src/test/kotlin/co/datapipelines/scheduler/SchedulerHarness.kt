@@ -43,7 +43,10 @@ internal class SchedulerHarness(
     val schedules = ScheduleRepository(SchedulerTestDb.jdbc, SchedulerAutoConfiguration.JSON)
     val runs = ScheduleRunRepository(SchedulerTestDb.jdbc, SchedulerAutoConfiguration.JSON)
     val transactions = TransactionTemplate(DataSourceTransactionManager(SchedulerTestDb.dataSource))
-    val ledger = RunLedger(runs, schedules, transactions, clock, metrics, workerName)
+    val notifications = NotificationRepository(SchedulerTestDb.jdbc)
+    val policy = NotificationPolicy(properties.notifications, deployment)
+    val outbox = NotificationOutbox(notifications, runs, policy, properties.notifications.backlogMax)
+    val ledger = RunLedger(runs, schedules, transactions, clock, metrics, outbox, workerName)
     val executors = JobExecutors(listOf(executor))
     val admission = SchedulerAdmission(properties.shutdownWait).also { it.start() }
     val dispatcher = ScheduleDispatcher(schedules, runs, ledger, transactions, clock, properties, metrics) { SchedulerTestDb.SYSTEM_ACTOR }
@@ -74,7 +77,7 @@ internal class SchedulerHarness(
             queue,
             SchedulerAutoConfiguration.JSON,
             ScheduleTargetReads(SchedulerTestDb.jdbc),
-            NotificationPolicy(properties.notifications, deployment),
+            policy,
         ) {
             SchedulerTestDb.SYSTEM_ACTOR
         }

@@ -166,6 +166,9 @@ class FlywayMigrationIntegrationTest {
                 // pipeline bodies rewritten with their hashes re-stamped, V33's blocks
                 // constraint renamed (the V33 file itself byte-identical).
                 "50|script node type|true",
+                // #442b (V51) — the schedule notification outbox: one event per selected run transition
+                // (or schedule block), one delivery per recipient, and the trail's four notification kinds.
+                "51|schedule notification outbox|true",
             )
     }
 
@@ -865,6 +868,55 @@ class FlywayMigrationIntegrationTest {
     }
 
     /**
+     * #442b (V51) — the notification outbox, read from the SHIPPED database: the trail's kind list gains the four
+     * notification kinds, an event's outcome is bound to its checkbox, a delivery is due exactly while pending, and
+     * the two identities (a run reaches each outcome once; a recipient once per event) are named UNIQUEs. Behaviour —
+     * enqueue in the transition's transaction, a replay writing nothing — is the scheduler module's own suite
+     * (`ScheduleNotificationOutboxIntegrationTest`); this pins that production Flyway builds what it runs on.
+     */
+    @Test
+    fun `V51 creates the notification outbox and widens the trail kinds`() {
+        query(
+            "SELECT conname || '|' || pg_get_constraintdef(oid) FROM pg_constraint WHERE conname IN " +
+                "('chk_schedule_run_events_kind', 'chk_schedule_notification_events_outcome', " +
+                "'chk_schedule_notification_deliveries_due', 'uq_schedule_notification_events_run_outcome', " +
+                "'uq_schedule_notification_deliveries_event_recipient') ORDER BY conname COLLATE \"C\"",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "chk_schedule_notification_deliveries_due|CHECK (((state = 'pending'::text) = (next_attempt_at IS NOT NULL)))",
+                "chk_schedule_notification_events_outcome|CHECK ((((event = 'start'::text) AND (outcome = 'started'::text)) OR " +
+                    "((event = 'success'::text) AND (outcome = 'completed'::text)) OR ((event = 'failure'::text) AND " +
+                    "(outcome = ANY (ARRAY['failed'::text, 'could_not_start'::text, 'cancelled'::text, 'aborted'::text]))) OR " +
+                    "((event = 'unknown'::text) AND (outcome = ANY (ARRAY['unknown'::text, 'unknown_update'::text]))) OR " +
+                    "((event = 'blocked'::text) AND (outcome = 'blocked'::text))))",
+                "chk_schedule_run_events_kind|CHECK ((kind = ANY (ARRAY['recorded'::text, 'capacity_retry'::text, 'claimed'::text, " +
+                    "'execution_started'::text, 'not_started'::text, 'skipped'::text, 'finished'::text, 'unknown'::text, " +
+                    "'updated_after_unknown'::text, 'unblocked'::text, 'notification_enqueued'::text, 'notification_sent'::text, " +
+                    "'notification_failed'::text, 'notification_uncertain'::text])))",
+                "uq_schedule_notification_deliveries_event_recipient|UNIQUE (event_id, recipient)",
+                "uq_schedule_notification_events_run_outcome|UNIQUE (run_id, outcome)",
+            )
+        columnsOf("schedule_notification_deliveries") shouldContainExactlyInAnyOrder
+            listOf(
+                "attempts",
+                "created_at",
+                "event_id",
+                "id",
+                "last_error_code",
+                "message_id",
+                "next_attempt_at",
+                "recipient",
+                "resend_count",
+                "sending_since",
+                "sent_at",
+                "state",
+                "updated_at",
+            )
+        columnsOf("schedule_notification_events") shouldContainExactlyInAnyOrder
+            listOf("created_at", "event", "id", "occurred_at", "outcome", "reason", "run_id", "run_state", "schedule_id", "sequence")
+    }
+
+    /**
      * #9 (V38) — the scheduler's schema, read from the SHIPPED database: the CHECK lists that R6's
      * table and the trail kinds live in, the partial one-active index (the durable overlap guard) and
      * SCHEDULE joining the trigger CHECK. The trail is append-only by construction, not by a
@@ -1365,7 +1417,7 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    fun `creates exactly the thirty-eight tables of metadata-db §4`() {
+    fun `creates exactly the forty tables of metadata-db §4`() {
         val tables =
             query(
                 """
@@ -1411,6 +1463,9 @@ class FlywayMigrationIntegrationTest {
                 "visualizations",
                 // #9 (V38) — the scheduler: db-scheduler's queue, the schedules, their runs and the runs' trail.
                 "scheduled_tasks",
+                // #442b (V51) — the notification outbox (metadata-db §4.39–§4.40).
+                "schedule_notification_deliveries",
+                "schedule_notification_events",
                 "schedule_run_events",
                 "schedule_runs",
                 "schedules",
@@ -1551,6 +1606,16 @@ class FlywayMigrationIntegrationTest {
                 "scheduled_tasks.last_heartbeat_idx",
                 "scheduled_tasks.priority_execution_time_idx",
                 "scheduled_tasks.scheduled_tasks_pkey",
+                // #442b (V51) — the sender's due scan, an event's deliveries, the two uniquenesses (a recipient once per
+                // event, a Message-ID once) and the PK; an event's schedule FK, its (run, outcome) uniqueness and the PK.
+                "schedule_notification_deliveries.idx_schedule_notification_deliveries_due",
+                "schedule_notification_deliveries.idx_schedule_notification_deliveries_event",
+                "schedule_notification_deliveries.schedule_notification_deliveries_pkey",
+                "schedule_notification_deliveries.uq_schedule_notification_deliveries_event_recipient",
+                "schedule_notification_deliveries.uq_schedule_notification_deliveries_message_id",
+                "schedule_notification_events.idx_schedule_notification_events_schedule",
+                "schedule_notification_events.schedule_notification_events_pkey",
+                "schedule_notification_events.uq_schedule_notification_events_run_outcome",
                 // #9 (V38) — the trail's PK (run_id, seq) is its one access path.
                 "schedule_run_events.schedule_run_events_pkey",
                 // #9 (V38) — a schedule's history, the reconciler's worklist, the execution join,
@@ -1702,6 +1767,17 @@ class FlywayMigrationIntegrationTest {
                 // 102 (V20): the write-surface stamps — 'session' | 'api_key' | 'mcp', both
                 // columns, the ruling's CHECK so a key id can never drift back in as a value.
                 "chk_pipeline_versions_via",
+                // #442b (V51) — the outbox's CHECKs (metadata-db §4.39–§4.40): a delivery's state list, its due/sending/
+                // accepted/failure pairings and counts; an event's checkbox list, its event/outcome pairing and sequence.
+                "chk_schedule_notification_deliveries_accepted",
+                "chk_schedule_notification_deliveries_counts",
+                "chk_schedule_notification_deliveries_due",
+                "chk_schedule_notification_deliveries_failure",
+                "chk_schedule_notification_deliveries_sending",
+                "chk_schedule_notification_deliveries_state",
+                "chk_schedule_notification_events_event",
+                "chk_schedule_notification_events_outcome",
+                "chk_schedule_notification_events_sequence",
                 // #9 (V38) — the trail's, the runs' and the schedules' CHECKs (metadata-db §4.22–§4.24),
                 // sorted as pg_constraint sorts them (the `_` is not a first-level sort key).
                 "chk_schedule_run_events_kind",
