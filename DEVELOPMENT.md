@@ -1211,6 +1211,59 @@ tooling crash (OOM, dead daemon) classifies as "no verdict, re-run" *ahead*
 of any skip, and skipped stages are counted and named in the gate's summary
 line — a PASS never hides an unrun guard (014/F4, 018/F1+ F2).
 
+#### Third-party notices
+
+```bash
+./gradlew :modules:app:generateThirdPartyNotices
+./gradlew :modules:app:bootJar  # generates and packages the same notices automatically
+./gradlew -Pmysql -Poracle :modules:app:generateThirdPartyNotices
+```
+
+Added 2026-10-24 (#677). The task writes
+`modules/app/build/generated/third-party-notices/THIRD-PARTY-NOTICES` from the
+resolved `productionRuntimeClasspath` graph, including its platform POMs,
+Spring Boot's jar-mode tools and both image isolate coordinates. It follows
+POM parents when licences are inherited. The isolate version is read from
+`Dockerfile`'s `GRAALJS_VERSION` ARG. Internal project modules are excluded.
+`processResources` puts the file at `META-INF/THIRD-PARTY-NOTICES` in the boot
+jar; the Dockerfile copies it to `/app/THIRD-PARTY-NOTICES`. Generate the jar
+before building the image, with the same optional-driver flags.
+
+`buildSrc/src/main/kotlin/ThirdPartyLicenseAllowlist.kt` maps exact POM
+licence names to SPDX identifiers/expressions and records canonical source
+URLs. Its comments explain each mapping's intended adopters. For a new
+spelling, inspect the actual resolved POM and its upstream licence, add a
+mapping with that intent, and vendor the canonical text once as
+`gradle/licenses/<SPDX-id>.txt`. Licence exceptions get separate text files.
+The allowlist records the SPDX text snapshot used; Oracle FUTC uses the
+local SPDX identifier `LicenseRef-Oracle-FUTC` and its Oracle source URL.
+No plugin or dependency is added, and licence texts are never downloaded
+by the build. POMs are resolved through Gradle's checksum verification;
+if the task first resolves a new POM artifact, regenerate verification
+metadata from a cold cache using §6.3, then review the added checksums.
+After warming resolution, `./gradlew --offline :modules:app:bootJar` works.
+
+The guard reports `Unresolved licence for <group:name:version>: raw POM
+license=...` for an unknown name, or `raw POM licenses=<none>` after the
+parent walk finds none. An unused mapping fails as `STALE licence
+allowlist entries (matched no POM)`. The MySQL and Oracle mappings are
+active only with their corresponding flags; the generated notice lists
+all declared alternatives and includes each licence/exception text once.
+It has sorted coordinates and text sections, UTF-8 output, and no time or
+git stamp. The task always revalidates POMs and mappings; tests under
+`buildSrc` exercise missing, unknown, inherited and stale licences, XML
+hardening, the isolate pin and deterministic output:
+
+```bash
+./gradlew -p buildSrc cleanTest test
+```
+
+Build-generated notices describe the graph that was packaged. Drivers
+mounted later through `lib/` require their own notices. Separately fetched
+DuckDB extensions and vendored browser assets remain tracked in
+[#692](https://github.com/msabiransari/datapipelines/issues/692) and
+[#693](https://github.com/msabiransari/datapipelines/issues/693).
+
 #### Dependency vulnerabilities (OSV-Scanner)
 
 ```bash

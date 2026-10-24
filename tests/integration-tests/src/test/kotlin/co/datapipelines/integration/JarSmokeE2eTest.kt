@@ -23,6 +23,7 @@ import java.sql.DriverManager
 import java.time.Instant
 import java.util.Base64
 import java.util.UUID
+import java.util.jar.JarFile
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
@@ -101,6 +102,25 @@ class JarSmokeE2eTest {
     }
 
     // ------------------------------------------------------------------ the screens
+
+    @Test
+    fun `the jar ships generated runtime and isolate licence notices`() {
+        JarFile(jarFile()).use { jar ->
+            val entry =
+                requireNotNull(jar.getJarEntry("META-INF/THIRD-PARTY-NOTICES")) {
+                    "Packaged THIRD-PARTY-NOTICES is missing"
+                }
+            val notices = jar.getInputStream(entry).bufferedReader(Charsets.UTF_8).use { it.readText() }
+            notices.isNotBlank() shouldBe true
+            notices shouldContain "org.graalvm.polyglot:polyglot:"
+            notices shouldContain "org.graalvm.js:js-isolate-linux-amd64-community:"
+            notices shouldContain "org.graalvm.js:js-isolate-linux-aarch64-community:"
+            notices shouldContain "===== UPL-1.0 ====="
+            notices shouldContain "The Universal Permissive License (UPL), Version 1.0"
+            notices shouldContain "===== Apache-2.0 ====="
+            notices shouldContain "TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION"
+        }
+    }
 
     @Test
     fun `the dashboard and both partials render from the jar`() {

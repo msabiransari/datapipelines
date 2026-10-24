@@ -74,6 +74,7 @@ RUN case "$TARGETARCH" in \
 ENV DATAPIPELINES_SCRIPT_JS_ISOLATE_DIR=/opt/graaljs
 
 COPY modules/app/build/libs/datapipelines-*.jar /app/datapipelines.jar
+COPY modules/app/build/generated/third-party-notices/THIRD-PARTY-NOTICES /app/THIRD-PARTY-NOTICES
 
 # The JDBC driver drop-in (module-structure.md §5.4.1): the jar's PropertiesLauncher adds
 # every jar in LOADER_PATH to the classpath, so an operator mounts ojdbc11.jar or
