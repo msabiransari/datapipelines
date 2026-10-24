@@ -74,10 +74,14 @@
         <section data-slot="deliveries-section" hidden>
           <h3 class="sch-messages-h">Notifications</h3>
           <p class="u-text-sm u-muted u-m0 u-mb-xs">Accepted means the mail relay took the message, not that it reached an inbox.</p>
-          <table class="ds-table">
-            <thead><tr><th>Notice</th><th>Recipient</th><th>State</th><th>Attempts</th><th>Last error</th><th><span class="u-sr-only">Actions</span></th></tr></thead>
-            <tbody data-slot="deliveries"></tbody>
-          </table>
+          <div class="dt-frame dt-scroll dt-h-sm dt-fit">
+            <div class="dt-viewport" tabindex="-1">
+            <table class="ds-table">
+              <thead><tr><th>Notice</th><th>Recipient</th><th>State</th><th>Attempts</th><th>Last error</th><th><span class="u-sr-only">Actions</span></th></tr></thead>
+              <tbody data-slot="deliveries"></tbody>
+            </table>
+            </div>
+          </div>
         </section>
 
         <h3 class="sch-messages-h">Messages</h3>

@@ -734,7 +734,7 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these four and NULL. V3
 | `updated_after_unknown` | A real terminal arrived after `unknown` — the same run, updated; the block stays |
 | `unblocked` | A person unblocked the schedule this run had blocked |
 | `notification_enqueued` | The outbox queued a notice for this run's transition (V51, #442b); `details` carry the notice id, its outcome and the queued/refused counts — never an address |
-| `notification_sent` | The relay accepted one delivery ([§44](#44-deliverystate) `accepted`) |
+| `notification_sent` | The relay accepted one delivery ([§44](#44-deliverystate--one-recipients-copy-of-a-notice-442b) `accepted`) |
 | `notification_failed` | One delivery ended `failed`; `details.code` says why |
 | `notification_uncertain` | One delivery may have been sent and is not retried automatically (`uncertain`) |
 
@@ -1061,7 +1061,7 @@ This document itself is **additive-only** — values are never removed (only mar
 
 ## 42. `NotificationEvent` — a schedule's notification choices (#442)
 
-Stored in `schedules.notification_events` (Metadata DB §4.22), serialized in declaration order by REST §20. These settings select which transitions mail is sent for (#442 part b): each outcome of [§43](#43-notificationoutcome) belongs to one event (Scheduler §2.3).
+Stored in `schedules.notification_events` (Metadata DB §4.22), serialized in declaration order by REST §20. These settings select which transitions mail is sent for (#442 part b): each outcome of [§43](#43-notificationoutcome--what-one-notice-reports-442b) belongs to one event (Scheduler §2.3).
 
 | Enum | Wire value | Meaning | Default |
 |---|---|---|---|
