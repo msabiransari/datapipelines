@@ -259,10 +259,13 @@ If startup fails with `datapipelines.auth.base-url must be set…`, your env fil
 ### 6.2 Dependency lockfiles
 
 Every module resolves its dependencies against its committed `gradle.lockfile`
-(module-structure.md §7.6). Locking is STRICT: if resolution drifts from the
-lock — a version changed in `gradle/libs.versions.toml`, a dependency added or
-removed in a module build file, a transitive shifting — the build FAILS with a
-lock-state error. That failure is the guard working; do not try to bypass it.
+(module-structure.md §7.6). STRICT locking constrains resolution to the committed
+versions and refuses unresolved lock state. It does not guarantee that a catalog
+version change fails: a lower request can resolve to the locked higher version
+(#566). Check the resolved dependency graph and the lock diff when changing the
+catalog; a passing build alone does not prove that the requested version took
+effect. The catalog/lock agreement guard remains tracked in #694. Do not bypass
+lock-state or dependency-verification failures.
 
 **Updating the locks** — the only correct response to a *deliberate* dependency
 change:

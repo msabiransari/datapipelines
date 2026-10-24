@@ -40,13 +40,14 @@
 
 [versions]
 # --- Toolchain / plugins -----------------------------------------------------
-# Kotlin: latest stable (2.4.20-Beta2 exists and is rejected as pre-release).
+# Kotlin: newest stable 2.4.x patch (Maven Central, 2026-10-24; 2.5.0-Beta2 exists
+# and is rejected as pre-release).
 # EXCEPTION to the BOM rule: the Spring Boot 3.5.16 BOM imports kotlin-bom 1.9.25,
 # which predates the compiler we run. The Kotlin Gradle plugin contributes
 # kotlin-stdlib at its own version; because the BOM is applied as a non-enforced
-# platform, Gradle conflict resolution selects the higher (2.4.10). Verified by
+# platform, Gradle conflict resolution selects the higher (2.4.21). Verified by
 # `./gradlew :modules:typesystem:dependencies --configuration compileClasspath`.
-kotlin = "2.4.10"
+kotlin = "2.4.21"
 # Spring Boot: latest stable 3.x. module-structure.md §11.1 FREEZES "Spring Boot 3.x"
 # in v1, so 4.1.0 (the current overall latest) is deliberately not taken.
 spring-boot = "3.5.16"

@@ -1,9 +1,9 @@
 # Auth & Security Specification
 
-**Status:** v3.56 (revised — see Change Log)
+**Status:** v3.57 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-24
 
 ---
 
@@ -561,7 +561,7 @@ The success handler is **fully provider-agnostic.** It reads `authorizedClientRe
 
 **The verified-primary rule.** With `emails-uri` set, the user-info `email` is **discarded** — GitHub's is the public profile address, neither verified nor necessarily the account's, and provisioning is keyed on email (§4.2), so trusting it would let anyone who types a victim's address into a public profile take the victim's row. No primary row → no address → refused (`missing_email`); a primary row whose `verified` is not the JSON `true` → refused (`email_not_verified`). **The trust knob does not apply to an entry with `emails-uri`**: the endpoint states verification itself, so `trust-email-without-verified-claim` cannot stand in for it; an `oauth2` entry without `emails-uri` is judged by the user-info attributes exactly as an OIDC token's claims, knob included. A failed, non-2xx or malformed emails read (not a list, a non-object row, two primaries, a primary without an address) refuses as `invalid_emails_response`; a user-info answer without the subject attribute as `invalid_user_info_response`.
 
-**Provider read timeouts (#682).** `datapipelines.auth.oidc.provider-read-timeout-seconds` (default `10`, integer in 1–2147483; Configuration §3.4) sets both connect and read timeouts for the code-for-token exchange (both protocols), OAuth2 user-info, the emails read and OIDC user-info. A stalled token exchange fails as `invalid_token_response`; either user-info path fails as `invalid_user_info_response`; the emails path fails as `invalid_emails_response` with `emails endpoint read failed (ResourceAccessException)`. These reach the failure path below. This is a per-connect/read bound, not a total login deadline. The ID-token decoder's JWKS read remains on Spring's default and is not governed by this key; bounding it requires a separate decoder factory preserving Spring's algorithm and validator defaults. Startup discovery keeps Spring's separate 30 s bound.
+**Provider read timeouts (#682).** `datapipelines.auth.oidc.provider-read-timeout-seconds` (default `10`, integer in 1–2147483; Configuration §3.4) sets both connect and read timeouts for the code-for-token exchange (both protocols), OAuth2 user-info, the emails read and OIDC user-info. A stalled token exchange fails as `invalid_token_response`; either user-info path fails as `invalid_user_info_response`; the emails path fails as `invalid_emails_response` with `emails endpoint read failed (ResourceAccessException)`. These reach the failure path below. This is a per-connect/read bound, not a total login deadline. The ID-token decoder's JWKS fetch is bounded by the same key through a `JwtDecoderFactory` bean (#686): the bean re-creates Spring's ID-token decoder with the bounded HTTP client and keeps everything else Spring's — the same algorithm resolution, the same validators (timestamp + OIDC issuer/audience), the same claim-type conversion, one decoder per registration — so a stalled JWKS read fails the ID-token decode as `invalid_id_token` and reaches the failure path below. Startup discovery keeps Spring's separate 30 s bound.
 
 **The failure path.** Every provider-side login failure — a refused consent, a lost authorization request, a failed token exchange, the refusals above — redirects to `/login?error=oidc_error` (the existing banner; no new page) and is audited `auth.login.oidc_error` with `details.reason` = the OAuth 2.0 error code (`authentication_failed` when there is none) and `details.provider` = the callback's registration id when it names a CONFIGURED provider (null otherwise — an unknown path segment is never written). The login limiter (§11.5; `/login` and `/oauth2/` prefixes, per client IP) meters the callback path, which bounds these rows.
 
@@ -1647,7 +1647,7 @@ datapipelines:
       cache-ttl-seconds: 60
 ```
 
-- `datapipelines.auth.oidc.provider-read-timeout-seconds` — shared by all providers, default `10`; 1–2147483 seconds for connect and read timeouts on token, OAuth2 user-info, emails and OIDC user-info calls (§5.5). JWKS retains Spring's default.
+- `datapipelines.auth.oidc.provider-read-timeout-seconds` — shared by all providers, default `10`; 1–2147483 seconds for connect and read timeouts on token, OAuth2 user-info, emails, OIDC user-info calls and the ID-token decoder's JWKS fetch (§5.5, #686). Startup discovery keeps Spring's separate 30 s bound.
 
 **Per provider, three values are required:**
 - `client-id` — from the OIDC provider's app registration.
@@ -1895,6 +1895,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-24 | v3.57 | #686 JWKS fetch joins the provider read bound | §5.5: the ID-token decoder's JWKS fetch is bounded by `datapipelines.auth.oidc.provider-read-timeout-seconds` through a `JwtDecoderFactory` bean that re-creates Spring's decoder with the bounded client — the same algorithm resolution, validators and claim-type conversion, one decoder per registration; a stalled JWKS read fails the decode as `invalid_id_token` and reaches the failure path. §11's key row names the JWKS fetch. No key added, no default change, no route, row or role cell change. |
 | 2026-10-22 | v3.56 | #651 enabled-provider avatar hosts | §11.1's `picture-hosts` allowlist includes only providers with a non-blank `client-id`, using the same predicate as sign-in registration. Dormant entries are still validated for shape at startup but contribute no hosts. No key, default, route or permission changes. |
 | 2026-10-22 | v3.55 | #682 | Shared provider read timeout for token exchange, OAuth2 user-info/emails and OIDC user-info; JWKS exception documented (§5.5, §11.1). |
 | 2026-10-21 | v3.54 | #655 GitHub sign-in (answers #154 part 2) | **GitHub is an OAuth 2.0 provider, not an OIDC one.** §5.1: an entry's `protocol` is `oidc` (default) or `oauth2`; an `oauth2` entry names `authorization-uri`, `token-uri`, `user-info-uri`, `user-name-attribute`, `scopes` and optionally `emails-uri`, is built with no HTTP at startup, and is refused with an `issuer-uri`, an `openid` scope or a non-https endpoint (loopback http excepted). §5.2: the protocol branch. §5.5: identity per protocol; with `emails-uri` only the verified PRIMARY row is accepted (`missing_email` / `email_not_verified`), the user-info `email` is discarded and the trust knob is not consulted; provider-side failures are now audited `auth.login.oidc_error` with `reason` and a configured `provider`; the access token is no longer retained in memory (a no-op authorized-client repository). §4.2 step 1, §6.2, §10's two `oidc_error` descriptions, §11.1 (the github block, the seven keys), §11.2 (GitHub row) and §15 reworded. §7.6: no row, route or role cell changes — `/oauth2/**` and `/login/**` already cover the flow. |

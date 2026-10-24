@@ -57,7 +57,7 @@ import java.util.zip.ZipFile
  *
  * Deviations from the §7.1 sketch, both deliberate and both reported at P0:
  *  - `-Xcontext-receivers` is NOT set. The flag was removed from the Kotlin
- *    compiler in 2.2; on the pinned 2.4.10 it is a hard error, and with
+ *    compiler in 2.2; on the pinned 2.4.21 it is a hard error, and with
  *    `allWarningsAsErrors` there is no soft-landing. Context parameters
  *    (`-Xcontext-parameters`) are the successor, and nothing in v1 needs them
  *    yet, so no replacement flag is set.

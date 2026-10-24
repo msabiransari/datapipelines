@@ -7,6 +7,7 @@ import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -14,13 +15,21 @@ import org.junit.jupiter.api.TestInstance
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
+import org.springframework.context.ApplicationContext
+import org.springframework.core.ResolvableType
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
+import org.springframework.security.authentication.ProviderManager
+import org.springframework.security.oauth2.client.oidc.authentication.OidcAuthorizationCodeAuthenticationProvider
+import org.springframework.security.oauth2.client.registration.ClientRegistration
+import org.springframework.security.oauth2.client.web.OAuth2LoginAuthenticationFilter
+import org.springframework.security.oauth2.jwt.JwtDecoderFactory
 import org.springframework.security.web.SecurityFilterChain
 import org.springframework.security.web.header.HeaderWriterFilter
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
+import org.springframework.test.util.ReflectionTestUtils
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -43,8 +52,8 @@ import java.util.Base64
  * auth.md §5 makes the *real* provider normative: real issuer discovery, the real
  * authorization-code exchange, the real JWKS fetch. Every one of those is an HTTP round
  * trip from this JVM to a container and back, and the callback hop is three of them behind
- * one request. The token exchange and user-info now use the configured provider timeout
- * (#682); the JWK client keeps Spring's default. The driver also has its own
+ * one request. The token exchange, user-info and the ID-token decoder's JWKS fetch now use
+ * the configured provider timeout (#682, #686). The driver also has its own
  * [HttpRequest.timeout]; when that fires the failure is an `HttpTimeoutException`
  * from the driver rather than a provider-timeout verdict from the product.
  *
@@ -86,7 +95,32 @@ class OidcLoginIntegrationTest {
 
     @Autowired private lateinit var securityFilterChain: SecurityFilterChain
 
+    @Autowired private lateinit var applicationContext: ApplicationContext
+
     @Autowired private lateinit var authProperties: AuthProperties
+
+    /**
+     * The #686 wiring proof: Spring's login config must hand the OIDC authentication
+     * provider THE context's `JwtDecoderFactory<ClientRegistration>` bean — the bounded
+     * one — not its own default factory. The walk starts at the live filter chain and
+     * reads the provider's `jwtDecoderFactory` field, so the assertion is about the objects
+     * a real login uses. Identity (`===`), not type: a fresh factory of the same type would
+     * carry Spring's unbounded client and still pass a type check. The bean is resolved by
+     * generic type (`JwtDecoderFactory<ClientRegistration>`) because the raw interface is
+     * the only type Spring publishes the bean under.
+     */
+    @Test
+    fun `the OIDC authentication provider decodes ID tokens through the context's bounded decoder factory`() {
+        val filter = securityFilterChain.filters.filterIsInstance<OAuth2LoginAuthenticationFilter>().single()
+        val manager = ReflectionTestUtils.getField(filter, "authenticationManager").shouldBeInstanceOf<ProviderManager>()
+        val provider = manager.providers.filterIsInstance<OidcAuthorizationCodeAuthenticationProvider>().single()
+        val wired = ReflectionTestUtils.getField(provider, "jwtDecoderFactory").shouldBeInstanceOf<JwtDecoderFactory<*>>()
+        val factoryType = ResolvableType.forClassWithGenerics(JwtDecoderFactory::class.java, ClientRegistration::class.java)
+        val beanNames = applicationContext.getBeanNamesForType(factoryType)
+        beanNames.size shouldBe 1
+        val bean = applicationContext.getBean(beanNames.single()) as JwtDecoderFactory<*>
+        (wired === bean).shouldBeTrue()
+    }
 
     @Test
     fun `security headers finish before downstream work can own an asynchronous response`() {
