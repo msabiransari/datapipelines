@@ -19,6 +19,7 @@ import org.gradle.kotlin.dsl.withType
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
 import org.jlleitschuh.gradle.ktlint.KtlintExtension
+import org.jlleitschuh.gradle.ktlint.tasks.BaseKtLintCheckTask
 import java.io.File
 import java.util.zip.ZipFile
 
@@ -182,6 +183,20 @@ class CommonConventionsPlugin : Plugin<Project> {
             }
         }
 
+        // A ktlint check task's stored output is not a function of its inputs (#689): on a
+        // REMOVED-only source change the plugin's incremental path finds no files to lint,
+        // returns before rewriting `discoveredErrors`, and Gradle stores the UNTOUCHED
+        // previous output under the new tree's cache key — so another checkout with the
+        // same relative sources is served findings named by THIS checkout's absolute
+        // paths (reproduced 2026-10-24: a clean tree failed lint on a scratch test it
+        // never contained). A lint finding, like a test verdict, runs fresh in every
+        // build. The reports half (`ktlint*Check`, GenerateReportsTask) stays cacheable:
+        // it reads this build's freshly written `discoveredErrors` as its input, so a
+        // cached verdict for identical content is sound — the lie lived upstream, here.
+        project.tasks.withType<BaseKtLintCheckTask>().configureEach {
+            outputs.cacheIf(UNCACHEABLE_LINT_FINDINGS) { false }
+        }
+
         project.extensions.configure<DetektExtension> {
             buildUponDefaultConfig = true
             allRules = false
@@ -229,8 +244,9 @@ class CommonConventionsPlugin : Plugin<Project> {
             // If the platform discovers no tests at all, that is a broken test setup,
             // not a pass. Guards the "engine found nothing" half of the false-green.
             failOnNoDiscoveredTests.set(true)
-            // The pregate runs with --build-cache (#480, DEVELOPMENT.md §9.4): compile and lint
-            // outputs may come from the cache, a test verdict never does. A cached test task
+            // The pregate runs with --build-cache (#480, DEVELOPMENT.md §9.4): compile and
+            // detekt outputs may come from the cache, a test verdict or a ktlint finding
+            // never does (#689). A cached test task
             // would also leave the pregate without the fresh stage-2 evidence its guard
             // coverage requires (scripts/pregate-results-lib.sh pgres::guards_covered).
             outputs.cacheIf(UNCACHEABLE_VERDICT) { false }
@@ -423,6 +439,14 @@ class CommonConventionsPlugin : Plugin<Project> {
         /** The reason Gradle logs (--info) for every task kept out of the build cache (#480). */
         const val UNCACHEABLE_VERDICT =
             "test, coverage and guard verdicts run fresh in every build; the pregate refuses cached test evidence (#480)"
+
+        /**
+         * The reason Gradle logs (--info) for every ktlint check task kept out of the build
+         * cache (#689): the task's stored output is the last incremental execution's, not a
+         * function of its inputs, so a cache hit can name another checkout's files.
+         */
+        const val UNCACHEABLE_LINT_FINDINGS =
+            "ktlint findings run fresh in every build; a stored lint output is the last incremental execution's, not a function of its inputs (#689)"
 
         /** Every Kover 0.9.x task class lives under this package (reports, verify, agent, artifact). */
         const val KOVER_TASK_PACKAGE = "kotlinx.kover.gradle.plugin.tasks."
