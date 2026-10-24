@@ -1,0 +1,3 @@
+# 2026-10-24 #686: public repeated HS256 key for the in-process JWKS fixture.
+# Exact introduction fingerprint only; other values, lines and commits remain scanned.
+06a4b2715310dee8d9c700bc9b0f49c2b7e9d7ca:modules/auth/src/test/kotlin/co/datapipelines/auth/JwksReadTimeoutTest.kt:generic-api-key:229
