@@ -274,7 +274,7 @@ class PipelinesController(
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
         val expectedHash = IfMatchHeader.required(ifMatch)
-        val plan = ReleasePlanBody.parse(body, ReleaseFamily.PIPELINE, releaseBounds)
+        val plan = ReleasePlanBody.parse(body, ReleaseFamily.PIPELINE, releaseBounds, ApiErrors::malformedPipelineBody)
         val released =
             pipelines.release(
                 workspaceId,

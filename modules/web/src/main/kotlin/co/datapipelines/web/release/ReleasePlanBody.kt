@@ -1,11 +1,15 @@
 package co.datapipelines.web.release
 
+import co.datapipelines.pipeline.RequestLimits
 import co.datapipelines.pipeline.release.CheckOverride
 import co.datapipelines.pipeline.release.ReleaseBounds
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseLimit
 import co.datapipelines.pipeline.release.ReleasePlanRequest
 import co.datapipelines.pipeline.release.ReleaseRefusals
+import co.datapipelines.web.api.ApiException
+import co.datapipelines.web.api.RequestBodies
+import com.fasterxml.jackson.core.JsonProcessingException
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
@@ -15,24 +19,30 @@ import com.fasterxml.jackson.databind.node.ObjectNode
  * fields — `tree_hash`, `include_dependencies` (node ids) and `check_overrides` (`{node_id, reason}`). No body, an empty
  * body or `{}` is no plan, so a legacy request is unchanged. Anything else the client sends — another key, a status, a
  * family, an order — is refused, never ignored. Refusals name a field locator, never the submitted value.
+ *
+ * The bytes are read the #291 way (pipeline-contract §13.21): through a request mapper carrying the stated nesting and
+ * string bounds, and a body that cannot be READ — not JSON, or nested past the bound — is the route family's own
+ * `malformed_json` 400 from the caller's [malformed], before any lookup. A readable body of the wrong shape is
+ * `plan_invalid`.
  */
 object ReleasePlanBody {
-    private val MAPPER = ObjectMapper()
+    private val MAPPER = RequestLimits.requestMapper(ObjectMapper())
     private val FIELDS = setOf(TREE_HASH, INCLUDE, OVERRIDES)
 
-    /** The plan [body] carries for a root of [family], or null when it carries none. */
+    /** The plan [body] carries for a root of [family], or null when it carries none; [malformed] refuses unreadable bytes. */
     @Suppress("ThrowsCount") // a boundary maps each distinct malformation to its own field locator
     fun parse(
         body: String?,
         family: ReleaseFamily,
         bounds: ReleaseBounds,
+        malformed: (JsonProcessingException) -> ApiException,
     ): ReleasePlanRequest? {
         if (body.isNullOrBlank()) return null
         if (body.toByteArray(Charsets.UTF_8).size > bounds.maxWireBytes) {
             throw ReleaseRefusals.limit(family, ReleaseLimit.WIRE_BYTES, bounds.maxWireBytes)
         }
         val tree =
-            runCatching { MAPPER.readTree(body) }.getOrNull() as? ObjectNode
+            RequestBodies.readTree(MAPPER, body, malformed) as? ObjectNode
                 ?: throw ReleaseRefusals.planInvalid(family, "body", "the body is not a JSON object")
         if (!FIELDS.containsAll(tree.fieldNames().asSequence().toList())) {
             throw ReleaseRefusals.planInvalid(family, "body", "the body carries a field the plan does not have")
