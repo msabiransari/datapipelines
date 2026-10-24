@@ -8,6 +8,7 @@ import co.datapipelines.pipeline.PipelineResolver
 import co.datapipelines.pipeline.TemplateDryRenderer
 import co.datapipelines.pipeline.TemplateReleaser
 import co.datapipelines.pipeline.TemplateVersionStatuses
+import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import co.datapipelines.visualization.DashboardReader
 import co.datapipelines.visualization.DashboardRepository
 import co.datapipelines.visualization.DashboardRuntimeConfig
@@ -130,6 +131,8 @@ class VisualizationConfiguration {
         releaser: TemplateReleaser,
         evidence: ReleaseEvidence,
         transactionManager: PlatformTransactionManager,
+        // #517 — every pin-affecting write under the workspace writer guard (release-dependencies §4.3).
+        guard: ReleaseMutationGuard,
     ): VisualizationService =
         VisualizationService(
             repository,
@@ -140,6 +143,7 @@ class VisualizationConfiguration {
             templateReleaser = releaser,
             evidence = evidence,
             transactions = TransactionTemplate(transactionManager) as TransactionOperations,
+            guard = guard,
         )
 
     @Bean
@@ -151,6 +155,7 @@ class VisualizationConfiguration {
         sets: ParameterSetFacts,
         authoring: AuthoringGuard,
         transactionManager: PlatformTransactionManager,
+        guard: ReleaseMutationGuard,
     ): DashboardService =
         DashboardService(
             repository,
@@ -159,6 +164,7 @@ class VisualizationConfiguration {
             sets,
             authoring,
             transactions = TransactionTemplate(transactionManager) as TransactionOperations,
+            guard = guard,
         )
 
     /**
@@ -194,6 +200,7 @@ class VisualizationConfiguration {
         transactionManager: PlatformTransactionManager,
         releaseRules: co.datapipelines.visualization.ArtifactImportReleaseRules,
         config: VisualizationConfig,
+        guard: ReleaseMutationGuard,
     ): co.datapipelines.visualization.ArtifactTransferService =
         co.datapipelines.visualization
             .ArtifactTransferService(
@@ -205,5 +212,6 @@ class VisualizationConfiguration {
                 transactions = TransactionTemplate(transactionManager) as TransactionOperations,
                 releaseRules = releaseRules,
                 config = config,
+                guard = guard,
             )
 }

@@ -6,6 +6,9 @@ import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.ValidationResult
 import co.datapipelines.pipeline.WriteSurface
+import co.datapipelines.pipeline.release.GuardedTransaction
+import co.datapipelines.pipeline.release.ReleaseFamily
+import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.transaction.support.TransactionOperations
 import java.util.UUID
@@ -30,6 +33,9 @@ data class DashboardReleased(
  *   visualization's own `releasePinnedTemplates`, the conservative reading of D61's "same consent flag").
  * - **Import** (§12): the rules against THIS deployment; a pin it lacks (`dependency_not_found`) is
  *   `import.missing_dependency` (the promotion order: pipelines, sets and visualizations first).
+ * - **The writer guard** (#517, release-dependencies record §4.3): every write runs in one metadata transaction that
+ *   acquires the workspace writer [guard] first; the validator's pin reads (metadata only, no egress) run under it, so
+ *   a dependency cannot be discarded or purged between the pin check and the save.
  */
 @Suppress("TooManyFunctions", "LongParameterList") // one façade over the aggregate's verb table; its ports are the constructor
 class DashboardService(
@@ -41,12 +47,20 @@ class DashboardService(
     authoring: AuthoringGuard,
     transactions: TransactionOperations = ArtifactLifecycle.DIRECT,
     newId: () -> UUID = UUID::randomUUID,
+    /** #517 — the workspace writer guard; [ReleaseMutationGuard.NONE] in a directly constructed test. */
+    private val guard: ReleaseMutationGuard = ReleaseMutationGuard.NONE,
 ) {
     /** Repository-owned, lens-filtered navigation metadata only. */
     fun navigation(request: co.datapipelines.pipeline.NavigationRequest): List<co.datapipelines.pipeline.NavigationRow> =
         repository.navigation(request)
 
     private val lifecycle = ArtifactLifecycle(repository, authoring, transactions, newId)
+
+    /** [block] in one metadata transaction, the workspace writer guard acquired first (#517); the lifecycle's transactions join it. */
+    private fun <T> guarded(
+        workspaceId: UUID,
+        block: () -> T,
+    ): T = GuardedTransaction.run(lifecycle.transactions, guard, workspaceId, ReleaseFamily.DASHBOARD, block)
 
     // ---- writes ---------------------------------------------------------------------------------------
 
@@ -57,8 +71,10 @@ class DashboardService(
         via: WriteSurface,
     ): ArtifactVersion<DashboardBody> {
         lifecycle.requireAuthoring()
-        val valid = validated(workspaceId, document)
-        return lifecycle.create(workspaceId, valid.name, valid.body, actor, via)
+        return guarded(workspaceId) {
+            val valid = validated(workspaceId, document)
+            lifecycle.create(workspaceId, valid.name, valid.body, actor, via)
+        }
     }
 
     fun write(
@@ -70,8 +86,10 @@ class DashboardService(
         via: WriteSurface,
     ): ArtifactVersion<DashboardBody> {
         lifecycle.requireAuthoring()
-        val valid = validated(workspaceId, document)
-        return lifecycle.write(workspaceId, id, valid.name, valid.body, expectedHash, actor, via)
+        return guarded(workspaceId) {
+            val valid = validated(workspaceId, document)
+            lifecycle.write(workspaceId, id, valid.name, valid.body, expectedHash, actor, via)
+        }
     }
 
     /** The §3.2 rules against the dependencies' current state, no write — `POST /{id}/validate`, `dashboards_validate`. */
@@ -99,6 +117,7 @@ class DashboardService(
         val released =
             checkNotNull(
                 lifecycle.transactions.execute {
+                    guard.acquire(workspaceId, ReleaseFamily.DASHBOARD)
                     val cascaded = toCascade.map { (visualizationId, ref) -> cascade(workspaceId, visualizationId, ref, actor) }
                     lifecycle.flipDraft(workspaceId, id, expectedHash, actor) to cascaded
                 },
@@ -110,26 +129,26 @@ class DashboardService(
         workspaceId: UUID,
         id: UUID,
         expectedHash: String,
-    ): Purged = lifecycle.purgeDraft(workspaceId, id, expectedHash)
+    ): Purged = guarded(workspaceId) { lifecycle.purgeDraft(workspaceId, id, expectedHash) }
 
     fun purgeVersion(
         workspaceId: UUID,
         id: UUID,
         version: Int,
         expectedHash: String? = null,
-    ): Purged = lifecycle.purgeVersion(workspaceId, id, version, expectedHash)
+    ): Purged = guarded(workspaceId) { lifecycle.purgeVersion(workspaceId, id, version, expectedHash) }
 
     fun purgeEntity(
         workspaceId: UUID,
         id: UUID,
-    ): Purged = lifecycle.purgeEntity(workspaceId, id)
+    ): Purged = guarded(workspaceId) { lifecycle.purgeEntity(workspaceId, id) }
 
     fun discardVersion(
         workspaceId: UUID,
         id: UUID,
         version: Int,
         actor: UUID,
-    ): VersionMoved = lifecycle.discardVersion(workspaceId, id, version, actor)
+    ): VersionMoved = guarded(workspaceId) { lifecycle.discardVersion(workspaceId, id, version, actor) }
 
     /**
      * Restore DISCARDED version [version] — after its DEPENDENCIES are judged against today's state (#320, D7). While a
@@ -145,9 +164,11 @@ class DashboardService(
         version: Int,
     ): VersionMoved {
         lifecycle.requireAuthoring()
-        val stored = repository.findVersion(workspaceId, id, version)
-        if (stored != null && stored.detail.status == PipelineVersionStatus.DISCARDED) refuseDanglingPins(workspaceId, id, stored.body)
-        return lifecycle.restoreVersion(workspaceId, id, version)
+        return guarded(workspaceId) {
+            val stored = repository.findVersion(workspaceId, id, version)
+            if (stored != null && stored.detail.status == PipelineVersionStatus.DISCARDED) refuseDanglingPins(workspaceId, id, stored.body)
+            lifecycle.restoreVersion(workspaceId, id, version)
+        }
     }
 
     private fun refuseDanglingPins(
@@ -166,7 +187,7 @@ class DashboardService(
         workspaceId: UUID,
         id: UUID,
         version: Int,
-    ): Switched = lifecycle.switchCurrent(workspaceId, id, version)
+    ): Switched = guarded(workspaceId) { lifecycle.switchCurrent(workspaceId, id, version) }
 
     /** Import (§12): [validateForImport] then the lifecycle's landing. Not an authoring write. */
     fun import(
@@ -174,11 +195,10 @@ class DashboardService(
         export: ArtifactExport<DashboardBody>,
         actor: UUID,
     ): ArtifactImported =
-        lifecycle.importValidated(
-            workspaceId,
-            export.copy(body = validateForImport(workspaceId, DashboardDocument(export.name, export.body)).body),
-            actor,
-        )
+        guarded(workspaceId) {
+            val validated = export.copy(body = validateForImport(workspaceId, DashboardDocument(export.name, export.body)).body)
+            lifecycle.importValidated(workspaceId, validated, actor)
+        }
 
     /** The rules against THIS deployment with the import lens: a pin it lacks is `import.missing_dependency`. */
     fun validateForImport(

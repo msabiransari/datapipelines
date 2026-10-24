@@ -527,7 +527,7 @@ class ParameterSetServiceIntegrationTest {
             val set = h.create(cascade(pin))
             h.probe.renders.size shouldBe 1 // steps 5-6 ran at save, through the port
             val refused = refusal { h.service.release(WORKSPACE, set.record.id, set.detail.bodyHash, AUTHOR) }
-            refused.code shouldBe ParameterErrorCodes.RELEASE_TEMPLATE_NOT_RELEASED
+            refused.code shouldBe ParameterErrorCodes.RELEASE_DEPENDENCY_NOT_RELEASED
             (refused.details["pins_not_released"] as List<*>).size shouldBe 1
             val released = h.service.release(WORKSPACE, set.record.id, set.detail.bodyHash, AUTHOR, releasePinnedTemplates = true)
             released.templatesReleased shouldBe listOf(pin)

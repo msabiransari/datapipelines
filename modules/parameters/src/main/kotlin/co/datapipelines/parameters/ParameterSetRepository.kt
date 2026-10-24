@@ -6,6 +6,7 @@ import co.datapipelines.pipeline.LifecycleBucket
 import co.datapipelines.pipeline.NavigationFamily
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.WriteSurface
+import co.datapipelines.pipeline.release.RaceSavepoint
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.RowMapper
@@ -739,6 +740,8 @@ class ParameterSetRepository(
      * version PRIMARY KEY before it reaches the one-draft index (Postgres checks unique indexes in
      * creation order) — found by the forced race, which the index-only mapping answered with a raw
      * `DuplicateKeyException`. Either constraint is the same race.
+     *
+     * Inside the writer guard's transaction (#517) the statement runs under a savepoint, so the winner read still answers.
      */
     private fun <T> mappingDraftRace(
         workspaceId: UUID,
@@ -746,7 +749,7 @@ class ParameterSetRepository(
         block: () -> T,
     ): T =
         try {
-            block()
+            RaceSavepoint.attempt(jdbc.jdbcTemplate, block)
         } catch (e: DuplicateKeyException) {
             val cause = e.mostSpecificCause.message.orEmpty()
             if (DRAFT_INDEX !in cause && VERSION_PK !in cause) throw e

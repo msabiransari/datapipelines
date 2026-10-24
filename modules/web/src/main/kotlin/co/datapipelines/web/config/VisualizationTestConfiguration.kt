@@ -46,7 +46,11 @@ import org.springframework.transaction.support.TransactionTemplate
 @EnableConfigurationProperties(VisualizationProperties::class)
 class VisualizationTestConfiguration {
     @Bean
-    fun visualizationTestRunRepository(jdbc: NamedParameterJdbcTemplate): TestRunRepository = TestRunRepository(jdbc)
+    fun visualizationTestRunRepository(
+        jdbc: NamedParameterJdbcTemplate,
+        // #517 — session start and evidence completion acquire the workspace writer guard (release-dependencies §4.3).
+        guard: co.datapipelines.pipeline.release.ReleaseMutationGuard,
+    ): TestRunRepository = TestRunRepository(jdbc, guard)
 
     @Bean
     fun visualizationFixtureEvaluator(
