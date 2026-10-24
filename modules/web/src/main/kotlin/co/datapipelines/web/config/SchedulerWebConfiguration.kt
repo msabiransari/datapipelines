@@ -3,6 +3,7 @@ package co.datapipelines.web.config
 import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuthProperties
 import co.datapipelines.auth.MailProperties
+import co.datapipelines.auth.MailSender
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceRepository
 import co.datapipelines.executor.ExecutionEventRepository
@@ -14,11 +15,13 @@ import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.scheduler.CapacityGate
 import co.datapipelines.scheduler.JobExecutor
 import co.datapipelines.scheduler.NotificationDeployment
+import co.datapipelines.scheduler.NotificationMailer
 import co.datapipelines.scheduler.SchedulerProperties
 import co.datapipelines.scheduler.SystemActorSource
 import co.datapipelines.web.pipelines.RecordingExecutionRunner
 import co.datapipelines.web.schedules.PipelineJobExecutor
 import co.datapipelines.web.schedules.SlotCapacityGate
+import co.datapipelines.web.schedules.SmtpNotificationMailer
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.beans.factory.ObjectProvider
@@ -37,6 +40,7 @@ import org.springframework.core.env.Environment
  * - the [CapacityGate] — [SlotCapacityGate] over `ExecutionSlots`, budget `max-concurrent-runs` (R4).
  * - #442: the [NotificationDeployment] facts the scheduler's mail policy reads — whether auth's shared
  *   SMTP transport is configured, the base URL and the effective posture.
+ * - #442b: the [NotificationMailer] — [SmtpNotificationMailer] over auth's one shared [MailSender].
  */
 @Configuration
 class SchedulerWebConfiguration {
@@ -96,6 +100,13 @@ class SchedulerWebConfiguration {
             developmentPosture = posture != DeploymentEnv.HARDENED,
         )
     }
+
+    /** #442b — the scheduler's mail port over the account notices' transport; no second SMTP configuration. */
+    @Bean
+    fun schedulerNotificationMailer(
+        sender: MailSender,
+        mail: MailProperties,
+    ): NotificationMailer = SmtpNotificationMailer(sender, mail)
 
     @Bean
     fun schedulerCapacityGate(

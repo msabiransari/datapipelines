@@ -1,0 +1,12 @@
+[(${headline})]
+
+[(${explanation})]
+
+Schedule:      [(${scheduleName})]
+Runs:          [(${target})]
+Run state:     [(${state})][# th:if="${reason != null}"]
+Reason:        [(${reason})][/][# th:if="${scheduledFor != null}"]
+Scheduled for: [(${scheduledFor})][/]
+When:          [(${when})]
+
+Open the run: [(${link})]

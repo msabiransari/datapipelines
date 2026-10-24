@@ -677,6 +677,7 @@ build's `allowedInternalDependencies` map carries the same closed set).
 **Dependencies (external):**
 - `com.github.kagkarlsson:db-scheduler-spring-boot-starter` (pinned, 16.12.0 at introduction; brings `db-scheduler` core and `db-scheduler-spring-common` at the same version) — the durable queue, cluster-wide picking and dead-task detection; Apache-2.0. Its Java-serialization default is replaced by the JSON serializer (scheduler design revision §2.2, A8), and its health indicator is disabled (the record §7.2).
 - `spring-boot-starter-jdbc`, `io.micrometer:micrometer-core`, Jackson (all BOM-managed).
+- `org.thymeleaf:thymeleaf-spring6` (BOM-managed, #442b) — the notice templates under `scheduler-mail-templates/`, rendered by an engine of the module's own exactly as `auth` renders its notices (no MVC, no view layer; the catalog note says why not bare Thymeleaf).
 
 **Public API:**
 - `ScheduleService` — the management use cases REST calls (create, edit, pause/resume/unblock, delete, Run now, reads, preview). The only scheduler type a transport may name.
@@ -684,7 +685,8 @@ build's `allowedInternalDependencies` map carries the same closed set).
 - `CapacityGate` / `CapacityLease` — the acquire-before-claim port (R4); `web` implements it over `dag`'s `ExecutionSlots`
 - `OccurrenceFunction` — the ONE occurrence computation (the record §3.2) the dispatcher and the preview share
 - `SchedulerProperties` — `datapipelines.scheduler.*` ([Configuration §3.29](configuration.md#329-scheduler-9))
-- the jobs `ScheduleDispatcher`, `ScheduledRunWorker`, `RunReconciler` — declared as db-scheduler tasks by the module's own `SchedulerAutoConfiguration`; no transport may name them (`ArchitectureGuardTest`, B5)
+- the jobs `ScheduleDispatcher`, `ScheduledRunWorker`, `RunReconciler`, `ScheduleNotifier` (#442b) — declared as db-scheduler tasks by the module's own `SchedulerAutoConfiguration`; no transport may name them (`ArchitectureGuardTest`, B5)
+- `NotificationMailer` (#442b) — the mail port: one rendered notice to one recipient, answered with whether the relay could have accepted it; `web` implements it over `auth`'s one shared SMTP transport (the scheduler cannot see `auth`)
 
 **Why it is its own module.** The scheduler must stay pipeline-agnostic (the owner's boundary, record §5): timing, occurrence identity, admission and the run trail are generic, and a report executor is expected to plug into the same port. A module with no `dag`/`application`/`auth` edge makes that a build fact; the fake executor in its own suite proves it at runtime.
 
@@ -1285,6 +1287,7 @@ Before considering the module structure "ready":
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-24 | #442b schedule notification delivery | 442b (#442) | §5.16: `scheduler` gains `thymeleaf-spring6` (BOM-managed, already on `auth`'s and `web`'s class paths — the scheduler's lock gains its four lines) for the notice templates; its public API gains the `NotificationMailer` port and the `ScheduleNotifier` job (B5). `web` implements the port over `auth`'s `MailSender`. No internal dependency edge changes. |
 | 2026-10-22 | JavaScript product wiring | 8b (#8) | One availability-aware engine map supplies templates, the pool runner and node support; §3.1/§5.15 name the two engines and their responsibilities. |
 | 2026-10-21 | #8 the JavaScript engine | 8a (#8) | §5.15: the module gains the round-two engine — `JavaScriptEngine` on the same seam, `JavaScriptRuntime` (the one Engine/Context factory: UNTRUSTED policy, spawned isolate, one Engine per JVM), its options, `Availability`, `EngineScope`, the console sink types and `JavaScriptResourcesMain`. External dependencies gain GraalVM polyglot, nativebridge and truffle-api 25.4.4.1.1 (UPL 1.0; with collections, nativeimage, word and jniutils) and the test-runtime-only `js-isolate-community` (MIT + UPL 1.0); no isolate binary in the jar. The internal edge set is unchanged (`scripting` → `typesystem` only). No product surface: a javascript template is still refused until 8b. |
 | 2026-10-21 | #8 lane 8a the image's loader path (owner ruling 2026-10-21) | 8a (#8) | §5.4.1: the image's value is now `LOADER_PATH=/app/lib,/opt/graaljs` in the fence, the prose and the readiness checklist — the drop-in directory, then the JavaScript isolate's (§5.15). One list in one `ENV`, never a `-Dloader.path` beside it: `PropertiesLauncher` reads the system property before the environment, so a `-Dloader.path` for the isolate would silently drop the drop-in (measured in lane 8a). `ImageLoaderPathSpecDriftTest` pins the new value and refuses a `-Dloader.path` in the Dockerfile. |

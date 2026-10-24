@@ -107,8 +107,11 @@ object DeliveryCodes {
     /** The connection failed after the message may have been submitted — the uncertain case. */
     const val IO_AFTER_CONNECT = "io_after_connect"
 
-    /** A claimed send never reported back (the instance stopped mid-send) — may have been sent. */
+    /** A claimed send never reported back (the instance stopped mid-send, or the transport port threw) — may have been sent. */
     const val INTERRUPTED = "interrupted"
+
+    /** The notice could not be rendered; nothing was sent. A defect, not a transport fault — never retried. */
+    const val RENDER_FAILED = "render_failed"
 }
 
 /** One `schedule_notification_events` row. */

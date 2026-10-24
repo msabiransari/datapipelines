@@ -1,0 +1,10 @@
+[(${headline})]
+
+[(${explanation})]
+
+Schedule:   [(${scheduleName})]
+Runs:       [(${target})][# th:if="${reason != null}"]
+Reason:     [(${reason})][/]
+Blocked at: [(${when})]
+
+Open the run that blocked it: [(${link})]
