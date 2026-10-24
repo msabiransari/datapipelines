@@ -500,6 +500,8 @@ object ApiErrorCatalog {
             "pipeline.import." to "This pipeline couldn't be imported into this environment.",
             "pipeline.promotion." to "This item couldn't be promoted to the target environment.",
             "pipeline.check." to "Some release checks failed. Review the checks on this version and try again.",
+            // #517 — the pipeline release-plan refusals (400/409/422/428, never ours): the twin of the other families' lines.
+            "pipeline.release." to "This pipeline can't be released yet. The details say what to release first.",
             "pipeline.execution." to "The pipeline run couldn't be completed.",
             "pipeline.node." to "A step in the pipeline failed while it was running.",
             // 7c §13.18 — a SCRIPT node's refusal: the script, its inputs or its own
