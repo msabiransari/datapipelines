@@ -107,12 +107,13 @@
         server, starting with <code>pipelines_list</code> and <code>datasources_list</code>. Nothing else needs
         configuring: capabilities come from the standard <code>initialize</code> handshake.
       </p>
-      <!-- claim: docs/mcp-server.md §4.2 -->
+      <!-- claim: docs/mcp-server.md §4.2 (the transport), docs/auth.md §13.7 (the refusal codes), docs/auth.md §7.5 (the key's own role) -->
       <h3>If it does not connect</h3>
       <ul class="fact-list fact-list-plain">
         <li><strong><code>401 auth.api_key.missing</code></strong>: the header did not arrive. Check the header name, and that the client sends headers at all on HTTP transports.</li>
-        <li><strong><code>401 auth.api_key.invalid</code> or <code>auth.api_key.expired</code></strong>: wrong, revoked, expired, or the owning user is deactivated.</li>
-          <li><strong><code>auth.key_issuer_role_lost</code> or <code>auth.role_required</code></strong>, as the tool's result: the key is real and the role it carries does not reach what the agent tried. The key acts at its own role: to widen its reach, create another key with a wider role, which the dialog offers only when your own role reaches that far.</li>
+        <li><strong><code>401 auth.api_key.invalid</code> or <code>auth.api_key.expired</code></strong>: wrong, revoked or expired.</li>
+        <li><strong><code>401 auth.principal_deactivated</code></strong>: the key's identity or its MCP-key creator is deactivated. Ask an administrator to reactivate the account.</li>
+        <li><strong><code>auth.role_required</code></strong>, as the tool's result: the key is real and the role it carries does not reach what the agent tried. The key acts at its own role: to widen its reach, create another key with a wider role, which the dialog offers only when your own role reaches that far.</li>
         <li><strong>Silent rejection of a browser session</strong>: expected. <code>/mcp</code> takes API keys only; a cookie will never work there.</li>
       </ul>
       <p><a th:href="@{/docs/mcp-server}">The MCP server specification &rarr;</a> &middot;
@@ -126,7 +127,7 @@
       <!-- claim: docs/mcp-server.md §3.2 — which MCP client should I use -->
       <!-- claim: docs/auth.md §7.5 — what role the key carries -->
       <!-- claim: docs/deployment.md §3.5 — which drivers ship in the image -->
-      <!-- claim: docs/mcp-server.md §4.2 — the tools did not come back -->
+      <!-- claim: docs/auth.md §13.7 (refusal codes), docs/mcp-server.md §4.2 (the transport) — the tools did not come back -->
       <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Client setup, in questions')}"></div>
     </div>
   </section>

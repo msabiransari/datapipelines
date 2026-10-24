@@ -79,11 +79,11 @@ object SiteFaqsCluster {
             FaqEntry(
                 "The tools did not come back: what now?",
                 "Read the refusal: auth.api_key.missing means the header did not arrive; invalid or expired means " +
-                    "wrong, revoked or the owner is deactivated; auth.key_issuer_role_lost or auth.role_required " +
-                    "means the key is real but the role the key carries does not reach that tool. A silently " +
-                    "ignored browser session is expected, because /mcp takes API keys only. " +
-                    "The troubleshooting list is docs/mcp-server.md §4.2.",
-                "docs/mcp-server.md §4.2",
+                    "wrong, revoked or expired; auth.principal_deactivated means the key's identity or MCP-key " +
+                    "creator is deactivated; auth.role_required means the key's own role does not reach that tool. " +
+                    "A silently ignored browser session is expected, because /mcp takes API keys only. " +
+                    "The refusal codes are docs/auth.md §13.7; the transport is docs/mcp-server.md §4.2.",
+                "docs/auth.md §13.7",
             ),
         )
 
