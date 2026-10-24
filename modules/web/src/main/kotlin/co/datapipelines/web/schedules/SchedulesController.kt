@@ -4,7 +4,6 @@ import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.scheduler.NotificationDelivery
 import co.datapipelines.scheduler.NotificationEvent
 import co.datapipelines.scheduler.NotificationSettingsRequest
 import co.datapipelines.scheduler.Occurrence
@@ -345,7 +344,7 @@ class SchedulesController(
                 linkedMapOf<String, Any?>(
                     "recipient_count" to schedule.notificationRecipients.size,
                     "events" to NotificationEvent.entries.filter { it in schedule.notificationEvents }.map { it.wire },
-                    "delivery" to NotificationDelivery.CURRENT,
+                    "delivery" to schedules.notificationDelivery().toWire(),
                 ).apply { if (mayReadRecipients) put("recipients", schedule.notificationRecipients) },
             "enabled" to schedule.enabled,
             "condition" to schedule.condition,

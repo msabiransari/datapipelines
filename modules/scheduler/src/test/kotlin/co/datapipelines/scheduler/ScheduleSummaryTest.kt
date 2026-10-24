@@ -38,6 +38,7 @@ class ScheduleSummaryTest {
             mockk(relaxed = true),
             SchedulerAutoConfiguration.JSON,
             mockk(relaxed = true),
+            NotificationPolicy(properties.notifications, NotificationDeployment.UNKNOWN),
         ) { UUID.randomUUID() }
 
     @Test

@@ -366,6 +366,7 @@ class ScheduleServiceIntegrationTest {
                 wide.queue,
                 SchedulerAutoConfiguration.JSON,
                 ScheduleTargetReads(SchedulerTestDb.jdbc),
+                NotificationPolicy(wide.properties.notifications, wide.deployment),
             ) { SchedulerTestDb.SYSTEM_ACTOR }
 
         val listed = service.list(SchedulerTestDb.WORKSPACE, null, names.size, 0, NarrowedViewer).map { it.name }

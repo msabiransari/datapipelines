@@ -19,6 +19,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Import
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
@@ -40,11 +41,13 @@ import java.util.UUID
  * wrapped in `TransactionAwareDataSourceProxy` — which is what spike 1 proves.
  *
  * Conditional on a [SystemActorSource] bean: a slice context that wires no scheduler (a web slice
- * test, a module-slice suite) gets none of it.
+ * test, a module-slice suite) gets none of it — nor the notification beans it imports
+ * ([SchedulerNotificationConfiguration], #442b).
  */
 @AutoConfiguration(before = [DbSchedulerAutoConfiguration::class])
 @ConditionalOnBean(SystemActorSource::class)
 @EnableConfigurationProperties(SchedulerProperties::class)
+@Import(SchedulerNotificationConfiguration::class)
 class SchedulerAutoConfiguration {
     /** The scheduler's clock — injectable, so a test can drive time (record §8's controlled clock). */
     @Bean
@@ -185,6 +188,7 @@ class SchedulerAutoConfiguration {
         scheduler: Scheduler,
         systemActor: SystemActorSource,
         jdbc: NamedParameterJdbcTemplate,
+        notificationPolicy: NotificationPolicy,
     ): ScheduleService =
         ScheduleService(
             schedules,
@@ -197,6 +201,7 @@ class SchedulerAutoConfiguration {
             DbSchedulerRunQueue(scheduler, SchedulerTasks.RUN_TASK),
             JSON,
             scheduleTargetReads(jdbc),
+            notificationPolicy,
             systemActor::userId,
         )
 

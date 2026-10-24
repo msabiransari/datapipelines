@@ -81,6 +81,8 @@ class ConfigValidatorCheckCountTest {
                 "modules/app/src/main/kotlin/co/datapipelines/config/UiRules.kt",
                 // #655 — the §3.4 provider-protocol rule, split out for the same size reason.
                 "modules/app/src/main/kotlin/co/datapipelines/config/AuthProviderRules.kt",
+                // #442b — the §3.29 scheduler-notification rule, split out for the same size reason.
+                "modules/app/src/main/kotlin/co/datapipelines/config/SchedulerNotificationRules.kt",
             )
     }
 }

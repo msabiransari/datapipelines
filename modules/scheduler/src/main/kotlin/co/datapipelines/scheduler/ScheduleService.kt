@@ -36,6 +36,8 @@ class ScheduleService(
     private val mapper: ObjectMapper,
     /** #259 — the by-target read, in its own file while the follow-ups lane is in flight. */
     private val targetReads: ScheduleTargetReads,
+    /** #442 — the deployment's notification decision: the save-time allowlist check and the delivery state readers see. */
+    private val notificationPolicy: NotificationPolicy,
     /**
      * The system identity's user id (R2) — every run's `actor_user_id`. LAST on purpose: a
      * call site may pass it as a trailing lambda, which binds to the final parameter (#250
@@ -55,7 +57,8 @@ class ScheduleService(
         request: ScheduleRequest,
         idempotencyKey: String?,
     ): Written<Schedule> {
-        val notifications = NotificationSettings.resolve(request.notifications, null, properties.notifications.maxRecipients)
+        val notifications =
+            NotificationSettings.resolve(request.notifications, null, properties.notifications.maxRecipients, notificationPolicy)
         val key = idempotencyKey?.let(::checkedKey)
         val hash = key?.let { hashOf(request, notifications) }
         // Pre-V49 keys hashed the same request without notification fields. Only the old defaults
@@ -122,7 +125,8 @@ class ScheduleService(
         val current = schedules.findLive(workspaceId, id) ?: throw notFound(id)
         if (current.revision != expectedRevision) throw revisionConflict(current)
         val validated = validate(workspaceId, request)
-        val notifications = NotificationSettings.resolve(request.notifications, current, properties.notifications.maxRecipients)
+        val notifications =
+            NotificationSettings.resolve(request.notifications, current, properties.notifications.maxRecipients, notificationPolicy)
         val timingChanged = validated.pattern.pattern != current.cron || validated.zone.id != current.timezone
         val edit =
             ScheduleEdit(
@@ -452,6 +456,9 @@ class ScheduleService(
         val admitted = read.take(cap)
         return ScheduleSummary.of(admitted, runs.latestStates(workspaceId, admitted.map { it.id }), complete = read.size <= cap)
     }
+
+    /** #442 — whether scheduler mail is on for this deployment, and if not, why (rest-api §20's `delivery`). */
+    fun notificationDelivery(): NotificationDeliveryState = notificationPolicy.state
 
     /** Live schedules in [workspaceId] — the workspace delete's content count. */
     fun countLive(workspaceId: UUID): Int = schedules.countLive(workspaceId)

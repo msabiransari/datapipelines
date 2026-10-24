@@ -34,6 +34,7 @@ internal class SchedulerHarness(
     val executor: FakeExecutor = FakeExecutor(),
     val capacity: FakeCapacityGate = FakeCapacityGate(),
     val properties: SchedulerProperties = SchedulerProperties(minIntervalSeconds = 60),
+    val deployment: NotificationDeployment = NotificationDeployment.UNKNOWN,
     workerName: String = "instance-" + UUID.randomUUID().toString().take(4),
 ) {
     val clock: Clock = SettableJavaClock(settable)
@@ -73,6 +74,7 @@ internal class SchedulerHarness(
             queue,
             SchedulerAutoConfiguration.JSON,
             ScheduleTargetReads(SchedulerTestDb.jdbc),
+            NotificationPolicy(properties.notifications, deployment),
         ) {
             SchedulerTestDb.SYSTEM_ACTOR
         }

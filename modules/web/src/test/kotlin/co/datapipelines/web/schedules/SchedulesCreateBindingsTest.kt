@@ -22,6 +22,8 @@ import co.datapipelines.pipeline.PipelineVersionDetail
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.scheduler.JobExecutors
+import co.datapipelines.scheduler.NotificationDeployment
+import co.datapipelines.scheduler.NotificationPolicy
 import co.datapipelines.scheduler.RunLedger
 import co.datapipelines.scheduler.Schedule
 import co.datapipelines.scheduler.ScheduleErrorCodes
@@ -114,6 +116,7 @@ class SchedulesCreateBindingsTest {
                 mapper = mapper,
                 systemActor = { SYSTEM_ID },
                 targetReads = mockk(), // the by-target read; this suite creates, it never reads
+                notificationPolicy = NotificationPolicy(SchedulerProperties.Notifications(), NotificationDeployment.UNKNOWN),
             ),
             audit,
             mapper,

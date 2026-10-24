@@ -68,8 +68,9 @@ class ConfigValidator(
          * `ScriptRules.checkRemovedTransformKeys` (§3.28 — the removed `datapipelines.transform.*` keys).
          * 37 since #655 added `AuthProviderRules.checkProviderProtocols` (§3.4).
          * 38 since #682 added `AuthProviderRules.checkProviderReadTimeout` (§3.4).
+         * 39 since #442b added `SchedulerNotificationRules.checkSchedulerNotifications` (§3.29).
          */
-        internal const val CHECK_COUNT = 38
+        internal const val CHECK_COUNT = 39
 
         /**
          * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
@@ -158,6 +159,8 @@ class ConfigValidator(
             // §3.27 (137) — the mail rules live in their own file (MailRules), like the posture ones.
             MailRules.checkMailShape(snapshot, violations)
             MailRules.checkMailHardened(snapshot, violations)
+            // §3.29 (#442b) — scheduler mail needs the transport and the base URL; its own file too.
+            SchedulerNotificationRules.checkSchedulerNotifications(snapshot, violations)
             return ValidationReport(violations, warnings)
         }
 
@@ -957,7 +960,7 @@ class ConfigValidator(
                 deploymentName = environment.getProperty(DeploymentEnv.LEGACY_ENV_KEY),
                 authAllowLocalOnly =
                     environment.getProperty("datapipelines.auth.allow-local-only", Boolean::class.java) ?: false,
-                mail = mailSnapshot(environment),
+                mail = MailRules.snapshot(environment),
             )
 
         /**
@@ -971,23 +974,6 @@ class ConfigValidator(
                     "datapipelines.executor.node-query-timeout-seconds-by-dialect",
                     Bindable.mapOf(String::class.java, String::class.java),
                 ).orElse(emptyMap())
-
-        /**
-         * §3.27 (137) — the mail block. Raw strings so a bad port or a `starttls` typo becomes a
-         * NAMED violation; the password is PRESENCE only. `auth.base-url` rides along for the
-         * cross-key rule (the welcome mail's login URL) — auth owns its semantics.
-         */
-        private fun mailSnapshot(environment: Environment): MailSnapshot =
-            MailSnapshot(
-                authBaseUrl = environment.getProperty("datapipelines.auth.base-url"),
-                host = environment.getProperty("datapipelines.mail.host"),
-                port = environment.getProperty("datapipelines.mail.port"),
-                username = environment.getProperty("datapipelines.mail.username"),
-                passwordSet = !environment.getProperty("datapipelines.mail.password").isNullOrBlank(),
-                starttls = environment.getProperty("datapipelines.mail.starttls"),
-                from = environment.getProperty("datapipelines.mail.from"),
-                opsTo = environment.getProperty("datapipelines.mail.ops-to"),
-            )
 
         /**
          * The configured providers, through the SAME Binder `AuthProperties` is bound with (#655).
@@ -1289,6 +1275,8 @@ internal data class MailSnapshot(
     val starttls: String? = null,
     val from: String? = null,
     val opsTo: String? = null,
+    /** §3.29 (#442b) — the scheduler's notification flag, raw; read only for its cross-key rule. */
+    val schedulerNotificationsEnabled: String? = null,
 ) {
     /** Mail is on exactly when [host] and [from] are set — the §3.27 derivation, spelled once here. */
     val enabled: Boolean get() = !host.isNullOrBlank() && !from.isNullOrBlank()

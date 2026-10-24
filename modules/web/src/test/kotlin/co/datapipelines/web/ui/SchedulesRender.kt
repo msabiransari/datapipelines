@@ -25,7 +25,10 @@ internal object SchedulesRender {
             )
         }
 
-    fun page(roles: WebContext.() -> Unit = { withRoles() }): String {
+    fun page(
+        roles: WebContext.() -> Unit = { withRoles() },
+        delivery: Map<String, String>? = null,
+    ): String {
         val context =
             WebContext(
                 JakartaServletWebApplication
@@ -38,6 +41,7 @@ internal object SchedulesRender {
         context.setVariable("currentPath", "/schedules")
         context.setVariable("workspaceOptions", emptyList<Any>())
         context.setVariable("timezoneGroups", ScheduleTimezones.GROUPS)
+        context.setVariable("notificationDelivery", delivery)
         return engine.process("schedules/index", context)
     }
 

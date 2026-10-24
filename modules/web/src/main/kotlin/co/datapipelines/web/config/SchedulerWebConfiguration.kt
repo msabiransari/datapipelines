@@ -1,6 +1,8 @@
 package co.datapipelines.web.config
 
 import co.datapipelines.application.lens.PromoterLens
+import co.datapipelines.auth.AuthProperties
+import co.datapipelines.auth.MailProperties
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceRepository
 import co.datapipelines.executor.ExecutionEventRepository
@@ -11,6 +13,7 @@ import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.scheduler.CapacityGate
 import co.datapipelines.scheduler.JobExecutor
+import co.datapipelines.scheduler.NotificationDeployment
 import co.datapipelines.scheduler.SchedulerProperties
 import co.datapipelines.scheduler.SystemActorSource
 import co.datapipelines.web.pipelines.RecordingExecutionRunner
@@ -21,6 +24,7 @@ import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.core.env.Environment
 
 /**
  * The scheduler's composition root (#9; scheduler design revision §6.2, A3 — `web/config`, since
@@ -31,6 +35,8 @@ import org.springframework.context.annotation.Configuration
  *   `SystemActorSeeder`; its presence is also what switches the scheduler's auto-configuration on.
  * - the pipeline [JobExecutor] — [PipelineJobExecutor], registered as executor `pipeline`.
  * - the [CapacityGate] — [SlotCapacityGate] over `ExecutionSlots`, budget `max-concurrent-runs` (R4).
+ * - #442: the [NotificationDeployment] facts the scheduler's mail policy reads — whether auth's shared
+ *   SMTP transport is configured, the base URL and the effective posture.
  */
 @Configuration
 class SchedulerWebConfiguration {
@@ -69,6 +75,27 @@ class SchedulerWebConfiguration {
             scope = executionScope,
             mapper = mapper,
         )
+
+    /**
+     * #442 — the deployment facts behind scheduler mail: auth's transport rule (host AND from,
+     * [MailProperties.enabled]), `datapipelines.auth.base-url` (#207) and the effective posture
+     * ([DeploymentEnv.resolvePosture]); anything but `hardened` reads as development, the stricter.
+     */
+    @Bean
+    fun schedulerNotificationDeployment(
+        mail: MailProperties,
+        auth: AuthProperties,
+        environment: Environment,
+    ): NotificationDeployment {
+        val env =
+            DeploymentEnv.resolveEnv(environment.getProperty(DeploymentEnv.ENV_KEY), environment.getProperty(DeploymentEnv.LEGACY_ENV_KEY))
+        val posture = DeploymentEnv.resolvePosture(environment.getProperty(DeploymentEnv.POSTURE_KEY), env)
+        return NotificationDeployment(
+            mailConfigured = mail.enabled,
+            baseUrl = auth.baseUrl?.takeIf { it.isNotBlank() },
+            developmentPosture = posture != DeploymentEnv.HARDENED,
+        )
+    }
 
     @Bean
     fun schedulerCapacityGate(
