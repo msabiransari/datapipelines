@@ -850,17 +850,21 @@ until the browser suite left the gate, owner ruling 2026-10-09).
 
 **The pre-gate reads and writes Gradle's local build cache; Gate A and CI never do (#480).**
 Every pregate Gradle invocation passes `--build-cache` (`PG_COMMON` in
-`scripts/pregate-plan-lib.sh`), so a fresh lane worktree's first pregate takes compile and lint
+`scripts/pregate-plan-lib.sh`), so a fresh lane worktree's first pregate takes compile and detekt
 outputs from any earlier build on this box with identical inputs instead of recompiling the whole
-tree and re-running detekt on every module. What may come `FROM-CACHE`: Kotlin/Java compilation,
-`detekt` and the `ktlint*` source-set checks. What never does: every `Test` task (the touched
+tree and re-running detekt on every module. What may come `FROM-CACHE`: Kotlin/Java compilation
+and `detekt`. What never does: the `ktlint*` check tasks — a ktlint task's stored output is the
+last incremental execution's, not a function of its inputs, so a cache hit can name another
+checkout's files (#689) — plus every `Test` task (the touched
 modules' `test`, `breachSuite`, the stage-3 guards, the focused `tests/*` classes), every Kover
 task (the XML/HTML/binary reports and the floor verdict behind `koverVerify`) and
 `verifyTestsExecuted` — `CommonConventionsPlugin` sets `cacheIf { false }` on each — and the
 ad-hoc and `Exec` tasks (`editorJsTest`, the four root audits, `processResources`), which Gradle
 never caches in the first place. `CommonConventionsPluginTest` proves the guard with a probe built
 twice around a `clean` (the compile task `FROM_CACHE`, the test and Kover tasks executed both
-times). Why tests stay out, for two independent reasons: a test verdict must come from this run, and a cached `:test` line is not fresh evidence,
+times). `KtlintCacheBoundaryTest` proves the ktlint boundary (#689) with two probes sharing one
+cache: after the first probe lints a violating tree and deletes the file, the second probe's lint
+task executes, passes, and carries no path from the first. Why tests stay out, for two independent reasons: a test verdict must come from this run, and a cached `:test` line is not fresh evidence,
 so stage 3 would keep every guard (`pgres::guards_covered`). The cache is the pre-gate's alone:
 `scripts/gate.sh` runs `clean` and then `build`, and with the cache on that build would be
 served from the cache and stop proving the tree compiles, so neither `gate.sh`, CI's workflows
@@ -1072,8 +1076,10 @@ be changed by an init script in `~/.gradle/init.d`, and this repo ships none). T
 or after a suspected bad entry: `rm -rf ~/.gradle/caches/build-cache-1` while no build is running;
 the next pregate repopulates it. A single pregate can also skip it with `--no-build-cache` on its
 stage commands (copy them from the run's `PLAN.txt`). A fresh worktree's first pregate is now mostly
-cache hits for compile, detekt and ktlint, as long as some build on the box has compiled the same
-inputs since the last `buildSrc` change.
+cache hits for compile and detekt, as long as some build on the box has compiled the same
+inputs since the last `buildSrc` change; ktlint check tasks always run fresh — a stale ktlint
+entry naming another checkout's files was the defect that only `rm -rf
+~/.gradle/caches/build-cache-1` used to cure (#689).
 
 **Three more things worth a minute on a dedicated Linux box.**
 
