@@ -1,8 +1,8 @@
 # Configuration Reference
 
-**Status:** v1.63 (single source of truth for every config key)
+**Status:** v1.64 (single source of truth for every config key)
 **Owner:** datapipelines.co core
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-24
 
 ---
 
@@ -130,7 +130,7 @@ Read downward. The statement bound is the driver's and drivers honour it unevenl
 | `datapipelines.auth.local.lockout.duration-minutes` | `15` | How long a locked account refuses local login. An admin unlock or password reset clears the lock early |
 | `datapipelines.auth.cookie-secure` | (empty) | The `Secure` flag on the cookies this deployment mints (`dp_session`, `dp_oauth2_authz`, `dp_csrf`). **Empty = derived from `base-url`'s scheme**: an explicit `http://` base-url drops the flag so local login works over plain HTTP, anything else keeps it. `true`/`false` pin it. The `hardened` posture ships `true` (§3.23) — a hardened deployment runs https, and a dropped flag there puts the session cookie on the wire |
 | `datapipelines.auth.allow-local-only` | `false` | The operator's **explicit acknowledgement** that a `hardened` deployment has no OIDC provider configured and authenticates with local password accounts only. Inert under `development`. Under `hardened`, startup is refused unless either an OIDC provider is fully configured or this is `true`, and setting it logs the acknowledgement (§3.23, §7) |
-| `datapipelines.auth.oidc.provider-read-timeout-seconds` | `10` | Connect and read timeout in seconds for the code-for-token exchange (both protocols), OAuth2 user-info, emails and OIDC user-info reads. Positive integer, at most 2147483 seconds (the HTTP client stores signed 32-bit milliseconds); zero means infinite in the HTTP client and is refused. JWKS keeps Spring's default; startup discovery is separate. Mirrored in application.yml, defaults.env, secrets.env.example, compose.yml. |
+| `datapipelines.auth.oidc.provider-read-timeout-seconds` | `10` | Connect and read timeout in seconds for the code-for-token exchange (both protocols), OAuth2 user-info, emails and OIDC user-info reads. Positive integer, at most 2147483 seconds (the HTTP client stores signed 32-bit milliseconds); zero means infinite in the HTTP client and is refused. The ID-token decoder's JWKS fetch is bounded by the same key through a `JwtDecoderFactory` bean (#686); startup discovery is separate. Mirrored in application.yml, defaults.env, secrets.env.example, compose.yml. |
 | `datapipelines.auth.oidc.providers[].protocol` | `oidc` | Per-provider (auth.md §5.1, #655): `oidc` builds the entry through discovery from `issuer-uri`; `oauth2` builds it from the five keys below with no HTTP at startup — for a provider that speaks OAuth 2.0 without OpenID Connect (GitHub). Anything else refuses startup naming the provider |
 | `datapipelines.auth.oidc.providers[].authorization-uri` | (empty) | Per-provider, `oauth2` only and required there (auth.md §5.1): the consent endpoint. `https://`, or plain `http://` to `localhost` / `127.0.0.1` only. Set on an `oidc` entry it refuses startup — discovery would ignore it |
 | `datapipelines.auth.oidc.providers[].token-uri` | (empty) | Per-provider, `oauth2` only and required there: the code-for-token exchange, called with `client_secret_basic` and `Accept: application/json`. Same scheme rule |
@@ -1078,6 +1078,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-24 | v1.64 | #686 JWKS fetch joins the provider read bound | §3.4's `provider-read-timeout-seconds` row: the ID-token decoder's JWKS fetch is bounded by the same key through a `JwtDecoderFactory` bean; discovery stays separate. No key added, no default change. |
 | 2026-10-22 | v1.63 | #651 enabled-provider avatar hosts | §3.4's `picture-hosts` allowlist includes only providers with a non-blank `client-id`, using the same predicate as sign-in registration. Dormant entries are still validated for shape at startup but contribute no hosts. No key, default, route or permission changes. |
 | 2026-10-22 | v1.62 | 8b (#8) — renumbered at merge after #682's v1.61 | §3.28 gains the nine JavaScript keys, their measured defaults, derived isolate memory and launcher agreement; max-depth also bounds JavaScript stack frames. |
 | 2026-10-22 | v1.61 | #682, answers #683 | Configurable provider connect/read timeout, deploy mirrors and startup validation (§3.4, §5, §7); per-provider defaults drift-guarded. |
