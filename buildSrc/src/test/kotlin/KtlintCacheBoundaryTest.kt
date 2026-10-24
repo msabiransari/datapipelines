@@ -170,11 +170,23 @@ class KtlintCacheBoundaryTest {
         // holding the previous run's findings. What happens NEXT is the whole
         // boundary under test: with the fix, nothing is stored; without it, the
         // stale output is stored under the clean tree's key. The in-worktree
-        // verdict here is NOT asserted (the plugin's own incrementality, kept).
-        probeA.resolve("modules/web/src/main/kotlin/Violation.kt").delete()
-        runCatching {
+        // report may still refuse the deleted file (the plugin's incrementality, kept).
+        // The worker must nevertheless complete: swallowing a setup/worker failure here
+        // could leave the clean cache key unoccupied and make probe B a false green.
+        assertTrue(probeA.resolve("modules/web/src/main/kotlin/Violation.kt").delete())
+        val a3 = try {
             runner(probeA, ":modules:web:ktlintMainSourceSetCheck").build()
+        } catch (failure: UnexpectedBuildFailure) {
+            val result = failure.buildResult
+            assertEquals(TaskOutcome.FAILED, result.task(":modules:web:ktlintMainSourceSetCheck")?.outcome, result.output)
+            assertTrue("Violation.kt" in result.output, "only the retained deleted-file finding is expected:\n${result.output}")
+            result
         }
+        val deletedLint = a3.task(":modules:web:runKtlintCheckOverMainSourceSet")
+        assertTrue(
+            deletedLint?.outcome in listOf(TaskOutcome.SUCCESS, TaskOutcome.UP_TO_DATE),
+            "the removed-only control must complete its lint worker: ${deletedLint?.outcome}\n${a3.output}",
+        )
 
         // Probe B: the identical clean tree, one shared cache. Compile is served
         // from the cache — the boundary fix must not cost compile its reuse.
@@ -188,10 +200,10 @@ class KtlintCacheBoundaryTest {
             "the shared cache stopped working for compile:\n${b.output}",
         )
         val lintRun = b.task(":modules:web:runKtlintCheckOverMainSourceSet")
-        assertTrue(
-            lintRun != null && lintRun.outcome != TaskOutcome.FROM_CACHE,
-            "a ktlint check task was served from the build cache — the #689 boundary is open: " +
-                "outcome=${lintRun?.outcome}\n${b.output}",
+        assertEquals(
+            TaskOutcome.SUCCESS,
+            lintRun?.outcome,
+            "the second checkout must execute its lint worker, not restore or skip it: ${lintRun?.outcome}\n${b.output}",
         )
         assertEquals(
             TaskOutcome.SUCCESS,
