@@ -262,6 +262,10 @@ own envelope manifest's evidence flag — nothing landed is unaudited. **A landi
 (O2): an import lands RELEASED, so a pin that exists here but is not RELEASED — a draft, or a discarded version —
 refuses with the family's release code (`visualization.release.dependency_not_released` /
 `dashboard.release.dependency_not_released`); a pin this deployment lacks stays the import lens' precise code.
+The two codes keep their spelling under the release-dependencies record's §14 code switch (#517); their `details` move
+to the shared blockers shape (`{root, blockers, blockers_truncated}`, rest-api §5.10) when each family's release
+participant lands (#520, #521) — until then a landing refusal keeps its current details (`pins_not_released` for a
+visualization, `dependencies_not_released` for a dashboard).
 **The envelope's arrays are count-bounded** (O7): at most `datapipelines.visualization.max-visualizations-per-dashboard`
 entries in a dashboard's bundle or a template closure, refused `body_invalid` with `reason: too_many` before any
 member is parsed. **The ceiling is AGGREGATE (the L1c-c round):** the same value also caps each whole promotion
@@ -1072,6 +1076,7 @@ change (#426). The templates workspace adopts the helper after #398's rework lan
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-24 | next | #517 release dependencies, core (S1) | **§3.3:** the landing refusal's two codes keep their spelling under the record's §14 switch; their details move to the shared blockers shape with #520 / #521. |
 | 2026-10-20 | v0.60 | #550 an older selection's refresh never clears a later stale mark | **§6.6:** the runtime stamps each refresh with the selection generation it was sent under; a commit that marks occurrences stale advances the generation and records it on every affected occurrence, whatever its state. A status rendered for a refresh older than that record keeps the mark (`in-progress`, `success`, `ready`, `no-data`; error and abort keep their issue voice), so a refresh still streaming for the previous selection renders its result marked stale and settles to `ready`, still stale. Ownership (#383) is unchanged; this is a second condition on top of it, checked where every status is rendered. A refresh started after the commit clears the mark as before; occurrences outside the commit's `parameter_scopes` are untouched. |
 | 2026-10-18 | v0.59 | #612 the Board tab fills the workspace | **§7:** the Board tab is a full-height column: with the Board pane visible, `.dp-ws-root` flexes (column, `min-height: 0`) and its panes shrink into it, so `<main>` does not scroll and the activity dock stays visible; the other tabs keep their ordinary flow. The Board bullet leads with it; `dashboards.css` carries the `:has()`-scoped flex and `DashboardWorkspaceBrowserTest` pins the fit. |
 | 2026-10-18 | v0.58 | #573 the main gutter by band | **§7:** the filters-drawer paragraph says that a 1280 px window with the resource browser shown puts the board region under the 820 px threshold (202 + 300 leave <main> 778 px, less `--app-main-pad` on both sides), and that the browser's resize at a fixed viewport, not the retired rail resize, is what crosses it. The board opts out of the 1500 px content frame (`app-canvas`, ui-screens §3.1), so its region keeps the whole track on a wide window. |
