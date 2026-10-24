@@ -101,3 +101,81 @@ tasks.named<Test>("test") {
         systemProperty("dp.browser.ciPatience", it)
     }
 }
+
+// #669: CI runs this suite as BrowserShards.BROWSER_SHARDS parallel jobs, one JVM each, every
+// leg passing -Pdp.browser.shard=<i>/<n> (buildSrc/src/main/kotlin/BrowserShards.kt has the rule:
+// sorted round-robin over the *Test.kt files read from the tree here, at configuration). Absent
+// = today's unfiltered task, which is what build/check and every local run use. A shard = a JVM
+// = its own containers, app and Chromium (SharedBrowserE2e, BrowserSuite), so a shard boundary
+// changes nothing a case observes. A filtered run is red on verifyTestsExecuted by design, so
+// the CI leg excludes that guard by name and verifyBrowserShardExecuted replaces it.
+val browserTestSources = layout.projectDirectory.dir("src/test/kotlin").asFile
+val browserShard = providers.gradleProperty(BrowserShards.PROPERTY).orNull?.let { BrowserShards.parseShard(it) }
+if (browserShard != null) {
+    val shardClasses =
+        BrowserShards.partition(BrowserShards.testClassNames(browserTestSources), browserShard.index, browserShard.count)
+    // An empty include list is NO filter — the whole suite would run in this leg.
+    require(shardClasses.isNotEmpty()) {
+        "-P${BrowserShards.PROPERTY}=${browserShard.index}/${browserShard.count} selects no class from $browserTestSources"
+    }
+    val shardLabel = "${browserShard.index}/${browserShard.count}"
+    tasks.named<Test>("test") {
+        filter { shardClasses.forEach { includeTestsMatching(it) } }
+        doFirst {
+            logger.lifecycle("browser shard $shardLabel: ${shardClasses.size} classes\n  " + shardClasses.joinToString("\n  "))
+        }
+    }
+    // The leg's own zero-loss guard: EXACTLY its classes left a result file — none missing (a class
+    // silently dropped), none extra (a class run outside its shard). Finalizes `test` like
+    // verifyTestsExecuted does, so it judges a red test task too.
+    val shardResults = layout.buildDirectory.dir("test-results/test").get().asFile
+    val shardGuard = tasks.register("verifyBrowserShardExecuted") {
+        group = "verification"
+        description = "Fails unless this browser shard wrote a result file for exactly its classes (#669)."
+        outputs.cacheIf { false }
+        doLast {
+            val expected = shardClasses.map { "TEST-$it.xml" }.toSet()
+            val present = shardResults.listFiles { f -> f.isFile && f.name.startsWith("TEST-") && f.name.endsWith(".xml") }
+                ?.map { it.name }?.toSet().orEmpty()
+            val missing = (expected - present).sorted()
+            val extra = (present - expected).sorted()
+            if (missing.isNotEmpty() || extra.isNotEmpty()) {
+                throw GradleException(
+                    "browser shard $shardLabel: ${expected.size} classes expected in $shardResults; " +
+                        "missing ${missing.size} $missing, outside the shard ${extra.size} $extra",
+                )
+            }
+            logger.lifecycle("browser shard $shardLabel: ${present.size} result files = its ${expected.size} classes")
+        }
+    }
+    tasks.named("test") { finalizedBy(shardGuard) }
+}
+
+// #669: the partition's CI-covered guard, in `check` (so the gate job's build, Gate A and a local
+// `build` run it; no browser, no JVM fork). Every *Test.kt is in exactly one shard of
+// BROWSER_SHARDS, no shard is empty, no source would be mis-sharded (a `class …Test` outside a
+// file of its own name runs unsharded and in NO shard), and the list is not vacuous.
+val verifyBrowserShardPartition = tasks.register("verifyBrowserShardPartition") {
+    group = "verification"
+    description = "Fails unless every browser test class is in exactly one of the CI shards (#669)."
+    outputs.cacheIf { false }
+    doLast {
+        val names = BrowserShards.testClassNames(browserTestSources)
+        val problems = BrowserShards.unshardableSources(browserTestSources).toMutableList()
+        if (names.size < BrowserShards.MIN_CLASSES) {
+            problems += "only ${names.size} *Test.kt classes under $browserTestSources (floor ${BrowserShards.MIN_CLASSES})"
+        }
+        val shards = (1..BrowserShards.BROWSER_SHARDS).map { BrowserShards.partition(names, it, BrowserShards.BROWSER_SHARDS) }
+        shards.forEachIndexed { i, shard -> if (shard.isEmpty()) problems += "shard ${i + 1} is empty" }
+        val placed = shards.flatten()
+        (placed.groupingBy { it }.eachCount().filterValues { it > 1 }.keys).forEach { problems += "$it is in two shards" }
+        (names.toSet() - placed.toSet()).forEach { problems += "$it is in no shard" }
+        if (problems.isNotEmpty()) {
+            throw GradleException("browser shard partition refused:\n  " + problems.joinToString("\n  "))
+        }
+        logger.lifecycle(
+            "browser shard partition: ${names.size} classes in ${shards.size} shards of ${shards.map { it.size }}",
+        )
+    }
+}
+tasks.named("check") { dependsOn(verifyBrowserShardPartition) }
