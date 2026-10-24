@@ -39,9 +39,14 @@ class DashboardErrorCodesSpecDriftTest {
             .shouldBeEmpty()
         documented
             .filterKeys { it.startsWith("dashboard.version.") || it.startsWith("dashboard.release.") }
+            .filterKeys { it !in RELEASE_PLAN_NON_CONFLICT }
             .filterValues { it != "409" }
             .keys
             .shouldBeEmpty()
+        // The release-dependency plan's three non-409 codes (release-dependencies record §14, #517).
+        documented[DashboardErrorCodes.RELEASE_PLAN_REQUIRED] shouldBe "428"
+        documented[DashboardErrorCodes.RELEASE_PLAN_INVALID] shouldBe "400"
+        documented[DashboardErrorCodes.RELEASE_DEPENDENCY_LIMIT] shouldBe "422"
         documented[DashboardErrorCodes.NAME_TAKEN] shouldBe "409"
         documented[DashboardErrorCodes.NOT_FOUND] shouldBe "404"
         documented[DashboardErrorCodes.IMPORT_ID_TAKEN] shouldBe "409"
@@ -56,6 +61,14 @@ class DashboardErrorCodesSpecDriftTest {
     }
 
     private companion object {
+        /** The release-plan refusals whose status is not the family's 409 (record §14): 428, 400, 422. */
+        val RELEASE_PLAN_NON_CONFLICT =
+            setOf(
+                DashboardErrorCodes.RELEASE_PLAN_REQUIRED,
+                DashboardErrorCodes.RELEASE_PLAN_INVALID,
+                DashboardErrorCodes.RELEASE_DEPENDENCY_LIMIT,
+            )
+
         val SUB_FAMILIES =
             listOf("validation.", "version.", "release.", "import.", "authoring.", "runtime.", "refresh.", "key.", "not_found")
     }

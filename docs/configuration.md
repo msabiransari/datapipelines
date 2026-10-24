@@ -626,6 +626,27 @@ Retention of the `dashboard_refreshes` rows has no key of its own: they are dele
 
 ---
 
+### 3.35 Release dependencies
+
+The bounds a cascading release works inside ([Versioning §5.3](versioning.md#53-release-lock), the
+[release-dependencies record](superpowers/specs/2026-10-13-release-dependencies-design.md) §1.2, ruled §17 row 4), and the
+workspace mutation guard's lock wait (record §4.3). The closure of a release — every version the root pins, transitively,
+across the five families — is enumerated with an explicit stack, memoised per exact version; every bound is checked WHILE it
+is enumerated, so a graph over a bound is refused `<family>.release.dependency_limit` (422, `details.limit` naming the bound,
+`details.maximum` its value, never a hidden total) before the walk materialises it, and a truncated closure never authorises a
+release. Each key is range-checked when the keys bind (`ReleaseDependencyProperties`), refusing the boot naming the key.
+
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.release.dependencies.max-depth` | `32` | The longest dependency path from the root, in edges (`limit: depth`). 1..256 |
+| `datapipelines.release.dependencies.max-versions` | `1024` | Distinct versions in one closure, the root included (`limit: versions`). 1..100000 |
+| `datapipelines.release.dependencies.max-edges` | `4096` | Pin occurrences in one closure — every incoming field path counted (`limit: edges`). 1..1000000 |
+| `datapipelines.release.dependencies.max-blockers` | `100` | Blockers one `dependency_not_released` refusal lists in `details.blockers`; the rest set `blockers_truncated`. 1..1000 |
+| `datapipelines.release.dependencies.max-wire-bytes` | `1048576` | Bytes of one release-plan request, and of a plan's canonical serialisation, 1 MiB (`limit: wire_bytes`). 1024..16777216 |
+| `datapipelines.release.dependencies.lock-wait-seconds` | `5` | How long a pin-affecting write or a release waits for its workspace's mutation guard (a row lock on the workspace, `SET LOCAL lock_timeout`) before it is refused `<family>.release.busy` with nothing written. 1..60 |
+
+---
+
 ## 4. Precedence
 
 Resolution order for any key, highest first:
@@ -960,6 +981,15 @@ datapipelines:
       parameter-lock-seconds: ${DATAPIPELINES_DASHBOARDS_PARAMETER_LOCK_SECONDS:30}
       render-seconds: ${DATAPIPELINES_DASHBOARDS_RENDER_SECONDS:20}
 
+  release:
+    dependencies:                  # §3.35 — release dependencies (#517)
+      max-depth: ${DATAPIPELINES_RELEASE_DEPENDENCIES_MAX_DEPTH:32}
+      max-versions: ${DATAPIPELINES_RELEASE_DEPENDENCIES_MAX_VERSIONS:1024}
+      max-edges: ${DATAPIPELINES_RELEASE_DEPENDENCIES_MAX_EDGES:4096}
+      max-blockers: ${DATAPIPELINES_RELEASE_DEPENDENCIES_MAX_BLOCKERS:100}
+      max-wire-bytes: ${DATAPIPELINES_RELEASE_DEPENDENCIES_MAX_WIRE_BYTES:1048576}
+      lock-wait-seconds: ${DATAPIPELINES_RELEASE_DEPENDENCIES_LOCK_WAIT_SECONDS:5}
+
 # The scheduler's library reads its own prefix; every value comes from datapipelines.scheduler.*
 # above (§3.29). Framework wiring, not an operator surface.
 db-scheduler:
@@ -1080,6 +1110,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-24 | next | #517 release dependencies, core (S1) | **§3.35 Release dependencies:** `datapipelines.release.dependencies.*` — the closure bounds (depth, versions, edges, wire bytes), the blocker cap and the writer guard's lock wait; §5's template gains the block. |
 | 2026-10-24 | v1.65 | #688 (Helm portion) — renumbered at merge after #686’s v1.64 | §3.28: the nine JavaScript keys are exposed as the chart's `script.js.*` values (deployment.md §6.4) — empty renders no env entry, the isolate directory must be one of the image's launcher-path entries, `extraEnv` double mappings are refused. No key, default, route or permission changes. |
 | 2026-10-24 | v1.64 | #686 JWKS fetch joins the provider read bound | §3.4's `provider-read-timeout-seconds` row: the ID-token decoder's JWKS fetch is bounded by the same key through a `JwtDecoderFactory` bean; discovery stays separate. No key added, no default change. |
 | 2026-10-22 | v1.63 | #651 enabled-provider avatar hosts | §3.4's `picture-hosts` allowlist includes only providers with a non-blank `client-id`, using the same predicate as sign-in registration. Dormant entries are still validated for shape at startup but contribute no hosts. No key, default, route or permission changes. |

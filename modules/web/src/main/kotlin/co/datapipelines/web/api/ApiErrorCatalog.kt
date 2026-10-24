@@ -92,6 +92,9 @@ object ApiErrorCatalog {
             "datasource.validation." to HttpStatus.BAD_REQUEST,
             "template.validation." to HttpStatus.BAD_REQUEST,
             "template.version." to HttpStatus.CONFLICT,
+            // #517 §13.9 — the template family's release-plan refusals (release-dependencies record §14): a state
+            // conflict like every other family's `release.` prefix; the 428/400/422 rows are EXCEPTIONS below.
+            "template.release." to HttpStatus.CONFLICT,
             "result." to HttpStatus.INTERNAL_SERVER_ERROR,
             "workspace." to HttpStatus.FORBIDDEN,
             // 074 §13.14 — the request validator is the biggest half of the family and every
@@ -309,6 +312,24 @@ object ApiErrorCatalog {
             // 400, not a 404 — the payload is the caller's to fix, and the one answer for
             // "absent" and "not yours" is what keeps it from being an existence oracle.
             PipelineErrorCodes.Template.IMPLEMENTS_UNRESOLVED to HttpStatus.BAD_REQUEST,
+            // #517 (release-dependencies record §14) — every family's `<family>.release.` prefix defaults to 409; three
+            // reasons are not state conflicts: a cascade consent without a preview digest is 428 (obtain a plan
+            // first), a malformed plan is the caller's 400, and a closure over a configured bound is 422.
+            PipelineErrorCodes.Versioning.RELEASE_PLAN_REQUIRED to HttpStatus.PRECONDITION_REQUIRED,
+            PipelineErrorCodes.Versioning.RELEASE_PLAN_INVALID to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Versioning.RELEASE_DEPENDENCY_LIMIT to HttpStatus.UNPROCESSABLE_ENTITY,
+            PipelineErrorCodes.Template.RELEASE_PLAN_REQUIRED to HttpStatus.PRECONDITION_REQUIRED,
+            PipelineErrorCodes.Template.RELEASE_PLAN_INVALID to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Template.RELEASE_DEPENDENCY_LIMIT to HttpStatus.UNPROCESSABLE_ENTITY,
+            PipelineErrorCodes.Parameters.RELEASE_PLAN_REQUIRED to HttpStatus.PRECONDITION_REQUIRED,
+            PipelineErrorCodes.Parameters.RELEASE_PLAN_INVALID to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Parameters.RELEASE_DEPENDENCY_LIMIT to HttpStatus.UNPROCESSABLE_ENTITY,
+            PipelineErrorCodes.Visualization.RELEASE_PLAN_REQUIRED to HttpStatus.PRECONDITION_REQUIRED,
+            PipelineErrorCodes.Visualization.RELEASE_PLAN_INVALID to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Visualization.RELEASE_DEPENDENCY_LIMIT to HttpStatus.UNPROCESSABLE_ENTITY,
+            PipelineErrorCodes.Dashboard.RELEASE_PLAN_REQUIRED to HttpStatus.PRECONDITION_REQUIRED,
+            PipelineErrorCodes.Dashboard.RELEASE_PLAN_INVALID to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Dashboard.RELEASE_DEPENDENCY_LIMIT to HttpStatus.UNPROCESSABLE_ENTITY,
             // §13.7 (055) — 401 like the auth.promotion family default, same A2 reason.
             PipelineErrorCodes.Auth.PROMOTION_KEY_INVALID to HttpStatus.UNAUTHORIZED,
             // §13.7 — bad credentials is the one `auth.login.*` code that is a 401,
@@ -488,6 +509,8 @@ object ApiErrorCatalog {
             "pipeline.staging." to "The pipeline ran out of room, or produced a value the temporary database couldn't hold.",
             "datasource.validation." to "These connection details aren't valid. Check them and try again.",
             "template.validation." to "This SQL template isn't valid. Check the reported problem and try again.",
+            // #517 — the template family's release-plan refusals, the parameter.release. sentence's twin.
+            "template.release." to "This template can't be released yet. The details say what to release first.",
             "result." to "The results for this run aren't available.",
             "workspace." to "That workspace isn't available to you. Check the name, or ask a workspace admin for access.",
             // 074 — the request family is the one a caller of a published endpoint sees, so the

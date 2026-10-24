@@ -1020,6 +1020,30 @@ object PipelineErrorCodes {
          * but you cannot see it"; `details.fact_id` names the first offending entry.
          */
         const val IMPLEMENTS_UNRESOLVED = "template.implements_unresolved"
+
+        /** §13.9 — 409: a visible missing/discarded pin or an unticked required draft; shared `blockers` details. */
+        const val RELEASE_DEPENDENCY_NOT_RELEASED = "template.release.dependency_not_released"
+
+        /** §13.9 — 409: a consented snapshot fact changed between the preview and the submit. */
+        const val RELEASE_PLAN_CONFLICT = "template.release.plan_conflict"
+
+        /** §13.9 — 428: cascade consent without a preview `tree_hash`. */
+        const val RELEASE_PLAN_REQUIRED = "template.release.plan_required"
+
+        /** §13.9 — 400: a malformed digest or selection, unknown or duplicate ids, or incompatible aliases. */
+        const val RELEASE_PLAN_INVALID = "template.release.plan_invalid"
+
+        /** §13.9 — 409: the closure repeats an exact node on its active path. */
+        const val RELEASE_DEPENDENCY_CYCLE = "template.release.dependency_cycle"
+
+        /** §13.9 — 422: the complete closure exceeds a configured bound; `details.limit`, `details.maximum`. */
+        const val RELEASE_DEPENDENCY_LIMIT = "template.release.dependency_limit"
+
+        /** §13.9 — 409: the workspace mutation guard's lock wait ran out; nothing was written. */
+        const val RELEASE_BUSY = "template.release.busy"
+
+        /** §13.9 — 409: the promotion peer lacks the full-closure envelope capability. */
+        const val RELEASE_BUNDLE_UNSUPPORTED = "template.release.bundle_unsupported"
     }
 
     /** §13.10 — result retrieval. Defined in rest-api.md §7; cataloged here (D5/D9). */
@@ -1190,8 +1214,29 @@ object PipelineErrorCodes {
          */
         const val CONFIRM_MISMATCH = "pipeline.version.confirm_mismatch"
 
-        /** §13.13 / versioning §5.3 — pipeline release blocked on a DRAFT template pin. */
-        const val RELEASE_TEMPLATE_NOT_RELEASED = "pipeline.release.template_not_released"
+        /** §13.13 — 409: a visible missing/discarded pin or an unticked required draft; shared `blockers` details. */
+        const val RELEASE_DEPENDENCY_NOT_RELEASED = "pipeline.release.dependency_not_released"
+
+        /** §13.13 — 409: a consented snapshot fact changed between the preview and the submit. */
+        const val RELEASE_PLAN_CONFLICT = "pipeline.release.plan_conflict"
+
+        /** §13.13 — 428: cascade consent without a preview `tree_hash`. */
+        const val RELEASE_PLAN_REQUIRED = "pipeline.release.plan_required"
+
+        /** §13.13 — 400: a malformed digest or selection, unknown or duplicate ids, or incompatible aliases. */
+        const val RELEASE_PLAN_INVALID = "pipeline.release.plan_invalid"
+
+        /** §13.13 — 409: the closure repeats an exact node on its active path. */
+        const val RELEASE_DEPENDENCY_CYCLE = "pipeline.release.dependency_cycle"
+
+        /** §13.13 — 422: the complete closure exceeds a configured bound; `details.limit`, `details.maximum`. */
+        const val RELEASE_DEPENDENCY_LIMIT = "pipeline.release.dependency_limit"
+
+        /** §13.13 — 409: the workspace mutation guard's lock wait ran out; nothing was written. */
+        const val RELEASE_BUSY = "pipeline.release.busy"
+
+        /** §13.13 — 409: the promotion peer lacks the full-closure envelope capability. */
+        const val RELEASE_BUNDLE_UNSUPPORTED = "pipeline.release.bundle_unsupported"
 
         /**
          * §13.13 (7e, transform-nodes design §8.2) — a WARNING, never an error: the released
@@ -1715,7 +1760,29 @@ object PipelineErrorCodes {
 
         const val VERSION_CONFIRM_MISMATCH = "parameter.version.confirm_mismatch"
 
-        const val RELEASE_TEMPLATE_NOT_RELEASED = "parameter.release.template_not_released"
+        /** §13.20 — 409: a visible missing/discarded pin or an unticked required draft; shared `blockers` details. */
+        const val RELEASE_DEPENDENCY_NOT_RELEASED = "parameter.release.dependency_not_released"
+
+        /** §13.20 — 409: a consented snapshot fact changed between the preview and the submit. */
+        const val RELEASE_PLAN_CONFLICT = "parameter.release.plan_conflict"
+
+        /** §13.20 — 428: cascade consent without a preview `tree_hash`. */
+        const val RELEASE_PLAN_REQUIRED = "parameter.release.plan_required"
+
+        /** §13.20 — 400: a malformed digest or selection, unknown or duplicate ids, or incompatible aliases. */
+        const val RELEASE_PLAN_INVALID = "parameter.release.plan_invalid"
+
+        /** §13.20 — 409: the closure repeats an exact node on its active path. */
+        const val RELEASE_DEPENDENCY_CYCLE = "parameter.release.dependency_cycle"
+
+        /** §13.20 — 422: the complete closure exceeds a configured bound; `details.limit`, `details.maximum`. */
+        const val RELEASE_DEPENDENCY_LIMIT = "parameter.release.dependency_limit"
+
+        /** §13.20 — 409: the workspace mutation guard's lock wait ran out; nothing was written. */
+        const val RELEASE_BUSY = "parameter.release.busy"
+
+        /** §13.20 — 409: the promotion peer lacks the full-closure envelope capability. */
+        const val RELEASE_BUNDLE_UNSUPPORTED = "parameter.release.bundle_unsupported"
 
         const val IMPORT_MISSING_TEMPLATE = "parameter.import.missing_template"
 
@@ -1773,6 +1840,27 @@ object PipelineErrorCodes {
         const val RELEASE_MECHANICAL_FAILED = "visualization.release.mechanical_failed"
 
         const val RELEASE_DEPENDENCY_NOT_RELEASED = "visualization.release.dependency_not_released"
+
+        /** §13.22 — 409: a consented snapshot fact changed between the preview and the submit. */
+        const val RELEASE_PLAN_CONFLICT = "visualization.release.plan_conflict"
+
+        /** §13.22 — 428: cascade consent without a preview `tree_hash`. */
+        const val RELEASE_PLAN_REQUIRED = "visualization.release.plan_required"
+
+        /** §13.22 — 400: a malformed digest or selection, unknown or duplicate ids, or incompatible aliases. */
+        const val RELEASE_PLAN_INVALID = "visualization.release.plan_invalid"
+
+        /** §13.22 — 409: the closure repeats an exact node on its active path. */
+        const val RELEASE_DEPENDENCY_CYCLE = "visualization.release.dependency_cycle"
+
+        /** §13.22 — 422: the complete closure exceeds a configured bound; `details.limit`, `details.maximum`. */
+        const val RELEASE_DEPENDENCY_LIMIT = "visualization.release.dependency_limit"
+
+        /** §13.22 — 409: the workspace mutation guard's lock wait ran out; nothing was written. */
+        const val RELEASE_BUSY = "visualization.release.busy"
+
+        /** §13.22 — 409: the promotion peer lacks the full-closure envelope capability. */
+        const val RELEASE_BUNDLE_UNSUPPORTED = "visualization.release.bundle_unsupported"
 
         const val IMPORT_ID_TAKEN = "visualization.import.id_taken"
 
@@ -1846,6 +1934,27 @@ object PipelineErrorCodes {
         const val VERSION_NOT_ELIGIBLE = "dashboard.version.not_eligible"
 
         const val RELEASE_DEPENDENCY_NOT_RELEASED = "dashboard.release.dependency_not_released"
+
+        /** §13.23 — 409: a consented snapshot fact changed between the preview and the submit. */
+        const val RELEASE_PLAN_CONFLICT = "dashboard.release.plan_conflict"
+
+        /** §13.23 — 428: cascade consent without a preview `tree_hash`. */
+        const val RELEASE_PLAN_REQUIRED = "dashboard.release.plan_required"
+
+        /** §13.23 — 400: a malformed digest or selection, unknown or duplicate ids, or incompatible aliases. */
+        const val RELEASE_PLAN_INVALID = "dashboard.release.plan_invalid"
+
+        /** §13.23 — 409: the closure repeats an exact node on its active path. */
+        const val RELEASE_DEPENDENCY_CYCLE = "dashboard.release.dependency_cycle"
+
+        /** §13.23 — 422: the complete closure exceeds a configured bound; `details.limit`, `details.maximum`. */
+        const val RELEASE_DEPENDENCY_LIMIT = "dashboard.release.dependency_limit"
+
+        /** §13.23 — 409: the workspace mutation guard's lock wait ran out; nothing was written. */
+        const val RELEASE_BUSY = "dashboard.release.busy"
+
+        /** §13.23 — 409: the promotion peer lacks the full-closure envelope capability. */
+        const val RELEASE_BUNDLE_UNSUPPORTED = "dashboard.release.bundle_unsupported"
 
         const val IMPORT_ID_TAKEN = "dashboard.import.id_taken"
 

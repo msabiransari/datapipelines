@@ -43,9 +43,14 @@ class VisualizationErrorCodesSpecDriftTest {
             .shouldBeEmpty()
         documented
             .filterKeys { it.startsWith("visualization.version.") || it.startsWith("visualization.release.") }
+            .filterKeys { it !in RELEASE_PLAN_NON_CONFLICT }
             .filterValues { it != "409" }
             .keys
             .shouldBeEmpty()
+        // The release-dependency plan's three non-409 codes (release-dependencies record §14, #517).
+        documented[VisualizationErrorCodes.RELEASE_PLAN_REQUIRED] shouldBe "428"
+        documented[VisualizationErrorCodes.RELEASE_PLAN_INVALID] shouldBe "400"
+        documented[VisualizationErrorCodes.RELEASE_DEPENDENCY_LIMIT] shouldBe "422"
         documented[VisualizationErrorCodes.NAME_TAKEN] shouldBe "409"
         documented[VisualizationErrorCodes.NOT_FOUND] shouldBe "404"
         documented[VisualizationErrorCodes.IMPORT_ID_TAKEN] shouldBe "409"
@@ -55,5 +60,15 @@ class VisualizationErrorCodesSpecDriftTest {
         documented[VisualizationErrorCodes.TEST_SESSION_EXPIRED] shouldBe "410"
         documented[VisualizationErrorCodes.TEST_SCREENSHOT_TOO_LARGE] shouldBe "413"
         documented[VisualizationErrorCodes.TEST_SCREENSHOT_INVALID] shouldBe "400"
+    }
+
+    private companion object {
+        /** The release-plan refusals whose status is not the family's 409 (record §14): 428, 400, 422. */
+        val RELEASE_PLAN_NON_CONFLICT =
+            setOf(
+                VisualizationErrorCodes.RELEASE_PLAN_REQUIRED,
+                VisualizationErrorCodes.RELEASE_PLAN_INVALID,
+                VisualizationErrorCodes.RELEASE_DEPENDENCY_LIMIT,
+            )
     }
 }

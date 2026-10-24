@@ -325,8 +325,14 @@ class ApiErrorCatalogSpecDriftTest {
          * §13.21 gains `request.query_too_long` (400 — the shared search-needle refusal), landed in
          * the SAME commit as its constant, the catalog rows and the retirement. Re-derived from the
          * document's own parse.
+         *
+         * 377 → 413 with #517: the release-dependency switch (record §14, no deprecation window) —
+         * eight `<family>.release.*` rows in each of §13.9, §13.13, §13.20, §13.22 and §13.23 (40),
+         * minus the four rows they replace (the pipeline and parameter template-only refusals,
+         * renamed to `dependency_not_released`, and the visualization/dashboard
+         * `dependency_not_released` rows, rewritten in place). Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 377
+        const val SECTION_13_ROW_COUNT = 413
 
         /**
          * §12's distinct validation codes.
