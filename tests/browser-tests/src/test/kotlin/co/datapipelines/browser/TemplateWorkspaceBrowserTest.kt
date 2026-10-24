@@ -136,6 +136,32 @@ class TemplateWorkspaceBrowserTest : BrowserSuite() {
         page.onConsoleMessage { message -> if (message.type() == "error") consoleErrors += message.text() }
     }
 
+    @Test
+    fun `the keyboard-focused tab shows one ring - its outline, no inherited shadow`() {
+        startTrace()
+        loginReadyUser("tlwring")
+        val name = "test/ws_ring_${generatedPassword("n").take(6).lowercase()}.sql"
+        must("POST", "/api/v1/templates", templateJson(name, sqlBody("ring")))
+        openWorkspace(name)
+
+        page.focus("#tw-tab-source")
+        page.keyboard().press("Tab")
+        page.waitForFunction("() => document.activeElement?.matches('#tw-tab-overview.tw-tab:focus-visible')")
+        val ring =
+            page.evaluate(
+                """() => {
+                  const style = getComputedStyle(document.activeElement);
+                  return { outlineWidth: style.outlineWidth, outlineStyle: style.outlineStyle,
+                           boxShadow: style.boxShadow };
+                }""",
+            ) as Map<*, *>
+        println("684-ring|$ring")
+        withClue("keyboard-focused tab outline width: $ring") { ring["outlineWidth"] shouldBe "2px" }
+        withClue("keyboard-focused tab outline style: $ring") { ring["outlineStyle"] shouldBe "solid" }
+        withClue("keyboard-focused tab boxShadow: $ring") { ring["boxShadow"] shouldBe "none" }
+        consoleErrors shouldBe emptyList()
+    }
+
     // ------------------------------------------------------------------ the resolution states
 
     @Test
