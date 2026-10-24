@@ -78,8 +78,7 @@ internal class BoundedOidcIdTokenDecoderFactory(
             is SignatureAlgorithm -> {
                 val jwkSetUri = registration.providerDetails.jwkSetUri
                 if (!StringUtils.hasText(jwkSetUri)) {
-                    throw missingSignatureVerifier(
-                        registration,
+                    missingSignatureVerifier(
                         "Failed to find a Signature Verifier for Client Registration: " +
                             "'${registration.registrationId}'. Check to ensure you have configured the JwkSet URI.",
                     )
@@ -94,8 +93,7 @@ internal class BoundedOidcIdTokenDecoderFactory(
             is MacAlgorithm -> {
                 val clientSecret = registration.clientSecret
                 if (!StringUtils.hasText(clientSecret)) {
-                    throw missingSignatureVerifier(
-                        registration,
+                    missingSignatureVerifier(
                         "Failed to find a Signature Verifier for Client Registration: " +
                             "'${registration.registrationId}'. Check to ensure you have configured the client secret.",
                     )
@@ -113,8 +111,7 @@ internal class BoundedOidcIdTokenDecoderFactory(
                     .build()
             }
 
-            else -> throw missingSignatureVerifier(
-                registration,
+            else -> missingSignatureVerifier(
                 "Failed to find a Signature Verifier for Client Registration: " +
                     "'${registration.registrationId}'. Check to ensure you have configured a valid JWS Algorithm: " +
                     "'$jwsAlgorithm'",
@@ -122,13 +119,13 @@ internal class BoundedOidcIdTokenDecoderFactory(
         }
     }
 
-    /** Spring's error shape: `missing_signature_verifier`, thrown with the error's own toString. */
-    private fun missingSignatureVerifier(
-        registration: ClientRegistration,
-        description: String,
-    ): OAuth2AuthenticationException {
+    /**
+     * Spring's error shape: `missing_signature_verifier`, thrown with the error's own
+     * toString. Returns [Nothing], so call sites need no `throw` of their own.
+     */
+    private fun missingSignatureVerifier(description: String): Nothing {
         val oauth2Error = OAuth2Error(MISSING_SIGNATURE_VERIFIER_ERROR_CODE, description, null)
-        return OAuth2AuthenticationException(oauth2Error, oauth2Error.toString())
+        throw OAuth2AuthenticationException(oauth2Error, oauth2Error.toString())
     }
 
     private companion object {

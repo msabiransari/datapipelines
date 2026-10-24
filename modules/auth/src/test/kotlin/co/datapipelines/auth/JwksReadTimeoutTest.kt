@@ -79,7 +79,8 @@ class JwksReadTimeoutTest {
     fun `a correctly signed token still decodes and the claims come back typed`() {
         JwksStub().use { stub ->
             stub.jwks = jwksDocument
-            val jwt = OidcConfig().providerIdTokenDecoderFactory(properties()).createDecoder(registration(stub)).decode(idToken(stub.issuer))
+            val factory = OidcConfig().providerIdTokenDecoderFactory(properties()).createDecoder(registration(stub))
+            val jwt = factory.decode(idToken(stub.issuer))
             jwt.subject shouldBe SUBJECT
             // The claim-type converter took. exp/aud/iss are typed by NimbusJwtDecoder's own
             // defaults too, so they do not discriminate; auth_time is converted ONLY by the
