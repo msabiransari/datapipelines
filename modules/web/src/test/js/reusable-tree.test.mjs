@@ -388,3 +388,29 @@ test("a row is an icon, a title span and a trailing metadata region; a folder's 
   assert.equal(folderMeta.children.filter(child => !child.hidden).length, 0, "a folder's region shows no badge");
   renderer.dispose();
 });
+
+// #701 — the owner ruling of 2026-10-24: a folder's glyph follows its expansion in the
+// same indent slot (folder closed, folder-open expanded), a leaf keeps the file glyph,
+// and the full canonical path stays in the control's and the label's title.
+test("a folder's glyph follows its expansion between folder and folder-open; a leaf keeps file", async () => {
+  const document = fakeDocument(); const host = document.createElement("div"); document.body.append(host);
+  const source = { async loadChildren(parent) {
+    if (parent === null) return page([folder("glyph")]);
+    return page([leaf("glyph/row.jsonata", "folder:glyph")]);
+  } };
+  const state = createTreeState({ source });
+  const renderer = createTreeRenderer(host, state, { label: "Templates", getHref: node => `/templates/${node.path}` });
+  await state.initialize(); renderer.render();
+  const controlOf = key => host.querySelectorAll(`[data-tree-key="${key}"]`)[0].children[0].children[0];
+  const glyphHref = control => control.children[0].children[0].getAttribute("href");
+
+  assert.equal(glyphHref(controlOf("folder:glyph")).endsWith("#folder"), true, "a collapsed folder shows the closed folder glyph");
+  await state.expand("folder:glyph"); renderer.render();
+  assert.equal(glyphHref(controlOf("folder:glyph")).endsWith("#folder-open"), true, "an expanded folder shows the open folder glyph");
+  assert.equal(glyphHref(controlOf("artifact:glyph/row.jsonata")).endsWith("#file"), true, "a leaf keeps the file glyph");
+  assert.equal(controlOf("folder:glyph").title, "glyph", "the control's title carries the full path");
+  assert.equal(controlOf("folder:glyph").children[1].title, "glyph", "the label's title carries the full path");
+  await state.collapse("folder:glyph"); renderer.render();
+  assert.equal(glyphHref(controlOf("folder:glyph")).endsWith("#folder"), true, "collapsing returns the closed folder glyph");
+  renderer.dispose();
+});
