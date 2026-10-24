@@ -106,9 +106,10 @@ class JarSmokeE2eTest {
     @Test
     fun `the jar ships generated runtime and isolate licence notices`() {
         JarFile(jarFile()).use { jar ->
-            val entry = requireNotNull(jar.getJarEntry("META-INF/THIRD-PARTY-NOTICES")) {
-                "Packaged THIRD-PARTY-NOTICES is missing"
-            }
+            val entry =
+                requireNotNull(jar.getJarEntry("META-INF/THIRD-PARTY-NOTICES")) {
+                    "Packaged THIRD-PARTY-NOTICES is missing"
+                }
             val notices = jar.getInputStream(entry).bufferedReader(Charsets.UTF_8).use { it.readText() }
             notices.isNotBlank() shouldBe true
             notices shouldContain "org.graalvm.polyglot:polyglot:"
