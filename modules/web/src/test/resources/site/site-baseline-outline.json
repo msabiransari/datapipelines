@@ -119,7 +119,7 @@
    }
   },
   "/mcp-server-for-sql-databases": {
-   "status": "unchanged",
+   "status": "rewritten",
    "anchors": [
     "pillar-title",
     "pain-title",
@@ -140,20 +140,12 @@
      "text": "Don't point an agent at production with write credentials"
     },
     {
-     "level": "H2",
-     "text": "Read-only by default, one key per person, every call audited"
-    },
-    {
      "level": "H3",
      "text": "Read-only is enforced, not advisory"
     },
     {
      "level": "H3",
      "text": "And the credential still does the real work"
-    },
-    {
-     "level": "H3",
-     "text": "One key per person, per workspace"
     },
     {
      "level": "H3",
@@ -247,7 +239,14 @@
      "level": "H2",
      "text": "Point your agent at the demo first"
     }
-   ]
+   ],
+   "retired": {
+    "anchors": {},
+    "headings": {
+     "Read-only by default, one key per person, every call audited": "662 review F1: keys v2 allows independently named keys; the replacement says keys with roles and retains the section anchor",
+     "One key per person, per workspace": "662 review F1: the login-minted single key was retired; the replacement describes each key's own role and identity"
+    }
+   }
   },
   "/mcp-server/postgres": {
    "status": "unchanged",
