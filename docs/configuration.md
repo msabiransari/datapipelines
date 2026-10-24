@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Status:** v1.63 (single source of truth for every config key)
+**Status:** v1.64 (single source of truth for every config key)
 **Owner:** datapipelines.co core
 **Last updated:** 2026-10-22
 
@@ -497,6 +497,8 @@ The budgets every script evaluation runs under — the save/release test suite o
 | `datapipelines.script.js.max-output-bytes` | `1048576` | Each console stream cap; at least 4096 bytes. Excess output refuses with resource_limit / OUTPUT; returned console lines are separately capped at 200 × 2000 chars. |
 | `datapipelines.script.js.max-result-mb` | `64` | Serialized result budget, MiB, at least 1; measured before host parsing. |
 | `datapipelines.script.js.max-input-mb` | `64` | Serialized input budget, MiB, at least 1; refused before the Context starts. |
+
+**Operator instruction:** Helm operators (`deploy/helm/`) set these nine keys through the chart's `script.js.*` values instead of an env file (deployment.md §6.4) — all nine empty by default, an empty value rendering no env entry (the image's own isolate directory and the app's derived isolate memory stay in force), an `isolateDir` outside the image's launcher-path entries refused at render time, and an `extraEnv` double mapping of any of the nine refused like the DuckDB keys.
 
 **Removed keys (script-node-rename lane, owner ruling 2026-10-20):** the nine budgets lived at `datapipelines.transform.*` before the TRANSFORM→SCRIPT node-type rename. There is no alias: a `datapipelines.transform.*` key binds nothing, and startup refuses BY NAME (§7, `checkRemovedTransformKeys`) telling the operator to rename it. This is the §3.17 rule again — a removed key is refused for being set at all, value notwithstanding.
 
@@ -1078,6 +1080,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-24 | v1.64 | #688 (Helm portion) | §3.28: the nine JavaScript keys are exposed as the chart's `script.js.*` values (deployment.md §6.4) — empty renders no env entry, the isolate directory must be one of the image's launcher-path entries, `extraEnv` double mappings are refused. No key, default, route or permission changes. |
 | 2026-10-22 | v1.63 | #651 enabled-provider avatar hosts | §3.4's `picture-hosts` allowlist includes only providers with a non-blank `client-id`, using the same predicate as sign-in registration. Dormant entries are still validated for shape at startup but contribute no hosts. No key, default, route or permission changes. |
 | 2026-10-22 | v1.62 | 8b (#8) — renumbered at merge after #682's v1.61 | §3.28 gains the nine JavaScript keys, their measured defaults, derived isolate memory and launcher agreement; max-depth also bounds JavaScript stack frames. |
 | 2026-10-22 | v1.61 | #682, answers #683 | Configurable provider connect/read timeout, deploy mirrors and startup validation (§3.4, §5, §7); per-provider defaults drift-guarded. |

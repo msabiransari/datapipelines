@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # helm-check.sh — render the reference Helm chart (deploy/helm/datapipelines)
-# with a PINNED helm binary: `helm lint --strict` plus six `helm template`
+# with a PINNED helm binary: `helm lint --strict` plus ten `helm template`
 # cases whose assertions pin the chart's render-TIME behaviour — the Kotlin
-# drift test HelmDuckDbValuesSpecDriftTest pins only the chart's TEXT (the
-# pregate has no helm binary), so the real engine is exercised here (#411,
-# closing the text-vs-engine gap #140 left).
+# drift tests HelmDuckDbValuesSpecDriftTest and HelmScriptJsValuesSpecDriftTest
+# pin only the chart's TEXT (the pregate has no helm binary), so the real
+# engine is exercised here (#411, closing the text-vs-engine gap #140 left).
 #
 #   ./scripts/helm-check.sh        # from the repo root; see EXIT CONTRACT
 #
@@ -14,16 +14,21 @@
 #         --strict and its warnings are REPORTED — the chart is the thing
 #         under test and is never edited here; the case fails only if even the
 #         non-strict lint exits non-zero.
-#   (a)   defaults: exit 0; NO DuckDB env entry, NO rendered `value: ""`, no
-#         `env:` block at all (an empty entry would override the image's own
-#         DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY — the #140 trap); no /app/lib.
+#   (a)   defaults: exit 0; NO DuckDB or JavaScript env entry, NO rendered
+#         `value: ""`, no `env:` block at all (an empty entry would override the
+#         image's own DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY or
+#         DATAPIPELINES_SCRIPT_JS_ISOLATE_DIR — the #140/#688 trap); no /app/lib.
 #   (b)   both duckdb values set: exit 0; each env name exactly once, with its
 #         quoted value; no rendered `value: ""`.
-#   (c)   the extraEnv double mapping, TWICE: each render exits non-zero AND
+#   (b2)  all nine script.js values set: exit 0; each env name exactly once,
+#         with its quoted value. (b2-single) maxHeapMb ALONE: the env: block
+#         still renders, with exactly that one entry — pins the or-clause that
+#         decides whether the block renders at all.
+#   (c)   the extraEnv double mapping, ELEVEN times (the two DuckDB keys and the
+#         nine DATAPIPELINES_SCRIPT_JS_* keys): each render exits non-zero AND
 #         stderr carries the template's own `fail` message VERBATIM
-#         (deployment.yaml:40 for the extension directory, :41 for the memory
-#         limit) — never just a non-zero exit, which (d) shows fires for the
-#         wrong reason too.
+#         (deployment.yaml) — never just a non-zero exit, which (d) shows fires
+#         for the wrong reason too.
 #   (d)   no secret name (the placeholder OMITTED): exit non-zero AND stderr
 #         carries `existingSecret is required` — pins the `required` guard and
 #         proves the placeholder is load-bearing for (a)–(c).
@@ -31,6 +36,9 @@
 #         same for loader_path, loader.path and Loader_Path, the spellings the launcher reads.
 #   (e3)  extraEnv.JAVA_TOOL_OPTIONS, JDK_JAVA_OPTIONS, _JAVA_OPTIONS: each refused with the
 #         template's own message (a -D in any of them can override the launcher path).
+#   (g)   script.js.isolateDir outside the image's launcher-path entries: refused
+#         with the template's own message; the image's own two entries
+#         (/opt/graaljs, /app/lib) render.
 #   (f)   libVolume enabled with a ConfigMap: exactly one read-only /app/lib
 #         mount and one driver-library volume using that ConfigMap.
 #         PVC sources must also be read-only; empty/multiple sources refused.
@@ -203,12 +211,15 @@ if [ "$rc" -ne 0 ]; then
   verdict "(a) defaults" 1 "helm template exited $rc (expected 0)"
 else
   n_dbu=$(grep -c 'DATAPIPELINES_DUCKDB_' "$WORK/a.out" || true)
+  n_js=$(grep -c 'DATAPIPELINES_SCRIPT_JS_' "$WORK/a.out" || true)
   n_emp=$(grep -c 'value: ""' "$WORK/a.out" || true)
   n_env=$(grep -c '^ *env:' "$WORK/a.out" || true)
   n_lib=$(grep -c '/app/lib' "$WORK/a.out" || true)
   n_driver=$(grep -c 'name: driver-library$' "$WORK/a.out" || true)
   if [ "$n_dbu" -ne 0 ]; then
     verdict "(a) defaults" 1 "grep -c 'DATAPIPELINES_DUCKDB_' = $n_dbu (expected 0 — an empty entry would override the image's ENV)"
+  elif [ "$n_js" -ne 0 ]; then
+    verdict "(a) defaults" 1 "grep -c 'DATAPIPELINES_SCRIPT_JS_' = $n_js (expected 0 — an empty entry would override the image's ISOLATE_DIR)"
   elif [ "$n_emp" -ne 0 ]; then
     verdict "(a) defaults" 1 "grep -c 'value: \"\"' = $n_emp (expected 0 — an empty env value still SETS the variable)"
   elif [ "$n_env" -ne 0 ]; then
@@ -216,7 +227,7 @@ else
   elif [ "$n_lib" -ne 0 ] || [ "$n_driver" -ne 0 ]; then
     verdict "(a) defaults" 1 "/app/lib count=$n_lib; driver-library count=$n_driver (expected 0 each)"
   else
-    verdict "(a) defaults" 0 "exit 0; 0 DuckDB entries, 0 rendered empty values, no env: block, no /app/lib or driver-library"
+    verdict "(a) defaults" 0 "exit 0; 0 DuckDB entries, 0 JavaScript entries, 0 rendered empty values, no env: block, no /app/lib or driver-library"
   fi
 fi
 
@@ -247,6 +258,70 @@ else
   fi
 fi
 
+# (b2) all nine script.js values set — each env name exactly once, quoted value.
+# isolateDir is set to /app/lib: one of the image's own launcher-path entries,
+# so the render-refusal must let it through.
+rc=0
+"$HELM" template dp "$CHART_DIR" --set "existingSecret=$PLACEHOLDER" \
+  --set script.js.isolateDir=/app/lib --set script.js.maxHeapMb=512 \
+  --set script.js.isolateMemoryMb=2048 --set script.js.maxStatements=50000000 \
+  --set script.js.maxAstDepth=501 --set script.js.maxStackFrames=502 \
+  --set script.js.maxOutputBytes=65536 --set script.js.maxResultMb=331 \
+  --set script.js.maxInputMb=321 >"$WORK/b2.out" 2>"$WORK/b2.err" || rc=$?
+b2_pairs='DATAPIPELINES_SCRIPT_JS_ISOLATE_DIR|/app/lib
+DATAPIPELINES_SCRIPT_JS_MAX_HEAP_MB|512
+DATAPIPELINES_SCRIPT_JS_ISOLATE_MEMORY_MB|2048
+DATAPIPELINES_SCRIPT_JS_MAX_STATEMENTS|50000000
+DATAPIPELINES_SCRIPT_JS_MAX_AST_DEPTH|501
+DATAPIPELINES_SCRIPT_JS_MAX_STACK_FRAMES|502
+DATAPIPELINES_SCRIPT_JS_MAX_OUTPUT_BYTES|65536
+DATAPIPELINES_SCRIPT_JS_MAX_RESULT_MB|331
+DATAPIPELINES_SCRIPT_JS_MAX_INPUT_MB|321'
+if [ "$rc" -ne 0 ]; then
+  verdict "(b2) all nine script.js values set" 1 "helm template exited $rc (expected 0)"
+else
+  b2_bad=""
+  while IFS='|' read -r name val; do
+    n_name=$(grep -c "^ *- name: $name$" "$WORK/b2.out" || true)
+    n_val=$(grep -cF "value: \"$val\"" "$WORK/b2.out" || true)
+    if [ "$n_name" -ne 1 ] || [ "$n_val" -ne 1 ]; then
+      b2_bad="$b2_bad $name(name=$n_name,value=$n_val)"
+    fi
+  done <<<"$b2_pairs"
+  n_emp=$(grep -c 'value: ""' "$WORK/b2.out" || true)
+  if [ -n "$b2_bad" ]; then
+    verdict "(b2) all nine script.js values set" 1 "expected each name exactly once with its quoted value;$b2_bad"
+  elif [ "$n_emp" -ne 0 ]; then
+    verdict "(b2) all nine script.js values set" 1 "grep -c 'value: \"\"' = $n_emp (expected 0)"
+  else
+    verdict "(b2) all nine script.js values set" 0 "exit 0; each of the nine names exactly once with its quoted value"
+  fi
+fi
+
+# (b2-single) maxHeapMb ALONE — the env: block must still render, with exactly
+# that one entry. Red proof for the or-clause: remove
+# .Values.script.js.maxHeapMb from it and no env: block renders at all.
+rc=0
+"$HELM" template dp "$CHART_DIR" --set "existingSecret=$PLACEHOLDER" \
+  --set script.js.maxHeapMb=512 >"$WORK/b2s.out" 2>"$WORK/b2s.err" || rc=$?
+if [ "$rc" -ne 0 ]; then
+  verdict "(b2-single) maxHeapMb alone" 1 "helm template exited $rc (expected 0)"
+else
+  n_env=$(grep -c '^ *env:' "$WORK/b2s.out" || true)
+  n_heap=$(grep -c '^ *- name: DATAPIPELINES_SCRIPT_JS_MAX_HEAP_MB$' "$WORK/b2s.out" || true)
+  n_vheap=$(grep -cF 'value: "512"' "$WORK/b2s.out" || true)
+  n_other=$(grep -c 'DATAPIPELINES_SCRIPT_JS_' "$WORK/b2s.out" || true)
+  if [ "$n_env" -lt 1 ]; then
+    verdict "(b2-single) maxHeapMb alone" 1 "no env: block rendered (the or-clause dropped script.js.maxHeapMb?)"
+  elif [ "$n_heap" -ne 1 ] || [ "$n_vheap" -ne 1 ]; then
+    verdict "(b2-single) maxHeapMb alone" 1 "MAX_HEAP_MB named $n_heap time(s), value \"512\" found $n_vheap time(s) (expected 1 each)"
+  elif [ "$n_other" -ne 1 ]; then
+    verdict "(b2-single) maxHeapMb alone" 1 "grep -c 'DATAPIPELINES_SCRIPT_JS_' = $n_other (expected exactly the one entry's name line)"
+  else
+    verdict "(b2-single) maxHeapMb alone" 0 "exit 0; the env: block renders with exactly the one guarded entry"
+  fi
+fi
+
 # (c) the extraEnv double mapping, TWICE — each render must refuse with the
 # template's own `fail` message, verbatim (deployment.yaml:40 / :41).
 check_double_mapping() {  # <label> <extraEnv key> <value> <verbatim fail message> <out> <err>
@@ -269,6 +344,27 @@ check_double_mapping "(c2) extraEnv double-maps the memory limit" \
   DATAPIPELINES_DUCKDB_MEMORY_LIMIT 4GB \
   'set duckdb.memoryLimit, not extraEnv.DATAPIPELINES_DUCKDB_MEMORY_LIMIT' \
   "$WORK/c2.out" "$WORK/c2.err"
+
+# (c3)..(c11) the nine JavaScript keys, in application.yml order — each
+# extraEnv double mapping refused with the template's own message, verbatim.
+c_seq=3
+while IFS='|' read -r camel envvar; do
+  check_double_mapping "(c$c_seq) extraEnv double-maps $camel" \
+    "$envvar" /x \
+    "set script.js.$camel, not extraEnv.$envvar" \
+    "$WORK/c$c_seq.out" "$WORK/c$c_seq.err"
+  c_seq=$((c_seq + 1))
+done <<'JS_KEYS'
+isolateDir|DATAPIPELINES_SCRIPT_JS_ISOLATE_DIR
+maxHeapMb|DATAPIPELINES_SCRIPT_JS_MAX_HEAP_MB
+isolateMemoryMb|DATAPIPELINES_SCRIPT_JS_ISOLATE_MEMORY_MB
+maxStatements|DATAPIPELINES_SCRIPT_JS_MAX_STATEMENTS
+maxAstDepth|DATAPIPELINES_SCRIPT_JS_MAX_AST_DEPTH
+maxStackFrames|DATAPIPELINES_SCRIPT_JS_MAX_STACK_FRAMES
+maxOutputBytes|DATAPIPELINES_SCRIPT_JS_MAX_OUTPUT_BYTES
+maxResultMb|DATAPIPELINES_SCRIPT_JS_MAX_RESULT_MB
+maxInputMb|DATAPIPELINES_SCRIPT_JS_MAX_INPUT_MB
+JS_KEYS
 
 # (d) no secret name — the placeholder OMITTED; pins the `required` guard.
 rc=0
@@ -308,6 +404,36 @@ for key in JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS; do
   check_double_mapping "(e3) extraEnv names $key" "$key" /tmp/x \
     "extraEnv.$key is refused: a JVM option variable can override the image's launcher path (deployment.md §9)" \
     "$WORK/e3.out" "$WORK/e3.err"
+done
+
+# (g) script.js.isolateDir is NOT an arbitrary path: outside the image's own
+# launcher-path entries it is refused at render time with the template's own
+# message; the image's two entries (/opt/graaljs, /app/lib) render.
+rc=0
+"$HELM" template dp "$CHART_DIR" --set "existingSecret=$PLACEHOLDER" \
+  --set script.js.isolateDir=/opt/custom >"$WORK/g.out" 2>"$WORK/g.err" || rc=$?
+if [ "$rc" -eq 0 ]; then
+  verdict "(g) isolateDir outside the image's launcher-path entries" 1 "helm template exited 0 (expected the render-time refusal)"
+elif grep -qF "script.js.isolateDir must be one of the image's LOADER_PATH entries (/app/lib,/opt/graaljs) and contain js-isolate.jar (deployment.md §6.4)" "$WORK/g.err"; then
+  verdict "(g) isolateDir outside the image's launcher-path entries" 0 "exit $rc with the template's own refusal message"
+else
+  verdict "(g) isolateDir outside the image's launcher-path entries" 1 "exit $rc but the exact refusal message is NOT on stderr (red for the wrong reason)"
+fi
+for dir in /opt/graaljs /app/lib; do
+  rc=0
+  "$HELM" template dp "$CHART_DIR" --set "existingSecret=$PLACEHOLDER" \
+    --set "script.js.isolateDir=$dir" >"$WORK/g-ok.out" 2>"$WORK/g-ok.err" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    verdict "(g) isolateDir $dir renders" 1 "helm template exited $rc (expected 0 — the image's own entry)"
+  else
+    n_isolate=$(grep -c '^ *- name: DATAPIPELINES_SCRIPT_JS_ISOLATE_DIR$' "$WORK/g-ok.out" || true)
+    n_val=$(grep -cF "value: \"$dir\"" "$WORK/g-ok.out" || true)
+    if [ "$n_isolate" -ne 1 ] || [ "$n_val" -ne 1 ]; then
+      verdict "(g) isolateDir $dir renders" 1 "ISOLATE_DIR named $n_isolate time(s), value found $n_val time(s) (expected 1 each)"
+    else
+      verdict "(g) isolateDir $dir renders" 0 "exit 0; the entry renders exactly once with its quoted value"
+    fi
+  fi
 done
 
 # (f) the enabled volume: match whole blocks, so an unrelated readOnly elsewhere

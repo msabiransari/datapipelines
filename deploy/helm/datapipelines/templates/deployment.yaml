@@ -39,9 +39,19 @@ spec:
                 name: {{ required "existingSecret is required — see values.yaml (deployment.md §5.1)" .Values.existingSecret }}
           {{- if hasKey .Values.extraEnv "DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY" }}{{ fail "set duckdb.extensionDirectory, not extraEnv.DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY" }}{{- end }}
           {{- if hasKey .Values.extraEnv "DATAPIPELINES_DUCKDB_MEMORY_LIMIT" }}{{ fail "set duckdb.memoryLimit, not extraEnv.DATAPIPELINES_DUCKDB_MEMORY_LIMIT" }}{{- end }}
+          {{- if hasKey .Values.extraEnv "DATAPIPELINES_SCRIPT_JS_ISOLATE_DIR" }}{{ fail "set script.js.isolateDir, not extraEnv.DATAPIPELINES_SCRIPT_JS_ISOLATE_DIR" }}{{- end }}
+          {{- if hasKey .Values.extraEnv "DATAPIPELINES_SCRIPT_JS_MAX_HEAP_MB" }}{{ fail "set script.js.maxHeapMb, not extraEnv.DATAPIPELINES_SCRIPT_JS_MAX_HEAP_MB" }}{{- end }}
+          {{- if hasKey .Values.extraEnv "DATAPIPELINES_SCRIPT_JS_ISOLATE_MEMORY_MB" }}{{ fail "set script.js.isolateMemoryMb, not extraEnv.DATAPIPELINES_SCRIPT_JS_ISOLATE_MEMORY_MB" }}{{- end }}
+          {{- if hasKey .Values.extraEnv "DATAPIPELINES_SCRIPT_JS_MAX_STATEMENTS" }}{{ fail "set script.js.maxStatements, not extraEnv.DATAPIPELINES_SCRIPT_JS_MAX_STATEMENTS" }}{{- end }}
+          {{- if hasKey .Values.extraEnv "DATAPIPELINES_SCRIPT_JS_MAX_AST_DEPTH" }}{{ fail "set script.js.maxAstDepth, not extraEnv.DATAPIPELINES_SCRIPT_JS_MAX_AST_DEPTH" }}{{- end }}
+          {{- if hasKey .Values.extraEnv "DATAPIPELINES_SCRIPT_JS_MAX_STACK_FRAMES" }}{{ fail "set script.js.maxStackFrames, not extraEnv.DATAPIPELINES_SCRIPT_JS_MAX_STACK_FRAMES" }}{{- end }}
+          {{- if hasKey .Values.extraEnv "DATAPIPELINES_SCRIPT_JS_MAX_OUTPUT_BYTES" }}{{ fail "set script.js.maxOutputBytes, not extraEnv.DATAPIPELINES_SCRIPT_JS_MAX_OUTPUT_BYTES" }}{{- end }}
+          {{- if hasKey .Values.extraEnv "DATAPIPELINES_SCRIPT_JS_MAX_RESULT_MB" }}{{ fail "set script.js.maxResultMb, not extraEnv.DATAPIPELINES_SCRIPT_JS_MAX_RESULT_MB" }}{{- end }}
+          {{- if hasKey .Values.extraEnv "DATAPIPELINES_SCRIPT_JS_MAX_INPUT_MB" }}{{ fail "set script.js.maxInputMb, not extraEnv.DATAPIPELINES_SCRIPT_JS_MAX_INPUT_MB" }}{{- end }}
           {{- range $name := keys .Values.extraEnv }}{{ if eq (upper (replace "." "_" $name)) "LOADER_PATH" }}{{ fail "LOADER_PATH comes from the image, never from extraEnv.LOADER_PATH (deployment.md §9)" }}{{ end }}{{- end }}
           {{- range $name := keys .Values.extraEnv }}{{ if has (upper $name) (list "JAVA_TOOL_OPTIONS" "JDK_JAVA_OPTIONS" "_JAVA_OPTIONS") }}{{ fail (printf "extraEnv.%s is refused: a JVM option variable can override the image's launcher path (deployment.md §9)" $name) }}{{ end }}{{- end }}
-          {{- if or .Values.extraEnv .Values.duckdb.extensionDirectory .Values.duckdb.memoryLimit }}
+          {{- if and .Values.script.js.isolateDir (not (has .Values.script.js.isolateDir (list "/opt/graaljs" "/app/lib"))) }}{{ fail "script.js.isolateDir must be one of the image's LOADER_PATH entries (/app/lib,/opt/graaljs) and contain js-isolate.jar (deployment.md §6.4)" }}{{- end }}
+          {{- if or .Values.extraEnv .Values.duckdb.extensionDirectory .Values.duckdb.memoryLimit .Values.script.js.isolateDir .Values.script.js.maxHeapMb .Values.script.js.isolateMemoryMb .Values.script.js.maxStatements .Values.script.js.maxAstDepth .Values.script.js.maxStackFrames .Values.script.js.maxOutputBytes .Values.script.js.maxResultMb .Values.script.js.maxInputMb }}
           env:
             {{- if .Values.duckdb.extensionDirectory }}
             - name: DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY
@@ -50,6 +60,42 @@ spec:
             {{- if .Values.duckdb.memoryLimit }}
             - name: DATAPIPELINES_DUCKDB_MEMORY_LIMIT
               value: {{ .Values.duckdb.memoryLimit | quote }}
+            {{- end }}
+            {{- if .Values.script.js.isolateDir }}
+            - name: DATAPIPELINES_SCRIPT_JS_ISOLATE_DIR
+              value: {{ .Values.script.js.isolateDir | quote }}
+            {{- end }}
+            {{- if .Values.script.js.maxHeapMb }}
+            - name: DATAPIPELINES_SCRIPT_JS_MAX_HEAP_MB
+              value: {{ .Values.script.js.maxHeapMb | quote }}
+            {{- end }}
+            {{- if .Values.script.js.isolateMemoryMb }}
+            - name: DATAPIPELINES_SCRIPT_JS_ISOLATE_MEMORY_MB
+              value: {{ .Values.script.js.isolateMemoryMb | quote }}
+            {{- end }}
+            {{- if .Values.script.js.maxStatements }}
+            - name: DATAPIPELINES_SCRIPT_JS_MAX_STATEMENTS
+              value: {{ .Values.script.js.maxStatements | quote }}
+            {{- end }}
+            {{- if .Values.script.js.maxAstDepth }}
+            - name: DATAPIPELINES_SCRIPT_JS_MAX_AST_DEPTH
+              value: {{ .Values.script.js.maxAstDepth | quote }}
+            {{- end }}
+            {{- if .Values.script.js.maxStackFrames }}
+            - name: DATAPIPELINES_SCRIPT_JS_MAX_STACK_FRAMES
+              value: {{ .Values.script.js.maxStackFrames | quote }}
+            {{- end }}
+            {{- if .Values.script.js.maxOutputBytes }}
+            - name: DATAPIPELINES_SCRIPT_JS_MAX_OUTPUT_BYTES
+              value: {{ .Values.script.js.maxOutputBytes | quote }}
+            {{- end }}
+            {{- if .Values.script.js.maxResultMb }}
+            - name: DATAPIPELINES_SCRIPT_JS_MAX_RESULT_MB
+              value: {{ .Values.script.js.maxResultMb | quote }}
+            {{- end }}
+            {{- if .Values.script.js.maxInputMb }}
+            - name: DATAPIPELINES_SCRIPT_JS_MAX_INPUT_MB
+              value: {{ .Values.script.js.maxInputMb | quote }}
             {{- end }}
             {{- range $name, $value := .Values.extraEnv }}
             - name: {{ $name }}
