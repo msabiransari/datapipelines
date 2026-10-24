@@ -46,9 +46,9 @@ import javax.crypto.spec.SecretKeySpec
  * default is an unbounded `RestTemplate`; here it is [OidcConfig.boundedRestTemplate] —
  * the same connect/read bound every other login-thread provider read carries
  * (`datapipelines.auth.oidc.provider-read-timeout-seconds`, #682). No JWK-set cache is
- * added: Spring's builder defaults to a `NoOpCache` and only wraps a caching source when
- * a real cache is configured, so every decode fetches the JWKS through the bounded
- * client, exactly as it previously fetched through Spring's client.
+ * added: Spring's builder defaults to a `NoOpCache` and enables Nimbus's own caching
+ * source in that case. Cached keys can satisfy later decodes without HTTP; when a
+ * fetch is needed, it uses the bounded client. Spring's cache policy is unchanged.
  */
 internal class BoundedOidcIdTokenDecoderFactory(
     private val boundedRestTemplate: RestTemplate,

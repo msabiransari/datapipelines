@@ -79,8 +79,11 @@ class JwksReadTimeoutTest {
     fun `a correctly signed token still decodes and the claims come back typed`() {
         JwksStub().use { stub ->
             stub.jwks = jwksDocument
-            val factory = OidcConfig().providerIdTokenDecoderFactory(properties()).createDecoder(registration(stub))
-            val jwt = factory.decode(idToken(stub.issuer))
+            val registration = registration(stub)
+            val factory = OidcConfig().providerIdTokenDecoderFactory(properties())
+            val decoder = factory.createDecoder(registration)
+            val token = idToken(stub.issuer)
+            val jwt = decoder.decode(token)
             jwt.subject shouldBe SUBJECT
             // The claim-type converter took. exp/aud/iss are typed by NimbusJwtDecoder's own
             // defaults too, so they do not discriminate; auth_time is converted ONLY by the
@@ -88,6 +91,10 @@ class JwksReadTimeoutTest {
             jwt.claims["exp"].shouldBeInstanceOf<Instant>()
             jwt.claims["aud"].shouldBeInstanceOf<Collection<*>>()
             jwt.claims[AUTH_TIME_CLAIM].shouldBeInstanceOf<Instant>()
+            // Preserve Spring's per-registration decoder and Nimbus JWK cache defaults.
+            (factory.createDecoder(registration) === decoder) shouldBe true
+            decoder.decode(token).subject shouldBe SUBJECT
+            stub.requestsTo(JwksStub.CERTS_PATH).size shouldBe 1
         }
     }
 
