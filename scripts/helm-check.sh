@@ -23,7 +23,8 @@
 #   (b2)  all nine script.js values set: exit 0; each env name exactly once,
 #         with its quoted value. (b2-single) maxHeapMb ALONE: the env: block
 #         still renders, with exactly that one entry — pins the or-clause that
-#         decides whether the block renders at all.
+#         decides whether the block renders at all. (b2-zero) each sizing key alone
+#         as numeric zero renders quoted "0" for startup validation; null omits it.
 #   (c)   the extraEnv double mapping, ELEVEN times (the two DuckDB keys and the
 #         nine DATAPIPELINES_SCRIPT_JS_* keys): each render exits non-zero AND
 #         stderr carries the template's own `fail` message VERBATIM
@@ -322,6 +323,44 @@ else
   fi
 fi
 
+# (b2-zero) Explicit numeric zero is supplied, not empty. Pass it to startup
+# validation even when it is the only JS key set (#688 landing review F1).
+while IFS='|' read -r camel envvar; do
+  [ "$camel" != isolateDir ] || continue
+  rc=0
+  "$HELM" template dp "$CHART_DIR" --set "existingSecret=$PLACEHOLDER" \
+    --set "script.js.$camel=0" >"$WORK/b2-zero.out" 2>"$WORK/b2-zero.err" || rc=$?
+  n_name=$(grep -c "^ *- name: $envvar$" "$WORK/b2-zero.out" || true)
+  n_zero=$(grep -cF 'value: "0"' "$WORK/b2-zero.out" || true)
+  n_js=$(grep -c 'DATAPIPELINES_SCRIPT_JS_' "$WORK/b2-zero.out" || true)
+  if [ "$rc" -eq 0 ] && [ "$n_name" -eq 1 ] && [ "$n_zero" -eq 1 ] && [ "$n_js" -eq 1 ]; then
+    verdict "(b2-zero) $camel alone" 0 'explicit zero renders exactly one quoted "0" entry for startup validation'
+  else
+    verdict "(b2-zero) $camel alone" 1 "exit=$rc; name=$n_name; quoted zero=$n_zero; JS entries=$n_js (expected 0/1/1/1)"
+  fi
+done <<'JS_ZERO_KEYS'
+isolateDir|DATAPIPELINES_SCRIPT_JS_ISOLATE_DIR
+maxHeapMb|DATAPIPELINES_SCRIPT_JS_MAX_HEAP_MB
+isolateMemoryMb|DATAPIPELINES_SCRIPT_JS_ISOLATE_MEMORY_MB
+maxStatements|DATAPIPELINES_SCRIPT_JS_MAX_STATEMENTS
+maxAstDepth|DATAPIPELINES_SCRIPT_JS_MAX_AST_DEPTH
+maxStackFrames|DATAPIPELINES_SCRIPT_JS_MAX_STACK_FRAMES
+maxOutputBytes|DATAPIPELINES_SCRIPT_JS_MAX_OUTPUT_BYTES
+maxResultMb|DATAPIPELINES_SCRIPT_JS_MAX_RESULT_MB
+maxInputMb|DATAPIPELINES_SCRIPT_JS_MAX_INPUT_MB
+JS_ZERO_KEYS
+# Null is unset; empty strings are already covered by (a).
+rc=0
+"$HELM" template dp "$CHART_DIR" --set "existingSecret=$PLACEHOLDER" \
+  --set script.js.maxHeapMb=null >"$WORK/b2-null.out" 2>"$WORK/b2-null.err" || rc=$?
+n_js=$(grep -c 'DATAPIPELINES_SCRIPT_JS_' "$WORK/b2-null.out" || true)
+n_env=$(grep -c '^ *env:' "$WORK/b2-null.out" || true)
+if [ "$rc" -eq 0 ] && [ "$n_js" -eq 0 ] && [ "$n_env" -eq 0 ]; then
+  verdict '(b2-null) maxHeapMb unset' 0 'null renders no JS entry or env block'
+else
+  verdict '(b2-null) maxHeapMb unset' 1 "exit=$rc; JS entries=$n_js; env blocks=$n_env (expected 0 each)"
+fi
+
 # (c) the extraEnv double mapping, TWICE — each render must refuse with the
 # template's own `fail` message, verbatim (deployment.yaml:40 / :41).
 check_double_mapping() {  # <label> <extraEnv key> <value> <verbatim fail message> <out> <err>
@@ -409,16 +448,18 @@ done
 # (g) script.js.isolateDir is NOT an arbitrary path: outside the image's own
 # launcher-path entries it is refused at render time with the template's own
 # message; the image's two entries (/opt/graaljs, /app/lib) render.
-rc=0
-"$HELM" template dp "$CHART_DIR" --set "existingSecret=$PLACEHOLDER" \
-  --set script.js.isolateDir=/opt/custom >"$WORK/g.out" 2>"$WORK/g.err" || rc=$?
-if [ "$rc" -eq 0 ]; then
-  verdict "(g) isolateDir outside the image's launcher-path entries" 1 "helm template exited 0 (expected the render-time refusal)"
-elif grep -qF "script.js.isolateDir must be one of the image's LOADER_PATH entries (/app/lib,/opt/graaljs) and contain js-isolate.jar (deployment.md §6.4)" "$WORK/g.err"; then
-  verdict "(g) isolateDir outside the image's launcher-path entries" 0 "exit $rc with the template's own refusal message"
-else
-  verdict "(g) isolateDir outside the image's launcher-path entries" 1 "exit $rc but the exact refusal message is NOT on stderr (red for the wrong reason)"
-fi
+for invalid_dir in /opt/custom 0 false; do
+  rc=0
+  "$HELM" template dp "$CHART_DIR" --set "existingSecret=$PLACEHOLDER" \
+    --set "script.js.isolateDir=$invalid_dir" >"$WORK/g.out" 2>"$WORK/g.err" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    verdict "(g) isolateDir $invalid_dir outside the image's launcher-path entries" 1 "helm template exited 0 (expected the render-time refusal)"
+  elif grep -qF "script.js.isolateDir must be one of the image's LOADER_PATH entries (/app/lib,/opt/graaljs) and contain js-isolate.jar (deployment.md §6.4)" "$WORK/g.err"; then
+    verdict "(g) isolateDir $invalid_dir outside the image's launcher-path entries" 0 "exit $rc with the template's own refusal message"
+  else
+    verdict "(g) isolateDir $invalid_dir outside the image's launcher-path entries" 1 "exit $rc but the exact refusal message is NOT on stderr (red for the wrong reason)"
+  fi
+done
 for dir in /opt/graaljs /app/lib; do
   rc=0
   "$HELM" template dp "$CHART_DIR" --set "existingSecret=$PLACEHOLDER" \

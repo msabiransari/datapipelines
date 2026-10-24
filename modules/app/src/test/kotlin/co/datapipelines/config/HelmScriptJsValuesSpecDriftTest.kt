@@ -22,8 +22,9 @@ import java.io.File
  * `ENV DATAPIPELINES_SCRIPT_JS_ISOLATE_DIR=/opt/graaljs` and fail the startup agreement
  * (ScriptRules' isolateAgreement: the directory must be one entry of the launcher's loader path
  * and contain js-isolate.jar). So all nine values default to the empty string and each entry
- * renders ONLY when its value is non-empty. Unlike the DuckDB pair, one key is NOT an arbitrary
- * path: `script.js.isolateDir` must name one of the image's own launcher-path entries, so the
+ * renders ONLY when its value is non-null and non-empty, including an explicit numeric zero.
+ * Unlike the DuckDB pair, one key is NOT an arbitrary path: `script.js.isolateDir` must name
+ * one of the image's own launcher-path entries, so the
  * chart refuses anything else at render time, and this test pins the refusal's two-entry list to
  * the `Dockerfile` — a chart entry that drifts from the image's list would refuse a legal value
  * or admit an illegal one.
@@ -95,10 +96,12 @@ class HelmScriptJsValuesSpecDriftTest {
             val envVar = entry.trimStart().removePrefix("- name: ").trim()
             val key = camelCase(envVar)
             val preceding = lines[index - 1]
-            val guardRegex = Regex("""^\s*\{\{-?\s+if\s+\.Values\.script\.js\.$key\s*\}\}\s*$""")
+            val value = Regex.escape(".Values.script.js.$key")
+            val guardRegex =
+                Regex("""^\s*\{\{-?\s+if\s+and\s+\(ne\s+$value\s+nil\)\s+\(ne\s+\(toString\s+$value\)\s+""\)\s*\}\}\s*$""")
             val guardForm = if (preceding.contains("{{-")) "{{- if" else "{{ if"
             val clue =
-                "the entry for $envVar must sit directly under an if guard on .Values.script.js.$key " +
+                "the entry for $envVar must guard null and empty .Values.script.js.$key without omitting zero " +
                     "(found guard form: $guardForm; preceding line: ${preceding.trim()})"
             withClue(clue) {
                 guardRegex.matches(preceding) shouldBe true
@@ -174,6 +177,7 @@ class HelmScriptJsValuesSpecDriftTest {
             VALUE_KEY_REGEX
                 .findAll(orLine)
                 .map { it.groupValues[1] }
+                .distinct()
                 .sorted()
                 .toList()
         val lines = template.lines()
@@ -183,6 +187,7 @@ class HelmScriptJsValuesSpecDriftTest {
                 .filter { GUARD_REGEX.containsMatchIn(it.value) }
                 .filter { lines[it.index + 1].contains("- name: DATAPIPELINES_") }
                 .flatMap { VALUE_KEY_REGEX.findAll(it.value).map { m -> m.groupValues[1] } }
+                .distinct()
                 .sorted()
                 .toList()
 
@@ -264,6 +269,7 @@ class HelmScriptJsValuesSpecDriftTest {
         val OR_CLAUSE_REGEX = Regex("""^\s*\{\{-\s+if\s+or\s+\.Values\.extraEnv\b""")
 
         val VALUE_KEY_REGEX = Regex("""\.Values\.(?:duckdb|script\.js)\.([A-Za-z]+)""")
-        val GUARD_REGEX = Regex("""^\s*\{\{-?\s+if\s+\.Values\.(?:duckdb|script\.js)\.[A-Za-z]+\s*\}\}\s*$""")
+        val GUARD_REGEX =
+            Regex("""^\s*\{\{-?\s+if\s+(?:and\s+\(ne\s+)?\.Values\.(?:duckdb|script\.js)\.[A-Za-z]+\b.*\}\}\s*$""")
     }
 }

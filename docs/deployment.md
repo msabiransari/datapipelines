@@ -483,14 +483,14 @@ The nine JavaScript runtime keys (configuration.md §3.28) are named chart value
 `script.js`: `isolateDir`, `maxHeapMb`, `isolateMemoryMb`, `maxStatements`, `maxAstDepth`,
 `maxStackFrames`, `maxOutputBytes`, `maxResultMb`, `maxInputMb` (env
 `DATAPIPELINES_SCRIPT_JS_*`, the mechanical camelCase map). All nine default to empty, and an
-empty value renders NO env entry — the image's own isolate directory and the app's derived
+empty or null value renders NO env entry — the image's own isolate directory and the app's derived
 isolate memory stay in force, exactly like the DuckDB pair below; a rendered `""` would override
 the image's `ENV` and fail the startup agreement above. `script.js.isolateDir` is not an
 arbitrary path: the chart refuses, at render time, any value outside the image's launcher-path
 entries (`/app/lib`, `/opt/graaljs`) — the same entries the startup rule admits — and an
 `extraEnv` double mapping of any of the nine fails `helm template` like the DuckDB keys do. The
 remaining eight keys are operator sizing: the chart renders them verbatim and does not validate
-numbers — an out-of-bound value fails the pod's startup, by name (configuration.md §3.28, §7).
+numbers — explicitly supplied zero values render as quoted "0", and an out-of-bound value fails the pod's startup, by name (configuration.md §3.28, §7).
 
 The image pre-installs native resources in the root-owned, read-only
 `/opt/graaljs/resources` cache and passes
@@ -522,7 +522,7 @@ CI renders the chart on every push and pull request: the `gate` job runs `script
 a pinned `helm` (version and checksum pin bumped together per DEVELOPMENT.md §10.2) running
 `helm lint --strict` plus ten template cases — defaults render no `env:` block or driver volume, both
 DuckDB values render exactly their two quoted entries, all nine `script.js` values render exactly their
-nine quoted entries (and `maxHeapMb` alone still renders its one entry), each `extraEnv` double mapping
+nine quoted entries (each sizing key alone also renders its explicit zero; null renders no entry), each `extraEnv` double mapping
 (the two DuckDB keys and the nine JavaScript keys) is refused
 with the template's own message, a missing `existingSecret`, `extraEnv.LOADER_PATH`, the three JVM option variables and a
 `script.js.isolateDir` outside the image's launcher-path entries are refused,

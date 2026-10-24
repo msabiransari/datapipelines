@@ -178,7 +178,8 @@ class ImageLoaderPathSpecDriftTest {
                     ).toRegex(),
                 Regex
                     .escape(
-                        """{{- if and .Values.script.js.isolateDir """ +
+                        """{{- if and (ne .Values.script.js.isolateDir nil) """ +
+                            """(ne (toString .Values.script.js.isolateDir) "") """ +
                             """(not (has .Values.script.js.isolateDir (list "/opt/graaljs" "/app/lib"))) }}""" +
                             """{{ fail "script.js.isolateDir must be one of the image's LOADER_PATH entries """ +
                             """(/app/lib,/opt/graaljs) and contain js-isolate.jar (deployment.md §6.4)" }}{{- end }}""",
