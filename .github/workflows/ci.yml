@@ -7,7 +7,7 @@
 #
 # WHAT RUNS WHERE —
 #
-#   gate (ubuntu-latest, REQUIRES the runner's Docker daemon; 120-minute budget, #290, #669):
+#   gate (ubuntu-latest, REQUIRES the runner's Docker daemon; 60-minute budget, #290, #669):
 #     ./scripts/helm-check.sh               — the reference Helm chart (deploy/helm/datapipelines)
 #         is linted and rendered by a PINNED helm binary (#411): `helm lint --strict` plus four
 #         template cases — defaults render no `env:` block at all, both `duckdb.*` values render
@@ -19,18 +19,25 @@
 #         (scripts/helm-check.sh; bump: DEVELOPMENT.md §10.2, "Bumping helm"). Needs network.
 #         CI-only: the pregate has no helm; a chart-check failure exits 1, tooling exits 2.
 #     ./gradlew build ktlintCheck detekt   — the standard gate: assemble, unit tests,
-#         ktlint, detekt, module-dependency verification, Kover. Only the E2E
-#         integration suite is EXCLUDED (-x :tests:integration-tests:test); the rest
-#         of the unit suite runs, and 21 test files across 7 module source sets start
+#         ktlint, detekt, module-dependency verification, Kover. Two suites are EXCLUDED,
+#         each run by a job of its own below: the E2E integration suite
+#         (-x :tests:integration-tests:test) and, since #669, the browser suite — excluded
+#         the way scripts/gate.sh excludes it: `-x :tests:browser-tests:test` with its
+#         zero-test guard, plus an explicit `:tests:browser-tests:testClasses`, because `-x`
+#         also drops the module's test compile and a browser test that no longer compiles
+#         must stay red HERE. `check` still runs :tests:browser-tests:verifyBrowserShardPartition
+#         (no browser, no JVM fork): the `browser` job's partition guard. The rest of the
+#         unit suite runs, and 21 test files across 7 module source sets start
 #         Testcontainers — so this job needs Docker. The original Docker-free
 #         ("hermetic") design intent was dropped deliberately (025b/C1): excluding
 #         those 21 files across 7 modules would leave real unit coverage unrun, and
-#         Docker on ubuntu-latest is reliable. `build` also runs the browser suite
-#         (tests/browser-tests' `test`) and scripting's `breachSuite` (#289, its own
-#         512m JVM) — both hang off `check`. The browser suite is this step's long pole:
-#         20.4 of its 29.5 min on run 36334831413, overlapping every other module's tests
-#         on the second worker; a job of its own would still compile the app first and
-#         then run the same 20 min, so it would not shorten the wall time (measured, #290).
+#         Docker on ubuntu-latest is reliable. `build` also runs scripting's
+#         `breachSuite` (#289, its own 512m JVM), off `check`.
+#         BEFORE #669 the browser suite ran inside this step, serially, as its long pole:
+#         20.4 of its 29.5 min on run 36334831413. "A job of its own would still compile the
+#         app first and then run the same 20 min" (#290) held for ONE job, not for parallel
+#         shards: on run 39689954314 (2026-10-21) the step took 56.9 min, and its last 41
+#         waited on the browser suite alone (126 classes, 585 tests, 46.9 class-minutes).
 #     coverage XML (Kover)                  — the reports come from the build step's own
 #         execution data and NEVER re-run a test: an init script disables every Test task
 #         by TYPE for that one invocation (so `test`, `breachSuite` or the next test task
@@ -53,9 +60,40 @@
 #         39525815939 (the last a pure timeout, 502 browser tests passed, 0 failed). The
 #         ceilings are raised to 100 (step) and 120 (job), keeping the 20-minute margin, as a
 #         stopgap until #669 moves the browser suite into its own sharded job.
+#         #669 (the structural fix): the browser suite is the `browser` job's. The step's
+#         ceiling is 40 and the job's 60 — INITIAL values from the projection (the step
+#         without the suite ≈ 17 min); the first run on `next` measures them and #669's
+#         follow-up sets them from that measurement.
 #     ./scripts/docs-audit.sh               — doc-structure checks over docs/ AND the served
 #         manual: `:modules:mcp-server:docsExport` renders it into build/skill-docs first
 #         (offline — the build step above resolved its classpath; 242a). No network.
+#
+#   browser (ubuntu-latest, Docker; three parallel legs, 60-minute budget each, #669):
+#     ./gradlew :tests:browser-tests:test -x :tests:browser-tests:verifyTestsExecuted
+#               -Pdp.browser.shard=<i>/3   — the Playwright browser suite, split across
+#         `matrix.shard` 1..3 by buildSrc/src/main/kotlin/BrowserShards.kt: the *Test.kt
+#         files are read from the tree at configuration, sorted (byte order), and leg i
+#         takes every third from index i−1 — deterministic, complete and disjoint by
+#         construction; a new class lands in a leg with no edit. Three is BROWSER_SHARDS:
+#         a `-P` whose n disagrees with that constant is refused at configuration, so a
+#         matrix that drifts from it is red on its first leg. Each leg is ONE test JVM
+#         (dp.test.forks.e2e=1) with its own containers, app and Chromium — the per-JVM
+#         fixture the unsharded suite had, so a leg boundary changes nothing a case
+#         observes. The zero-test guard is excluded by name (a filtered run is red on it by
+#         design); verifyBrowserShardExecuted finalizes the leg instead: exactly its classes
+#         left a result file, none missing, none extra. Each leg names its failing tests on
+#         its summary and uploads `browser-reports-<i>` (its JUnit XML), pass or fail.
+#         fail-fast is off: a red leg never cancels the other two, and
+#         `gh run rerun <id> --failed` re-runs only the red legs. ONE recount over a run is
+#         `gate-reports` plus every `browser-reports-<i>` (DEVELOPMENT.md §9.4); its browser
+#         `files=` equals the module's *Test.kt count, the equality the zero-test guard
+#         enforced when the suite ran unsharded.
+#         `browser-verdict` (needs: browser, always) is red unless every leg succeeded: the
+#         ONE check name the `main` ruleset requires for the suite (owner ruling 2026-10-24).
+#         Measured basis: the rule split run 39689954314's XML into legs of 14.6–16.8 min
+#         of test time (the measured-weight optimum is 15.7); a leg also pays ≈ 10.5 min of
+#         setup and app + browser-test compile. Budgets: step 45, job 60 — INITIAL, from
+#         that ≈ 28 min projection; #669's follow-up sets them from the first measured run.
 #
 #   integration (ubuntu-latest, Docker available and used):
 #     ./gradlew integrationTest             — the Testcontainers E2E suite AND the
@@ -90,18 +128,21 @@
 #   secret-scan.sh                  needs the gitleaks binary; the pre-push hook is
 #                                   the enforcement point (DEVELOPMENT.md).
 #
-# Branch protection (E3, owner-owned — see the 025 handback): require `gate` on main,
-# PRs only. `integration` and `cold-verify` are strong signals but slower; requiring
-# them is the owner's call once their typical duration is known.
+# Branch protection (E3, owner-owned — see the 025 handback) began as `gate` on main, PRs
+# only. Since 2026-10-09 ruleset 23246563 requires `gate`, `integration` and `cold-verify` for
+# every SHA on main; #669 adds `browser-verdict` (owner ruling 2026-10-24 — the owner edits
+# the ruleset; until then a browser-red SHA could reach main).
 #
 # PROMOTION FLOW (owner ruling 2026-10-09) — `next` is the gate, `main` is what passed it.
 # The lander merges every delivered handback onto local main, runs scripts/gate.sh on the
 # batch tip (every test but the browser suite, which that script excludes), pushes `main:next`,
-# and this workflow is the browser suite's only full run and the whole-batch check on a cold
-# runner. On a green run the lander fast-forwards
+# and this workflow — its `browser` job — is the browser suite's only full run, and the
+# whole-batch check on a cold runner. On a green run the lander fast-forwards
 # `origin/main` to the SAME SHA, so a `main` run repeats a verdict `next` already gave.
 # A red run on `next` is read from `gh run view <id> --log-failed` plus the `gate-reports`
-# artifact; the fix lands as its own commit on main and `next` is pushed again.
+# and `browser-reports-<i>` artifacts; the fix lands as its own commit on main and `next` is
+# pushed again (a red `browser` leg alone: `gh run rerun <id> --failed` first, if it may be a
+# flake — the other legs keep their verdicts).
 
 name: ci
 
@@ -110,6 +151,7 @@ on:
     branches: [main, next]
   pull_request:
 
+# A newer push to the same ref cancels EVERY job of the older run, the browser legs included.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -123,9 +165,9 @@ permissions:
 jobs:
   gate:
     runs-on: ubuntu-latest
-    # 90 since #290 over a measured 48–57 min; 120 since #669 (2026-10-21), the build step's
-    # 100 plus the reports' 20 (header).
-    timeout-minutes: 120
+    # 90 since #290 over a measured 48–57 min; 120 as #669's stopgap (2026-10-21); 60 since the
+    # browser suite left this job (#669): the build step's 40 plus the reports' 20 (header).
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
@@ -166,10 +208,15 @@ jobs:
         # gate has always run with it; 2026-09-14: a dag flake stopped CI before four modules
         # had tested, and the report step below then ran their suites instead of reporting).
         # Its own ceiling, 20 min under the job's: a hung build still leaves the steps below
-        # (the reports, the failure summary, the artifact) their time (#290). 100 since #669: the
-        # browser suite took the step to 60–68 min and three runs hit the old 70.
-        timeout-minutes: 100
-        run: ./gradlew build ktlintCheck detekt --continue -x :tests:integration-tests:test -x :tests:integration-tests:verifyTestsExecuted
+        # (the reports, the failure summary, the artifact) their time (#290). 100 was #669's
+        # stopgap (the browser suite took the step to 60–68 min); 40 since the suite is the
+        # `browser` job's — excluded here the way scripts/gate.sh does, its test classes still
+        # compiled (header). Initial, from the ≈ 17 min projection; #669 sets it from the measurement.
+        timeout-minutes: 40
+        run: >-
+          ./gradlew build ktlintCheck detekt --continue
+          -x :tests:integration-tests:test -x :tests:integration-tests:verifyTestsExecuted
+          -x :tests:browser-tests:test -x :tests:browser-tests:verifyTestsExecuted :tests:browser-tests:testClasses
       # koverVerify writes only verify.err; the line-level XML the artifact below needs comes from
       # the report task, run AFTER the build so a failed verification still leaves the report.
       # It must NEVER run a test (#290): Kover 0.9.9's report tasks depend on every instrumented
@@ -201,66 +248,21 @@ jobs:
           ./gradlew koverXmlReport --init-script "$RUNNER_TEMP/no-test-tasks.init.gradle" \
             -x :tests:integration-tests:koverXmlReport --offline --continue \
             || { echo "::error title=coverage report::koverXmlReport failed on the build step's data (read this step's log; no test ran here)"; exit 1; }
-      # The failing tests by NAME on the run's summary page (#290): a red gate is read from the
-      # summary, not by searching a 15,000-line log for FAILED. The build's outcome rides in env;
-      # names and messages are escaped for EACH channel they reach (#297): workflow-command
-      # escaping for the annotation, html.escape for the Markdown summary — GitHub's sanitiser
-      # drops a `<WORD>` it reads as a tag, so `expected:<REFUSED> but was:<UNBOUNDED>` would
-      # render as `expected: but was:`. A result file that does not parse (a test JVM killed
-      # mid-write — the build step's ceiling's own case) is named and skipped, never fatal: the
-      # summary is most needed in exactly that run.
+      # The failing tests by NAME on the run's summary page (#290, #297): one script for every
+      # job that runs tests (#669), so the gate's summary and each browser leg's have one shape —
+      # its header has the escaping and unreadable-file rules. The build's outcome rides in env.
       - name: name the failing tests
         if: always()
         env:
           BUILD_OUTCOME: ${{ steps.build.outcome }}
-        run: |
-          python3 - <<'PY'
-          import glob, html, os, xml.etree.ElementTree as ET
-          def esc(s):
-              return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-          def md(s):
-              return html.escape(s, quote=False)
-          t = f = e = s = n = 0
-          failed = []
-          unreadable = []
-          for p in sorted(glob.glob("modules/*/build/test-results/*/*.xml") + glob.glob("tests/*/build/test-results/*/*.xml")):
-              try:
-                  r = ET.parse(p).getroot()
-              except (ET.ParseError, OSError) as err:
-                  unreadable.append((p, str(err)))
-                  continue
-              if r.tag != "testsuite":
-                  continue
-              n += 1; t += int(r.get("tests", 0)); f += int(r.get("failures", 0))
-              e += int(r.get("errors", 0)); s += int(r.get("skipped", 0))
-              for tc in r.iter("testcase"):
-                  bad = tc.find("failure")
-                  if bad is None:
-                      bad = tc.find("error")
-                  if bad is not None:
-                      first = ((bad.get("message") or "").strip().splitlines() or [""])[0][:200]
-                      failed.append((tc.get("classname", ""), tc.get("name", ""), first))
-          more = f" ({len(unreadable)} more unreadable)" if unreadable else ""
-          lines = [f"### Tests: {t} in {n} result files{more} — {f} failed, {e} errors, {s} skipped", ""]
-          for p, why in unreadable:
-              lines.append(f"- unreadable result file: `{md(p)}` — {md(why)}")
-              print(f"::warning title=unreadable result file::{esc(p)}")
-          for c, name, msg in failed:
-              lines.append(f"- **{md(c)}** › {md(name)} — {md(msg)}")
-              print(f"::error title=test failed::{esc(c)} > {esc(name)}")
-          if not failed and os.environ.get("BUILD_OUTCOME") == "failure":
-              lines.append("The build step FAILED with no failing test case in the XML: a non-test task (lint, "
-                           "coverage floor, a guard) or a test JVM that died without reporting — read the "
-                           "build step's `FAILURE:` lines.")
-          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
-              out.write("\n".join(lines) + "\n")
-          PY
+        run: python3 scripts/ci-name-failing-tests.py 'modules/*/build/test-results/*/*.xml' 'tests/*/build/test-results/*/*.xml'
       # The coverage and test-result XML, kept for a week, pass or fail: a coverage floor
       # that holds on the dev box and fails here (2026-09-14: pipeline-contract at 93.9065
       # against 94, the same 373 tests, 17 lines fewer covered) can only be diagnosed
       # line by line, and the runner's numbers were unreachable without this. Every test
-      # task's results (`breachSuite` too), the browser suite's (#283's red was missing from
-      # this artifact) and the breach report dag-executor.md pastes (#290).
+      # task's results (`breachSuite` too) and the breach report dag-executor.md pastes (#290).
+      # The browser suite's XML is no longer here (#669): each `browser` leg uploads its own
+      # `browser-reports-<i>`, and the recount reads them together (DEVELOPMENT.md §9.4).
       - name: keep the coverage and test-result reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -271,13 +273,100 @@ jobs:
             modules/*/build/reports/kover/verify.err
             modules/*/build/test-results/*/*.xml
             modules/scripting/build/reports/jsonata-breach.md
-            tests/browser-tests/build/test-results/test/*.xml
           retention-days: 7
           if-no-files-found: warn
       - name: docs audit (the served manual exported first — 242a)
         run: |
           ./gradlew :modules:mcp-server:docsExport --offline -q
           ./scripts/docs-audit.sh
+
+  # The Playwright browser suite, sharded (#669; header). Runs beside `gate`, never after it:
+  # each leg compiles what it needs, so the run's wall clock is the slower of the two jobs.
+  browser:
+    runs-on: ubuntu-latest
+    # The step's 45 plus 15 for setup, the summary and the artifact. Initial, from the ≈ 28 min
+    # projection (header); #669 sets both from the first measured run.
+    timeout-minutes: 60
+    strategy:
+      # One red leg must not cancel the others: every leg's verdict is read (and a red one
+      # re-run alone, `gh run rerun <id> --failed`).
+      fail-fast: false
+      matrix:
+        # 1..BrowserShards.BROWSER_SHARDS (buildSrc/src/main/kotlin/BrowserShards.kt). A list
+        # that drifts from the constant is refused by the leg's own -P parse.
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3
+      # Size Gradle for THIS runner (2 vCPU / 7 GB), not for the repo's defaults, which
+      # gradle.properties sizes for a 96-thread dev box (DEVELOPMENT.md §9.5). A per-machine
+      # gradle.properties in the Gradle user home wins over the repo's — the documented
+      # override path. At the repo defaults (workers 6, forked test JVMs, 3+4 GB daemons)
+      # this runner is oversubscribed and load-sensitive UI assertions lose their race
+      # (2026-09-13: an entrance animation measured 116.7 ms against its 120 ms floor).
+      # dp.test.forks.e2e=1: each leg is ONE test JVM, its classes in ClassName order.
+      - name: size Gradle for the runner
+        run: |
+          mkdir -p ~/.gradle
+          cat >> ~/.gradle/gradle.properties <<'EOF'
+          org.gradle.workers.max=2
+          org.gradle.jvmargs=-Xmx2g -XX:MaxMetaspaceSize=512m
+          kotlin.daemon.jvmargs=-Xmx2g
+          dp.test.forks=1
+          dp.test.forks.e2e=1
+          dp.test.heap=1g
+          EOF
+      # The suite boots the pinned Postgres and Redis images (SharedBrowserE2e).
+      - name: every pinned test image still exists at its registry (cold — never the cache)
+        run: ./scripts/verify-image-pins.sh
+      # The zero-test guard is excluded by name: a filtered run is red on it by design.
+      # verifyBrowserShardExecuted finalizes `test` instead (exactly this leg's classes).
+      # BrowserSuite reads GitHub's CI env var for its CI patience; no property is needed.
+      - name: browser suite, shard ${{ matrix.shard }} of 3 (Playwright + Testcontainers — Docker required)
+        id: build
+        timeout-minutes: 45
+        run: >-
+          ./gradlew :tests:browser-tests:test -x :tests:browser-tests:verifyTestsExecuted
+          -Pdp.browser.shard=${{ matrix.shard }}/3
+      - name: name the failing tests
+        if: always()
+        env:
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+        run: python3 scripts/ci-name-failing-tests.py 'tests/browser-tests/build/test-results/*/*.xml'
+      # This leg's JUnit XML, kept for a week, pass or fail; the recount reads every leg's
+      # beside gate-reports (DEVELOPMENT.md §9.4). `error`, not gate-reports' `warn`: a leg that
+      # wrote no XML at all is a tooling event (the JVM never started, the step was cancelled
+      # before its first class), and the missing artifact must not read as a quiet green leg.
+      - name: keep the test-result reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: browser-reports-${{ matrix.shard }}
+          path: tests/browser-tests/build/test-results/test/*.xml
+          retention-days: 7
+          if-no-files-found: error
+
+  # ONE stable required-check name over every browser leg, whatever BROWSER_SHARDS is (owner
+  # ruling 2026-10-24, #669): until #669 the browser verdict rode inside the required `gate`
+  # check; ruleset 23246563 requires `browser-verdict` beside gate/integration/cold-verify.
+  # `always()`: a failed or cancelled leg must still produce THIS check, as a red — a skipped
+  # required check would leave the SHA unmergeable with no reason on the page.
+  browser-verdict:
+    needs: browser
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: every browser leg succeeded
+        env:
+          LEGS: ${{ needs.browser.result }}
+        run: |
+          echo "browser legs: $LEGS"
+          [ "$LEGS" = success ] || { echo "::error title=browser suite::a browser leg did not succeed ($LEGS) — read its summary and browser-reports-<i>"; exit 1; }
 
   integration:
     runs-on: ubuntu-latest
