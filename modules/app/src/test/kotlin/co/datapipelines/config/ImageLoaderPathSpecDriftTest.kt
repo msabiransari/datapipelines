@@ -171,14 +171,17 @@ class ImageLoaderPathSpecDriftTest {
             listOf(
                 Regex
                     .escape(
-                        """{{- range ${'$'}name := keys .Values.extraEnv }}{{ if eq (upper (replace "." "_" ${'$'}name)) "LOADER_PATH" }}""" +
+                        """{{- range ${'$'}name := keys .Values.extraEnv }}""" +
+                            """{{ if eq (upper (replace "." "_" ${'$'}name)) "LOADER_PATH" }}""" +
                             """{{ fail "LOADER_PATH comes from the image, never from extraEnv.LOADER_PATH (deployment.md §9)" }}""" +
                             """{{ end }}{{- end }}""",
                     ).toRegex(),
                 Regex
                     .escape(
-                        """{{- if and .Values.script.js.isolateDir (not (has .Values.script.js.isolateDir (list "/opt/graaljs" "/app/lib"))) }}""" +
-                            """{{ fail "script.js.isolateDir must be one of the image's LOADER_PATH entries (/app/lib,/opt/graaljs) and contain js-isolate.jar (deployment.md §6.4)" }}{{- end }}""",
+                        """{{- if and .Values.script.js.isolateDir """ +
+                            """(not (has .Values.script.js.isolateDir (list "/opt/graaljs" "/app/lib"))) }}""" +
+                            """{{ fail "script.js.isolateDir must be one of the image's LOADER_PATH entries """ +
+                            """(/app/lib,/opt/graaljs) and contain js-isolate.jar (deployment.md §6.4)" }}{{- end }}""",
                     ).toRegex(),
             )
         val REFUSAL_NAMES = listOf("extraEnv.LOADER_PATH", "script.js.isolateDir")
