@@ -4,6 +4,7 @@ import co.datapipelines.mcp.McpToolCatalog
 import co.datapipelines.web.ui.site.SiteFacts
 import co.datapipelines.web.ui.site.SitePageRenderer
 import co.datapipelines.web.ui.site.SitePages
+import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -163,6 +164,46 @@ class SiteRenderTest {
         }
     }
 
+    /**
+     * #662 — keys v2 (docs/auth.md §7.4, A15, 2026-09-25) retired the login-minted key and
+     * the top-bar chip: every key, the `mcp` kind included, is created on the Keys page
+     * (`/api-keys`) and its plaintext is shown once at creation. Five public pages still
+     * taught the chip ritual; this guard keeps them from teaching it again, on the RENDERED
+     * page so the FAQ answers built in Kotlin are swept beside the template prose.
+     *
+     * Sense audit at the guard's birth: every "top bar" on the five pages was about keys, so
+     * [OTHER_SENSES] is empty. A future non-keys sense must be argued into that list, never
+     * matched silently — a hit whose window names no listed sense fails.
+     */
+    @Test
+    fun `no site page teaches the retired top-bar key`() {
+        val pages =
+            listOf(
+                SitePages.PILLAR,
+                SitePages.FOR_AGENCIES,
+                SitePages.HOW_IT_WORKS,
+                SitePages.ADD_TO_CLAUDE_CODE,
+                SitePages.enginePage(checkNotNull(SitePages.engine("postgres"))),
+            ).associateWith { SitePageRenderer.render(it) }
+
+        val offenders =
+            pages.flatMap { (page, html) ->
+                TOP_BAR.findAll(html).mapNotNull { m ->
+                    val window = html.substring(maxOf(0, m.range.first - 70), minOf(html.length, m.range.last + 70))
+                    if (OTHER_SENSES.any { (phrase, _) -> window.contains(phrase, ignoreCase = true) }) {
+                        null
+                    } else {
+                        "${page.path}: …$window…"
+                    }
+                }
+            }
+        withClue("pages still pointing at the retired top-bar key:\n${offenders.joinToString("\n")}") {
+            offenders shouldBe emptyList()
+        }
+        // The client-setup page's step 2 names where the key comes from today, not the chip.
+        pages.getValue(SitePages.ADD_TO_CLAUDE_CODE) shouldContain "Create your MCP key on the Keys page"
+    }
+
     @Test
     fun `SiteController serves the site view with a public cache header and the catalog count`() {
         val model = ExtendedModelMap()
@@ -263,6 +304,15 @@ class SiteRenderTest {
     }
 
     private companion object {
+        /** The retired key location, hyphenated or not, case-insensitive (#662). */
+        val TOP_BAR = Regex("""top[ -]bar""", RegexOption.IGNORE_CASE)
+
+        /**
+         * A hit whose surrounding window matches one of these is another sense, listed with
+         * its reading. Empty at birth: every "top bar" on the five pages was the key chip.
+         */
+        val OTHER_SENSES: List<Pair<String, String>> = emptyList()
+
         /** One feature card, from its opening article tag to its close. */
         val CARD = Regex("""<article class="card[^"]*">.*?</article>""", RegexOption.DOT_MATCHES_ALL)
         val CLAIM = Regex("""<!--\s*claim:""")

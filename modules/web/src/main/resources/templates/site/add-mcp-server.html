@@ -44,32 +44,32 @@
   <section class="section band" aria-labelledby="step2-title">
     <div class="container">
       <p class="kicker">Step 2</p>
-      <h2 id="step2-title" class="ds-headline">Copy your MCP key from the top bar</h2>
-      <!-- claim: docs/ui-screens.md §3.4 (the top bar's chip), docs/auth.md §7.4 -->
+      <h2 id="step2-title" class="ds-headline">Create your MCP key on the Keys page</h2>
+      <!-- claim: docs/auth.md §7.4, docs/ui-screens.md §4.19 -->
       <p class="section-lede">
-        Sign in. That is all it takes to get a key. Your MCP key is created for you the moment you enter a
-        workspace, one per workspace, and waits in the <strong>top bar</strong> on the right: the <code>dpk_…</code>
-        chip beside your account menu. <strong>Copy</strong> fetches the full key on the click and puts it on your
-        clipboard; it never sits in the page. The chip is also where you rotate: delete it, and your next sign-in
-        creates a fresh one.
+        Sign in, open the <strong>Keys page</strong>, and choose <strong>New API key</strong>: pick the kind
+        <code>mcp</code> and the role the agent should carry. The dialog offers exactly the roles whose permissions
+        are a subset of yours. <strong>Create</strong> shows the full key once, and the server keeps only a hash
+        afterwards, so copy it straight into the client config in step 3. Rotation later is the same page: revoke
+        the key, create another.
       </p>
-      <p>The key carries your role in that workspace, capped at author. There is nothing to pick:</p>
+      <p>The key holds the role you gave it, as an identity of its own. What the agent may do, by the role the key carries:</p>
       <table class="facts-table">
-        <caption>What the key may do, by the role you hold in its workspace.</caption>
+        <caption>What the key may do, by the role it carries.</caption>
         <thead>
-          <tr><th scope="col">Your role</th><th scope="col">The agent may…</th></tr>
+          <tr><th scope="col">The key's role</th><th scope="col">The agent may…</th></tr>
         </thead>
         <tbody>
-          <tr><th scope="row">Viewer</th><td>browse pipelines, templates and datasources, read schemas, run pipelines and read your own past runs</td></tr>
-          <tr><th scope="row">Author</th><td>also create and update pipelines and templates, probe SQL, preview rows and publish endpoints</td></tr>
+          <tr><th scope="row">Author</th><td>create and update pipelines and templates, run them, probe SQL, preview rows and publish endpoints</td></tr>
           <tr><th scope="row">Promoter</th><td>read released-and-newer pipelines and templates, and datasource schemas. That is the promotion reviewer's reach, nothing executable</td></tr>
-          <tr><th scope="row">Workspace admin</th><td>the same as an author. A key is capped at author, and administering the workspace is a signed-in person's act</td></tr>
+          <tr><th scope="row">Workspace admin</th><td>everything an author's key reaches, plus administering the workspace itself. No key is ever a super admin, so instance administration stays out of reach</td></tr>
         </tbody>
       </table>
-      <!-- claim: docs/auth.md §7.5 — a key's role is its member's, capped at author, and no key is a super admin; §11A.4 — the role is re-read per request -->
-      <p>Administration, of the workspace or of the instance, is for signed-in people; no key can hold it. The key's reach is re-read
-        against your role on every request, so a demotion narrows the key within about a minute with no reissue needed.</p>
-      <p>Rotating means deleting the key on the chip and signing in again; it takes effect within about a minute. There is no shared password to rotate.</p>
+      <!-- claim: docs/auth.md §7.5 — the key's role is chosen at creation and held by its own identity; member role changes do not flow to the key; no key is ever a super admin (B1) -->
+      <p>Administration of the instance stays with signed-in people; no key can hold it. The key's role is fixed at
+        creation: your later role changes do not flow into it.</p>
+      <p>Rotating means revoking the key on the Keys page and creating another under a fresh name; revocation takes
+        effect within about a minute. There is no shared password to rotate.</p>
     </div>
   </section>
 
@@ -112,7 +112,7 @@
       <ul class="fact-list fact-list-plain">
         <li><strong><code>401 auth.api_key.missing</code></strong>: the header did not arrive. Check the header name, and that the client sends headers at all on HTTP transports.</li>
         <li><strong><code>401 auth.api_key.invalid</code> or <code>auth.api_key.expired</code></strong>: wrong, revoked, expired, or the owning user is deactivated.</li>
-        <li><strong><code>auth.key_issuer_role_lost</code> or <code>auth.role_required</code></strong>, as the tool's result: the key is real and your role in that workspace does not reach what the agent tried. The key follows the role: ask a workspace admin to raise it rather than looking for a wider key. None exists.</li>
+          <li><strong><code>auth.key_issuer_role_lost</code> or <code>auth.role_required</code></strong>, as the tool's result: the key is real and the role it carries does not reach what the agent tried. The key acts at its own role: to widen its reach, create another key with a wider role, which the dialog offers only when your own role reaches that far.</li>
         <li><strong>Silent rejection of a browser session</strong>: expected. <code>/mcp</code> takes API keys only; a cookie will never work there.</li>
       </ul>
       <p><a th:href="@{/docs/mcp-server}">The MCP server specification &rarr;</a> &middot;
@@ -134,10 +134,10 @@
   <section class="section band" aria-labelledby="cta-title">
     <div class="container">
       <h2 id="cta-title" class="ds-headline">Do the whole loop on the demo</h2>
-      <!-- claim: docs/deployment.md Appendix B -->
+      <!-- claim: docs/deployment.md Appendix B (the demo stack), docs/auth.md §7.4 (the key is created on the Keys page) -->
       <p class="section-lede">
-        The demo stack is one command, and every step on this page works against it: sign in, copy the key from the
-        top bar, paste the config, list the tools, run a pipeline. Connecting to your own databases is the same ritual with real stakes.
+        The demo stack is one command, and every step on this page works against it: sign in, create the key on the
+        Keys page, paste the config, list the tools, run a pipeline. Connecting to your own databases is the same ritual with real stakes.
       </p>
       <div class="btn-row">
         <a class="btn btn-primary" th:href="@{/docs/deployment}">Demo quickstart</a>
