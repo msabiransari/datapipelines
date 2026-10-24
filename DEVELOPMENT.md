@@ -853,7 +853,7 @@ Every pregate Gradle invocation passes `--build-cache` (`PG_COMMON` in
 `scripts/pregate-plan-lib.sh`), so a fresh lane worktree's first pregate takes compile and detekt
 outputs from any earlier build on this box with identical inputs instead of recompiling the whole
 tree and re-running detekt on every module. What may come `FROM-CACHE`: Kotlin/Java compilation
-and `detekt`. What never does: the `ktlint*` check tasks — a ktlint task's stored output is the
+and `detekt`. What never does: ktlint's `BaseKtLintCheckTask` workers (`runKtlintCheckOver*`) — a worker's stored output is the
 last incremental execution's, not a function of its inputs, so a cache hit can name another
 checkout's files (#689) — plus every `Test` task (the touched
 modules' `test`, `breachSuite`, the stage-3 guards, the focused `tests/*` classes), every Kover
@@ -864,7 +864,13 @@ never caches in the first place. `CommonConventionsPluginTest` proves the guard 
 twice around a `clean` (the compile task `FROM_CACHE`, the test and Kover tasks executed both
 times). `KtlintCacheBoundaryTest` proves the ktlint boundary (#689) with two probes sharing one
 cache: after the first probe lints a violating tree and deletes the file, the second probe's lint
-task executes, passes, and carries no path from the first. Why tests stay out, for two independent reasons: a test verdict must come from this run, and a cached `:test` line is not fresh evidence,
+task executes, passes, and carries no path from the first. The separate `GenerateReportsTask`
+remains cacheable by the contents of `discoveredErrors`; it does not inherit the worker's
+cache exemption. Gradle's up-to-date checks and the worker's in-checkout incrementality still
+apply. A removed-only change can retain stale findings in that checkout (#703); pregate does
+not clean before stage 1. Recover under the verification lock with the affected module's lint
+check and `--rerun-tasks --no-build-cache`, so it rechecks the full source set without deleting
+the shared cache. Why tests stay out, for two independent reasons: a test verdict must come from this run, and a cached `:test` line is not fresh evidence,
 so stage 3 would keep every guard (`pgres::guards_covered`). The cache is the pre-gate's alone:
 `scripts/gate.sh` runs `clean` and then `build`, and with the cache on that build would be
 served from the cache and stop proving the tree compiles, so neither `gate.sh`, CI's workflows
@@ -1077,9 +1083,10 @@ or after a suspected bad entry: `rm -rf ~/.gradle/caches/build-cache-1` while no
 the next pregate repopulates it. A single pregate can also skip it with `--no-build-cache` on its
 stage commands (copy them from the run's `PLAN.txt`). A fresh worktree's first pregate is now mostly
 cache hits for compile and detekt, as long as some build on the box has compiled the same
-inputs since the last `buildSrc` change; ktlint check tasks always run fresh — a stale ktlint
-entry naming another checkout's files was the defect that only `rm -rf
-~/.gradle/caches/build-cache-1` used to cure (#689).
+inputs since the last `buildSrc` change. Ktlint worker outputs cannot be restored from the
+build cache (#689); up-to-date and incremental behavior still apply. Deleting the shared cache
+was the former workaround for a poisoned entry naming another checkout's files. For a retained
+in-checkout finding after a deletion (#703), use the forced affected-task check above instead.
 
 **Three more things worth a minute on a dedicated Linux box.**
 

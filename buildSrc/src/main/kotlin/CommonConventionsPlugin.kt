@@ -189,10 +189,10 @@ class CommonConventionsPlugin : Plugin<Project> {
         // previous output under the new tree's cache key — so another checkout with the
         // same relative sources is served findings named by THIS checkout's absolute
         // paths (reproduced 2026-10-24: a clean tree failed lint on a scratch test it
-        // never contained). A lint finding, like a test verdict, runs fresh in every
-        // build. The reports half (`ktlint*Check`, GenerateReportsTask) stays cacheable:
-        // it reads this build's freshly written `discoveredErrors` as its input, so a
-        // cached verdict for identical content is sound — the lie lived upstream, here.
+        // never contained). Keep worker outputs out of the build cache. Up-to-date and
+        // in-checkout incremental behavior remain, including the removed-only skip (#703).
+        // The reports half (`ktlint*Check`, GenerateReportsTask) stays cacheable by the
+        // contents of `discoveredErrors`; it cannot repair stale upstream findings.
         project.tasks.withType<BaseKtLintCheckTask>().configureEach {
             outputs.cacheIf(UNCACHEABLE_LINT_FINDINGS) { false }
         }
@@ -245,7 +245,7 @@ class CommonConventionsPlugin : Plugin<Project> {
             // not a pass. Guards the "engine found nothing" half of the false-green.
             failOnNoDiscoveredTests.set(true)
             // The pregate runs with --build-cache (#480, DEVELOPMENT.md §9.4): compile and
-            // detekt outputs may come from the cache, a test verdict or a ktlint finding
+            // detekt outputs may come from the cache, a test verdict or a ktlint worker output
             // never does (#689). A cached test task
             // would also leave the pregate without the fresh stage-2 evidence its guard
             // coverage requires (scripts/pregate-results-lib.sh pgres::guards_covered).
@@ -446,7 +446,7 @@ class CommonConventionsPlugin : Plugin<Project> {
          * function of its inputs, so a cache hit can name another checkout's files.
          */
         const val UNCACHEABLE_LINT_FINDINGS =
-            "ktlint findings run fresh in every build; a stored lint output is the last incremental execution's, not a function of its inputs (#689)"
+            "ktlint worker outputs stay out of the build cache; stored findings reflect incremental history, not only the inputs (#689)"
 
         /** Every Kover 0.9.x task class lives under this package (reports, verify, agent, artifact). */
         const val KOVER_TASK_PACKAGE = "kotlinx.kover.gradle.plugin.tasks."
