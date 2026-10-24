@@ -356,10 +356,10 @@ class ScriptVocabularyGuardTest {
                 Triple(
                     Regex(
                         "browser/(?:DashboardFilters|DashboardFiltersShots|DashboardParametersPane|DataTable|" +
-                            "MobileShell|PipelineEditorStartMarker|ShellFeel)BrowserTest\\.kt$",
+                            "MobileShell|PipelineEditorStartMarker|ShellFeel|BrowserResourceRow)BrowserTest\\.kt$",
                     ),
                     Regex("transform", setOf(IGNORE_CASE)),
-                    "the drawer/panel CSS transform and the geometry notes",
+                    "the drawer/panel CSS transform, the geometry notes, and the row's never-rotating glyph reading (#701)",
                 ),
                 Triple(
                     Regex("browser/DraftDashboardDependenciesBrowserTest\\.kt$"),
