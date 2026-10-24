@@ -76,6 +76,9 @@ class ScheduleNotificationMailOffE2eTest {
         schedule.getString("data.notifications.delivery.state") shouldBe "off"
         schedule.getString("data.notifications.delivery.reason") shouldBe "disabled"
         val scheduleId = schedule.getString("data.id")
+        // The Postgres is shared with the suites that ran before this one (SharedE2e), so the
+        // global delivery count is read as a before/after pair, never against zero.
+        val deliveriesBefore = scalar(ALL_DELIVERIES)
 
         val run =
             session()
@@ -94,7 +97,11 @@ class ScheduleNotificationMailOffE2eTest {
         detail["deliveries"].size() shouldBe 0
 
         scalar("SELECT count(*) FROM schedule_notification_events WHERE schedule_id = '$scheduleId'") shouldBe "0"
-        scalar("SELECT count(*) FROM schedule_notification_deliveries") shouldBe "0"
+        scalar(
+            "SELECT count(*) FROM schedule_notification_deliveries d JOIN schedule_notification_events e ON e.id = d.event_id " +
+                "WHERE e.schedule_id = '$scheduleId'",
+        ) shouldBe "0"
+        scalar(ALL_DELIVERIES) shouldBe deliveriesBefore
         inbox(OPS) shouldBe 0
     }
 
@@ -249,6 +256,7 @@ class ScheduleNotificationMailOffE2eTest {
         private const val IF_MATCH = "If-Match"
         private const val POLL_BUDGET_SECONDS = 90L
         private const val POLL_MILLIS = 250L
+        private const val ALL_DELIVERIES = "SELECT count(*) FROM schedule_notification_deliveries"
 
         /** Never due during the suite: the run here is a Run now. */
         private const val YEARLY = "0 3 1 1 *"
