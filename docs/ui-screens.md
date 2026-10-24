@@ -1460,6 +1460,9 @@ pipelines twin's own function); an unknown `tab` resolves to Source.
 **The tabs — the floor (#398; six, the pipelines workspace's shape, regrouped only where the
 family differs):**
 
+Keyboard focus on a `.tw-tab` shows one ring: the vendored global `:focus-visible` box-shadow
+is reset on the tab, leaving its own outline (#684).
+
 - **Source** (the default): the VIEWED version's body — the source column for `sql`/`html`
   (R5: a selected version is read-only, with its badge and release provenance; the editable
   textarea carries the WORKING draft only), or the **script face** for `jsonata`/`javascript`
@@ -3100,6 +3103,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-23 | v1.210 | #684 one keyboard ring on template workspace tabs | **§4.7:** `.tw-tab` resets the vendored global focus shadow, retaining its own outline as the only ring. `TemplateWorkspaceBrowserTest` reads both computed properties after keyboard focus. |
 | 2026-10-23 | v1.209 | #623 merge follow-up | §4.1 names `auth.css` as the ceremony geometry stylesheet, completing the outstanding filename clarification. |
 | 2026-10-22 | v1.208 | #681 — renumbered at merge after #623's v1.207 — the provider button's label is the configured display-name, unprefixed | **§4.1:** the login template renders `th:text="${provider.displayName}"` — the "Continue with " prefix is gone, so a deployment whose display-names already read "Sign in with Google" / "Sign in with GitHub" show exactly that, not "Continue with Sign in with …"; the configured text is the whole label and no yml value changes. Guard: `AuthLayoutRenderTest` pins `shouldNotContain "Continue with"` (red at the base, the assertion that can go red on a regression). No route, authorization, template-attribute or config change. |
 | 2026-10-22 | v1.207 | #623 shared auth layout and typography | **§2 principle 4:** the ceremony layout has a header, content main and footer; login uses its story/preview and sign-in composition, while the forced-password-change gate keeps the centred card. The no-shell/no-boost contract remains. **§3.3 item 6:** the illustrative miniature names its `.app-login-*` classes in `auth.css`; the fallback ratios are explicitly 090's historical measurements, not a Noto Sans calibration. **§3.5 item 7:** login uses the shared `.app-eyebrow`, and the faces follow §3.3 (#551 supersedes the 2026-09-08 Inter-only ruling). Documentation reconciliation only; no behavior, route or authorization change. |

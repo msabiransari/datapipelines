@@ -169,6 +169,8 @@
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: -2px;
   border-radius: var(--radius-sm, 6px);
+  /* #684 — reset base.css:60's global shadow so the tab's outline is the only ring. */
+  box-shadow: none;
 }
 
 /* ---- the panes -------------------------------------------------------------------- */
