@@ -4,7 +4,9 @@ import com.microsoft.playwright.Page
 import io.kotest.assertions.assertSoftly
 import io.kotest.assertions.withClue
 import io.kotest.matchers.doubles.shouldBeBetween
+import io.kotest.matchers.doubles.shouldBeGreaterThan
 import io.kotest.matchers.doubles.shouldBeGreaterThanOrEqual
+import io.kotest.matchers.doubles.shouldBeLessThanOrEqual
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
@@ -12,15 +14,18 @@ import java.nio.file.Files
 import java.nio.file.Paths
 
 /**
- * #604 — the record's resource row, MEASURED in the browser (ui-screens §3.4, the
- * application-shell record §5/§7): the browser surface is the overlay token, a row is
- * 12px padding and an 8px radius, the name is its own 12px title that wraps instead of
- * clipping, the badges sit in a trailing metadata line that starts under the title's
- * last line, the icon tops the title's first line, rows sit 4px apart, hover tints the
- * row, and selection is primary ink over the selected surface (never the link blue).
+ * #701 — the resource row re-cut to ONE line (owner ruling 2026-10-24; the record §5/§7
+ * as amended in 4cf4f91d), MEASURED in the browser (ui-screens §3.4): the browser surface
+ * is the overlay token, a row is 12px padding and an 8px radius and ONE text line — the
+ * 12px title truncates with an ellipsis (the control's `title` carries the full canonical
+ * name) and yields width to the badges, which share the line after it and never leave the
+ * rail (#541); the glyph is centred on the line, a folder's following its expansion
+ * (`folder` closed / `folder-open` open) and a leaf's staying `file`, and neither ever
+ * rotates. Rows sit 4px apart, hover tints the row, and selection is primary ink over the
+ * selected surface (never the link blue).
  *
  * Every number is a computed style or a box read off the real page at 1440×900,
- * collected first and printed (`604-measure|…` in the XML's system-out, the handback's
+ * collected first and printed (`701-measure|…` in the XML's system-out, the handback's
  * base/tip table), then asserted softly, so a red names EVERY number that moved rather
  * than the first. Token comparisons resolve the named token through an ATTACHED probe
  * on the same page (a detached one computes to ""), never a hex literal.
@@ -49,6 +54,7 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
           const probe = document.createElement('span');
           probe.style.display = 'none'; document.body.appendChild(probe);
           const tok = (name) => { probe.style.color = 'var(' + name + ')'; return getComputedStyle(probe).color; };
+          const use = icon.querySelector('use');
           const out = {
             surfaceOverlay: tok('--surface-overlay'), surfaceHover: tok('--surface-hover'),
             surfaceSelected: tok('--surface-selected'), textPrimary: tok('--text-primary'),
@@ -59,10 +65,16 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
             padBottom: parseFloat(cs.paddingBottom), padLeft: parseFloat(cs.paddingLeft),
             radius: parseFloat(cs.borderTopLeftRadius),
             titleFontSize: parseFloat(tcs.fontSize), titleLineHeight: parseFloat(tcs.lineHeight),
+            titleTextOverflow: tcs.textOverflow,
             titleHeight: tr.height,
+            titleScrollWidth: title.scrollWidth, titleClientWidth: title.clientWidth,
+            iconHref: use ? use.getAttribute('href') : null, iconTransform: getComputedStyle(icon).transform,
             iconTop: icr.top, titleTop: tr.top, titleBottom: tr.bottom, titleLeft: tr.left,
-            metaTop: mr.top, metaLeft: mr.left,
+            titleRight: tr.right, titleCenterY: tr.top + tr.height / 2, iconCenterY: icr.top + icr.height / 2,
+            metaTop: mr.top, metaLeft: mr.left, metaBottom: mr.bottom, metaRight: mr.right,
             controlHeight: cr.height, controlWidth: cr.width,
+            controlRight: cr.right, controlBottom: cr.bottom,
+            controlTitle: control.getAttribute('title'), labelTitle: title.getAttribute('title'),
             itemTop: itr.top, itemBottom: itr.bottom,
           };
           probe.remove();
@@ -96,13 +108,13 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
     }
 
     private fun printReadings(case: String) {
-        readings.forEach { (label, value) -> println("604-measure|$case|$label|$value") }
+        readings.forEach { (label, value) -> println("701-measure|$case|$label|$value") }
     }
 
     private fun shot(name: String) {
         val dir = Paths.get("build", "browser-evidence")
         Files.createDirectories(dir)
-        page.screenshot(Page.ScreenshotOptions().setPath(dir.resolve("604-$name.png")).setFullPage(false))
+        page.screenshot(Page.ScreenshotOptions().setPath(dir.resolve("701-$name.png")).setFullPage(false))
     }
 
     private fun num(label: String): Double = (readings[label] as Number).toDouble()
@@ -159,8 +171,10 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
                           const p = rect(browser), scroll = tree.querySelector('.dp-tree-scroll');
                           const badges = [...tree.querySelectorAll('a[title="' + path + '"] .ds-badge:not([hidden])')]
                             .map(el => ({text:el.textContent, ...rect(el)}));
+                          const title = tree.querySelector('a[title="' + path + '"] .dp-tree-title');
                           return {panel:p, badges, panelScroll:browser.scrollWidth, panelClient:browser.clientWidth,
                             treeScroll:scroll.scrollWidth, treeClient:scroll.clientWidth,
+                            titleScrollWidth:title.scrollWidth, titleClientWidth:title.clientWidth,
                             inside:badges.length > 0 && badges.every(r => r.left >= p.left - 0.5 && r.right <= p.right + 0.5
                               && r.top >= p.top - 0.5 && r.bottom <= p.bottom + 0.5),
                             noOverflow:browser.scrollWidth <= browser.clientWidth && scroll.scrollWidth <= scroll.clientWidth};
@@ -171,17 +185,25 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
                 assertSoftly {
                     withClue("$theme $path badge bounds: $metrics") { metrics["inside"] shouldBe true }
                     withClue("$theme $path scrollWidth <= clientWidth: $metrics") { metrics["noOverflow"] shouldBe true }
+                    // #701: the long name truncates instead of wrapping — the title's box is one line
+                    withClue("$theme $path title truncates: $metrics") {
+                        (metrics["titleScrollWidth"] as Number).toDouble() shouldBeGreaterThan
+                            (metrics["titleClientWidth"] as Number).toDouble()
+                    }
                 }
             }
             Files.createDirectories(Paths.get("build/browser-evidence"))
             page.screenshot(Page.ScreenshotOptions().setPath(Paths.get("build/browser-evidence/541-badges-$theme.png")))
+            page.screenshot(Page.ScreenshotOptions().setPath(Paths.get("build/browser-evidence/701-badges-$theme.png")))
         }
         ensureTheme(back)
     }
 
-    /** The resting state: geometry, the overlay surface, hover on a sibling, the long name wraps. */
+    /** The resting state (#701): one line per row — a truncating title, its badges beside
+     *  it, the glyph centred, 12px padding, an 8px radius, the 4px rhythm, the overlay
+     *  surface, hover on a sibling, the folder glyph following its expansion. */
     @Test
-    fun `a row is 12px padding, 8px radius, a wrapping 12px title over a badge line, 4px from its neighbour, on the overlay surface`() {
+    fun `a row is one line - a 12px title truncating with an ellipsis, its badges on the same line, a centred glyph, 12px padding, 8px radius, 4px between rows, on the overlay surface`() {
         startTrace()
         readyTree()
         seedPipeline("row/alpha")
@@ -189,6 +211,13 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
         seedPipeline("row/" + "x".repeat(64))
         openTree()
         page.waitForSelector(folder("row"))
+
+        // the collapsed folder shows the CLOSED folder glyph before anything opens
+        record("row.folder.collapsed", rowMetrics("row"))
+        withClue("row.folder.collapsed.iconHref") {
+            (readings["row.folder.collapsed.iconHref"] as String).endsWith("#folder") shouldBe true
+        }
+
         expand("row")
         page.waitForSelector(leaf("row/alpha") + " .dp-tree-version:not([hidden])")
 
@@ -205,6 +234,7 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
         page.mouse().move(5.0, 500.0)
 
         printReadings("rest")
+        val longPath = "row/" + "x".repeat(64)
         assertSoftly {
             matchesToken("surface.browserBg", "surface.surfaceOverlay")
             isTransparent("row.alpha.controlBg")
@@ -216,16 +246,42 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
             near("row.alpha.radius", 8.0, 0.05)
             near("row.alpha.titleFontSize", 12.0, 0.05)
             near("row.alpha.titleLineHeight", 18.6, 0.1)
-            near("row.alpha.iconTop", num("row.alpha.titleTop"), 1.0)
-            near("row.alpha.metaTop", num("row.alpha.titleBottom") + 8.0, 1.0)
-            near("row.alpha.metaLeft", num("row.alpha.titleLeft"), 1.0)
+            // ONE line: every row's title is a single 18.6px line, folders and leaves
+            // alike, and the control is exactly padding + that line + padding
+            for (row in listOf("row.alpha", "row.beta", "row.long", "row.folder")) {
+                near("$row.titleHeight", num("$row.titleLineHeight"), 0.5)
+                near("$row.controlHeight", num("$row.padTop") + num("$row.titleLineHeight") + num("$row.padBottom"), 1.0)
+            }
+            // the glyph is vertically centred on the text line and never rotated
+            for (row in listOf("row.alpha", "row.long", "row.folder")) {
+                withClue("$row glyph centred on the title line") {
+                    num("$row.iconCenterY").shouldBeBetween(num("$row.titleCenterY") - 1.0, num("$row.titleCenterY") + 1.0, 0.0)
+                }
+                withClue("$row icon transform") { readings["$row.iconTransform"] shouldBe "none" }
+            }
+            // the badges share the title's line and stay inside the control's padding box
+            for (row in listOf("row.alpha", "row.beta")) {
+                atLeast("$row.metaTop", num("$row.titleTop") - 1.0)
+                withClue("$row.metaBottom") {
+                    num("$row.metaBottom").shouldBeLessThanOrEqual(num("$row.controlBottom") - num("$row.padBottom") + 1.0)
+                }
+                withClue("$row.metaLeft") { num("$row.metaLeft").shouldBeGreaterThanOrEqual(num("$row.titleRight") - 0.5) }
+                withClue("$row.metaRight") {
+                    num("$row.metaRight").shouldBeLessThanOrEqual(num("$row.controlRight") - num("$row.padRight") + 0.5)
+                }
+            }
+            // the long name truncates with an ellipsis; the tooltip carries the full path
+            withClue("row.long.titleScrollWidth > titleClientWidth") {
+                num("row.long.titleScrollWidth").shouldBeGreaterThan(num("row.long.titleClientWidth"))
+            }
+            withClue("row.long.titleTextOverflow") { readings["row.long.titleTextOverflow"] shouldBe "ellipsis" }
+            withClue("row.long.controlTitle") { readings["row.long.controlTitle"] shouldBe longPath }
+            withClue("row.long.labelTitle") { readings["row.long.labelTitle"] shouldBe longPath }
+            // glyphs: the expanded folder is folder-open, a leaf stays file
+            withClue("row.folder.iconHref") { (readings["row.folder.iconHref"] as String).endsWith("#folder-open") shouldBe true }
+            withClue("row.alpha.iconHref") { (readings["row.alpha.iconHref"] as String).endsWith("#file") shouldBe true }
             near("row.beta.itemTop", num("row.alpha.itemBottom") + 4.0, 0.5)
             matchesToken("row.beta.hover.controlBg", "row.beta.surfaceHover")
-            atLeast("row.long.titleHeight", 2 * num("row.long.titleLineHeight") - 0.5)
-            atLeast("row.long.controlHeight", num("row.long.titleHeight") + 24.0 - 0.5)
-            // a badge-less row (the folder) carries no metadata line at all — its control is
-            // exactly padding + title + padding, with no dead space beneath the title
-            near("row.folder.controlHeight", num("row.folder.padTop") + num("row.folder.titleHeight") + num("row.folder.padBottom"), 1.0)
         }
     }
 
