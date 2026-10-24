@@ -38,6 +38,42 @@ duckdb:
   # (DATAPIPELINES_DUCKDB_MEMORY_LIMIT). An invalid value fails the pod's boot by design.
   memoryLimit: ""
 
+# configuration.md §3.28 — the nine JavaScript runtime keys (#8 lane 8b, #688). All NINE empty
+# by default, and an empty value renders NO env entry — the same rule as the duckdb block above.
+# The image carries the isolate and sets its own directory (the Dockerfile's
+# DATAPIPELINES_SCRIPT_JS_ISOLATE_DIR ENV, one entry of the image's launcher-path list), so an
+# empty isolateDir inherits that value, exactly like an empty extensionDirectory inherits the
+# image's DuckDB directory; a literal "" rendered into env would OVERRIDE it and fail the
+# startup agreement (the directory must be one entry of the launcher's loader path and contain
+# js-isolate.jar, configuration.md §3.28). The chart refuses an isolateDir outside the image's
+# two launcher-path entries at render time. The remaining eight keys are operator sizing; the
+# app, not the chart, validates the numbers (startup refuses an out-of-bound value by name).
+# When isolateMemoryMb is left empty the app derives it: pool-size × maxHeapMb + 256 MiB
+# (1280 at the 4 × 256 defaults).
+script:
+  js:
+    # Absolute directory of the platform isolate (DATAPIPELINES_SCRIPT_JS_ISOLATE_DIR).
+    # Empty: the image's /opt/graaljs stays in force. Non-empty: must be /opt/graaljs or
+    # /app/lib (the image's launcher-path entries) — anything else is refused at render.
+    isolateDir: ""
+    # Per-Context soft heap ceiling in MiB (DATAPIPELINES_SCRIPT_JS_MAX_HEAP_MB).
+    maxHeapMb: ""
+    # Shared-isolate byte ceiling in MiB (DATAPIPELINES_SCRIPT_JS_ISOLATE_MEMORY_MB).
+    # Empty: the app derives pool-size × maxHeapMb + 256 MiB.
+    isolateMemoryMb: ""
+    # Hard guest-statement ceiling (DATAPIPELINES_SCRIPT_JS_MAX_STATEMENTS).
+    maxStatements: ""
+    # Parse-time nesting ceiling (DATAPIPELINES_SCRIPT_JS_MAX_AST_DEPTH).
+    maxAstDepth: ""
+    # Guest stack-frame ceiling (DATAPIPELINES_SCRIPT_JS_MAX_STACK_FRAMES).
+    maxStackFrames: ""
+    # Per-console-stream output ceiling in bytes (DATAPIPELINES_SCRIPT_JS_MAX_OUTPUT_BYTES).
+    maxOutputBytes: ""
+    # Serialized result budget in MiB (DATAPIPELINES_SCRIPT_JS_MAX_RESULT_MB).
+    maxResultMb: ""
+    # Serialized input budget in MiB (DATAPIPELINES_SCRIPT_JS_MAX_INPUT_MB).
+    maxInputMb: ""
+
 service:
   type: ClusterIP
   port: 8080
@@ -54,6 +90,18 @@ resources: {}
 # requests/limits in resources when needed.
 temporaryStorage:
   sizeLimit: ""
+
+# Optional JDBC driver drop-in at /app/lib (deployment.md §3.5/§9).
+# Populate only through a trusted image, init container or CI-written ConfigMap,
+# never through the app. The app's mount is always read-only. Supply ONE volume
+# source verbatim; a PVC source must also set readOnly: true. For example:
+# source:
+#   persistentVolumeClaim:
+#     claimName: trusted-drivers
+#     readOnly: true
+libVolume:
+  enabled: false
+  source: {}
 
 autoscaling:
   enabled: true

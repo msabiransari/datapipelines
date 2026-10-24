@@ -5,7 +5,6 @@ import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
-import java.nio.file.Path
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference
 
@@ -45,33 +44,17 @@ import java.util.concurrent.atomic.AtomicReference
  * module's `test`. On CI run 36365034218 (2026-09-28, a 2-vCPU runner) an `OutOfMemoryError`
  * reached the test thread outside the old guard — at the evidence string of the OOM branch
  * itself — JUnit rethrew it (the one error it treats as unrecoverable), the Gradle test worker
- * died, and the module's 62 other tests lost their verdict with it. Two rules keep a heap event
- * a ROW rather than a dead worker:
- *
- *  - everything after the bomb — the classification, the evidence strings, the heap delta, the
- *    row — runs inside one `OutOfMemoryError` guard ([measure]); an OOM that reaches the test
- *    thread there is recorded UNBOUNDED once the heap has drained, and nothing is allocated
- *    before it has;
- *  - every case starts from a `System.gc()` and a headroom check: a case that starts with more
- *    than [MAX_HELD_AT_START_MB] of the heap still held is recorded SKIPPED with the numbers and
- *    fails the prediction check by name — an environment verdict, never a silent pass.
+ * died, and the module's 62 other tests lost their verdict with it. The two rules that keep a
+ * heap event a ROW rather than a dead worker — the `OutOfMemoryError` guard around everything
+ * after the bomb, and the headroom check at every case's start — live in [BreachHarness], which
+ * the JavaScript suite shares (#8 lane 8a).
  */
 class JsonataBreachTest {
-    private enum class Outcome { REFUSED, BOUNDED, UNBOUNDED, SKIPPED }
-
-    private data class Row(
-        val case: String,
-        val outcome: Outcome,
-        val evidence: String,
-        val secondsLived: Long,
-        val heapDeltaMb: Long,
-    )
-
     /** Body, the outcome §4.5's table predicts, and what "completed" would mean. */
     private data class Case(
         val name: String,
         val body: String,
-        val predicted: Outcome,
+        val predicted: BreachOutcome,
         val completedNote: String,
     )
 
@@ -83,44 +66,44 @@ class JsonataBreachTest {
                 // inside 512m (measured). Three ranges (~600 MB) is the same operator
                 // with its 1e7 cap as the only bound actually exhausting the JVM.
                 "{\"a\": [1..10000000], \"b\": [1..10000000], \"c\": [1..10000000]}",
-                Outcome.UNBOUNDED,
+                BreachOutcome.UNBOUNDED,
                 "completed (no bound fired) - miscalibrated case",
             ),
             Case(
                 "pad-bomb",
                 "\$pad(\"x\", 100000000)",
-                Outcome.UNBOUNDED,
+                BreachOutcome.UNBOUNDED,
                 "completed (no bound fired) - miscalibrated case",
             ),
             Case(
                 "join-bomb",
                 "\$join([1..10000000], \",\")",
-                Outcome.REFUSED,
+                BreachOutcome.REFUSED,
                 "completed (no bound fired) - miscalibrated case",
             ),
             Case(
                 "regex-bomb",
                 "\$match(\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!\", /^(a+)+\$/)",
-                Outcome.BOUNDED,
+                BreachOutcome.BOUNDED,
                 "resistant: java.util.regex fails fast on the record's pattern (no " +
                     "catastrophic backtracking measured at 32 chars); no bound fired",
             ),
             Case(
                 "deep-recursion",
                 "(\$f := function(\$x){ \$f(\$x + 1) }; \$f(0))",
-                Outcome.BOUNDED,
+                BreachOutcome.BOUNDED,
                 "completed (no bound fired) - miscalibrated case",
             ),
             Case(
                 "eval-nesting",
                 "\$eval(\"\$pad(\\\"x\\\", 100000000)\")",
-                Outcome.UNBOUNDED,
+                BreachOutcome.UNBOUNDED,
                 "completed (no bound fired) - miscalibrated case",
             ),
             Case(
                 "now",
                 "\$now()",
-                Outcome.REFUSED,
+                BreachOutcome.REFUSED,
                 "completed (no bound fired) - miscalibrated case",
             ),
             // #272: the hooks ARE frame variables the library looks up through the chain, so a
@@ -132,7 +115,7 @@ class JsonataBreachTest {
                 "hook-rebind",
                 "( \$__evaluate_entry := \$nonexistent; \$__evaluate_exit := \$nonexistent; " +
                     "\$f := function(\$x){ \$f(\$x + 1) }; \$f(0) )",
-                Outcome.REFUSED,
+                BreachOutcome.REFUSED,
                 "completed (no bound fired) - miscalibrated case",
             ),
             // The same rebind through `$eval`, which parses at evaluate time and binds in the
@@ -142,22 +125,17 @@ class JsonataBreachTest {
                 "hook-rebind-eval",
                 "( \$eval(\"\$__evaluate_entry := \$nonexistent\"); \$eval(\"\$__evaluate_exit := \$nonexistent\"); " +
                     "\$f := function(\$x){ \$f(\$x + 1) }; \$f(0) )",
-                Outcome.REFUSED,
+                BreachOutcome.REFUSED,
                 "completed (no bound fired) - miscalibrated case",
             ),
         )
 
     @Test
     fun `every bomb's measured outcome matches the prediction, and the report lands`() {
-        // The corpus is calibrated for a 512m JVM: a larger heap lets the big cases complete,
-        // a smaller one blows the small ones — either way the table would lie. Refuse to measure.
-        val maxHeapMb = Runtime.getRuntime().maxMemory() / MB
-        withClue("the breach suite runs in breachSuite's own ${HEAP_MB}m JVM; this JVM's max heap is $maxHeapMb MB") {
-            (maxHeapMb in HEAP_FLOOR_MB..HEAP_MB) shouldBe true
-        }
+        BreachHarness.requireCalibratedHeap()
 
-        val rows = cases.map { measure(it) }
-        val report = writeReport(rows)
+        val rows = cases.map { case -> BreachHarness.measure(case.name) { heapBefore, start -> classify(case, heapBefore, start) } }
+        val report = BreachHarness.writeReport("jsonata-breach.md", "JSONata breach suite — measured outcomes (lane 7a)", rows)
 
         // The prediction check — a measured outcome that differs from the table
         // above FAILS the suite and forces the docs (and these predictions) to
@@ -170,7 +148,7 @@ class JsonataBreachTest {
 
         // Non-vacuity: the corpus is the record's seven plus #272's two rebinds, every row materialised.
         rows.size shouldBe 9
-        Files.readAllLines(report).size shouldBe (rows.size + 4)
+        Files.readAllLines(report).size shouldBe (rows.size + BreachHarness.REPORT_HEADER_LINES)
     }
 
     /**
@@ -190,53 +168,18 @@ class JsonataBreachTest {
      * The heap blowout on the TEST thread (#289) is the guard around all of it: whatever the
      * classification or the bookkeeping allocates after the bomb — the evidence strings, the
      * heap delta, the row — an `OutOfMemoryError` there is the case's heap event, recorded
-     * UNBOUNDED after [awaitHeadroom]. No case starts with more than [MAX_HELD_AT_START_MB] held.
+     * UNBOUNDED once [BreachHarness.measure] has drained the heap. No case starts with more than
+     * [BreachHarness.MAX_HELD_AT_START_MB] held.
      */
-    private fun measure(case: Case): Row {
-        val heapBefore = usedHeapMb()
-        val headroom = Runtime.getRuntime().maxMemory() / MB - heapBefore
-        // The start state, in the XML's system-out: a surprising row on a runner is read against it.
-        println("breach case ${case.name}: starts with $headroom MB free after gc ($heapBefore MB in use)")
-        if (heapBefore > MAX_HELD_AT_START_MB) {
-            return Row(
-                case.name,
-                Outcome.SKIPPED,
-                "no headroom: $heapBefore MB still held after gc at the case's start (at most $MAX_HELD_AT_START_MB; " +
-                    "$headroom MB free) - not measured (an environment verdict; re-run before reading it as a bound)",
-                0,
-                0,
-            )
-        }
-        val start = System.nanoTime()
-        return try {
-            classify(case, heapBefore, start)
-        } catch (
-            @Suppress("SwallowedException") err: OutOfMemoryError,
-        ) {
-            // The heap blew on THIS thread after the bomb: the heap event is the outcome. Nothing
-            // is allocated until the heap has drained (the old measure died at exactly this point,
-            // building its evidence string); the row's numbers are read after it has.
-            awaitHeadroom()
-            Row(
-                case.name,
-                Outcome.UNBOUNDED,
-                TEST_THREAD_BLOWOUT,
-                (System.nanoTime() - start) / NANOS_PER_SECOND,
-                usedHeapMb() - heapBefore,
-            )
-        }
-    }
-
-    /** The bomb and everything after it — [measure]'s guarded body. */
     private fun classify(
         case: Case,
         heapBefore: Long,
         start: Long,
-    ): Row {
+    ): BreachRow {
         val pool = ScriptEvaluationPool(1, 1, GRACE, ScriptEvaluationPool.SYSTEM)
         val limits = EvaluationLimits(Duration.ofSeconds(2), 100)
         var evidence: String
-        var outcome: Outcome
+        var outcome: BreachOutcome
         var result: Any? = null
         val threadHeapBlowout = AtomicReference<OutOfMemoryError?>(null)
 
@@ -253,7 +196,7 @@ class JsonataBreachTest {
                         throw err
                     }
                 }
-            outcome = Outcome.BOUNDED
+            outcome = BreachOutcome.BOUNDED
             evidence = case.completedNote
         } catch (
             @Suppress("SwallowedException")
@@ -265,119 +208,37 @@ class JsonataBreachTest {
             Thread.sleep(GRACE.toMillis())
             val blowout = threadHeapBlowout.get()
             if (blowout != null) {
-                outcome = Outcome.UNBOUNDED
+                outcome = BreachOutcome.UNBOUNDED
                 evidence =
                     "ScriptTimeoutException at ${limits.wallClock.toMillis()} ms; the abandoned thread then " +
                     "died of OutOfMemoryError: ${blowout.message?.take(40)}"
             } else if (pool.abandonedThreadsAlive() > 0) {
-                outcome = Outcome.UNBOUNDED
+                outcome = BreachOutcome.UNBOUNDED
                 evidence =
                     "ScriptTimeoutException at ${limits.wallClock.toMillis()} ms; thread still alive at the grace"
             } else {
-                outcome = Outcome.BOUNDED
+                outcome = BreachOutcome.BOUNDED
                 evidence = "ScriptTimeoutException at ${limits.wallClock.toMillis()} ms; thread ended inside the grace"
             }
         } catch (
             @Suppress("SwallowedException") err: OutOfMemoryError,
         ) {
             // its message is the evidence
-            outcome = Outcome.UNBOUNDED
+            outcome = BreachOutcome.UNBOUNDED
             evidence = "OutOfMemoryError: ${err.message?.take(60)}"
         } catch (err: ScriptingException) {
-            outcome = Outcome.REFUSED
+            outcome = BreachOutcome.REFUSED
             evidence = "${err.javaClass.simpleName}(${err.code}): ${err.message?.take(60)}"
         }
 
-        val seconds = (System.nanoTime() - start) / NANOS_PER_SECOND
-        val heapDelta = usedHeapMb() - heapBefore
+        val seconds = (System.nanoTime() - start) / BreachHarness.NANOS_PER_SECOND
+        val heapDelta = BreachHarness.usedHeapMb() - heapBefore
         result = null
-        return Row(case.name, outcome, evidence, seconds, heapDelta)
-    }
-
-    private fun writeReport(rows: List<Row>): Path {
-        val report = repoBuildReports().resolve("jsonata-breach.md")
-        val lines =
-            mutableListOf(
-                "# JSONata breach suite — measured outcomes (lane 7a)",
-                "",
-                "| case | outcome | code-or-exception | seconds-lived | heap-delta-mb |",
-                "|---|---|---|---|---|",
-            )
-        rows.forEach { row ->
-            lines +=
-                "| ${row.case} | ${row.outcome} | ${row.evidence.replace('|', '/')} | ${row.secondsLived} | ${row.heapDeltaMb} |"
-        }
-        Files.createDirectories(report.parent)
-        Files.write(report, lines)
-        return report
-    }
-
-    @Suppress("ExplicitGarbageCollectionCall") // the heap delta IS the measurement; gc is the only way to read it
-    private fun usedHeapMb(): Long {
-        val runtime = Runtime.getRuntime()
-        System.gc()
-        Thread.sleep(50)
-        System.gc()
-        return (runtime.totalMemory() - runtime.freeMemory()) / MB
-    }
-
-    /**
-     * Waits until no more than [MAX_HELD_AT_START_MB] is held again — at most [DRAIN_NANOS], since
-     * a runaway thread may still hold the heap — WITHOUT allocating: it runs right after an
-     * `OutOfMemoryError` on this thread, where one more allocation is one more OOM. Only natives
-     * and arithmetic here.
-     */
-    @Suppress("ExplicitGarbageCollectionCall") // draining the heap is the point; gc is the only lever
-    private fun awaitHeadroom() {
-        val runtime = Runtime.getRuntime()
-        val deadline = System.nanoTime() + DRAIN_NANOS
-        while (System.nanoTime() < deadline) {
-            System.gc()
-            if (runtime.totalMemory() - runtime.freeMemory() <= MAX_HELD_AT_START_MB * MB) return
-            Thread.sleep(DRAIN_POLL_MS)
-        }
-    }
-
-    /** The repo root is the nearest ancestor holding `settings.gradle.kts` (the house locator). */
-    private fun repoBuildReports(): Path {
-        var dir = java.io.File(".").absoluteFile
-        while (!java.io.File(dir, "settings.gradle.kts").isFile) {
-            dir = dir.parentFile ?: error("settings.gradle.kts not found above ${java.io.File(".").absolutePath}")
-        }
-        return java.io.File(dir, "modules/scripting/build/reports").toPath()
+        return BreachRow(case.name, outcome, evidence, seconds, heapDelta)
     }
 
     private companion object {
         /** A.6's grace for the 1/1 pool: 5 seconds. */
         val GRACE: Duration = Duration.ofSeconds(5)
-
-        const val MB = 1024L * 1024L
-
-        /** The heap the corpus is calibrated for — breachSuite's `maxHeapSize` (the module's build file). */
-        const val HEAP_MB = 512L
-
-        /** `-Xmx512m` reads as 512 MB on G1 and a survivor space less on the serial/parallel collectors. */
-        const val HEAP_FLOOR_MB = HEAP_MB * 7 / 8
-
-        /**
-         * The most a case may start with still held (after gc) and be measured. The corpus is
-         * calibrated on a JVM that starts every case with nearly all of its 512m free: measured
-         * 2026-09-28, 8–9 MB in use at every case's start (503–504 MB free). Past this a bomb's
-         * outcome says more about what an earlier case left behind than about the bomb. An
-         * ABSOLUTE bound on the heap still held, not a share of the max: the check in [measure]
-         * compares the used heap with this constant and never reads `maxMemory` (that is read only
-         * for the logged free figure), so a collector that reports a smaller `maxMemory` cannot trip
-         * it. The max itself is pinned separately, by the test's [HEAP_FLOOR_MB]..[HEAP_MB] assertion.
-         */
-        const val MAX_HELD_AT_START_MB = 128L
-
-        /** How long [awaitHeadroom] waits for a blown heap to drain before the row is written anyway (30 s). */
-        const val DRAIN_NANOS = 30_000_000_000L
-        const val DRAIN_POLL_MS = 100L
-        const val NANOS_PER_SECOND = 1_000_000_000L
-
-        /** A constant, so recording the test thread's blowout allocates no evidence string. */
-        const val TEST_THREAD_BLOWOUT =
-            "OutOfMemoryError on the test thread after the bomb (classification or bookkeeping); recorded once the heap drained"
     }
 }

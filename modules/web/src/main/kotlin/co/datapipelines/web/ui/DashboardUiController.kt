@@ -31,7 +31,7 @@ class DashboardUiController(
     private val themeResolver: ThemeResolver,
     /** 178 — the promoter lens: the pages render the caller's view. */
     private val lens: PromoterLens,
-) {
+) : ShellPage {
     /**
      * The flat catalog (#400, the `/pipelines` catalog's shape): every dashboard the caller
      * may read — or the matches of `q` — one row each, a row linking the workspace, paged at

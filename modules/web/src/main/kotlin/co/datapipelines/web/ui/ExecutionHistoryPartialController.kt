@@ -19,7 +19,7 @@ import java.util.UUID
 @RequestMapping("/partials")
 class ExecutionHistoryPartialController(
     private val browse: ExecutionHistoryBrowseModel,
-) {
+) : ShellPage {
     @GetMapping("/executions")
     @RequiredScope(Permission.EXECUTION_READ)
     @Suppress("LongParameterList") // the filter bar's fields, one parameter each (the §5 idiom)

@@ -54,7 +54,7 @@ class WorkspacesUiController(
     private val jwtService: JwtService,
     private val authProperties: AuthProperties,
     private val themeResolver: ThemeResolver,
-) {
+) : ShellPage {
     @GetMapping("/workspaces")
     @RequiredScope(Permission.WORKSPACE_READ)
     fun screen(

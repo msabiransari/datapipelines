@@ -15,7 +15,11 @@ import java.io.File
  * authority that promises it) and deployment.md's drop-in paragraph (the operator's recipe).
  *
  * The spec promised `ENV LOADER_PATH=lib` for months while the image set nothing — the drift this
- * guard exists for. The value is ABSOLUTE on purpose: `PropertiesLauncher` resolves a relative
+ * guard exists for. Since #8 lane 8a the value is a LIST, `/app/lib,/opt/graaljs`: the drop-in
+ * directory, then the JavaScript isolate's (module-structure §5.15). One list in one ENV, never a
+ * `-Dloader.path` beside it (owner ruling 2026-10-21): `PropertiesLauncher` reads the system
+ * property before the environment, so a `-Dloader.path` for the isolate would silently drop the
+ * drop-in (measured in lane 8a). Each entry is ABSOLUTE on purpose: `PropertiesLauncher` resolves a relative
  * `loader.path` entry against `loader.home`, which defaults to `${user.dir}`, and the image sets
  * no `WORKDIR`, so `lib` would put `/lib`, the OS library directory, on the classpath.
  *
@@ -23,7 +27,9 @@ import java.io.File
  * code-execution-by-file-drop, and `LOADER_PATH` comes from the image, never from the deployment
  * environment): the directory is created and made `0555` before the image's `USER` line, so it is
  * root-owned and the app user cannot write it; and no compose file or chart template names
- * `LOADER_PATH`, so a deployment cannot point the launcher somewhere writable.
+ * `LOADER_PATH` outside the chart's two render-time refusals (the extraEnv guard, and #688's
+ * script.js.isolateDir list check whose message names the image's launcher-path list), so a
+ * deployment cannot point the launcher somewhere writable.
  *
  * Textual, the [HelmDuckDbValuesSpecDriftTest] shape: it reads the files, it does not build the
  * image. The built image's own proof (printenv, `touch` refused, the loader's debug classpath)
@@ -33,10 +39,13 @@ class ImageLoaderPathSpecDriftTest {
     private val dockerfile: List<String> by lazy { repoFile("Dockerfile").readLines() }
 
     @Test
-    fun `the Dockerfile sets LOADER_PATH exactly once to the absolute drop-in directory`() {
+    fun `the Dockerfile sets LOADER_PATH exactly once to the absolute drop-in and isolate directories`() {
         val values = dockerfile.mapNotNull { ENV_LINE.matchEntire(it.trim())?.groupValues?.get(1) }
 
-        withClue("Dockerfile `ENV LOADER_PATH=` lines") { values shouldContainExactly listOf(EXPECTED) }
+        withClue("Dockerfile `ENV LOADER_PATH=` lines") { values shouldContainExactly listOf(IMAGE_LOADER_PATH) }
+        withClue("no instruction passes a `loader.path` system property, which would override the ENV") {
+            dockerfile.filter { !it.trim().startsWith("#") && it.contains("-Dloader.path") }.shouldBeEmpty()
+        }
     }
 
     @Test
@@ -63,7 +72,7 @@ class ImageLoaderPathSpecDriftTest {
 
         for ((where, pattern) in SPEC_SITES) {
             val values = pattern.findAll(spec).map { it.groupValues[1] }.toList()
-            withClue("module-structure.md $where") { values shouldContainExactly listOf(EXPECTED) }
+            withClue("module-structure.md $where") { values shouldContainExactly listOf(IMAGE_LOADER_PATH) }
         }
     }
 
@@ -74,7 +83,7 @@ class ImageLoaderPathSpecDriftTest {
 
         withClue("deployment.md's one `$DROP_IN_PARAGRAPH` paragraph") { paragraph shouldHaveSize 1 }
         withClue("it names the mount point") { paragraph.single() shouldContain "`$EXPECTED/`" }
-        withClue("it quotes the image's ENV") { paragraph.single() shouldContain "`ENV LOADER_PATH=$EXPECTED`" }
+        withClue("it quotes the image's ENV") { paragraph.single() shouldContain "`ENV LOADER_PATH=$IMAGE_LOADER_PATH`" }
     }
 
     @Test
@@ -85,9 +94,12 @@ class ImageLoaderPathSpecDriftTest {
                 File(root, CHART_DIR).walkTopDown().filter { it.isFile }.toList()
         val offenders =
             deployFiles.flatMap { file ->
-                file.readLines().withIndex().filter { LOADER_PATH_TOKEN.containsMatchIn(it.value) }.map {
-                    "${file.relativeTo(root)}:${it.index + 1}"
-                }
+                file
+                    .readLines()
+                    .withIndex()
+                    .filter { LOADER_PATH_TOKEN.containsMatchIn(it.value) }
+                    .filterNot { file.relativeTo(root).path == TEMPLATE && ALLOWED_REFUSALS.any { r -> r.matches(it.value.trim()) } }
+                    .map { "${file.relativeTo(root)}:${it.index + 1}" }
             }
 
         // The non-vacuity floor: the scan must have read the shipped compose file and the chart's
@@ -95,8 +107,13 @@ class ImageLoaderPathSpecDriftTest {
         withClue("files scanned") {
             deployFiles.map { it.relativeTo(root).path }.containsAll(SCAN_FLOOR) shouldBe true
         }
-        withClue("deploy files naming LOADER_PATH (deployment.md §9: never from the environment)") {
+        withClue("deploy files naming LOADER_PATH (deployment.md §9; only the exact template refusals are admitted)") {
             offenders.shouldBeEmpty()
+        }
+        for ((name, refusal) in REFUSAL_NAMES.zip(ALLOWED_REFUSALS)) {
+            withClue("the template's exact $name refusal must exist exactly once") {
+                repoFile(TEMPLATE).readLines().count { refusal.matches(it.trim()) } shouldBe 1
+            }
         }
     }
 
@@ -120,7 +137,11 @@ class ImageLoaderPathSpecDriftTest {
 
     private companion object {
         const val EXPECTED = "/app/lib"
+
+        /** The image's whole `LOADER_PATH`: the drop-in directory, then the JavaScript isolate's (#8). */
+        const val IMAGE_LOADER_PATH = "$EXPECTED,/opt/graaljs"
         const val CHART_DIR = "deploy/helm/datapipelines"
+        const val TEMPLATE = "$CHART_DIR/templates/deployment.yaml"
         const val CHANGE_LOG_HEADING = "## Appendix A: Change Log"
         const val DROP_IN_PARAGRAPH = "**The `lib/` drop-in.**"
 
@@ -140,6 +161,31 @@ class ImageLoaderPathSpecDriftTest {
 
         val COMPOSE_FILE = Regex("""compose(\..+)?\.ya?ml""")
         val LOADER_PATH_TOKEN = Regex("""\bLOADER_PATH\b|loader\.path""")
+
+        /**
+         * The only deploy-file lines allowed to name `LOADER_PATH`: the chart's extraEnv refusal
+         * and — since #688 — the script.js.isolateDir render refusal, whose message names the
+         * image's launcher-path list it must agree with. Each is asserted to exist exactly once.
+         */
+        val ALLOWED_REFUSALS =
+            listOf(
+                Regex
+                    .escape(
+                        """{{- range ${'$'}name := keys .Values.extraEnv }}""" +
+                            """{{ if eq (upper (replace "." "_" ${'$'}name)) "LOADER_PATH" }}""" +
+                            """{{ fail "LOADER_PATH comes from the image, never from extraEnv.LOADER_PATH (deployment.md §9)" }}""" +
+                            """{{ end }}{{- end }}""",
+                    ).toRegex(),
+                Regex
+                    .escape(
+                        """{{- if and (ne .Values.script.js.isolateDir nil) """ +
+                            """(ne (toString .Values.script.js.isolateDir) "") """ +
+                            """(not (has .Values.script.js.isolateDir (list "/opt/graaljs" "/app/lib"))) }}""" +
+                            """{{ fail "script.js.isolateDir must be one of the image's LOADER_PATH entries """ +
+                            """(/app/lib,/opt/graaljs) and contain js-isolate.jar (deployment.md §6.4)" }}{{- end }}""",
+                    ).toRegex(),
+            )
+        val REFUSAL_NAMES = listOf("extraEnv.LOADER_PATH", "script.js.isolateDir")
         val SCAN_FLOOR = listOf("deploy/compose.yml", "$CHART_DIR/templates/deployment.yaml", "$CHART_DIR/values.yaml")
     }
 }

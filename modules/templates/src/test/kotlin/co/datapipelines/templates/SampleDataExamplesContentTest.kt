@@ -160,7 +160,12 @@ class SampleDataExamplesContentTest {
     private fun validateExamples(doc: JsonNode): List<String> {
         val problems = mutableListOf<String>()
         val registry = InMemoryTemplateRegistry()
-        val templateValidator = TemplateValidator(LibraryResolver { registry })
+        val templateValidator =
+            TemplateValidator(
+                scriptEngines =
+                    mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
+                libraryResolver = LibraryResolver { registry },
+            )
 
         doc.path("templates").forEachIndexed { index, entry ->
             problems += validateTemplateEntry(entry, index, templateValidator, registry)

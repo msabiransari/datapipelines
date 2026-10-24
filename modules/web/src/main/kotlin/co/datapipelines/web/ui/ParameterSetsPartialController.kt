@@ -34,7 +34,7 @@ class ParameterSetsPartialController(
     private val browse: ParameterSetsBrowseModel,
     /** 178 — the promoter lens: every fragment here renders the caller's view. */
     private val lens: PromoterLens,
-) {
+) : ShellPage {
     @GetMapping("/partials/parameter-sets/tree")
     @RequiredScope(Permission.PARAMETER_SET_READ)
     fun catalog(

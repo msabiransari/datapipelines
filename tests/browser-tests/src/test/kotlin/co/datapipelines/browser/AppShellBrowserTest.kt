@@ -453,6 +453,9 @@ class AppShellBrowserTest : BrowserSuite() {
     fun `a rail click is one boosted GET, not a document load`() {
         startTrace()
         signedIn("boost")
+        // The workspace-switch fixture can return before this document's DOMContentLoaded.
+        // Measure a click only after htmx and the shell have installed their navigation handlers.
+        page.waitForFunction("() => window.__dpShellInit === true")
 
         val documents = mutableListOf<String>()
         page.onRequest { request ->

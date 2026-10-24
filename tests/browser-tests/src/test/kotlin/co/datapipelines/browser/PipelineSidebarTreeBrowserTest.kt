@@ -1,5 +1,6 @@
 package co.datapipelines.browser
 
+import com.microsoft.playwright.Page
 import com.microsoft.playwright.Route
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -25,6 +26,14 @@ class PipelineSidebarTreeBrowserTest : RestTreeBrowserFixture() {
         width() shouldBe 300
         mainWidth() shouldBe 1440 - 202 - 300
         page.locator("#browser-boundary").focus()
+        page.keyboard().press("Shift+Tab")
+        page.keyboard().press("Tab")
+        page.evaluate("() => document.activeElement.id") shouldBe "browser-boundary"
+        val boundaryShadow = page.locator("#browser-boundary").evaluate("el => getComputedStyle(el).boxShadow")
+        val boundaryOutline = page.locator("#browser-boundary").evaluate("el => getComputedStyle(el).outlineStyle")
+        val boundaryOutlineWidth = page.locator("#browser-boundary").evaluate("el => getComputedStyle(el).outlineWidth")
+        println("644-measure|boundary|boxShadow|$boundaryShadow")
+        println("644-measure|boundary|outline|" + page.locator("#browser-boundary").evaluate("el => getComputedStyle(el).outline"))
         page.keyboard().press("End")
         width() shouldBe 480
         mainWidth() shouldBe 1440 - 202 - 480
@@ -50,6 +59,9 @@ class PipelineSidebarTreeBrowserTest : RestTreeBrowserFixture() {
         expand("acme/deep")
         width() shouldBe 400
         menuWidth() shouldBe 202
+        boundaryShadow shouldBe "none"
+        boundaryOutline shouldBe "solid"
+        boundaryOutlineWidth shouldBe "2px"
     }
 
     @Test
@@ -159,14 +171,16 @@ class PipelineSidebarTreeBrowserTest : RestTreeBrowserFixture() {
         openTree()
         // #516: a click lands on the item the renderer focused (render.mjs item.focus()), and
         // the selected-row tint is the only answer it may draw — the old outline on the item
-        // boxed the whole expanded subtree the item element contains.
+        // boxed the whole expanded subtree the item element contains. #644 also checks
+        // the vendored global box-shadow: the line's outline must be the ONLY ring.
         page.click("${folder("acme")} > .dp-tree-line button")
         expand("acme/keys")
         focused() shouldBe "folder:acme/keys"
         page.locator(folder("acme/keys")).evaluate("el => getComputedStyle(el).outlineWidth") shouldBe "0px"
         page.evaluate(
             "p => [...document.querySelector(p).querySelectorAll('[role=treeitem], .dp-tree-line')]" +
-                ".filter(e => parseFloat(getComputedStyle(e).outlineWidth) > 0 && getComputedStyle(e).outlineStyle !== 'none').length",
+                ".filter(e => (parseFloat(getComputedStyle(e).outlineWidth) > 0 && " +
+                "getComputedStyle(e).outlineStyle !== 'none') || getComputedStyle(e).boxShadow !== 'none').length",
             panel,
         ) shouldBe 0
         // Keyboard focus keeps the ring, on the focused row's line and inside its box: the
@@ -175,9 +189,18 @@ class PipelineSidebarTreeBrowserTest : RestTreeBrowserFixture() {
         page.keyboard().press("ArrowDown")
         focused() shouldBe "folder:acme"
         page.evaluate("() => getComputedStyle(document.activeElement).outlineWidth") shouldBe "0px"
+        val rootShadow = page.evaluate("() => getComputedStyle(document.activeElement).boxShadow")
+        println("644-measure|root|boxShadow|$rootShadow")
         page.evaluate("() => getComputedStyle(document.activeElement.querySelector('.dp-tree-line')).outlineWidth") shouldBe "2px"
         page.keyboard().press("ArrowRight")
         focused() shouldBe "folder:acme/keys"
+        val expandedShadow = page.evaluate("() => getComputedStyle(document.activeElement).boxShadow")
+        println("644-measure|expanded|boxShadow|$expandedShadow")
+        page.screenshot(
+            Page.ScreenshotOptions().setPath(
+                Paths.get("build", "browser-evidence", "644-expanded-folder.png").also { Files.createDirectories(it.parent) },
+            ),
+        )
         page.locator("${folder("acme/keys")} > .dp-tree-line").evaluate("el => getComputedStyle(el).outlineWidth") shouldBe "2px"
         // Chromium computes a 3px outline-width WITH style none on elements no rule outlines,
         // so "boxed" is the painted predicate the sweep below uses, not a width alone.
@@ -185,9 +208,14 @@ class PipelineSidebarTreeBrowserTest : RestTreeBrowserFixture() {
             "() => getComputedStyle(document.activeElement.querySelector(':scope > [role=group]')).outlineStyle",
         ) shouldBe "none"
         page.evaluate(
-            "() => [...document.activeElement.querySelector('[role=group]').querySelectorAll('.dp-tree-line')]" +
-                ".every(e => parseFloat(getComputedStyle(e).outlineWidth) === 0 || getComputedStyle(e).outlineStyle === 'none')",
+            "() => [...document.activeElement.querySelector('[role=group]').querySelectorAll('[role=treeitem], .dp-tree-line')]" +
+                ".every(e => (parseFloat(getComputedStyle(e).outlineWidth) === 0 || " +
+                "getComputedStyle(e).outlineStyle === 'none') && getComputedStyle(e).boxShadow === 'none')",
         ) shouldBe true
+        assertAll(
+            { rootShadow shouldBe "none" },
+            { expandedShadow shouldBe "none" },
+        )
     }
 
     @Test

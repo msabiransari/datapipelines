@@ -182,7 +182,8 @@ internal object PostureRules {
                 "datapipelines.redis.host is loopback ('$redisHost') $where " +
                 "(DATAPIPELINES_REDIS_HOST)."
         }
-        val hasOidc = snapshot.oidcProviders.any { it.clientId.isNotBlank() && it.clientSecret.isNotBlank() && it.issuerUri.isNotBlank() }
+        // #655: complete for ITS protocol — an OAuth 2.0 entry (GitHub) has no issuer-uri.
+        val hasOidc = snapshot.oidcProviders.any { it.isFullyConfigured }
         if (!hasOidc) {
             if (!snapshot.authAllowLocalOnly) {
                 violations +=

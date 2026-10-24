@@ -1,6 +1,7 @@
 package co.datapipelines.web.ui.site
 
 import co.datapipelines.web.bootstrap.BootstrapProperties
+import co.datapipelines.web.ui.ShellPage
 import jakarta.servlet.http.HttpServletResponse
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Controller
@@ -28,7 +29,7 @@ import org.springframework.web.servlet.ModelAndView
 class SitePagesController(
     private val demoData: SiteDemoData,
     private val bootstrapProperties: BootstrapProperties,
-) {
+) : ShellPage {
     @GetMapping("/mcp-server-for-sql-databases")
     fun pillar(
         model: Model,

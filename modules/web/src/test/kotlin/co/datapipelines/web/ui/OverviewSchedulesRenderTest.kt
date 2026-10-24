@@ -90,6 +90,10 @@ class OverviewSchedulesRenderTest {
             doc.selectFirst("[data-count=$key] .app-overview-dot")!!.attr("data-tone") shouldBe
                 doc.selectFirst("[data-chart=condition] [data-bar=$key]")!!.attr("data-tone")
         }
+        doc.select("[data-overview-summary] .app-overview-dot").map { it.attr("data-tone") } shouldContainExactly
+            listOf("success", "warning", "danger")
+        doc.select("[data-chart=last-run] [data-bar]").map { it.attr("data-tone") } shouldContainExactly
+            listOf("success", "danger", "mixed", "discarded", "discarded")
         doc.selectFirst("[data-overview-view-all-count]")!!.text() shouldBe "4"
         doc.select("[data-overview-panel] .app-overview-panel-sub").map { it.text() } shouldContainExactly
             listOf("Every live schedule once, by the condition the explorer shows.", "Each schedule once, by how its latest run ended.")

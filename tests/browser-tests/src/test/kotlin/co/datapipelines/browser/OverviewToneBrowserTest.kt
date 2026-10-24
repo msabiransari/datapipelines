@@ -16,7 +16,8 @@ import kotlin.math.sqrt
 
 /**
  * #627: real lifecycle fills and legend swatches remain distinct from each other, links, text
- * and the empty track across every offered theme, including both auto schemes.
+ * and the empty track across every offered theme, including both auto schemes. #642 adds semantic
+ * success, warning and danger dot/bar equality and all semantic pairs named in ui-screens §4.25.
  * The matrix is written before assertions so a failing candidate retains every measured pair.
  *
  * #638: the v2 Pipelines home carries the four tones as the strip's dots (In development,
@@ -38,11 +39,14 @@ import kotlin.math.sqrt
  * | minimal | live-changes/text | 0 | #631 |
  * | minimal | in-development/text | 0 | #631 |
  * | minimal | live/text | 0 | #631 |
+ * | minimal | success/warning, success/danger, warning/danger | 0 | #631 |
+ * | minimal | success/text, warning/text, danger/text | 0 | #631 |
+ * | minimal | warning/live, success/live-changes, danger/live-changes | 0 | #631 |
  *
  * Professional's info and link roles are both indigo. Minimal intentionally paints warning,
  * success and info black; its discarded, track and panel pairs pass and are never excepted.
- * The last two rows came with #638's text pairs and were recorded on the owner's ruling
- * (2026-10-20): the same cause as #631's other rows, so the same issue.
+ * The #638 and #642 text and semantic rows follow the owner's ruling (2026-10-20):
+ * the same cause as #631's other rows, so the same issue.
  */
 class OverviewToneBrowserTest : RestTreeBrowserFixture() {
     private data class Gap(
@@ -90,7 +94,10 @@ class OverviewToneBrowserTest : RestTreeBrowserFixture() {
         val pairs =
             listOf("in-development" to "live", "in-development" to "retired", "live" to "retired") +
                 listOf("in-development", "live", "retired", "link", "text", "track").map { "live-changes" to it } +
-                listOf("in-development", "live").flatMap { tone -> listOf("track", "panel", "text").map { tone to it } }
+                listOf("in-development", "live").flatMap { tone -> listOf("track", "panel", "text").map { tone to it } } +
+                listOf("success" to "warning", "success" to "danger", "warning" to "danger", "warning" to "live") +
+                listOf("success", "warning", "danger").flatMap { tone -> listOf("track", "panel", "text").map { tone to it } } +
+                listOf("success", "danger").flatMap { tone -> listOf("live-changes", "retired").map { tone to it } }
         pairs.forEach { (first, second) ->
             val a = colours.getValue(first)
             val b = colours.getValue(second)
@@ -172,18 +179,19 @@ class OverviewToneBrowserTest : RestTreeBrowserFixture() {
         const val MIN_SWEEP = 10
 
         /** The tones painted beyond the strip's dot: the legend dot, the column fill and the bar fill. */
-        val SITES = mapOf("in-development" to listOf("legend", "fill", "bar"), "live" to listOf("legend", "fill", "bar"))
+        val SITES =
+            mapOf("in-development" to listOf("legend", "fill", "bar"), "live" to listOf("legend", "fill", "bar")) +
+                listOf("success", "warning", "danger").associateWith { listOf("bar") }
         val GAPS =
-            listOf(
-                Gap(setOf("professional", "auto"), "live-changes/link", 0.073491, 633),
-                Gap(setOf("minimal"), "in-development/live", 0.0, 631),
-                Gap(setOf("minimal"), "live-changes/in-development", 0.0, 631),
-                Gap(setOf("minimal"), "live-changes/live", 0.0, 631),
-                Gap(setOf("minimal"), "live-changes/link", 0.0, 631),
-                Gap(setOf("minimal"), "live-changes/text", 0.0, 631),
-                Gap(setOf("minimal"), "in-development/text", 0.0, 631),
-                Gap(setOf("minimal"), "live/text", 0.0, 631),
-            )
+            listOf(Gap(setOf("professional", "auto"), "live-changes/link", 0.073491, 633)) +
+                mapOf(
+                    "in-development" to listOf("live", "text"),
+                    "live-changes" to listOf("in-development", "live", "link", "text"),
+                    "live" to listOf("text"),
+                    "success" to listOf("warning", "danger", "text", "live-changes"),
+                    "warning" to listOf("danger", "live", "text"),
+                    "danger" to listOf("text", "live-changes"),
+                ).flatMap { (tone, others) -> others.map { Gap(setOf("minimal"), "$tone/$it", 0.0, 631) } }
 
         fun distance(
             a: String,
@@ -225,7 +233,23 @@ class OverviewToneBrowserTest : RestTreeBrowserFixture() {
             """
             async () => {
               const dot = (key) => document.querySelector('[data-count="' + key + '"] .app-overview-dot');
+              document.querySelectorAll('[data-semantic-probe]').forEach(e => e.remove());
+              const semantic = {};
+              for (const tone of ['success', 'warning', 'danger']) {
+                const probe = document.createElement('span');
+                probe.className = 'app-overview-dot';
+                probe.dataset.tone = tone;
+                probe.dataset.semanticProbe = tone;
+                document.querySelector('[data-overview-summary] dl').append(probe);
+                semantic[tone] = [probe, 'backgroundColor'];
+                const bar = document.querySelector('.app-overview-bar:not(.is-zero)').cloneNode(true);
+                bar.dataset.tone = tone;
+                bar.dataset.semanticProbe = tone;
+                document.querySelector('.app-overview-chart').append(bar);
+                semantic['bar-' + tone] = [bar.querySelector('.app-overview-bar-fill'), 'fill'];
+              }
               const sites = {
+                ...semantic,
                 'in-development': [dot('in-development'), 'backgroundColor'],
                 'live': [dot('live'), 'backgroundColor'],
                 'live-changes': [dot('live-changes'), 'backgroundColor'],

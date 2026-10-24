@@ -223,6 +223,20 @@ Or run from your IDE: main class `co.datapipelines.DatapipelinesApplicationKt`, 
 
 The app starts on `http://localhost:8080`.
 
+**The JavaScript isolate is in the image, never in the jar (#8).** The jar carries the polyglot
+API; the GraalJS isolate binary (`org.graalvm.polyglot:js-isolate-community`) is a test-runtime
+dependency only, so `bootRun` and a bare `java -jar` report JavaScript unavailable (no product
+path selects it before #8's lane 8b). The Dockerfile's runtime stage fetches the `TARGETARCH`'s
+isolate jar from Maven Central into `/opt/graaljs` and checks it against the pinned sum
+(`GRAALJS_VERSION`, `GRAALJS_SHA256_LINUX_AMD64` / `_AARCH64`; a mismatch fails the build at
+`sha256sum -c`), puts it on the class path through `LOADER_PATH=/app/lib,/opt/graaljs`, and runs
+`JavaScriptResourcesMain` as root to unpack the isolate's native resources into
+`/opt/graaljs/resources`, made read-only for everyone; the ENTRYPOINT names that cache with
+`-Dpolyglot.engine.userResourceCache`, so a read-only root filesystem runs it. A GraalVM bump is
+three edits that must agree — the catalog's `graalvm`, the version ARG and both sums —
+and `DockerfileGraalJsPinTest` stays red until the sums are those of the jars the tests ran.
+`./app.sh --start` builds it unchanged; the image build needs network access to repo1.maven.org.
+
 ### 6.1 Run from IntelliJ IDEA
 
 1. **Run → Edit Configurations → + → Application.**
@@ -245,10 +259,13 @@ If startup fails with `datapipelines.auth.base-url must be set…`, your env fil
 ### 6.2 Dependency lockfiles
 
 Every module resolves its dependencies against its committed `gradle.lockfile`
-(module-structure.md §7.6). Locking is STRICT: if resolution drifts from the
-lock — a version changed in `gradle/libs.versions.toml`, a dependency added or
-removed in a module build file, a transitive shifting — the build FAILS with a
-lock-state error. That failure is the guard working; do not try to bypass it.
+(module-structure.md §7.6). STRICT locking constrains resolution to the committed
+versions and refuses unresolved lock state. It does not guarantee that a catalog
+version change fails: a lower request can resolve to the locked higher version
+(#566). Check the resolved dependency graph and the lock diff when changing the
+catalog; a passing build alone does not prove that the requested version took
+effect. The catalog/lock agreement guard remains tracked in #694. Do not bypass
+lock-state or dependency-verification failures.
 
 **Updating the locks** — the only correct response to a *deliberate* dependency
 change:
@@ -262,7 +279,11 @@ This resolves every resolvable configuration in every module and rewrites all
 diff like any dependency review — it shows exactly which versions moved — and
 commit it in the same commit as the catalog/build-file change that caused it.
 A lockfile diff with no corresponding dependency change means something drifted
-that you did not intend; investigate, don't commit.
+that you did not intend; investigate, don't commit. A dependency added to a library
+module moves the lock of every module that resolves it too: #8's GraalVM API in
+`scripting` added sixteen lines to its own lock and the same seven (its runtime class
+path's GraalVM jars) to each of the ten locks whose runtime class path reaches `scripting` —
+additions only, every one a GraalVM artifact.
 
 - To move a single module (say, bump only SLF4J): change the version, then
   `./gradlew resolveAndLockAll --write-locks --update-locks org.slf4j:slf4j-api`.
@@ -303,7 +324,9 @@ records each artifact's checksum. **Run it against a COLD `GRADLE_USER_HOME`** (
 already holds parent POMs Gradle reads off the metadata graph, so the writer never
 records them and only CI's cold job finds the gap (2026-09-29, the jackson 2.21.6 bump:
 `jackson-modules-java8-2.21.6.pom` was missing on every CI job while the laptop was green). Review the diff like the lockfile diff:
-new entries must be exactly the artifacts your change introduced.
+new entries must be exactly the artifacts your change introduced — on every configuration,
+test runtime included: #8's test-only isolate aggregator records all four platform binaries
+(under both `org.graalvm.polyglot` and `org.graalvm.js`), though none of them ships in the jar.
 
 #### Hand-verified entries
 
@@ -728,13 +751,14 @@ the counts, 2 for a root that is not a directory, and 3 when no result XML is fo
 rather than retyped so two lanes' numbers are comparable; a modules-only glob under-reported the
 total for four consecutive rounds before it existed.
 
-**The breach suite is a task of its own (#289).** `JsonataBreachTest` lives in
-`modules/scripting/src/test/breach` and runs ALONE in `:modules:scripting:breachSuite`, a 512m test
+**The breach suite is a task of its own (#289).** `JsonataBreachTest` and, since #8,
+`JavaScriptBreachTest` (with `JavaScriptMeasurementsTest`, the JavaScript engine's costs) live in
+`modules/scripting/src/test/breach` and run ALONE in `:modules:scripting:breachSuite`, a 512m test
 JVM of its own, never inside the module's `test` (which runs at the conventions' `dp.test.heap`).
 It hangs off `check`, so the gate's two `build` stages and CI's build step run it with no stage
 of their own; a filtered `:modules:scripting:test` no longer touches it, and
-`./gradlew :modules:scripting:breachSuite` regenerates `build/reports/jsonata-breach.md` (the
-table dag-executor.md pastes). Its results land in `build/test-results/breachSuite/` — the
+`./gradlew :modules:scripting:breachSuite` regenerates `build/reports/jsonata-breach.md` and
+`javascript-breach.md` (the tables dag-executor.md pastes) and `javascript-measurements.md`. Its results land in `build/test-results/breachSuite/` — the
 recount's `test-results/**` glob counts them; `verifyBreachSuiteExecuted` is its zero-test
 guard. A red there reads one of two ways, both named in the XML and the report: a prediction
 that no longer holds (reconcile the doc), or a `SKIPPED` row — the case could not start with the
@@ -1187,6 +1211,59 @@ tooling crash (OOM, dead daemon) classifies as "no verdict, re-run" *ahead*
 of any skip, and skipped stages are counted and named in the gate's summary
 line — a PASS never hides an unrun guard (014/F4, 018/F1+ F2).
 
+#### Third-party notices
+
+```bash
+./gradlew :modules:app:generateThirdPartyNotices
+./gradlew :modules:app:bootJar  # generates and packages the same notices automatically
+./gradlew -Pmysql -Poracle :modules:app:generateThirdPartyNotices
+```
+
+Added 2026-10-24 (#677). The task writes
+`modules/app/build/generated/third-party-notices/THIRD-PARTY-NOTICES` from the
+resolved `productionRuntimeClasspath` graph, including its platform POMs,
+Spring Boot's jar-mode tools and both image isolate coordinates. It follows
+POM parents when licences are inherited. The isolate version is read from
+`Dockerfile`'s `GRAALJS_VERSION` ARG. Internal project modules are excluded.
+`processResources` puts the file at `META-INF/THIRD-PARTY-NOTICES` in the boot
+jar; the Dockerfile copies it to `/app/THIRD-PARTY-NOTICES`. Generate the jar
+before building the image, with the same optional-driver flags.
+
+`buildSrc/src/main/kotlin/ThirdPartyLicenseAllowlist.kt` maps exact POM
+licence names to SPDX identifiers/expressions and records canonical source
+URLs. Its comments explain each mapping's intended adopters. For a new
+spelling, inspect the actual resolved POM and its upstream licence, add a
+mapping with that intent, and vendor the canonical text once as
+`gradle/licenses/<SPDX-id>.txt`. Licence exceptions get separate text files.
+The allowlist records the SPDX text snapshot used; Oracle FUTC uses the
+local SPDX identifier `LicenseRef-Oracle-FUTC` and its Oracle source URL.
+No plugin or dependency is added, and licence texts are never downloaded
+by the build. POMs are resolved through Gradle's checksum verification;
+if the task first resolves a new POM artifact, regenerate verification
+metadata from a cold cache using §6.3, then review the added checksums.
+After warming resolution, `./gradlew --offline :modules:app:bootJar` works.
+
+The guard reports `Unresolved licence for <group:name:version>: raw POM
+license=...` for an unknown name, or `raw POM licenses=<none>` after the
+parent walk finds none. An unused mapping fails as `STALE licence
+allowlist entries (matched no POM)`. The MySQL and Oracle mappings are
+active only with their corresponding flags; the generated notice lists
+all declared alternatives and includes each licence/exception text once.
+It has sorted coordinates and text sections, UTF-8 output, and no time or
+git stamp. The task always revalidates POMs and mappings; tests under
+`buildSrc` exercise missing, unknown, inherited and stale licences, XML
+hardening, the isolate pin and deterministic output:
+
+```bash
+./gradlew -p buildSrc cleanTest test
+```
+
+Build-generated notices describe the graph that was packaged. Drivers
+mounted later through `lib/` require their own notices. Separately fetched
+DuckDB extensions and vendored browser assets remain tracked in
+[#692](https://github.com/msabiransari/datapipelines/issues/692) and
+[#693](https://github.com/msabiransari/datapipelines/issues/693).
+
 #### Dependency vulnerabilities (OSV-Scanner)
 
 ```bash
@@ -1302,6 +1379,9 @@ entries are SECRET-targeted and path-scoped with `condition = "AND"`
 secret co-located with an allowlisted token still fires), each with a reason +
 date comment, and the config EXTENDS the gitleaks default ruleset (a bare
 custom config silently replaces it — that mistake was made and caught here).
+The full-history scan runs by hand and is expected to exit 0 on `main`; a
+finding in a committed test fixture is triaged with a path + exact-value
+allowlist entry, never by reshaping the fixture's history.
 
 #### Container scanning (trivy)
 

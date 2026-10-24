@@ -6,13 +6,16 @@ import jakarta.servlet.http.HttpServletResponse
 import org.springframework.security.core.Authentication
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken
 import org.springframework.security.oauth2.core.oidc.user.OidcUser
+import org.springframework.security.oauth2.core.user.OAuth2User
 import org.springframework.security.web.authentication.SimpleUrlAuthenticationSuccessHandler
 
 /**
- * OIDC login callback (auth.md §5.5). Fully provider-agnostic — reads
+ * Provider login callback (auth.md §5.5). Fully provider-agnostic — reads
  * `authorizedClientRegistrationId` (whatever the deployment named the provider) and
- * the ID-token claims, provisions/links the user, issues the internal JWT, and sets
- * the `dp_session` cookie (HttpOnly, Secure, **SameSite=Lax**, §5.5/§8).
+ * the login's identity claims — the ID token of an OIDC login, or the user-info attributes
+ * [OAuth2IdentityUserService] shaped for an OAuth 2.0 login (#655) — provisions/links the
+ * user, issues the internal JWT, and sets the `dp_session` cookie (HttpOnly, Secure,
+ * **SameSite=Lax**, §5.5/§8).
  *
  * Lax, not Strict, and deliberately so (T33, observed live 2026-08-28): the post-login
  * landing arrives over the cross-site redirect chain from the IdP, where Strict withholds
@@ -28,6 +31,7 @@ import org.springframework.security.web.authentication.SimpleUrlAuthenticationSu
  * | no `email` claim | `auth.login.oidc_error` | `/login?error=oidc_error` |
  * | `email_verified: false` | `auth.login.oidc_error` | `/login?error=oidc_error` |
  * | `email_verified` MISSING (unless the provider's trust knob, §5.1) | `auth.login.oidc_error` | `/login?error=oidc_error` |
+ * | `emails-uri` entry: primary row missing or unverified (knob ignored) | `auth.login.oidc_error` | `/login?error=oidc_error` |
  * | stored identity differs from the incoming one (#187) | `auth.login.identity_mismatch` | `/login?error=identity_mismatch` |
  * | domain not allowlisted | `auth.login.domain_not_allowed` | `/login?error=domain_not_allowed` |
  * | `is_active = false` | `auth.login.user_inactive` | `/login?error=inactive` |
@@ -41,6 +45,10 @@ import org.springframework.security.web.authentication.SimpleUrlAuthenticationSu
  * (`auth.login.email_verified_assumed`). The link-once rule (#187) lives in
  * [UserService]: a login whose identity does not match the stored row refuses — an
  * identity is re-linked only by the super admin's explicit reset, never by a login.
+ *
+ * An `oauth2` entry (#655) reaches the same rows through [OAuth2IdentityUserService]: with
+ * `emails-uri` the endpoint's primary row decides (`missing_email` / `email_not_verified`)
+ * and the knob is not consulted; without it, the first three rows apply, knob included.
  */
 class OidcSuccessHandler(
     private val userService: UserService,
@@ -57,8 +65,7 @@ class OidcSuccessHandler(
         response: HttpServletResponse,
         authentication: Authentication,
     ) {
-        val oidcUser = authentication.principal as OidcUser
-        val claims = oidcUser.idToken.claims
+        val claims = identityClaims(authentication.principal)
         val registrationId = (authentication as OAuth2AuthenticationToken).authorizedClientRegistrationId
 
         // §4.2: lowercase at the boundary, so allowlist, audit and provisioning all
@@ -80,6 +87,18 @@ class OidcSuccessHandler(
                 ?: return
         completeLogin(user, created, email, registrationId, request, response)
     }
+
+    /**
+     * The identity the login presents (#655): an OIDC login's ID-token claims, or an OAuth 2.0
+     * login's user-info attributes as [OAuth2IdentityUserService] shaped them (`sub`, `email`,
+     * `email_verified`, `name`, `picture`). Everything after this point is one code path.
+     */
+    private fun identityClaims(principal: Any?): Map<String, Any> =
+        when (principal) {
+            is OidcUser -> principal.idToken.claims
+            is OAuth2User -> principal.attributes
+            else -> error("Provider login produced a ${principal?.javaClass?.name} principal, not an OAuth2User")
+        }
 
     /** The §4.3 allowlist gate — false when the login may proceed; redirects on refusal. */
     private fun domainRefused(
@@ -110,7 +129,10 @@ class OidcSuccessHandler(
         request: HttpServletRequest,
         response: HttpServletResponse,
     ): Boolean {
-        val trustWithoutClaim = authProperties.oidcProvider(registrationId)?.trustEmailWithoutVerifiedClaim ?: false
+        // #655: an entry with an `emails-uri` states verification itself (the primary row's own
+        // flag), so the knob that stands in for a MISSING claim has nothing to stand in for.
+        val provider = authProperties.oidcProvider(registrationId)
+        val trustWithoutClaim = provider != null && provider.emailsUri.isNullOrBlank() && provider.trustEmailWithoutVerifiedClaim
         if (isEmailUnverified(claims["email_verified"], trustWithoutClaim)) {
             rejectOidc(request, response, registrationId, reason = "email_not_verified", email = email)
             return true

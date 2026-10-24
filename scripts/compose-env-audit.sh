@@ -31,13 +31,16 @@
 #      valueless mapping form (`DATAPIPELINES_AUTH_COOKIE_SECURE:`), the only form that
 #      leaves the variable UNSET when no file sets it. `${VAR:-}` and `${VAR:+…}` both
 #      yield an empty string, which outranks the profile — 075's live defect.
+#   8. JVM code-loading environment names are refused, even if allowlisted.
+#   9. Every name outside DATAPIPELINES_* must have a FOREIGN_ALLOWLIST reason;
+#      entries no longer passed by compose are stale and fail too.
 #
 # Values built by CONCATENATION (`${OTHER:+literal}${OTHER2:+,literal}`) are DERIVED,
 # not pass-throughs: the demo's bootstrap lists are assembled from the family ON
 # markers. They are recognised as that form and still need a DECLARED_OVERRIDES entry.
 #
-# Scope: DATAPIPELINES_* only — SPRING_*/SERVER_*/MANAGEMENT_*/GOOGLE_* are framework
-# wiring (configuration.md §3.14) or provider credentials with their own compose lines.
+# Scope: every environment name in the compose datapipelines service; DATAPIPELINES_*
+# binds are checked against the app contract, and foreign names require explicit intent.
 #
 # Born 2026-09-02 (051 §B); wired into `./gradlew build` by 075 (T119) — before that it
 # ran only when someone remembered, and 074 shipped three keys with no pass-through.
@@ -53,7 +56,8 @@ SECRETS_EXAMPLE="deploy/secrets.env.example"
 if [[ "${1:-}" == "--self-test" ]]; then
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
-  mkdir -p "$tmp/modules/app/src/main/resources" "$tmp/deploy/env"
+  mkdir -p "$tmp/modules/app/src/main/resources" "$tmp/deploy/env" "$tmp/scripts"
+  cp scripts/compose-env-audit.sh "$tmp/scripts/compose-env-audit.sh"
   cp "$APP_YML" "$tmp/$APP_YML"
   cp "$COMPOSE" "$tmp/$COMPOSE"
   cp "$DEFAULTS_ENV" "$tmp/$DEFAULTS_ENV"
@@ -61,7 +65,8 @@ if [[ "${1:-}" == "--self-test" ]]; then
   # One defect per check class: a removed pass-through line (1), a diverged default (2),
   # a foreign literal without an allowlist entry (3), a line the app never binds (4), a
   # variable dropped from defaults.env (5), a drifted commented mirror (6), and a posture
-  # key given a `${VAR:-}` default instead of the valueless form (7).
+  # key given a `${VAR:-}` default instead of the valueless form (7), a refused JVM
+  # loader variable (8), and an unlisted foreign environment name (9).
   python3 - "$tmp/$COMPOSE" "$tmp/$DEFAULTS_ENV" "$tmp/$SECRETS_EXAMPLE" <<'PY'
 import sys, re
 p, defaults, secrets_example = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -75,7 +80,9 @@ t = t.replace("      DATAPIPELINES_AUTH_COOKIE_SECURE:\n",
 # alone (found 2026-09-06 by printing the doctored run's failures instead of its exit code
 # — MISTAKES.md: a guard that cannot go red is not a guard).
 t = t.replace("      DATAPIPELINES_UI_THEME: ${DATAPIPELINES_UI_THEME:-dark}\n",
-              "      DATAPIPELINES_MADE_UP_KEY: hard-coded\n")
+              "      DATAPIPELINES_MADE_UP_KEY: hard-coded\n"
+              "      LOADER_PATH: ${LOADER_PATH:-/app/lib}\n"
+              "      MADE_UP_FOREIGN: x\n")
 open(p, "w").write(t)
 e = open(defaults).read()
 e = re.sub(r"^DATAPIPELINES_ORG_TIMEZONE=.*\n", "", e, flags=re.M)
@@ -84,11 +91,16 @@ s = open(secrets_example).read()
 s = s.replace("# DATAPIPELINES_UI_THEME=dark", "# DATAPIPELINES_UI_THEME=drifted")
 open(secrets_example, "w").write(s)
 PY
-  if (cd "$tmp" && bash "scripts/compose-env-audit.sh" >/dev/null 2>&1); then
-    echo "SELF-TEST FAILED: doctored compose passed the audit" >&2; exit 1
-  else
-    echo "self-test OK: doctored compose correctly fails the audit"; exit 0
+  status=0
+  output=$(cd "$tmp" && bash scripts/compose-env-audit.sh 2>&1) || status=$?
+  printf '%s\n' "$output"
+  if [[ "$status" -ne 1 ]]; then
+    echo "SELF-TEST FAILED: doctored audit exited $status, expected 1" >&2; exit 1
   fi
+  if ! grep -q '^  8 ' <<< "$output" || ! grep -q '^  9 ' <<< "$output"; then
+    echo "SELF-TEST FAILED: missing class-8 or class-9 failure" >&2; exit 1
+  fi
+  echo "self-test OK: doctored compose correctly fails the audit"; exit 0
 fi
 
 python3 - "$APP_YML" "$COMPOSE" "$DEFAULTS_ENV" "$SECRETS_EXAMPLE" <<'PY'
@@ -120,6 +132,32 @@ passed = dict(re.findall(r"^      (DATAPIPELINES_[A-Z0-9_]+): (.*)$", svc.group(
 # way a profile default survives a compose boot (081 §B). It is not a pass-through and has
 # no default to compare, so it is collected separately.
 unset_unless_set = set(re.findall(r"^      (DATAPIPELINES_[A-Z0-9_]+):\s*$", svc.group(1), re.M))
+
+# Inventory valued AND valueless names independently of the app's namespace — EVERY key
+# at the block's indent, lower-case and dotted ones included: Spring Boot's loader reads
+# `loader.path` from the environment as `loader.path`, `loader_path` or `LOADER_PATH`
+# (launch.SystemPropertyUtils), and Spring resolves `spring.config.import` verbatim.
+names_in_block = set(re.findall(r"^      ([^\s#:][^:\s]*):", svc.group(1), re.M))
+foreign_names = {name for name in names_in_block if not name.startswith("DATAPIPELINES_")}
+
+# These change JVM code loading. The refusal is independent of the allowlist below and is
+# matched on the loader's own normalization (upper-cased, dots to underscores).
+DENIED_NAMES = {"LOADER_PATH", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS"}
+denied_in_block = {name for name in names_in_block if name.upper().replace(".", "_") in DENIED_NAMES}
+FOREIGN_ALLOWLIST: dict[str, str] = {
+    "SAMPLE_DB_USER": "App bootstrap datasource manifest username (datasources.md §8A.2)",
+    "SAMPLE_PG_PASSWORD": "App bootstrap PostgreSQL datasource manifest credential (datasources.md §8A.2)",
+    "SAMPLE_MYSQL_PASSWORD": "App bootstrap MySQL datasource manifest credential (datasources.md §8A.2)",
+    "SAMPLE_LAKE_MANIFEST_URL": "App bootstrap lake datasource manifest URL (datasources.md §8A.2)",
+    "SAMPLE_LAKE_CATALOG_REF": "App bootstrap lake datasource catalog reference (datasources.md §8A.2)",
+    "SPRING_DATASOURCE_URL": "Spring metadata JDBC URL on the compose network (deployment.md §5.1)",
+    "SPRING_DATASOURCE_USERNAME": "Spring metadata JDBC username (deployment.md §5.1)",
+    "SPRING_DATASOURCE_PASSWORD": "Spring metadata JDBC password from secrets.env (deployment.md §5.1)",
+    "GOOGLE_CLIENT_ID": "Google login provider client ID read by application.yml (auth.md §5.1)",
+    "GOOGLE_CLIENT_SECRET": "Google login provider client secret read by application.yml (auth.md §5.1)",
+    "GITHUB_CLIENT_ID": "GitHub login provider client ID read by application.yml (auth.md §5.1)",
+    "GITHUB_CLIENT_SECRET": "GitHub login provider client secret read by application.yml (auth.md §5.1)",
+}
 
 # Values that deliberately differ from a same-name pass-through, each with its reason.
 # Every entry must stay in use — an unused entry is stale and fails the audit.
@@ -157,6 +195,8 @@ DECLARED_OVERRIDES = {
 # keeps the empty app default and check 5 compares THAT against application.yml as usual.
 IMAGE_DEFAULT_VARS = {
     "DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY": "/opt/duckdb/extensions",
+    # D-T16: JavaScript uses the pre-installed platform isolate in the image.
+    "DATAPIPELINES_SCRIPT_JS_ISOLATE_DIR": "/opt/graaljs",
 }
 
 # A value assembled ENTIRELY from `${OTHER:+literal}` fragments — the concatenation form.
@@ -222,6 +262,14 @@ def commented(path):
     return re.findall(r"^#\s*([A-Z][A-Z0-9_]*)=(.*)$", open(path).read(), re.M)
 
 failures = []
+for name in sorted(denied_in_block):
+    failures.append(f"8 compose passes {name} to the app container — refused: it changes what code "
+                    f"the JVM runs (deployment.md §9); remove the line")
+for name in sorted(foreign_names - FOREIGN_ALLOWLIST.keys()):
+    failures.append(f"9 compose passes {name}, outside DATAPIPELINES_* and not in "
+                    f"compose-env-audit.sh's FOREIGN_ALLOWLIST — add it with the reason, or remove the line")
+for name in sorted(FOREIGN_ALLOWLIST.keys() - names_in_block):
+    failures.append(f"9 FOREIGN_ALLOWLIST names {name} but compose no longer passes it — stale entry")
 for name in sorted(bound):
     if name in POSTURE_VARS:
         if name not in unset_unless_set:
@@ -361,7 +409,8 @@ if failures:
     sys.exit(1)
 print(f"compose-env-audit: OK ({len(bound)} app env vars; {len(passed)} compose pass-throughs "
       f"+ {len(unset_unless_set)} posture keys passed only when set; {len(DECLARED_OVERRIDES)} "
-      f"declared compose overrides; one authority each — {len(defaults_active)} active in "
+      f"declared compose overrides; {len(FOREIGN_ALLOWLIST)} allowlisted foreign names; "
+      f"one authority each — {len(defaults_active)} active in "
       f"{defaults_env} ({len(DEFAULTS_ENV_OVERRIDES)} declared to differ from application.yml), "
       f"{len(secrets_active)} in {secrets_example}, {len(POSTURE_VARS)} owned by the posture "
       f"profiles; {len(secrets_named)} names in the commented reference list)")

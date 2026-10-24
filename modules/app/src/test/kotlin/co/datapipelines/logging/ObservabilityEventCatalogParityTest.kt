@@ -23,7 +23,7 @@ import java.io.File
  * cannot pass by agreeing with itself on an empty set (the plant the gate demands is a deleted
  * row and a new uncatalogued literal — both one-sided, both red).
  *
- * All twelve currently catalogued namespaces are enforced; uncatalogued namespaces remain
+ * All thirteen currently catalogued namespaces are enforced; uncatalogued namespaces remain
  * outside this guard. Extraction reads source text, including comments, not an AST or runtime.
  * A computed event identity in a file that logs an enforced namespace is refused. Only two
  * exact legacy audit-row diagnostics in AuditLogger are exempt, each required exactly once.
@@ -251,6 +251,7 @@ class ObservabilityEventCatalogParityTest {
                 "execution" to 7,
                 "pipeline" to 3,
                 "shutdown" to 8,
+                "retention" to 1,
             )
 
         val SECTION_34 = Regex("(?ms)^#### 3\\.4A\\b.*?(?=^### )")

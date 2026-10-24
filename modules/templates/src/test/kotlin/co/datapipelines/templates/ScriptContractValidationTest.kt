@@ -20,7 +20,12 @@ import org.junit.jupiter.api.Test
 class ScriptContractValidationTest {
     private val workspaceId = java.util.UUID.randomUUID()
 
-    private fun validator() = TemplateValidator(LibraryResolver { _ -> InMemoryTemplateRegistry() })
+    private fun validator() =
+        TemplateValidator(
+            scriptEngines =
+                mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
+            libraryResolver = LibraryResolver { _ -> InMemoryTemplateRegistry() },
+        )
 
     /** A legal row-mode script draft; a test mutates exactly what it is about. */
     private fun draftOf(

@@ -35,9 +35,10 @@ import java.util.concurrent.TimeUnit
  * The two views differ only in their layout; the body is the same rendered Markdown.
  *
  * The authentication answer comes from the `authenticated` model attribute that
- * [UiWorkspaceAdvice] fills for every `@Controller` — Spring runs its `@ModelAttribute`
- * methods before this handler, and reading it here keeps ONE definition of "is there a
- * principal" rather than a second `SecurityContextHolder` lookup that could disagree.
+ * [UiWorkspaceAdvice] fills for every shell page (`ShellPage`, #652) — Spring runs its
+ * `@ModelAttribute` methods before this handler, and reading it here keeps ONE definition
+ * of "is there a principal" rather than a second `SecurityContextHolder` lookup that
+ * could disagree.
  *
  * **Raw Markdown since 173** (§C.2): `GET /docs/{slug}.md` — and `GET /docs/{slug}` with
  * `Accept: text/markdown` — serve the packaged Markdown itself, with the same relative-link
@@ -50,7 +51,7 @@ import java.util.concurrent.TimeUnit
 @Controller
 class DocsController(
     private val docs: DocsCatalog,
-) {
+) : ShellPage {
     @GetMapping("/docs")
     fun index(
         model: Model,

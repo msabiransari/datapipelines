@@ -1,16 +1,17 @@
 package co.datapipelines.auth
 
 import jakarta.servlet.DispatcherType
-import org.slf4j.LoggerFactory
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity
 import org.springframework.security.config.http.SessionCreationPolicy
+import org.springframework.security.oauth2.client.endpoint.RestClientAuthorizationCodeTokenResponseClient
+import org.springframework.security.oauth2.client.oidc.userinfo.OidcUserService
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestRedirectFilter
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestResolver
-import org.springframework.security.oauth2.core.OAuth2AuthenticationException
+import org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepository
 import org.springframework.security.web.SecurityFilterChain
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter
 import org.springframework.security.web.authentication.session.NullAuthenticatedSessionStrategy
@@ -55,6 +56,11 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
 class SecurityConfig(
     private val filters: AuthFilters,
     private val oidcSuccessHandler: OidcSuccessHandler,
+    private val oauth2LoginFailureHandler: OAuth2LoginFailureHandler,
+    private val oauth2IdentityUserService: OAuth2IdentityUserService,
+    private val providerTokenResponseClient: RestClientAuthorizationCodeTokenResponseClient,
+    private val providerOidcUserService: OidcUserService,
+    private val authorizedClientRepository: OAuth2AuthorizedClientRepository,
     private val scopeInterceptor: ScopeInterceptor,
     private val forcedPasswordChangeInterceptor: ForcedPasswordChangeInterceptor,
     private val authEntryPoint: AuthEntryPoint,
@@ -64,8 +70,6 @@ class SecurityConfig(
     private val authorizationRequestResolver: OAuth2AuthorizationRequestResolver,
     private val authProperties: AuthProperties,
 ) {
-    private val log = LoggerFactory.getLogger(SecurityConfig::class.java)
-
     @Bean
     // One line over detekt's LongMethod cap after the 027 CSRF-stability block landed
     // inline — same call as PipelineExecutor's suppress: the filter chain reads as one
@@ -180,11 +184,18 @@ class SecurityConfig(
     }
 
     /**
-     * The OIDC login wiring (auth.md §8), applied only when at least one provider is
+     * The provider login wiring (auth.md §8), applied only when at least one provider is
      * configured — see the call site. The opaque `oidc_error` redirect never leaks
-     * provider internals, but the failure itself is NOT swallowed (rules/02): without
-     * the warn line every authorization-request-not-found, invalid_grant or PKCE
-     * mismatch is indistinguishable from a §4.2 rejection at the success handler.
+     * provider internals, but the failure itself is NOT swallowed (rules/02):
+     * [OAuth2LoginFailureHandler] logs and audits every authorization-request-not-found,
+     * invalid_grant or PKCE mismatch, which would otherwise be indistinguishable from a §4.2
+     * rejection at the success handler.
+     *
+     * #655: `protocol: oauth2` registrations (no `openid` scope) resolve their identity through
+     * [OAuth2IdentityUserService]; OIDC registrations use Spring's OIDC user service with a
+     * bounded user-info delegate. Both protocols' token exchanges share the configured bound. The
+     * authorized client — the provider's access token — is never stored
+     * ([NoStoreAuthorizedClientRepository]).
      */
     private fun configureOidcLogin(http: HttpSecurity) {
         // 090 §C — ahead of the authorization redirect, which Spring Security orders BEFORE
@@ -194,16 +205,13 @@ class SecurityConfig(
         http.addFilterBefore(filters.oidcSignedInBounce, OAuth2AuthorizationRequestRedirectFilter::class.java)
         http.oauth2Login { oauth ->
             oauth.successHandler(oidcSuccessHandler)
-            oauth.failureHandler { request, response, exception ->
-                log.warn(
-                    "OIDC login failed at {}: {}",
-                    request.requestURI,
-                    (exception as? OAuth2AuthenticationException)?.error?.let { "${it.errorCode}: ${it.description}" }
-                        ?: exception.toString(),
-                    exception,
-                )
-                response.sendRedirect("${request.contextPath}/login?error=oidc_error")
+            oauth.failureHandler(oauth2LoginFailureHandler)
+            oauth.tokenEndpoint { it.accessTokenResponseClient(providerTokenResponseClient) }
+            oauth.userInfoEndpoint {
+                it.userService(oauth2IdentityUserService)
+                it.oidcUserService(providerOidcUserService)
             }
+            oauth.authorizedClientRepository(authorizedClientRepository)
             oauth.authorizationEndpoint {
                 it.authorizationRequestRepository(authorizationRequestRepository)
                 // PKCE (RFC 7636) is applied by this resolver — see OidcConfig.

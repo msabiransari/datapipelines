@@ -1478,8 +1478,8 @@ object PipelineErrorCodes {
         const val REJECTS_STRICT = "pipeline.script.rejects_strict"
 
         /**
-         * §13.18 / record §4.4 — a `javascript` template is refused until round two's engine
-         * ships (503 at boot, 400 at save). Raised by `modules/templates`'s save path.
+         * §13.18 / D-T16 — the isolate is not installed; JavaScript is disabled, reported once
+         * at boot, and refused at save/evaluate with HTTP 400 (never a boot-time 503).
          */
         const val JS_UNAVAILABLE = "script.js.unavailable"
     }
@@ -1872,3 +1872,7 @@ object PipelineErrorCodes {
         const val BINDING_PATH_INVALID = "dashboard.binding.path_invalid"
     }
 }
+
+/** One availability refusal shared by save, evaluate and node runs (D-T16); not an error code. */
+const val JAVASCRIPT_UNAVAILABLE_MESSAGE =
+    "the JavaScript isolate is not installed on this instance (datapipelines.script.js.isolate-dir)"

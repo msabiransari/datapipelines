@@ -1,13 +1,11 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.application.lens.LensedView
-import co.datapipelines.pipeline.Activity
 import co.datapipelines.pipeline.Inventory
 import co.datapipelines.pipeline.LifecycleBucket
 import co.datapipelines.pipeline.NavigationFamily
 import co.datapipelines.pipeline.ReadLens
 import java.time.Instant
-import java.util.Locale
 
 /**
  * #556 — what one family overview renders (`overview/family.html`, shell design §8), built in ONE
@@ -24,6 +22,9 @@ import java.util.Locale
  * template renders that sentence and no number, never a zero. [recent] is null for a family whose
  * Recently updated adapter does not exist yet ([FamilyRecent.supports]); [guided] marks the
  * families whose introduction and agent guidance are written (`overview/guide-<family>.html`).
+ *
+ * The lifecycle home's builders live in [LifecycleHomePage]; the companion's `of`, `tasks`,
+ * `iconFor` and `width` are one-line delegates there (#670).
  */
 data class OverviewPage(
     val family: String,
@@ -79,6 +80,8 @@ data class OverviewPage(
      * [href] its filtered catalog (null: unlinked), [tone] the status dot (null: none), [lensed]
      * whether the number passed the promoter lens (#621), [title] the hover sentence (Retired's
      * "have no page"). [value] is null only for a number a sibling cannot state.
+     * [tone] uses draft, released, mixed, discarded (lifecycle) or success, warning, danger
+     * (ops status); see the overview token block in `app.css`.
      */
     data class Metric(
         val key: String,
@@ -159,7 +162,8 @@ data class OverviewPage(
     /**
      * One chart bar: [width] is the SVG rect's width in a 0–100 viewBox (the tallest bar is 100,
      * a zero is 0 — never a visible minimum), [tone] the token family that paints it, [label]
-     * the accessible sentence.
+     * the accessible sentence. [tone] uses draft, released, mixed, discarded (lifecycle) or
+     * success, warning, danger (ops status); see the overview token block in `app.css`.
      */
     data class Bar(
         val key: String,
@@ -299,241 +303,25 @@ data class OverviewPage(
     }
 
     companion object {
-        /**
-         * #598a — the page for a [OverviewStacked.ChartSet.LIFECYCLE] [family] from one chart read
-         * (the lifecycle and maturity charts, one snapshot) and one recent read, at [now]. An
-         * unknown chart group is the frame's unavailable sentence, never a zero.
-         */
+        /** The builders live in [LifecycleHomePage]; these delegates keep the frame's face (#670). */
         fun of(
             family: Family,
             lensed: Boolean,
             charts: ChartsResult,
             recent: RecentResult?,
             now: Instant,
-        ): OverviewPage {
-            require(family.charts == OverviewStacked.ChartSet.LIFECYCLE) { "$family carries the four counts, not the charts" }
-            val available = (charts as? ChartsResult.Available)?.charts
-            return page(
-                family,
-                lensed,
-                available?.let { OverviewStacked.panel(family, it, lensed) },
-                (charts as? ChartsResult.Unavailable)?.reason,
-                recent?.let {
-                    recentPanel(family, it, now).copy(
-                        review = null,
-                        tasks = tasks(family, available?.lifecycle),
-                        description = "A clear next step for your ${family.plural}",
-                    )
-                },
-            )
-        }
+        ): OverviewPage = LifecycleHomePage.of(family, lensed, charts, recent, now)
 
-        /**
-         * #638 — Continue your work's two rows for a lifecycle family: the drafts awaiting
-         * their first release ([inventory]'s In development count worded; no number when the
-         * inventory is unknown) and the live objects to run. A family whose catalog offers no such
-         * filter gets no row for it.
-         */
         fun tasks(
             family: Family,
             inventory: Inventory?,
-        ): List<TaskRow> =
-            listOfNotNull(
-                family.filtered(LifecycleBucket.DRAFT_ONLY)?.let { href ->
-                    TaskRow("drafts", "file", "Review your drafts", OverviewWords.drafts(family, inventory?.draftOnly), href, "draft")
-                },
-                family.filtered(LifecycleBucket.RELEASED_ONLY)?.let { href ->
-                    TaskRow(
-                        "live",
-                        "play",
-                        "Explore live ${family.plural}",
-                        "Run a released ${family.singular} with your own inputs.",
-                        href,
-                        "released",
-                    )
-                },
-            )
+        ): List<TaskRow> = LifecycleHomePage.tasks(family, inventory)
 
-        /** The heading eyebrow's icon for a family route: the [Family]'s own, else the sibling homes' rail icons. */
-        fun iconFor(family: String): String =
-            Family.entries.firstOrNull { it.navigation.route == family }?.icon ?: SIBLING_ICONS[family] ?: DEFAULT_ICON
+        fun iconFor(family: String): String = LifecycleHomePage.iconFor(family)
 
-        private fun page(
-            family: Family,
-            lensed: Boolean,
-            inventory: InventoryPanel?,
-            unavailable: String?,
-            recent: RecentPanel?,
-        ): OverviewPage =
-            OverviewPage(
-                family = family.navigation.route,
-                title = family.title,
-                catalogHref = family.catalogHref,
-                lensed = lensed,
-                inventory = inventory,
-                unavailable = unavailable,
-                recent = recent,
-                guided = family.guided,
-            )
-
-        private fun recentPanel(
-            family: Family,
-            recent: RecentResult,
-            now: Instant,
-        ): RecentPanel {
-            val review =
-                family.filtered(LifecycleBucket.WITH_DRAFTS)?.let { href -> Link(href, REVIEW_DRAFTS) }
-            val section =
-                RecentSection(
-                    heading = RECENTLY_UPDATED,
-                    note = RECENT_NOTE,
-                    entries =
-                        when (recent) {
-                            is RecentResult.Available -> {
-                                recent.entries.map {
-                                    RecentItem(
-                                        name = it.name,
-                                        href = it.href,
-                                        datetime = it.modifiedAt.toString(),
-                                        ago = RelativeTime.since(it.modifiedAt, now),
-                                        absolute = RelativeTime.absolute(it.modifiedAt),
-                                        hasDraft = it.hasDraft,
-                                    )
-                                }
-                            }
-
-                            is RecentResult.Unavailable -> {
-                                null
-                            }
-                        },
-                    unavailable = (recent as? RecentResult.Unavailable)?.reason,
-                    emptyNote = RECENT_EMPTY,
-                )
-            return RecentPanel(review, listOf(section))
-        }
-
-        /** [value] as a share of [tallest] in the chart's 0–100 viewBox; an all-zero chart is all zero. */
         internal fun width(
             value: Long,
             tallest: Long,
-        ): String = if (tallest == 0L) "0" else String.format(Locale.ROOT, "%.1f", value * PERCENT / tallest)
-
-        private const val PERCENT = 100.0
-        private const val DEFAULT_ICON = "layout-grid"
-
-        /** The three homes whose controllers build their page directly (rail icons, shell record §3). */
-        private val SIBLING_ICONS = mapOf("datasources" to "database", "schedules" to "calendar-clock", "api-console" to "activity")
-
-        /** The recent card's words, model-owned since #583 — the template renders what it is given. */
-        const val REVIEW_DRAFTS = "Review drafts"
-        const val RECENTLY_UPDATED = "Recently updated"
-        const val RECENT_NOTE = "The latest changes in this workspace, newest first. Not a personal history."
-        const val RECENT_EMPTY = "Nothing here yet. The starter prompt above is a good first step."
+        ): String = LifecycleHomePage.width(value, tallest)
     }
-}
-
-/**
- * #638 — the dialog sections' and rows' sentences, in the reader's words (ui-screens §4.25,
- * the counting model), each built from the numbers the page already shows.
- */
-object OverviewWords {
-    const val DEFINITIONS = "definitions"
-    const val RELEASES = "releases"
-    const val ACTIVITY = "activity"
-
-    /** "14 days", "1 day" — the actively developed window as configured. */
-    fun days(value: Int): String = "$value ${if (value == 1) "day" else "days"}"
-
-    /** Review your drafts' sentence: the In development count worded, or none when it is unknown. */
-    fun drafts(
-        family: OverviewPage.Family,
-        draftOnly: Long?,
-    ): String =
-        when (draftOnly) {
-            null -> "${family.title} working toward their first release."
-            0L -> "No ${family.singular} is waiting for its first release."
-            1L -> "1 ${family.singular} is working toward its first release."
-            else -> "$draftOnly ${family.plural} are working toward their first release."
-        }
-
-    /**
-     * "All 4 unreleased pipelines have a draft." / "3 of the 10 released pipelines have open
-     * changes." — [part] of [whole] objects in the [group] have [what]; null when [whole] is 0.
-     */
-    fun share(
-        part: Long,
-        whole: Long,
-        group: String,
-        family: OverviewPage.Family,
-        what: String,
-    ): String? =
-        when {
-            whole == 0L -> null
-            whole == 1L -> "The 1 $group ${family.singular} ${if (part == 1L) "has $what" else "has no ${what.removePrefix("a ")}"}."
-            part == whole -> "All $whole $group ${family.plural} have $what."
-            part == 0L -> "None of the $whole $group ${family.plural} have $what."
-            else -> "$part of the $whole $group ${family.plural} ${if (part == 1L) "has" else "have"} $what."
-        }
-
-    /** How the summary is counted: the four exclusive groups, the overlapping measure, the browser's count (#593, #626). */
-    fun definitions(
-        family: OverviewPage.Family,
-        inventory: Inventory,
-        windowDays: Int,
-    ): OverviewPage.Explanation {
-        val names = OverviewStacked.LIFECYCLE_NAMES
-        val texts =
-            mapOf(
-                LifecycleBucket.DRAFT_ONLY to "A draft, and no release yet.",
-                LifecycleBucket.RELEASED_ONLY to "A release, and no open draft.",
-                LifecycleBucket.RELEASED_WITH_DRAFT to "A release, and a draft in progress.",
-                LifecycleBucket.DISCARDED_ONLY to "Every version discarded: no draft or release remains.",
-            )
-        return OverviewPage.Explanation(
-            key = DEFINITIONS,
-            title = "How the summary is counted",
-            paragraphs =
-                listOf(
-                    "Each ${family.singular} belongs to one lifecycle group. These four groups total ${inventory.objects}.",
-                    "Actively developed is a separate measure: a ${family.singular} with a draft edited in the last " +
-                        "${days(windowDays)}. It overlaps the lifecycle groups and is not an additional group. A draft " +
-                        "keeps only its last write, so this is a count today, not a history.",
-                    "The resource browser and View all count the three groups that are not retired: " +
-                        "${OverviewStacked.live(inventory)}. Retired ${family.plural} have no page.",
-                ),
-            terms =
-                names.map { (bucket, name) ->
-                    OverviewPage.Term(name, CatalogLifecycle.label(bucket), bucket.countIn(inventory), texts.getValue(bucket))
-                },
-        )
-    }
-
-    /** Understanding release history: the maturity rule, then the panel's own two sentences. */
-    fun releases(
-        family: OverviewPage.Family,
-        note: List<String>,
-    ): OverviewPage.Explanation =
-        OverviewPage.Explanation(
-            key = RELEASES,
-            title = "Understanding release history",
-            paragraphs =
-                listOf(
-                    "Each ${family.singular} appears in one release-count bucket. The bars compare the number of " +
-                        "${family.plural}, not their number of executions.",
-                    "A release that has since been discarded is not counted. A retired ${family.singular} has zero releases.",
-                ) + note,
-        )
-
-    /** The activity dialog: the events rule above the table twin it receives. */
-    fun activity(family: OverviewPage.Family): OverviewPage.Explanation =
-        OverviewPage.Explanation(
-            key = ACTIVITY,
-            title = "Development activity · ${Activity.WEEKS} weeks",
-            paragraphs =
-                listOf(
-                    "Events, not distinct ${family.plural}. A ${family.singular} created and released in the same week " +
-                        "contributes to both counts. Weeks begin Monday (UTC); discarded releases are excluded.",
-                ),
-            table = ACTIVITY,
-        )
 }

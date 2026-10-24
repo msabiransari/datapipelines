@@ -25,7 +25,12 @@ import org.junit.jupiter.api.Test
 class TemplateTypeRulesTest {
     private val workspaceId = java.util.UUID.randomUUID()
 
-    private fun validator() = TemplateValidator(LibraryResolver { _ -> InMemoryTemplateRegistry() })
+    private fun validator() =
+        TemplateValidator(
+            scriptEngines =
+                mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
+            libraryResolver = LibraryResolver { _ -> InMemoryTemplateRegistry() },
+        )
 
     private data class Row(
         val name: String,

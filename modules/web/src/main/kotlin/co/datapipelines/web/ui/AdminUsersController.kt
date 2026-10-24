@@ -14,7 +14,7 @@ class AdminUsersController(
     private val themeResolver: ThemeResolver,
     private val authProperties: AuthProperties,
     private val browse: AdminUsersBrowseModel,
-) {
+) : ShellPage {
     /**
      * 096 §C (review finding F3): the admin gate was a hand-written
      * `if (!Scope.satisfies(principal.scopes, Scope.ADMIN)) throw AccessDeniedException(...)`

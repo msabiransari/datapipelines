@@ -45,7 +45,7 @@ class ParameterSetsUiController(
     private val themeResolver: ThemeResolver,
     /** 178 — the promoter lens: the pages render the caller's view. */
     private val lens: PromoterLens,
-) {
+) : ShellPage {
     // NOT a constructor parameter: Spring injects the app's servlet ObjectMapper into an ObjectMapper-typed
     // parameter even when it has a default, and that mapper lacks the contract modules.
     // Guarded by ObjectMapperDefaultParameterKonsistTest.

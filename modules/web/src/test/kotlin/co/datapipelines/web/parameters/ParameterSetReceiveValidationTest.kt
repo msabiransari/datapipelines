@@ -57,7 +57,11 @@ class ParameterSetReceiveValidationTest {
             { name, _ -> if (name == DATASOURCE) DatasourceFacts(Dialect.H2) else null },
             probe,
             ParametersConfig(),
-            TemplateValidator(LibraryResolver { engines.registryFor(it) }),
+            TemplateValidator(
+                scriptEngines =
+                    mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
+                libraryResolver = LibraryResolver { engines.registryFor(it) },
+            ),
         )
 
     init {

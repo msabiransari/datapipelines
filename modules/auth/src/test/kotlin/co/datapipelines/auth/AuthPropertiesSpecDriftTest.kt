@@ -1,5 +1,7 @@
 package co.datapipelines.auth
 
+import io.kotest.assertions.withClue
+import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 
@@ -30,7 +32,40 @@ class AuthPropertiesSpecDriftTest {
         documented.getValue("datapipelines.auth.jwt.ttl-hours") shouldBe props.jwt.ttlHours.toString()
         documented.getValue("datapipelines.auth.api-keys.cache-ttl-seconds") shouldBe props.apiKeys.cacheTtlSeconds.toString()
         documented.getValue("datapipelines.auth.rate-limit.login-per-minute") shouldBe props.rateLimit.loginPerMinute.toString()
+        documented.getValue("datapipelines.auth.oidc.provider-read-timeout-seconds") shouldBe
+            props.oidc.providerReadTimeoutSeconds.toString()
     }
+
+    @Test
+    fun `every documented provider default matches the default constructed provider`() {
+        val provider = AuthProperties.Provider()
+        val defaults =
+            mapOf(
+                "protocol" to provider.protocol,
+                "authorization-uri" to provider.authorizationUri,
+                "token-uri" to provider.tokenUri,
+                "user-info-uri" to provider.userInfoUri,
+                "user-name-attribute" to provider.userNameAttribute,
+                "scopes" to provider.scopes,
+                "emails-uri" to provider.emailsUri,
+                "trust-email-without-verified-claim" to provider.trustEmailWithoutVerifiedClaim,
+                "picture-hosts" to provider.pictureHosts,
+            )
+        val rows = documented.filterKeys { it.startsWith(PROVIDER_PREFIX) }
+        withClue("providers rows parsed from configuration.md §3.4") { rows.size shouldBeGreaterThanOrEqual 9 }
+        rows.forEach { (key, value) ->
+            val suffix = key.removePrefix(PROVIDER_PREFIX)
+            check(defaults.containsKey(suffix)) { "Unknown documented provider row: $key" }
+            withClue(key) { value shouldBe renderDefault(defaults.getValue(suffix)).removeSurrounding("`") }
+        }
+    }
+
+    private fun renderDefault(value: Any?): String =
+        when {
+            value == null -> "(none)"
+            value == "" || (value is List<*> && value.isEmpty()) -> "(empty)"
+            else -> "`$value`"
+        }
 
     @Test
     fun `workspaces property defaults match configuration-md section 3-17`() {
@@ -80,9 +115,10 @@ class AuthPropertiesSpecDriftTest {
          */
         val ROW_REGEX =
             Regex(
-                """^\|\s*`(datapipelines\.[a-z0-9.\-]+)`\s*\|\s*`?([A-Za-z0-9\-]+)`?\s*\|(?:[^|\n]|\\\|)*\|$""",
+                """^\|\s*`(datapipelines\.[a-z0-9.\-\[\]]+)`\s*\|\s*`?([A-Za-z0-9\-]+|\(empty\)|\(none\))`?\s*\|(?:[^|\n]|\\\|)*\|$""",
             )
 
         const val CONFIG_SPEC_PATH = "docs/configuration.md"
+        const val PROVIDER_PREFIX = "datapipelines.auth.oidc.providers[]."
     }
 }

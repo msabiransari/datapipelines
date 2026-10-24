@@ -46,7 +46,7 @@ class LocalLoginController(
     private val authProperties: AuthProperties,
     private val workspaceService: WorkspaceService,
     private val clientAddressResolver: ClientAddressResolver,
-) {
+) : ShellPage {
     @PostMapping("/login")
     fun login(
         @RequestParam email: String,

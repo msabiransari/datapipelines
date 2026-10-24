@@ -15,6 +15,8 @@ dependencies {
     testImplementation(libs.testcontainers.junit.jupiter)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.playwright)
+    // #8 lane 8b: the JavaScript authoring walk uses the native isolate.
+    testRuntimeOnly(libs.graalvm.js.isolate.community)
 }
 
 // `siteShots` — the marketing site's screenshots, produced by a script (070 §C). Wired the

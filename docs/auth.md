@@ -1,9 +1,9 @@
 # Auth & Security Specification
 
-**Status:** v3.53 (revised — see Change Log)
+**Status:** v3.57 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-24
 
 ---
 
@@ -100,7 +100,7 @@ The `provider` field stores the **OIDC registration name** as configured by the 
 ### 4.2 User provisioning
 
 **First login:** When a user logs in via OIDC for the first time:
-1. Server extracts `email`, `name`, `sub`, `picture` from the OIDC ID token. The email is **normalized to lowercase** before every lookup and store — provider case differences must not fork one human into two rows (or mint a second bootstrap admin, §4.4). If the ID token carries `email_verified: false`, the login is **rejected** (`auth.login.oidc_error`, audited) — an unverified self-registered account at a provider must never reach the email-keyed linking step below, or it takes over the existing account with that email. A provider **omitting** the claim is now also treated as NOT vouching for the address (2026-09-21, #187 — fail closed): the login is rejected the same way. An IdP that never emits the claim must be trusted explicitly, per provider, with `datapipelines.auth.oidc.providers[].trust-email-without-verified-claim: true` (§5.1); each acceptance under the knob is audited (`auth.login.email_verified_assumed`). A claim that is present and `false` is refused whatever the knob says.
+1. Server extracts `email`, `name`, `sub`, `picture` from the OIDC ID token — for a `protocol: oauth2` provider, from its user-info and emails endpoints instead (§5.5, #655). The email is **normalized to lowercase** before every lookup and store — provider case differences must not fork one human into two rows (or mint a second bootstrap admin, §4.4). If the ID token carries `email_verified: false`, the login is **rejected** (`auth.login.oidc_error`, audited) — an unverified self-registered account at a provider must never reach the email-keyed linking step below, or it takes over the existing account with that email. A provider **omitting** the claim is now also treated as NOT vouching for the address (2026-09-21, #187 — fail closed): the login is rejected the same way. An IdP that never emits the claim must be trusted explicitly, per provider, with `datapipelines.auth.oidc.providers[].trust-email-without-verified-claim: true` (§5.1); each acceptance under the knob is audited (`auth.login.email_verified_assumed`). A claim that is present and `false` is refused whatever the knob says.
 2. Checks if a user with that `email` already exists.
    - **Yes:** the stored identity is compared with the incoming one (2026-09-21, #187 — an identity is linked ONCE, never silently re-linked):
      - the row is the `provider = 'bootstrap'` placeholder — this login **completes** it (the §4.4 pre-provisioned admin's first sign-in); `provider`, `provider_subject`, `last_login_at`, `profile_picture_url` and `display_name` update (the `display_name` refresh is owner-ratified 2026-08-28: there is no profile-edit feature, so a stored name has no user-chosen referent to protect, and freezing it would leave an IdP rename unrepresentable; revisit if a profile surface ever ships);
@@ -291,6 +291,19 @@ The identity is built exactly like the System account, so login is impossible by
 
 OIDC providers are configured as a **list** in the deployment config. Each provider requires only three values — `client-id`, `client-secret`, and `issuer-uri`. The issuer URI triggers OIDC discovery (`/.well-known/openid-configuration`), which auto-configures all authorization, token, userinfo, and JWKS endpoints.
 
+**Two protocols (#655).** An entry's `protocol` is `oidc` (the default — everything above) or `oauth2`, for a provider that speaks OAuth 2.0 **without** OpenID Connect: no discovery document, no ID token, no `openid` scope. GitHub is the shipped one. Discovery cannot build such an entry — the entry GitHub shipped as until #655 (`issuer-uri: https://github.com/login/oauth`) failed at startup the moment a client-id was set — so an `oauth2` entry names its endpoints instead, and needs no HTTP at startup:
+
+| Key (`oauth2` only) | Required | Meaning |
+|---|---|---|
+| `authorization-uri` | yes | Where the browser is sent to consent |
+| `token-uri` | yes | The code-for-token exchange (client_secret_basic, `Accept: application/json`) |
+| `user-info-uri` | yes | The profile read, with the access token as bearer |
+| `user-name-attribute` | yes | The user-info attribute that is the stable subject (`users.provider_subject`); GitHub: `id` |
+| `scopes` | yes | The scopes requested — never `openid`, which would route the login to the OIDC user service |
+| `emails-uri` | no | A list of `{email, primary, verified}` rows; when set, it is the ONLY source of the address (§5.5) |
+
+`issuer-uri` is refused on an `oauth2` entry, and the `oauth2`-only keys are refused on an `oidc` entry (discovery would silently ignore them). Every endpoint is `https://`; plain `http://` is accepted only for `localhost` / `127.0.0.1` (a test stub). Configuration §7 enforces all of it at startup, naming the provider and the key.
+
 Each provider takes one optional trust knob — `trust-email-without-verified-claim` (default `false`, #187): set it `true` ONLY for an IdP that never emits the `email_verified` claim, so a missing claim is accepted as verified (audited `auth.login.email_verified_assumed`). A claim that is present and `false` is refused regardless.
 
 ```yaml
@@ -304,6 +317,18 @@ datapipelines:
           issuer-uri: https://accounts.google.com
           display-name: "Sign in with Google"   # shown on login button
           # trust-email-without-verified-claim: true   # ONLY for an IdP that never emits the claim (§4.2, #187)
+
+        - name: github               # OAuth 2.0, not OIDC (#655)
+          protocol: oauth2
+          client-id: ${GITHUB_CLIENT_ID}
+          client-secret: ${GITHUB_CLIENT_SECRET}
+          authorization-uri: https://github.com/login/oauth/authorize
+          token-uri: https://github.com/login/oauth/access_token
+          user-info-uri: https://api.github.com/user
+          user-name-attribute: id
+          scopes: [read:user, user:email]
+          emails-uri: https://api.github.com/user/emails
+          display-name: "Sign in with GitHub"
 
         - name: microsoft
           client-id: ${MS_CLIENT_ID}
@@ -325,7 +350,7 @@ datapipelines:
         #   display-name: "Company SSO"
 ```
 
-Scopes requested for every provider: `openid`, `profile`, `email`. These are the standard OIDC scopes that give us the user's identity.
+Scopes requested for every `oidc` provider: `openid`, `profile`, `email`. These are the standard OIDC scopes that give us the user's identity. An `oauth2` provider requests exactly its configured `scopes` (GitHub: `read:user` for the profile, `user:email` for the emails endpoint).
 
 ### 5.2 ClientRegistration bean (built at startup)
 
@@ -363,6 +388,8 @@ class OidcConfig {
     }
 }
 ```
+
+**The branch (#655).** The sample above is the `oidc` arm. `OidcConfig` dispatches on `protocol`: `oidc` builds through discovery (`ClientRegistrations.fromIssuerLocation`) with the three OIDC scopes; `oauth2` builds from the configured endpoints with the authorization-code grant, `client_secret_basic`, the configured `scopes` and `user-name-attribute`, and makes no HTTP call. Both arms share the registration id, client credentials, display name and the absolute redirect URI below. An unknown `protocol`, a missing `oauth2` key or an `openid` scope on an `oauth2` entry throws at construction naming the provider — the second line behind Configuration §7.
 
 The redirect URI is built from `datapipelines.auth.base-url` ([Configuration §3.4](configuration.md#34-auth)) — the deployment's exact external origin (e.g. `https://dp.example.com`, no trailing slash). Startup fails when it is unset while any OIDC provider is configured. This is what §13's "OIDC redirect URI locked to the deployment's exact domain" means mechanically; the earlier `{baseUrl}` placeholder resolved from the incoming request and let a hostile `Host`/`X-Forwarded-Host` header pick the redirect target (v2.4).
 
@@ -522,6 +549,23 @@ to "fix" the code to match it.
 **The create branch tells sys-ops (137, §5A.8).** `UserService.findOrCreateByEmail` answers `Provisioned(user, created)`, and when `created` is true — this callback's insert won the row — the handler hands a "New user" notice to `MailNotices` after the workspace resolution (so the notice can name where the account landed): `created by: self-service via <registration id>`, never a password. A returning user's login sends nothing; the loser of a two-replica first-login race reports `created = false` and sends nothing either — the winner's callback already did. With mail unconfigured the notice is one INFO line.
 
 The success handler is **fully provider-agnostic.** It reads `authorizedClientRegistrationId` from the authentication token — that's whatever provider name the deployment configured. It doesn't know or care whether it's Google, Okta, or Keycloak.
+
+**Identity per protocol (#655).** An `oidc` login's identity is the ID token's claims (above). An `oauth2` login has no ID token: Spring routes a registration without the `openid` scope to the plain OAuth 2.0 user service, and ours (`OAuth2IdentityUserService`) reads the user-info endpoint and returns a principal carrying the same keys — so the handler reads `claims` from either principal and everything after it (lowercasing, the §4.2 gates, the link-once rule, the allowlist, the session) is ONE code path:
+
+| Key | `oauth2` source |
+|---|---|
+| `sub` | the `user-name-attribute` value, as a string (GitHub: the numeric `id`) |
+| `name` | user-info `name`, else `login` (GitHub's `name` is nullable) |
+| `picture` | user-info `picture`, else `avatar_url` |
+| `email`, `email_verified` | with `emails-uri`: the row with `primary: true` and its `verified` flag; without it, user-info's own attributes |
+
+**The verified-primary rule.** With `emails-uri` set, the user-info `email` is **discarded** — GitHub's is the public profile address, neither verified nor necessarily the account's, and provisioning is keyed on email (§4.2), so trusting it would let anyone who types a victim's address into a public profile take the victim's row. No primary row → no address → refused (`missing_email`); a primary row whose `verified` is not the JSON `true` → refused (`email_not_verified`). **The trust knob does not apply to an entry with `emails-uri`**: the endpoint states verification itself, so `trust-email-without-verified-claim` cannot stand in for it; an `oauth2` entry without `emails-uri` is judged by the user-info attributes exactly as an OIDC token's claims, knob included. A failed, non-2xx or malformed emails read (not a list, a non-object row, two primaries, a primary without an address) refuses as `invalid_emails_response`; a user-info answer without the subject attribute as `invalid_user_info_response`.
+
+**Provider read timeouts (#682).** `datapipelines.auth.oidc.provider-read-timeout-seconds` (default `10`, integer in 1–2147483; Configuration §3.4) sets both connect and read timeouts for the code-for-token exchange (both protocols), OAuth2 user-info, the emails read and OIDC user-info. A stalled token exchange fails as `invalid_token_response`; either user-info path fails as `invalid_user_info_response`; the emails path fails as `invalid_emails_response` with `emails endpoint read failed (ResourceAccessException)`. These reach the failure path below. This is a per-connect/read bound, not a total login deadline. The ID-token decoder's JWKS fetch is bounded by the same key through a `JwtDecoderFactory` bean (#686): the bean re-creates Spring's ID-token decoder with the bounded HTTP client and keeps everything else Spring's — the same algorithm resolution, the same validators (timestamp + OIDC issuer/audience), the same claim-type conversion, one decoder per registration — so a stalled JWKS read fails the ID-token decode as `invalid_id_token` and reaches the failure path below. Startup discovery keeps Spring's separate 30 s bound.
+
+**The failure path.** Every provider-side login failure — a refused consent, a lost authorization request, a failed token exchange, the refusals above — redirects to `/login?error=oidc_error` (the existing banner; no new page) and is audited `auth.login.oidc_error` with `details.reason` = the OAuth 2.0 error code (`authentication_failed` when there is none) and `details.provider` = the callback's registration id when it names a CONFIGURED provider (null otherwise — an unknown path segment is never written). The login limiter (§11.5; `/login` and `/oauth2/` prefixes, per client IP) meters the callback path, which bounds these rows.
+
+**The access token is not retained.** It lives only inside the user-info request: the bearer of the user-info and emails reads, never stored, logged or put in a cookie. Spring Boot's default authorized-client repository would have kept every login's token in an in-memory map keyed by principal; `OidcConfig` replaces it with a repository that stores nothing, so a login leaves no provider token in the process — for either protocol.
 
 ---
 
@@ -707,7 +751,7 @@ surfaces, so each is also a second line behind the kind confinement, §7.7.)
 - **Decoupled TTL.** Our JWT has its own TTL (8h). OIDC access tokens have provider-specific TTLs (Google = 1h). Using OIDC tokens would require refreshing mid-session.
 - **Our own authorization model.** What a session may do is our roles (§11A), resolved per request. OIDC tokens carry provider scopes which don't map to it.
 - **Stateless validation.** Our JWT is validated with a local HMAC secret. OIDC token validation requires fetching the provider's JWKS (network call).
-- **No vendor lock-in.** If we add a third provider (GitHub, Okta), the internal JWT is identical regardless of which provider authenticated the user.
+- **No vendor lock-in.** Whichever provider authenticated the user — an OIDC one, or GitHub over OAuth 2.0 (shipped, #655) — the internal JWT is identical.
 
 ### 6.3 JWT validation (on every request)
 
@@ -1401,7 +1445,7 @@ Codes follow the `{domain}.{entity}.{failure}` convention; the registry of recor
 | `auth.login.bad_credentials` | 401 | Local login rejected: email unknown or password incorrect — deliberately identical (§5A.5) |
 | `auth.login.locked` | 403 | Local account locked after consecutive failures (§5A.3) |
 | `auth.password.change_required` | 403 | Session principal must change password before any other operation (§5A.4) |
-| `auth.login.oidc_error` | 500 | OIDC provider returned an error during login |
+| `auth.login.oidc_error` | 500 | OIDC or OAuth 2.0 provider login failed — `details.reason` names the cause (§5.5) |
 | `auth.session.expired` | 401 | JWT expired |
 | `auth.session.invalid` | 401 | JWT signature invalid or malformed |
 | `auth.api_key.missing` | 401 | No `DP-API-Key` header, no Bearer `dpk_` token, no `dp_session` cookie |
@@ -1443,7 +1487,7 @@ Workspace resolution failures (§5.6) use the `workspace.*` codes — catalogued
 | `datasource.granted` | A datasource was granted to a workspace — the verb that decides who can reach a live database's data. `details.already_granted` separates a new grant from an idempotent re-grant |
 | `datasource.revoked` | A datasource's grant to a workspace was removed; the datasource itself is untouched |
 | `auth.login.user_inactive` | User account is deactivated (OIDC or local — same event) |
-| `auth.login.oidc_error` | OIDC provider returned an error |
+| `auth.login.oidc_error` | OIDC or OAuth 2.0 provider login failed — `details.reason` (the OAuth 2.0 error code, or a §4.2/§5.5 refusal) and `details.provider` (a configured registration id, else null) |
 | `auth.login.bad_credentials` | Local login failed: unknown email, OIDC-only account, or wrong password — deliberately indistinguishable (§5A.5) |
 | `auth.login.locked` | Local account locked after `lockout.max-failures` consecutive failures (§5A.3) |
 | `auth.password.seeded` | Config seeded the bootstrap admin's one-time local credential (§5A.2) |
@@ -1552,6 +1596,21 @@ datapipelines:
           # trust-email-without-verified-claim: true   # default false (§4.2/#187) — only for
           #                                            # an IdP that never emits the claim
 
+        # GitHub — OAuth 2.0 WITHOUT OpenID Connect (§5.1, #655): the endpoints are named,
+        # nothing is discovered; the address is the verified PRIMARY row of emails-uri.
+        - name: github
+          protocol: oauth2
+          client-id: ${GITHUB_CLIENT_ID:}
+          client-secret: ${GITHUB_CLIENT_SECRET:}
+          authorization-uri: https://github.com/login/oauth/authorize
+          token-uri: https://github.com/login/oauth/access_token
+          user-info-uri: https://api.github.com/user
+          user-name-attribute: id
+          scopes: [read:user, user:email]
+          emails-uri: https://api.github.com/user/emails
+          display-name: "Sign in with GitHub"
+          picture-hosts: avatars.githubusercontent.com
+
         # Microsoft (Entra ID) — SINGLE-TENANT only in v1: the issuer-uri MUST name
         # your tenant. Multi-tenant `/common` is NOT supported: its discovery metadata
         # carries the `{tenantid}` issuer template, which the OIDC discovery client
@@ -1588,23 +1647,33 @@ datapipelines:
       cache-ttl-seconds: 60
 ```
 
+- `datapipelines.auth.oidc.provider-read-timeout-seconds` — shared by all providers, default `10`; 1–2147483 seconds for connect and read timeouts on token, OAuth2 user-info, emails, OIDC user-info calls and the ID-token decoder's JWKS fetch (§5.5, #686). Startup discovery keeps Spring's separate 30 s bound.
+
 **Per provider, three values are required:**
 - `client-id` — from the OIDC provider's app registration.
 - `client-secret` — from the provider's app registration.
-- `issuer-uri` — the provider's OIDC issuer URL. Triggers auto-discovery of all endpoints.
+- `issuer-uri` — the provider's OIDC issuer URL. Triggers auto-discovery of all endpoints. (`oidc` entries only; refused on an `oauth2` entry.)
+
+**The protocol and the `oauth2` keys (#655, §5.1):**
+- `protocol` — optional, `oidc` (default) or `oauth2`; anything else refuses startup.
+- `authorization-uri`, `token-uri`, `user-info-uri` — required for `oauth2`, empty by default; `https://` (plain `http://` only for `localhost` / `127.0.0.1`).
+- `user-name-attribute` — required for `oauth2`, empty by default: the user-info attribute that is the stable subject.
+- `scopes` — required for `oauth2`, empty list by default; never `openid`.
+- `emails-uri` — optional, unset by default; when set, the verified primary row is the only source of the address and the trust knob is not consulted (§5.5).
 
 **Two further values:**
 - `name` — **required.** Registration ID used in URLs (`/oauth2/authorization/{name}`) and stored in `users.provider`. Lowercase `[a-z0-9-]+`. (The §5.2 bean uses it directly; there is no derivation fallback.)
 - `display-name` — optional. Text shown on the login button; defaults to `name`.
 
 **One further value (#197):**
-- `picture-hosts` — optional, comma-separated bare hostnames, **default empty**. The allowlist the avatar proxy (`GET /avatar`, §7.6 `profile.read`) may fetch the stored `users.profile_picture_url` from, so the CSP's `img-src` can stay `'self' data:` and the browser never loads an image from an identity provider's host. The host is NOT derivable from `issuer-uri` (Google issues from `accounts.google.com`, serves pictures from `lh3.googleusercontent.com`; Entra's pictures live on Microsoft Graph; a self-hosted Keycloak's sit wherever its operator mapped them), so the operator names the hosts the deployment trusts. Empty (the default) = the proxy fetches nothing and every avatar falls back to initials — exactly the rendering a login without a `picture` claim already gets. A non-hostname entry (scheme, port, path, userinfo or wildcard) refuses startup. The fetch itself is fenced: the caller's OWN row only, http/https, no userinfo component, redirects never followed, a 1 MiB cap on the body, and a small private TTL cache. Three rules narrow it further (#246). A stored picture URL that names a port — any explicit port, the scheme's default included — is refused before any connection is made: the allowlist names hosts, never ports, so a port would steer the fetch to any service on a trusted host. Only raster images are served — `image/png`, `image/jpeg`, `image/gif` and `image/webp`, the type passed through as the provider sent it — and anything else, SVG included (a document format that can carry script), is refused. The whole fetch — connect, headers and body — completes within 5 s or is abandoned and its connection closed, so a provider that dribbles or stalls its body holds a request thread no longer than that and the avatar falls back to initials. A refused or failed fetch is itself remembered (#254): it enters the same bounded TTL cache as a negative entry, so a broken picture host costs ONE provider fetch per user per TTL instead of one per page view, the 404 answers with `Cache-Control: private, max-age=<ttl seconds>` so the browser stops asking while the refusal stands, and a later successful fetch replaces the negative entry.
+- `picture-hosts` — optional, comma-separated bare hostnames, **default empty**. The allowlist the avatar proxy (`GET /avatar`, §7.6 `profile.read`) may fetch the stored `users.profile_picture_url` from, so the CSP's `img-src` can stay `'self' data:` and the browser never loads an image from an identity provider's host. The host is NOT derivable from `issuer-uri` (Google issues from `accounts.google.com`, serves pictures from `lh3.googleusercontent.com`; Entra's pictures live on Microsoft Graph; a self-hosted Keycloak's sit wherever its operator mapped them), so the operator names the hosts the deployment trusts. Empty (the default) = the proxy fetches nothing and every avatar falls back to initials — exactly the rendering a login without a `picture` claim already gets. A non-hostname entry (scheme, port, path, userinfo or wildcard) refuses startup. Only providers with a non-blank `client-id` contribute; a dormant entry's hosts are validated for shape but never allowlisted (#651). The fetch itself is fenced: the caller's OWN row only, http/https, no userinfo component, redirects never followed, a 1 MiB cap on the body, and a small private TTL cache. Three rules narrow it further (#246). A stored picture URL that names a port — any explicit port, the scheme's default included — is refused before any connection is made: the allowlist names hosts, never ports, so a port would steer the fetch to any service on a trusted host. Only raster images are served — `image/png`, `image/jpeg`, `image/gif` and `image/webp`, the type passed through as the provider sent it — and anything else, SVG included (a document format that can carry script), is refused. The whole fetch — connect, headers and body — completes within 5 s or is abandoned and its connection closed, so a provider that dribbles or stalls its body holds a request thread no longer than that and the avatar falls back to initials. A refused or failed fetch is itself remembered (#254): it enters the same bounded TTL cache as a negative entry, so a broken picture host costs ONE provider fetch per user per TTL instead of one per page view, the 404 answers with `Cache-Control: private, max-age=<ttl seconds>` so the browser stops asking while the refusal stands, and a later successful fetch replaces the negative entry.
 
 ### 11.2 Common provider issuer URIs (reference)
 
 | Provider | issuer-uri |
 |---|---|
 | Google | `https://accounts.google.com` |
+| GitHub | none — not OIDC; a `protocol: oauth2` entry (§5.1, §11.1) |
 | Microsoft (single tenant) | `https://login.microsoftonline.com/{tenant-id}/v2.0` |
 | ~~Microsoft (multi-tenant)~~ | `/common` — **unsupported in v1** (§11.1: the `{tenantid}` discovery metadata is refused at startup) |
 | Okta | `https://{your-org}.okta.com` |
@@ -1813,7 +1882,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 ## 15. Open Questions / Future
 
-- **Additional OIDC providers** (GitHub, Okta, Auth0) — easy to add; just another Spring Security registration.
+- **Additional OIDC providers** (Okta, Auth0) — easy to add; just another registration with an `issuer-uri`. GitHub is OAuth 2.0, not OIDC — shipped as a `protocol: oauth2` entry (#655, §5.1).
 - **SAML** — for enterprises that require SAML instead of OIDC. Spring Security SAML extension.
 - **Group/role sync from provider** — map OIDC groups to internal roles automatically.
 - **Per-datasource ACLs** — fine-grained access beyond roles.
@@ -1826,6 +1895,10 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-24 | v3.57 | #686 JWKS fetch joins the provider read bound | §5.5: the ID-token decoder's JWKS fetch is bounded by `datapipelines.auth.oidc.provider-read-timeout-seconds` through a `JwtDecoderFactory` bean that re-creates Spring's decoder with the bounded client — the same algorithm resolution, validators and claim-type conversion, one decoder per registration; a stalled JWKS read fails the decode as `invalid_id_token` and reaches the failure path. §11's key row names the JWKS fetch. No key added, no default change, no route, row or role cell change. |
+| 2026-10-22 | v3.56 | #651 enabled-provider avatar hosts | §11.1's `picture-hosts` allowlist includes only providers with a non-blank `client-id`, using the same predicate as sign-in registration. Dormant entries are still validated for shape at startup but contribute no hosts. No key, default, route or permission changes. |
+| 2026-10-22 | v3.55 | #682 | Shared provider read timeout for token exchange, OAuth2 user-info/emails and OIDC user-info; JWKS exception documented (§5.5, §11.1). |
+| 2026-10-21 | v3.54 | #655 GitHub sign-in (answers #154 part 2) | **GitHub is an OAuth 2.0 provider, not an OIDC one.** §5.1: an entry's `protocol` is `oidc` (default) or `oauth2`; an `oauth2` entry names `authorization-uri`, `token-uri`, `user-info-uri`, `user-name-attribute`, `scopes` and optionally `emails-uri`, is built with no HTTP at startup, and is refused with an `issuer-uri`, an `openid` scope or a non-https endpoint (loopback http excepted). §5.2: the protocol branch. §5.5: identity per protocol; with `emails-uri` only the verified PRIMARY row is accepted (`missing_email` / `email_not_verified`), the user-info `email` is discarded and the trust knob is not consulted; provider-side failures are now audited `auth.login.oidc_error` with `reason` and a configured `provider`; the access token is no longer retained in memory (a no-op authorized-client repository). §4.2 step 1, §6.2, §10's two `oidc_error` descriptions, §11.1 (the github block, the seven keys), §11.2 (GitHub row) and §15 reworded. §7.6: no row, route or role cell changes — `/oauth2/**` and `/login/**` already cover the flow. |
 | 2026-10-21 | v3.53 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **§7.6: no row or role cell changes — four rows' prose renames.** The `template.read` / `template.create` / `template.update` / `template.evaluate` Surfaces cells now name the script face's routes `/partials/templates/script-face/…` and say "the script face" and "a script template" where they said transform; the operations, the scope constants and every role cell are unchanged. A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-19 | v3.52 | #585 the API home — renumbered at merge after #584's v3.51 | **§7.6: no new row, no role cell change — one route token joins the `endpoint.read` Surfaces cell.** `GET /overview/api-console` is the API menu's destination: endpoint counts and the endpoints-by-state chart over the console's own two reads (`EndpointPublishService.list` and `listLegacy`, behind the promoter lens — the row's `lens` cells unchanged), key counts and the keys-by-kind chart over the Keys page's own narrowing (the whole workspace with `api_key.read`, otherwise the caller's own `mcp` keys — `mcp_key.own` / `api_key.read`, unchanged), the MCP connection card (the console's, now one shared fragment: the key PLACEHOLDER, never a key) and a starter prompt that stops at publishing. The console keeps `GET /api-console` as the home's View all. No POST, no MCP tool, no key route, no migration. |
 | 2026-10-19 | v3.51 | #584 the Schedules home | **§7.6: no new row, no role cell change — one route token joins the `schedule.read` Surfaces cell.** `GET /overview/schedules` reads the viewer's schedules — four counts, By condition, Last run, Up next and Recently changed — through ONE `ScheduleService.summary`, which is §20.1's own lensed list at the workspace cap, so a promoter's numbers are the admitted ones (the row's `lens` cells unchanged) and never the unlensed live count. No recipient address or block reason is read onto the page (`schedule.update`'s, and a pipeline error's). No POST, no REST route, no MCP tool, no migration. |

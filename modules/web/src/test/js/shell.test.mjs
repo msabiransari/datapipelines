@@ -160,7 +160,7 @@ test("init wires the shell once — repeated loads never stack listeners", () =>
   shell.init();
   const beforeSwapCount = added.filter((t) => t === "htmx:beforeSwap").length;
   assert.equal(beforeSwapCount, 1, "one boost-policy listener across repeated init");
-  assert.deepEqual(onWindow, ["pageshow"], "the bfcache clear is wired exactly once");
+  assert.deepEqual(onWindow, ["popstate", "pageshow"], "the bfcache clear is wired exactly once");
   delete globalThis.window;
   delete globalThis.document;
 });
@@ -1857,3 +1857,99 @@ test("init's body click listener clears through the closest [data-dp-clear-filte
     delete globalThis.document;
   }
 });
+
+// #660: drive the installed listeners; preserve multiple listeners per event.
+function historyMissHarness(run) {
+  const bodyListeners = {};
+  const windowListeners = {};
+  const add = (listeners) => (name, listener) => (listeners[name] ||= []).push(listener);
+  globalThis.window = {
+    location: { pathname: "/pipelines" },
+    localStorage: { setItem() {} },
+    addEventListener: add(windowListeners),
+  };
+  globalThis.document = {
+    readyState: "complete",
+    body: { addEventListener: add(bodyListeners) },
+    addEventListener() {},
+    documentElement: { classList: { toggle() {}, contains: () => false } },
+    getElementById: () => null,
+    querySelectorAll: () => [],
+  };
+  try {
+    const shell = loadShell();
+    const fire = (name, detail) => {
+      const event = { detail, preventDefault() { assert.fail("a history miss must never be vetoed"); } };
+      for (const listener of bodyListeners[name] || []) listener(event);
+    };
+    const pop = (state) => windowListeners.popstate.forEach((listener) => listener({ state }));
+    const xhr = () => ({ aborts: 0, abort() { this.aborts++; } });
+    run({ shell, fire, pop, xhr });
+  } finally {
+    delete globalThis.window;
+    delete globalThis.document;
+  }
+}
+
+test("history miss is aborted once on a cache hit", () => historyMissHarness(({ shell, fire, xhr }) => {
+  const request = xhr();
+  fire("htmx:historyCacheMiss", { xhr: request, path: "/pipelines" });
+  assert.equal(shell.pendingHistoryMiss(), "/pipelines");
+  fire("htmx:historyCacheHit", {});
+  fire("htmx:historyCacheHit", {});
+  assert.equal(request.aborts, 1);
+  assert.equal(shell.pendingHistoryMiss(), null);
+}));
+
+test("history miss load clears without aborting the completed xhr", () => historyMissHarness(({ shell, fire, xhr }) => {
+  const request = xhr();
+  fire("htmx:historyCacheMiss", { xhr: request, path: "/pipelines" });
+  fire("htmx:historyCacheMissLoad", { xhr: request });
+  fire("htmx:historyCacheHit", {});
+  assert.equal(request.aborts, 0);
+  assert.equal(shell.pendingHistoryMiss(), null);
+}));
+
+test("a newer history miss aborts the first and ignores its late terminal events", () => historyMissHarness(({ shell, fire, xhr }) => {
+  const first = xhr();
+  const second = xhr();
+  fire("htmx:historyCacheMiss", { xhr: first, path: "/pipelines" });
+  fire("htmx:historyCacheMiss", { xhr: second, path: "/templates" });
+  assert.equal(first.aborts, 1);
+  for (const name of ["htmx:historyCacheMissLoad", "htmx:historyCacheMissLoadError"]) fire(name, { xhr: first });
+  assert.equal(shell.pendingHistoryMiss(), "/templates");
+  assert.equal(second.aborts, 0);
+  fire("htmx:historyCacheMissLoadError", { xhr: second });
+  assert.equal(shell.pendingHistoryMiss(), null);
+  assert.equal(second.aborts, 0);
+}));
+
+test("only a boosted beforeRequest aborts a history miss", () => historyMissHarness(({ shell, fire, xhr }) => {
+  const request = xhr();
+  fire("htmx:historyCacheMiss", { xhr: request, path: "/pipelines" });
+  fire("htmx:beforeRequest", { boosted: false });
+  assert.equal(request.aborts, 0);
+  assert.equal(shell.pendingHistoryMiss(), "/pipelines");
+  fire("htmx:beforeRequest", { boosted: true });
+  assert.equal(request.aborts, 1);
+  assert.equal(shell.pendingHistoryMiss(), null);
+}));
+
+test("foreign popstate aborts a history miss while htmx popstate defers to its restore event", () => historyMissHarness(({ shell, fire, pop, xhr }) => {
+  for (const state of [null, { workspace: true }]) {
+    const request = xhr();
+    fire("htmx:historyCacheMiss", { xhr: request, path: "/pipelines" });
+    pop({ htmx: true });
+    assert.equal(request.aborts, 0);
+    pop(state);
+    assert.equal(request.aborts, 1);
+    assert.equal(shell.pendingHistoryMiss(), null);
+  }
+}));
+
+test("a throwing history-miss abort still clears the pending request", () => historyMissHarness(({ shell, fire }) => {
+  const request = { abort() { throw new Error("discarded xhr"); } };
+  fire("htmx:historyCacheMiss", { xhr: request, path: "/pipelines" });
+  assert.doesNotThrow(() => fire("htmx:historyCacheHit", {}));
+  assert.equal(shell.pendingHistoryMiss(), null);
+}));

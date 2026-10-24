@@ -156,9 +156,11 @@
           <!-- 7d: for a script type the body starts as the record's example body (the blocks
                below are its contract, invariants and tests); switching back to sql/html while
                it is untouched clears it again. -->
+          <code hidden data-create-js-frame class="u-mono" th:text="${skeleton?.MAIN_OPEN}">function main(input) {</code>
           <textarea id="create-template-body" name="body" class="ds-input app-template-body-input"
                     placeholder="SELECT 1" required
-                    th:attr="data-script-body=${skeleton?.body}"></textarea>
+                    th:attr="data-script-body=${skeleton?.body}, data-javascript-body=${skeleton?.javascriptBody}"></textarea>
+          <code hidden data-create-js-frame class="u-mono" th:text="${skeleton?.MAIN_CLOSE}">}</code>
         </div>
         <!-- 7d (#7, transform-nodes design §2.2): a script carries a contract, invariants and
              tests inside its version — the create runs the suite, and one EMPTY-input case is

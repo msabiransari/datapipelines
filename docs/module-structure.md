@@ -74,7 +74,7 @@ datapipelines/
 | `typesystem` | [type-system.md](type-system.md) | The 11 canonical types, per-dialect mappers, H2 mapping, schema envelope. Foundation. | — (no persistence) |
 | `graph` | [dag-executor.md §3](dag-executor.md#3-dag-data-structure) (this spec, §5.17) | The generic DAG primitive — `Dag<T>`, `DagBuilder<T>` (topological order, cycle detection, reverse index). Stdlib only, no internal dependencies: moved out of `dag` (#194) so a module below the executor can build a graph without inheriting the executor's dependency set. Package `co.datapipelines.dag`, kept on purpose. | — (no persistence) |
 | `persistence` | [DAG Executor §10](dag-executor.md#10-sse-event-integration), [Auth §10](auth.md) (this spec, §5.19) | The generic batching writer (#266) — `BatchingWriter<T>`: an ordered, bounded, partitioned group commit in front of ONE store, with a bounded wait that falls back to the caller's own write, a singles retry that isolates a poison row, and a bounded shutdown drain. Knows no store: each supplies a `BatchSink`. Stdlib, coroutines and slf4j only. | — (writes whatever its sinks write; owns no table) |
-| `scripting` | (this spec, §5.15) | The script engine seam: `ScriptEngine` (JSONata in round one), the evaluation pool, the type gate, canonical JSON. Pure library — evaluates untrusted script bodies with no I/O surface. | — (no persistence) |
+| `scripting` | (this spec, §5.15) | The script engine seam: `ScriptEngine` (JSONata in-process; JavaScript in a GraalJS isolate, #8), one registry wired in web and injected into the validator, test runner and node support, the evaluation pool, the type gate, canonical JSON. Pure library — evaluates untrusted script bodies with no I/O surface. | — (no persistence) |
 | `pipeline-contract` | [pipeline-contract.md](pipeline-contract.md) | Pipeline JSON model, validation, ExecutionContext type. | `PipelineRepository` → `pipelines`, `pipeline_versions` |
 | `templates` | [templates.md](templates.md) | Freemarker integration, library macros, template registry, versioning. | `TemplateRepository` → `templates`, `template_versions` |
 | `datasources` | [datasources.md](datasources.md) | Connection registry, HikariCP pools, dialect adapters, credential encryption. | `DatasourceRepository` → `datasources` |
@@ -369,11 +369,12 @@ At runtime the operator points the launcher at the directory with `loader.path` 
 
 ```
 java -Dloader.path=lib -jar datapipelines-app.jar
-# or, in the container image (absolute: the image sets no WORKDIR, so a relative entry would resolve against /):
-ENV LOADER_PATH=/app/lib
+# or, in the container image (absolute: the image sets no WORKDIR, so a relative entry would resolve against /;
+# the second entry is the JavaScript isolate's directory, §5.15):
+ENV LOADER_PATH=/app/lib,/opt/graaljs
 ```
 
-The deployment image therefore ships an empty, read-only `/app/lib` (`root:root`, mode `0555`, created before the image drops to its app user) and sets `LOADER_PATH=/app/lib` so a drop-in works with no rebuild and no re-configuration ([Deployment §6](deployment.md) owns the image contents; the operator mounts the driver jar read-only there, [Deployment §3.5](deployment.md#35-jdbc-driver-matrix-what-ships-in-the-image)). The path is absolute because `loader.home` defaults to the working directory and the image sets no `WORKDIR`: `LOADER_PATH=lib` would put `/lib`, the OS library directory, on the classpath. `ImageLoaderPathSpecDriftTest` pins the Dockerfile and this section to the same value.
+The deployment image therefore ships an empty, read-only `/app/lib` (`root:root`, mode `0555`, created before the image drops to its app user) and sets `LOADER_PATH=/app/lib,/opt/graaljs` — the drop-in directory, then the directory holding the image's JavaScript isolate jar (§5.15) — so a drop-in works with no rebuild and no re-configuration ([Deployment §6](deployment.md) owns the image contents; the operator mounts the driver jar read-only there, [Deployment §3.5](deployment.md#35-jdbc-driver-matrix-what-ships-in-the-image)). The path is absolute because `loader.home` defaults to the working directory and the image sets no `WORKDIR`: `LOADER_PATH=lib` would put `/lib`, the OS library directory, on the classpath. The two directories are one list in one `ENV`, never a `-Dloader.path` beside it: `PropertiesLauncher` reads the system property before the environment, so a `-Dloader.path` naming only the isolate would silently drop the driver drop-in (measured in #8 lane 8a). `ImageLoaderPathSpecDriftTest` pins the Dockerfile and this section to the same value.
 
 The wiring lives in `app` (it owns the runnable artifact) even though the drivers are a `datasources` concern. A driver that is neither bundled nor dropped in fails datasource save with `datasource.driver_not_loaded` — see [Datasources §10](datasources.md#10-jdbc-driver-packaging) for the licensing rationale and the full driver matrix.
 
@@ -650,19 +651,24 @@ build's `allowedInternalDependencies` map carries the same closed set).
 - `com.dashjoin:jsonata` (pinned, 0.9.10 at introduction) — the round-one script engine; Apache-2.0. Bus-factor note for the dependency review: a small upstream project (99 stars, 17 open issues, last push 2026-07-08 at dispatch) — recorded on purpose; not a blocker while the seam keeps it replaceable.
 - `com.fasterxml.jackson.core:jackson-databind` (BOM-managed) — the one `ObjectMapper` behind `CanonicalJson`, private to the module.
 - `org.slf4j:slf4j-api` (BOM-managed) — the evaluation pool's abandonment log; the registry lives in `app`.
+- `org.graalvm.polyglot:polyglot`, `org.graalvm.sdk:nativebridge`, `org.graalvm.truffle:truffle-api` (pinned, 25.4.4.1.1 at introduction; UPL 1.0) — the JavaScript engine's polyglot API and the isolate's two declared bridge dependencies (#8 lane 8a). They bring `org.graalvm.sdk:collections`, `nativeimage`, `word` and `jniutils` (UPL 1.0); all seven ride in the boot jar.
+- `org.graalvm.polyglot:js-isolate-community` (same pin; MIT + UPL 1.0) — the GraalJS isolate, **test runtime only**: the aggregator pulls the four platform binaries into the Gradle cache. No isolate binary enters the jar; the image fetches its platform's into `/opt/graaljs`, SHA-256-pinned, and puts it on the loader path (§5.4.1). A process without it reports JavaScript unavailable.
 
 **Public API:**
-- `ScriptEngine` — compile once, evaluate many; JSON-shaped values in and out; `JsonataEngine` is the round-one implementation
+- `ScriptEngine` — compile once, evaluate many; JSON-shaped values in and out; `JsonataEngine` and `JavaScriptEngine` are the two implementations, wired through one availability-aware map (#8 lane 8b)
 - `ScriptLanguage`, `EvaluationLimits`, `EngineCapabilities` — the seam's vocabulary; capabilities state which limits an engine can actually enforce, measured by the breach suite, never intended
+- `JavaScriptRuntime`, `JavaScriptRuntimeOptions`, `Availability`, `EngineScope` — the one factory of every polyglot Engine and Context (`SandboxPolicy.UNTRUSTED`, `spawnIsolate(true)`, no host, IO, polyglot, native, process or environment access), one Engine per JVM with a fresh Context per evaluation, and the isolate's sizing
+- `ConsoleSink`, `ConsoleLine`, `ConsoleLevel` — where a JavaScript body's console lines go
+- `JavaScriptResourcesMain` — the image build's pre-install of the isolate's native resources
 - `CompiledScript` — opaque engine-produced handle
 - `ScriptEvaluationPool` — the bounded pool every production evaluate call runs on; `ScriptClock` is its injected time source
 - `TypeGate` (+ `GateRefusal`/`GateResult`) — the §5.3/R1 output contract of the script design; DECIMAL rounds half-even, BIGDECIMAL is exact
 - `CanonicalJson` — the §5.5 canonical form: keys sorted, shortest doubles, plain decimals
 - `ScriptingException` and its five typed refusals (`ScriptSyntaxException`, `ScriptEvaluationException`, `ScriptTimeoutException`, `ScriptResourceLimitException`, `ScriptPoolExhaustedException`) — the codes they carry are the script design's §7 mapping
 
-**Why it is its own module.** The engine evaluates UNTRUSTED script bodies as pure functions of their JSON input (script design D-T4). That is safe because the module cannot reach anything else: one internal edge, an I/O-refusing source guard (`ScriptingPurityTest`), and resource bounds that are measured, not believed (`JsonataBreachTest` writes `build/reports/jsonata-breach.md`, and dag-executor.md's honest-bounds table is pasted from it). It deliberately does **not** depend on `pipeline-contract`: modes, contracts, error codes and the Context are callers' concerns (7b/7c), and an engine that knew them would be an engine nobody could sandbox.
+**Why it is its own module.** The engine evaluates UNTRUSTED script bodies as pure functions of their JSON input (script design D-T4). That is safe because the module cannot reach anything else: one internal edge, an I/O-refusing source guard (`ScriptingPurityTest`), and resource bounds that are measured, not believed (`JsonataBreachTest` and `JavaScriptBreachTest` write `build/reports/jsonata-breach.md` and `javascript-breach.md`, and dag-executor.md's honest-bounds table is pasted from them). The JavaScript engine adds a second wall: its bodies run in a separate GraalJS isolate whose Engines and Contexts only `JavaScriptRuntime` builds (`JavaScriptSandboxGuardTest`). It deliberately does **not** depend on `pipeline-contract`: modes, contracts, error codes and the Context are callers' concerns (7b/7c), and an engine that knew them would be an engine nobody could sandbox.
 
-**Tests:** the conformance suite parameterised over every engine (`ScriptEngineConformanceTest`), the breach suite with its three-way outcome record (`JsonataBreachTest`), the 32-thread determinism proof, the pool contract, the §5.3 type-gate table (42 cases), `CanonicalJsonTest`, and `ScriptingPurityTest`.
+**Tests:** the conformance suite parameterised over every engine (`ScriptEngineConformanceTest`), the breach suites with their three-way outcome records (`JsonataBreachTest`, `JavaScriptBreachTest`) and the JavaScript engine's measurements (`JavaScriptMeasurementsTest`), the 32-thread determinism proof, the pool contract, the §5.3 type-gate table, the JavaScript engine's own suites (`JavaScript*Test`, `DockerfileGraalJsPinTest`), `CanonicalJsonTest`, and `ScriptingPurityTest`.
 
 ### 5.16 `scheduler`
 
@@ -1258,7 +1264,7 @@ Before considering the module structure "ready":
 - [ ] `./gradlew build` succeeds from clean state.
 - [ ] The §4.2 allowed-dependency verification task passes (no module declares an edge outside its row).
 - [ ] `./gradlew -Poracle bootJar` produces a JAR containing `ojdbc11`; the default `bootJar` does not.
-- [ ] A driver mounted read-only into `/app/lib/` is picked up at runtime with the image's `LOADER_PATH=/app/lib` (§5.4.1).
+- [ ] A driver mounted read-only into `/app/lib/` is picked up at runtime with the image's `LOADER_PATH=/app/lib,/opt/graaljs` (§5.4.1).
 - [ ] Flyway migrations live only in `app`; no other module declares a Flyway dependency.
 - [ ] Only `dag` and `web` declare a Redis dependency.
 - [ ] All unit tests pass.
@@ -1279,6 +1285,9 @@ Before considering the module structure "ready":
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-22 | JavaScript product wiring | 8b (#8) | One availability-aware engine map supplies templates, the pool runner and node support; §3.1/§5.15 name the two engines and their responsibilities. |
+| 2026-10-21 | #8 the JavaScript engine | 8a (#8) | §5.15: the module gains the round-two engine — `JavaScriptEngine` on the same seam, `JavaScriptRuntime` (the one Engine/Context factory: UNTRUSTED policy, spawned isolate, one Engine per JVM), its options, `Availability`, `EngineScope`, the console sink types and `JavaScriptResourcesMain`. External dependencies gain GraalVM polyglot, nativebridge and truffle-api 25.4.4.1.1 (UPL 1.0; with collections, nativeimage, word and jniutils) and the test-runtime-only `js-isolate-community` (MIT + UPL 1.0); no isolate binary in the jar. The internal edge set is unchanged (`scripting` → `typesystem` only). No product surface: a javascript template is still refused until 8b. |
+| 2026-10-21 | #8 lane 8a the image's loader path (owner ruling 2026-10-21) | 8a (#8) | §5.4.1: the image's value is now `LOADER_PATH=/app/lib,/opt/graaljs` in the fence, the prose and the readiness checklist — the drop-in directory, then the JavaScript isolate's (§5.15). One list in one `ENV`, never a `-Dloader.path` beside it: `PropertiesLauncher` reads the system property before the environment, so a `-Dloader.path` for the isolate would silently drop the drop-in (measured in lane 8a). `ImageLoaderPathSpecDriftTest` pins the new value and refuses a `-Dloader.path` in the Dockerfile. |
 | 2026-10-21 | #657 the image's driver drop-in | 657 | §5.4.1: the container value is `LOADER_PATH=/app/lib` (was `lib`), absolute because `loader.home` defaults to the working directory and the image sets no `WORKDIR` — `lib` would have meant `/lib`. The image now ships the empty, read-only `/app/lib` the section promised (the Dockerfile created none and set no `LOADER_PATH`); the readiness checklist names the same path. `ImageLoaderPathSpecDriftTest` pins the Dockerfile and this section together. No module, dependency edge or public API changes. |
 | 2026-10-21 | #640 the script-node rename | script-node-rename (#640, V50, owner ruling 2026-10-20) | The script engine seam, script bodies and the SCRIPT node in the module notes and their design references (was transform); no module, dependency edge or public API changes. A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-20 | #326 the scheduled jobs' statement bounds | 326 | Additive: §5.6's public API gains `BoundedJdbc` (#311's bounded-template construction, lifted and shared) and its `persistence` note names `ScheduledJob`; §5.19's public API gains `ScheduledJob` (strings only — no Micrometer, no JDBC). No dependency edge changes. |

@@ -37,7 +37,7 @@ class DatasourceFactsPartialController(
     private val semantics: SemanticsService,
     /** 7e — the template lens the facts' `implemented_by` is read through (no default). */
     private val lens: co.datapipelines.application.lens.PromoterLens,
-) {
+) : ShellPage {
     /** The dialog: every live fact on the datasource this workspace may see, oldest first. */
     @GetMapping("/partials/datasources/{name}/facts")
     @RequiredScope(Permission.SEMANTIC_READ)

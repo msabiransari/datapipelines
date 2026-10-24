@@ -61,25 +61,6 @@ id = "GHSA-qv9r-c865-cp47" # log4j-api 2.24.3 — facade only via log4j-to-slf4j
 reason = "log4j-api is present only as the log4j-to-slf4j facade (no log4j-core); the vulnerable MapMessage encoding path is never exercised"
 ignoreUntil = 2027-02-15
 
-#  * kotlin-gradle-plugin 2.4.10 (MEDIUM, build cache unsafe deserialization)
-#    — BUILD tooling only (buildSrc classpath), never shipped. The vulnerable
-#    path is the Gradle BUILD CACHE. Re-triaged 2026-10-16 (#480): the cache is
-#    now read and written by `scripts/pregate.sh` (`--build-cache`), and ONLY
-#    there — gate.sh, CI and gradle.properties never enable it, which
-#    `pregate.sh --self-test` asserts — and it is the LOCAL directory cache under
-#    the developer's own ~/.gradle; there is no remote or shared cache. Planting
-#    a poisoned entry there needs write access to that user's home, which
-#    already runs code as that user (~/.gradle/init.d, the build scripts), so
-#    the advisory adds no new path. Nothing CI or a release builds reads it.
-#    Kotlin 2.4.20 and 2.4.21 are stable now (Maven Central, 2026-10-16), so the
-#    retirement condition is met: bump `kotlin` in the catalog (#566)
-#    and delete this entry in the same commit.
-
-[[IgnoredVulns]]
-id = "GHSA-r937-wjx7-w2jp" # kotlin-gradle-plugin 2.4.10 — build tooling only, local pregate-only build cache (re-triaged 2026-10-16, #480)
-reason = "kotlin-gradle-plugin is build-only tooling; the build cache is enabled only for local pregate runs, in the developer's own Gradle home with no remote cache, so a poisoned entry needs write access that already grants code execution; Gate A and CI never read it; retire with the Kotlin 2.4.21 bump"
-ignoreUntil = 2027-02-15
-
 #  * spring-webmvc 6.2.19 (CRITICAL 9.8, CVE-2026-47884, XsltView SSRF/RCE)
 #    — on every web module's runtime classpath. Exploitable only when the app
 #    renders through XsltView behind a `/**` mapping with an unspecified view

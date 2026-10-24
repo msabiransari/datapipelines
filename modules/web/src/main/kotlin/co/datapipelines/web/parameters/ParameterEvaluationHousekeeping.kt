@@ -2,6 +2,9 @@ package co.datapipelines.web.parameters
 
 import co.datapipelines.parameters.ParameterEvaluationRepository
 import co.datapipelines.persistence.FailureShape
+import co.datapipelines.persistence.ScheduledJob
+import io.micrometer.core.instrument.Counter
+import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataAccessException
 
@@ -14,11 +17,28 @@ import org.springframework.dao.DataAccessException
  * [MARGIN_SECONDS] cannot still be running anywhere — the cutoff is a fact, not a guess. The row becomes `INCOMPLETE`,
  * never `TIMEOUT`: nobody knows how the lost attempt ended. One guarded `UPDATE` per tick over the partial running
  * index; every replica may run it; a failed tick is logged by class and SQLState only and retried next hour.
+ *
+ * The `UPDATE` carries the retention tick's bound (#636, `RetentionSchedulingConfiguration` builds [evaluations] over its
+ * 25 s template): a cancel (`sql_state=57014`) rolls the `UPDATE` back whole and the next hourly tick retries from the same
+ * predicate. A failed step — a statement that threw, or was cancelled at its bound — is one
+ * `event=parameter.evaluation_sweep_failed` WARN and one [ScheduledJob.FAILED_TICK_METER] increment
+ * (`job=parameter_evaluation_sweep`).
  */
 class ParameterEvaluationSweeper(
     private val evaluations: ParameterEvaluationRepository,
     evaluateTimeoutSeconds: Long,
+    /** The failed-tick counter's registry; null (direct constructions in tests) counts nothing. */
+    metrics: MeterRegistry? = null,
 ) {
+    private val failedTicks: Counter? =
+        metrics?.let { registry ->
+            Counter
+                .builder(ScheduledJob.FAILED_TICK_METER)
+                .description(ScheduledJob.FAILED_TICK_DESCRIPTION)
+                .tag(ScheduledJob.JOB_TAG, ScheduledJob.PARAMETER_EVALUATION_SWEEP.tag)
+                .register(registry)
+        }
+
     init {
         require(evaluateTimeoutSeconds > 0) { "evaluateTimeoutSeconds must be positive, was $evaluateTimeoutSeconds" }
     }
@@ -34,6 +54,7 @@ class ParameterEvaluationSweeper(
                 evaluations.sweepStale(staleAfterSeconds)
             } catch (e: DataAccessException) {
                 LOG.warn("event=parameter.evaluation_sweep_failed error={} sql_state={}", FailureShape.cause(e), FailureShape.sqlState(e))
+                failedTicks?.increment()
                 return 0
             }
         closed.forEach {
@@ -63,12 +84,28 @@ class ParameterEvaluationSweeper(
  * hourly tick, the cutoff on `started_at`. ONE bounded `DELETE` per tick ([batchSize] records, oldest first, the query
  * rows cascading) — the `AuditLogRetention` batch shape without its loop: a full batch means a backlog, said once at
  * WARN, and the next hour takes the next batch. A `RUNNING` row is never deleted.
+ *
+ * The `DELETE` carries the retention tick's bound (#636, `RetentionSchedulingConfiguration` builds [evaluations] over its
+ * 25 s template): a cancel (`sql_state=57014`) rolls back that one batch and the next hourly tick takes it again. A failed
+ * step — a statement that threw, or was cancelled at its bound — is one `event=parameter.evaluation_retention_failed` WARN
+ * and one [ScheduledJob.FAILED_TICK_METER] increment (`job=parameter_evaluation_retention`).
  */
 class ParameterEvaluationRetention(
     private val evaluations: ParameterEvaluationRepository,
     private val retentionDays: Long,
     private val batchSize: Int = DEFAULT_BATCH_SIZE,
+    /** The failed-tick counter's registry; null (direct constructions in tests) counts nothing. */
+    metrics: MeterRegistry? = null,
 ) {
+    private val failedTicks: Counter? =
+        metrics?.let { registry ->
+            Counter
+                .builder(ScheduledJob.FAILED_TICK_METER)
+                .description(ScheduledJob.FAILED_TICK_DESCRIPTION)
+                .tag(ScheduledJob.JOB_TAG, ScheduledJob.PARAMETER_EVALUATION_RETENTION.tag)
+                .register(registry)
+        }
+
     init {
         require(retentionDays > 0) { "retentionDays must be positive, was $retentionDays" }
         require(batchSize > 0) { "batchSize must be positive, was $batchSize" }
@@ -86,6 +123,7 @@ class ParameterEvaluationRetention(
                     FailureShape.cause(e),
                     FailureShape.sqlState(e),
                 )
+                failedTicks?.increment()
                 return 0
             }
         if (purged > 0) LOG.info("event=parameter.evaluations_purged count={} retention_days={}", purged, retentionDays)

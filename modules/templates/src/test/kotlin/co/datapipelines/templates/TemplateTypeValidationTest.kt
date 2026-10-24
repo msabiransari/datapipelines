@@ -24,7 +24,12 @@ class TemplateTypeValidationTest {
     private val workspaceId = UUID.randomUUID()
     private val deserializer = TemplateDeserializer()
 
-    private fun validator(): TemplateValidator = TemplateValidator(LibraryResolver { _ -> InMemoryTemplateRegistry() })
+    private fun validator(): TemplateValidator =
+        TemplateValidator(
+            scriptEngines =
+                mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
+            libraryResolver = LibraryResolver { _ -> InMemoryTemplateRegistry() },
+        )
 
     private fun json(
         type: String?,

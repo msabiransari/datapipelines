@@ -47,7 +47,7 @@ class DashboardLifecycleDialogController(
     private val dashboards: DashboardService,
     private val dialogs: DashboardLifecycleDialogModel,
     private val audit: AuditEventSink,
-) {
+) : ShellPage {
     // ------------------------------------------------------------------ release
 
     @GetMapping("/partials/dashboards/{id}/lifecycle/release")

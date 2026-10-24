@@ -1,8 +1,8 @@
 # Configuration Reference
 
-**Status:** v1.58 (single source of truth for every config key)
+**Status:** v1.65 (single source of truth for every config key)
 **Owner:** datapipelines.co core
-**Last updated:** 2026-10-20
+**Last updated:** 2026-10-24
 
 ---
 
@@ -31,7 +31,7 @@ Every configuration key for datapipelines.co, in one place. Environment variable
 | `datapipelines.jwt.secret` | `DATAPIPELINES_JWT_SECRET` | Internal JWT signing secret. ≥ 32 bytes random, base64-encoded |
 | `datapipelines.db.encryption-key` | `DATAPIPELINES_DB_ENCRYPTION_KEY` | AES-256 data key for datasource password encryption. Exactly 32 bytes, base64-encoded. **Required — there is no fallback source.** It is **key version 1**, forever: every credential written under it carries `0x01` as its first byte ([Datasources §7.1](datasources.md#71-encryption-at-rest)). Rotation and KMS-backed sources are §3.20's `key-provider` seam. |
 
-**OIDC provider configuration** is also required — at least one provider must be configured in `datapipelines.auth.oidc.providers` (in `application.yml`). Each provider requires `client-id`, `client-secret`, and `issuer-uri`. The client-id and client-secret are typically referenced from env vars. See [Auth spec §11.1](auth.md#111-oidc-provider-configuration) for the full format.
+**Provider configuration** is also required — at least one OIDC or OAuth 2.0 provider must be configured in `datapipelines.auth.oidc.providers` (in `application.yml`), unless local accounts are enabled. An OIDC provider requires `client-id`, `client-secret`, and `issuer-uri`; an OAuth 2.0 provider (`protocol: oauth2`, GitHub, #655) requires `client-id`, `client-secret`, its three endpoints, `user-name-attribute` and `scopes` instead (§3.4). The client-id and client-secret are typically referenced from env vars. See [Auth spec §11.1](auth.md#111-oidc-provider-configuration) for the full format.
 
 The specific env var names depend on which provider(s) the deployment chooses. Examples:
 
@@ -41,6 +41,7 @@ The specific env var names depend on which provider(s) the deployment chooses. E
 | `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET` | Microsoft Entra ID |
 | `OKTA_CLIENT_ID`, `OKTA_CLIENT_SECRET` | Okta |
 | `KEYCLOAK_CLIENT_ID`, `KEYCLOAK_CLIENT_SECRET` | Keycloak |
+| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | GitHub (OAuth 2.0, shipped entry; empty lines in `deploy/secrets.env.example`) |
 
 The deployment defines these env var names in `application.yml` — they're not hardcoded by the app. (OIDC provider env vars are the one deliberate exception to the naming derivation rule in §1, since the deployment names them.)
 
@@ -129,8 +130,16 @@ Read downward. The statement bound is the driver's and drivers honour it unevenl
 | `datapipelines.auth.local.lockout.duration-minutes` | `15` | How long a locked account refuses local login. An admin unlock or password reset clears the lock early |
 | `datapipelines.auth.cookie-secure` | (empty) | The `Secure` flag on the cookies this deployment mints (`dp_session`, `dp_oauth2_authz`, `dp_csrf`). **Empty = derived from `base-url`'s scheme**: an explicit `http://` base-url drops the flag so local login works over plain HTTP, anything else keeps it. `true`/`false` pin it. The `hardened` posture ships `true` (§3.23) — a hardened deployment runs https, and a dropped flag there puts the session cookie on the wire |
 | `datapipelines.auth.allow-local-only` | `false` | The operator's **explicit acknowledgement** that a `hardened` deployment has no OIDC provider configured and authenticates with local password accounts only. Inert under `development`. Under `hardened`, startup is refused unless either an OIDC provider is fully configured or this is `true`, and setting it logs the acknowledgement (§3.23, §7) |
+| `datapipelines.auth.oidc.provider-read-timeout-seconds` | `10` | Connect and read timeout in seconds for the code-for-token exchange (both protocols), OAuth2 user-info, emails and OIDC user-info reads. Positive integer, at most 2147483 seconds (the HTTP client stores signed 32-bit milliseconds); zero means infinite in the HTTP client and is refused. The ID-token decoder's JWKS fetch is bounded by the same key through a `JwtDecoderFactory` bean (#686); startup discovery is separate. Mirrored in application.yml, defaults.env, secrets.env.example, compose.yml. |
+| `datapipelines.auth.oidc.providers[].protocol` | `oidc` | Per-provider (auth.md §5.1, #655): `oidc` builds the entry through discovery from `issuer-uri`; `oauth2` builds it from the five keys below with no HTTP at startup — for a provider that speaks OAuth 2.0 without OpenID Connect (GitHub). Anything else refuses startup naming the provider |
+| `datapipelines.auth.oidc.providers[].authorization-uri` | (empty) | Per-provider, `oauth2` only and required there (auth.md §5.1): the consent endpoint. `https://`, or plain `http://` to `localhost` / `127.0.0.1` only. Set on an `oidc` entry it refuses startup — discovery would ignore it |
+| `datapipelines.auth.oidc.providers[].token-uri` | (empty) | Per-provider, `oauth2` only and required there: the code-for-token exchange, called with `client_secret_basic` and `Accept: application/json`. Same scheme rule |
+| `datapipelines.auth.oidc.providers[].user-info-uri` | (empty) | Per-provider, `oauth2` only and required there: the profile read, the access token as bearer. Same scheme rule |
+| `datapipelines.auth.oidc.providers[].user-name-attribute` | (empty) | Per-provider, `oauth2` only and required there: the user-info attribute that is the stable subject stored in `users.provider_subject` (GitHub: `id`) |
+| `datapipelines.auth.oidc.providers[].scopes` | (empty) | Per-provider, `oauth2` only and required there: the scopes requested, a YAML list or comma-separated. Never `openid` — that is the `oidc` protocol, and it would route the login to the OIDC user service |
+| `datapipelines.auth.oidc.providers[].emails-uri` | (none) | Per-provider, `oauth2` only, optional (auth.md §5.5): a list of `{email, primary, verified}` rows. When set it is the ONLY source of the address — the user-info `email` is discarded, only the `primary` row is read, a row not `verified: true` refuses the login, and `trust-email-without-verified-claim` is not consulted. Same scheme rule |
 | `datapipelines.auth.oidc.providers[].trust-email-without-verified-claim` | `false` | Per-provider (auth.md §5.1, #187): set `true` ONLY for an IdP that never emits the `email_verified` claim, so a MISSING claim is accepted as verified — each acceptance is audited (`auth.login.email_verified_assumed`). A claim that is present and `false` is refused regardless. The shipped default treats a missing claim as UNVERIFIED ([Auth §4.2](auth.md#42-user-provisioning)) |
-| `datapipelines.auth.oidc.providers[].picture-hosts` | (empty) | Per-provider (auth.md §11.1, #197): bare hostnames the avatar proxy may fetch the stored `users.profile_picture_url` from, so the browser never loads an image from an identity provider's host and the CSP `img-src` stays `'self' data:` ([Deployment §6.2](deployment.md#62-multi-instance-horizontal-scaling-production)). NOT derivable from `issuer-uri` (Google: `accounts.google.com` issues, `lh3.googleusercontent.com` serves pictures) — the operator names the hosts the deployment trusts. **Empty = no fetch**: every avatar falls back to initials. Each entry must be a bare hostname (no scheme, port, path, userinfo or wildcard); anything else refuses startup. **No port**: an entry names a host, never a port, and a stored picture URL that names one is refused (#246) — as are non-raster answers and a fetch past its 5 s budget (auth.md §11.1) |
+| `datapipelines.auth.oidc.providers[].picture-hosts` | (empty) | Per-provider (auth.md §11.1, #197): bare hostnames the avatar proxy may fetch the stored `users.profile_picture_url` from, so the browser never loads an image from an identity provider's host and the CSP `img-src` stays `'self' data:` ([Deployment §6.2](deployment.md#62-multi-instance-horizontal-scaling-production)). NOT derivable from `issuer-uri` (Google: `accounts.google.com` issues, `lh3.googleusercontent.com` serves pictures) — the operator names the hosts the deployment trusts. **Empty = no fetch**: every avatar falls back to initials. Each entry must be a bare hostname (no scheme, port, path, userinfo or wildcard); anything else refuses startup. Only providers with a non-blank `client-id` contribute; a dormant entry's hosts are validated for shape but never allowlisted (#651). **No port**: an entry names a host, never a port, and a stored picture URL that names one is refused (#246) — as are non-raster answers and a fetch past its 5 s budget (auth.md §11.1) |
 
 ### 3.5 Results
 
@@ -193,7 +202,7 @@ There is deliberately **no fail-open key**. When the limiter's Redis is unreacha
 | `datapipelines.executions.event-retention-days` | `7` | How long to keep `execution_events` rows (Postgres, the durable record) past their execution's completion — enforced by the hourly retention job (050/T60, safe for N replicas: one idempotent `DELETE`; `pipeline_executions` rows are never touched). The post-completion Redis event log lives for 1 hour, not configurable |
 | `datapipelines.executions.stale-timeout-minutes` | `60` | Mark RUNNING executions older than this as ABORTED (crash sweep) |
 
-**Not a key: the scheduled jobs' statement bounds (#326).** The stale sweep's UPDATE is cancelled after 10 s and the hourly retention's metadata statements (the `execution_events` DELETE, the audit retention's cutoff read and batches, the keys purge's FK read and two DELETEs) after 25 s — a JDBC `queryTimeout`, failing the tick with SQLState `57014` ([Metadata DB §8.1](metadata-db.md#81-execution-event-cleanup), [§8.3](metadata-db.md#83-stale-execution-sweep)). They are code constants beside the cadences they serve (`SWEEP_STATEMENT_TIMEOUT_SECONDS`, `RETENTION_STATEMENT_TIMEOUT_SECONDS`), as the cadences are, not keys: each is set by its own cadence and the 30 s shutdown phase, not by a deployment.
+**Not a key: the scheduled jobs' statement bounds (#326, #636).** The stale sweep's UPDATE and the dashboard refresh sweep's UPDATE are cancelled after 10 s and the hourly retention's metadata statements (the `execution_events` DELETE, the audit retention's cutoff read and batches, the keys purge's FK read and two DELETEs, the dashboard refreshes' DELETE, the parameter evaluations' sweep UPDATE and batch DELETE) after 25 s — a JDBC `queryTimeout`, failing the tick with SQLState `57014` ([Metadata DB §8.1](metadata-db.md#81-execution-event-cleanup), [§8.3](metadata-db.md#83-stale-execution-sweep), [§8.4](metadata-db.md#84-stale-dashboard-refresh-sweep), [§8.5](metadata-db.md#85-stale-parameter-evaluation-sweep)). They are code constants beside the cadences they serve (`SWEEP_STATEMENT_TIMEOUT_SECONDS`, `REFRESH_SWEEP_STATEMENT_TIMEOUT_SECONDS`, `RETENTION_STATEMENT_TIMEOUT_SECONDS`), as the cadences are, not keys: each is set by its own cadence and the 30 s shutdown phase, not by a deployment.
 
 ### 3.12 Audit
 
@@ -478,7 +487,18 @@ The budgets every script evaluation runs under — the save/release test suite o
 | `datapipelines.script.max-input-rows` | `100000` | Row cap on any table input — the `rows` batch or any table input — refused BEFORE evaluation with the record §4.3's input-cap code (§13.18, 7c) |
 | `datapipelines.script.max-value-bytes` | `1048576` | Cap on a value/object output (the record §4.3's value-cap code, §13.18, 7c) — a Context value is not a table |
 | `datapipelines.script.max-string-bytes` | `1048576` | Cap on a single string in any returned row (the same §4.3 code, with the row number) |
-| `datapipelines.script.max-depth` | `100` | Expression depth bound — counted at every evaluate entry and exit by the engine itself: nested evaluation, non-tail lambda recursion included; set-level work over hundreds of rows evaluates (the 7a `isParallelCall` leak is gone, #260); a tail-recursive lambda is trampolined by the library and the wall clock is its bound (the engine's measured bounds, dag-executor §5.3) |
+| `datapipelines.script.max-depth` | `100` | Expression depth bound; also the JS stack-frame bound (plus four prelude frames, capped by `js.max-stack-frames`) — counted at every evaluate entry and exit by the engine itself: nested evaluation, non-tail lambda recursion included; set-level work over hundreds of rows evaluates (the 7a `isParallelCall` leak is gone, #260); a tail-recursive lambda is trampolined by the library and the wall clock is its bound (the engine's measured bounds, dag-executor §5.3) |
+| `datapipelines.script.js.isolate-dir` | `empty` | Absolute directory containing `js-isolate.jar`; must be one entry of `loader.path` (system property) or `LOADER_PATH` (environment). No class-path mutation. Unset and no isolate on the class path disables JavaScript, reported once at INFO; JSONata remains available. |
+| `datapipelines.script.js.max-heap-mb` | `256` | Per-Context heap, MiB; SOFT. All concurrent Contexts share the isolate heap, outside the JVM heap. |
+| `datapipelines.script.js.isolate-memory-mb` | `empty` | Unset → `pool-size × max-heap-mb + 256` MiB (1280 at defaults). Explicit value must be at least 32 MiB and strictly larger than `pool-size × max-heap-mb`; a derived byte budget that overflows is refused by name. |
+| `datapipelines.script.js.max-statements` | `100000000` | Hard guest-statement ceiling; internal prelude excluded. |
+| `datapipelines.script.js.max-ast-depth` | `1000` | Parse-time nesting ceiling, including runtime eval. |
+| `datapipelines.script.js.max-stack-frames` | `1000` | Guest stack-frame ceiling; minimum of this and `max-depth + 4` prelude frames. |
+| `datapipelines.script.js.max-output-bytes` | `1048576` | Each console stream cap; at least 4096 bytes. Excess output refuses with resource_limit / OUTPUT; returned console lines are separately capped at 200 × 2000 chars. |
+| `datapipelines.script.js.max-result-mb` | `64` | Serialized result budget, MiB, at least 1; measured before host parsing. |
+| `datapipelines.script.js.max-input-mb` | `64` | Serialized input budget, MiB, at least 1; refused before the Context starts. |
+
+**Operator instruction:** Helm operators (`deploy/helm/`) set these nine keys through the chart's `script.js.*` values instead of an env file (deployment.md §6.4) — all nine empty by default, an empty value rendering no env entry (the image's own isolate directory and the app's derived isolate memory stay in force), an `isolateDir` outside the image's launcher-path entries refused at render time, and an `extraEnv` double mapping of any of the nine refused like the DuckDB keys.
 
 **Removed keys (script-node-rename lane, owner ruling 2026-10-20):** the nine budgets lived at `datapipelines.transform.*` before the TRANSFORM→SCRIPT node-type rename. There is no alias: a `datapipelines.transform.*` key binds nothing, and startup refuses BY NAME (§7, `checkRemovedTransformKeys`) telling the operator to rename it. This is the §3.17 rule again — a removed key is refused for being set at all, value notwithstanding.
 
@@ -686,6 +706,7 @@ datapipelines:
 
   auth:
     oidc:
+      provider-read-timeout-seconds: ${DATAPIPELINES_AUTH_OIDC_PROVIDER_READ_TIMEOUT_SECONDS:10}
       providers:
         # client-id defaulting to empty = the entry is IGNORED with a WARN (§7);
         # a local-accounts-only deployment starts with zero OIDC providers.
@@ -696,6 +717,19 @@ datapipelines:
           display-name: "Sign in with Google"
           # #197 — hosts the avatar proxy may fetch; empty = no fetch (avatars render initials)
           picture-hosts: ${DATAPIPELINES_AUTH_GOOGLE_PICTURE_HOSTS:lh3.googleusercontent.com}
+        # GitHub is OAuth 2.0 without OpenID Connect (#655): endpoints named, not discovered.
+        - name: github
+          protocol: oauth2
+          client-id: ${GITHUB_CLIENT_ID:}
+          client-secret: ${GITHUB_CLIENT_SECRET:}
+          authorization-uri: https://github.com/login/oauth/authorize
+          token-uri: https://github.com/login/oauth/access_token
+          user-info-uri: https://api.github.com/user
+          user-name-attribute: id
+          scopes: [read:user, user:email]
+          emails-uri: https://api.github.com/user/emails
+          display-name: "Sign in with GitHub"
+          picture-hosts: avatars.githubusercontent.com
         - name: microsoft
           client-id: ${MICROSOFT_CLIENT_ID:}
           client-secret: ${MICROSOFT_CLIENT_SECRET:}
@@ -1002,8 +1036,10 @@ On startup, the app validates:
 - **Key provider (§3.20):** `datapipelines.db.key-provider` names a provider this build ships (a violation lists them and points at `docs/key-providers.md`), and that provider's own settings are present and well-formed. For `env`: every entry of `datapipelines.db.encryption-keys` has an integer version in `1..255` that is not `1`, and a value that decodes to exactly 32 bytes; `datapipelines.db.encryption-key-current` is an integer naming a configured version (the violation lists which versions ARE configured). An unknown provider name short-circuits the rest — reporting `env`'s key rules to an operator who asked for `aws-kms` is noise they cannot act on.
 - `DATAPIPELINES_UI_THEME` matches a vendored theme directory.
 - **Actively developed window (§3.10, #598b):** `datapipelines.ui.actively-developed-days`, when present, is an integer ≥ 1 — `0`, a negative or a non-integer refuses startup naming the key and the value. An absent key is not a violation: the binder default (14) applies.
-- At least one authentication method: a fully-configured OIDC provider (non-empty `client-id`, `client-secret`, and `issuer-uri`) or `datapipelines.auth.local.enabled=true`. A provider entry with an empty `client-id` is ignored with a WARN — it does not count, and it is not a violation on its own.
+- At least one authentication method: a fully-configured provider or `datapipelines.auth.local.enabled=true`. Fully configured means non-empty `client-id` and `client-secret` plus, for `protocol: oidc`, `issuer-uri`, and for `protocol: oauth2`, `authorization-uri`, `token-uri`, `user-info-uri`, `user-name-attribute` and a non-empty `scopes`. A provider entry with an empty `client-id` is ignored with a WARN — it does not count, and it is not a violation on its own.
+- **Each provider entry against its protocol (#655, auth.md §5.1),** every violation naming the provider and the key: `protocol` is `oidc` or `oauth2`; an `oidc` entry has an `issuer-uri` and none of the `oauth2`-only keys; an `oauth2` entry has the five required keys, no `issuer-uri` and no `openid` scope, and every endpoint it names (`emails-uri` included) is `https://` with a host — plain `http://` only to `localhost` / `127.0.0.1`. The provider list is read as the application binds it (the Binder), so a higher-precedence source that re-declares the list replaces it whole and never inherits a key from `application.yml`'s entry at the same index. The `hardened` posture's "a provider is configured" (§3.23) uses the same per-protocol completeness.
 - `datapipelines.auth.local.bootstrap-password` and `datapipelines.auth.local.bootstrap-password-hash` are never both set; either seed requires `datapipelines.auth.local.enabled=true` AND `datapipelines.auth.bootstrap-admin-email` — each violation names both keys.
+- `datapipelines.auth.oidc.provider-read-timeout-seconds` is a positive integer no greater than 2147483 (§3.4; signed 32-bit milliseconds); zero would disable the HTTP timeout and is refused.
 - `datapipelines.auth.local.lockout.max-failures` and `datapipelines.auth.local.lockout.duration-minutes` are positive integers.
 - The deprecated executor alias `datapipelines.executor.max-concurrent-executions-global` (050/R2): set alone → its value runs and startup logs one WARN naming `max-concurrent-executions-per-instance`; set together with the new key and differing → startup REFUSES naming both keys.
 - `result.ttl-min-seconds` ≤ `result.ttl-default-seconds` ≤ `result.ttl-max-seconds`.
@@ -1044,6 +1080,13 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-24 | v1.65 | #688 (Helm portion) — renumbered at merge after #686’s v1.64 | §3.28: the nine JavaScript keys are exposed as the chart's `script.js.*` values (deployment.md §6.4) — empty renders no env entry, the isolate directory must be one of the image's launcher-path entries, `extraEnv` double mappings are refused. No key, default, route or permission changes. |
+| 2026-10-24 | v1.64 | #686 JWKS fetch joins the provider read bound | §3.4's `provider-read-timeout-seconds` row: the ID-token decoder's JWKS fetch is bounded by the same key through a `JwtDecoderFactory` bean; discovery stays separate. No key added, no default change. |
+| 2026-10-22 | v1.63 | #651 enabled-provider avatar hosts | §3.4's `picture-hosts` allowlist includes only providers with a non-blank `client-id`, using the same predicate as sign-in registration. Dormant entries are still validated for shape at startup but contribute no hosts. No key, default, route or permission changes. |
+| 2026-10-22 | v1.62 | 8b (#8) — renumbered at merge after #682's v1.61 | §3.28 gains the nine JavaScript keys, their measured defaults, derived isolate memory and launcher agreement; max-depth also bounds JavaScript stack frames. |
+| 2026-10-22 | v1.61 | #682, answers #683 | Configurable provider connect/read timeout, deploy mirrors and startup validation (§3.4, §5, §7); per-provider defaults drift-guarded. |
+| 2026-10-21 | v1.60 | 655 (#655) GitHub sign-in, answers #154 part 2 | **§3.4 gains seven per-provider rows:** `protocol` (default `oidc`), `authorization-uri`, `token-uri`, `user-info-uri`, `user-name-attribute`, `scopes` (all empty by default, required for `oauth2`) and `emails-uri` (unset, optional). §1's provider sentence names both protocols and the GitHub env pair; the §5 YAML gains the `github` entry as shipped; §7's authentication-method rule is per protocol and gains the entry-against-protocol rule (unknown protocol, missing key, `issuer-uri` on `oauth2`, `oauth2` keys on `oidc`, `openid` scope, non-https endpoint — each naming the provider and the key). `deploy/secrets.env.example` gains empty `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` lines. |
+| 2026-10-21 | v1.59 | 636 (#636) the housekeeping statements' bounds | **§3.11**'s "not a key" note names the four housekeeping statements #636 bounds — the dashboard refresh sweep's UPDATE at 10 s (`REFRESH_SWEEP_STATEMENT_TIMEOUT_SECONDS`), the dashboard refreshes' DELETE and the parameter evaluations' sweep UPDATE and batch DELETE at the retention tick's 25 s — and links metadata-db §8.4 and §8.5. No key added. |
 | 2026-10-20 | v1.58 | V50 (#640, script-node-rename lane, owner ruling 2026-10-20) | **The TRANSFORM→SCRIPT node-type rename, §3.28's keys move with it**: the nine script budgets now live at `datapipelines.script.*` (env `DATAPIPELINES_SCRIPT_*`) with no alias; **§7 gains `checkRemovedTransformKeys`** (`CHECK_COUNT` 35 → 36): any set `datapipelines.transform.*` key refuses startup BY NAME pointing at its replacement — presence, not value, is the signal (the §3.17 rule). `ScriptConfigKeysSpecDriftTest` (7b's, renamed) still pins the new keys in this document, `application.yml` and the validator. Renumbered at merge after #326's v1.57. |
 | 2026-10-20 | v1.57 | 326 (#326) the scheduled jobs' statement bounds | **§3.11** gains a "not a key" note: the stale sweep's 10 s and the hourly retention's 25 s statement bounds are code constants beside their cadences, not configuration keys. No key is added, renamed or removed. |
 | 2026-10-20 | v1.56 | 599 merge follow-up (#599) the window counts on every lifecycle home | **§3.10 row** `datapipelines.ui.actively-developed-days`: the description names every lifecycle home (the four object families read the same window since #599), not the Pipelines home only. No key, default or validation change. |

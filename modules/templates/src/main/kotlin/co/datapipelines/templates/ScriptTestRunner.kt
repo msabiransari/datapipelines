@@ -4,6 +4,8 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.scripting.CanonicalJson
 import co.datapipelines.scripting.CompiledScript
+import co.datapipelines.scripting.ConsoleLine
+import co.datapipelines.scripting.ConsoleSink
 import co.datapipelines.scripting.EvaluationLimits
 import co.datapipelines.scripting.GateRefusal
 import co.datapipelines.scripting.ScriptEngine
@@ -39,6 +41,10 @@ class ScriptTestRunner(
     private val maxStringBytes: Long = 1_048_576,
     private val maxValueBytes: Long = 1_048_576,
     private val maxDepth: Int = 100,
+    private val maxHeapBytes: Long? = null,
+    private val maxStatements: Long? = null,
+    private val maxResultBytes: Long? = null,
+    private val maxInputBytes: Long? = null,
 ) {
     /** One invariant's verdict on one evaluation (record §9.1's `{ name, passed, message }`). */
     data class InvariantVerdict(
@@ -53,6 +59,8 @@ class ScriptTestRunner(
         data class Refused(
             val code: String,
             val message: String,
+            val console: List<ConsoleLine> = emptyList(),
+            val details: Map<String, Any?> = emptyMap(),
         ) : RunOutcome
 
         /** The run evaluated, gated and checked. */
@@ -60,6 +68,7 @@ class ScriptTestRunner(
             val output: Any?,
             val rejects: List<Map<String, Any?>>,
             val invariants: List<InvariantVerdict>,
+            val console: List<ConsoleLine> = emptyList(),
         ) : RunOutcome
     }
 
@@ -103,7 +112,13 @@ class ScriptTestRunner(
         invariants: List<ScriptInvariant>,
         tests: List<ScriptTestCase>,
     ): List<TemplateValidationFailure> {
-        val engine = engineFor(type) ?: return emptyList()
+        val engine =
+            engineFor(type) ?: return listOf(
+                TemplateValidationFailure(
+                    PipelineErrorCodes.Script.JS_UNAVAILABLE,
+                    co.datapipelines.pipeline.JAVASCRIPT_UNAVAILABLE_MESSAGE,
+                ),
+            )
         val script = engine.compile(body)
         val compiledInvariants = invariants.map { it to jsonata().compile(it.expr) }
         val deadline = System.nanoTime() + suiteTimeout.toNanos()
@@ -150,27 +165,33 @@ class ScriptTestRunner(
         // §5.1: rows and each table input against the contract's columns, value inputs against types.
         inputViolation(contract, rows, inputs)?.let { return it }
 
+        val console = mutableListOf<ConsoleLine>()
         val limits =
             EvaluationLimits(
                 wallClock = evaluateTimeout,
                 maxDepth = maxDepth,
                 now = caseNow(input) ?: now,
+                maxHeapBytes = maxHeapBytes,
+                maxStatements = maxStatements,
+                maxResultBytes = maxResultBytes,
+                maxInputBytes = maxInputBytes,
+                console = ConsoleSink { console += it },
             )
         val evaluated = evaluateOnPool(label, engine, script, contract, CaseContext(input, rows, inputs), limits)
-        if (evaluated is RunOutcome.Refused) return evaluated
+        if (evaluated is RunOutcome.Refused) return evaluated.copy(console = console.toList())
 
         // Shape + gate the output (§5.3).
         val gated =
             when (val shaped = shapeAndGate(contract, (evaluated as RunOutcome.Evaluated).output)) {
-                is RunOutcome.Refused -> return shaped
+                is RunOutcome.Refused -> return shaped.copy(console = console.toList())
                 is Gated -> shaped
                 else -> error("shapeAndGate returned ${shaped.javaClass}")
             }
 
         val verdicts =
             runInvariants(label, contract, compiledInvariants, gated, rows, inputs, limits)
-        if (verdicts is RunOutcome.Refused) return verdicts
-        return RunOutcome.Evaluated(gated.output, gated.rejects, (verdicts as RunOutcome.Evaluated).invariants)
+        if (verdicts is RunOutcome.Refused) return verdicts.copy(console = console.toList())
+        return RunOutcome.Evaluated(gated.output, gated.rejects, (verdicts as RunOutcome.Evaluated).invariants, console.toList())
     }
 
     /** Caps BEFORE any evaluation (§4.3): the row batch, or any table input, above the row cap. */
@@ -216,7 +237,7 @@ class ScriptTestRunner(
         return try {
             RunOutcome.Evaluated(pool.run(limits, label) { engine.evaluate(script, inputObject, limits) }, emptyList(), emptyList())
         } catch (err: ScriptingException) {
-            RunOutcome.Refused(err.code, err.message ?: err.code)
+            RunOutcome.Refused(err.code, err.message ?: err.code, details = err.details)
         }
     }
 
