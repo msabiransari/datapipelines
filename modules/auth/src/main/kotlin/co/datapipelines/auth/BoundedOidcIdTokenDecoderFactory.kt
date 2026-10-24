@@ -111,11 +111,13 @@ internal class BoundedOidcIdTokenDecoderFactory(
                     .build()
             }
 
-            else -> missingSignatureVerifier(
-                "Failed to find a Signature Verifier for Client Registration: " +
-                    "'${registration.registrationId}'. Check to ensure you have configured a valid JWS Algorithm: " +
-                    "'$jwsAlgorithm'",
-            )
+            else -> {
+                missingSignatureVerifier(
+                    "Failed to find a Signature Verifier for Client Registration: " +
+                        "'${registration.registrationId}'. Check to ensure you have configured a valid JWS Algorithm: " +
+                        "'$jwsAlgorithm'",
+                )
+            }
         }
     }
 

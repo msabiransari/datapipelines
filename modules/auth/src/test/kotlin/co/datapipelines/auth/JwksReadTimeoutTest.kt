@@ -97,7 +97,8 @@ class JwksReadTimeoutTest {
             stub.jwks = jwksDocument
             val failure =
                 shouldThrow<JwtValidationException> {
-                    OidcConfig().providerIdTokenDecoderFactory(properties())
+                    OidcConfig()
+                        .providerIdTokenDecoderFactory(properties())
                         .createDecoder(registration(stub))
                         .decode(idToken(stub.issuer, audience = "other"))
                 }
@@ -113,7 +114,8 @@ class JwksReadTimeoutTest {
             stub.jwks = jwksDocument
             val failure =
                 shouldThrow<JwtValidationException> {
-                    OidcConfig().providerIdTokenDecoderFactory(properties())
+                    OidcConfig()
+                        .providerIdTokenDecoderFactory(properties())
                         .createDecoder(registration(stub))
                         .decode(idToken(stub.issuer, expired = true))
                 }
@@ -126,6 +128,7 @@ class JwksReadTimeoutTest {
     @Test
     fun `the default resolver answers RS256 as Spring's does`() {
         val factory = OidcConfig().providerIdTokenDecoderFactory(properties()) as BoundedOidcIdTokenDecoderFactory
+
         @Suppress("UNCHECKED_CAST")
         val resolver =
             ReflectionTestUtils.getField(factory, "jwsAlgorithmResolver") as Function1<ClientRegistration, JwsAlgorithm>
