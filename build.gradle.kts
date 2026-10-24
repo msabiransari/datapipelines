@@ -505,9 +505,10 @@ tasks.register("integrationTest") {
     dependsOn(":tests:integration-tests:test")
 }
 
-// The browser suite (module-structure §5.12) is :tests:browser-tests:test, so `build` and `check`
-// RUN it like every module's `test` — the gate and CI's build step both do (#297; a `--dry-run`
-// of CI's build step lists it). `browserTest` below is the name for running that suite ALONE.
+// The browser suite (module-structure §5.12) is :tests:browser-tests:test, so a local `build` and
+// `check` RUN it like every module's `test` (#297). scripts/gate.sh and CI's gate job exclude it
+// (still compiling its classes); CI's `browser` job runs it in shards (#669, DEVELOPMENT.md §9.0).
+// `browserTest` below is the name for running that suite ALONE.
 // It downloads browser binaries on first use (Playwright's cache) and launches chromium.
 // The screenshot driver is NOT part of build/check: `siteShots` needs a running demo deployment,
 // is registered in the module itself (tests/browser-tests/build.gradle.kts) and reachable from

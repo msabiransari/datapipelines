@@ -498,12 +498,15 @@ Integration tests use **Testcontainers** to spin up real Postgres, Redis, and so
 
 Both live in `tests/browser-tests`, download a chromium binary on first use and launch a real
 browser. Only the **screenshot driver** is outside `build`/`check`. The **browser suite** is the
-module's `test` task, so `build` runs it like any module's tests in CI's gate job, whose long pole
-it is (§9.5); `browserTest` runs it alone. **`scripts/gate.sh` excludes it** from both of its
+module's `test` task, so a local `build` runs it like any module's tests; `browserTest` runs it
+alone. **CI's `gate` job no longer runs it (#669):** CI's `browser` job does, in three parallel
+shards (`-Pdp.browser.shard=<i>/3`, the partition in `buildSrc/src/main/kotlin/BrowserShards.kt`,
+§9.4), and the gate job excludes it exactly as the local gate does. **`scripts/gate.sh` excludes it** from both of its
 `build` invocations (`-x :tests:browser-tests:test -x :tests:browser-tests:verifyTestsExecuted`, plus
 `:tests:browser-tests:testClasses` requested explicitly because `-x` would drop the compile too;
-owner ruling 2026-10-09): the local full gate after a merge runs every other test, and CI on
-`next` is the browser suite's only full run; the module still compiles and lints in the gate. (This
+owner ruling 2026-10-09): the local full gate after a merge runs every other test, and CI's
+`browser` job on `next` is the browser suite's only full run; the module still compiles and lints
+in the gate, and its `check` runs `verifyBrowserShardPartition` (no browser). (This
 section said until #283 that the suite, too, was outside `build`; every gate log says otherwise.
 The comments in the root build and the module's build file carried the same claim until #297.)
 
@@ -748,6 +751,26 @@ the counts, 2 for a root that is not a directory, and 3 when no result XML is fo
 rather than retyped so two lanes' numbers are comparable; a modules-only glob under-reported the
 total for four consecutive rounds before it existed.
 
+**One recount over a CI run (#669).** CI's results are four artifacts: `gate-reports` (every test
+task of the gate job) and `browser-reports-1` … `browser-reports-3` (one per browser shard). Download
+each into its OWN directory — `gh run download` lands a single named artifact flat in `-D` — and
+pass every root to one recount, which prints ONE line over all of them:
+
+```bash
+D=$(mktemp -d); R=<run-id>; gh run download "$R" -n gate-reports -D "$D/gate" || echo "DOWNLOAD FAILED gate-reports"
+for i in 1 2 3; do gh run download "$R" -n "browser-reports-$i" -D "$D/browser-$i" || echo "DOWNLOAD FAILED browser-reports-$i"; done
+./scripts/test-recount.sh "$D/gate" "$D/browser-1" "$D/browser-2" "$D/browser-3"
+./scripts/test-recount.sh "$D/browser-1" "$D/browser-2" "$D/browser-3"    # the browser suite alone
+```
+
+Read every exit: a missing root is exit 2, a root with no XML exit 3, and the same `TEST-*.xml`
+under two roots exit 4 with each named — a class counted twice, nothing summed. The invariant the
+lander checks: the browser line's `files=` equals the browser module's `*Test.kt` count at that SHA
+(`find tests/browser-tests/src/test/kotlin -name '*Test.kt' | wc -l`; 126 on 2026-10-22), the
+equality `verifyTestsExecuted` enforced when the suite ran unsharded, and `tests=` equals the
+previous unsharded total plus the cases the batch added. The legs are 1..`BROWSER_SHARDS`
+(`buildSrc/src/main/kotlin/BrowserShards.kt`); if that constant changes, so does the loop.
+
 **The breach suite is a task of its own (#289).** `JsonataBreachTest` and, since #8,
 `JavaScriptBreachTest` (with `JavaScriptMeasurementsTest`, the JavaScript engine's costs) live in
 `modules/scripting/src/test/breach` and run ALONE in `:modules:scripting:breachSuite`, a 512m test
@@ -796,8 +819,8 @@ test, substitute its exact class and `:tests:browser-tests:test` task and exclus
 and task log together; an XML file left by a previous run cannot establish this run's result.
 A focused result is iteration evidence. A fresh complete pregate on the final committed tip
 is required for handback; the whole-batch check is `scripts/gate.sh` on the batch tip (every test
-but the browser suite, §9.0) and then CI on `next` (the browser suite's only full run: the lander
-pushes the landed batch as `main:next` and fast-forwards `main` when it is green).
+but the browser suite, §9.0) and then CI on `next` (its `browser` job is the browser suite's only
+full run: the lander pushes the landed batch as `main:next` and fast-forwards `main` when it is green).
 
 **`verifyTestsExecuted` and filtered runs.** The zero-test guard compares result files with
 all of a module's `*Test.kt` sources. Exclude that module's exact `verifyTestsExecuted` task
@@ -820,7 +843,7 @@ changed test classes, focused — where the changed file is not itself a runnabl
 abstract base, an interface, an object, a helper), its real runnable consumers run, found through
 intermediate bases; when consumers cannot be established — an orphan helper, a deleted or renamed
 file, a changed test resource or build file — coverage is **DEFERRED**: the integration module's
-to Gate A and CI, the browser module's to CI on `next` only (the gate excludes the browser suite, §9.0).
+to Gate A and CI, the browser module's to CI's `browser` job on `next` only (the gate excludes the browser suite, §9.0).
 The selection uses declared class names, never file names. An ambiguous declaration is also
 deferred. A change to `templates/layouts/*.html` adds `JarSmokeE2eTest`, `LocalLoginE2eTest` and
 `WriteSurfaceStampingE2eTest` to the integration selection to exercise shell rendering and the deferred CSRF cookie.
@@ -828,7 +851,7 @@ At most **five exact classes per test module** run; larger selections (including
 shared base affecting most browser classes) are deferred in their entirety, never truncated.
 Pregate cannot emit an unfiltered `tests/*:test` task. Deferred modules appear in the console,
 the run manifest and the verdict's `deferred=` field; a pregate PASS does not claim those tests
-ran. Full browser/integration coverage belongs to CI on `next` (and on `main` after the fast-forward).
+ran. Full browser/integration coverage belongs to CI on `next` — its `browser` and `integration` jobs (and on `main` after the fast-forward).
 `./scripts/pregate.sh --self-test` checks the selector, resource limits, evidence and overlap
 refusal using isolated fixtures and a refusing Gradle stand-in; (3) the
 cross-cutting guard classes still needed after stage 2, filtered, with the zero-test guard skipped for those modules — the
@@ -884,7 +907,7 @@ look like successful zeroes. Mandatory evidence writes, recounts and retention f
 refuse PASS. `--continue-on-failure [base]` attempts later stages for diagnostics and remains
 FAIL after any failure. Skipped stages with no selected module, deferred tests and guards
 covered by stage 2 have separate dispositions. Deferred full-suite coverage still belongs to
-Gate A (integration) and CI on `next` (browser); it is not a claim that pregate exercised those classes.
+Gate A (integration) and CI's `browser` job on `next`; it is not a claim that pregate exercised those classes.
 
 Each run retains `PLAN.txt` (intended commands and selections), `COMMANDS.txt` (actual commands
 and dispositions), the completed stage logs, and per-stage plus total monotonic milliseconds
@@ -997,7 +1020,7 @@ UI assertions lose their race. One gate step stands outside these knobs entirely
 |---|---|---|---|
 | `org.gradle.workers.max` (or `--max-workers=N`) | 6 | tasks running at once across modules — compile, lint and test tasks overlap | one JVM per running test task; Docker load when several are integration modules |
 | `dp.test.forks` | 3 | test classes of an ordinary module split across N JVMs | N × `dp.test.heap` per test task that is running |
-| `dp.test.forks.e2e` | 2 | the same for `tests/integration-tests` and `tests/browser-tests` | each fork boots its **own** containers, Spring contexts and Chromium — the expensive one |
+| `dp.test.forks.e2e` | 2 | the same for `tests/integration-tests` and `tests/browser-tests` (CI's browser shards run one JVM each) | each fork boots its **own** containers, Spring contexts and Chromium — the expensive one |
 | `dp.test.heap` | 1g | the ordinary test JVM's `-Xmx` (integration-tests keeps 6g) | RAM, only when the JVM actually needs it |
 | `versionLifecycle.sequences` | 2000 (no property passed) | sizes `VersionLifecycleModelTest`'s random sweep; the pregate passes `-PversionLifecycle.sequences=200`, cutting that case from ~100 s to ~10 s | fewer random sequences in that pregate — only Gate A/CI run 2000 and are the bank |
 
@@ -1008,8 +1031,8 @@ their build files set; any `-Pjunit.jupiter.testclass.order.default=…` you pas
 one-fork order with
 `./gradlew :tests:integration-tests:test :tests:browser-tests:test -Pdp.test.forks.e2e=1 -Pjunit.jupiter.testclass.order.default='org.junit.jupiter.api.ClassOrderer$ClassName'`.
 
-**CI's gate job: the budget and the report step (#290).** The job budgets 90 minutes (the
-integration job's figure) and its build step 70 of them. Before #290 the four green jobs took
+**CI's gate job: the budget and the report step (#290).** At #290 the job budgeted 90 minutes (the
+integration job's figure) and its build step 70 of them (today's values: the end of this paragraph). Before #290 the four green jobs took
 48–57 min, and 19–23 of those were the coverage-report step RE-RUNNING tests: Kover 0.9.9's report
 tasks depend on every instrumented test task, a task that failed is never up to date, and neither
 was anything downstream of `modules/app`, whose build-info stamped a new `build.time` on every
@@ -1020,10 +1043,17 @@ red run's report step ran into the 60-minute cancel and read "cancelled". The st
 needs nothing added there) and `-x :tests:integration-tests:koverXmlReport` (the build step never
 compiled that module's tests, and `--offline` cannot resolve them); it fails as itself, never behind
 `|| true`. A following step names every failing test on the run's summary page, and the
-`gate-reports` artifact now carries every test task's XML (the browser suite's included) and the
-breach report. The browser suite stays in the gate job: it is the build step's long pole (20.4 of
-29.5 min on run 36334831413) but overlaps every other module's tests on the second worker, so a job
-of its own — which compiles the app first — would finish no sooner.
+`gate-reports` artifact now carries every test task's XML and the breach report. Before #669 the
+browser suite ran in the gate job, as the build step's long pole (20.4 of 29.5 min on run
+36334831413), and one job of its own, compiling the app first, would have finished no sooner (#290).
+Three parallel shards change that: on run 39689954314 (2026-10-21) the build step took 56.9 min, and
+for its last 41 it waited on the browser suite alone (126 classes, 585 tests, 46.9 class-minutes,
+serial in one JVM); #669's stopgap had raised the ceilings to 100 (step) and 120 (job). Since #669
+the gate job excludes the suite (§9.0) and CI's `browser` job runs it as three legs of ~15 min of
+test time each (the sorted round-robin over that run's XML: 14.6–16.8 min) plus ~10.5 min of setup
+and compile. The budgets are initial values from that projection — gate step 40 / job 60, browser
+step 45 / job 60 — until the first run on `next` measures them (#669). `browser-verdict` is red
+unless every leg succeeded: the one check name the `main` ruleset requires for the suite.
 
 **Measured on 2026-09-12** (2 × 24-core Xeon, 96 threads, 64 GB, NVMe, native Docker, Ubuntu
 26.04) — the numbers to size against:
