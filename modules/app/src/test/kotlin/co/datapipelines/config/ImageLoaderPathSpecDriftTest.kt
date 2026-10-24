@@ -27,8 +27,9 @@ import java.io.File
  * code-execution-by-file-drop, and `LOADER_PATH` comes from the image, never from the deployment
  * environment): the directory is created and made `0555` before the image's `USER` line, so it is
  * root-owned and the app user cannot write it; and no compose file or chart template names
- * `LOADER_PATH` outside the chart's one render-time refusal, so a deployment cannot point the
- * launcher somewhere writable.
+ * `LOADER_PATH` outside the chart's two render-time refusals (the extraEnv guard, and #688's
+ * script.js.isolateDir list check whose message names the image's launcher-path list), so a
+ * deployment cannot point the launcher somewhere writable.
  *
  * Textual, the [HelmDuckDbValuesSpecDriftTest] shape: it reads the files, it does not build the
  * image. The built image's own proof (printenv, `touch` refused, the loader's debug classpath)
@@ -97,7 +98,7 @@ class ImageLoaderPathSpecDriftTest {
                     .readLines()
                     .withIndex()
                     .filter { LOADER_PATH_TOKEN.containsMatchIn(it.value) }
-                    .filterNot { file.relativeTo(root).path == TEMPLATE && ALLOWED_REFUSAL.matches(it.value.trim()) }
+                    .filterNot { file.relativeTo(root).path == TEMPLATE && ALLOWED_REFUSALS.any { r -> r.matches(it.value.trim()) } }
                     .map { "${file.relativeTo(root)}:${it.index + 1}" }
             }
 
@@ -106,11 +107,13 @@ class ImageLoaderPathSpecDriftTest {
         withClue("files scanned") {
             deployFiles.map { it.relativeTo(root).path }.containsAll(SCAN_FLOOR) shouldBe true
         }
-        withClue("deploy files naming LOADER_PATH (deployment.md §9; only the exact template refusal is admitted)") {
+        withClue("deploy files naming LOADER_PATH (deployment.md §9; only the exact template refusals are admitted)") {
             offenders.shouldBeEmpty()
         }
-        withClue("the template's exact LOADER_PATH refusal must exist exactly once") {
-            repoFile(TEMPLATE).readLines().count { ALLOWED_REFUSAL.matches(it.trim()) } shouldBe 1
+        for ((name, refusal) in REFUSAL_NAMES.zip(ALLOWED_REFUSALS)) {
+            withClue("the template's exact $name refusal must exist exactly once") {
+                repoFile(TEMPLATE).readLines().count { refusal.matches(it.trim()) } shouldBe 1
+            }
         }
     }
 
@@ -158,13 +161,30 @@ class ImageLoaderPathSpecDriftTest {
 
         val COMPOSE_FILE = Regex("""compose(\..+)?\.ya?ml""")
         val LOADER_PATH_TOKEN = Regex("""\bLOADER_PATH\b|loader\.path""")
-        val ALLOWED_REFUSAL =
-            Regex
-                .escape(
-                    """{{- range ${'$'}name := keys .Values.extraEnv }}{{ if eq (upper (replace "." "_" ${'$'}name)) "LOADER_PATH" }}""" +
-                        """{{ fail "LOADER_PATH comes from the image, never from extraEnv.LOADER_PATH (deployment.md §9)" }}""" +
-                        """{{ end }}{{- end }}""",
-                ).toRegex()
+
+        /**
+         * The only deploy-file lines allowed to name `LOADER_PATH`: the chart's extraEnv refusal
+         * and — since #688 — the script.js.isolateDir render refusal, whose message names the
+         * image's launcher-path list it must agree with. Each is asserted to exist exactly once.
+         */
+        val ALLOWED_REFUSALS =
+            listOf(
+                Regex
+                    .escape(
+                        """{{- range ${'$'}name := keys .Values.extraEnv }}""" +
+                            """{{ if eq (upper (replace "." "_" ${'$'}name)) "LOADER_PATH" }}""" +
+                            """{{ fail "LOADER_PATH comes from the image, never from extraEnv.LOADER_PATH (deployment.md §9)" }}""" +
+                            """{{ end }}{{- end }}""",
+                    ).toRegex(),
+                Regex
+                    .escape(
+                        """{{- if and .Values.script.js.isolateDir """ +
+                            """(not (has .Values.script.js.isolateDir (list "/opt/graaljs" "/app/lib"))) }}""" +
+                            """{{ fail "script.js.isolateDir must be one of the image's LOADER_PATH entries """ +
+                            """(/app/lib,/opt/graaljs) and contain js-isolate.jar (deployment.md §6.4)" }}{{- end }}""",
+                    ).toRegex(),
+            )
+        val REFUSAL_NAMES = listOf("extraEnv.LOADER_PATH", "script.js.isolateDir")
         val SCAN_FLOOR = listOf("deploy/compose.yml", "$CHART_DIR/templates/deployment.yaml", "$CHART_DIR/values.yaml")
     }
 }
