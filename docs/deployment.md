@@ -1,9 +1,9 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.49
+**Status:** v1.50
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-24
 
 ---
 
@@ -775,9 +775,26 @@ lifecycle:
 ## 10. Distribution License
 
 - **Code**: AGPL-3.0 (see [LICENSE](../LICENSE); contributions under the [CLA](../CLA.md)).
-- **Dependencies**: only those with compatible licenses bundled by default. Oracle and MySQL drivers optional via Gradle profile (operator's responsibility to accept their licenses).
-
-LICENSE and NOTICE files at repo root.
+- **Third-party runtime notices**: `:modules:app:generateThirdPartyNotices` reads the
+  resolved `productionRuntimeClasspath` POMs (walking parents for inherited licences),
+  plus Spring Boot's packaged jar-mode tools and both Linux GraalJS isolate POMs.
+  The isolate versions come from the Dockerfile's `GRAALJS_VERSION` ARG. The generated
+  file lists artifact coordinates, POM licence names, SPDX identifiers and vendored
+  licence texts; unknown, missing or stale licence mappings fail the build.
+- **Distribution locations**: the boot jar contains `META-INF/THIRD-PARTY-NOTICES`;
+  the image also contains `/app/THIRD-PARTY-NOTICES`, readable by the application user.
+  `LICENSE` at the repository root covers the product's own code. The generated
+  notices are build outputs, not a hand-maintained root `NOTICE` file.
+- **Optional drivers**: `-Pmysql` and `-Poracle` include their drivers and corresponding
+  notices only in those builds. MySQL declares GPL-2.0-only with the Universal FOSS
+  exception; Oracle's FUTC is identified as `LicenseRef-Oracle-FUTC` (no SPDX-listed
+  identifier). Operators remain responsible for their use and redistribution terms,
+  including drivers added through `lib/` after the build.
+- **Coverage boundary**: these notices cover Maven runtime components and the isolate,
+  not the base operating system, separately downloaded DuckDB extensions
+  ([#692](https://github.com/msabiransari/datapipelines/issues/692)), or vendored browser
+  assets ([#693](https://github.com/msabiransari/datapipelines/issues/693)).
+  See [Development §10.2](../DEVELOPMENT.md#102-quality-tooling) for the generation and update procedure.
 
 ---
 
@@ -1222,6 +1239,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-24 | v1.50 | #677 third-party notices | §10 documents generated Maven/isolate notices in the jar and image, the unresolved/stale licence guards, optional-driver terms and the remaining distribution boundaries. |
 | 2026-10-22 | v1.49 | 8b (#8) | Documents the isolate directory/loader agreement, pre-installed resources on read-only roots, shared-isolate failure mode and memory sizing. |
 | 2026-10-21 | v1.48 | #8 lane 8a the JavaScript isolate (owner ruling 2026-10-21) | **§3.5** the `lib/` drop-in paragraph quotes the image's value as it now is, `ENV LOADER_PATH=/app/lib,/opt/graaljs`: the drop-in directory, then `/opt/graaljs`, where the image fetches its platform's SHA-256-pinned GraalJS isolate jar. One list in one `ENV` because `PropertiesLauncher` reads a `-Dloader.path` before the variable — an ENTRYPOINT `-Dloader.path=/opt/graaljs` would have silently dropped the drop-in (measured in lane 8a). The mount point, its mode and the never-from-the-environment rule are unchanged. `ImageLoaderPathSpecDriftTest` pins the new value. Renumbered at merge after #666's v1.47. The engine's operator-facing configuration and the rest of the image's JavaScript story are lane 8b's. |
 | JavaScript isolate | `js-isolate.jar` is in `datapipelines.script.js.isolate-dir`, which is one loader-path entry; the native resource cache is pre-installed and read-only; startup logs one isolate-loaded line |

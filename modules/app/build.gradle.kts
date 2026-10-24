@@ -1,3 +1,5 @@
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.artifacts.result.UnresolvedDependencyResult
 import org.springframework.boot.gradle.tasks.bundling.BootJar
 import org.springframework.boot.gradle.tasks.run.BootRun
 import java.time.Instant
@@ -81,6 +83,30 @@ springBoot {
             }
         }
     }
+}
+
+val generateThirdPartyNotices = tasks.register<ThirdPartyNoticesTask>("generateThirdPartyNotices") {
+    coordinates.set(providers.provider {
+        val graph = configurations["productionRuntimeClasspath"].incoming.resolutionResult
+        val unresolved = graph.allDependencies.filterIsInstance<UnresolvedDependencyResult>()
+        check(unresolved.isEmpty()) { "Cannot generate notices for an unresolved runtime graph: $unresolved" }
+        graph.allComponents
+            .mapNotNull { it.id as? ModuleComponentIdentifier }
+            .filter { it.group != project.group.toString() }
+            .map { "${it.group}:${it.module}:${it.version}" }
+            // BootJar adds this library outside productionRuntimeClasspath.
+            .plus("org.springframework.boot:spring-boot-jarmode-tools:${libs.versions.spring.boot.get()}")
+            .sorted()
+    })
+    mysql.set(providers.gradleProperty("mysql").isPresent)
+    oracle.set(providers.gradleProperty("oracle").isPresent)
+    dockerfile.set(rootProject.layout.projectDirectory.file("Dockerfile"))
+    licenseTexts.set(rootProject.layout.projectDirectory.dir("gradle/licenses"))
+    outputDirectory.set(layout.buildDirectory.dir("generated/third-party-notices"))
+}
+
+tasks.named<ProcessResources>("processResources") {
+    from(generateThirdPartyNotices) { into("META-INF") }
 }
 
 // §5.4.1 — `lib/` driver drop-in with no rebuild.
