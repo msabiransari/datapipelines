@@ -325,8 +325,13 @@ class ApiErrorCatalogSpecDriftTest {
          * §13.21 gains `request.query_too_long` (400 — the shared search-needle refusal), landed in
          * the SAME commit as its constant, the catalog rows and the retirement. Re-derived from the
          * document's own parse.
+         *
+         * 377 → 379 with #442b: §13.19 gains `schedule.notification.not_found` (404, an explicit
+         * catalog row) and `schedule.notification.not_resendable` (409 — the `schedule.` family
+         * default, so no explicit row), landed in the SAME commit as their constants in
+         * `ScheduleErrorCodes` and `PipelineErrorCodes.Schedule` and the resend that raises them.
          */
-        const val SECTION_13_ROW_COUNT = 377
+        const val SECTION_13_ROW_COUNT = 379
 
         /**
          * §12's distinct validation codes.

@@ -74,6 +74,9 @@
       case "open-blocking-run":
         if (current) call("run", "open", current.schedule.id, action.getAttribute("data-run-id"));
         break;
+      case "resend-delivery":
+        call("run", "resend", action);
+        break;
       case "close-dialog":
         S.closeDialog();
         break;

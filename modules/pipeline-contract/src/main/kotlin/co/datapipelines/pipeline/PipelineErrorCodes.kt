@@ -1514,6 +1514,12 @@ object PipelineErrorCodes {
         /** 409 — the workspace already holds `max-schedules-per-workspace` live schedules. */
         const val LIMIT_PER_WORKSPACE = "schedule.limit.per_workspace"
 
+        /** 404 — no notification delivery with that id on that run (#442b). */
+        const val NOTIFICATION_NOT_FOUND = "schedule.notification.not_found"
+
+        /** 409 — resend of a notification that is not `failed` or `uncertain` (#442b). */
+        const val NOTIFICATION_NOT_RESENDABLE = "schedule.notification.not_resendable"
+
         /** 400 — a missing or ill-typed request field. */
         const val REQUEST_INVALID = "schedule.validation.request_invalid"
 

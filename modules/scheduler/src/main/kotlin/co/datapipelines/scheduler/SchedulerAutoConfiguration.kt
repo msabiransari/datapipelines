@@ -190,6 +190,7 @@ class SchedulerAutoConfiguration {
         systemActor: SystemActorSource,
         jdbc: NamedParameterJdbcTemplate,
         notificationPolicy: NotificationPolicy,
+        notifications: NotificationRepository,
     ): ScheduleService =
         ScheduleService(
             schedules,
@@ -203,6 +204,7 @@ class SchedulerAutoConfiguration {
             JSON,
             scheduleTargetReads(jdbc),
             notificationPolicy,
+            notifications,
             systemActor::userId,
         )
 

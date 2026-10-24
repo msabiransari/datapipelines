@@ -109,6 +109,62 @@ class NotificationRepository(
             deliveryMapper,
         )
 
+    /**
+     * The deliveries of [runId], each with the notice it carries — the run detail's read (rest-api
+     * §20.11), in transition then recipient order. Bounded by its own key: one event per outcome
+     * of the run (`uq_schedule_notification_events_run_outcome`) times the recipient cap.
+     */
+    fun deliveriesOfRun(runId: UUID): List<RunDelivery> =
+        jdbc.query(
+            """
+            SELECT d.*, e.outcome
+              FROM schedule_notification_deliveries d JOIN schedule_notification_events e ON e.id = d.event_id
+             WHERE e.run_id = :runId
+             ORDER BY e.sequence, e.outcome, d.recipient
+            """.trimIndent(),
+            mapOf("runId" to runId),
+            runDeliveryMapper,
+        )
+
+    /**
+     * [deliveryId] if it belongs to [runId], row-locked for the resend that reads it (the caller's
+     * transaction): the sender settles a claim under its own condition, and a failed or uncertain
+     * row is never claimed, so the lock orders two resends of the same row, nothing else.
+     */
+    fun lockOfRun(
+        runId: UUID,
+        deliveryId: UUID,
+    ): RunDelivery? =
+        jdbc
+            .query(
+                """
+                SELECT d.*, e.outcome
+                  FROM schedule_notification_deliveries d JOIN schedule_notification_events e ON e.id = d.event_id
+                 WHERE d.id = :id AND e.run_id = :runId
+                   FOR UPDATE OF d
+                """.trimIndent(),
+                mapOf("id" to deliveryId, "runId" to runId),
+                runDeliveryMapper,
+            ).singleOrNull()
+
+    /**
+     * An explicit resend (#442b): a `failed` or `uncertain` delivery becomes `pending` and due at
+     * [now], its attempts KEPT and `resend_count` + 1; its last code stays until the next attempt
+     * settles. False when the row was in any other state.
+     */
+    fun requeue(
+        deliveryId: UUID,
+        now: Instant,
+    ): Boolean =
+        jdbc.update(
+            """
+            UPDATE schedule_notification_deliveries
+               SET state = 'pending', next_attempt_at = :now, resend_count = resend_count + 1, updated_at = :now
+             WHERE id = :id AND state IN ('failed', 'uncertain')
+            """.trimIndent(),
+            mapOf("id" to deliveryId, "now" to Timestamp.from(now)),
+        ) == 1
+
     /** The events of [runId], in transition order. */
     fun eventsOfRun(runId: UUID): List<NotificationEventRow> =
         jdbc.query(
@@ -147,6 +203,11 @@ class NotificationRepository(
                 createdAt = rs.getTimestamp("created_at").toInstant(),
                 updatedAt = rs.getTimestamp("updated_at").toInstant(),
             )
+        }
+
+    private val runDeliveryMapper =
+        RowMapper { rs, n ->
+            RunDelivery(NotificationOutcome.fromWire(rs.getString("outcome")), checkNotNull(deliveryMapper.mapRow(rs, n)))
         }
 
     private fun strings(

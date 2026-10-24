@@ -144,6 +144,7 @@ object ApiErrorCatalog {
             // #9 §13.19 — a schedule or run the caller's workspace does not hold (or the lens hides).
             co.datapipelines.scheduler.ScheduleErrorCodes.NOT_FOUND to HttpStatus.NOT_FOUND,
             co.datapipelines.scheduler.ScheduleErrorCodes.RUN_NOT_FOUND to HttpStatus.NOT_FOUND,
+            co.datapipelines.scheduler.ScheduleErrorCodes.NOTIFICATION_NOT_FOUND to HttpStatus.NOT_FOUND,
             // §13.21 / #504b — the shared search-needle refusal on every REST `q`: 400, an argument
             // to fix, before any read. (BODY_TOO_LARGE needs no row — the body-cap filter answers
             // 413 itself, never through the catalog.)

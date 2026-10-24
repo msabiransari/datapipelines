@@ -96,6 +96,7 @@ internal class SchedulerHarness(
             SchedulerAutoConfiguration.JSON,
             ScheduleTargetReads(SchedulerTestDb.jdbc),
             policy,
+            notifications,
         ) {
             SchedulerTestDb.SYSTEM_ACTOR
         }

@@ -149,3 +149,18 @@ data class Delivery(
         "Delivery(id=$id, eventId=$eventId, domain=$recipientDomain, state=${state.wire}, attempts=$attempts, " +
             "lastErrorCode=$lastErrorCode, resendCount=$resendCount)"
 }
+
+/** One delivery of a run with the notice it carries — the run detail's row (rest-api §20.11). */
+data class RunDelivery(
+    val outcome: NotificationOutcome,
+    val delivery: Delivery,
+)
+
+/** An explicit resend's answer: the re-queued delivery and the state it was resent from. */
+data class Resent(
+    val delivery: RunDelivery,
+    val prior: DeliveryState,
+) {
+    /** An `uncertain` delivery may already have arrived: the resend can be a second copy under the same Message-ID. */
+    val mayDuplicate: Boolean get() = prior == DeliveryState.UNCERTAIN
+}

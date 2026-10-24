@@ -117,6 +117,7 @@ class SchedulesCreateBindingsTest {
                 systemActor = { SYSTEM_ID },
                 targetReads = mockk(), // the by-target read; this suite creates, it never reads
                 notificationPolicy = NotificationPolicy(SchedulerProperties.Notifications(), NotificationDeployment.UNKNOWN),
+                notifications = mockk(), // the outbox; this suite creates, it never reads a run
             ),
             audit,
             mapper,

@@ -46,3 +46,29 @@ test("an ok 2xx still resolves with the unwrapped data", async () => {
   const res = await api.runs("11111111-1111-1111-1111-111111111111", 0, 5);
   assert.deepEqual(res.data, { items: [1] });
 });
+
+// #442b — the resend (§20.13) is a POST to the delivery's own path under its run and schedule,
+// carrying the CSRF header the shared request builds for every write.
+test("resend posts to the delivery's path with the CSRF header", async () => {
+  const seen = [];
+  globalThis.window = { DpCsrf: { token: () => "csrf-token" } };
+  globalThis.fetch = (url, init) => {
+    seen.push({ url, init });
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      text: async () => JSON.stringify({ data: { id: "d", state: "pending", warning: "may_duplicate" } }),
+    });
+  };
+  try {
+    const res = await api.resend("s/1", "r", "d");
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].url, "/api/v1/schedules/s%2F1/runs/r/deliveries/d/resend");
+    assert.equal(seen[0].init.method, "POST");
+    assert.equal(seen[0].init.headers["DP-CSRF-Token"], "csrf-token");
+    assert.equal(res.data.warning, "may_duplicate");
+  } finally {
+    delete globalThis.window;
+  }
+});

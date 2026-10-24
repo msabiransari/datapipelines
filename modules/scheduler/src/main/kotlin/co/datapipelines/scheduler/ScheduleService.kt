@@ -7,6 +7,7 @@ import org.springframework.dao.DuplicateKeyException
 import org.springframework.transaction.support.TransactionTemplate
 import java.security.MessageDigest
 import java.time.Clock
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /**
@@ -38,6 +39,8 @@ class ScheduleService(
     private val targetReads: ScheduleTargetReads,
     /** #442 — the deployment's notification decision: the save-time allowlist check and the delivery state readers see. */
     private val notificationPolicy: NotificationPolicy,
+    /** #442b — the outbox: a run's deliveries for its detail, and the explicit resend. */
+    private val notifications: NotificationRepository,
     /**
      * The system identity's user id (R2) — every run's `actor_user_id`. LAST on purpose: a
      * call site may pass it as a trailing lambda, which binds to the final parameter (#250
@@ -431,14 +434,58 @@ class ScheduleService(
         viewer: TargetViewer,
     ): RunDetail {
         visible(workspaceId, scheduleId, viewer)
-        val run =
-            runs.findInSchedule(workspaceId, scheduleId, runId)
-                ?: throw ScheduleException(
-                    ScheduleErrorCodes.RUN_NOT_FOUND,
-                    "No run '$runId' under schedule '$scheduleId'.",
-                    mapOf("schedule_id" to scheduleId.toString(), "run_id" to runId.toString()),
+        val run = runs.findInSchedule(workspaceId, scheduleId, runId) ?: throw runNotFound(scheduleId, runId)
+        return RunDetail(run, runs.trail(runId), notifications.deliveriesOfRun(runId))
+    }
+
+    /**
+     * #442b — queues one of a run's notifications again (rest-api §20.13): only a `failed` or
+     * `uncertain` delivery, which becomes `pending` and due now, its attempts kept. The sender
+     * re-checks the flag and the allowlist when it sends, and reuses the delivery's Message-ID, so
+     * a resend of an `uncertain` one may arrive as a second copy of the same message —
+     * [Resent.mayDuplicate] says so.
+     */
+    fun resendDelivery(
+        workspaceId: UUID,
+        scheduleId: UUID,
+        runId: UUID,
+        deliveryId: UUID,
+    ): Resent {
+        schedules.findLive(workspaceId, scheduleId) ?: throw notFound(scheduleId)
+        runs.findInSchedule(workspaceId, scheduleId, runId) ?: throw runNotFound(scheduleId, runId)
+        val resent =
+            transactions.execute {
+                val found =
+                    notifications.lockOfRun(runId, deliveryId)
+                        ?: throw ScheduleException(
+                            ScheduleErrorCodes.NOTIFICATION_NOT_FOUND,
+                            "No notification '$deliveryId' on run '$runId'.",
+                            mapOf("run_id" to runId.toString(), "delivery_id" to deliveryId.toString()),
+                        )
+                val prior = found.delivery
+                if (prior.state !in RESENDABLE) {
+                    throw ScheduleException(
+                        ScheduleErrorCodes.NOTIFICATION_NOT_RESENDABLE,
+                        "Notification '$deliveryId' is ${prior.state.wire}; only a failed or uncertain notification can be resent.",
+                        mapOf("delivery_id" to deliveryId.toString(), "state" to prior.state.wire),
+                    )
+                }
+                val now = clock.instant().truncatedTo(ChronoUnit.MICROS)
+                check(notifications.requeue(deliveryId, now)) { "the locked delivery $deliveryId was not re-queued" }
+                Resent(
+                    found.copy(
+                        delivery =
+                            prior.copy(
+                                state = DeliveryState.PENDING,
+                                nextAttemptAt = now,
+                                resendCount = prior.resendCount + 1,
+                                updatedAt = now,
+                            ),
+                    ),
+                    prior.state,
                 )
-        return RunDetail(run, runs.trail(runId))
+            }
+        return checkNotNull(resent)
     }
 
     /**
@@ -618,6 +665,15 @@ class ScheduleService(
         return trimmed
     }
 
+    private fun runNotFound(
+        scheduleId: UUID,
+        runId: UUID,
+    ) = ScheduleException(
+        ScheduleErrorCodes.RUN_NOT_FOUND,
+        "No run '$runId' under schedule '$scheduleId'.",
+        mapOf("schedule_id" to scheduleId.toString(), "run_id" to runId.toString()),
+    )
+
     private fun notFound(id: UUID) =
         ScheduleException(ScheduleErrorCodes.NOT_FOUND, "No schedule '$id' in this workspace.", mapOf("schedule_id" to id.toString()))
 
@@ -665,6 +721,9 @@ class ScheduleService(
         private const val MAX_KEY_CHARS = 255
         private const val MAX_ECHO = 64
 
+        /** The states an explicit resend may queue again (#442b): never `pending` or `accepted`. */
+        private val RESENDABLE = setOf(DeliveryState.FAILED, DeliveryState.UNCERTAIN)
+
         private fun requestInvalid(
             field: String,
             expected: String,
@@ -704,6 +763,8 @@ data class Written<T>(
 data class RunDetail(
     val run: ScheduleRun,
     val trail: List<TrailEvent>,
+    /** #442b — the run's notification deliveries, in transition then recipient order. */
+    val deliveries: List<RunDelivery> = emptyList(),
 )
 
 private data class Validated(
