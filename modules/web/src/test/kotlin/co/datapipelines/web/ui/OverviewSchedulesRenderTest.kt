@@ -100,7 +100,8 @@ class OverviewSchedulesRenderTest {
         doc.select("[data-overview-panel] [data-open]").map { it.attr("data-open") } shouldContainExactly listOf("condition", "last-run")
         doc.selectFirst("[data-dialog-section=condition]")!!.text() shouldContain "blocked wins"
         doc.selectFirst("[data-dialog-section=last-run]")!!.text() shouldContain "Not a history"
-        doc.select("[data-overview-recent] [data-task]").map { it.attr("data-task") } shouldContainExactly listOf("next")
+        // #641: one blocked schedule puts Unblock first (its own case below pins the row).
+        doc.select("[data-overview-recent] [data-task]").map { it.attr("data-task") } shouldContainExactly listOf("unblock", "next")
         val task = doc.selectFirst("[data-task=next] a").shouldNotBeNull()
         task.attr("href") shouldBe "/schedules"
         task.selectFirst("b")!!.text() shouldBe "See what runs next"
@@ -112,12 +113,45 @@ class OverviewSchedulesRenderTest {
         doc.selectFirst(".app-overview-actions [data-overview-new-schedule]").shouldNotBeNull()
     }
 
-    /** No explorer filter selects the blocked schedules, so no Unblock row is offered for them (§4.20a). */
+    /**
+     * #641 — the explorer filters by condition, so a blocked workspace gets its next step first:
+     * Unblock N schedules, linking the blocked explorer, N worded from the one summary read.
+     */
     @Test
-    fun `a blocked schedule adds no row the explorer cannot filter for`() {
+    fun `blocked schedules put Unblock first - linking the explorer filtered to blocked, the count worded`() {
         val doc = Jsoup.parse(controllerHtml(WorkspaceRole.AUTHOR, blocked = 2))
+        doc.select("[data-overview-recent] [data-task]").map { it.attr("data-task") } shouldContainExactly listOf("unblock", "next")
+        val unblock = doc.selectFirst("[data-task=unblock] a").shouldNotBeNull()
+        unblock.attr("href") shouldBe "/schedules?condition=blocked"
+        unblock.selectFirst("b")!!.text() shouldBe "Unblock 2 schedules"
+        unblock.selectFirst("small")!!.text() shouldBe "2 schedules are stopped by a failure until someone unblocks them."
+        unblock.selectFirst(".app-overview-task-icon use")!!.attr("href") shouldBe "/vendor/icons/lucide-sprite.svg#octagon-alert"
+
+        val one = Jsoup.parse(controllerHtml(WorkspaceRole.AUTHOR, blocked = 1)).selectFirst("[data-task=unblock] a").shouldNotBeNull()
+        one.selectFirst("b")!!.text() shouldBe "Unblock 1 schedule"
+        one.selectFirst("small")!!.text() shouldBe "1 schedule is stopped by a failure until someone unblocks it."
+    }
+
+    @Test
+    fun `no blocked schedule - no Unblock row and no blocked link in the recent panel`() {
+        val doc = Jsoup.parse(controllerHtml(WorkspaceRole.AUTHOR, blocked = 0))
         doc.select("[data-overview-recent] [data-task]").map { it.attr("data-task") } shouldContainExactly listOf("next")
         doc.select("[data-overview-recent] a[href*=blocked]").shouldBeEmpty()
+    }
+
+    /** #641 — the condition tiles and bars open the explorer filtered to their bucket; Schedules and Last run stay unlinked. */
+    @Test
+    fun `the condition tiles and bars link the filtered explorer - the total and the last-run bars do not`() {
+        val doc = Jsoup.parse(controllerHtml(WorkspaceRole.AUTHOR, blocked = 1))
+        listOf("enabled", "paused", "blocked").forEach { key ->
+            doc.selectFirst("[data-overview-summary] [data-count=$key] a")!!.attr("href") shouldBe "/schedules?condition=$key"
+            doc.selectFirst("[data-chart=condition] [data-bar=$key] a")!!.attr("href") shouldBe "/schedules?condition=$key"
+        }
+        doc.select("[data-overview-summary] [data-count=schedules] a").shouldBeEmpty()
+        doc.select("[data-chart=last-run] a").shouldBeEmpty()
+        doc.selectFirst("[data-dialog-section=condition]")!!.text() shouldContain
+            "Each bar and each condition tile opens the explorer filtered to that condition; the Last run bars are not filters."
+        doc.selectFirst("[data-dialog-section=condition]")!!.text() shouldNotContain "The bars are not filters"
     }
 
     /** The New schedule action is the canAuthor set's: a viewer and a promoter read the steps and no button. */

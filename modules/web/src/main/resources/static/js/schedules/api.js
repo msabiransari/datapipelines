@@ -127,12 +127,13 @@
   /**
    * §20.1, every page: the list reads `has_more` until it is false (a subtree is bounded by the
    * per-workspace cap, scheduler.md §3 — 100 by default, so one page at the 200 maximum is the
-   * usual answer).
+   * usual answer). #641: a [condition] word narrows the read server-side, before the lens, so the
+   * filtered list is the set the Schedules home counts.
    */
-  function listAll(prefix) {
+  function listAll(prefix, condition) {
     var items = [];
     function page(offset) {
-      return request("GET", BASE + q({ prefix: prefix, offset: offset, limit: 200 })).then(function (r) {
+      return request("GET", BASE + q({ prefix: prefix, offset: offset, limit: 200, condition: condition })).then(function (r) {
         var data = r.data || {};
         items = items.concat(data.items || []);
         var more = data.pagination && data.pagination.has_more;

@@ -120,9 +120,15 @@
     return !!(S.state && S.state.root && S.state.root.isConnected);
   };
 
-  /** The page's deep link for a schedule (and a run), kept in the address bar as the reader moves. */
+  /**
+   * The page's deep link for a schedule (and a run), kept in the address bar as the reader moves.
+   * #641: the active condition filter rides with it (validated words only — S.state.condition is
+   * set through model.conditionFilter), and is absent when the list is unfiltered.
+   */
   S.url = function (scheduleId, runId) {
     var parts = [];
+    var condition = S.state && S.state.condition;
+    if (condition) parts.push("condition=" + encodeURIComponent(condition));
     if (scheduleId) parts.push("id=" + encodeURIComponent(scheduleId));
     if (runId) parts.push("run=" + encodeURIComponent(runId));
     return "/schedules" + (parts.length ? "?" + parts.join("&") : "");

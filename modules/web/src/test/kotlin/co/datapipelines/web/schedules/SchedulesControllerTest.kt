@@ -124,7 +124,7 @@ class SchedulesControllerTest {
             val data =
                 if (list) {
                     controller
-                        .list(null, null, null)
+                        .list(null, null, null, null)
                         .data.items
                         .single()
                 } else {
@@ -182,7 +182,7 @@ class SchedulesControllerTest {
             val data =
                 if (list) {
                     controller
-                        .list(null, null, null)
+                        .list(null, null, null, null)
                         .data.items
                         .single()
                 } else {
@@ -370,10 +370,21 @@ class SchedulesControllerTest {
     fun `the list pages with one extra row to learn has_more`() {
         every { service.list(workspace, "finance/", 3, 0, any()) } returns List(3) { schedule() }
 
-        val data = controller.list(" finance/ ", 0, 2).data
+        val data = controller.list(" finance/ ", 0, 2, null).data
 
         data.items.size shouldBe 2
         data.pagination.hasMore shouldBe true
+    }
+
+    @Test
+    fun `the list hands the condition word to the service as given - the service owns its one validation`() {
+        every { service.list(workspace, null, 3, 0, any(), "blocked") } returns List(1) { schedule() }
+        every { service.list(workspace, null, 3, 0, any(), "nope") } throws
+            ScheduleException(ScheduleErrorCodes.REQUEST_INVALID, "refused", mapOf("field" to "condition"))
+
+        controller.list(null, 0, 2, "blocked").data.items.size shouldBe 1
+        shouldThrow<ScheduleException> { controller.list(null, 0, 2, "nope") }.details["field"] shouldBe "condition"
+        verify(exactly = 1) { service.list(workspace, null, 3, 0, any(), "blocked") }
     }
 
     @Test

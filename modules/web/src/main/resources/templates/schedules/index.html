@@ -28,10 +28,13 @@
   <script th:src="@{/js/schedules/form.js}" defer></script>
   <script th:src="@{/js/schedules/page.js}" defer></script>
 
+  <!-- #641: the condition stamp below is the PARSED deep-link word (the controller refused any
+       other value with a 400), absent when the list is unfiltered; the script reads it first. -->
   <div class="tplx-page sch-page app-canvas" data-schedules-root
        th:attr="data-can-author=${canAuthor == true},
                 data-can-read-executions=${canReadExecutions == true},
-                data-can-execute=${canExecute == true}">
+                data-can-execute=${canExecute == true}"
+       th:data-schedule-condition="${#strings.isEmpty(condition) ? null : condition}">
 
     <!-- ONE grid child for the heading row (the `.tplx-page` three-row grid — pipelines/list.html). -->
     <div class="app-page-h">
@@ -53,10 +56,19 @@
 
     <!-- Search: a flat list of full paths while the box holds text, the tree when it is empty
          (the explorers' browse-vs-search rule, §4.3). It matches every column the list
-         renders — the name, the pipeline, the pattern and the condition (§5.1 Search). -->
+         renders — the name, the pipeline, the pattern and the condition (§5.1 Search).
+         #641: the condition select beside it is the pipelines catalog's lifecycle select
+         without htmx — its change re-reads §20.1 with `condition` (explorer.js), and while a
+         condition is chosen the list is flat, like a search; the two include each other. -->
     <div class="u-row-md tplx-search-row">
       <input type="search" id="schedule-filter-q" name="q" placeholder="Search schedules..."
              class="ds-input app-search-input" autocomplete="off" aria-controls="schedule-list">
+      <select id="schedule-filter-condition" name="condition" class="ds-input app-select-auto"
+              aria-label="Filter by condition" aria-controls="schedule-list">
+        <option value="" th:selected="${#strings.isEmpty(condition)}">All conditions</option>
+        <option th:each="o : ${conditionOptions}" th:value="${o.value}" th:text="${o.label}"
+                th:selected="${o.value == condition}">Blocked</option>
+      </select>
     </div>
 
     <div class="tplx-body">

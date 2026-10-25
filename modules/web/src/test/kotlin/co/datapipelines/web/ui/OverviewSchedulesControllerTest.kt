@@ -66,7 +66,9 @@ class OverviewSchedulesControllerTest {
         val panel = page.inventory.shouldNotBeNull()
         panel.counts.map { it.key to it.value } shouldContainExactly
             listOf("schedules" to 4L, "enabled" to 2L, "paused" to 1L, "blocked" to 1L)
-        panel.counts.map { it.href } shouldBe listOf(null, null, null, null)
+        // #641: each condition tile opens the explorer filtered to it; the total has no filter.
+        panel.counts.map { it.href } shouldBe
+            listOf(null, "/schedules?condition=enabled", "/schedules?condition=paused", "/schedules?condition=blocked")
 
         val (condition, lastRun) = panel.charts
         condition.key shouldBe "condition"
@@ -79,7 +81,8 @@ class OverviewSchedulesControllerTest {
             listOf("succeeded" to 1L, "failed" to 1L, "in-progress" to 0L, "did-not-run" to 0L, "never-ran" to 2L)
         lastRun.bars.map { it.name } shouldContainExactly listOf("Succeeded", "Failed", "In progress", "Did not run", "Never ran")
         lastRun.bars.first().label shouldBe "Succeeded: 1 schedule"
-        (condition.bars + lastRun.bars).map { it.href }.toSet() shouldBe setOf(null)
+        condition.bars.map { it.href } shouldContainExactly condition.bars.map { "/schedules?condition=${it.key}" }
+        lastRun.bars.map { it.href }.toSet() shouldBe setOf(null)
 
         val recent = page.recent.shouldNotBeNull()
         recent.review.shouldBeNull()
