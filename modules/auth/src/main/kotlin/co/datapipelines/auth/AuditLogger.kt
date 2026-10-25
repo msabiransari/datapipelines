@@ -13,9 +13,15 @@ import java.util.UUID
  * INSERTed, never updated. `details_json` is redaction-bound (observability §3) —
  * callers must not put credentials here.
  *
- * Failure to write an audit row must not break the request path, but it must never
- * pass silently: it is logged as a structured WARN at a defined boundary (rules/02),
- * not swallowed.
+ * A failed audit write follows the direction of the call (auth.md §10.1A, #704):
+ * - **outside a transaction** it is best effort — logged as a structured WARN at a defined
+ *   boundary (rules/02) and swallowed; the request proceeds without the row, never silently;
+ * - **inside the caller's transaction** it is strict — the failure propagates out of [log], the
+ *   caller's transaction rolls back and the request is refused (the rule #517 adopted for release
+ *   rows, generalised). A swallow there cannot keep the request alive anyway: on Postgres the
+ *   refused INSERT aborts the caller's transaction, and its COMMIT becomes a silent ROLLBACK behind
+ *   a success answer — a key handed out whose `api_key.created` row, and whose key row, never
+ *   committed.
  *
  * Implements [AuditEventSink] (052) so cross-module emitters — the MCP dispatcher's
  * `mcp.tool.*` events — depend on the sink contract, not on this JDBC writer; the
@@ -42,7 +48,12 @@ import java.util.UUID
  * - **No writer** (the default — `audit.enabled: false` — or `datapipelines.persistence.enabled:
  *   false`, or a test slice): every row is the direct INSERT.
  *
- * ## Which failures reach the caller — the same on every path (#266b)
+ * ## Inside a transaction every failure reaches the caller (#704)
+ * The joined INSERT runs bare: a `DataAccessException` leaves [log] as the template raised it — same
+ * class, same SQLState — and no WARN is written here, because the boundary that refuses the request
+ * logs it once (the REST catch-all answers the generic 500 envelope; no error code of its own).
+ *
+ * ## Which failures reach the caller outside a transaction — the same on both paths (#266b)
  * A STORE failure is the row's, never the request's: a `DataAccessException` (the INSERT refused, the
  * database unreachable) and, on the batched path, a `TransactionException` (the batch's own
  * transaction could not begin or commit) are WARNed with the row's ids and the failure's class and
@@ -81,6 +92,11 @@ class AuditLogger(
                 else -> PATH_DIRECT
             },
         )
+        if (inTransaction) {
+            // #704: strict — a refused row propagates and the caller's transaction rolls back with it.
+            jdbc.update(AuditRowSink.INSERT, AuditRowSink.params(row))
+            return
+        }
         if (batching == null) {
             insertDirect(row)
             return
@@ -93,6 +109,7 @@ class AuditLogger(
         }
     }
 
+    /** Outside a transaction only: the #266b swallow — WARNed by class and SQLState, the request proceeds. */
     private fun insertDirect(row: AuditRow) {
         try {
             jdbc.update(AuditRowSink.INSERT, AuditRowSink.params(row))
