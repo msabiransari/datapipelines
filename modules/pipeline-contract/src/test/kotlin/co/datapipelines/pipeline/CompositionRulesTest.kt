@@ -103,6 +103,7 @@ class CompositionRulesTest {
         // Another workspace's entity of the same name is not registered HERE (workspaces design §3).
         val elsewhere = UUID.randomUUID()
         val unresolved = PipelineResolver { _, _, _ -> null }
+
         fun registeredIn(workspace: UUID) = PipelineNames { asked, name -> asked == workspace && name == CHILD }
 
         validatorWith(unresolved, names = registeredIn(workspaceId))
