@@ -293,7 +293,7 @@ class ParameterSetService(
      * Restore DISCARDED version [version]; the pointer moves only above-current-or-NULL (D60). A restore lands RELEASED
      * without a human's consent, so under the guard the stored body's selector-template pins are rechecked first (#517
      * round three, record §12.1): a missing or DISCARDED pin refuses with the save rules' validation code (400), a DRAFT
-     * one `parameter.release.dependency_not_released` (409). A refusal writes nothing.
+     * one `parameter_set.release.dependency_not_released` (409). A refusal writes nothing.
      */
     fun restoreVersion(
         workspaceId: UUID,

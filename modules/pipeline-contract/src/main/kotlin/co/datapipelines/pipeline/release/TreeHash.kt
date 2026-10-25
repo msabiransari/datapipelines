@@ -10,7 +10,7 @@ import java.security.MessageDigest
  * Covered: identity (family word, pin key, resolved UUID, version), status, body hash (null kept distinct from absent — a MISSING node
  * has `"body_hash":null`), current pointer, edges with their paths. NOT covered: display names, `node_id`s (positional
  * locators), selections, warnings. It is a token, not an authorisation: permission, lens, posture and evidence are
- * rechecked separately at submit. `TreeHashTest` pins a golden digest. S1 is unmerged and stateless; its UUID correction retains `v1`.
+ * rechecked separately at submit. `TreeHashTest` pins a golden digest. The initial `v1` format includes resolved UUIDs.
  * Subsequent changes to a shipped serialisation require a format bump.
  */
 object TreeHash {
