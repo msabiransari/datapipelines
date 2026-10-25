@@ -178,7 +178,18 @@ class SiteAtlasContrastBrowserTest : BrowserSuite() {
         /** `--site-nav-wide-min` (64rem): below it the header is the phone menu. */
         const val NAV_WIDE_MIN = 1024
         val VIEWPORTS = listOf(1440 to 900, 390 to 844)
-        val PAGES = listOf("/", "/how-it-works", "/pricing", "/pipeline-scheduling", "/semantic-layer", "/docs/scheduler")
+        val PAGES =
+            listOf(
+                "/",
+                "/how-it-works",
+                "/pricing",
+                "/pipeline-scheduling",
+                "/semantic-layer",
+                "/docs/scheduler",
+                // The two pages whose bare-list and step links read as text alone until 698 underlined them.
+                "/roadmap",
+                "/tableau/prep-vs-pipelines-as-code",
+            )
         val TABS = listOf("tab-api", "tab-evidence", "tab-chart")
         val LOCK_VIEWPORT = 1440 to 900
         val LOCK_PAGES = listOf("/", "/how-it-works")
@@ -242,7 +253,9 @@ class SiteAtlasContrastBrowserTest : BrowserSuite() {
                 if (!(t.compareDocumentPosition(g) & Node.DOCUMENT_POSITION_PRECEDING)) continue;
                 const cs = getComputedStyle(g), m = g.getScreenCTM();
                 if (cs.fill === 'none' || cs.display === 'none' || cs.visibility !== 'visible' || !m) continue;
-                if (!g.isPointInFill(centre.matrixTransform(m.inverse()))) continue;
+                // The centre in the shape's own user space: the inverse screen matrix, applied by hand.
+                const i = m.inverse(), x = centre.x, y = centre.y;
+                if (!g.isPointInFill(new DOMPoint(i.a * x + i.c * y + i.e, i.b * x + i.d * y + i.f))) continue;
                 const c = rgba(cs.fill);
                 ground = over(c, c[3] * parseFloat(cs.fillOpacity) * parseFloat(cs.opacity), ground);
               }

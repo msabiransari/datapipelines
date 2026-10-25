@@ -1063,7 +1063,10 @@ a {
 .price-card p a,
 .section-title p a,
 .dark-band :is(p, li) a,
-.doc-source a {
+.doc-source a,
+.steps p a,
+.chart-note a,
+.container > ul:not([class]) > li a {
   text-decoration: underline;
   text-underline-offset: var(--space-1);
 }
