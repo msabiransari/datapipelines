@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{site/_layout :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      <li><a th:href="@{/}">Home</a></li>
+      <li aria-current="page">Parameter sets</li>
+    </ol>
+  </nav>
+
+  <!--/* #699: the parameter sets capability page (design record §5). The contract is
+       rest-api.md §21; the samples are the parameter engine's own examples (its design record
+       §3 and §6, the country/state cascade rest-api.md §21.3 evaluates). A set's consumer today
+       is a dashboard; the page says so and never attaches a set to endpoints or schedules. */-->
+  <!-- claim: docs/rest-api.md §21 — the parameter set surface -->
+  <!-- claim: docs/dashboards.md §1 — a dashboard pins one parameter-set version -->
+
+  <section class="section page-hero" aria-labelledby="rp-title">
+    <div class="container">
+      <p class="kicker">Parameter sets</p>
+      <h1 id="rp-title" class="ds-display">Define inputs once. Reuse them in dashboards.</h1>
+      <p class="section-lede">
+        A parameter set is a versioned definition of the filters a person fills in: typed text and number inputs,
+        dropdowns and multi-selects, their defaults, their validation and the choices that depend on other
+        choices. The server evaluates the whole form, so every dashboard that pins the set gets the same rules.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/docs/rest-api}">The parameter sets API</a>
+        <a class="btn btn-secondary" th:href="@{/sql-dashboards}">Where sets are used</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="rp-kinds">
+    <div class="container">
+      <p class="kicker">What a set holds</p>
+      <h2 id="rp-kinds" class="ds-headline">Typed inputs and choices, one validator</h2>
+      <div class="features-grid features-grid--two">
+        <article class="card">
+          <!-- claim: docs/rest-api.md §21.3 -->
+          <h3>INPUT: a value someone types</h3>
+          <p>A date, an amount, a name. It has a type, an optional default and optional constraints such as a minimum or a pattern. A value that breaks a rule is refused, never rounded or trimmed: an amount with two decimal places will not accept a third.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/rest-api.md §21.3 -->
+          <h3>SELECT: a value someone picks</h3>
+          <p>One choice or several. Each option is a value, the label a person reads and whether it is the default. Options are written into the set for lists that rarely change, or read from your database by a pinned SQL template for lists that do.</p>
+        </article>
+      </div>
+      <!-- claim: docs/rest-api.md §21.1 -->
+      <div class="code-block">
+        <pre><code>{
+  "name": "state",
+  "label": "State",
+  "type": "STRING",
+  "kind": "SELECT",
+  "cardinality": "SINGLE",
+  "required": true,
+  "source": { "template": { "id": "acme/sales/states_of_country.sql", "version": 3 },
+              "datasource": "warehouse" },
+  "depends_on": ["country"],
+  "presentation": { "control": "dropdown" }
+}</code></pre>
+        <button type="button" class="copy-btn" hidden>Copy</button>
+      </div>
+      <p class="how-footnote">One parameter from the engine's own example set: the state list depends on the chosen country.</p>
+    </div>
+  </section>
+
+  <section class="section band" aria-labelledby="rp-cascade">
+    <div class="container">
+      <p class="kicker">Cascading choices</p>
+      <h2 id="rp-cascade" class="ds-headline">Pick a country, get its states</h2>
+      <ol class="steps">
+        <li>
+          <h3>The selector is a reviewed SQL template</h3>
+          <!-- claim: docs/rest-api.md §21.2 -->
+          <p>The state list comes from a pinned template version, so the query behind a dropdown is reviewed and released like any other SQL. It returns a value, the text to show and the default flag, in a declared order.</p>
+        </li>
+        <li>
+          <h3>Parents bind as parameters</h3>
+          <!-- claim: docs/rest-api.md §21.3 -->
+          <p>The chosen country reaches the state query as a bound parameter, never pasted into the SQL text. A city list can depend on the state the same way, as long as the chain has no cycle.</p>
+        </li>
+        <li>
+          <h3>The server evaluates the whole form</h3>
+          <!-- claim: docs/rest-api.md §21.3 -->
+          <p>The client sends every control's current value; the server answers with fresh options, the resolved value of each control and any errors. A choice that no longer exists falls back to the default and says it was reset.</p>
+        </li>
+      </ol>
+      <!-- claim: docs/rest-api.md §21.3 -->
+      <div class="code-block">
+        <pre><code>POST /api/v1/parameter-sets/{id}/evaluate
+{ "version": 4,
+  "selections": { "country": "USA", "state": "NY", "city": null, "min_order_amount": 250.00 } }</code></pre>
+        <button type="button" class="copy-btn" hidden>Copy</button>
+      </div>
+      <p class="how-footnote">The evaluate request from the REST contract. A first render sends empty selections and gets the whole form back.</p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="rp-life">
+    <div class="container">
+      <p class="kicker">Versions and review</p>
+      <h2 id="rp-life" class="ds-headline">Versioned like a pipeline</h2>
+      <div class="features-grid">
+        <article class="card">
+          <!-- claim: docs/rest-api.md §21.1, docs/versioning.md §3.5, docs/mcp-server.md §6.1 -->
+          <h3>Draft, release, switch</h3>
+          <p>An agent creates or edits a set as a draft over the <a th:href="@{/docs/mcp-server}">MCP tools</a>. A person releases it, and can discard, restore or switch versions with the same lifecycle templates use.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/rest-api.md §21.2 -->
+          <h3>Protected while pinned</h3>
+          <p>A dashboard pins one exact set version. That version cannot be discarded or purged while it is pinned; the server names the dashboards that hold it.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/ui-screens.md §4.23, docs/rest-api.md §21.5 -->
+          <h3>A live form and a history</h3>
+          <p>The Parameter Sets page renders the form and evaluates it as you change values, and its History tab lists every evaluation of the set: when, from which surface, by whom, its status and how long it took.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section band" aria-labelledby="rp-limits">
+    <div class="container">
+      <p class="kicker">Current limits</p>
+      <h2 id="rp-limits" class="ds-headline">What a parameter set is not</h2>
+      <!-- claim: docs/dashboards.md §2.2, docs/scheduler.md §2.2, docs/rest-api.md §19 -->
+      <ul class="fact-list fact-list-plain">
+        <li><strong>Not a pipeline's own parameters.</strong> A pipeline declares its typed parameters, and an API call or a schedule supplies values for them. A set maps its values onto those parameters through a dashboard.</li>
+        <li><strong>Dashboards are the consumer today.</strong> A set does not attach to a published endpoint or a schedule.</li>
+        <li><strong>Not schedule dates.</strong> <code>TODAY</code> and <code>YESTERDAY</code> on a schedule are bindings of the scheduler, separate from sets.</li>
+        <li><strong>Not access control.</strong> A set shapes and validates choices. Which rows a viewer may see is decided where the viewer is authorized.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="rp-try">
+    <div class="container">
+      <p class="kicker">Try it</p>
+      <h2 id="rp-try" class="ds-headline">Try the form before you release it</h2>
+      <div class="prose">
+        <!-- claim: docs/ui-screens.md §4.23 -->
+        <p>
+          Run the server with the <a th:href="@{/how-it-works}">tutorial</a> and ask your agent for the filters your
+          <a th:href="@{/sql-dashboards}">dashboard</a> needs. Open the draft on the Parameter Sets page, change a
+          parent value and watch the dependent choices follow, then release the set before the dashboard that pins it.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section band" aria-labelledby="faq-title">
+    <div class="container">
+      <p class="kicker">Asked before</p>
+      <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Parameter sets, in three questions')}"></div>
+    </div>
+  </section>
+
+</th:block>
+</html>

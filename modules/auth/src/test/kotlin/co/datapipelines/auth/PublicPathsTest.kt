@@ -55,6 +55,9 @@ class PublicPathsTest {
                 "/semantic-layer",
                 "/use-cases",
                 "/explore",
+                "/pipeline-scheduling",
+                "/sql-dashboards",
+                "/reusable-parameter-sets",
                 "/docs",
                 "/docs/*",
                 "/skill.md",
@@ -153,9 +156,10 @@ class PublicPathsTest {
          * 115 added the engineering page (35 -> 36); 116 added the demo-data page (36 -> 37);
          * 119 added the pricing page (37 -> 38) and the semantic-layer page (38 -> 39);
          * 145 the two hub pages (39 -> 41); 173 the llms.txt pair (41 -> 43); 353 the visualization test
-         * preview page and the screenshot upload, the first capability-authenticated routes (43 -> 45).
+         * preview page and the screenshot upload, the first capability-authenticated routes (43 -> 45);
+         * 699 the three capability pages, exact paths (45 -> 48).
          * (Kotlin block comments nest, so the glob's spelling is written without its star.)
          */
-        const val DOCUMENTED_ROWS = 45
+        const val DOCUMENTED_ROWS = 48
     }
 }

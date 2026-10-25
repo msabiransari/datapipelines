@@ -15,17 +15,18 @@ import org.junit.jupiter.api.Test
 /**
  * The public header, in a real browser — 130's Product arms restored by 148 (#115: the seven
  * feature pages had moved to /explore and the footer with 145; the owner asked for the header
- * path back), on 145's five-page row.
+ * path back), on 145's five-page row. #699 adds the three capability pages: the disclosure
+ * carries ten.
  *
  *  - **(a) the row and the phone menu agree:** the wide row is the Product summary, then
  *    [PRIMARY_PATHS] — every one a registry page or the docs index — then the host-aware
  *    application entry (`/login`); the disclosure's links are [PRODUCT_PATHS] in order; the
- *    phone menu's group carries the same seven with the same labels and the same primaries
+ *    phone menu's group carries the same ten with the same labels and the same primaries
  *    follow it; on `/how-it-works` that link alone is `aria-current="page"` in both menus, and
  *    on `/semantic-layer` the disclosure's link is current AND its summary wears the mark;
  *  - **(b) the disclosure opens on click and keyboard, closes on Escape with focus on the
  *    summary, on a click outside, and when focus leaves it — never trapping focus:** at
- *    1280×900 Tab from the open summary lands on the first link; Tab past the seventh closes
+ *    1280×900 Tab from the open summary lands on the first link; Tab past the tenth closes
  *    the panel and lands on the next row item;
  *  - **(c) one row that fits its box, at the breakpoint and above:** at 1024×768 (the width the
  *    wide row appears at), 1280×900 and 1440×1000, every `.nav-wide` item — the summary
@@ -33,7 +34,7 @@ import org.junit.jupiter.api.Test
  *    ([HEADER_HEIGHT_PX]) and the row's max-content width fits the container's content box
  *    under BOTH labels the layout can render (read from the template, never typed here);
  *  - **(d) the phone group is visible and operable, down to the shortest phone:** at 390×844 and
- *    320×568 the hamburger opens the panel, the group's heading labels it, all seven links are
+ *    320×568 the hamburger opens the panel, the group's heading labels it, all ten links are
  *    visible and each one can be brought inside the viewport (the panel scrolls; a panel
  *    hanging from a sticky header cannot be scrolled INTO), and a touch on a link navigates;
  *  - **(e) breakpoint and overflow coherence:** a disclosure opened at 1280 is closed after a
@@ -42,14 +43,14 @@ import org.junit.jupiter.api.Test
  *    390, 768 and 1440;
  *  - **(f) reduced motion:** under `prefers-reduced-motion: reduce` the chevron's transition is
  *    the design system's 0.01ms floor and the disclosure still opens and closes;
- *  - **(g) the seven are still in /explore and the footer:** the directory and the site map
+ *  - **(g) the ten are still in /explore and the footer:** the directory and the site map
  *    keep linking them — the header is an addition, not a move back.
  *
  * Anonymous throughout: the site is public.
  */
 class SiteHeaderMenuBrowserTest : BrowserSuite() {
     @Test
-    fun `the row leads with Product, the disclosure links the seven, the phone menu agrees and current pages are marked`() {
+    fun `the row leads with Product, the disclosure links the ten, the phone menu agrees and current pages are marked`() {
         startTrace()
         page.setViewportSize(1280, 900)
         navigate("/how-it-works")
@@ -64,7 +65,7 @@ class SiteHeaderMenuBrowserTest : BrowserSuite() {
         panel.forEach { (path, label) -> withClue("$path has a label") { label.isNotBlank() shouldBe true } }
 
         val group = links(".nav-mobile .nav-group > a")
-        withClue("the phone group is the same seven, same labels, same order") { group shouldBe panel }
+        withClue("the phone group is the same ten, same labels, same order") { group shouldBe panel }
         val phone = links(".nav-mobile .nav-panel > a")
         withClue("the phone menu's primaries follow the group") { phone.map { it.first } shouldBe PRIMARY_PATHS + "/login" }
         withClue("exactly the page being read is current, in both menus") {
@@ -104,7 +105,7 @@ class SiteHeaderMenuBrowserTest : BrowserSuite() {
         page.keyboard().press("Enter")
         page.locator(".nav-menu[open]").waitFor()
         repeat(PRODUCT_PATHS.size) { page.keyboard().press("Tab") }
-        withClue("seven Tabs reach the seventh link") { activeHref() shouldBe PRODUCT_PATHS.last() }
+        withClue("ten Tabs reach the tenth link") { activeHref() shouldBe PRODUCT_PATHS.last() }
         page.keyboard().press("Tab")
         page.locator(".nav-menu:not([open])").waitFor()
         withClue("Tab past the last link leaves the panel closed behind, on the next row item") {
@@ -179,7 +180,7 @@ class SiteHeaderMenuBrowserTest : BrowserSuite() {
                     p.locator(".nav-mobile .nav-group").getAttribute("aria-labelledby") shouldBe heading.getAttribute("id")
                 }
                 val groupLinks = p.locator(".nav-mobile .nav-group > a").all()
-                withClue("${w}x$h: seven links in the group") { groupLinks.size shouldBe PRODUCT_PATHS.size }
+                withClue("${w}x$h: ten links in the group") { groupLinks.size shouldBe PRODUCT_PATHS.size }
                 withClue("${w}x$h: every group link is visible") { groupLinks.filterNot { it.isVisible() }.shouldBeEmpty() }
                 val outside =
                     (groupLinks + p.locator(".nav-mobile .nav-panel > a").all()).mapNotNull { link ->
@@ -272,16 +273,16 @@ class SiteHeaderMenuBrowserTest : BrowserSuite() {
     }
 
     @Test
-    fun `the seven feature pages are still linked from explore and from the footer`() {
+    fun `the ten feature pages are still linked from explore and from the footer`() {
         startTrace()
         page.setViewportSize(1280, 900)
         navigate("/explore")
         val explore = links("main a[href]").map { it.first }.toSet()
-        withClue("/explore links the seven") { explore shouldContainAll PRODUCT_PATHS }
+        withClue("/explore links the ten") { explore shouldContainAll PRODUCT_PATHS }
         val footer = links("footer a[href]").map { it.first }.toSet()
-        withClue("the footer links the seven") { footer shouldContainAll PRODUCT_PATHS }
-        // Non-vacuity: seven, not "at least one".
-        PRODUCT_PATHS.size shouldBe 7
+        withClue("the footer links the ten") { footer shouldContainAll PRODUCT_PATHS }
+        // Non-vacuity: ten, not "at least one".
+        PRODUCT_PATHS.size shouldBe 10
     }
 
     private fun navigate(path: String) {
@@ -337,9 +338,23 @@ class SiteHeaderMenuBrowserTest : BrowserSuite() {
         /** The five primary pages and the docs, in the header's order (145 §2). */
         val PRIMARY_PATHS = listOf("/how-it-works", "/use-cases", "/pricing", "/explore", "/docs")
 
-        /** The seven, in the header's order (130, restored by 148). Existence is proven against the rendered registry, not assumed. */
+        /**
+         * The ten, in the header's order (130, restored by 148; #699 appended the three capability
+         * pages). Existence is proven against the rendered registry, not assumed.
+         */
         val PRODUCT_PATHS =
-            listOf("/semantic-layer", "/dp-lake", "/federated-query", "/text-to-sql-agent", "/mcp-tools", "/demo-data", "/security")
+            listOf(
+                "/semantic-layer",
+                "/dp-lake",
+                "/federated-query",
+                "/text-to-sql-agent",
+                "/mcp-tools",
+                "/demo-data",
+                "/security",
+                "/pipeline-scheduling",
+                "/sql-dashboards",
+                "/reusable-parameter-sets",
+            )
 
         /** The breakpoint width (`--site-nav-wide-min` = 64rem = 1024px) and 145's two wide widths. */
         val WIDE_VIEWPORTS = listOf(1024 to 768, 1280 to 900, 1440 to 1000)

@@ -14,14 +14,17 @@
        What we are shipping. What is on the Roadmap"). Two columns — ships today / planned —
        and never the word "alternative" for something that is not one yet. The FAQ block is
        SiteFaqs.TABLEAU. Every ships-today claim cites a packaged spec; every roadmap item cites
-       the design record on disk and is labelled planned. */-->
+       the design record on disk and is labelled planned. #699 moved dashboards, the scheduler and
+       SCRIPT nodes into the ships-today column; extracts, alerts and metrics stay planned. */-->
   <!-- claim: docs/rest-api.md §19 — Tableau reads the endpoint's JSON -->
   <!-- claim: docs/pipeline-contract.md §8 — write-back to a datasource Tableau connects to -->
   <!-- claim: docs/staging.md §3 — no warehouse between the sources and Tableau -->
   <!-- claim: docs/versioning.md §3 — the dataset a person released -->
   <!-- claim: docs/auth.md §7.7 — path-scoped keys -->
-  <!-- claim: docs/superpowers/specs/2026-09-07-scheduler-design.md — the planned scheduler -->
-  <!-- claim: docs/ROADMAP.md §2 — planned dashboards -->
+  <!-- claim: docs/scheduler.md §1 — schedules that run pipelines -->
+  <!-- claim: docs/dashboards.md §1, docs/dashboards.md §6.5 — dashboards embedded through your backend -->
+  <!-- claim: docs/pipeline-contract.md §4.12 — SCRIPT nodes -->
+  <!-- claim: docs/ROADMAP.md §3 — scheduled extracts, alerts and metrics are later -->
 
   <section class="section page-hero" aria-labelledby="tb-title">
     <div class="container">
@@ -31,8 +34,9 @@
         Tableau is very good at drawing. What costs teams the money is everything before and after the drawing.
         Before it: getting a trustworthy, joined, refreshed dataset in front of Tableau from four databases and a
         bucket. After it: putting the result inside their own product instead of a portal. datapipelines does the
-        first part today, with an AI agent doing the authoring and a person doing the releasing. The second part is
-        planned, and this page keeps the two apart.
+        first part today, with an AI agent doing the authoring and a person doing the releasing, and SQL dashboards
+        your backend embeds now cover much of the second. Scheduled extracts and alerts are planned, and this page
+        keeps the two apart.
       </p>
       <div class="btn-row">
         <a class="btn btn-primary" th:href="@{/tableau/governed-dataset}">Publish a governed dataset for Tableau</a>
@@ -58,8 +62,8 @@
           The expensive part was never the chart. It was the dataset, the API and the embedding, three projects
           that each needed a team. datapipelines collapses the first two into something an agent can do in a session
           and a person can review in an afternoon: the dataset is a versioned pipeline across your databases, and the
-          API is one release away. The third, the dashboard you embed, is planned, designed to
-          be created by the same agent and fed by the same released pipelines.
+          API is one release away. The third, the dashboard you embed, now ships too: the same agent drafts it, the
+          same released pipelines feed it, and your backend shows it inside your product.
         </p>
       </div>
     </div>
@@ -83,19 +87,25 @@
             <li><b>Access by path.</b> An API key is bound to an endpoint prefix; a client, a partner or a Tableau workbook gets its endpoint and nothing else.</li>
             <!-- claim: docs/versioning.md §3 -->
             <li><b>A number you can trace.</b> Every released version is immutable and audited; the dataset behind a chart is a version you can name.</li>
+            <!-- claim: docs/dashboards.md §1, docs/dashboards.md §6.5 -->
+            <li><b><a th:href="@{/sql-dashboards}">Dashboards</a> your product embeds.</b> Drafted by your agent over released pipelines, released by a person, shown through your own backend, which holds the key and decides each viewer's filter values.</li>
+            <!-- claim: docs/scheduler.md §1 -->
+            <li><b><a th:href="@{/pipeline-scheduling}">Schedules</a>.</b> A pipeline runs on a cron pattern in its own time zone, every run a first-class execution. The nightly refresh without the nightly job.</li>
+            <!-- claim: docs/pipeline-contract.md §4.12 -->
+            <li><b>JSONata and JavaScript nodes</b> for the shaping SQL is bad at: the nested response a dashboard wants, the pivot Prep did with a click.</li>
           </ul>
         </div>
         <div>
           <h3><span class="status">Planned</span> The parts Tableau does that we will</h3>
           <ul>
-            <!-- claim: docs/ROADMAP.md §2 -->
-            <li><b>Dashboards, created by your agent, that you embed in your own product</b>, fed by released pipelines and APIs and filtered per viewer. The chart lives in your app, behind your login, showing each user their rows.</li>
-            <!-- claim: docs/superpowers/specs/2026-09-07-scheduler-design.md -->
-            <li><b>Scheduling.</b> Schedules in folders, fired exactly once across instances, every run a first-class execution. The nightly refresh without the nightly job.</li>
-            <!-- claim: docs/superpowers/specs/2026-09-09-transform-nodes-design.md -->
-            <li><b>JSONata and JavaScript nodes</b> for the shaping SQL is bad at: the nested response a dashboard wants, the pivot Prep did with a click.</li>
+            <!-- claim: docs/ROADMAP.md §3 -->
+            <li><b>Scheduled extracts to your own bucket</b>, which Tableau reads natively: a schedule runs a pipeline today, but it does not write an extract file yet.</li>
+            <!-- claim: docs/scheduler.md §9 -->
+            <li><b>Mail and alerts.</b> A schedule saves who should hear about a failed run, but nothing sends mail yet; alerts on a SQL condition and report delivery are later.</li>
+            <!-- claim: docs/ROADMAP.md §3 -->
+            <li><b>Metrics defined once</b>, shared by every dashboard that reads them.</li>
           </ul>
-          <p class="how-footnote">Later, decided but not dated: scheduled extracts to your own bucket, which Tableau reads natively, then email alerts, and metrics defined once. The <a th:href="@{/roadmap}">roadmap</a> carries the same words.</p>
+          <p class="how-footnote">Decided but not dated. The <a th:href="@{/roadmap}">roadmap</a> and the <a th:href="@{/tableau/extracts-alerts-dashboards}">extracts, alerts and dashboards page</a> carry the same words.</p>
         </div>
       </div>
     </div>

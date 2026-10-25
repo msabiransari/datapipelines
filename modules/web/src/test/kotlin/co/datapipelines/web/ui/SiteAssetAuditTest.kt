@@ -115,9 +115,9 @@ class SiteAssetAuditTest {
         // pages (111) + the engineering page (115) + the demo-data page (116) + the pricing
         // page (119), the semantic-layer page (119 §B), the four 133 demo partials (the
         // console, the DAG, the endpoint panel and the datasource roster), the two 145 hub
-        // pages (use-cases, explore), the 173 Dagster vs Airflow comparison, and the two
-        // public docs views.
-        const val PUBLIC_TEMPLATES = 38
+        // pages (use-cases, explore), the 173 Dagster vs Airflow comparison, the three #699
+        // capability pages (scheduling, dashboards, parameter sets), and the two public docs views.
+        const val PUBLIC_TEMPLATES = 41
 
         val ASSET_TAG = Regex("""<(?:link|script|img)\b[^>]*>""")
         val ATTR = Regex("""\b(?:th:)?(?:href|src)="([^"]*)"""")

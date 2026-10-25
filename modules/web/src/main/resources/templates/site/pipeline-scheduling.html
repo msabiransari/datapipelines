@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{site/_layout :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      <li><a th:href="@{/}">Home</a></li>
+      <li aria-current="page">Pipeline scheduling</li>
+    </ol>
+  </nav>
+
+  <!--/* #699: the scheduler capability page (design record §5). Every behaviour named here is
+       docs/scheduler.md's; the request sample is rest-api.md §20.2's create body. The limits
+       section is the record's §3 list for scheduling, kept visible on purpose. */-->
+  <!-- claim: docs/scheduler.md §1 — a schedule runs a pipeline at a cron pattern's occurrences -->
+  <!-- claim: docs/rest-api.md §20 — the schedule routes -->
+
+  <section class="section page-hero" aria-labelledby="ps-title">
+    <div class="container">
+      <p class="kicker">Pipeline scheduling</p>
+      <h1 id="ps-title" class="ds-display">Run your pipelines on a schedule.</h1>
+      <p class="section-lede">
+        A schedule runs one SQL pipeline at the times a cron pattern names, in the time zone you choose. You see
+        the next runs before you save, every run keeps a history of what happened to it, and a run whose outcome
+        nobody can confirm stops the schedule until a person looks. Recurring work stops being somebody's
+        calendar reminder.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/docs/scheduler}">The scheduler contract</a>
+        <a class="btn btn-secondary" th:href="@{/how-it-works}">Run it locally first</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="ps-how">
+    <div class="container">
+      <p class="kicker">How it works</p>
+      <h2 id="ps-how" class="ds-headline">A pipeline, a pattern, a time zone</h2>
+      <ol class="steps">
+        <li>
+          <h3>Name the pipeline and the pattern</h3>
+          <!-- claim: docs/scheduler.md §3 -->
+          <p>A schedule names a pipeline in your workspace, a five-field cron pattern such as <code>30 2 * * *</code> and an IANA time zone such as <code>America/New_York</code>. A fixed offset is refused, because it cannot follow a region's daylight-saving rules.</p>
+        </li>
+        <li>
+          <h3>Check the next runs before saving</h3>
+          <!-- claim: docs/scheduler.md §3 -->
+          <p>The preview lists the next occurrences with their local time and offset, from the same function the dispatcher uses. A time inside a spring-forward gap runs at the transition, so a daily job never silently skips a day; a repeated fall-back hour runs once.</p>
+        </li>
+        <li>
+          <h3>Choose what happens to missed runs</h3>
+          <!-- claim: docs/scheduler.md §4 -->
+          <p>If no instance was dispatching, <code>skip</code>, the default, records the missed occurrences as one summary row. <code>latest</code> runs the most recent missed occurrence once, if it is at most a day old. Paused time is never counted as missed.</p>
+        </li>
+        <li>
+          <h3>Bind dates to the run's own day</h3>
+          <!-- claim: docs/scheduler.md §2.2 -->
+          <p>A <code>DATE</code> parameter can take <code>TODAY</code> or <code>YESTERDAY</code>, resolved on the occurrence the run was due for in the schedule's time zone. A run due at 23:55 that starts at 00:05 still reports the day it was due for.</p>
+        </li>
+      </ol>
+      <!-- claim: docs/rest-api.md §20.2 -->
+      <div class="code-block">
+        <pre><code>POST /api/v1/schedules
+{
+  "name": "finance/daily/revenue",
+  "cron": "30 2 * * *",
+  "timezone": "America/New_York",
+  "missed_run_policy": "skip",
+  "payload": {
+    "pipeline": "finance/pipelines/daily_revenue",
+    "version": "current",
+    "parameter_bindings": {
+      "as_of_date": { "source": "keyword", "name": "YESTERDAY" }
+    }
+  }
+}</code></pre>
+        <button type="button" class="copy-btn" hidden>Copy</button>
+      </div>
+      <p class="how-footnote">The create request as the REST contract defines it. The routes take a signed-in session; the Schedules page in the application makes the same calls.</p>
+    </div>
+  </section>
+
+  <section class="section band" aria-labelledby="ps-run">
+    <div class="container">
+      <p class="kicker">Running it</p>
+      <h2 id="ps-run" class="ds-headline">What happens on each run, and who can act</h2>
+      <div class="features-grid">
+        <article class="card">
+          <!-- claim: docs/scheduler.md §4 -->
+          <h3>Pause, resume, run now</h3>
+          <p>Pause stops new runs; resume counts forward from now. Run now records a manual run, works on a paused schedule, and is refused on a blocked one or while another run of the same schedule is active. One schedule never overlaps itself.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/scheduler.md §5 -->
+          <h3>Every run has a history</h3>
+          <p>Each run is recorded before anything launches and ends in exactly one state, with a trail of what happened to it: recorded, claimed, started, finished, retried or blocked, and why.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/scheduler.md §5.2 -->
+          <h3>Unknown outcomes block</h3>
+          <p>If an instance dies mid-run, nobody can say whether the work happened, so the schedule blocks instead of firing again and loading twice. A person reads the run and unblocks it, which re-validates the saved settings.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/scheduler.md §6 -->
+          <h3>Runs as the system identity</h3>
+          <p>A schedule runs as the deployment's System account, which may only read pipelines, execute them and read executions. A creator who leaves the workspace does not stop their schedules, and nobody gains power through one.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/scheduler.md §6, docs/auth.md §7.6 -->
+          <h3>Roles decide who writes</h3>
+          <p>Every member can read schedules, with promoters limited to pipelines they can see. Authors, workspace admins and super admins create, edit, pause, resume, unblock, delete and run them. The application's buttons follow the same rules, and the server enforces them.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/scheduler.md §7, docs/scheduler.md §3 -->
+          <h3>Bounded by configuration</h3>
+          <p>Four scheduled runs at once per instance, at least five minutes between occurrences and a hundred schedules per workspace, by default. Each limit is a setting an operator can change.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="ps-limits">
+    <div class="container">
+      <p class="kicker">Current limits</p>
+      <h2 id="ps-limits" class="ds-headline">What a schedule does not do yet</h2>
+      <!-- claim: docs/scheduler.md §2.3, docs/scheduler.md §9, docs/scheduler.md §2.1 -->
+      <ul class="fact-list fact-list-plain">
+        <li><strong>No mail yet.</strong> Recipients and the events that should send mail are saved with the schedule, and nothing sends until delivery ships.</li>
+        <li><strong>It runs pipelines only.</strong> No report delivery, no SQL-condition alerts, no PDF exports and no scheduled dashboard refresh.</li>
+        <li><strong>It follows the current pointer.</strong> A schedule runs the version the pipeline's pointer names, which can be a draft in development. Each run records the exact version it ran.</li>
+        <li><strong>People manage it, agents do not.</strong> No MCP tool reads or writes a schedule, and the routes need a signed-in session; a management credential for your own backend is a later slice.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section band" aria-labelledby="ps-try">
+    <div class="container">
+      <p class="kicker">Try it</p>
+      <h2 id="ps-try" class="ds-headline">From a released pipeline to a recurring run</h2>
+      <div class="prose">
+        <!-- claim: docs/scheduler.md §8.4, docs/versioning.md §3 -->
+        <p>
+          Run the server locally with the <a th:href="@{/how-it-works}">tutorial</a>, let an agent author a pipeline and
+          release it, then open Schedules in the application's Operate group. The same pipeline can also serve a
+          <a th:href="@{/published-api}">published API</a> or feed <a th:href="@{/sql-dashboards}">a dashboard</a>;
+          a schedule runs it, it does not refresh either of them.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="faq-title">
+    <div class="container">
+      <p class="kicker">Asked before</p>
+      <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Scheduling, in three questions')}"></div>
+    </div>
+  </section>
+
+</th:block>
+</html>

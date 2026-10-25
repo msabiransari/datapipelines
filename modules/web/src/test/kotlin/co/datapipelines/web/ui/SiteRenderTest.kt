@@ -92,14 +92,18 @@ class SiteRenderTest {
     /**
      * 169 §E — every `<img>` on the two capture pages resolves to a PACKAGED file under
      * `static/site/img/`, with its intrinsic size declared (no layout shift), a descriptive
-     * alt, and lazy loading except the home page's first capability figure (the one image
-     * allowed to eager-load, as it sits just under the fold). A missing file, a third-party
+     * alt, and lazy loading. A missing file, a third-party
      * URL, an undeclared size or a marketing-claim alt is a red build — the page can no longer
      * accumulate a silent broken picture.
      *
      * 175: the home strip became seven capability sections, each with ONE full-width
      * `home-*.png` at 2880x1800 (the driver's `home` set, DPR 2, dark theme); the eager lead
      * moved to `home-connect.png`.
+     *
+     * 698 (#710): no eager lead any more. The 486 KB `home-connect.png` loading eagerly under
+     * the fold shared the throttled link with the hero, and Lighthouse placed the home page's
+     * largest contentful paint (the hero paragraph) at 4.1 s: performance 87 against the 95
+     * floor. Lazy, the same export scores 100.
      */
     @Test
     fun `every screenshot on the capture pages is a packaged site image with its size declared`() {
@@ -142,13 +146,12 @@ class SiteRenderTest {
             else -> null
         }
 
-    /** The layout and labelling rules: declared size, described, lazy unless the home page's eager lead. */
+    /** The layout and labelling rules: declared size, described, lazy. */
     private fun sizingOffender(
         path: String,
         src: String,
         tag: String,
     ): String? {
-        val eagerLead = path == SitePages.HOME.path && src == EAGER_ALLOWED
         val altLength =
             ALT
                 .find(tag)
@@ -159,7 +162,7 @@ class SiteRenderTest {
         return when {
             WIDTH_HEIGHT.find(tag) == null -> "$path: $src carries no explicit width and height"
             altLength < MIN_ALT_CHARS -> "$path: $src carries no descriptive alt"
-            LAZY !in tag && !eagerLead -> "$path: $src is neither lazy nor the home page's eager lead"
+            LAZY !in tag -> "$path: $src is not lazy-loaded"
             else -> null
         }
     }
@@ -328,9 +331,6 @@ class SiteRenderTest {
 
         /** A packaged capture reference: nothing but the site's own image directory. */
         val PACKAGE_PATH = Regex("""/site/img/[a-z0-9-]+\.png""")
-
-        /** The one eager image: the home page's first capability figure, just under the fold. */
-        const val EAGER_ALLOWED = "/site/img/home-connect.png"
 
         val IMG = Regex("""<img\b[^>]*>""")
         val ATTR = Regex("""\bsrc="([^"]*)"""")

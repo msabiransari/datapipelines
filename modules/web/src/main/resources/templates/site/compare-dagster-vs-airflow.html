@@ -122,12 +122,14 @@
   <section class="section" aria-labelledby="fits-title">
     <div class="container">
       <h2 id="fits-title" class="ds-headline">Where datapipelines fits, said once</h2>
-      <!-- claim: docs/dag-executor.md §5 — on-demand execution, no scheduler; docs/rest-api.md §6 — the execution endpoint and SSE stream any orchestrator can call -->
+      <!-- claim: docs/dag-executor.md §5 — on-demand execution; docs/scheduler.md §1 — a schedule runs one pipeline, not a task graph; docs/rest-api.md §6 — the execution endpoint and SSE stream any orchestrator can call -->
       <p class="section-lede">
         Whichever you choose, it will orchestrate <em>work</em>. When the work is SQL across several operational
         databases, authored by an agent and run under governed, read-only-by-default credentials, that part can
         live here: a versioned pipeline the orchestrator triggers through one endpoint and follows to completion.
-        datapipelines has no scheduler and wants none. It composes with Dagster, Airflow or Prefect rather than
+        Its built-in schedules run one pipeline at a cron pattern's times, which covers a nightly dataset and stops
+        well short of an orchestrator: no dependencies between schedules, no range backfills, no sensors. It
+        composes with Dagster, Airflow or Prefect rather than
         competing with any of them. <a th:href="@{/compare/airflow}">The Airflow comparison</a> spells out the
         boundary; <a th:href="@{/compare/dbt}">the dbt comparison</a> covers the modelling side of the same question.
       </p>
