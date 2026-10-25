@@ -583,11 +583,9 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
         val PIPELINE_ROWS = listOf("row/deep/$LONG", "$DEEP/$LONG")
 
         /**
-         * The templates rows of one case, under a root that names its width: each case's workspace
-         * holds template names no other workspace holds. A first draft write after a release is
-         * refused 409 when another workspace has a template of the same name (the create-draft
-         * statement reads `templates` by name alone; the handback's follow-up), so the two cases
-         * must never share one.
+         * The templates rows of one case, under a root that names its width, so the geometry
+         * evidence identifies its fixture. Cross-workspace write correctness is covered by
+         * TemplateRepositoryIntegrationTest; these cases measure the rendered row.
          */
         fun scriptRows(width: Int): List<String> {
             val leaf = "${LONG.drop(8)}.jsonata"
