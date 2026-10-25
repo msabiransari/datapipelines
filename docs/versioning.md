@@ -456,8 +456,9 @@ A missing or DISCARDED pin refuses with the family's validation code (400): a te
 template from a missing version), a pipeline's child pin `pipeline_not_found` / `pipeline_version_not_found` /
 `pipeline_reference_not_released` (`status: DISCARDED`). A present-but-DRAFT pin refuses
 `<family>.release.dependency_not_released` (409, the import-landing precedent, `reason: not_released` in the shared
-blockers shape); no save rule lets a once-released body pin a draft, so that branch is defensive. The 400 answers
-first. Repair is bottom-up: restore the dependency, then the dependent. A refusal writes nothing — status, pointer and
+blockers shape); no save rule lets a once-released body pin a draft, so that branch is defensive. The dashboard and
+visualization restores have no such branch: they refuse the missing pin only and admit a present-but-DRAFT one. The 400
+answers first. Repair is bottom-up: restore the dependency, then the dependent. A refusal writes nothing — status, pointer and
 audit stand.
 
 **The lens.** `templates_used_by` and the template screen narrow the visualization arm like the others: a hidden
