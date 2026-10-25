@@ -32,7 +32,7 @@
       "price": "0",
       "priceCurrency": "USD"
     },
-    "description": "Open-source, self-hosted data pipelines for small and medium-sized organisations: an AI agent authors reusable SQL pipelines over your existing databases and S3 data, a person reviews and releases them, and the released version serves an API or a dataset for your BI tool."
+    "description": "Open-source, self-hosted data pipelines for small and medium-sized organisations: an AI agent authors reusable SQL pipelines over your existing databases and S3 data, a person reviews and releases them, and the released version serves an API, a dashboard or a dataset for your BI tool."
   }
   </script>
 
@@ -100,7 +100,7 @@
               </svg>
               <strong th:text="|${r.topCompany} ${r.share}|">Uber 74.62%</strong>
             </div>
-            <p class="chart-note">An illustrative chart of the recorded result, drawn here rather than by the product. Native dashboards are planned.</p>
+            <p class="chart-note">An illustrative chart of the recorded result, drawn here rather than by the product. In the product, a SQL dashboard charts a released pipeline the same way.</p>
           </div>
           <div class="panel" id="api" role="tabpanel" aria-labelledby="tab-api">
             <p class="panel-label">API response</p>
@@ -143,6 +143,46 @@
     </div>
   </section>
 
+  <!-- ============================ THE WORKFLOW ============================ -->
+  <!--/* #699 (design record §5): the expanded workflow beneath the hero. Numbered steps, no
+       arrows between them: a schedule runs a pipeline and does NOT refresh a dashboard, and a
+       parameter set feeds dashboards only, so no step is drawn as feeding the next one. */-->
+  <section class="section border" id="workflow" aria-labelledby="workflow-title">
+    <div class="container">
+      <div class="section-title">
+        <p class="eyebrow">From a draft to work that repeats</p>
+        <h2 id="workflow-title">Drafted by an agent. Reviewed by a person. Put to work.</h2>
+      </div>
+      <ol class="steps">
+        <li>
+          <h3>An agent drafts a reusable pipeline</h3>
+          <!-- claim: docs/mcp-server.md §6 (an agent authors over MCP; everything it writes is a draft) -->
+          <p>Ask a business question and your agent writes the SQL steps and their inputs as a draft. Nothing it writes is live.</p>
+        </li>
+        <li>
+          <h3>A person reviews and releases it</h3>
+          <!-- claim: docs/versioning.md §3 (a person releases; a released version is immutable) -->
+          <p>Read every step, run it, and release the version you trust. Later edits open a new draft.</p>
+        </li>
+        <li>
+          <h3>Recurring work can run on a schedule</h3>
+          <!-- claim: docs/scheduler.md §1 and §3 (a schedule runs a pipeline at a cron pattern's occurrences in an IANA time zone) -->
+          <p>A schedule runs a pipeline at the times you set, in your time zone, and keeps a history of every run.</p>
+        </li>
+        <li>
+          <h3>Results feed dashboards or APIs</h3>
+          <!-- claim: docs/dashboards.md §1 and §5 (configured dashboard actions refresh pinned pipelines), docs/rest-api.md §19 (a released pipeline as an API) -->
+          <p>Show the result on a dashboard with filters people can change, or serve it to your application as a published API.</p>
+        </li>
+      </ol>
+      <p class="how-footnote">
+        Each step in depth: <a th:href="@{/pipeline-scheduling}">pipeline scheduling</a>,
+        <a th:href="@{/sql-dashboards}">SQL dashboards</a>, <a th:href="@{/reusable-parameter-sets}">reusable parameter sets</a>
+        and <a th:href="@{/published-api}">published APIs</a>.
+      </p>
+    </div>
+  </section>
+
   <!-- ============================ THE CORE CAPABILITIES ============================ -->
   <!--/* 175 (#175): the product story as one section per core capability, each with ONE
        full-width figure in the .media-frame pattern. The captures are the driver's `home`
@@ -167,7 +207,7 @@
       </div>
       <figure class="media-frame">
         <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Datasources</span><span class="tag">Screenshot</span></div>
-        <img src="/site/img/home-connect.png" width="2880" height="1800" alt="The datasource registry of the live demo deployment in the dark theme: seven connections across SQLite, MySQL, Postgres, DuckDB and S3 lake engines, with each connection's last test state.">
+        <img src="/site/img/home-connect.png" width="2880" height="1800" loading="lazy" alt="The datasource registry of the live demo deployment in the dark theme: seven connections across SQLite, MySQL, Postgres, DuckDB and S3 lake engines, with each connection's last test state.">
         <figcaption>The live deployment's datasource registry: the engines it reads, and the state of each connection's last test.</figcaption>
       </figure>
     </div>
@@ -394,23 +434,25 @@
         <article class="status-box">
           <span class="tag live">Available today</span>
           <h3>Build, review and share datasets</h3>
-          <!-- claim: docs/datasources.md §4 (the engines and S3), docs/datasources.md §7E (learned facts), docs/templates.md §5 (versioned templates), docs/versioning.md §3 (human release), docs/rest-api.md §19 (published APIs), docs/auth.md §5.6, §7.5 and §7.7 (workspaces, key roles, key kinds) -->
+          <!-- claim: docs/datasources.md §4 (the engines and S3), docs/datasources.md §7E (learned facts), docs/templates.md §5 (versioned templates), docs/versioning.md §3 (human release), docs/rest-api.md §19 (published APIs), docs/auth.md §5.6, §7.5 and §7.7 (workspaces, key roles, key kinds), docs/scheduler.md §1 (schedules), docs/dashboards.md §1 (dashboards and parameter sets) -->
           <ul>
             <li>Queries across supported databases and S3</li>
             <li>Learned data facts and business definitions</li>
             <li>Reusable SQL templates and human release</li>
             <li>Published APIs and datasets for Tableau</li>
+            <li>Schedules that run pipelines on a cron pattern</li>
+            <li>SQL dashboards with reusable parameter sets</li>
             <li>Workspace roles and API keys that carry a role</li>
           </ul>
         </article>
         <article class="status-box">
           <span class="tag">Planned</span>
           <h3>More ways to deliver the answer</h3>
-          <!-- claim: docs/ROADMAP.md §2 (dashboards, the scheduler, reports and alerts — no dates on this page by design) -->
+          <!-- claim: docs/scheduler.md §2.3 and §9 (schedule mail is saved, not sent; reports and alerts are not built), docs/ROADMAP.md §2.2 (report generation, email) — no dates on this page by design -->
           <ul>
-            <li>Native embeddable dashboards</li>
-            <li>Scheduled pipeline refresh</li>
-            <li>Reports and alerts</li>
+            <li>Mail when a scheduled run fails</li>
+            <li>Scheduled report delivery</li>
+            <li>Alerts on a SQL condition</li>
           </ul>
           <a th:href="@{/roadmap}">Follow the roadmap <span aria-hidden="true">&rarr;</span></a>
         </article>
@@ -424,7 +466,7 @@
       <p class="kicker" th:text="|The product, in ${faqEntries.size()} questions|">The product, in eight questions</p>
       <!-- claim: docs/deployment.md §4, docs/datasources.md §3, docs/versioning.md §3 — FAQ "Do I need a data engineer" -->
       <!-- claim: docs/datasources.md §7, docs/staging.md §3, docs/rest-api.md §7, docs/pipeline-contract.md §8 — FAQ "Where does my data go" -->
-      <!-- claim: docs/ROADMAP.md §2 — FAQ "What do I get today, and what is planned" -->
+      <!-- claim: docs/scheduler.md §1, docs/dashboards.md §1, docs/ROADMAP.md §2 — FAQ "What do I get today, and what is planned" -->
       <!-- claim: docs/rest-api.md §10, docs/pipeline-contract.md §12.12 — FAQ "How do I know the numbers are right" -->
       <!-- claim: docs/rest-api.md §19.3, docs/auth.md §7.7 — FAQ "Can each customer see only their own rows" -->
       <!-- claim: docs/pipeline-editor.md §11, docs/ROADMAP.md §2 — FAQ "Do I have to use an AI agent" -->

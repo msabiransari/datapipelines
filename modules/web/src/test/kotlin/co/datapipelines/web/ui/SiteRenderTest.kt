@@ -4,6 +4,7 @@ import co.datapipelines.mcp.McpToolCatalog
 import co.datapipelines.web.ui.site.SiteFacts
 import co.datapipelines.web.ui.site.SitePageRenderer
 import co.datapipelines.web.ui.site.SitePages
+import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -91,14 +92,18 @@ class SiteRenderTest {
     /**
      * 169 §E — every `<img>` on the two capture pages resolves to a PACKAGED file under
      * `static/site/img/`, with its intrinsic size declared (no layout shift), a descriptive
-     * alt, and lazy loading except the home page's first capability figure (the one image
-     * allowed to eager-load, as it sits just under the fold). A missing file, a third-party
+     * alt, and lazy loading. A missing file, a third-party
      * URL, an undeclared size or a marketing-claim alt is a red build — the page can no longer
      * accumulate a silent broken picture.
      *
      * 175: the home strip became seven capability sections, each with ONE full-width
      * `home-*.png` at 2880x1800 (the driver's `home` set, DPR 2, dark theme); the eager lead
      * moved to `home-connect.png`.
+     *
+     * 698 (#710): no eager lead any more. The 486 KB `home-connect.png` loading eagerly under
+     * the fold shared the throttled link with the hero, and Lighthouse placed the home page's
+     * largest contentful paint (the hero paragraph) at 4.1 s: performance 87 against the 95
+     * floor. Lazy, the same export scores 100.
      */
     @Test
     fun `every screenshot on the capture pages is a packaged site image with its size declared`() {
@@ -141,13 +146,12 @@ class SiteRenderTest {
             else -> null
         }
 
-    /** The layout and labelling rules: declared size, described, lazy unless the home page's eager lead. */
+    /** The layout and labelling rules: declared size, described, lazy. */
     private fun sizingOffender(
         path: String,
         src: String,
         tag: String,
     ): String? {
-        val eagerLead = path == SitePages.HOME.path && src == EAGER_ALLOWED
         val altLength =
             ALT
                 .find(tag)
@@ -158,9 +162,49 @@ class SiteRenderTest {
         return when {
             WIDTH_HEIGHT.find(tag) == null -> "$path: $src carries no explicit width and height"
             altLength < MIN_ALT_CHARS -> "$path: $src carries no descriptive alt"
-            LAZY !in tag && !eagerLead -> "$path: $src is neither lazy nor the home page's eager lead"
+            LAZY !in tag -> "$path: $src is not lazy-loaded"
             else -> null
         }
+    }
+
+    /**
+     * #662 — keys v2 (docs/auth.md §7.4, A15, 2026-09-25) retired the login-minted key and
+     * the top-bar chip: every key, the `mcp` kind included, is created on the Keys page
+     * (`/api-keys`) and its plaintext is shown once at creation. Five public pages still
+     * taught the chip ritual; this guard keeps them from teaching it again, on the RENDERED
+     * page so the FAQ answers built in Kotlin are swept beside the template prose.
+     *
+     * Sense audit at the guard's birth: every "top bar" on the five pages was about keys, so
+     * [OTHER_SENSES] is empty. A future non-keys sense must be argued into that list, never
+     * matched silently — a hit whose window names no listed sense fails.
+     */
+    @Test
+    fun `no site page teaches the retired top-bar key`() {
+        val pages =
+            listOf(
+                SitePages.PILLAR,
+                SitePages.FOR_AGENCIES,
+                SitePages.HOW_IT_WORKS,
+                SitePages.ADD_TO_CLAUDE_CODE,
+                SitePages.enginePage(checkNotNull(SitePages.engine("postgres"))),
+            ).associateWith { SitePageRenderer.render(it) }
+
+        val offenders =
+            pages.flatMap { (page, html) ->
+                TOP_BAR.findAll(html).mapNotNull { m ->
+                    val window = html.substring(maxOf(0, m.range.first - 70), minOf(html.length, m.range.last + 70))
+                    if (OTHER_SENSES.any { (phrase, _) -> window.contains(phrase, ignoreCase = true) }) {
+                        null
+                    } else {
+                        "${page.path}: …$window…"
+                    }
+                }
+            }
+        withClue("pages still pointing at the retired top-bar key:\n${offenders.joinToString("\n")}") {
+            offenders shouldBe emptyList()
+        }
+        // The client-setup page's step 2 names where the key comes from today, not the chip.
+        pages.getValue(SitePages.ADD_TO_CLAUDE_CODE) shouldContain "Create your MCP key on the Keys page"
     }
 
     @Test
@@ -263,6 +307,15 @@ class SiteRenderTest {
     }
 
     private companion object {
+        /** The retired key location, hyphenated or not, case-insensitive (#662). */
+        val TOP_BAR = Regex("""top[ -]bar""", RegexOption.IGNORE_CASE)
+
+        /**
+         * A hit whose surrounding window matches one of these is another sense, listed with
+         * its reading. Empty at birth: every "top bar" on the five pages was the key chip.
+         */
+        val OTHER_SENSES: List<Pair<String, String>> = emptyList()
+
         /** One feature card, from its opening article tag to its close. */
         val CARD = Regex("""<article class="card[^"]*">.*?</article>""", RegexOption.DOT_MATCHES_ALL)
         val CLAIM = Regex("""<!--\s*claim:""")
@@ -278,9 +331,6 @@ class SiteRenderTest {
 
         /** A packaged capture reference: nothing but the site's own image directory. */
         val PACKAGE_PATH = Regex("""/site/img/[a-z0-9-]+\.png""")
-
-        /** The one eager image: the home page's first capability figure, just under the fold. */
-        const val EAGER_ALLOWED = "/site/img/home-connect.png"
 
         val IMG = Regex("""<img\b[^>]*>""")
         val ATTR = Regex("""\bsrc="([^"]*)"""")

@@ -40,38 +40,38 @@ class OverviewController(
     fun pipelines(
         model: Model,
         request: HttpServletRequest,
-    ): String = render(OverviewPage.Family.PIPELINES, model, request)
+    ): String = render(OverviewFamily.PIPELINES, model, request)
 
     @GetMapping("/overview/templates")
     @RequiredScope(Permission.TEMPLATE_READ)
     fun templates(
         model: Model,
         request: HttpServletRequest,
-    ): String = render(OverviewPage.Family.TEMPLATES, model, request)
+    ): String = render(OverviewFamily.TEMPLATES, model, request)
 
     @GetMapping("/overview/dashboards")
     @RequiredScope(Permission.DASHBOARD_READ)
     fun dashboards(
         model: Model,
         request: HttpServletRequest,
-    ): String = render(OverviewPage.Family.DASHBOARDS, model, request)
+    ): String = render(OverviewFamily.DASHBOARDS, model, request)
 
     @GetMapping("/overview/visualizations")
     @RequiredScope(Permission.VISUALIZATION_READ)
     fun visualizations(
         model: Model,
         request: HttpServletRequest,
-    ): String = render(OverviewPage.Family.VISUALIZATIONS, model, request)
+    ): String = render(OverviewFamily.VISUALIZATIONS, model, request)
 
     @GetMapping("/overview/parameter-sets")
     @RequiredScope(Permission.PARAMETER_SET_READ)
     fun parameterSets(
         model: Model,
         request: HttpServletRequest,
-    ): String = render(OverviewPage.Family.PARAMETER_SETS, model, request)
+    ): String = render(OverviewFamily.PARAMETER_SETS, model, request)
 
     private fun render(
-        family: OverviewPage.Family,
+        family: OverviewFamily,
         model: Model,
         request: HttpServletRequest,
     ): String {

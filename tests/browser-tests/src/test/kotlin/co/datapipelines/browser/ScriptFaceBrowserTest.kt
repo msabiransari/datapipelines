@@ -354,7 +354,8 @@ class ScriptFaceBrowserTest : BrowserSuite() {
      * picture shows the screen and not the switch that took it.
      */
     private fun dismissToasts() {
-        page.locator("#toast .ds-toast-close").all().forEach { close -> if (close.isVisible) close.click() }
+        // Locator.all() returns live indexes; hold the nodes in one browser turn instead.
+        page.locator("#toast .ds-toast-close").evaluateAll("buttons => buttons.forEach(button => button.click())")
         page.waitForFunction("() => document.querySelectorAll('#toast .ds-toast').length === 0")
     }
 

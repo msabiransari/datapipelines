@@ -217,7 +217,7 @@ class OverviewParameterSetsRenderTest {
     private fun page(
         charts: ChartsResult,
         recent: RecentResult? = RecentResult.Available(emptyList()),
-    ): OverviewPage = OverviewPage.of(OverviewPage.Family.PARAMETER_SETS, false, charts, recent, NOW)
+    ): OverviewPage = OverviewPage.of(OverviewFamily.PARAMETER_SETS, false, charts, recent, NOW)
 
     private fun render(
         page: OverviewPage,

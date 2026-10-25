@@ -193,6 +193,24 @@ object PublicPaths {
                 "Site v3 directory, generated from the page registry and the packaged docs catalog; no datastore, no principal.",
                 "145",
             ),
+            // 699: the three capability pages: scheduling, dashboards and parameter sets, described.
+            // Exact paths, never a glob: the application's own /schedules, /dashboards and
+            // /parameter-sets pages stay behind a session.
+            PublicPath(
+                "/pipeline-scheduling",
+                "Site capability page: GET-only constant content, no datastore and no principal on the request.",
+                "699",
+            ),
+            PublicPath(
+                "/sql-dashboards",
+                "Site capability page: GET-only constant content, no datastore and no principal on the request.",
+                "699",
+            ),
+            PublicPath(
+                "/reusable-parameter-sets",
+                "Site capability page: GET-only constant content, no datastore and no principal on the request.",
+                "699",
+            ),
             // 073: the in-product spec set, public. The viewer renders the Markdown packaged
             // in the jar — DocsCatalog's only collaborator is a ClassLoader, the controller
             // reads no principal and no workspace, and no route here reaches a datastore.

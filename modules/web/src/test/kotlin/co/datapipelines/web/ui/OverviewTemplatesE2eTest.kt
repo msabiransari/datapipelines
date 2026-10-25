@@ -184,11 +184,11 @@ class OverviewTemplatesE2eTest {
                 now,
                 OverviewRenderSupport.ACTIVE_DAYS,
             )
-        val page = OverviewPage.of(OverviewPage.Family.TEMPLATES, false, charts, RecentResult.Available(emptyList()), now)
+        val page = OverviewPage.of(OverviewFamily.TEMPLATES, false, charts, RecentResult.Available(emptyList()), now)
         val doc = Jsoup.parse(OverviewRenderSupport.html(page))
 
         OverviewRenderSupport.assertStripSumsTo(doc, counted(ReadLens.Everything).objects)
-        OverviewRenderSupport.assertGuideWords(doc, OverviewPage.Family.TEMPLATES, WORDS)
+        OverviewRenderSupport.assertGuideWords(doc, OverviewFamily.TEMPLATES, WORDS)
     }
 
     private fun equalityTable(

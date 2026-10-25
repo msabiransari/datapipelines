@@ -265,6 +265,8 @@ class DocsCatalog(
                         "datasources",
                         "key-providers",
                         "observability",
+                        // #699: the scheduler is operated like observability: what runs, as whom, and what blocks.
+                        "scheduler",
                         "mcp-server",
                     ),
                 "Contracts" to
