@@ -18,6 +18,10 @@ import java.util.UUID
  *
  * Blocking lives here too: a run that ends `unknown`, or a refusal the executor asks to block on,
  * blocks its schedule in the same transaction as the transition that caused it.
+ *
+ * So does the notification outbox (#442b, record §6.1): after the trail row, in the SAME
+ * transaction, the [NotificationOutbox] writes the notice the transition (or the block) selects —
+ * a transition and its notice commit together or not at all.
  */
 class RunLedger(
     private val runs: ScheduleRunRepository,
@@ -25,6 +29,7 @@ class RunLedger(
     private val transactions: TransactionTemplate,
     private val clock: Clock,
     private val metrics: SchedulerMetrics,
+    private val outbox: NotificationOutbox,
     /** This instance's worker name — the trail's `worker` column. */
     val worker: String,
 ) {
@@ -75,19 +80,28 @@ class RunLedger(
     ): Boolean {
         val now = clock.instant()
         if (!runs.transition(runId, from, to, reason, now, executionStartedAt, executionCompletedAt)) return false
-        runs.appendTrail(runId, kind, reason, now, worker, details)
+        val seq = runs.appendTrail(runId, kind, reason, now, worker, details)
         if (!to.active) metrics.runFinished(to)
-        if (block) blockScheduleOf(runId, blockReason ?: BLOCKED_BY_UNKNOWN_RUN)
+        NotificationOutcome.of(to, kind)?.let { outcome -> outbox.enqueue(runId, outcome, to, reason, now, seq, worker) }
+        if (block) blockScheduleOf(runId, blockReason ?: BLOCKED_BY_UNKNOWN_RUN, to, seq)
         return true
     }
 
-    /** Blocks the schedule [runId] belongs to (a manual or ad-hoc run's schedule too). Keeps an existing block. */
+    /**
+     * Blocks the schedule [runId] belongs to (a manual or ad-hoc run's schedule too). Keeps an
+     * existing block. Only the ACTUAL transition to blocked enqueues the `blocked` notice (the
+     * ruling: a schedule-level notice on the transition), attached to the run that caused it.
+     */
     private fun blockScheduleOf(
         runId: UUID,
         reason: String,
+        runState: RunState,
+        seq: Int,
     ) {
         val scheduleId = runs.find(runId)?.scheduleId ?: return
-        if (schedules.block(scheduleId, reason, runId, clock.instant())) {
+        val now = clock.instant()
+        if (schedules.block(scheduleId, reason, runId, now)) {
+            outbox.enqueue(runId, NotificationOutcome.BLOCKED, runState, reason, now, seq, worker)
             LOG.warn(
                 "event=scheduler.schedule_blocked schedule_id={} run_id={} reason={} " +
                     "message=\"the schedule fires nothing until a person unblocks it\"",

@@ -113,6 +113,18 @@ class MailSendRepositoryIntegrationTest {
     }
 
     @Test
+    fun `the scheduler's label is not a claim kind - claiming it is refused by the same CHECK`() {
+        // #442b: MailKind.SCHEDULE_NOTIFICATION labels a message on the shared transport; schedule
+        // recipients are not users and the scheduler's own delivery row is the identity. Any claim
+        // in mail_sends under it must fail loudly, never land.
+        val ex =
+            shouldThrow<DataIntegrityViolationException> {
+                sends.tryClaim(user.id, MailKind.SCHEDULE_NOTIFICATION, actId = user.id, recipient = "ada@company.com")
+            }
+        ex.message.shouldNotBeNull() shouldContain "chk_mail_sends_kind"
+    }
+
+    @Test
     fun `a row for an unknown user, kind or act is absent, not an error`() {
         sends.find(UUID.randomUUID(), MailKind.WELCOME, UUID.randomUUID()).shouldBeNull()
     }

@@ -497,6 +497,7 @@ Pre-created and fixed: the three member roles are the ONLY roles an `mcp` key ca
 | `schedule.unblocked` | A block was cleared after the saved payload re-validated. Same `details` |
 | `schedule.deleted` | Soft-deleted. `details` carries `schedule_id` |
 | `schedule.run_requested` | Run now recorded a manual run (a replay writes no second row). `details` carries `schedule_id`, `run_id` |
+| `schedule.notification_resent` | A person queued one of a run's `failed` or `uncertain` notifications again (#442b, [REST API §20.13](rest-api.md#2013-resend-a-notification)). `details` carries `schedule_id`, `run_id`, `delivery_id` and `prior_state` — never the recipient address. The sends themselves are the run's trail (`notification_sent` / `_failed` / `_uncertain`), not audit rows: nobody acted |
 
 **Dashboard audit events** (same `audit_log` table; emitted by the dashboard runtime's refresh, [Dashboards §5](dashboards.md#5-the-runtime), #10 L2). ONE row per refresh, AWAITED (audit rows are authorization inputs — never the fire-and-forget path) and written at the refresh's END whatever its ending, the client gone or the process stopping included. `user_id` is the refreshing person. `details` carries `refresh_id`, `dashboard_id`, `dashboard_version`, `workspace_id`, `instance_id`, `scope`, `status` (a [`RefreshStatus`](#38-refreshstatus--a-dashboard-refreshs-state-10)), `targets` (name → outcome) and `execution_ids` — never a selection, a row or a driver message. A refresh refused at admission (`429`) writes no row and so no event.
 
@@ -732,6 +733,10 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these four and NULL. V3
 | `unknown` | The outcome is unknown; the schedule blocks |
 | `updated_after_unknown` | A real terminal arrived after `unknown` — the same run, updated; the block stays |
 | `unblocked` | A person unblocked the schedule this run had blocked |
+| `notification_enqueued` | The outbox queued a notice for this run's transition (V51, #442b); `details` carry the notice id, its outcome and the queued/refused counts — never an address |
+| `notification_sent` | The relay accepted one delivery ([§44](#44-deliverystate--one-recipients-copy-of-a-notice-442b) `accepted`) |
+| `notification_failed` | One delivery ended `failed`; `details.code` says why |
+| `notification_uncertain` | One delivery may have been sent and is not retried automatically (`uncertain`) |
 
 **Append-only.** A trail row is never changed or removed; the run row is the projection of its latest row.
 
@@ -1056,7 +1061,7 @@ This document itself is **additive-only** — values are never removed (only mar
 
 ## 42. `NotificationEvent` — a schedule's notification choices (#442)
 
-Stored in `schedules.notification_events` (Metadata DB §4.22), serialized in declaration order by REST §20. These settings select part b's delivery policy; part a sends nothing (Scheduler §2.3).
+Stored in `schedules.notification_events` (Metadata DB §4.22), serialized in declaration order by REST §20. These settings select which transitions mail is sent for (#442 part b): each outcome of [§43](#43-notificationoutcome--what-one-notice-reports-442b) belongs to one event (Scheduler §2.3).
 
 | Enum | Wire value | Meaning | Default |
 |---|---|---|---|
@@ -1070,10 +1075,63 @@ No mail for skipped ticks or pause/resume. Empty recipients means off; recipient
 
 ---
 
+## 43. `NotificationOutcome` — what one notice reports (#442b)
+
+Stored in `schedule_notification_events.outcome` ([Metadata DB §4.39](metadata-db.md#439-schedule_notification_events)), the `notice` of a delivery in REST §20.11, and the trail rows' `reason` for the notification kinds (§25). Each outcome belongs to one §42 event — the schedule's choice of that event decides whether the notice is written — and fixes the subject's state words; the subject is `<schedule name> — <state words>`, with control characters stripped from the name.
+
+| Enum | Wire value | Event (§42) | Subject state words | Written when |
+|---|---|---|---|---|
+| `STARTED` | `started` | `start` | Started | The run reached `running` |
+| `COMPLETED` | `completed` | `success` | Completed | The run `succeeded` |
+| `FAILED` | `failed` | `failure` | Failed | The run `failed` |
+| `COULD_NOT_START` | `could_not_start` | `failure` | Could not start | The run is `not_started` |
+| `CANCELLED` | `cancelled` | `failure` | Stopped — cancelled | The run was `cancelled` |
+| `ABORTED` | `aborted` | `failure` | Stopped — instance shut down | The run was `aborted` |
+| `UNKNOWN` | `unknown` | `unknown` | Outcome unknown — action required | The run's outcome is `unknown` |
+| `UNKNOWN_UPDATE` | `unknown_update` | `unknown` | Update on an unknown run | A real terminal arrived after `unknown` (`updated_after_unknown`) |
+| `BLOCKED` | `blocked` | `blocked` | Schedule blocked | The schedule moved to blocked |
+
+No notice for `queued`, `starting` or `skipped`. One notice per (run, outcome) — a duplicate callback writes none.
+
+---
+
+## 44. `DeliveryState` — one recipient's copy of a notice (#442b)
+
+Stored in `schedule_notification_deliveries.state` ([Metadata DB §4.40](metadata-db.md#440-schedule_notification_deliveries)), shown in REST §20.11's `deliveries`. Never "delivered": the product knows only what the relay said.
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `PENDING` | `pending` | Queued, or due again after a send that provably never reached the relay |
+| `ACCEPTED` | `accepted` | The SMTP relay accepted the message — not proof it reached an inbox |
+| `FAILED` | `failed` | Never sent, refused, or out of tries; `last_error_code` says which |
+| `UNCERTAIN` | `uncertain` | The send may have reached the relay; never retried automatically — a `schedule.update` holder may resend it (REST §20.13), which may duplicate |
+
+A resend (REST §20.13) returns a `failed` or `uncertain` delivery to `pending` under the same Message-ID; nothing else moves a settled delivery.
+
+**`last_error_code`** — sanitized, never transport text or an address:
+
+| Code | Meaning | Retried automatically |
+|---|---|---|
+| `domain_not_allowed` | The recipient's domain is outside the allowlist (at enqueue, or re-checked at send) | No |
+| `backlog_full` | At least `backlog-max` deliveries were pending; never queued for sending | No — admission is serialized across the deployment; resend at the hard cap is refused with `409 schedule.notification.backlog_full` |
+| `invalid_address` | The address fails strict parsing at send | No |
+| `connect_failed` | The relay could not be reached; nothing was sent | Yes, until `max-attempts` |
+| `smtp_transient` | The relay answered 4xx; nothing was accepted | Yes, until `max-attempts` |
+| `auth_failed` | The relay refused the credentials; nothing was sent | Yes, until `max-attempts` |
+| `smtp_refused` | The relay refused the message (5xx) | No |
+| `io_after_connect` | The connection failed after the message may have been submitted (`uncertain`) | No |
+| `interrupted` | A claimed send never reported back — the instance stopped mid-send (`uncertain`) | No |
+| `render_failed` | The notice could not be rendered; nothing was sent | No |
+| `disabled` / `mail_unconfigured` / `no_allowlist` | Mail was off when the delivery was due (the deployment's off reason, Scheduler §2.3) | No |
+
+---
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-25 | next | 442c (#442) | §44: backlog_full is decided by serialized deployment admission; explicit resend at the hard cap is refused. |
+| 2026-10-24 | next | 442b (#442) | **§25 `TrailKind`** gains the four V51 notification kinds; new **§43 `NotificationOutcome`** and **§44 `DeliveryState`** with the sanitized `last_error_code` set; §42 no longer says nothing is sent; §15 gains `schedule.notification_resent`. |
 | 2026-10-22 | v1.36 | 8b (#8) | The JavaScript type is enabled with the isolate and stores main(input) statements. |
 | 2026-10-21 | v1.35 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The `node_type` row `TRANSFORM` is `SCRIPT`**; the template-type rows say "the script types" / "a script"; the error-prefix row is `pipeline.script.*`; the JavaScript save refusal is `script.js.unavailable`; the 503 example names `pipeline.script.pool_exhausted`. A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-09 | v1.34 | 487 (#487) | The HTTP status table moves `result.storage_unavailable` from 500 to 503 ([Pipeline Contract §13.10](pipeline-contract.md#1310-result-retrieval) v1.56) and names `pipeline.transform.pool_exhausted` beside it, the 503 the catalog already carried. |

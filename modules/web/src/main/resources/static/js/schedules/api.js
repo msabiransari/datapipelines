@@ -152,6 +152,10 @@
     preview: function (cron, timezone, count) { return request("GET", BASE + "/preview" + q({ cron: cron, timezone: timezone, count: count || 5 })); },
     runs: function (scheduleId, offset, limit) { return request("GET", BASE + "/" + id(scheduleId) + "/runs" + q({ offset: offset || 0, limit: limit || 20 })); },
     run: function (scheduleId, runId) { return request("GET", BASE + "/" + id(scheduleId) + "/runs/" + id(runId)); },
+    // §20.13 (#442b) — re-queue one failed or uncertain delivery of a run; schedule.update.
+    resend: function (scheduleId, runId, deliveryId) {
+      return request("POST", BASE + "/" + id(scheduleId) + "/runs/" + id(runId) + "/deliveries/" + id(deliveryId) + "/resend");
+    },
     create: function (body, key) { return request("POST", BASE, { body: body, idempotencyKey: key }); },
     update: function (scheduleId, body, etag) { return request("PUT", BASE + "/" + id(scheduleId), { body: body, ifMatch: etag }); },
     remove: function (scheduleId, etag) { return request("DELETE", BASE + "/" + id(scheduleId), { ifMatch: etag }); },

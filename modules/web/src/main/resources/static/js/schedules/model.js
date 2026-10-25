@@ -275,6 +275,52 @@
     return String(state || "").replace(/_/g, " ");
   }
 
+  // ------------------------------------------------------------------ §20.11 deliveries (#442b)
+
+  /** A notice's words — the subject's state words (enums.md §43). */
+  var NOTICE_TEXT = {
+    started: "Started",
+    completed: "Completed",
+    failed: "Failed",
+    could_not_start: "Could not start",
+    cancelled: "Stopped — cancelled",
+    aborted: "Stopped — instance shut down",
+    unknown: "Outcome unknown",
+    unknown_update: "Update on an unknown run",
+    blocked: "Schedule blocked",
+  };
+
+  function noticeText(notice) {
+    return NOTICE_TEXT[notice] || String(notice || "");
+  }
+
+  /** A delivery state's badge (enums.md §44): accepted is the relay's word, never "delivered". */
+  var DELIVERY_BADGE = {
+    pending: "ds-badge-default",
+    accepted: "ds-badge-success",
+    failed: "ds-badge-danger",
+    uncertain: "ds-badge-warning",
+  };
+
+  function deliveryBadge(state) {
+    return DELIVERY_BADGE[state] || "ds-badge-default";
+  }
+
+  /** Only a failed or uncertain delivery may be resent (§20.13); the server refuses the rest. */
+  function canResend(delivery) {
+    return !!delivery && (delivery.state === "failed" || delivery.state === "uncertain");
+  }
+
+  /**
+   * The toast after a resend (§20.13): an uncertain delivery may already have reached the relay,
+   * so the server's `may_duplicate` warning is said out loud.
+   */
+  function resendNotice(response) {
+    return response && response.warning === "may_duplicate"
+      ? { variant: "warning", title: "Resend queued", message: "The first send may have arrived — the recipient can get this notice twice." }
+      : { variant: "success", title: "Resend queued", message: "The notice goes out on the sender's next tick." };
+  }
+
   var ACTIVE = { queued: true, starting: true, running: true };
 
   function isActive(run) {
@@ -641,6 +687,10 @@
     relativeText: relativeText,
     runChip: runChip,
     runStateText: runStateText,
+    noticeText: noticeText,
+    deliveryBadge: deliveryBadge,
+    canResend: canResend,
+    resendNotice: resendNotice,
     isActive: isActive,
     executionDurationMs: executionDurationMs,
     originText: originText,

@@ -165,7 +165,7 @@ The app **fail-fasts** on startup if any of the following is missing. Full defin
 
    **The operator's first-admin story with local accounts** (no IdP): set `datapipelines.auth.bootstrap-admin-email` to the admin address, enable `datapipelines.auth.local.enabled`, and seed the one-time credential — preferably as a pre-computed hash from `./gradlew :modules:auth:hashPassword` into `datapipelines.auth.local.bootstrap-password-hash` (the plaintext form exists for demos). Hand the password to the admin out-of-band; the app forces a change at first login ([Auth §5A.2](auth.md#5a2-seeding-the-first-admin)), and a deployment still running the seeded credential announces itself with a startup WARN. Every account after the first is created by an admin on the user-administration screen — there is no self-registration and no self-service email reset: a forgotten password means an admin resets it there, which issues a new one-time credential under the same forced-change rule. **With outbound mail configured** (`DATAPIPELINES_MAIL_HOST` + `DATAPIPELINES_MAIL_FROM` — any SMTP server, Postmark's included; the nine variables are [Configuration §3.27](configuration.md#327-mail) and `deploy/secrets.env.example` names them) that credential is **emailed to the user** and sys-ops (`DATAPIPELINES_MAIL_OPS_TO`) hears about every new user, local or first social login ([Auth §5A.8](auth.md#5a8-mail-the-welcome-mail-and-the-new-user-notice)); the admin screen then shows where the password went, not what it was. Mail is on exactly when those two are set — there is no flag — and it then also requires `DATAPIPELINES_AUTH_BASE_URL` (the login URL in the mail).
 
-Everything else has a default and is optional.
+Everything else has a default and is optional. One optional key adds a startup requirement of its own: `datapipelines.scheduler.notifications.enabled=true` (scheduler notification mail, off by default — [Scheduler §2.3](scheduler.md#23-notification-settings-442), #442b) refuses to start, naming the keys, unless the shared mail transport (`datapipelines.mail.host` and `.from`, [Configuration §3.27](configuration.md#327-mail)) and `datapipelines.auth.base-url` (the link every notice carries) are set; under the `development` posture it also sends nothing until `datapipelines.scheduler.notifications.recipient-domains` lists a domain.
 
 ### 5.2 Everything else
 
@@ -729,6 +729,11 @@ Operators should run a quarterly restore drill: restore metadata DB from backup 
 
 For k8s: rolling update via `kubectl rollout`. Each terminated pod flips its readiness and cancels its in-flight executions on the way out (§8.3.1); the `preStop` and `terminationGracePeriodSeconds` settings in §8.3.2 keep that orderly.
 
+**Scheduler notification kinds (V51).**
+
+1. Keep `datapipelines.scheduler.notifications.enabled=false` (the default) throughout the first rollout containing V51; with mail off this is the ordinary rolling update.
+2. Enable notifications only after **every instance** runs the new image. A new sender writes `notification_*` trail kinds which an older image cannot read: its strict `TrailKind.fromWire` throws when `ScheduleRunRepository` reads that run's detail. Widening the database CHECK is not reader compatibility. Do not enable during the mixed-version fleet.
+
 #### 8.3.1 Graceful shutdown mechanism
 
 Shutdown is a defined sequence, not "stop the process and hope". On `SIGTERM` the instance, in this order:
@@ -757,6 +762,8 @@ lifecycle:
 - A `PodDisruptionBudget` (§6.4) keeps node drains from taking every replica's drain at once.
 
 ### 8.4 Rollback
+
+**Scheduler notifications (V51): older-image boundary.** Before downgrading to an image older than V51, disable notifications on every instance and let the current sender settle the backlog: `SELECT count(*) FROM schedule_notification_deliveries WHERE state = 'pending'` must be zero. Disabling stops new enqueue; the current sender settles existing rows as failed/disabled, so this drain is not a promise to send them. Already recorded kinds remain: `SELECT DISTINCT run_id FROM schedule_run_events WHERE kind LIKE 'notification\_%'` identifies runs whose detail is unreadable by the older image until it is upgraded again. The reader stays strict ([Enums](enums.md) additive-only wire convention); this feature promises no rolling reader compatibility, and an additive CHECK alone does not make an old artifact safe. Do not delete historical trail rows to hide the boundary.
 
 - App rollback: redeploy previous image. Schema migrations are forward-only — if a migration was applied, you can't run the old app version against the new schema.
 - **For MINOR upgrades**: schema changes are additive; rollback usually works.
@@ -1255,6 +1262,8 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-25 | next | 442c (#442) | §8.3: keep scheduler mail off until every instance understands V51 notification trail kinds. §8.4: disable, drain and account for old readers refusing historical notification kinds before downgrade. |
+| 2026-10-24 | next | 442b (#442) | §5.1: the one optional key with a startup requirement of its own — `datapipelines.scheduler.notifications.enabled=true` needs the mail transport and `auth.base-url` or startup refuses; under `development` nothing sends until the recipient-domain allowlist names a domain. |
 | 2026-10-24 | v1.51 | #688 (Helm portion) — renumbered at merge after #677’s v1.50 | **§6.4:** the nine JavaScript runtime keys (configuration.md §3.28) are named chart values under `script.js`, all empty by default — an empty value renders no env entry, inheriting the image's own isolate directory and the app's derived isolate memory. `script.js.isolateDir` is refused at render time outside the image's launcher-path entries (`/app/lib`, `/opt/graaljs`), and an `extraEnv` double mapping of any of the nine is refused like the DuckDB keys. Number validation stays the app's (startup, by name). Chart 0.2.0; `helm-check.sh` grows to lint plus ten template cases (all-nine render, the single-key or-clause proof, the nine double-mapping refusals, the isolateDir refusal and its two admitted entries); `HelmScriptJsValuesSpecDriftTest` pins doc, chart, values and the Dockerfile's launcher-path list together. |
 | 2026-10-24 | v1.50 | #677 third-party notices | §10 documents generated Maven/isolate notices in the jar and image, the unresolved/stale licence guards, optional-driver terms and the remaining distribution boundaries. |
 | 2026-10-22 | v1.49 | 8b (#8) | Documents the isolate directory/loader agreement, pre-installed resources on read-only roots, shared-isolate failure mode and memory sizing. |

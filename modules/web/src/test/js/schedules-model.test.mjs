@@ -301,3 +301,27 @@ test("collectBindings sends presetted keywords and passes literal bindings throu
    assert.equal(M.recipientsText([]), "");
    assert.deepEqual(M.fieldForError({ code: "schedule.validation.notifications_invalid" }), { field: "notifications" });
  });
+
+// #442b — the run's Notifications table (§20.11 deliveries, §20.13 resend).
+test("a delivery is resendable only when failed or uncertain", () => {
+  const states = ["pending", "accepted", "failed", "uncertain"];
+  assert.deepEqual(states.filter((state) => M.canResend({ state })), ["failed", "uncertain"]);
+  assert.equal(M.canResend(null), false);
+});
+
+test("every notice reads as its subject's state words, and an unknown wire value reads as itself", () => {
+  const notices = ["started", "completed", "failed", "could_not_start", "cancelled", "aborted", "unknown", "unknown_update", "blocked"];
+  notices.forEach((n) => assert.notEqual(M.noticeText(n), n, n));
+  assert.equal(M.noticeText("could_not_start"), "Could not start");
+  assert.equal(M.noticeText("later_value"), "later_value");
+});
+
+test("accepted is the relay's word and uncertain warns; a resend of an uncertain delivery says it may duplicate", () => {
+  assert.equal(M.deliveryBadge("accepted"), "ds-badge-success");
+  assert.equal(M.deliveryBadge("uncertain"), "ds-badge-warning");
+  assert.equal(M.deliveryBadge("failed"), "ds-badge-danger");
+  assert.equal(M.deliveryBadge("pending"), "ds-badge-default");
+  assert.equal(M.resendNotice({ state: "pending", warning: "may_duplicate" }).variant, "warning");
+  assert.match(M.resendNotice({ state: "pending", warning: "may_duplicate" }).message, /twice/);
+  assert.equal(M.resendNotice({ state: "pending" }).variant, "success");
+});

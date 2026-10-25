@@ -9,6 +9,10 @@
  * which case it is rather than showing a shorter list silently: no execution (the run never
  * started), a reader whose role reads no executions (the promoter), a record past its retention
  * (410 `event_record_expired`), or a read that failed.
+ *
+ * #442b — the Notifications table (§20.11 `deliveries`): one row per notice and recipient, the
+ * address only when the API sent it (a schedule.update holder), every cell through textContent.
+ * Resend (§20.13) is in the row template's role guard and offered on a failed or uncertain row.
  */
 (function () {
   "use strict";
@@ -45,6 +49,7 @@
     var dlg = S.clone("sch-tpl-run-dialog");
     if (!dlg) return;
     dlg.setAttribute("data-run-id", runId);
+    dlg.setAttribute("data-schedule-id", scheduleId);
     var c = S.detail.current();
     S.text(dlg, "schedule", c && c.schedule.id === scheduleId ? c.schedule.name : "");
     S.text(dlg, "messages-note", "Loading…");
@@ -57,6 +62,7 @@
         var run = r.data;
         var timezone = run.reference_timezone || (c && c.schedule.timezone);
         fill(dlg, run, timezone, c);
+        deliveries(dlg, run.deliveries);
         return messages(dlg, run, timezone);
       })
       .catch(function (err) {
@@ -143,6 +149,48 @@
     }
   }
 
+  function deliveries(dlg, rows) {
+    var list = rows || [];
+    S.show(S.slot(dlg, "deliveries-section"), list.length > 0);
+    var body = S.slot(dlg, "deliveries");
+    S.clear(body);
+    list.forEach(function (d) {
+      body.appendChild(deliveryRow(d));
+    });
+  }
+
+  function deliveryRow(d) {
+    var row = S.clone("sch-tpl-delivery");
+    row.setAttribute("data-delivery-id", d.id);
+    S.text(row, "notice", M().noticeText(d.notice));
+    S.text(row, "recipient", d.recipient || "—");
+    S.text(row, "delivery-state", d.state).className = "ds-badge " + M().deliveryBadge(d.state);
+    S.text(row, "delivery-attempts", String(d.attempts) + (d.resend_count > 0 ? " · resent " + d.resend_count + "×" : ""));
+    S.text(row, "delivery-error", d.last_error_code || "");
+    // Absent for a reader without schedule.update: the server rendered no button for them.
+    S.show(row.querySelector('[data-verb="schedule-notification-resend"]'), M().canResend(d));
+    return row;
+  }
+
+  /** §20.13 — the button's own row is replaced by the answer; the toast says if it may duplicate. */
+  function resend(button) {
+    var dlg = button.closest("[data-sch-dialog]");
+    var row = button.closest("[data-delivery-id]");
+    if (!dlg || !row) return;
+    button.setAttribute("aria-disabled", "true");
+    API()
+      .resend(dlg.getAttribute("data-schedule-id"), dlg.getAttribute("data-run-id"), row.getAttribute("data-delivery-id"))
+      .then(function (r) {
+        var notice = M().resendNotice(r.data);
+        S.toast(notice.variant, notice.title, notice.message);
+        if (row.isConnected) row.replaceWith(deliveryRow(r.data));
+      })
+      .catch(function (err) {
+        button.removeAttribute("aria-disabled");
+        S.toastError(err, "Resend failed");
+      });
+  }
+
   function messages(dlg, run, timezone) {
     var trail = run.trail || [];
     // #261 — the trail's ids (a recorded row's requested_by) read as names when the run carries one.
@@ -205,5 +253,5 @@
     }
   }
 
-  S.run = { open: open };
+  S.run = { open: open, resend: resend };
 })();
