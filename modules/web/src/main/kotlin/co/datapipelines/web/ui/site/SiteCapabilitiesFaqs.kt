@@ -51,9 +51,10 @@ object SiteCapabilitiesFaqs {
             ),
             FaqEntry(
                 "Does a schedule refresh my dashboards?",
-                "No. A schedule runs a pipeline. A dashboard refreshes when a viewer opens it or applies its " +
-                    "controls: the server runs the pinned source pipelines at that moment and streams each chart's " +
-                    "result as it arrives. No MCP tool refreshes a dashboard. The contracts are docs/dashboards.md " +
+                "No. A schedule runs a pipeline. Configured refresh actions run its pinned sources: an action can " +
+                    "run when the dashboard opens, from a button or from a bound filter control. Changing an unbound " +
+                    "filter marks charts stale. A refresh streams each chart's result as it arrives. No MCP tool " +
+                    "refreshes a dashboard. The contracts are docs/dashboards.md " +
                     "§5.5 and docs/dashboards.md §5.8.",
                 "docs/dashboards.md §5.5, docs/dashboards.md §5.8",
             ),

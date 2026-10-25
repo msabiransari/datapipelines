@@ -84,7 +84,7 @@
         <!-- claim: docs/dashboards.md §5.1, docs/dashboards.md §5.8 -->
         <p>
           The limits are on the <a th:href="@{/sql-dashboards}">dashboards page</a> too: a dashboard refreshes when
-          someone opens it or applies its filters, a schedule does not refresh it, there is no drag-and-drop editor,
+          its configured refresh actions run, a schedule does not refresh it, there is no drag-and-drop editor,
           and its read-only rule is declared by the source nodes' types rather than enforced by a read-only database
           connection.
         </p>
