@@ -763,9 +763,9 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/auth.md §7.7 -->
           <h3>A key has a kind, and the kind decides its reach</h3>
-          <p><span th:text="|${#strings.capitalize(facts.apiKeyKindCountWord)} kinds.|">Four kinds.</span> A <code>mcp</code> key is the agent's key: its own identity at the role its creator chose, reaching <code>/mcp</code> and nothing else. An <code>endpoint</code> key carries the <em>api caller</em> role for the published paths it is <em>bound</em> to. A <code>server</code> key opens the promotion routes. A <code>dashboard</code> key serves one external app's embeds.</p>
+          <p><span th:text="|${#strings.capitalize(facts.apiKeyKindCountWord)} kinds.|">Four kinds.</span> <code>mcp</code>: the agent's own identity, with the role its creator chose; it reaches only <code>/mcp</code>. <code>endpoint</code>: the <em>api caller</em> role, limited to bound published paths. <code>server</code>: promotion routes. <code>dashboard</code>: one external app's embeds.</p>
           <!-- claim: docs/auth.md §7.7 (the confinement is central) -->
-          <p>The confinement is decided centrally, before any handler's annotation is read. A new route cannot become quietly reachable to a key of the wrong kind.</p>
+          <p>A central check confines each kind before the handler's permission check. A new route never expands another kind's reach.</p>
           <a class="card-link" th:href="@{/docs/auth}">Read the spec &rarr;</a>
         </article>
 
