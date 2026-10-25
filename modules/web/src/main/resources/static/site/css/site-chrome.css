@@ -726,32 +726,41 @@ hr,
 }
 
 /* ============================================================
-   SITE STYLES — datapipelines.co public site (v4, the 145 transition)
+   SITE STYLES — datapipelines.co public site (v5, Atlas — #698)
    A layer over the vendored design system: every colour, spacing,
    radius, motion and surface value below references a token.
 
-   THE DESIGN LAYER (owner approval 2026-09-16; the approved reference is
-   previews/website-2026-09-16 in the orchestration store — its composition,
-   type, spacing and motion are the spec, adapted to the server templates):
-   - Palette: the `--site-*` token set below, LIGHT ONLY. There is one state:
-     bare :root. No dark media query, no data-theme attribute, no swap sheet —
-     the public site wears the approved light presentation whatever the OS or a
-     saved preference says (145 §5). The bundle's theme source is themes/light.css
-     (scripts/build-site-chrome.sh), so the design system's `--_*` values are
-     fixed too. The bridge block points every semantic token the site reads at
-     the site palette; the APP's layouts are untouched and keep their themes.
-   - Type: Manrope, proportional, for everything the page SAYS — display and
-     body, 700/800 for headlines with tight tracking. JetBrains Mono (the late
-     sheet) is for what the product RUNS: code, data labels, the console.
-   - Rhythm: open sections separated by hairlines (`.section.border`), generous
-     section padding, one head→body gap token, cards as tall as their text.
-     The pre-145 slab (`.band`) and the one dark slab (`.dark`) survive for the
-     specialist pages in the same language: a soft tint and the navy panel.
+   THE DESIGN LAYER (owner approval 2026-10-24; the spec is the store's
+   design-records/698-atlas-public-website.md, the frozen reference
+   previews/atlas-2026-10-24 from prototype f6c0cf1f — its palette, type
+   and composition are adapted here to the server templates; it supersedes
+   the 2026-09-16 styling, not the content):
+   - Palette: the `--site-*` token set below, LIGHT ONLY ("Atlas light for
+     everyone"). There is one state: bare :root. No dark media query, no
+     data-theme attribute, no swap sheet — the public site wears the light
+     presentation whatever the OS or a saved preference says. The bundle's
+     theme source is themes/light.css (scripts/build-site-chrome.sh), so the
+     design system's `--_*` values are fixed too. The bridge block points
+     every semantic token the site reads at the site palette; the APP's
+     layouts are untouched and keep their themes. Warm paper, forest accent,
+     one full-width dark product band per page where a page has one.
+   - Contrast (the record's floors): body/secondary text 7:1 on its surface,
+     every other text 4.5:1 (no large-text exemption), control boundaries,
+     focus and meaningful graphics 3:1. Never fade text with opacity; a rule
+     that changes the local surface re-declares the ink it sits on.
+   - Type: an editorial serif (system Georgia stack, normal weight, selective
+     italic forest emphasis) for headings; Manrope for body, navigation and
+     controls; JetBrains Mono (the late sheet) for code, data labels and the
+     section eyebrows.
+   - Composition: straight edges, thin rules, no gradients, no elevation;
+     open sections separated by rules (`.section.border`), the soft slab
+     (`.band`) and the dark band (`.dark`, `.dark-band`) for the pages that
+     carry them. Cards keep their rhythm padding and are flat raised boxes.
    - Motion: finite entrances on first view (site.js adds `.is-entering` once;
      the element rests visible with or without JS), staggered chart bars and
-     flow steps, nav underlines, link arrows, card/media lift, pressed buttons.
-     Transform/opacity only; prefers-reduced-motion turns all of it off, at
-     load and when the preference changes.
+     pressed buttons. No ornamental motion. Transform/opacity only;
+     prefers-reduced-motion turns all of it off, at load and when the
+     preference changes.
    No `style` attributes, no style elements, no JS style injection anywhere on
    the public site — SitePublicPresentationGuardTest sweeps for all three.
    ============================================================ */
@@ -800,55 +809,67 @@ hr,
 
   --site-font-sans: "Manrope", var(--font-sans);
   --site-font-mono: "JetBrains Mono", var(--font-mono);
+  /* 698 (Atlas): the editorial display face is the system serif stack — no web font is
+     fetched for it (the record: "do not add a web font dependency"). Linux without Georgia
+     resolves Liberation/Noto Serif; the wrap is checked at 320–1440 in the lane evidence. */
+  --site-font-display: Georgia, "Times New Roman", serif;
 
-  /* Palette (the approved preview's light palette; muted stepped to 5:1 on the ground). */
-  --site-ground: #F5F7FA;
-  --site-surface: #FFFFFF;
-  --site-surface-2: #EDF1F5;
-  --site-band: #E9EEF3;
-  --site-ink: #101820;
-  --site-ink-2: #4C5B68;
-  --site-muted: #5F6C78;
-  --site-hair: #D6DDE4;
-  --site-hair-2: #C3CCD6;
-  --site-accent: #C4740A;
-  --site-accent-hover: #B26A09;
-  --site-accent-ink: #8C5206;
-  --site-accent-btn-ink: #0B1420;
-  --site-accent-soft: #FBEFD9;
-  --site-panel: #0B1420;
-  --site-panel-2: #12203A;
-  --site-panel-ink: #EEF2F6;
-  --site-panel-muted: #C3CCD6;
-  --site-panel-hair: #334152;
-  --site-panel-accent: #F7C36B;
-  --site-good: #1E8A5A;
-  --site-good-panel: #4FCB8B;
-  --site-teal: #19785E;
-  --site-teal-soft: #E7F3EE;
-  --site-shadow: 0 1px 2px rgba(16, 24, 32, .05), 0 8px 24px -12px rgba(16, 24, 32, .18);
-  --site-shadow-lift: 0 24px 70px -30px rgba(11, 20, 32, .30);
+  /* Palette — the approved Atlas values (design record 698). Ratios are WCAG 2.x, measured
+     on the surface each ink is meant for; SiteAtlasContrastBrowserTest re-measures them on
+     the served pages. Body/secondary ≥ 7:1, other text ≥ 4.5:1, control lines ≥ 3:1. */
+  --site-ground: #F3F1E9;          /* paper */
+  --site-surface: #FAF8F1;         /* raised */
+  --site-surface-2: #E4E8DC;       /* soft (insets, code chips, table heads) */
+  --site-band: #E4E8DC;            /* soft slab */
+  --site-ink: #142B21;             /* headings, primary — 13.3 on paper */
+  --site-ink-2: #344B3F;           /* body, secondary — 8.35 paper / 8.88 raised / 7.59 soft */
+  --site-muted: #344B3F;           /* captions share the body ink: no washed-out text */
+  --site-hair: #CBD1C2;            /* decorative rule only (1.38 on paper) */
+  --site-hair-2: #6B7A6F;          /* control boundary — 4.00 paper / 3.64 soft */
+  --site-accent: #28634E;          /* forest — 6.22 paper / 5.65 soft */
+  --site-accent-hover: #1F4F3E;
+  --site-accent-ink: #28634E;
+  --site-accent-btn-ink: #FAF8F1;  /* on forest 6.62; on the hover forest 8.80 */
+  --site-accent-soft: #E4E8DC;
+  --site-panel: #203C31;           /* the dark product band */
+  --site-panel-2: #2A4A3D;
+  --site-panel-ink: #FAF8F1;       /* 11.28 on the band */
+  --site-panel-muted: #E0E8DF;     /* 9.58 on the band / 7.82 on panel-2 */
+  --site-panel-hair: #53685A;      /* decorative rule on the band */
+  --site-panel-line: #8FA596;      /* control boundary on the band — 4.56 / 3.72 */
+  --site-panel-accent: #E7EDDD;    /* 10.02 on the band */
+  --site-good: #28634E;
+  --site-good-panel: #B9DCC3;      /* 8.04 on the band */
+  --site-teal: #28634E;
+  --site-teal-soft: #E4E8DC;
+  /* Straight edges and no elevation; the one overlay (the dropped nav panel) keeps a shadow
+     so it separates from the paper it hangs over. */
+  --site-shadow: none;
+  --site-shadow-lift: none;
+  --site-shadow-overlay: 0 18px 40px -24px rgba(20, 43, 33, .45);
   --site-accent-line: color-mix(in srgb, var(--site-accent) 38%, transparent);
 
-  /* Type scale extensions over the design system's (display sizes it has no step for). */
-  --site-text-display: clamp(2.6rem, 5vw, 3.75rem);
-  --site-text-page-title: clamp(2.3rem, 4.4vw, 3.5rem);
-  --site-text-h2: clamp(1.8rem, 3vw, 2.25rem);
-  --site-text-h2-small: 1.75rem;
-  --site-text-h3: 1.3125rem;
+  /* Type scale extensions over the design system's (display sizes it has no step for). The
+     serif display carries hierarchy by size, not weight: normal weight, tight tracking. */
+  --site-text-display: clamp(2.75rem, 6.3vw, 5.25rem);
+  --site-text-page-title: clamp(2.4rem, 4.8vw, 3.75rem);
+  --site-text-h2: clamp(2rem, 3.4vw, 2.75rem);
+  --site-text-h2-small: 1.875rem;
+  --site-text-h3: 1.5rem;
   --site-text-lede: 1.0625rem;
   --site-text-price: clamp(4.25rem, 7vw, 5.125rem);
-  --site-text-micro: 0.6875rem;
-  --site-text-tag: 0.625rem;
-  --site-weight-display: 750;
-  --site-weight-heavy: 800;
+  --site-text-micro: 0.75rem;
+  --site-text-tag: 0.75rem;
+  --site-weight-display: 400;
+  --site-weight-heavy: 700;
   --site-weight-emphasis: 650;
-  --site-leading-display: 1.08;
+  --site-weight-control: 650;
+  --site-leading-display: 1.04;
   --site-leading-copy: 1.65;
   --site-leading-loose: 1.75;
-  --site-tracking-display: -0.04em;
-  --site-tracking-h2: -0.03em;
-  --site-tracking-h3: -0.02em;
+  --site-tracking-display: -0.035em;
+  --site-tracking-h2: -0.025em;
+  --site-tracking-h3: -0.015em;
   --site-tracking-caps: 0.1em;
   --site-tracking-tag: 0.06em;
   --site-measure: 62ch;
@@ -856,9 +877,12 @@ hr,
   --site-measure-title: 18ch;
 
   /* Rhythm. */
-  --site-section-pad: clamp(56px, 8vw, 96px);
+  --site-section-pad: clamp(56px, 8vw, 104px);
   --site-gap-head: clamp(28px, 4vw, 44px);
-  --site-radius-panel: calc(var(--radius-xl) + var(--space-1));
+  --site-radius: 0;
+  --site-radius-panel: var(--site-radius);
+  --site-rule: var(--space-px) solid var(--site-hair);
+  --site-index-width: 11rem;
   --site-header-height: 4.5rem;
   /* 148: the width at which the wide row replaces the phone menu. A media query cannot
      read a custom property, so the `@media (min-width: 64rem)` in the header block repeats
@@ -920,6 +944,16 @@ hr,
   --shadow-lg: var(--site-shadow-lift);
   --shadow-xl: var(--site-shadow-lift);
 
+  /* 698: Atlas is straight-edged — every design-system corner the site layer reads is the
+     site radius. `--radius-full` stays: it draws true circles (status dots), not corners. */
+  --radius-sm: var(--site-radius);
+  --radius-base: var(--site-radius);
+  --radius-md: var(--site-radius);
+  --radius-lg: var(--site-radius);
+  --radius-xl: var(--site-radius);
+  --radius-2xl: var(--site-radius);
+  --radius-pill: var(--site-radius);
+
   /* The body measure: 16/1.6 in the approved preview. */
   --text-base: 1rem;
 }
@@ -938,15 +972,17 @@ body {
 }
 
 /* --------------------------------------------------------
-   Type — Manrope for everything the page says. `balance` is the orphan
-   fix; the scale never shrinks to fit.
+   Type — the serif display for headings (normal weight; hierarchy is
+   size and space), Manrope for what the page says around them. `balance`
+   is the orphan fix; the scale never shrinks to fit.
    -------------------------------------------------------- */
 
-h1, h2, h3, h4,
+h1, h2, h3,
 .ds-display, .ds-headline {
-  font-family: var(--site-font-sans);
+  font-family: var(--site-font-display);
   font-weight: var(--site-weight-display);
   letter-spacing: var(--site-tracking-h2);
+  color: var(--text-primary);
   text-wrap: balance;
 }
 
@@ -966,7 +1002,7 @@ h2,
 h3,
 .ds-subheadline {
   font-size: var(--site-text-h3);
-  font-weight: var(--weight-bold);
+  font-weight: var(--site-weight-display);
   line-height: var(--leading-snug);
   letter-spacing: var(--site-tracking-h3);
 }
@@ -981,15 +1017,17 @@ h2.ds-subheadline {
 }
 
 h4 {
+  font-family: var(--site-font-sans);
   font-size: var(--text-lg);
   font-weight: var(--weight-bold);
   line-height: var(--leading-snug);
+  color: var(--text-primary);
 }
 
 /* A cluster page's title: long buyer titles at the home ceiling would wall of text. */
 .page-hero .ds-display {
   font-size: var(--site-text-page-title);
-  line-height: 1.1;
+  line-height: 1.08;
 }
 
 code, pre, kbd, .mono {
@@ -1024,7 +1062,11 @@ a {
 .use-card p a,
 .price-card p a,
 .section-title p a,
-.dark-band p a {
+.dark-band :is(p, li) a,
+.doc-source a,
+.steps p a,
+.chart-note a,
+.container > ul:not([class]) > li a {
   text-decoration: underline;
   text-underline-offset: var(--space-1);
 }
@@ -1047,10 +1089,20 @@ button {
   cursor: pointer;
 }
 
-:where(a, button, summary, [tabindex]):focus-visible {
+/* Every element the keyboard can reach, including the scroll containers Chrome makes focusable
+   on its own (a phone-width `pre` or table), wears the one ring; the base sheet's ring is a
+   box-shadow keyed to the app's surface, so the site re-declares it as an outline (698). */
+:where(*):focus-visible {
   outline: var(--space-0-5) solid var(--site-accent);
   outline-offset: var(--space-1);
   border-radius: var(--radius-sm);
+}
+
+/* On the dark band and every dark panel the forest ring would sit near 1.6:1; the ring
+   brightens to the dark accent (10:1) there. Same specificity as the rule above, later. */
+:where(.dark-band, .section.dark, .quick-code, .mini-flow, .install, .console, .dag-embed, .api-demo, .receipt)
+  :where(*):focus-visible {
+  outline-color: var(--site-panel-accent);
 }
 
 /* --------------------------------------------------------
@@ -1128,9 +1180,9 @@ button {
 }
 
 /* --------------------------------------------------------
-   Sections — open on the ground, separated by hairlines. `.border`
-   draws the hairline above (the approved rhythm); `.band` is the
-   specialist pages' soft slab; `.dark` the one navy panel per page.
+   Sections — open on the paper, separated by thin rules. `.border`
+   draws the rule above; `.band` is the soft slab; `.dark` the full-width
+   dark product band (Atlas: edge to edge, straight, no inset panel).
    -------------------------------------------------------- */
 
 .section {
@@ -1144,8 +1196,6 @@ button {
 .section.band {
   background: var(--site-band);
   border-block: var(--space-px) solid var(--site-hair);
-  /* Quiet text on the tint steps up to ink-2 (Lighthouse contrast on the slab). */
-  --text-muted: var(--site-ink-2);
 }
 
 .section.band + .section.band {
@@ -1153,10 +1203,7 @@ button {
 }
 
 .section.dark {
-  margin-inline: clamp(8px, 2vw, 28px);
-  border-radius: var(--site-radius-panel);
   background: var(--site-panel);
-  border: var(--space-px) solid var(--site-panel-hair);
   color: var(--site-panel-ink);
 }
 
@@ -1165,7 +1212,8 @@ button {
   color: var(--site-panel-ink);
 }
 
-.section.dark .kicker {
+.section.dark .kicker,
+.section.dark .eyebrow {
   color: var(--site-panel-accent);
 }
 
@@ -1208,34 +1256,21 @@ button {
   line-height: var(--site-leading-loose);
 }
 
-/* The section opener (the approved preview's eyebrow): a short accent rule and an
-   uppercase heavy line in accent-ink. One rule serves the pre-145 `.kicker` and the
-   preview's `.eyebrow` alike. */
+/* The section opener (Atlas's field label): mono, uppercase, forest, at a size a real page
+   can read (12px — the reference's 10px labels are not reproduced). One rule serves the
+   pre-145 `.kicker` and the `.eyebrow` alike. */
 .kicker,
 .eyebrow {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2-5);
-  font-family: var(--site-font-sans);
-  font-size: var(--text-xs);
-  font-weight: var(--site-weight-heavy);
-  letter-spacing: var(--site-tracking-caps);
+  font-family: var(--site-font-mono);
+  font-size: var(--site-text-micro);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--site-tracking-tag);
   text-transform: uppercase;
   color: var(--site-accent-ink);
   margin-bottom: var(--space-3-5);
-}
-
-.kicker::before,
-.eyebrow::before {
-  content: "";
-  width: var(--space-6);
-  height: var(--space-0-5);
-  background: var(--site-accent);
-  flex: none;
-}
-
-.kicker:has(> .status:only-child)::before {
-  content: none;
 }
 
 code {
@@ -1280,23 +1315,18 @@ code {
 
 /* --------------------------------------------------------
    Header + navigation — the Product disclosure (148), five pages, the
-   docs, and the host-aware entry. Sticky, translucent; the hairline
-   appears once the page has scrolled.
+   docs, and the host-aware entry. Sticky, opaque paper over a permanent
+   rule (698).
    -------------------------------------------------------- */
 
+/* Opaque paper: a translucent bar over the dark band would composite the nav ink onto a
+   darker ground than the one its contrast was measured on. */
 .site-header {
   position: sticky;
   top: 0;
   z-index: var(--z-sticky);
-  background: color-mix(in srgb, var(--site-ground) 88%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-bottom: var(--space-px) solid transparent;
-  transition: border-color var(--duration-slow) var(--ease-out);
-}
-
-.site-header.scrolled {
-  border-bottom-color: var(--site-hair);
+  background: var(--site-ground);
+  border-bottom: var(--space-px) solid var(--site-hair);
 }
 
 .header-inner {
@@ -1312,6 +1342,7 @@ code {
   gap: var(--space-2-5);
   margin-inline-end: auto;
   min-height: 2.75rem;
+  font-family: var(--site-font-sans);
   font-size: var(--text-lg);
   font-weight: var(--site-weight-heavy);
   letter-spacing: var(--site-tracking-h3);
@@ -1328,7 +1359,7 @@ code {
   width: var(--icon-lg);
   height: var(--icon-lg);
   flex: none;
-  color: var(--site-accent);
+  color: var(--site-ink);
 }
 
 .nav-wide {
@@ -1480,7 +1511,7 @@ code {
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   color: var(--text-primary);
-  border: var(--space-px) solid var(--site-hair);
+  border: var(--space-px) solid var(--site-hair-2);
   border-radius: var(--radius-md);
   background: var(--surface-default);
   cursor: pointer;
@@ -1513,12 +1544,14 @@ code {
   padding: var(--space-3);
   gap: var(--space-1);
   background: var(--surface-raised);
-  border: var(--space-px) solid var(--site-hair);
+  border: var(--space-px) solid var(--site-hair-2);
   border-radius: var(--radius-lg);
-  box-shadow: var(--site-shadow-lift);
+  box-shadow: var(--site-shadow-overlay);
 }
 
-.nav-panel a {
+/* `:not(.btn)`: the panel's call to action is a primary button, and this rule's secondary
+   ink outranked `.btn-primary` on its forest fill (1.34:1, measured in 698). */
+.nav-panel a:not(.btn) {
   display: flex;
   align-items: center;
   min-height: 2.75rem;
@@ -1529,13 +1562,13 @@ code {
   white-space: nowrap;
 }
 
-.nav-panel a:hover,
-.nav-panel a:focus-visible {
+.nav-panel a:not(.btn):hover,
+.nav-panel a:not(.btn):focus-visible {
   color: var(--text-primary);
   background: var(--surface-hover);
 }
 
-.nav-panel a[aria-current="page"] {
+.nav-panel a:not(.btn)[aria-current="page"] {
   color: var(--text-primary);
   background: var(--site-accent-soft);
   font-weight: var(--weight-bold);
@@ -1582,9 +1615,9 @@ code {
 
 /* --------------------------------------------------------
    Buttons — `.btn` is the site's control (every template uses it); the
-   approved preview's shape: a 10px radius, the accent primary with navy
-   ink, a hairline secondary, a light variant for the navy panel. Hover
-   lifts, focus shows the ring, :active presses (motion block below).
+   Atlas shape: square corners, the forest primary with paper ink, a
+   raised secondary with a 3:1 control line, a light variant for the dark
+   band. Focus shows the ring, :active presses (motion block below).
    -------------------------------------------------------- */
 
 .btn-row,
@@ -1603,11 +1636,11 @@ code {
   min-height: 2.75rem;
   padding: var(--space-2-5) var(--space-5);
   font-size: var(--text-sm);
-  font-weight: var(--site-weight-display);
+  font-weight: var(--site-weight-control);
   color: var(--text-primary);
   background: var(--site-surface);
-  border: var(--space-px) solid var(--site-hair);
-  border-radius: var(--space-2-5);
+  border: var(--space-px) solid var(--site-hair-2);
+  border-radius: var(--site-radius);
   text-decoration: none;
   transition: transform var(--site-motion-fast) var(--site-motion-ease),
               border-color var(--site-motion-fast),
@@ -1628,9 +1661,9 @@ code {
 }
 
 .btn-primary:hover {
-  background: var(--site-accent-soft);
+  background: var(--site-accent-hover);
   color: var(--site-accent-btn-ink);
-  border-color: var(--site-accent);
+  border-color: var(--site-accent-hover);
 }
 
 .btn-primary code {
@@ -1653,7 +1686,8 @@ code {
 
 .btn-light:hover {
   color: var(--site-panel);
-  background: var(--site-accent-soft);
+  background: var(--site-panel-accent);
+  border-color: var(--site-panel-accent);
 }
 
 .btn span[aria-hidden] {
@@ -1670,7 +1704,8 @@ code {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2-5);
-  font-weight: var(--site-weight-display);
+  font-size: var(--text-sm);
+  font-weight: var(--site-weight-control);
   color: var(--site-accent-ink);
 }
 
@@ -1687,7 +1722,7 @@ code {
   position: relative;
   margin-top: var(--space-6);
   background: var(--surface-inset);
-  border: var(--space-px) solid var(--border-default);
+  border: var(--space-px) solid var(--site-hair);
   border-radius: var(--radius-lg);
 }
 
@@ -1759,18 +1794,18 @@ code {
   font-weight: var(--weight-semibold);
   color: var(--site-panel-ink);
   background: var(--site-panel-2);
-  border: var(--space-px) solid var(--site-panel-hair);
+  border: var(--space-px) solid var(--site-panel-line);
   border-radius: var(--radius-base);
 }
 
 .install .copy-btn:hover {
-  background: var(--site-panel-hair);
+  background: var(--site-panel);
   color: var(--site-panel-ink);
-  border-color: var(--site-panel-hair);
+  border-color: var(--site-panel-ink);
 }
 
 /* --------------------------------------------------------
-   Cards — as tall as their text; the approved lift on hover.
+   Cards — as tall as their text; flat raised boxes, square, a rule.
    Padding is the rhythm token (24px from 64rem, 20px below;
    SiteRhythmBrowserTest holds it).
    -------------------------------------------------------- */
@@ -1851,8 +1886,7 @@ code {
 }
 
 .card h3 {
-  font-size: var(--text-lg);
-  font-weight: var(--weight-bold);
+  font-size: var(--text-xl);
   line-height: var(--leading-snug);
 }
 
@@ -1866,7 +1900,7 @@ code {
 .card-link {
   margin-top: var(--space-1);
   font-size: var(--text-sm);
-  font-weight: var(--site-weight-display);
+  font-weight: var(--site-weight-control);
   color: var(--site-accent-ink);
 }
 
@@ -1877,16 +1911,15 @@ code {
   color: var(--site-accent);
 }
 
-/* The approved preview's icon tile: a tinted square holding a 24px stroke icon. */
+/* The icon tile: a soft square holding a 24px stroke icon. */
 .card-icon {
   width: var(--space-10);
   height: var(--space-10);
   display: grid;
   place-items: center;
   background: var(--site-accent-soft);
-  border-radius: var(--space-2-5);
+  border-radius: var(--site-radius);
   color: var(--site-accent-ink);
-  transition: transform var(--site-motion-fast) var(--site-motion-ease);
 }
 
 .card-icon svg {
@@ -1907,9 +1940,10 @@ code {
 }
 
 .group-title {
-  font-size: var(--text-xs);
-  font-weight: var(--site-weight-heavy);
-  letter-spacing: var(--site-tracking-caps);
+  font-family: var(--site-font-mono);
+  font-size: var(--site-text-micro);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--site-tracking-tag);
   text-transform: uppercase;
   color: var(--site-accent-ink);
   margin-top: var(--space-8);
@@ -1939,9 +1973,9 @@ code {
   align-items: center;
   gap: var(--space-1-5);
   padding: var(--space-0-5) var(--space-2);
-  font-family: var(--site-font-sans);
+  font-family: var(--site-font-mono);
   font-size: var(--site-text-tag);
-  font-weight: var(--site-weight-display);
+  font-weight: var(--weight-medium);
   letter-spacing: var(--site-tracking-tag);
   text-transform: uppercase;
   color: var(--text-secondary);
@@ -1987,8 +2021,9 @@ code {
 
 .subtle-label {
   display: block;
+  font-family: var(--site-font-mono);
   font-size: var(--site-text-micro);
-  font-weight: var(--site-weight-display);
+  font-weight: var(--weight-medium);
   letter-spacing: var(--site-tracking-caps);
   text-transform: uppercase;
   color: var(--site-accent-ink);
@@ -2007,13 +2042,15 @@ code {
 }
 
 /* --------------------------------------------------------
-   HOME — the outcome-led hero: copy on the left, the worked example on
-   the right (a tabbed panel over the recorded demo run), the engine
-   strip beneath. Nothing here is a screenshot.
+   HOME — the outcome-led hero: the editorial headline on the left, the
+   worked example on the right as Atlas's figure (a rule on its start
+   edge, a labelled head row, the question in the serif, the tabs and the
+   panels over the recorded demo run), the engine strip beneath. Nothing
+   here is a screenshot.
    -------------------------------------------------------- */
 
 .hero {
-  padding-block: clamp(48px, 7vw, 72px) clamp(40px, 5vw, 52px);
+  padding-block: clamp(40px, 6vw, 72px) clamp(40px, 5vw, 56px);
 }
 
 .home-hero .hero-grid {
@@ -2036,7 +2073,9 @@ code {
   justify-items: start;
 }
 
+/* The selective italic forest emphasis: the headline's closing phrase. */
 .hero-copy h1 span {
+  font-style: italic;
   color: var(--site-accent-ink);
 }
 
@@ -2067,13 +2106,11 @@ code {
   align-items: center;
 }
 
-/* The worked example — a raised panel with a title bar, the question, the tabs and the panels. */
+/* The worked example — Atlas's figure: open on the paper, a rule on its start edge, a
+   labelled head row over a rule, the question in the serif, the tabs and the panels. */
 .demo {
-  border: var(--space-px) solid var(--site-hair);
-  border-radius: var(--site-radius-panel);
-  background: var(--site-surface);
-  box-shadow: var(--site-shadow-lift);
-  overflow: hidden;
+  border-inline-start: var(--site-rule);
+  background: var(--site-ground);
 }
 
 .demo-head {
@@ -2081,13 +2118,17 @@ code {
   justify-content: space-between;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-5) var(--space-6);
-  border-bottom: var(--space-px) solid var(--site-hair);
-  font-size: var(--text-xs);
+  padding: var(--space-1) var(--space-6) var(--space-4);
+  border-bottom: var(--site-rule);
+  font-family: var(--site-font-mono);
+  font-size: var(--site-text-micro);
+  letter-spacing: var(--site-tracking-tag);
+  text-transform: uppercase;
+  color: var(--site-accent-ink);
 }
 
 .demo-head strong {
-  font-weight: var(--site-weight-heavy);
+  font-weight: var(--weight-medium);
 }
 
 .question {
@@ -2095,29 +2136,34 @@ code {
 }
 
 .question .small {
+  font-family: var(--site-font-mono);
   font-size: var(--site-text-micro);
-  letter-spacing: var(--site-tracking-caps);
+  letter-spacing: var(--site-tracking-tag);
   text-transform: uppercase;
 }
 
 .question p {
-  margin-top: var(--space-1-5);
-  font-size: var(--text-xl);
+  margin-top: var(--space-2);
+  font-size: var(--site-text-h3);
+  color: var(--text-primary);
   font-weight: var(--site-weight-display);
+  font-family: var(--site-font-display);
   line-height: var(--leading-snug);
   letter-spacing: var(--site-tracking-h3);
 }
 
 .tabs {
   display: flex;
-  gap: var(--space-5);
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-5);
   padding: 0 var(--space-6);
-  border-bottom: var(--space-px) solid var(--site-hair);
+  border-bottom: var(--site-rule);
 }
 
 .tabs button {
-  padding: 0 0 var(--space-3);
-  font-size: var(--text-xs);
+  min-height: 2.75rem;
+  padding: 0;
+  font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
   color: var(--text-secondary);
   background: none;
@@ -2165,27 +2211,32 @@ code {
 
 .chart-title {
   margin: 0 0 var(--space-3-5);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   color: var(--text-secondary);
 }
 
 /* The bar chart: label / track / value, one grid row per borough; the bar itself is an
    SVG whose width attribute is the share from the demo block — data, not a style. */
+/* The bar chart's data labels are mono (Atlas's chart labels); the track is the soft fill
+   with a control-line edge so the 0–100 scale reads (3:1); the bar is the forest. */
 .bar-row {
   display: grid;
-  grid-template-columns: 5.5rem minmax(0, 1fr) 6.5rem;
+  grid-template-columns: 5.5rem minmax(0, 1fr) 7rem;
   gap: var(--space-3);
   align-items: center;
   margin: var(--space-3) 0;
-  font-size: var(--text-xs);
+  font-family: var(--site-font-mono);
+  font-size: var(--site-text-micro);
+  color: var(--text-secondary);
 }
 
 .bar-track {
   display: block;
   width: 100%;
-  height: var(--space-3);
-  background: var(--site-ground);
-  border-radius: var(--space-0-5);
+  height: var(--space-4);
+  background: var(--site-surface-2);
+  border-inline-end: var(--space-px) solid var(--site-hair-2);
+  border-radius: var(--site-radius);
   overflow: hidden;
 }
 
@@ -2197,13 +2248,15 @@ code {
 .bar-row strong {
   text-align: right;
   font-variant-numeric: tabular-nums;
-  font-size: var(--text-xs);
+  font-size: var(--site-text-micro);
+  font-weight: var(--weight-medium);
+  color: var(--text-primary);
   white-space: nowrap;
 }
 
 .chart-note {
   margin: var(--space-4) 0 0;
-  font-size: var(--site-text-micro);
+  font-size: var(--text-xs);
   line-height: var(--leading-normal);
   color: var(--text-muted);
 }
@@ -2218,8 +2271,10 @@ code {
 
 .panel .code {
   padding: var(--space-4);
-  background: var(--site-ground);
-  border-radius: var(--radius-md);
+  background: var(--site-surface);
+  border: var(--site-rule);
+  border-radius: var(--site-radius);
+  color: var(--text-primary);
 }
 
 .evidence {
@@ -2237,16 +2292,29 @@ code {
   display: flex;
   gap: var(--space-2);
   align-items: flex-start;
-  padding: var(--space-3-5) var(--space-6);
-  border-top: var(--space-px) solid var(--site-hair);
-  background: var(--site-ground);
-  font-size: var(--site-text-micro);
+  padding: var(--space-3-5) var(--space-6) 0;
+  border-top: var(--site-rule);
+  font-size: var(--text-xs);
   line-height: var(--leading-normal);
   color: var(--text-secondary);
 }
 
 .demo-foot b {
   color: var(--text-primary);
+}
+
+/* On a phone the figure's start rule keeps it a figure; its inner gutter shrinks. */
+@media (max-width: 47.99rem) {
+  .demo-head,
+  .question,
+  .panel,
+  .demo-foot {
+    padding-inline: var(--space-4);
+  }
+
+  .tabs {
+    padding-inline: var(--space-4);
+  }
 }
 
 /* The engine strip under the hero — the fold's proof line. */
@@ -2264,9 +2332,11 @@ code {
 
 .compat .small {
   margin-right: auto;
-  font-weight: var(--site-weight-heavy);
-  letter-spacing: var(--site-tracking-caps);
+  font-family: var(--site-font-mono);
+  font-size: var(--site-text-micro);
+  letter-spacing: var(--site-tracking-tag);
   text-transform: uppercase;
+  color: var(--site-accent-ink);
 }
 
 .compat strong {
@@ -2276,7 +2346,7 @@ code {
 }
 
 .compat a {
-  font-weight: var(--site-weight-display);
+  font-weight: var(--site-weight-control);
 }
 
 @media (max-width: 47.99rem) {
@@ -2285,13 +2355,15 @@ code {
   }
 }
 
-/* Section titles — the approved preview's opener block: eyebrow, h2, one paragraph. */
+/* Section titles — the opener block: eyebrow, h2, one paragraph. The paragraph rule skips
+   the eyebrow: (0,1,1) would otherwise outrank `.eyebrow` and set the field label at the
+   lede's size. */
 .section-title {
   max-width: var(--site-measure);
   margin-bottom: var(--space-8);
 }
 
-.section-title > p,
+.section-title > p:not(.eyebrow, .kicker),
 .lede {
   font-size: var(--site-text-lede);
   line-height: var(--site-leading-loose);
@@ -2332,13 +2404,11 @@ code {
 .media-frame {
   position: relative;
   margin: 0;
-  border: var(--space-px) solid var(--site-hair);
+  border: var(--site-rule);
   border-radius: var(--site-radius-panel);
   background: var(--site-surface);
   overflow: hidden;
-  transition: transform var(--site-motion-fast) var(--site-motion-ease),
-              border-color var(--site-motion-fast),
-              box-shadow var(--site-motion-fast);
+  transition: border-color var(--site-motion-fast);
 }
 
 .media-bar {
@@ -2347,8 +2417,11 @@ code {
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-3-5) var(--space-5);
-  border-bottom: var(--space-px) solid var(--site-hair);
+  border-bottom: var(--site-rule);
+  font-family: var(--site-font-mono);
   font-size: var(--site-text-micro);
+  letter-spacing: var(--site-tracking-tag);
+  text-transform: uppercase;
   color: var(--text-muted);
 }
 
@@ -2370,7 +2443,7 @@ code {
   min-height: 14rem;
   padding: var(--space-6);
   text-align: center;
-  background: linear-gradient(145deg, var(--site-surface), var(--site-accent-soft));
+  background: var(--site-surface-2);
 }
 
 .media-video {
@@ -2382,8 +2455,8 @@ code {
   place-items: center;
   width: var(--space-14);
   height: var(--space-14);
-  border: var(--space-px) solid var(--site-hair);
-  border-radius: var(--radius-xl);
+  border: var(--site-rule);
+  border-radius: var(--site-radius);
   background: var(--site-surface);
   color: var(--site-accent-ink);
   font-size: var(--text-3xl);
@@ -2497,13 +2570,23 @@ code {
   display: inline-flex;
 }
 
-/* The navy band — the one dark panel a page carries, with its proof list. */
+/* The dark product band — the one dark band a page carries, with its proof list. Atlas
+   runs it edge to edge: the band's own box keeps the container's measure (its content and
+   the rhythm tests read that box) and paints the full viewport width behind it with a
+   clipped spread — no markup change, no horizontal overflow. Its section gives up its
+   paper padding so the band meets the rules above and below. */
 .dark-band {
-  padding: var(--space-12);
+  padding: var(--site-section-pad) 0;
   margin: 0;
-  border-radius: var(--site-radius-panel);
+  border-radius: var(--site-radius);
   background: var(--site-panel);
+  box-shadow: 0 0 0 100vmax var(--site-panel);
+  clip-path: inset(0 -100vmax);
   color: var(--site-panel-ink);
+}
+
+.section:has(> .container > .dark-band) {
+  padding-block: 0;
 }
 
 .dark-band .eyebrow,
@@ -2511,12 +2594,8 @@ code {
   color: var(--site-panel-accent);
 }
 
-.dark-band .eyebrow::before,
-.dark-band .kicker::before {
-  background: var(--site-panel-accent);
-}
-
-.dark-band h2 {
+.dark-band h2,
+.dark-band h3 {
   color: var(--site-panel-ink);
 }
 
@@ -2531,6 +2610,15 @@ code {
 
 .dark-band .btn-light {
   color: var(--site-panel);
+}
+
+.dark-band .text-link {
+  color: var(--site-panel-accent);
+}
+
+.dark-band code {
+  background: var(--site-panel-2);
+  color: var(--site-panel-ink);
 }
 
 .dark-grid {
@@ -2580,7 +2668,7 @@ code {
 
 @media (max-width: 47.99rem) {
   .dark-band {
-    padding: var(--space-7) var(--space-5);
+    padding: var(--space-12) 0;
   }
 }
 
@@ -2600,8 +2688,8 @@ code {
 .status-box {
   padding: var(--space-6);
   background: var(--site-surface);
-  border: var(--space-px) solid var(--site-hair);
-  border-radius: var(--radius-xl);
+  border: var(--site-rule);
+  border-radius: var(--site-radius);
 }
 
 .status-box h3 {
@@ -2621,22 +2709,23 @@ code {
   display: inline-block;
   margin-top: var(--space-4);
   font-size: var(--text-sm);
-  font-weight: var(--site-weight-display);
+  font-weight: var(--site-weight-control);
 }
 
-/* The closing call. */
+/* The closing call — Atlas's open finale: centred on the paper between two rules. */
 .final-cta {
   padding: var(--space-14) var(--space-7);
   margin: 0 0 var(--space-16);
   text-align: center;
-  background: var(--site-accent-soft);
-  border: var(--space-px) solid var(--site-hair);
-  border-radius: var(--site-radius-panel);
+  border-block: var(--site-rule);
 }
 
 .final-cta h2 {
   max-width: 23ch;
   margin: 0 auto var(--space-4);
+  font-size: var(--site-text-page-title);
+  line-height: var(--site-leading-display);
+  letter-spacing: var(--site-tracking-display);
 }
 
 .final-cta p {
@@ -2687,10 +2776,16 @@ code {
   }
 }
 
+.breadcrumbs ol {
+  font-family: var(--site-font-mono);
+  letter-spacing: var(--site-tracking-tag);
+  text-transform: uppercase;
+}
+
 .breadcrumbs li + li::before {
   content: "/";
   margin-right: var(--space-2);
-  color: var(--site-hair-2);
+  color: var(--text-muted);
 }
 
 .breadcrumbs a {
@@ -2711,7 +2806,7 @@ code {
 }
 
 .page-hero .ds-display {
-  max-width: 22ch;
+  max-width: 24ch;
 }
 
 .page-hero .section-lede,
@@ -2756,7 +2851,7 @@ code {
   font-weight: var(--weight-medium);
   color: var(--text-secondary);
   background: var(--site-surface);
-  border: var(--space-px) solid var(--site-hair);
+  border: var(--space-px) solid var(--site-hair-2);
   border-radius: var(--radius-base);
   text-decoration: none;
   transition: color var(--site-motion-fast), border-color var(--site-motion-fast);
@@ -2777,8 +2872,8 @@ code {
 
 .flow-item {
   padding: var(--space-4);
-  border: var(--space-px) solid var(--site-panel-hair);
-  border-radius: var(--space-2-5);
+  border: var(--space-px) solid var(--site-panel-line);
+  border-radius: var(--site-radius);
   font-size: var(--text-sm);
 }
 
@@ -2792,7 +2887,8 @@ code {
 }
 
 .flow-item.accent {
-  border-color: var(--site-accent);
+  border-color: var(--site-panel-accent);
+  background: var(--site-panel-2);
 }
 
 .flow-arrow {
@@ -2822,8 +2918,9 @@ code {
 }
 
 .walk-number {
-  font-size: var(--text-3xl);
-  font-weight: var(--site-weight-emphasis);
+  font-family: var(--site-font-mono);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-medium);
   line-height: 1;
   color: var(--site-accent-ink);
 }
@@ -2865,8 +2962,8 @@ code {
 
 .walk-card .code {
   padding: var(--space-4);
-  background: var(--site-ground);
-  border-radius: var(--radius-md);
+  background: var(--site-surface-2);
+  border-radius: var(--site-radius);
   font-size: var(--text-xs);
 }
 
@@ -2888,8 +2985,9 @@ code {
 }
 
 .walk-card .quote {
+  font-family: var(--site-font-display);
   font-size: var(--text-xl);
-  font-weight: var(--site-weight-emphasis);
+  font-weight: var(--site-weight-display);
   line-height: var(--leading-normal);
   color: var(--text-primary);
 }
@@ -2908,8 +3006,8 @@ code {
 .callout {
   margin-top: var(--space-6);
   padding: var(--space-5) var(--space-6);
-  border-left: var(--space-1) solid var(--site-accent);
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  border-left: var(--space-0-5) solid var(--site-accent);
+  border-radius: var(--site-radius);
   background: var(--site-accent-soft);
   font-size: var(--text-sm);
   color: var(--text-secondary);
@@ -2962,15 +3060,96 @@ code {
   min-width: 0;
   color: var(--site-panel-ink);
   background: var(--site-panel);
-  border-color: var(--site-panel-hair);
+  border-color: var(--site-panel-line);
 }
 
 .quick-code .copy-btn:hover {
   background: var(--site-panel-2);
   color: var(--site-panel-ink);
+  border-color: var(--site-panel-ink);
 }
 
-/* The engineering depth's own opener: a hairline and a heavier kicker. */
+/* 698 — the tutorial's reading layout (Atlas's workflow page): the eight step sections in
+   one column, separated by rules, beside a sticky desktop index. The steps keep their own
+   `.section > .container` markup; inside the layout the outer container owns the measure
+   and gutter, so the inner one only stacks. Below 64rem the index is not drawn and the
+   steps read as one natural column. */
+.workflow-layout {
+  border-top: var(--site-rule);
+}
+
+.workflow-layout > .workflow-steps {
+  margin-top: 0;
+}
+
+.workflow-steps .container {
+  max-width: none;
+  padding-inline: 0;
+}
+
+.workflow-steps > .section + .section {
+  border-top: var(--site-rule);
+}
+
+.workflow-index {
+  display: none;
+}
+
+@media (min-width: 64rem) {
+  .workflow-layout {
+    display: grid;
+    grid-template-columns: var(--site-index-width) minmax(0, 1fr);
+    gap: var(--space-12);
+    align-items: start;
+  }
+
+  .workflow-index {
+    display: block;
+    position: sticky;
+    top: calc(var(--site-header-height) + var(--space-6));
+    padding-block: var(--site-section-pad) var(--space-6);
+  }
+}
+
+.workflow-index-title {
+  font-family: var(--site-font-mono);
+  font-size: var(--site-text-micro);
+  letter-spacing: var(--site-tracking-tag);
+  text-transform: uppercase;
+  color: var(--site-accent-ink);
+}
+
+.workflow-index ol {
+  list-style: none;
+  margin: var(--space-3) 0 var(--space-6);
+  padding: 0;
+}
+
+.workflow-index a {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-height: 2.25rem;
+  padding-block: var(--space-1-5);
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.workflow-index a:hover,
+.workflow-index a:focus-visible {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+
+.workflow-index a span {
+  font-family: var(--site-font-mono);
+  font-size: var(--site-text-micro);
+  color: var(--site-accent-ink);
+}
+
+/* The engineering depth's own opener: a rule and the field label. */
 .depth-intro {
   padding-top: var(--space-10);
   border-top: var(--space-px) solid var(--site-hair);
@@ -2994,7 +3173,7 @@ code {
   font-weight: var(--weight-medium);
   color: var(--text-secondary);
   background: var(--site-surface);
-  border: var(--space-px) solid var(--site-hair);
+  border: var(--space-px) solid var(--site-hair-2);
   border-radius: var(--radius-base);
   text-decoration: none;
 }
@@ -3167,18 +3346,19 @@ code {
 
 .price-card.featured {
   border-top: var(--space-1) solid var(--site-accent);
-  box-shadow: var(--site-shadow-lift);
 }
 
 .price {
   margin: var(--space-5) 0 var(--space-1-5);
   font-size: var(--site-text-price);
   font-weight: var(--site-weight-display);
+  font-family: var(--site-font-display);
   line-height: 1.1;
   letter-spacing: var(--site-tracking-display);
 }
 
 .price small {
+  font-family: var(--site-font-sans);
   font-size: var(--text-base);
   font-weight: var(--weight-medium);
   letter-spacing: 0;
@@ -3391,11 +3571,12 @@ code {
   justify-content: center;
   width: var(--space-8);
   height: var(--space-8);
+  font-family: var(--site-font-mono);
   font-size: var(--text-sm);
-  font-weight: var(--site-weight-heavy);
+  font-weight: var(--weight-medium);
   color: var(--site-accent-ink);
-  border: var(--space-px) solid var(--site-hair);
-  border-radius: var(--radius-full);
+  border: var(--space-px) solid var(--site-hair-2);
+  border-radius: var(--site-radius);
 }
 
 .steps h3 {
@@ -3635,7 +3816,7 @@ code {
   align-items: center;
   min-height: 2.5rem;
   padding: 0 var(--space-4);
-  border: var(--space-px) solid var(--site-hair);
+  border: var(--space-px) solid var(--site-hair-2);
   border-radius: var(--radius-base);
   background: var(--site-surface);
   font-size: var(--text-sm);
@@ -3897,9 +4078,9 @@ code {
 
 .doc-section .doc-body blockquote {
   padding: var(--space-3) var(--space-5);
-  border-left: var(--space-1) solid var(--site-accent);
-  background: var(--site-accent-soft);
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  border-left: var(--space-0-5) solid var(--site-accent);
+  background: var(--site-surface-2);
+  border-radius: var(--site-radius);
   color: var(--text-secondary);
 }
 
@@ -4013,7 +4194,7 @@ code {
   font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
   color: var(--text-primary);
-  border: var(--space-px) solid var(--site-hair);
+  border: var(--space-px) solid var(--site-hair-2);
   border-radius: var(--radius-md);
   text-decoration: none;
 }
@@ -4073,9 +4254,10 @@ code {
 }
 
 .footer-col h2 {
+  font-family: var(--site-font-mono);
   font-size: var(--site-text-micro);
-  font-weight: var(--site-weight-heavy);
-  letter-spacing: var(--site-tracking-caps);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--site-tracking-tag);
   text-transform: uppercase;
   color: var(--text-muted);
   margin-bottom: var(--space-3);
@@ -4351,18 +4533,19 @@ code {
   letter-spacing: .06em;
 }
 
+/* Nodes and edges are meaningful graphics: their lines take the band's 3:1 control line. */
 .dag .node {
   fill: var(--site-panel-2);
-  stroke: var(--site-panel-hair);
+  stroke: var(--site-panel-line);
   stroke-width: 1;
 }
 
 .dag .node.hot {
-  stroke: var(--site-accent);
+  stroke: var(--site-panel-accent);
 }
 
 .dag .edge {
-  stroke: var(--site-panel-hair);
+  stroke: var(--site-panel-line);
   stroke-width: 1.5;
   fill: none;
 }
@@ -4468,8 +4651,8 @@ code {
 }
 
 .compare .col.after {
-  border-color: var(--site-accent-line);
-  background: linear-gradient(180deg, var(--site-accent-soft), var(--site-surface) 55%);
+  border-color: var(--site-accent);
+  border-top-width: var(--space-1);
 }
 
 .compare .compare-arrow {
@@ -4480,8 +4663,9 @@ code {
 }
 
 .compare .quote {
-  font-size: var(--text-lg);
-  font-weight: var(--site-weight-emphasis);
+  font-family: var(--site-font-display);
+  font-size: var(--text-xl);
+  font-weight: var(--site-weight-display);
   line-height: 1.35;
   color: var(--text-primary);
 }
@@ -4612,12 +4796,6 @@ code {
     animation: site-enter var(--site-motion-fast) var(--site-motion-ease) backwards;
   }
 
-  .kicker::before,
-  .eyebrow::before {
-    animation: site-rule var(--site-motion-enter) var(--site-motion-ease) both;
-    transform-origin: left;
-  }
-
   .dag .flow {
     animation: dag-flow 1.6s linear infinite;
   }
@@ -4631,27 +4809,12 @@ code {
     transform: scale(var(--site-motion-press));
   }
 
+  /* Atlas keeps hover quiet: a rule turns forest and an arrow nudges; nothing lifts. */
   @media (hover: hover) and (pointer: fine) {
-    .btn:hover,
-    .card:hover,
-    .media-frame:hover,
-    .resource-grid a:hover {
-      transform: translateY(var(--site-motion-lift));
-    }
-
     .card:hover,
     .media-frame:hover,
     .resource-grid a:hover {
       border-color: var(--site-accent);
-    }
-
-    .media-frame:hover,
-    .resource-grid a:hover {
-      box-shadow: var(--site-shadow-lift);
-    }
-
-    .card:hover .card-icon {
-      transform: translateY(var(--site-motion-lift));
     }
 
     .btn:hover span[aria-hidden],
@@ -4675,16 +4838,6 @@ code {
 }
 
 @keyframes site-chart-enter {
-  from {
-    transform: scaleX(0);
-  }
-
-  to {
-    transform: scaleX(1);
-  }
-}
-
-@keyframes site-rule {
   from {
     transform: scaleX(0);
   }
