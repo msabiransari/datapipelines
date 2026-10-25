@@ -31,7 +31,8 @@ object SiteCapabilitiesFaqs {
                 "Can an AI agent create or change a schedule?",
                 "No. Nothing about a schedule is exposed over MCP. Authors, workspace admins and super admins " +
                     "create, edit, pause, resume, unblock, delete and run schedules in the application or over the " +
-                    "REST API with a signed-in session; every member of the workspace can read them. The contracts " +
+                    "REST API with a signed-in session; every workspace member can read schedules, with promoters " +
+                    "limited to pipelines they can see. The contracts " +
                     "are docs/scheduler.md §1 and docs/scheduler.md §6.",
                 "docs/scheduler.md §1, docs/scheduler.md §6",
             ),
