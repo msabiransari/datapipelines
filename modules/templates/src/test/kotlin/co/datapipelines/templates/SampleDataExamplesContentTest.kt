@@ -5,6 +5,7 @@ import co.datapipelines.pipeline.DatasourceRegistry
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineDeserializer
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.PipelineNames
 import co.datapipelines.pipeline.PipelineResolver
 import co.datapipelines.pipeline.PipelineValidationException
 import co.datapipelines.pipeline.PipelineValidator
@@ -195,6 +196,7 @@ class SampleDataExamplesContentTest {
                                 ?.takeIf { version == SEED_VERSION }
                                 ?.let { ResolvedPipeline(it, entityDiscarded = false) }
                         },
+                    pipelineNames = PipelineNames { _, name -> name in seeded },
                     maxCompositionDepth = MAX_COMPOSITION_DEPTH,
                 )
             doc.path("pipelines").forEach { entry ->

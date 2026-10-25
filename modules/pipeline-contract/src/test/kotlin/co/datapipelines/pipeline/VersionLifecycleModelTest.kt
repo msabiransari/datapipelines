@@ -845,6 +845,7 @@ class VersionLifecycleModelTest {
                 DatasourceRegistry { name, _ -> if (name == "pg") DatasourceFacts(co.datapipelines.typesystem.Dialect.H2) else null },
                 PermissiveTemplates,
                 PipelineResolver { _, _, _ -> null },
+                PipelineNames { _, _ -> false },
                 5,
             )
         val statuses = TemplateVersionStatuses { _, _, _ -> PipelineVersionStatus.RELEASED }
