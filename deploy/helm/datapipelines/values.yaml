@@ -78,6 +78,52 @@ service:
   type: ClusterIP
   port: 8080
 
+# The management port (configuration.md §3.14; deployment.md §9). The app serves
+# /actuator/health (and, with the metrics registry, /actuator/prometheus) on
+# 127.0.0.1:9090 by default. A Kubernetes scraper reaches the POD IP, so opening
+# the port to it deliberately sets MANAGEMENT_SERVER_ADDRESS=0.0.0.0 — explicit
+# opt-open, never default-open. Everything here is OFF: with expose: false the
+# chart renders byte-identical to a chart without this block. With expose: true
+# the Deployment gains the management containerPort and both MANAGEMENT_SERVER_*
+# env entries, a headless Service (clusterIP: None — the scraper targets pod IPs,
+# not a cluster VIP) is added, and serviceMonitor.enabled adds a ServiceMonitor
+# for the Prometheus operator. networkPolicy.enabled adds the chart's ONE
+# ingress NetworkPolicy for the app pods (deployment.md §6.4). Selecting the
+# pods isolates EVERY ingress to them, so it carries two rules: the scraper
+# selectors → the management port, and appIngress → the app port. Enabling it
+# REQUIRES both: at least one scraper selector (both empty is refused — an
+# empty from: admits every source) AND an app-port declaration — a non-empty
+# appIngress.from, or the explicit appIngress.allowAll: true acknowledgement
+# (never both; neither is refused). Every selector is a full LabelSelector
+# object (matchLabels / matchExpressions), copied verbatim, e.g.
+#   scraperNamespaceSelector:
+#     matchLabels:
+#       kubernetes.io/metadata.name: monitoring
+# — a bare label map is refused at render time. appIngress.from is a list of
+# NetworkPolicyPeer objects (namespaceSelector / podSelector / ipBlock), copied
+# verbatim; an ipBlock of 0.0.0.0/0 is allow-all by another name. Both scraper
+# selectors set: the two peers are OR'd (Kubernetes semantics) — a pod matches
+# if it is in a namespace matching scraperNamespaceSelector OR matches
+# scraperPodSelector (the latter in the app's own namespace). Policies are
+# unioned: another policy on these pods keeps its allowances and this one adds
+# exactly its declared peers. extraEnv.MANAGEMENT_SERVER_ADDRESS / _PORT are
+# refused: Kubernetes honours the last duplicate env name silently, and the
+# 0.0.0.0 address is the opt-open switch this block alone governs.
+management:
+  expose: false
+  port: 9090
+  networkPolicy:
+    enabled: false
+    scraperNamespaceSelector: {}
+    scraperPodSelector: {}
+    appIngress:
+      allowAll: false
+      from: []
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}
+
 # §6.6: heap ≥ staging max-memory-mb × this instance's share of concurrent
 # executions + ~512 MB; container limit ≈ heap × 1.5. Left empty deliberately —
 # a default that pretends to know the deployment's execution profile is worse

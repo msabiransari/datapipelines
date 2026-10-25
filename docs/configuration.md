@@ -234,7 +234,7 @@ These framework key paths appear in `application.yml` as internal wiring. They a
 | YAML path | Env var | Default | Description |
 |---|---|---|---|
 | `management.server.port` | `MANAGEMENT_SERVER_PORT` | `9090` | Separate management port serving `/actuator/health` (and later `/actuator/prometheus`) — never publish it; nothing actuator is routable on the application port. |
-| `management.server.address` | `MANAGEMENT_SERVER_ADDRESS` | `127.0.0.1` | **Loopback by default** — the management surface is silently-public on no deployment shape. Kubernetes scraping (scraper → pod IP) requires explicitly setting `0.0.0.0`, paired with a NetworkPolicy restricting the port to the monitoring namespace ([Deployment §9](deployment.md#9-security-hardening-checklist-deployment)). Explicit opt-open, never default-open. |
+| `management.server.address` | `MANAGEMENT_SERVER_ADDRESS` | `127.0.0.1` | **Loopback by default** — the management surface is silently-public on no deployment shape. Kubernetes scraping (scraper → pod IP) requires explicitly setting `0.0.0.0`, paired with a NetworkPolicy restricting the port to the monitoring namespace ([Deployment §9](deployment.md#9-security-hardening-checklist-deployment)). Explicit opt-open, never default-open. The reference Helm chart ships this opt-open as the `management` block (chart 0.2.1): `management.expose` pins `0.0.0.0` and the management port, and `management.networkPolicy.enabled` adds that NetworkPolicy — [Deployment §6.4](deployment.md#64-kubernetes-recommended-for-production). |
 
 ### 3.15 Observability
 

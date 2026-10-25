@@ -1,6 +1,6 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.53
+**Status:** v1.54
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-10-25
@@ -460,6 +460,65 @@ Reference Helm chart in `deploy/helm/`. Includes:
 - Externalized Redis (managed recommended).
 - `HorizontalPodAutoscaler` (scales on CPU).
 - `PodDisruptionBudget` (availability during node drains).
+- Management port exposure, all of it OFF by default (the render is unchanged
+  until you opt in — [Configuration §3.14](configuration.md#314-framework-wiring-keys)):
+  `management.expose` adds the management `containerPort` (from `management.port`, default 9090)
+  and pins both `MANAGEMENT_SERVER_*` env entries — including the address opt-open `0.0.0.0` —
+  and a headless `Service` (`clusterIP: None`: the scraper targets pod IPs, not a cluster VIP);
+  `management.networkPolicy.enabled` adds the chart's one ingress `NetworkPolicy` for the app
+  pods — the scraper peers on the management port AND your declared peers on the app port
+  (below); `management.serviceMonitor.enabled` adds a `ServiceMonitor` for the headless
+  `Service`. Any `extraEnv.MANAGEMENT_SERVER_ADDRESS` / `_PORT` double mapping is refused
+  (Kubernetes honours the last duplicate env name silently).
+
+**The management `NetworkPolicy` is a complete ingress policy for the app pods** (#712). A
+NetworkPolicy that selects a pod isolates that pod for **every** ingress, not only for the ports
+its rules name, and the allow rules of all policies selecting the pod are unioned
+([Kubernetes: Network Policies](https://kubernetes.io/docs/concepts/services-networking/network-policies/#the-two-sorts-of-pod-isolation)).
+A policy that admitted only the scraper would therefore cut the app port off — so the chart's
+policy, rendered only with both `management.expose` and `management.networkPolicy.enabled`,
+carries two rules, and the render refuses to enable it without either:
+
+1. **Scraper → management port:** one peer per non-empty scraper selector
+   (`scraperNamespaceSelector`, `scraperPodSelector`). The two are separate peers, OR'd: a pod in a
+   matching namespace OR a matching pod in the app's own namespace. (One peer carrying both a
+   `namespaceSelector` and a `podSelector` would be their AND — the Kubernetes rule.) Both empty
+   is refused: an empty `from:` admits every source.
+2. **Declared peers → app port (8080):** `appIngress.from`, a list of `NetworkPolicyPeer` objects
+   (`namespaceSelector` / `podSelector` / `ipBlock`) copied verbatim — typically your ingress
+   controller's namespace. Instead of a list, `appIngress.allowAll: true` is the explicit
+   acknowledgement that every source may reach the app port; it renders the rule without a
+   `from` and prints the acknowledgement as a comment in the rendered policy. Neither set is
+   refused; both set is refused as a contradiction. An `ipBlock` of `0.0.0.0/0` is allow-all
+   by another name.
+
+Every selector is a full `LabelSelector` object (`matchLabels` / `matchExpressions`), copied
+verbatim. A bare label map is refused at render time: it is not a selector, the API schema
+rejects it, and an apply path that drops unknown fields would leave an empty selector, which
+selects every namespace.
+
+```yaml
+management:
+  expose: true
+  networkPolicy:
+    enabled: true
+    scraperNamespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: monitoring
+    appIngress:
+      from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+```
+
+**With policies you already own.** Policies are additive. If your own policies already select
+these pods, they keep every allowance they grant, and the chart's policy adds exactly its
+declared peers to that union. It never narrows your policy, and it widens it by precisely
+what you declare. To leave an existing stricter app-port policy unwidened, declare no peer it
+does not already admit. `allowAll: true` widens the app port to every source. Egress is not
+touched (`policyTypes: [Ingress]`): §9's egress policy stays yours. With
+`management.networkPolicy.enabled` off (the default) the chart renders no policy at all.
 
 The pod keeps its root filesystem read-only and mounts a disk-backed `emptyDir` at `/tmp`.
 This supports JVM native libraries and the default LAKE spill directories. Set
@@ -520,15 +579,26 @@ through `extraEnv`; an `extraEnv` key that double-maps either DuckDB key fails `
 because Kubernetes does not reject duplicate `env` names and would silently honor the last one.
 CI renders the chart on every push and pull request: the `gate` job runs `scripts/helm-check.sh`,
 a pinned `helm` (version and checksum pin bumped together per DEVELOPMENT.md §10.2) running
-`helm lint --strict` plus ten template cases — defaults render no `env:` block or driver volume, both
+`helm lint --strict` plus eighty-nine verdicts — defaults render no `env:` block or driver volume, both
 DuckDB values render exactly their two quoted entries, all nine `script.js` values render exactly their
 nine quoted entries (each sizing key alone also renders its explicit zero; null renders no entry), each `extraEnv` double mapping
-(the two DuckDB keys and the nine JavaScript keys) is refused
+(the two DuckDB keys, the nine JavaScript keys and the two `MANAGEMENT_SERVER_*` keys) is refused
 with the template's own message, a missing `existingSecret`, `extraEnv.LOADER_PATH`, the three JVM option variables and a
 `script.js.isolateDir` outside the image's launcher-path entries are refused,
-and an enabled driver volume renders its read-only mount (with additional PVC/source checks) — exiting 0 when
-every case passes, 1 when a chart check fails, and 2 on a tooling failure (a download or
-checksum-pin mismatch, never a chart verdict).
+an enabled driver volume renders its read-only mount (with additional PVC/source checks),
+and the management block renders nothing by default (no 9090, no `MANAGEMENT_*` env entry, no
+`NetworkPolicy`, no `ServiceMonitor`) while `management.expose` renders the four objects — the
+management `containerPort`, both `MANAGEMENT_SERVER_*` entries (`0.0.0.0` opt-open), the headless
+`Service` and the `NetworkPolicy`, whose parsed rules must admit the scraper peers on the
+management port AND the declared peers (or, under `allowAll`, every source) on the app port —
+with `management.serviceMonitor.enabled` adding exactly one `ServiceMonitor`, and each of the
+policy's refusals (both scraper selectors empty, no app-port declaration, `allowAll` with a
+`from`, a bare label map, an unknown or empty peer, a quoted `allowAll`) exercised with its own
+message. Every successful render is also validated `-strict` against the Kubernetes 1.35.0 API
+schema (and the CRDs-catalog schema for the `ServiceMonitor`) by a pinned `kubeconform`
+(DEVELOPMENT.md §10.2), with every object accounted for. It exits 0 when every case passes,
+1 when a chart check fails, and 2 on a tooling failure (a download, a checksum-pin mismatch, a
+schema fetch, or a missing python3/PyYAML — never a chart verdict).
 
 The `lib/` driver drop-in (§3.5) is opt-in: set `libVolume.enabled: true` and supply exactly one Kubernetes volume source in `libVolume.source` (for example, `{configMap: {name: drivers}}`); the chart mounts it at `/app/lib` with `readOnly: true`, and a `persistentVolumeClaim` source must itself set `readOnly: true`. Populate the source only through a trusted image, init container or CI-written ConfigMap, never through the app (§9). The default is disabled; an `extraEnv` key naming the launcher path in any spelling the launcher reads (`LOADER_PATH`, `loader_path`, `loader.path`) is refused at render time, and so are `JAVA_TOOL_OPTIONS`, `JDK_JAVA_OPTIONS` and `_JAVA_OPTIONS` (the JVM reads `-D` options from them, and a system property would win over the image's value), so the image's launcher path stays in force against `extraEnv`. Keys inside the `existingSecret` reach the container through `envFrom` and cannot be checked at render time: the Secret holds the §5.1 startup contract and never the launcher path or a JVM option variable.
 
@@ -788,7 +858,7 @@ lifecycle:
 - [ ] Container filesystem read-only except for configured volume mounts.
 - [ ] Resource limits set (CPU + memory) per deployment.
 - [ ] Audit log retained per compliance policy.
-- [ ] No `/actuator/*` path reachable on the application port; `/actuator/prometheus` on the management port (`management.server.port`), cluster-internal only ([Observability §4.2](observability.md#42-exposure)). The management port is never published to a host or load balancer; `MANAGEMENT_SERVER_ADDRESS` defaults to loopback — setting it to `0.0.0.0` (required for k8s scraping) demands an accompanying NetworkPolicy confining the port to the monitoring namespace.
+- [ ] No `/actuator/*` path reachable on the application port; `/actuator/prometheus` on the management port (`management.server.port`), cluster-internal only ([Observability §4.2](observability.md#42-exposure)). The management port is never published to a host or load balancer; `MANAGEMENT_SERVER_ADDRESS` defaults to loopback — setting it to `0.0.0.0` (required for k8s scraping) demands an accompanying NetworkPolicy that admits only the scraper to the management port. Because that policy selects the app pods, it isolates their app port too, so it must also carry the app-port rule you declare. The reference chart implements this check as the `management` block: `management.expose` is the opt-open switch (it pins `0.0.0.0` and renders the port and headless `Service`), and `management.networkPolicy.enabled` renders the policy. That policy carries the scraper rule on the management port plus the app-port rule from `appIngress.from`, or every source under the explicit `appIngress.allowAll: true`. The render refuses both scraper selectors empty, no app-port declaration, and a bare label map in place of a `LabelSelector`. Everything stays OFF by default ([§6.4](#64-kubernetes-recommended-for-production)).
 - [ ] Internet-exposed deployments may prefer to omit `-Pdatapipelines.commit` at build time — a public `/info` commit hash maps the instance to exact source revisions.
 - [ ] The `lib/` driver drop-in mount is **read-only** in the container, populated at image build or by a trusted init container, never writable by the app user; `LOADER_PATH`, if set, comes from the image — never inherited from the deployment environment (a writable `lib/` is code-execution-by-file-drop).
 - [ ] Production Redis requires `requirepass` (or ACLs) **and** TLS, or is confined to a private network segment with a NetworkPolicy — it holds fully materialized caller results for up to an hour (D9). The app logs a structured WARN at startup when the Redis password is empty and the host is not loopback under `development`, and refuses to start under `hardened` ([Configuration §7](configuration.md#7-config-validation)).
@@ -1262,6 +1332,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-25 | v1.54 | #712 — renumbered at merge after #442’s v1.52/v1.53 | **§6.4:** the management port's chart exposure (configuration.md §3.14) — a `management` values block, everything OFF by default (byte-identical default render): `management.expose` adds the management `containerPort` (from `management.port`), pins both `MANAGEMENT_SERVER_*` env entries (address `0.0.0.0` — the opt-open switch) and a headless `Service` (`clusterIP: None`); `management.networkPolicy.enabled` adds the chart's one ingress `NetworkPolicy` for the app pods, which carries two rules: the scraper peers on the management port, and the app-port rule from `appIngress.from` (`NetworkPolicyPeer`s, verbatim) or every source under the explicit `appIngress.allowAll: true`. Every selector is a full `LabelSelector`. The render refuses both scraper selectors empty, no app-port declaration, `allowAll` with a `from`, a bare label map, an unknown or empty peer and a quoted `allowAll`; the isolation and union semantics, and how the policy combines with operator-owned ones, are stated. `management.serviceMonitor.enabled` adds a `ServiceMonitor`. Any `extraEnv.MANAGEMENT_SERVER_*` double mapping is refused (Kubernetes honours the last duplicate env name silently). Chart 0.2.0 → 0.2.1. `helm-check.sh` grows to lint plus eighty-nine verdicts (`(h)`–`(h5h)`), with a pinned `kubeconform` validating every successful render against the Kubernetes 1.35.0 schema and a parsed NetworkPolicy contract. **§9:** the management-port sentence names the app-port rule. `HelmManagementValuesSpecDriftTest` pins the values, the expose guards, the refusals, the three templates' flag lines, the shared app port, the `matchLabels` example and the configuration.md §3.14 row. |
 | 2026-10-25 | v1.53 | 442c (#442) | §8.3: keep scheduler mail off until every instance understands V51 notification trail kinds. §8.4: disable, drain and account for old readers refusing historical notification kinds before downgrade. |
 | 2026-10-24 | v1.52 | 442b (#442) | §5.1: the one optional key with a startup requirement of its own — `datapipelines.scheduler.notifications.enabled=true` needs the mail transport and `auth.base-url` or startup refuses; under `development` nothing sends until the recipient-domain allowlist names a domain. |
 | 2026-10-24 | v1.51 | #688 (Helm portion) — renumbered at merge after #677’s v1.50 | **§6.4:** the nine JavaScript runtime keys (configuration.md §3.28) are named chart values under `script.js`, all empty by default — an empty value renders no env entry, inheriting the image's own isolate directory and the app's derived isolate memory. `script.js.isolateDir` is refused at render time outside the image's launcher-path entries (`/app/lib`, `/opt/graaljs`), and an `extraEnv` double mapping of any of the nine is refused like the DuckDB keys. Number validation stays the app's (startup, by name). Chart 0.2.0; `helm-check.sh` grows to lint plus ten template cases (all-nine render, the single-key or-clause proof, the nine double-mapping refusals, the isolateDir refusal and its two admitted entries); `HelmScriptJsValuesSpecDriftTest` pins doc, chart, values and the Dockerfile's launcher-path list together. |
