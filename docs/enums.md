@@ -1113,7 +1113,7 @@ A resend (REST §20.13) returns a `failed` or `uncertain` delivery to `pending` 
 | Code | Meaning | Retried automatically |
 |---|---|---|
 | `domain_not_allowed` | The recipient's domain is outside the allowlist (at enqueue, or re-checked at send) | No |
-| `backlog_full` | More than `backlog-max` deliveries were pending; never queued for sending | No — admission is serialized across the deployment; resend at the hard cap is refused with `409 schedule.notification.backlog_full` |
+| `backlog_full` | At least `backlog-max` deliveries were pending; never queued for sending | No — admission is serialized across the deployment; resend at the hard cap is refused with `409 schedule.notification.backlog_full` |
 | `invalid_address` | The address fails strict parsing at send | No |
 | `connect_failed` | The relay could not be reached; nothing was sent | Yes, until `max-attempts` |
 | `smtp_transient` | The relay answered 4xx; nothing was accepted | Yes, until `max-attempts` |
@@ -1130,7 +1130,7 @@ A resend (REST §20.13) returns a `failed` or `uncertain` delivery to `pending` 
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-10-25 | next | 442c (#442) | Round two: serialized deployment backlog admission including resend; notices from the run’s frozen target and reference clock with known due/start/end and execution reference; notification-kind activation and older-image rollback boundary. |
+| 2026-10-25 | next | 442c (#442) | §44: backlog_full is decided by serialized deployment admission; explicit resend at the hard cap is refused. |
 | 2026-10-24 | next | 442b (#442) | **§25 `TrailKind`** gains the four V51 notification kinds; new **§43 `NotificationOutcome`** and **§44 `DeliveryState`** with the sanitized `last_error_code` set; §42 no longer says nothing is sent; §15 gains `schedule.notification_resent`. |
 | 2026-10-22 | v1.36 | 8b (#8) | The JavaScript type is enabled with the isolate and stores main(input) statements. |
 | 2026-10-21 | v1.35 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The `node_type` row `TRANSFORM` is `SCRIPT`**; the template-type rows say "the script types" / "a script"; the error-prefix row is `pipeline.script.*`; the JavaScript save refusal is `script.js.unavailable`; the 503 example names `pipeline.script.pool_exhausted`. A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |

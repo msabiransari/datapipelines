@@ -233,7 +233,7 @@ People manage schedules on the **Schedules** page (`/schedules`, in the rail's O
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-10-25 | next | 442c (#442) | Round two: serialized deployment backlog admission including resend; notices from the run’s frozen target and reference clock with known due/start/end and execution reference; notification-kind activation and older-image rollback boundary. |
+| 2026-10-25 | next | 442c (#442) | §2.3: notices use the run’s frozen target and reference timezone with known due/start/end and execution reference. §8.2: activation and rollback pointers. |
 | 2026-10-24 | next | 442b (#442) | §2.3: scheduler notification mail is delivered — off unless enabled (computed `on`/`off` + reason), one notice per selected transition written with it, one message per recipient with a fixed Message-ID, the four delivery states with bounded retries for provably-unsent sends only, `uncertain` never retried, re-checks at send, the resend (REST §20.13). §8.1: API mode sends no mail. §8.3: the three notification counters. §9: notifications struck through. |
 | 2026-10-19 | v1.8 | #584 | §8.4: the rail's Schedules item lands on the Schedules home (`/overview/schedules`, UI Screens §4.20a); the explorer at `/schedules` is its View all. No behaviour of the scheduler changes. |
 | 2026-10-03 | v1.7 | 442a (#442) | Saved schedule notification settings: recipients and five event choices, validated and shown by role; omitted PUT settings preserved; mail remains off pending part b. |
