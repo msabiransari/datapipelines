@@ -33,6 +33,7 @@ import java.nio.file.Paths
  * a fixed 320px explorer column overflows a NARROW window, and a `1fr` that resolves against
  * content overflows a WIDE one.
  */
+@Suppress("LargeClass") // one app+browser fixture shared by 15 walk cases; #717 diagnostics stay cohesive with their case
 class AppShellBrowserTest : BrowserSuite() {
     /** Every top-level screen, in rail order — the same list siteShots photographs. */
     private val appPages =
