@@ -158,7 +158,7 @@ class SiteClaimCitationTest {
     @Test
     fun `every cited section exists`() {
         val refs = citedSectionRefs()
-        // Non-vacuity: 834 anchored citations today. A parser that stopped seeing anchors
+        // Non-vacuity: 834 anchored citations (838 ends with ranges flattened). A parser that stopped seeing anchors
         // (an ANCHOR regex regression, a comment-shape change) must fail loudly here, as
         // MIN_COMMENTS does above — not pass by looking at nothing.
         check(refs.size >= MIN_ANCHORED) { "the citation sweep found only ${refs.size} anchored citations" }
@@ -272,7 +272,8 @@ class SiteClaimCitationTest {
          * than the anchor names), vague (the prose is a marketing question the section never
          * answers literally), synonym (the section says it in other words), chain (further
          * bare `§n` citations ride in the prose). The follow-up issue owns the sharpening; a
-         * comment fixed here leaves this list. Key: `template|doc|anchor(s)`.
+         * comment fixed here leaves this list. Sharpening and the bare-section chain boundary
+         * are tracked in #722. Key: `template|doc|anchor(s)`.
          */
         val KNOWN_UNPROBED: Map<String, String> =
             mapOf(
