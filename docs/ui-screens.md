@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.215
+**Status:** v1.216
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-25 (#670; #632; #632 merge follow-up); 2026-10-24 (#668; #684); 2026-10-23 (#623 merge follow-up); 2026-10-22 (#681; #623; #652; #660; #644); 2026-10-21 (#642; #654; #591; #659; #589; #640); 2026-10-20 (#574; #595; #588; #541; #634; #635; #622 merge follow-up; #622; #599; #604; #639; #638; #610; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-25 (#701; #670; #632; #632 merge follow-up); 2026-10-24 (#701; #668; #684); 2026-10-23 (#623 merge follow-up); 2026-10-22 (#681; #623; #652; #660; #644); 2026-10-21 (#642; #654; #591; #659; #589; #640); 2026-10-20 (#574; #595; #588; #541; #634; #635; #622 merge follow-up; #622; #599; #604; #639; #638; #610; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 ---
 
 ## 1. Purpose
@@ -263,24 +263,42 @@ focused row's line and never around the subtree its item contains (#516) — one
 `:focus-visible` box-shadow is reset on tree items (#644). A mouse click leaves the selected-row tint.
 Labels use text sinks and fixed vendored lucide icons.
 
-**The row (#604).** The browser column sits on the record's browser surface: `--surface-overlay`, one step
-above the page. A row is a card there — the activate (`.dp-tree-activate`) paints the 12px padding
+**The row (#604, re-cut by #701 — owner ruling 2026-10-24).** The browser column sits on the record's browser surface: `--surface-overlay`, one step
+above the page. A row is a card there and ONE line — the activate (`.dp-tree-activate`) paints the 12px padding
 (`--space-3`), the 8px radius (`--radius-md`) and the tints: hover `--surface-hover`, selection
 `--surface-selected` with the title in primary ink (`--text-primary`) and the metadata in secondary
 (`--text-secondary`) — the record's primary-ink selection, not the link blue the other trees keep. The
 name is its own region, `span.dp-tree-title` at the **resource name** role (`--app-text-name`, 12px on
-1.55 leading) wrapping at `overflow-wrap: anywhere` — a long unbroken name included, never clipped or
-line-clamped. The badges live in a trailing `span.dp-tree-meta` — the same column as the title, 8px
-(`--space-2`) under its last line, flex-wrapped, always present in the DOM so the title's box never
-changes when a badge appears or leaves, and carrying no margin at all when no badge is visible. The row's
-DOM contract is kept: the control stays the line's first child (folders' is a button, leaves' an anchor
-whose `title` is the full path), the icon region leads it, and every `aria` attribute is untouched. Rows
-sit 4px (`--space-1`) apart, and the #516 keyboard ring stays on the row's line, which takes the card's
-radius while focused on the browser's rows. Because badges wrap beneath the title, a leaf's status
-markers stay inside the panel at any browser width regardless of the name's length; the panel never
-scrolls sideways for a name (#541).
+1.55 leading), on a single line that truncates with an ellipsis when the row leaves it too little width;
+the control's `title` attribute carries the full canonical name, and the label's carries it too. The
+badges — version, lifecycle state, needs-review, and the optional pin indication — live in a trailing
+`span.dp-tree-meta` on the SAME line, after the title, `flex: none`: the label yields width to them,
+never the reverse, so every indicator stays inside the rail at any browser width and the panel never
+scrolls sideways for a name (#541). The browser's rows are COMPACT at every width (owner ruling
+2026-10-25, amended the same day): the indent per level and a badge's side padding are 4px
+(`--space-1`), while the row's padding and gaps and the badge's vertical padding stay. A name runs ten
+segments deep, and with the 16px indent a deep three-badge row overflowed every default width; a
+width threshold between the two modes would have made widening the browser hide a deep name (131px
+wide at 381px compact, 0px at 382px with the full indent), so there is none — a wider browser only
+gives a name more room. At the 240px minimum a leaf deeper than ~7 levels may show no name at all —
+the tooltip carries it — and a three-badge one may let its badges reach into the row's right padding,
+still inside the rail. When no badge is visible the region stays in the DOM and its box
+does not — no dead gap after the title. The glyph occupies the indent slot the rotating chevron kept: a
+folder shows `folder` closed and `folder-open` expanded, following `aria-expanded`; a leaf keeps
+`file`; both are vertically centred on the text line and neither ever rotates. The row's DOM contract
+is kept: the control stays the line's first child (folders' is a button, leaves' an anchor whose
+`title` is the full path), the icon region leads it, and every `aria` attribute is untouched. Rows sit
+4px (`--space-1`) apart, and the #516 keyboard ring stays on the row's line, which takes the card's
+radius while focused on the browser's rows.
 `BrowserResourceRowBrowserTest` measures the row — surface token, padding, radius, title role, the
-metadata line's geometry, the 4px rhythm, hover and selection colours, and the wrap — off the real page.
+one-line height (a control is padding plus one 18.6px line, folder and leaf alike), the centred glyph,
+the same-line badge bounds, the ellipsis and the truncation of a long unbroken name, the folder/leaf
+glyph references, the 4px rhythm, and hover and selection colours — off the real page; at the 240px
+minimum and the 300px default it measures a depth-three and a depth-ten row on the pipelines tree
+(`v13` and `draft`) and on the templates tree (`v13`, `draft` and `needs review`) in both themes:
+every badge inside the rail, no sideways scroll, the full name in the tooltip, and the compact indent
+and badge padding; at the 480px maximum the rows are still compact and every name is wider than at
+300px.
 
 **Width (#554).** The menu's two widths are fixed; the browser's is the reader's. Its default follows the
 band — 320px at 1600px and wider, 300px from 1101 to 1599px, 270px from 761 to 1100px — and the
@@ -592,7 +610,7 @@ Spacing has no role tokens: the record's 4/8/12/16/20/24/32/40/48 scale is the d
 | Coarse pointer | every button, input and select ≥44px high; a small or icon button ≥44×44 — the HIT REGION grows, never the type or the glyph |
 | Primary navigation row (`.app-nav-link`) | 13px/400, 1.5 leading; ≥36px; 8px/12px padding; 12px icon gap; 8px radius; 12px menu gutters; primary selected label and accent icon (Minimal: inverted ink), tint plus 3px indicator |
 | Workspace switcher (`.app-ws`) | 12px padding/gap, 32px avatar, 8px radius; UI workspace name, 11px role badge, no redundant caption; transparent select remains operable |
-| Resource row (`.app-browser .dp-tree-activate`) | 12px/18.6px title that wraps, a metadata line 8px below, 12px padding, 8px icon gap, 8px radius, 4px between rows; selected: tint + primary-ink title, secondary metadata |
+| Resource row (`.app-browser .dp-tree-activate`) | ONE line: a 12px/18.6px title truncating with an ellipsis (the full canonical name in the control's and label's tooltips), version/draft/needs-review badges on the same line after it, `flex: none` — the label yields width to them, a badge-less row leaves no metadata box; 12px padding, 8px icon gap, 8px radius, 4px between rows; folder/folder-open/file glyphs centred on the line, never rotating; selected: tint + primary-ink title, secondary metadata |
 
 **House exceptions (ruled).** Where the house departs from the application-shell record on purpose, the departure is listed here with its reason and its measurement; nothing else in this section departs from the record.
 
@@ -3106,8 +3124,10 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-25 | v1.216 | #701 — renumbered at merge after #442’s v1.214/v1.215 — the resource row is one line (owner ruling 2026-10-24) and compact at every width (owner ruling 2026-10-25, amended the same day) | **§3.3, §3.4:** the browser's resource row is ONE line (option a of the 2026-10-24 ruling; record amended in 4cf4f91d): the 12px title truncates with an ellipsis, the control's and label's `title` carry the full canonical name; version/draft/needs-review (and the optional pin) share the line after it, `flex: none` — the label yields width to the badges, never the reverse, so no indicator is pushed out of the rail and the panel never scrolls sideways for a name (#541 kept); a badge-less row's metadata box leaves the layout; a folder's glyph is `folder` closed / `folder-open` expanded in the old chevron's indent slot, a leaf keeps `file`, both centred on the line and never rotating — the generic chevron-rotation rule is deleted (its rotate(90deg) namesakes in data-table sort glyphs, the template-tree explorer and the marketing site are untouched). Round two (option a of the 2026-10-25 ruling, amended the same day: its ~320px threshold dropped, since a threshold made widening the browser hide deep names): the browser's rows are COMPACT at every width — the indent per level 16→4px and a badge's side padding 8→4px (`--space-1`); at the 240px minimum a leaf deeper than ~7 levels may show no name, the tooltip carries it, and a three-badge one may reach into the row's right padding, inside the rail. Code: `static/js/tree/render.mjs` (the row's title, metadata region and glyphs), `static/css/app.css` (the one-line row, the folder glyphs, the compact block). Guard: `BrowserResourceRowBrowserTest` measured off the real page (one-line heights, centred glyph, same-line badge bounds, ellipsis plus truncation, glyph references, `transform: none`; at 240px and 300px a depth-three and a depth-ten row with `v13`, `draft` and `needs review`, both themes; still compact at the 480px maximum); the node guard `reusable-tree.test.mjs` pins the href swap following `aria-expanded`. |
 | 2026-10-25 | v1.215 | 442c (#442) | §4.20: add backlog_full to the existing Resend refusal toast codes. |
 | 2026-10-24 | v1.214 | 442b (#442) | **§4.20:** the form's mail note is now the deployment's computed state — shown only while delivery is `off`, worded per reason (`disabled` / `mail_unconfigured` / `no_allowlist`), and the details' suffix follows it; the run dialog gains **Notifications** (§20.11 `deliveries`: notice, recipient for `schedule.update` holders only, state badge never “delivered”, attempts, last error) with **Resend** on `failed`/`uncertain` rows (§20.13, `may_duplicate` warning toast); “Not in this slice” drops notification delivery. |
+
 | 2026-10-25 | v1.213 | #670 round 2 — renumbered at merge after #632's v1.212 (owner ruling 2026-10-24, option (a)) | **§4.25:** the family facts enum is now the top-level `OverviewFamily` (its own file), no longer nested in `OverviewPage` as `Family`; every reference was renamed mechanically and the nested page models stay nested. The three rendered homes (lifecycle, Schedules, API) are byte-identical before and after. Code organisation only; no route, permission, template or wording change. |
 | 2026-10-25 | v1.212 | #632 template version navigation transport | **§4.7 htmx row and State and roles:** the version selector and Versions-tab Open are boosted, rail-preserving navigations, matching `hx-boost="true"` since `1d7b8457a`. R5's read-only selected version resolves server-side independently of transport. The catalog links have no explicit boost attribute. `TemplateHtmxRenderAuditTest` renders two versions and pins both selector and Versions-tab Open attributes and version URLs. No template, route or permission change. |
 | 2026-10-24 | v1.211 | #668 — renumbered at merge after #684's v1.210 — the ui-screens transport vocabulary guard | New guard `UiScreensTransportVocabularyTest` scans this document alone: a line outside the Change Log matching `sidebar uses` (#654's F1 grep) or a sidebar-then-`REST tree`/`tree/search` shape (both case-insensitive) fails the suite unless a dated-quote keep entry with its reason admits it, and a keep entry that admits no line fails as stale. The change-log skip is docs-audit's heading flip, copied verbatim, and the scan asserts its own honesty (at least 3,000 lines read; the flip seen). The keep list seeds empty at 5e1326773 — the sweep found zero matching sentences outside the Change Log, the #466 v1.140 row being inside it. The self-check carries the six pre-#654 transport sentences from aedfaa6bb verbatim (the five `sidebar uses` lines plus the §4.4 picker note, which matches the second shape only). Documentation only; no route, permission, template or script change. |

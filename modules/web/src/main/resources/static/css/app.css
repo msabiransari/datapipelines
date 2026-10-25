@@ -103,7 +103,7 @@
   --app-text-ui: 0.8125rem;            /* 13px — base UI, controls, notices */
   --app-leading-ui: 1.5;               /* 19.5px at 13 */
   --app-text-support: 0.75rem;         /* 12px — support copy, tabs, table cells, card titles, form help/errors */
-  --app-text-name: 0.75rem;            /* 12px — resource names; wrap, never clip */
+  --app-text-name: 0.75rem;            /* 12px — resource names; one line, truncates with an ellipsis (#701) */
   --app-leading-name: 1.55;            /* 18.6px at 12 */
   --app-text-heading: 0.875rem;        /* 14px — a dialog or section heading (the prototype's dialog h3) */
   --app-text-browser-title: var(--app-text-heading); /* 14px — the resource browser's title (#554 reads it) */
@@ -1443,28 +1443,33 @@ button.app-busy::after {
   padding: var(--gap-xs) var(--gap-sm);
 }
 
-/* Record §5/§7 (#604): a browser row is a card on the overlay surface. The control
-   paints the 12px padding, the 8px radius, the hover tint and the selection tint; the
-   line stays transparent so the surface shows through. The name is its own 12px title
-   that wraps — a long unbroken name included — and never clips or line-clamps; the
-   badges wrap onto their own metadata line in the title's column, 8px under the
-   title's last line, in muted ink. */
+/* Record §5/§7 (#604, re-cut by #701 — owner ruling 2026-10-24): a browser row is ONE
+   line on the overlay surface. The control paints the 12px padding, the 8px radius, the
+   hover tint and the selection tint; the line stays transparent so the surface shows
+   through. The 12px title truncates with an ellipsis — the control's title attribute
+   carries the full canonical name — and yields width to the badges, which stay on the
+   same line after it, never wrapping and never leaving the rail (#541). The glyph is
+   flex: none and vertically centred by the row's align-items; a folder's closed/open
+   glyph follows the renderer's aria-expanded. The line keeps display: block so the
+   control fills the row and the #516 ring rides the line (kept below). */
 .app-browser .dp-tree-line {
   display: block;
   min-width: 0;
 }
 
 .app-browser .dp-tree-activate {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  column-gap: var(--space-2);
-  row-gap: 0;
-  align-items: start;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   min-width: 0;
   padding: var(--space-3);
   border-radius: var(--radius-md);
-  white-space: normal;
+  white-space: nowrap;
   text-align: start;
+}
+
+.app-browser .dp-tree-activate .ds-icon {
+  flex: none;
 }
 
 .app-browser .dp-tree-activate:hover {
@@ -1472,26 +1477,27 @@ button.app-busy::after {
 }
 
 .app-browser .dp-tree-title {
+  flex: 1 1 auto;
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--app-text-name);
   line-height: var(--app-leading-name);
 }
 
 .app-browser .dp-tree-meta {
-  grid-column: 2;
+  flex: none;
   display: flex;
-  flex-wrap: wrap;
   gap: var(--space-1);
-  min-width: 0;
-  margin-top: var(--space-2);
   color: var(--text-secondary);
 }
 
-/* A row with no visible badge carries no metadata line at all — the title's box is
-   the row's whole content, with no dead space beneath it. */
+/* A row with no visible badge carries no metadata box at all — no dead gap between the
+   title's end and the row's padding. The span stays in the DOM (the renderer's
+   contract); only its box leaves. */
 .app-browser .dp-tree-meta:not(:has(> .ds-badge:not([hidden]))) {
-  margin-top: 0;
+  display: none;
 }
 
 /* #604: selection is primary ink over the tint on the CONTROL — the generic line
@@ -1515,6 +1521,25 @@ button.app-busy::after {
    ring follows the control's rounded shape without moving off the line. */
 .app-browser .dp-tree-item:focus-visible > .dp-tree-line {
   border-radius: var(--radius-md);
+}
+
+/* #701 round two (owner ruling 2026-10-25, amended the same day): the browser's rows are
+   COMPACT at every width. A one-line row's fixed parts — the 24px padding, the 12px glyph,
+   two 8px gaps and up to three badges (≈169px with their 8px sides) — need ≈217px plus the
+   indent per level, and a name runs ten segments deep. The full 16px indent left a deep
+   three-badge row overflowing every default column, and a threshold between the two modes
+   made widening the browser HIDE names (measured: a depth-10 name 131px wide at 381px
+   compact, 0px at 382px full). So here the indent per level and a badge's side padding are
+   --space-1; the row's padding and gaps and the badge's vertical padding stay. The label
+   yields what is left, down to 0px on a deep leaf at the 240px minimum, where the control's
+   title carries the full name (and a three-badge leaf deeper than 7 levels may reach into
+   the row's right padding, inside the rail — accepted). */
+.app-browser .dp-tree-group {
+  padding-inline-start: var(--space-1);
+}
+
+.app-browser .dp-tree-meta .ds-badge {
+  padding-inline: var(--space-1);
 }
 
 .app-browser-foot {
@@ -3898,7 +3923,9 @@ pre.tf-pane-input {
 .dp-tree-item:focus { outline: 0; }
 .dp-tree-item:focus-visible { box-shadow: none; }
 .dp-tree-item:focus-visible > .dp-tree-line { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: calc(-1 * var(--space-px)); }
-.dp-tree-item[aria-expanded="true"] > .dp-tree-line .ds-icon { transform: rotate(90deg); }
+/* #701 — the chevron rotation lived here; no tree row emits a chevron any more (a
+   folder's closed/open folder glyph follows aria-expanded in the renderer), so the
+   rule is gone. A folder glyph must never rotate. */
 .dp-tree-item[aria-selected="true"] > .dp-tree-line { background: var(--surface-selected); color: var(--text-link); }
 .dp-tree-status { padding: var(--gap-xs); color: var(--text-muted); }
 
