@@ -9,6 +9,7 @@ import org.gradle.api.artifacts.VersionCatalogsExtension
 import org.gradle.api.artifacts.dsl.LockMode
 import org.gradle.api.file.FileCollection
 import org.gradle.api.plugins.JavaPluginExtension
+import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.testing.Test
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.kotlin.dsl.configure
@@ -260,6 +261,18 @@ class CommonConventionsPlugin : Plugin<Project> {
             // would also leave the pregate without the fresh stage-2 evidence its guard
             // coverage requires (scripts/pregate-results-lib.sh pgres::guards_covered).
             outputs.cacheIf(UNCACHEABLE_VERDICT) { false }
+            // The repository tree is an input of EVERY test task (#718, DEVELOPMENT.md §9.4).
+            // Spec-drift and source-scan guards open repo files by walking up to
+            // settings.gradle.kts — docs, the chart, scripts, the Dockerfile, other modules'
+            // source TEXT, and in two scanners every tracked file — none of which is on the
+            // test classpath. Undeclared, a docs-, chart- or comment-only edit left those
+            // guards UP-TO-DATE and their previous verdict reported as this run's (#712).
+            // RELATIVE: content and repo-relative path count, never the checkout's location
+            // or an mtime. See RepoTestInputs for what is excluded and why.
+            inputs
+                .files(RepoTestInputs.files(project))
+                .withPathSensitivity(PathSensitivity.RELATIVE)
+                .withPropertyName(RepoTestInputs.PROPERTY)
             // The ONE-TestEngine rule (see this class's KDoc) enforced instead of merely
             // written down. `classpath` is this task's own input, so reading it here is
             // configuration-cache safe.
@@ -523,6 +536,107 @@ class CommonConventionsPlugin : Plugin<Project> {
             // launch into the Kover-instrumented unit graph would defeat the suite's
             // deliberate separate invocation (module-structure §5.12). (2026-09-03)
             ":tests:browser-tests",
+        )
+    }
+}
+
+/**
+ * The repository files every [Test] task declares as inputs (#718): the whole checkout,
+ * minus what is not repository content.
+ *
+ * Why the whole tree and not a list: the inventory at 9fcc1fb08 (lane 718's evidence) found
+ * tests in 15 of the 16 test-running projects reading files outside their own classpath —
+ * docs, the Helm chart, compose and env files, scripts, the Dockerfile, the version catalog,
+ * the plugin mirror, other modules' Kotlin source as text (a comment-only edit changes no
+ * bytecode, so the classpath cannot see it) — and two scanners reading every tracked file.
+ * A per-module or per-directory list would need a guard proving each read is declared; the
+ * tree has nothing to forget (owner ruling 2026-10-25, over the brief's narrower list). The
+ * accepted cost: any edit re-runs every test task a build invokes, by design.
+ *
+ * [EXCLUDES] mirrors `.gitignore` (what git does not track is not repository content) plus
+ * Git's own directory; [RepoTestInputsTest] fails when a `.gitignore` entry is added without
+ * its mirror here. Two kinds of entry matter beyond speed:
+ *  - local data and state: the sample-data work directories hold gigabytes of Parquet,
+ *    and the pregate writes its logs inside the checkout while its own build runs;
+ *  - secrets: `deploy/secrets.env` and every other secret-shaped file `.gitignore` names
+ *    never enter Gradle's task history, not even as a content hash.
+ * [REINCLUDES] mirrors the `.gitignore` negations that name tracked content a test reads
+ * (`deploy/secrets.env.example`, the committed template — never a secret).
+ */
+internal object RepoTestInputs {
+    /** The input property name Gradle prints for these files in `--info` and in build scans. */
+    const val PROPERTY = "repoFilesReadByTests"
+
+    /** Ant patterns relative to the repo root; each line names the `.gitignore` entry it mirrors. */
+    val EXCLUDES: List<String> =
+        listOf(
+            // Git's own store (a directory in the main checkout, a file in a linked worktree).
+            ".git",
+            ".git/**",
+            // build/ and **/build/, buildSrc/build/, .gradle/, buildSrc/.gradle/, .gradle-docker/, .kotlin/, out/
+            "**/build/**",
+            "**/.gradle/**",
+            "**/.gradle-docker/**",
+            "**/.kotlin/**",
+            "**/out/**",
+            // .gate-logs/, gate-logs/, .pregate-logs/, .tools/
+            "**/.gate-logs/**",
+            "**/gate-logs/**",
+            "**/.pregate-logs/**",
+            "**/.tools/**",
+            // the three sample-data work directories (downloaded sources and built dumps)
+            "scripts/sample-data/work/**",
+            "scripts/sample-data-trade/work/**",
+            "scripts/sample-data-lake/work/**",
+            // .claude/* (agent state, lane worktrees), .worktrees/, .kimi-code/, orchestration/
+            ".claude/**",
+            "**/.worktrees/**",
+            "**/.kimi-code/**",
+            "**/orchestration/**",
+            // .idea/, *.iml, *.ipr, *.iws, .vscode/, *.swp, .DS_Store, .playwright-mcp/, /*.png
+            "**/.idea/**",
+            "**/*.iml",
+            "**/*.ipr",
+            "**/*.iws",
+            "**/.vscode/**",
+            "**/*.swp",
+            "**/.DS_Store",
+            "**/.playwright-mcp/**",
+            "*.png",
+            // hs_err_pid*.log, replay_pid*.log, *.hprof, lib/*.jar
+            "**/hs_err_pid*.log",
+            "**/replay_pid*.log",
+            "**/*.hprof",
+            "lib/*.jar",
+            // secrets: .env, .env.*, *.key, *.pem, *.p8, *.jks, *.p12, *.pfx, *.keystore,
+            // *.truststore, credentials.*, secrets.* (deploy/secrets.env among them)
+            "**/.env",
+            "**/.env.*",
+            "**/*.key",
+            "**/*.pem",
+            "**/*.p8",
+            "**/*.jks",
+            "**/*.p12",
+            "**/*.pfx",
+            "**/*.keystore",
+            "**/*.truststore",
+            "**/credentials.*",
+            "**/secrets.*",
+        )
+
+    /**
+     * Tracked files an exclusion above would hide, as literal repo-relative FILE paths (never
+     * patterns: an empty include pattern set matches the whole tree); each mirrors a
+     * `.gitignore` negation.
+     */
+    val REINCLUDES: List<String> = listOf("deploy/secrets.env.example")
+
+    /** Lazy: nothing is walked until Gradle fingerprints the task's inputs. */
+    fun files(project: Project): FileCollection {
+        val root = project.rootProject.layout.projectDirectory
+        return project.files(
+            root.asFileTree.matching { exclude(EXCLUDES) },
+            REINCLUDES.map { root.file(it) },
         )
     }
 }

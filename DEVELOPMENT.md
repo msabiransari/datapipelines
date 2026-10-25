@@ -883,6 +883,27 @@ either, and both would make Gate A warm. Any change under `buildSrc/` changes ev
 implementation hash, so the first pregate after such a change misses the cache once. Location,
 cleanup and clearing: §9.5.
 
+**Every test task tracks the repository tree (#718).** Gradle knows a `Test` task's classpath, not
+the files its tests open: the spec-drift and source-scan guards find the repo root by walking up to
+`settings.gradle.kts` and read docs, the Helm chart, compose and env files, scripts, the
+`Dockerfile`, the version catalog, the plugin mirror, other modules' sources as text, and in two
+scanners every tracked file. Until #718 a docs-, chart-, script- or comment-only change left those
+tasks `UP-TO-DATE` and the previous run's XML stood in for this run's verdict (#712 saw a planted
+chart mutation stay green until it forced `--rerun`). `CommonConventionsPlugin` now declares the
+whole checkout as the input `repoFilesReadByTests` of every `Test` task (`RepoTestInputs`), hashed
+by content under repo-relative paths: a touch alone re-runs nothing, and an edit anywhere in the
+tree re-runs every test task the build invokes — by design, because the guards read it (owner
+ruling 2026-10-25). The first build after this change, or after any edit, therefore executes the
+pregate's stage-3 guards instead of reporting them `UP-TO-DATE`. Not inputs: what `.gitignore`
+names — build output and Gradle/Kotlin state, `.claude/` (lane worktrees), IDE and tool
+directories, the gate and pregate logs, the sample-data `work/` directories, and the secrets
+(`deploy/secrets.env`, `.env` files, keys and keystores, `credentials.*`, `secrets.*`; the tracked
+template `deploy/secrets.env.example` stays an input) — plus Git's own directory. A secret file
+never enters Gradle's task history, not even as a hash. `RepoTestInputsTest` fails when a
+`.gitignore` entry lands without its mirror in `RepoTestInputs`. The `--rerun` #712 needed is no
+longer needed for this cause; `modules/parameters` and `modules/templates` carried their own input
+lists for it (049), which the convention replaced.
+
 **Preview and failure handling (#479).** `./scripts/pregate.sh --plan [base]` shows the
 resolved base, merge-base and HEAD, selected files (including staged, unstaged and untracked
 edits), touched modules, exact test classes, deferred coverage, guard candidates, stage order

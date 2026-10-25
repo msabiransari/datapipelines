@@ -62,6 +62,12 @@ tasks.test {
     val repoCatalog = rootProject.file("../gradle/libs.versions.toml")
     inputs.file(repoCatalog).withPathSensitivity(PathSensitivity.NONE)
     systemProperty("repo.catalog", repoCatalog.absolutePath)
+    // The other repo files these tests open beside the catalog (#718 — the convention's
+    // repo-tree input reaches the modules' test tasks, never this one): the Dockerfile
+    // (ThirdPartyNoticesTest's GraalJS pin) and .gitignore (RepoTestInputsTest's mirror).
+    inputs.files(rootProject.file("../Dockerfile"), rootProject.file("../.gitignore"))
+        .withPathSensitivity(PathSensitivity.NAME_ONLY)
+        .withPropertyName("repoFilesReadByBuildSrcTests")
     // The probes apply the same JDK 21 toolchain the modules get; hand the
     // tests a RESOLVED installation (detection finds the daemon JDK /
     // ~/.gradle/jdks / any auto-provisioned install) so the probe builds need
