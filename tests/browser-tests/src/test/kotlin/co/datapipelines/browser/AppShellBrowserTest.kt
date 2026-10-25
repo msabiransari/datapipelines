@@ -443,7 +443,8 @@ class AppShellBrowserTest : BrowserSuite() {
     private fun shot(name: String) {
         // Any visible toast is dismissed through its own × first (the 7d/7e shot convention), so
         // the picture shows the screen and not the theme switch that preceded it.
-        page.locator("#toast .ds-toast-close").all().forEach { close -> if (close.isVisible) close.click() }
+        // Locator.all() returns live indexes; hold the nodes in one browser turn instead.
+        page.locator("#toast .ds-toast-close").evaluateAll("buttons => buttons.forEach(button => button.click())")
         page.waitForFunction("() => document.querySelectorAll('#toast .ds-toast').length === 0")
         val dir = Paths.get("build", "reports", "240-screenshots").also { it.toFile().mkdirs() }
         page.screenshot(Page.ScreenshotOptions().setPath(dir.resolve("240-$name.png")))

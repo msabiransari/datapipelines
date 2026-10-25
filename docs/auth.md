@@ -1264,6 +1264,9 @@ Two things are deliberately **not** rows in this table:
 | `/semantic-layer` | Site v2 intent page: GET-only constant content, no datastore and no principal on the request. | 119 |
 | `/use-cases` | Site v3 hub page: GET-only constant content, no datastore and no principal on the request. | 145 |
 | `/explore` | Site v3 directory, generated from the page registry and the packaged docs catalog; no datastore, no principal. | 145 |
+| `/pipeline-scheduling` | Site capability page: GET-only constant content, no datastore and no principal on the request. | 699 |
+| `/sql-dashboards` | Site capability page: GET-only constant content, no datastore and no principal on the request. | 699 |
+| `/reusable-parameter-sets` | Site capability page: GET-only constant content, no datastore and no principal on the request. | 699 |
 | `/docs` | The in-product spec index: packaged Markdown, no principal, no datastore, already public in the AGPL repo. | 073 |
 | `/docs/*` | One packaged spec per slug, rendered from the jar or raw at its .md twin (173); the same text is public on GitHub. | 073 |
 | `/skill.md` | The agent manual's core, raw: it is the MANUAL, so requiring a key would gate learning how to use the key. | 095 |
@@ -1410,6 +1413,9 @@ Handler methods are not listed here: §7.6 is their reviewed table (B3 — one t
 | `/semantic-layer` | Site v2 intent page: GET-only constant content, no datastore and no principal on the request. | `GET /semantic-layer SiteV2Batch2Controller#semanticLayer` | `/semantic-layer` | 200 | no principal · no write · constant | refused |
 | `/use-cases` | Site v3 hub page: GET-only constant content, no datastore and no principal on the request. | `GET /use-cases SiteHubController#useCases` | `/use-cases` | 200 | no principal · no write · constant | refused |
 | `/explore` | Site v3 directory, generated from the page registry and the packaged docs catalog; no datastore, no principal. | `GET /explore SiteHubController#explore` | `/explore` | 200 | no principal · no write · generated from the page registry and the docs catalog | refused |
+| `/pipeline-scheduling` | Site capability page: GET-only constant content, no datastore and no principal on the request. | `GET /pipeline-scheduling SiteCapabilitiesController#pipelineScheduling` | `/pipeline-scheduling` | 200 | no principal · no write · constant | refused |
+| `/sql-dashboards` | Site capability page: GET-only constant content, no datastore and no principal on the request. | `GET /sql-dashboards SiteCapabilitiesController#sqlDashboards` | `/sql-dashboards` | 200 | no principal · no write · constant | refused |
+| `/reusable-parameter-sets` | Site capability page: GET-only constant content, no datastore and no principal on the request. | `GET /reusable-parameter-sets SiteCapabilitiesController#reusableParameterSets` | `/reusable-parameter-sets` | 200 | no principal · no write · constant | refused |
 | `/docs` | The in-product spec index: packaged Markdown, no principal, no datastore, already public in the AGPL repo. | `GET /docs DocsController#index` | `/docs` | 200 | no principal · no write · packaged Markdown | refused |
 | `/docs/*` | One packaged spec per slug, rendered from the jar or raw at its .md twin (173); the same text is public on GitHub. | `GET /docs/{slug} DocsController#doc` `GET /docs/{slug} DocsController#markdown` `GET /docs/{slug}.md DocsController#markdown` | `/docs/auth` | 200 | no principal · no write · packaged Markdown | refused |
 | `/skill.md` | The agent manual's core, raw: it is the MANUAL, so requiring a key would gate learning how to use the key. | `GET /skill.md SkillController#skill` | `/skill.md` | 200 | no principal · no write · the rendered manual | refused |

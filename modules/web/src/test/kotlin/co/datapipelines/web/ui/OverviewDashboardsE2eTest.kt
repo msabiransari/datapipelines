@@ -319,11 +319,11 @@ class OverviewDashboardsE2eTest {
                 now,
                 OverviewRenderSupport.ACTIVE_DAYS,
             )
-        val page = OverviewPage.of(OverviewPage.Family.DASHBOARDS, false, charts, RecentResult.Available(emptyList()), now)
+        val page = OverviewPage.of(OverviewFamily.DASHBOARDS, false, charts, RecentResult.Available(emptyList()), now)
         val doc = Jsoup.parse(OverviewRenderSupport.html(page))
 
         OverviewRenderSupport.assertStripSumsTo(doc, counted(LensedView.EVERYTHING).objects)
-        OverviewRenderSupport.assertGuideWords(doc, OverviewPage.Family.DASHBOARDS, WORDS)
+        OverviewRenderSupport.assertGuideWords(doc, OverviewFamily.DASHBOARDS, WORDS)
     }
 
     private fun equalityTable(

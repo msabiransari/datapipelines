@@ -114,14 +114,15 @@
           if the source overwrites yesterday, yesterday is gone, and no query at the source will bring it back.
           History is the ELT tools' home ground; that is one of the reasons they exist.
         </p>
-        <!-- claim: docs/pipeline-contract.md §8 -->
+        <!-- claim: docs/pipeline-contract.md §8 (write-back), docs/scheduler.md §1 (schedules), docs/pipeline-contract.md §4.12 (SCRIPT nodes), docs/ROADMAP.md §3 (extracts later) -->
         <p>
           Second, the warehouse itself. Write-back here means a pipeline node can land its result in a table of a
           datasource you already run. Useful for feeding a BI tool, and explicitly not a columnar warehouse with a
-          modelling layer on top. Third, scheduling: pipelines run on demand, by an agent, a REST call or a person;
-          the scheduler is the planned roadmap item, and scheduled extracts to your own lake are later. The
-          roadmap page labels both as planned and later, undated. Fourth, transformation breadth: the work is SQL, plus JSONata and JavaScript
-          script nodes that are themselves a roadmap item. If the job is Python operators orchestrating a
+          modelling layer on top. Third, scheduling: a <a th:href="@{/pipeline-scheduling}">schedule</a> can rerun a
+          pipeline at a cron pattern's times, so a write-back can be refreshed nightly, but scheduled extracts to your
+          own lake are later, and the roadmap page labels them so, undated. Fourth, transformation breadth: the work
+          is SQL, plus JSONata and JavaScript <code>SCRIPT</code> nodes over the staged rows. If the job is Python
+          operators orchestrating a
           platform, the <a th:href="@{/compare/airflow}">Airflow comparison</a> says plainly that Airflow is the
           answer.
         </p>

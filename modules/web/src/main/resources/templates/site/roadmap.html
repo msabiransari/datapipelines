@@ -13,10 +13,13 @@
   <!--/* Site v2: the public roadmap. Three bands — shipped, planned, later — with a
        dateline the SiteRoadmapFreshnessTest keeps honest (a roadmap older than 120 days fails
        the build). Wording ruled by the owner 2026-09-09; the "shipped" band cites the packaged
-       specs, the two roadmap bands cite the design records on disk. */-->
+       specs, the two roadmap bands cite the design records on disk. #699 (2026-10-24) moved the
+       scheduler, dashboards and SCRIPT nodes into the shipped band, each with its pinned heading,
+       and left in the planned band only what their contracts say is not built. */-->
   <!-- claim: docs/ROADMAP.md §2 — the v1.1 candidates -->
-  <!-- claim: docs/superpowers/specs/2026-09-07-scheduler-design.md — scheduler, ratified -->
-  <!-- claim: docs/superpowers/specs/2026-09-09-transform-nodes-design.md — JSONata / JavaScript nodes -->
+  <!-- claim: docs/scheduler.md §1 and §9 — the scheduler, and what slice 1 leaves out -->
+  <!-- claim: docs/dashboards.md §1 — visualizations, dashboards and parameter sets -->
+  <!-- claim: docs/pipeline-contract.md §4.12 — the SCRIPT node -->
 
   <script type="application/ld+json">
   {
@@ -24,7 +27,7 @@
     "@type": "Article",
     "headline": "datapipelines.co roadmap: what ships now, what is planned, and what comes later",
     "datePublished": "2026-09-09",
-    "dateModified": "2026-09-16",
+    "dateModified": "2026-10-24",
     "author": { "@type": "Organization", "name": "datapipelines.co" },
     "publisher": { "@type": "Organization", "name": "datapipelines.co" },
     "mainEntityOfPage": "https://datapipelines.co/roadmap"
@@ -40,7 +43,7 @@
         specified in the packaged docs. <strong>Planned</strong> describes features being designed or developed. <strong>Later</strong>
         describes longer-term direction. Planned features have no announced release date.
       </p>
-      <p class="dateline" data-roadmap-updated="2026-09-16">Last updated 2026-09-16</p>
+      <p class="dateline" data-roadmap-updated="2026-10-24">Last updated 2026-10-24</p>
     </div>
   </section>
 
@@ -79,6 +82,21 @@
           <h3>Agent probes</h3>
           <p>Catalogue statistics and indexes per table, and a bounded <code>sql_probe</code> that returns rows, wall time and the plan, so an agent fixes a slow shape from evidence.</p>
         </article>
+        <article class="card">
+          <!-- claim: docs/scheduler.md §1 -->
+          <h3>Scheduler</h3>
+          <p>A schedule runs one pipeline at a five-field cron pattern's times in an IANA time zone, with a preview of the next runs, pause, resume, run now and a history of every run. People manage schedules in the application; agents do not. <a th:href="@{/pipeline-scheduling}">Pipeline scheduling.</a></p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/dashboards.md §1 -->
+          <h3>Dashboards</h3>
+          <p>Charts, tables and KPI cards over pinned, released pipelines, with filters from a reusable parameter set. An agent drafts them, a person releases them, and your product can embed them through its own backend. <a th:href="@{/sql-dashboards}">SQL dashboards.</a></p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/pipeline-contract.md §4.12, docs/dag-executor.md §5.3, docs/deployment.md §6.4 -->
+          <h3>JSONata and JavaScript nodes</h3>
+          <p>A <code>SCRIPT</code> node runs a versioned JSONata or JavaScript template over staged tables, with no handle to the network or the filesystem. JavaScript is not Node: it runs in an isolate the Docker image includes, and a server without it keeps JSONata.</p>
+        </article>
       </div>
     </div>
   </section>
@@ -103,13 +121,16 @@
         <li><strong>No in-browser pipeline or template authoring without an agent</strong>: the editors
           preview, execute, release and discard; authoring is MCP-first today.
           <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §2.2</a></li>
-        <li><strong>No scheduler, and no scheduler UI</strong>: the design is ratified and implementation is planned, below. <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §2.2</a></li>
-        <li><strong>No JSONata or JavaScript script nodes yet</strong>: designed and planned.
-          <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §2.2</a></li>
-        <li><strong>No dashboards or report generation yet</strong>: the API a report or a dashboard
-          would read ships today; the surfaces do not. <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §2.2</a></li>
-        <li><strong>No email delivery yet</strong>: alerts, report delivery and email output targets
-          all wait on it. <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §2.2</a></li>
+        <li><strong>Schedules send no mail yet</strong>: recipients and events are saved with a schedule,
+          and delivery is the next slice. Schedules run pipelines only, and their routes take a signed-in
+          session. <a th:href="@{/docs/scheduler}">docs/scheduler.md §9</a></li>
+        <li><strong>No report generation yet</strong>: dashboards ship; scheduled reports, PDF export and
+          condition alerts do not. <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §2.2</a></li>
+        <li><strong>A dashboard's read-only rule is declared</strong>: sources are admitted by their nodes'
+          declared types, not by a read-only database connection; enforcing it at the connection is tracked
+          separately. <a th:href="@{/docs/dashboards}">docs/dashboards.md §5.1</a></li>
+        <li><strong>No email delivery yet</strong>: schedule notices, alerts, report delivery and email
+          output targets all wait on it. <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §2.2</a></li>
         <li><strong>No audit-log screen yet</strong>: the audit log is written on every call and read
           by SQL today; the filter screen is on the backlog. <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §2.2</a></li>
         <li><strong>The v2 band is design-stage</strong>: nested types, conditional execution, per-node
@@ -130,32 +151,27 @@
       <h2 id="rm-next" class="ds-headline">Designed, in progress</h2>
       <div class="split">
         <div>
-          <!-- claim: docs/superpowers/specs/2026-09-07-scheduler-design.md -->
-          <h3>Scheduler</h3>
+          <!-- claim: docs/scheduler.md §2.3 and §9 -->
+          <h3>Schedule notices by mail</h3>
           <ul>
-            <li><b>Schedules live in folders</b> beside the pipelines they run, versioned like everything else.</li>
-            <li><b>Fired exactly once</b> across every instance of the server, with no duplicate runs when you scale out.</li>
-            <li><b>Every run is a first-class execution</b>: same history, same result, same cancel, same audit.</li>
-            <li>The design is ratified; the implementation round is written.</li>
+            <li><b>The settings exist</b>: each schedule already saves its recipients and which events send mail.</li>
+            <li><b>Delivery is next</b>: a failed, unknown or blocked run will send mail by default once it ships.</li>
           </ul>
         </div>
         <div>
-          <!-- claim: docs/ROADMAP.md §2 -->
-          <h3>Dashboards</h3>
+          <!-- claim: docs/scheduler.md §9 -->
+          <h3>Schedules for your own backend</h3>
           <ul>
-            <li><b>Created by your agent</b>, the way it creates a pipeline today.</li>
-            <li><b>Embedded in your own product</b>, not a portal you send people to.</li>
-            <li><b>Fed by released pipelines and APIs</b>, so the numbers are the ones a person released.</li>
-            <li><b>Filtered per viewer</b>: the same dashboard shows each user their own rows.</li>
+            <li><b>A management credential</b>, so a backend can create schedules for its own customers.</li>
+            <li><b>Background one-time runs</b> of a pipeline, outside any schedule.</li>
           </ul>
         </div>
         <div>
-          <!-- claim: docs/superpowers/specs/2026-09-09-transform-nodes-design.md -->
-          <h3>JSONata and JavaScript nodes</h3>
+          <!-- claim: docs/ROADMAP.md §2.2 -->
+          <h3>Report generation</h3>
           <ul>
-            <li><b>Two new template types</b>, not new entities. They inherit versioning, pins and the release rule.</li>
-            <li><b>One <code>SCRIPT</code> node type</b> with <code>row</code>, <code>table</code> and <code>value</code> modes: shape a nested API response, derive parameters, pivot what SQL cannot.</li>
-            <li><b>Sandboxed and bounded</b>: pure functions over staged data, no network, no filesystem, a wall-clock deadline.</li>
+            <li><b>A document, not a chart</b>, rendered over a released pipeline's result and delivered by email first.</li>
+            <li>The design is pending, and it waits on the scheduler's mail.</li>
           </ul>
         </div>
       </div>
@@ -202,8 +218,9 @@
       <p class="kicker">If you came here from Tableau</p>
       <h2 id="rm-tableau" class="ds-headline">What this means beside Tableau</h2>
       <p class="section-lede">
-        Today datapipelines gets a governed dataset <em>into</em> Tableau, as an API or into a database it reads.
-        Planned: dashboards you embed in your own product. Later, extracts on your own bucket. The
+        Today datapipelines gets a governed dataset <em>into</em> Tableau, as an API or into a database it reads,
+        a schedule can rerun the pipeline behind it, and its own SQL dashboards can sit in your product beside
+        Tableau. Later, extracts on your own bucket. The
         <a th:href="@{/tableau}">Tableau page</a> keeps the two columns, ships today and roadmap, side by side.
       </p>
       <div class="btn-row">

@@ -32,6 +32,29 @@ import java.util.UUID
  */
 class ScriptImplementsBrowserTest : BrowserSuite() {
     @Test
+    fun `toast dismissal closes every member of a shrinking stack`() {
+        startTrace()
+        page.setDefaultTimeout(TOAST_PROBE_TIMEOUT_MS)
+        page.setContent(
+            """<div id="toast">
+              <div class="ds-toast"><button class="ds-toast-close">Dismiss first</button></div>
+              <div class="ds-toast"><button class="ds-toast-close">Dismiss second</button></div>
+              <div class="ds-toast"><button class="ds-toast-close">Dismiss third</button></div>
+            </div>""",
+        )
+        // An exit can finish before the next locator RPC. Immediate removal makes that
+        // supported interleaving deterministic, without waiting for an animation or timer.
+        page.evaluate(
+            """() => document.querySelectorAll('#toast .ds-toast-close').forEach(button => {
+              button.addEventListener('click', () => button.closest('.ds-toast').remove());
+            })""",
+        )
+        page.locator("#toast .ds-toast").count() shouldBe TOAST_PROBE_COUNT
+        dismissToasts()
+        page.locator("#toast .ds-toast").count() shouldBe 0
+    }
+
+    @Test
     fun `a script citing a superseded rule is marked wherever it is read, and its release warns and proceeds`() {
         startTrace()
         val user = seedLocalUser(uniqueEmail("tim-" + suffix()), generatedPassword("pw"), mustChange = false)
@@ -383,13 +406,17 @@ class ScriptImplementsBrowserTest : BrowserSuite() {
 
     /** Each theme switch leaves a "Theme updated" toast over the header; dismissed through its own ×. */
     private fun dismissToasts() {
-        page.locator("#toast .ds-toast-close").all().forEach { close -> if (close.isVisible) close.click() }
+        // Locator.all() returns live indexes; hold the nodes in one browser turn instead.
+        page.locator("#toast .ds-toast-close").evaluateAll("buttons => buttons.forEach(button => button.click())")
         page.waitForFunction("() => document.querySelectorAll('#toast .ds-toast').length === 0")
     }
 
     private fun shotDir(): Path = Paths.get("build", "reports", "7e-screenshots").also { it.toFile().mkdirs() }
 
     private companion object {
+        const val TOAST_PROBE_TIMEOUT_MS = 5000.0
+        const val TOAST_PROBE_COUNT = 3
+
         const val TREE_PANEL = "#nav-tree-templates"
 
         const val ORDER_ID = """{"name":"order_id","type":"INTEGER"}"""

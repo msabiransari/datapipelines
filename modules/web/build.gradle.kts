@@ -139,6 +139,8 @@ tasks.named<ProcessResources>("processResources") {
             "README.md",
             "rest-api.md",
             "ROADMAP.md",
+            // #699 — the scheduler's operating contract, under the Operations manual.
+            "scheduler.md",
             "staging.md",
             "templates.md",
             "type-system.md",

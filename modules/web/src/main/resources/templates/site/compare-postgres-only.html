@@ -81,9 +81,9 @@
           <p>The question crosses engines now, orders in Postgres, events in MySQL, a lookup in SQLite, and no engine can see two. What is needed is a place for the join: a scratch database created for that one run, sources staged into it, dropped after. Not a warehouse; a per-run workbench.</p>
         </article>
         <article class="card">
-          <!-- claim: docs/datasources.md §7 -->
+          <!-- claim: docs/datasources.md §7, docs/auth.md §7.5 -->
           <h3>The agent that needs access</h3>
-          <p>An AI coding agent is the newest member of the team and the one you least want holding a superuser password. The server-side shape: credentials encrypted at rest on the server, the agent holding a revocable key limited to its person's role, read-only flags where writes are out of bounds, and every call audited.</p>
+          <p>An AI coding agent is the newest member of the team and the one you least want holding a superuser password. The server-side shape: credentials encrypted at rest on the server, the agent holding a revocable key whose role, chosen at creation, never exceeds its creator's, read-only flags where writes are out of bounds, and every call audited.</p>
         </article>
         <article class="card">
           <!-- claim: docs/rest-api.md §19 -->

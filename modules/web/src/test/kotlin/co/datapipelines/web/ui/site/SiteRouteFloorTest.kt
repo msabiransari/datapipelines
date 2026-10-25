@@ -96,7 +96,15 @@ class SiteRouteFloorTest {
             registry.keys shouldContainAll marketing
             (registry.keys - marketing) shouldBe additions.keys
             additions.keys shouldBe
-                setOf(SitePages.USE_CASES.path, SitePages.EXPLORE.path, SitePages.COMPARE_DAGSTER_AIRFLOW.path)
+                setOf(
+                    SitePages.USE_CASES.path,
+                    SitePages.EXPLORE.path,
+                    SitePages.COMPARE_DAGSTER_AIRFLOW.path,
+                    // #699: the three capability pages.
+                    SitePages.PIPELINE_SCHEDULING.path,
+                    SitePages.SQL_DASHBOARDS.path,
+                    SitePages.REUSABLE_PARAMETER_SETS.path,
+                )
         }
         withClue("every addition names its reason") {
             additions.filterValues { it.length < MIN_REASON_CHARS }.keys.shouldBeEmpty()
@@ -190,8 +198,9 @@ class SiteRouteFloorTest {
 
         // 145 rewrote seven routes; 173 (SEO coverage) renamed headings on eleven routes for the
         // measured phrases, ten of them not rewritten before (/for/agencies already was) —
-        // every retirement names its phrase and keeps its anchor.
-        const val REWRITTEN_ROUTES = 17
+        // every retirement names its phrase and keeps its anchor. 662 also retires the pillar
+        // page's login-era single-key headings, with the section anchor retained.
+        const val REWRITTEN_ROUTES = 18
         const val MIN_PINNED_HEADINGS = 400
         const val MIN_ANCHORS = 150
         const val MIN_REASON_CHARS = 20

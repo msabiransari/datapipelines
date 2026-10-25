@@ -22,7 +22,7 @@ import kotlin.random.Random
  * worded for none, one, some and all.
  */
 class OverviewStackedTest {
-    private val family = OverviewPage.Family.PIPELINES
+    private val family = OverviewFamily.PIPELINES
 
     @Test
     fun `random inventories - the strip's four groups sum to Total and View all counts all but Retired`() {

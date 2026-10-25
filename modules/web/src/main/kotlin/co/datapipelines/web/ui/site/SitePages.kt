@@ -74,7 +74,7 @@ const val RELEASE_STAGE_CTA: String = "Report what breaks."
 const val SITE_SUMMARY: String =
     "Open-source, self-hosted data pipelines for small and medium-sized organisations: an AI agent authors " +
         "reusable SQL pipelines over your existing databases and S3 data, a person reviews and releases them, " +
-        "and the released version serves an API or a dataset for your BI tool."
+        "and the released version serves an API, a dashboard or a dataset for your BI tool."
 
 /** The host of [SITE_ORIGIN], without the scheme — what a request's server name is compared against. */
 val SITE_ORIGIN_HOST: String = SITE_ORIGIN.removePrefix("https://")
@@ -314,7 +314,8 @@ object SitePages {
      * dp-lake (089 §G) — the product page written from the thesis note
      * (`notes/2026-09-07-dp-lake-thesis.md`): the headline IS the note's marketing line.
      * It states exactly what ships — Parquet/Iceberg on S3 read in place, read-only, DuckDB
-     * as the engine, our own catalog — and nothing more: no dashboards, no scheduler.
+     * as the engine, our own catalog — and nothing more: it reads, it never writes the bucket
+     * (#699 retired the "no scheduler, no dashboards" line once both shipped).
      */
     val DP_LAKE =
         SitePage(
@@ -341,8 +342,8 @@ object SitePages {
             path = "/roadmap",
             title = "Roadmap: shipped, planned, and later | datapipelines.co",
             description =
-                "Shipped: MCP server, ${facts.engineCountWord} engines, published APIs. Planned: scheduler, embedded dashboards, " +
-                    "JSONata and JavaScript nodes. Later: lake extracts, alerts.",
+                "Shipped: MCP server, ${facts.engineCountWord} engines, APIs, scheduler, dashboards, JSONata " +
+                    "and JavaScript nodes. Planned: schedule mail, reports. Later: extracts, alerts.",
             view = "site/roadmap",
         )
     val SECURITY =
@@ -429,15 +430,16 @@ object SitePages {
 
     /**
      * "scheduled extract to s3" + "data driven alerts from sql" + "embedded dashboards row level
-     * security" — a ROADMAP page: every roadmap item on it says roadmap, planned or later.
+     * security" — a ROADMAP page: every roadmap item on it says roadmap, planned or later. Since
+     * #699 the embedded dashboards ship; extracts and alerts remain later.
      */
     val TABLEAU_ROADMAP =
         SitePage(
             path = "/tableau/extracts-alerts-dashboards",
-            title = "Embedded dashboards, extracts to S3, alerts: the roadmap",
+            title = "Embedded dashboards today; extracts to S3 and alerts later",
             description =
-                "Embedded dashboards, scheduled extracts to your own bucket, email alerts: what the roadmap " +
-                    "dates, what ships today, and what is not planned.",
+                "Embedded dashboards ship today; scheduled extracts to your own bucket and email alerts " +
+                    "come later. What ships, what is planned, and what is not.",
             view = "site/tableau-extracts-alerts-dashboards",
         )
 
@@ -456,7 +458,7 @@ object SitePages {
     val FOR_SAAS_TEAMS =
         SitePage(
             path = "/for/saas-teams",
-            title = "Embedded analytics without a warehouse: the API ships today",
+            title = "Embedded analytics without a warehouse: APIs and dashboards",
             description =
                 "Show customers their own numbers in your app: an agent authors the pipeline, a person " +
                     "releases it, a versioned endpoint serves each viewer.",
@@ -580,6 +582,42 @@ object SitePages {
                 "Every page on the site, generated from its registry: product pages, the SQL MCP server " +
                     "and each engine, comparisons and Tableau, and the packaged docs.",
             view = "site/explore",
+        )
+
+    // ---- #699: the three capability pages (design record §5). Public marketing routes, distinct
+    // from the protected application pages /schedules, /dashboards and /parameter-sets.
+
+    /** "sql pipeline scheduling" + "schedule sql query" — the scheduler as docs/scheduler.md states it. */
+    val PIPELINE_SCHEDULING =
+        SitePage(
+            path = "/pipeline-scheduling",
+            title = "SQL pipeline scheduling | datapipelines.co",
+            description =
+                "Run a SQL pipeline on a five-field cron in an IANA time zone: preview the next runs, pause, run now, " +
+                    "pick a missed-run policy, bind TODAY to a date.",
+            view = "site/pipeline-scheduling",
+        )
+
+    /** "sql dashboard" (140) + "self hosted dashboard" (140) + "embedded analytics" (260), measured 2026-10-24. */
+    val SQL_DASHBOARDS =
+        SitePage(
+            path = "/sql-dashboards",
+            title = "Self-hosted SQL dashboards | datapipelines.co",
+            description =
+                "Charts, tables and KPI cards over pinned pipeline results, with filters, refresh history and a " +
+                    "backend proxy that keeps the dashboard key server-side.",
+            view = "site/sql-dashboards",
+        )
+
+    /** "parameterized sql queries" (260) + "dashboard filters" (90): the parameter sets dashboards pin. */
+    val REUSABLE_PARAMETER_SETS =
+        SitePage(
+            path = "/reusable-parameter-sets",
+            title = "Reusable parameter sets and dashboard filters | datapipelines.co",
+            description =
+                "Typed inputs and dropdowns defined once: defaults, validation, SQL-fed options and cascading " +
+                    "choices, versioned like a pipeline and reused by dashboards.",
+            view = "site/reusable-parameter-sets",
         )
 
     /** The route prefix the engine pages share. */
@@ -729,6 +767,9 @@ object SitePages {
                 ROADMAP,
                 SECURITY,
                 PUBLISHED_API,
+                PIPELINE_SCHEDULING,
+                SQL_DASHBOARDS,
+                REUSABLE_PARAMETER_SETS,
                 MCP_TOOLS,
                 TABLEAU,
                 TABLEAU_GOVERNED_DATASET,

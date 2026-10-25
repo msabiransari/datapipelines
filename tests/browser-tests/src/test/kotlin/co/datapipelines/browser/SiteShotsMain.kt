@@ -912,31 +912,27 @@ object SiteShotsMain {
         }
 
         /**
-         * 179 (D16): the key shot is the TOP BAR, not a modal — your MCP key is minted by
-         * the sign-in itself (this driver's included) and the chip carries its prefix, the
-         * Copy button and delete-to-rotate. The clip keeps the bar and a little air under
-         * it: the chip IS the claim, and a full 1440x900 of dashboard would bury it.
+         * Keys v2 (233, A15) retired the top-bar chip, so the shot is the `/api-keys` page
+         * itself: the keys table with each key's kind, the role it carries, the identity it
+         * acts as and its creator, beside the New API key button. Two fixed-name keys make
+         * the table read like a real one — the `mcp` key an agent would carry, at the role
+         * the dialog's subset rule offers, and the `endpoint` key [apiConsole]'s association
+         * column needs.
          *
-         * The `endpoint`-kind key is still minted first because [apiConsole]'s association
-         * column needs it — on the `/api-keys` page, where key management moved (D17).
+         * Idempotent: the table arrives with the page but the EMPTY state is a different
+         * element — wait for whichever landed before counting rows, or every run mints
+         * duplicates (it minted five before that wait was here). Fixed names, not timestamped
+         * ones: two runs of this command must produce the same pixels, and
+         * "agent-2026-09-04" in a table cell would differ tomorrow. The create's OOB swap
+         * refreshes the table in place, so no reload is needed before the shutter.
          */
         private fun keys() {
             page.navigate("$baseUrl/api-keys")
-            // The table arrives with the page but the EMPTY state is a different element —
-            // wait for whichever landed. Counting rows before either exists reports zero, and
-            // this method would mint a fresh key on every run (it minted five before this
-            // wait was here) until the shot was a wall of duplicates.
             waitFor(".ds-table, .ds-empty")
-            // Fixed names, not timestamped ones: two runs of this command must produce the
-            // same pixels, and "agent-2026-09-04" in a table cell would differ tomorrow.
+            mintKeyIfAbsent("agent-key", kind = "mcp", binding = null, role = "author")
             mintKeyIfAbsent("reporting-endpoint", kind = "endpoint", binding = DEMO_ENDPOINT_PATH)
-            page.navigate("$baseUrl/dashboard")
-            // Keys v2 (233, A15) retired the top-bar chip this shot framed (`#app-mcpkey`); the
-            // top bar is what remains to wait for. The shot and its alt text are stale until the
-            // #244 retake reframes them on the Keys page.
-            waitFor(".app-topbar")
             refuseVisibleSecret()
-            shoot("keys.png", clipHeight = 176.0)
+            shoot("keys.png")
         }
 
         /**
@@ -956,9 +952,11 @@ object SiteShotsMain {
 
         /**
          * The create-key modal, driven the way a person drives it: Kind first (it decides what
-         * the rest of the form MEANS), then scope or bindings, then the name. `check()` on the
-         * radio dispatches the change event `keyKindChanged()` listens for — a `.click()` on the
-         * label would too, but the radio is what the handler is bound to.
+         * the rest of the form MEANS), then — keys v2 (A14) — the role the `mcp` kind carries,
+         * its options already subset-filtered for the signed-in member, then scope or bindings,
+         * then the name. `check()` on the radio dispatches the change event `keyKindChanged()`
+         * listens for — a `.click()` on the label would too, but the radio is what the handler
+         * is bound to.
          *
          * The name lives in a SPAN inside the cell (a revoked key adds a badge beside it), so an
          * exact-text match on the `td` misses and this method mints a duplicate on every run —
@@ -968,11 +966,18 @@ object SiteShotsMain {
             name: String,
             kind: String,
             binding: String?,
+            role: String? = null,
         ) {
             if (page.locator("#keys-table-body span:text-is('$name')").count() > 0) return
             page.click("button:has-text('New API key')")
             page.locator("#key-modal").waitFor()
             page.locator("#key-modal input[name=kind][value=$kind]").check()
+            if (role != null) {
+                // The role field only exists for the `mcp` kind, revealed by the same change
+                // handler — wait for the field, never for a clock.
+                page.locator("#key-role-field:not(.u-hidden)").waitFor()
+                page.selectOption("#key-role", role)
+            }
             if (binding != null) {
                 // The bindings picker only exists for the `endpoint` kind, and only after the
                 // kind's change handler has run — wait for the field, never for a clock.
@@ -1592,25 +1597,17 @@ object SiteShotsMain {
             }
         }
 
-        private fun shoot(
-            file: String,
-            clipHeight: Double? = null,
-        ) {
+        private fun shoot(file: String) {
             settle()
             val target = outDir.resolve(file)
-            // Clip to the CURRENT viewport, not a constant: the `app` set resizes the page
-            // between passes, and a hard-coded 1440x900 clip would crop the 2560x1440 pass.
             // The scale is the set's ([shotScale]) — DEVICE on a DPR-2 context is what makes
             // the `home` set's PNGs 2880x1800 rather than a CSS-sized bitmap.
-            // [clipHeight] (179's top-bar chip) shortens the shot from the top: the bar is at
-            // the top of every page, and a full-height capture would bury it in chrome-free
-            // dashboard.
             val viewport = page.viewportSize()
             page.screenshot(
                 Page
                     .ScreenshotOptions()
                     .setPath(target)
-                    .setClip(0.0, 0.0, viewport.width.toDouble(), clipHeight ?: viewport.height.toDouble())
+                    .setClip(0.0, 0.0, viewport.width.toDouble(), viewport.height.toDouble())
                     .setAnimations(com.microsoft.playwright.options.ScreenshotAnimations.DISABLED)
                     .setScale(shotScale),
             )
