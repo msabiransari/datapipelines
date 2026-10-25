@@ -6,6 +6,7 @@ import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.executor.StoredResultView
 import co.datapipelines.pipeline.PipelineRecord
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.templates.Template
 import co.datapipelines.typesystem.ColumnSchema
 import co.datapipelines.typesystem.Dialect
@@ -16,6 +17,7 @@ import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import org.jsoup.Jsoup
 import org.junit.jupiter.api.Test
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver
 import org.springframework.mock.web.MockHttpServletRequest
@@ -54,7 +56,8 @@ import java.util.UUID
  * Method, honest limits: a source-level regex sweep — NOT an HTML parser,
  * sufficient for this codebase's attribute-per-line authoring shape; and one
  * full RENDER of the page that carried the E defect, asserting the cancel
- * button comes out resolved. A mutating attribute whose value is a constant
+ * button comes out resolved. Workspace renders also pin #632's boosted version
+ * selector and Versions-tab Open links. A mutating attribute whose value is a constant
  * needs no processing and passes by design.
  */
 class TemplateHtmxRenderAuditTest {
@@ -121,6 +124,45 @@ class TemplateHtmxRenderAuditTest {
         html shouldContain "hx-get=\"/partials/executions/$executionId/result\""
         html shouldNotContain "th:hx-"
         Regex("""hx-[a-z-]+="[^"]*\$\{""").containsMatchIn(html) shouldBe false
+    }
+
+    /** #632: render both navigation surfaces, including the real Versions-tab partial. */
+    @Test
+    fun `template version selector and Versions tab Open links render boosted`() {
+        val now = Instant.parse("2026-08-11T00:00:00Z")
+        val versions =
+            listOf(1, 2).map { version ->
+                VersionRowView.of(
+                    version = version,
+                    status = PipelineVersionStatus.RELEASED,
+                    createdAt = now,
+                    actor = "Author",
+                    now = now,
+                    usage = 0,
+                    usageUnit = "use",
+                    isCurrent = version == 1,
+                    isViewed = version == 1,
+                )
+            }
+        val html =
+            templateEngine().process(
+                "templates/workspace",
+                webContext().apply {
+                    fillTemplateEditor()
+                    setVariable("versions", versions)
+                },
+            )
+        val document = Jsoup.parse(html)
+        val selectorLinks = document.select("a.tw-version-link")
+        val openLinks = document.select("#tw-pane-versions a[href]").filter { it.text() == "Open" }
+        println("#632 rendered anchors: selector=${selectorLinks.size}, Versions-tab Open=${openLinks.size}")
+        selectorLinks.size shouldBe 2
+        openLinks.size shouldBe 2
+        for (links in listOf(selectorLinks, openLinks)) {
+            links.map { it.attr("hx-boost") } shouldBe listOf("true", "true")
+            links.map { it.attr("href").substringBefore('&') } shouldBe
+                listOf("/templates/acme/revenue.sql?version=1", "/templates/acme/revenue.sql?version=2")
+        }
     }
 
     /**

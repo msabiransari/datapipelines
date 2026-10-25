@@ -1,10 +1,6 @@
 package co.datapipelines.web.ui
 
-import co.datapipelines.application.lens.LensedView
 import co.datapipelines.pipeline.Inventory
-import co.datapipelines.pipeline.LifecycleBucket
-import co.datapipelines.pipeline.NavigationFamily
-import co.datapipelines.pipeline.ReadLens
 import java.time.Instant
 
 /**
@@ -24,7 +20,8 @@ import java.time.Instant
  * families whose introduction and agent guidance are written (`overview/guide-<family>.html`).
  *
  * The lifecycle home's builders live in [LifecycleHomePage]; the companion's `of`, `tasks`,
- * `iconFor` and `width` are one-line delegates there (#670).
+ * `iconFor` and `width` are one-line delegates there (#670). The family facts live in the
+ * top-level [OverviewFamily] (#670 round 2).
  */
 data class OverviewPage(
     val family: String,
@@ -217,95 +214,10 @@ data class OverviewPage(
         val hasDraft: Boolean,
     )
 
-    /**
-     * The family facts an overview names. Parameter sets' route is `parameter-sets`. [charts] is
-     * the inventory card the family carries: since #599 all five are lifecycle homes (#598a/b,
-     * #638: the strip, the activity columns and the release history from one chart read).
-     */
-    enum class Family(
-        val navigation: NavigationFamily,
-        val title: String,
-        val singular: String,
-        val plural: String,
-        val offered: List<LifecycleBucket>,
-        val guided: Boolean,
-        val icon: String,
-        val charts: OverviewStacked.ChartSet,
-    ) {
-        PIPELINES(
-            NavigationFamily.PIPELINES,
-            "Pipelines",
-            "pipeline",
-            "pipelines",
-            CatalogLifecycle.PIPELINES,
-            guided = true,
-            icon = "workflow",
-            charts = OverviewStacked.ChartSet.LIFECYCLE,
-        ),
-        TEMPLATES(
-            NavigationFamily.TEMPLATES,
-            "Templates",
-            "template",
-            "templates",
-            CatalogLifecycle.TEMPLATES,
-            guided = true,
-            icon = "code",
-            charts = OverviewStacked.ChartSet.LIFECYCLE,
-        ),
-        DASHBOARDS(
-            NavigationFamily.DASHBOARDS,
-            "Dashboards",
-            "dashboard",
-            "dashboards",
-            CatalogLifecycle.DASHBOARDS,
-            guided = true,
-            icon = "boxes",
-            charts = OverviewStacked.ChartSet.LIFECYCLE,
-        ),
-        VISUALIZATIONS(
-            NavigationFamily.VISUALIZATIONS,
-            "Visualizations",
-            "visualization",
-            "visualizations",
-            CatalogLifecycle.VISUALIZATIONS,
-            guided = true,
-            icon = "chart-line",
-            charts = OverviewStacked.ChartSet.LIFECYCLE,
-        ),
-        PARAMETER_SETS(
-            NavigationFamily.PARAMETER_SETS,
-            "Parameter Sets",
-            "parameter set",
-            "parameter sets",
-            CatalogLifecycle.PARAMETER_SETS,
-            guided = true,
-            icon = "sliders-horizontal",
-            charts = OverviewStacked.ChartSet.LIFECYCLE,
-        ),
-        ;
-
-        val catalogHref: String get() = "/${navigation.route}"
-
-        /** This family's arm of the caller's view — the lens [FamilyInventory] reads it through. */
-        fun lens(view: LensedView): ReadLens =
-            when (this) {
-                PIPELINES -> view.pipelines
-                TEMPLATES -> view.templates
-                DASHBOARDS -> view.dashboards
-                VISUALIZATIONS -> view.visualizations
-                PARAMETER_SETS -> view.parameterSets
-            }
-
-        /** The catalog filtered to [bucket], or null when this family's catalog does not offer it. */
-        fun filtered(bucket: LifecycleBucket): String? = if (bucket in offered) "$catalogHref?lifecycle=${bucket.wire}" else null
-
-        fun count(value: Long): String = "$value ${if (value == 1L) singular else plural}"
-    }
-
     companion object {
         /** The builders live in [LifecycleHomePage]; these delegates keep the frame's face (#670). */
         fun of(
-            family: Family,
+            family: OverviewFamily,
             lensed: Boolean,
             charts: ChartsResult,
             recent: RecentResult?,
@@ -313,7 +225,7 @@ data class OverviewPage(
         ): OverviewPage = LifecycleHomePage.of(family, lensed, charts, recent, now)
 
         fun tasks(
-            family: Family,
+            family: OverviewFamily,
             inventory: Inventory?,
         ): List<TaskRow> = LifecycleHomePage.tasks(family, inventory)
 
