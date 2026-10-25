@@ -26,15 +26,6 @@ dependencies {
     testImplementation(libs.postgresql)
 }
 
-// SampleDataExamplesContentTest reads repo files at RUNTIME — invisible to Gradle's
-// up-to-date checking, so a stale test result would survive an examples.json edit and an
-// ordinary `./gradlew build` would report green on the old verdict (049: the exact silence
-// that let the published artifact drift). Declaring them as test inputs makes the guard
-// re-run when the content it guards changes; the exit gate's --rerun-tasks remains the
-// belt to this braces. One examples file and one bootstrap yml per sample-data family.
-tasks.test {
-    inputs.file(rootProject.layout.projectDirectory.file("scripts/sample-data/content/examples.json"))
-    inputs.file(rootProject.layout.projectDirectory.file("scripts/sample-data-trade/content/examples.json"))
-    inputs.file(rootProject.layout.projectDirectory.file("deploy/sample-data/bootstrap-datasources-nyc.yml"))
-    inputs.file(rootProject.layout.projectDirectory.file("deploy/sample-data/bootstrap-datasources-census.yml"))
-}
+// SampleDataExamplesContentTest reads repo files at RUNTIME (examples.json, the bootstrap ymls); every test task
+// declares the repository tree as an input in the convention (CommonConventionsPlugin, RepoTestInputs;
+// #718), which replaced this module's own list (049's stale-verdict incident).

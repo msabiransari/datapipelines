@@ -37,6 +37,13 @@ import java.io.File
  * the second time (the cache was really on), while its test task and every
  * Kover report/verify task execute both times and are never FROM_CACHE.
  *
+ * Cases (f) and (g) prove the repository-tree test input (#718): a test that
+ * reads `docs/probe.md` through the repo-root walk re-runs when that file's
+ * CONTENT changes and stays UP-TO-DATE when nothing (or only its mtime)
+ * changed; `deploy/secrets.env` and a sample-data work directory never
+ * re-run it and never appear in `--info`, while the tracked
+ * `deploy/secrets.env.example` does re-run it.
+ *
  * The probe projects reuse the repo's real version catalog — the plugin
  * resolves catalog aliases at apply time. Tests (a) and (b) stop at
  * configuration ("help"), but test (c) writes real sources and runs
@@ -266,6 +273,109 @@ class CommonConventionsPluginTest {
             assertTrue(kover.size >= 2, "expected the Kover report and verify tasks, got $kover")
             val cached = kover.filter { it.outcome == TaskOutcome.FROM_CACHE }
             assertTrue(cached.isEmpty(), "Kover tasks served from the build cache: $cached\n${build.output}")
+        }
+    }
+
+    /** A probe test that reads `docs/probe.md` the way the repo's drift tests do: walking up to settings.gradle.kts. */
+    private fun writeRepoDocReadingTest() {
+        probeDir.resolve("modules/web/src/test/kotlin/ProbeTest.kt").apply { parentFile.mkdirs() }.writeText(
+            """
+            package co.datapipelines.probe
+            import org.junit.jupiter.api.Test
+            import java.io.File
+            class ProbeTest {
+                @Test fun readsTheRepoDoc() {
+                    var dir = File(".").absoluteFile
+                    while (!File(dir, "settings.gradle.kts").isFile) dir = dir.parentFile ?: error("no settings.gradle.kts")
+                    val text = File(dir, "docs/probe.md").readText().trim()
+                    check(text.startsWith("probe ")) { text }
+                    println("docs-probe=" + text)
+                }
+            }
+            """.trimIndent(),
+        )
+    }
+
+    /** The docs-probe line the last executed test run wrote to its XML report. */
+    private fun docsProbeSeen(): String {
+        val results = probeDir.resolve("modules/web/build/test-results/test")
+        val xml = results.listFiles()!!.single { it.name.startsWith("TEST-") && it.extension == "xml" }
+        return xml.readLines().single { "docs-probe=" in it }.substringAfter("docs-probe=").substringBefore('<').trim()
+    }
+
+    @Test
+    fun `a repo doc a test reads re-runs the test task when its content changes and only then`() {
+        writeSettings(":modules:web")
+        writeBuild("modules/web/build.gradle.kts")
+        writeRepoDocReadingTest()
+        val doc = probeDir.resolve("docs/probe.md").apply { parentFile.mkdirs() }
+        doc.writeText("probe one\n")
+        val test = ":modules:web:test"
+
+        val first = runner(test).build()
+        assertEquals(TaskOutcome.SUCCESS, first.task(test)?.outcome, first.output)
+        assertEquals("probe one", docsProbeSeen())
+
+        val unchanged = runner(test).build()
+        assertEquals(TaskOutcome.UP_TO_DATE, unchanged.task(test)?.outcome, "no change must leave the task UP-TO-DATE\n${unchanged.output}")
+
+        // Content hashing, not mtime: a touch alone changes nothing.
+        assertTrue(doc.setLastModified(doc.lastModified() + 60_000), "could not touch ${doc.path}")
+        val touched = runner(test).build()
+        assertEquals(TaskOutcome.UP_TO_DATE, touched.task(test)?.outcome, "an mtime-only change re-ran the task\n${touched.output}")
+
+        // The #712 silence: a docs-only edit must EXECUTE the guard that reads the doc.
+        doc.writeText("probe two\n")
+        val edited = runner(test).build()
+        assertEquals(
+            TaskOutcome.SUCCESS,
+            edited.task(test)?.outcome,
+            "editing docs/probe.md left $test ${edited.task(test)?.outcome}: the repo-tree input is missing\n${edited.output}",
+        )
+        assertEquals("probe two", docsProbeSeen(), "the re-run did not read the edited doc")
+    }
+
+    @Test
+    fun `secrets and local data never re-run a test task or reach its input listing while the tracked template does`() {
+        writeSettings(":modules:web")
+        writeBuild("modules/web/build.gradle.kts")
+        writeRepoDocReadingTest()
+        probeDir.resolve("docs/probe.md").apply { parentFile.mkdirs() }.writeText("probe one\n")
+        val secrets = probeDir.resolve("deploy/secrets.env").apply { parentFile.mkdirs() }
+        secrets.writeText("DATAPIPELINES_SECRET=one\n")
+        val lakeData = probeDir.resolve("scripts/sample-data-lake/work/trips.parquet").apply { parentFile.mkdirs() }
+        lakeData.writeText("one\n")
+        val template = probeDir.resolve("deploy/secrets.env.example")
+        template.writeText("DATAPIPELINES_SECRET=\n")
+        val test = ":modules:web:test"
+        // A secret's NAME is the leak marker: the template's name contains it, so match the bare name only.
+        val secretMention = Regex("""secrets\.env(?!\.example)""")
+
+        val first = runner(test, "--info").build()
+        assertEquals(TaskOutcome.SUCCESS, first.task(test)?.outcome, first.output)
+
+        secrets.writeText("DATAPIPELINES_SECRET=two\n")
+        lakeData.writeText("two\n")
+        val excludedOnly = runner(test, "--info").build()
+        assertEquals(
+            TaskOutcome.UP_TO_DATE,
+            excludedOnly.task(test)?.outcome,
+            "a change to deploy/secrets.env or a sample-data work file re-ran the task\n${excludedOnly.output}",
+        )
+
+        template.writeText("DATAPIPELINES_SECRET=\nDATAPIPELINES_OTHER=\n")
+        val templateEdited = runner(test, "--info").build()
+        assertEquals(
+            TaskOutcome.SUCCESS,
+            templateEdited.task(test)?.outcome,
+            "the tracked template is content tests read\n${templateEdited.output}",
+        )
+        // Non-vacuity: --info does list changed input files by path, so the absence below means something.
+        assertTrue("secrets.env.example" in templateEdited.output, "--info named no changed input file\n${templateEdited.output}")
+
+        for (build in listOf(first, excludedOnly, templateEdited)) {
+            val leaks = build.output.lines().filter { secretMention.containsMatchIn(it) }
+            assertEquals(emptyList<String>(), leaks, "deploy/secrets.env reached Gradle's output")
         }
     }
 }
