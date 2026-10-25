@@ -110,6 +110,12 @@ class ParametersConfigurationWiringTest {
         fun releaseMutationGuard(): co.datapipelines.pipeline.release.ReleaseMutationGuard =
             co.datapipelines.pipeline.release.ReleaseMutationGuard.NONE
 
+        /** #517 round three — the bound a restore refusal's blockers list truncates at; the shipped default. */
+        @Bean
+        fun releaseBounds(): co.datapipelines.pipeline.release.ReleaseBounds =
+            co.datapipelines.pipeline.release
+                .ReleaseBounds()
+
         private fun dataSource(): javax.sql.DataSource = io.mockk.mockk(relaxed = true)
 
         @Bean
