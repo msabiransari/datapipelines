@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Status:** v1.67 (single source of truth for every config key)
+**Status:** v1.68 (single source of truth for every config key)
 **Owner:** datapipelines.co core
 **Last updated:** 2026-10-25
 
@@ -234,7 +234,7 @@ These framework key paths appear in `application.yml` as internal wiring. They a
 | YAML path | Env var | Default | Description |
 |---|---|---|---|
 | `management.server.port` | `MANAGEMENT_SERVER_PORT` | `9090` | Separate management port serving `/actuator/health` (and later `/actuator/prometheus`) — never publish it; nothing actuator is routable on the application port. |
-| `management.server.address` | `MANAGEMENT_SERVER_ADDRESS` | `127.0.0.1` | **Loopback by default** — the management surface is silently-public on no deployment shape. Kubernetes scraping (scraper → pod IP) requires explicitly setting `0.0.0.0`, paired with a NetworkPolicy restricting the port to the monitoring namespace ([Deployment §9](deployment.md#9-security-hardening-checklist-deployment)). Explicit opt-open, never default-open. The reference Helm chart ships this opt-open as the `management` block (chart 0.2.1): `management.expose` pins `0.0.0.0` and the management port, and `management.networkPolicy.enabled` adds that NetworkPolicy — [Deployment §6.4](deployment.md#64-kubernetes-recommended-for-production). |
+| `management.server.address` | `MANAGEMENT_SERVER_ADDRESS` | `127.0.0.1` | **Loopback by default** — the management surface is silently-public on no deployment shape. Kubernetes scraping (scraper → pod IP) requires explicitly setting `0.0.0.0`, paired with a NetworkPolicy limiting management-port access to the declared scraper peers ([Deployment §9](deployment.md#9-security-hardening-checklist-deployment)). Explicit opt-open, never default-open. The reference Helm chart ships this opt-open as the `management` block (chart 0.2.1): `management.expose` pins `0.0.0.0` and the management port, and `management.networkPolicy.enabled` adds a complete ingress NetworkPolicy: the scraper rule plus a required app-port declaration (`management.networkPolicy.appIngress.from` or an explicit `allowAll: true`). Its allowances are unioned with every other policy selecting the pods — [Deployment §6.4](deployment.md#64-kubernetes-recommended-for-production). |
 
 ### 3.15 Observability
 
@@ -1086,6 +1086,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-25 | v1.68 | #712 integration | §3.14: the chart’s complete ingress policy requires the app-port declaration and unions allowances with other selecting policies. |
 | 2026-10-25 | v1.67 | 442c (#442) | §3.29: serialized deployment-wide pending admission, including resend refusal at capacity; activation pointer for a mixed-version fleet. |
 | 2026-10-24 | v1.66 | 442b (#442) | §3.29 gains six scheduler notification keys — `notifications.enabled` (default `false`; `true` needs the mail transport and `auth.base-url` or startup refuses), `recipient-domains` (the allowlist: `example.com` / `*.example.com`; empty under `development` sends nothing, under `hardened` restricts nothing), `max-attempts` (3), `retry-backoff-seconds` (30,120,600), `batch-size` (20) and `backlog-max` (1000); `max-recipients` loses its "settings only" note. Compose and `defaults.env` carry them. |
 | 2026-10-24 | v1.65 | #688 (Helm portion) — renumbered at merge after #686’s v1.64 | §3.28: the nine JavaScript keys are exposed as the chart's `script.js.*` values (deployment.md §6.4) — empty renders no env entry, the isolate directory must be one of the image's launcher-path entries, `extraEnv` double mappings are refused. No key, default, route or permission changes. |
