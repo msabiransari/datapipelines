@@ -230,9 +230,9 @@ class ReleaseCascadeE2eTest {
         val root = nodes.first()
         val nodeJson =
             nodes.map { n ->
-                "{\"id\":${n.id},\"entity_uuid\":\"${entityUuid(
-                    n,
-                )}\",\"status\":\"${n.status}\",\"body_hash\":\"${n.bodyHash}\",\"current\":${n.current ?: "null"}}"
+                val uuid = entityUuid(n)
+                "{\"id\":${n.id},\"entity_uuid\":\"$uuid\",\"status\":\"${n.status}\"," +
+                    "\"body_hash\":\"${n.bodyHash}\",\"current\":${n.current ?: "null"}}"
             }
         val edgeJson = edges.map { (from, to, path) -> "{\"from\":${from.id},\"to\":${to.id},\"path\":\"$path\"}" }
         val canonical =
@@ -609,13 +609,19 @@ class ReleaseCascadeE2eTest {
             )
         withClue("restore succeeds: $restored") { restoreError shouldBe false }
         restored["draft"]["body_hash"].asText() shouldBe parentHash
-        releaseWithPlan(parentId, parentHash, preview, listOf("n1"))
-            .statusCode(409)
-            .body("error.code", equalTo("pipeline.release.plan_conflict"))
-        pipelineStatus(parentId) shouldBe "DRAFT"
-        pipelineStatus(newId) shouldBe "DRAFT"
-        auditRows("pipeline.version.released", parentId).size shouldBe 0
-        auditRows("pipeline.version.released", newId).size shouldBe 0
+        val response = releaseWithPlan(parentId, parentHash, preview, listOf("n1")).extract().response()
+        val parentStatus = pipelineStatus(parentId)
+        val childStatus = pipelineStatus(newId)
+        val parentAudits = auditRows("pipeline.version.released", parentId).size
+        val childAudits = auditRows("pipeline.version.released", newId).size
+        withClue("HTTP ${response.statusCode}; parent=$parentStatus child=$childStatus; release audits=$parentAudits/$childAudits") {
+            response.statusCode shouldBe 409
+            response.jsonPath().getString("error.code") shouldBe "pipeline.release.plan_conflict"
+            parentStatus shouldBe "DRAFT"
+            childStatus shouldBe "DRAFT"
+            parentAudits shouldBe 0
+            childAudits shouldBe 0
+        }
     }
 
     companion object {

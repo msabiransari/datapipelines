@@ -242,8 +242,12 @@ class PipelineDependencyReleaseRollbackE2eTest {
         ) = "[\"$family\",\"$key\",1]"
         val p = id("pipeline", PIPELINE)
         val nodes =
-            listOf(p to pipelineHash) + TEMPLATES.map { id("template", it) to templateHashes.getValue(it) }
-        val nodeJson = nodes.map { (n, hash) -> "{\"id\":$n,\"status\":\"DRAFT\",\"body_hash\":\"$hash\",\"current\":null}" }
+            listOf(Triple(p, pipelineHash, pipelineId)) +
+                TEMPLATES.map { Triple(id("template", it), templateHashes.getValue(it), templateEntityUuid(it)) }
+        val nodeJson =
+            nodes.map { (n, hash, uuid) ->
+                "{\"id\":$n,\"entity_uuid\":\"$uuid\",\"status\":\"DRAFT\",\"body_hash\":\"$hash\",\"current\":null}"
+            }
         val edgeJson =
             TEMPLATES.mapIndexed { index, t -> "{\"from\":$p,\"to\":${id("template", t)},\"path\":\"nodes[$index].template\"}" }
         val canonical =
@@ -255,6 +259,18 @@ class PipelineDependencyReleaseRollbackE2eTest {
                 .digest(canonical.toByteArray(Charsets.UTF_8))
         return "v1:" + digest.joinToString("") { "%02x".format(it) }
     }
+
+    private fun templateEntityUuid(name: String): String =
+        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            connection.prepareStatement("SELECT id FROM templates WHERE workspace_id = ?::uuid AND name = ?").use { statement ->
+                statement.setString(1, WORKSPACE_ID)
+                statement.setString(2, name)
+                statement.executeQuery().use { rows ->
+                    check(rows.next())
+                    rows.getString(1)
+                }
+            }
+        }
 
     private fun registerDatasource() {
         DriverManager.getConnection(H2_JDBC_URL, H2_USER, H2_PASSWORD).use { it.createStatement().execute("SELECT 1") }
