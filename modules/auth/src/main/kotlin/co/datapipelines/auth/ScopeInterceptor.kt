@@ -189,9 +189,11 @@ class ScopeInterceptor(
      * catalogued code, its status and its details, unmodified.
      *
      * The interceptor does not re-derive WHY: [ScopeMatrix.allowed] already distinguished a
-     * role that does not hold the permission (`auth.role_required`), a key whose member's role
-     * does not reach it (`auth.key_issuer_role_lost`) and an unreachable workspace
-     * (`workspace.not_found`), and a second judgement here is a second place for them to drift.
+     * role that does not hold the permission (`auth.role_required` — an MCP key's own chosen
+     * role included, keys v2) and an unreachable workspace (`workspace.not_found`), and a
+     * second judgement here is a second place for them to drift. (`auth.key_issuer_role_lost`
+     * is not this interceptor's answer: since keys v2 a key carries its own role and refuses
+     * with `auth.role_required`; that code remains only on the context-judged path.)
      */
     private fun deny(
         request: HttpServletRequest,
