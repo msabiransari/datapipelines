@@ -107,7 +107,9 @@ internal object NeedsReviewFixtures {
                 ),
             ) as Map<String, Any?>
         val status = (result["status"] as Number).toInt()
-        check(status == if (hash == null) 201 else 200) { "script template $id: $status ${result["body"]}" }
+        check(status == if (hash == null) 201 else 200) {
+            "script template $id revision $revision (If-Match $hash): $status ${result["body"]}"
+        }
         return result["body"] as String
     }
 }

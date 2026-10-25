@@ -525,16 +525,18 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
         EditorRunFixtures.registerSourceDatasource(page, baseUrl, datasource).shouldBeEmpty()
         val rule = NeedsReviewFixtures.recordRule(email, datasource, "A row is a row.", supersedes = null, workspace = workspace)
         for (script in SCRIPT_ROWS) {
-            var hash = field(NeedsReviewFixtures.writeCitingScript(page, script, rule), "body_hash")
+            NeedsReviewFixtures.writeCitingScript(page, script, rule)
             for (round in 1..RELEASES) {
-                if (round > 1) hash = field(NeedsReviewFixtures.writeCitingScript(page, script, rule, round, hash), "body_hash")
-                api("POST", "/api/v1/templates/release", """{"name":"$script"}""", hash)
-                hash = field(api("GET", "/api/v1/templates?name=$script", null), "body_hash")
+                if (round > 1) NeedsReviewFixtures.writeCitingScript(page, script, rule, round, workingHash(script))
+                api("POST", "/api/v1/templates/release", """{"name":"$script"}""", workingHash(script))
             }
-            NeedsReviewFixtures.writeCitingScript(page, script, rule, RELEASES + 1, hash)
+            NeedsReviewFixtures.writeCitingScript(page, script, rule, RELEASES + 1, workingHash(script))
         }
         NeedsReviewFixtures.recordRule(email, datasource, "A row is a row with a name.", supersedes = rule, workspace = workspace)
     }
+
+    /** The working version's hash (the draft's when one exists), read fresh before every write, as the integration suites do. */
+    private fun workingHash(script: String): String = field(api("GET", "/api/v1/templates?name=$script", null), "body_hash")
 
     private fun workspaceCreator(workspace: UUID): String {
         val sql = "SELECT u.email FROM workspaces w JOIN users u ON u.id = w.created_by WHERE w.id = ?"
