@@ -230,6 +230,7 @@ class ApplicationSmokeTest {
     fun `the management port serves prometheus and health anonymously - and only those two endpoints`() {
         val index = get(managementPort, "/actuator")
         withClue("anonymous GET /actuator on the management port: ${index.body()}") { index.statusCode() shouldBe 200 }
+        println("event=scrape.evidence management_index=${index.body()}")
         val links =
             mapper
                 .readTree(index.body())["_links"]
