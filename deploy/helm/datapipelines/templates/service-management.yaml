@@ -1,0 +1,21 @@
+{{- if .Values.management.expose }}
+{{/* Headless on purpose (values.yaml, management block): a Prometheus scraper
+     targets POD IPs so each instance's own /actuator/prometheus is scraped — a
+     cluster VIP would round-robin scrapes across instances. No ingress
+     annotation and no LoadBalancer/NodePort: the port never leaves the cluster
+     (deployment.md §9). */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "datapipelines.fullname" . }}-management
+  labels:
+    {{- include "datapipelines.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  ports:
+    - name: management
+      port: {{ .Values.management.port }}
+      targetPort: management
+  selector:
+    {{- include "datapipelines.selectorLabels" . | nindent 4 }}
+{{- end }}

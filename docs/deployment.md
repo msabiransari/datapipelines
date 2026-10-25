@@ -460,6 +460,16 @@ Reference Helm chart in `deploy/helm/`. Includes:
 - Externalized Redis (managed recommended).
 - `HorizontalPodAutoscaler` (scales on CPU).
 - `PodDisruptionBudget` (availability during node drains).
+- Management port exposure, all of it OFF by default (the render is unchanged
+  until you opt in — [Configuration §3.14](configuration.md#314-framework-wiring-keys)):
+  `management.expose` adds the management `containerPort` (from `management.port`, default 9090)
+  and pins both `MANAGEMENT_SERVER_*` env entries — including the address opt-open `0.0.0.0` —
+  and a headless `Service` (`clusterIP: None`: the scraper targets pod IPs, not a cluster VIP);
+  `management.networkPolicy.enabled` adds a `NetworkPolicy` confining that port to the scraper
+  selectors (both selectors empty is REFUSED at render time — an empty `from:` admits every
+  source); `management.serviceMonitor.enabled` adds a `ServiceMonitor` for the headless
+  `Service`. Any `extraEnv.MANAGEMENT_SERVER_ADDRESS` / `_PORT` double mapping is refused
+  (Kubernetes honours the last duplicate env name silently).
 
 The pod keeps its root filesystem read-only and mounts a disk-backed `emptyDir` at `/tmp`.
 This supports JVM native libraries and the default LAKE spill directories. Set
@@ -520,13 +530,18 @@ through `extraEnv`; an `extraEnv` key that double-maps either DuckDB key fails `
 because Kubernetes does not reject duplicate `env` names and would silently honor the last one.
 CI renders the chart on every push and pull request: the `gate` job runs `scripts/helm-check.sh`,
 a pinned `helm` (version and checksum pin bumped together per DEVELOPMENT.md §10.2) running
-`helm lint --strict` plus ten template cases — defaults render no `env:` block or driver volume, both
+`helm lint --strict` plus fifty-six verdict cases — defaults render no `env:` block or driver volume, both
 DuckDB values render exactly their two quoted entries, all nine `script.js` values render exactly their
 nine quoted entries (each sizing key alone also renders its explicit zero; null renders no entry), each `extraEnv` double mapping
-(the two DuckDB keys and the nine JavaScript keys) is refused
+(the two DuckDB keys, the nine JavaScript keys and the two `MANAGEMENT_SERVER_*` keys) is refused
 with the template's own message, a missing `existingSecret`, `extraEnv.LOADER_PATH`, the three JVM option variables and a
 `script.js.isolateDir` outside the image's launcher-path entries are refused,
-and an enabled driver volume renders its read-only mount (with additional PVC/source checks) — exiting 0 when
+an enabled driver volume renders its read-only mount (with additional PVC/source checks),
+and the management block renders nothing by default (no 9090, no `MANAGEMENT_*` env entry, no
+`NetworkPolicy`, no `ServiceMonitor`) while `management.expose` renders the four objects — the
+management `containerPort`, both `MANAGEMENT_SERVER_*` entries (`0.0.0.0` opt-open), the headless
+`Service` and the confining `NetworkPolicy` — with `management.serviceMonitor.enabled` adding
+exactly one `ServiceMonitor` and both scraper selectors empty refused — exiting 0 when
 every case passes, 1 when a chart check fails, and 2 on a tooling failure (a download or
 checksum-pin mismatch, never a chart verdict).
 
@@ -781,7 +796,7 @@ lifecycle:
 - [ ] Container filesystem read-only except for configured volume mounts.
 - [ ] Resource limits set (CPU + memory) per deployment.
 - [ ] Audit log retained per compliance policy.
-- [ ] No `/actuator/*` path reachable on the application port; `/actuator/prometheus` on the management port (`management.server.port`), cluster-internal only ([Observability §4.2](observability.md#42-exposure)). The management port is never published to a host or load balancer; `MANAGEMENT_SERVER_ADDRESS` defaults to loopback — setting it to `0.0.0.0` (required for k8s scraping) demands an accompanying NetworkPolicy confining the port to the monitoring namespace.
+- [ ] No `/actuator/*` path reachable on the application port; `/actuator/prometheus` on the management port (`management.server.port`), cluster-internal only ([Observability §4.2](observability.md#42-exposure)). The management port is never published to a host or load balancer; `MANAGEMENT_SERVER_ADDRESS` defaults to loopback — setting it to `0.0.0.0` (required for k8s scraping) demands an accompanying NetworkPolicy confining the port to the monitoring namespace. The reference chart implements this check as the `management` block: `management.expose` is the opt-open switch (it pins `0.0.0.0` and renders the port, headless `Service` and — with `management.networkPolicy.enabled` — the NetworkPolicy; both scraper selectors empty is refused at render time), and it stays OFF by default ([§6.4](#64-kubernetes-recommended-for-production)).
 - [ ] Internet-exposed deployments may prefer to omit `-Pdatapipelines.commit` at build time — a public `/info` commit hash maps the instance to exact source revisions.
 - [ ] The `lib/` driver drop-in mount is **read-only** in the container, populated at image build or by a trusted init container, never writable by the app user; `LOADER_PATH`, if set, comes from the image — never inherited from the deployment environment (a writable `lib/` is code-execution-by-file-drop).
 - [ ] Production Redis requires `requirepass` (or ACLs) **and** TLS, or is confined to a private network segment with a NetworkPolicy — it holds fully materialized caller results for up to an hour (D9). The app logs a structured WARN at startup when the Redis password is empty and the host is not loopback under `development`, and refuses to start under `hardened` ([Configuration §7](configuration.md#7-config-validation)).
@@ -1255,6 +1270,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-25 | v1.52 | #712 | **§6.4:** the management port's chart exposure (configuration.md §3.14) — a `management` values block, everything OFF by default (byte-identical default render): `management.expose` adds the management `containerPort` (from `management.port`), pins both `MANAGEMENT_SERVER_*` env entries (address `0.0.0.0` — the opt-open switch) and a headless `Service` (`clusterIP: None`); `management.networkPolicy.enabled` adds a `NetworkPolicy` confining the port to the scraper selectors (both selectors empty refused at render time); `management.serviceMonitor.enabled` adds a `ServiceMonitor`. Any `extraEnv.MANAGEMENT_SERVER_*` double mapping is refused (Kubernetes honours the last duplicate env name silently). Chart 0.2.0 → 0.2.1; `helm-check.sh` grows to lint plus fifty-six verdict cases (`(h)`–`(h5)`); `HelmManagementValuesSpecDriftTest` pins the values, the expose guards, the refusals, the three templates' flag lines and the configuration.md §3.14 row. |
 | 2026-10-24 | v1.51 | #688 (Helm portion) — renumbered at merge after #677’s v1.50 | **§6.4:** the nine JavaScript runtime keys (configuration.md §3.28) are named chart values under `script.js`, all empty by default — an empty value renders no env entry, inheriting the image's own isolate directory and the app's derived isolate memory. `script.js.isolateDir` is refused at render time outside the image's launcher-path entries (`/app/lib`, `/opt/graaljs`), and an `extraEnv` double mapping of any of the nine is refused like the DuckDB keys. Number validation stays the app's (startup, by name). Chart 0.2.0; `helm-check.sh` grows to lint plus ten template cases (all-nine render, the single-key or-clause proof, the nine double-mapping refusals, the isolateDir refusal and its two admitted entries); `HelmScriptJsValuesSpecDriftTest` pins doc, chart, values and the Dockerfile's launcher-path list together. |
 | 2026-10-24 | v1.50 | #677 third-party notices | §10 documents generated Maven/isolate notices in the jar and image, the unresolved/stale licence guards, optional-driver terms and the remaining distribution boundaries. |
 | 2026-10-22 | v1.49 | 8b (#8) | Documents the isolate directory/loader agreement, pre-installed resources on read-only roots, shared-isolate failure mode and memory sizing. |

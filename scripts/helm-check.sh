@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # helm-check.sh — render the reference Helm chart (deploy/helm/datapipelines)
-# with a PINNED helm binary: `helm lint --strict` plus ten `helm template`
-# cases whose assertions pin the chart's render-TIME behaviour — the Kotlin
-# drift tests HelmDuckDbValuesSpecDriftTest and HelmScriptJsValuesSpecDriftTest
-# pin only the chart's TEXT (the pregate has no helm binary), so the real
-# engine is exercised here (#411, closing the text-vs-engine gap #140 left).
+# with a PINNED helm binary: `helm lint --strict` plus the `helm template`
+# cases below — fifty-six `verdict` assertions in total, labels `(a)`–`(h5)` —
+# whose assertions pin the chart's render-TIME behaviour — the Kotlin drift
+# tests HelmDuckDbValuesSpecDriftTest, HelmScriptJsValuesSpecDriftTest and
+# HelmManagementValuesSpecDriftTest pin only the chart's TEXT (the pregate has
+# no helm binary), so the real engine is exercised here (#411, closing the
+# text-vs-engine gap #140 left).
 #
 #   ./scripts/helm-check.sh        # from the repo root; see EXIT CONTRACT
 #
@@ -43,6 +45,28 @@
 #   (f)   libVolume enabled with a ConfigMap: exactly one read-only /app/lib
 #         mount and one driver-library volume using that ConfigMap.
 #         PVC sources must also be read-only; empty/multiple sources refused.
+#   (h)   management defaults: exit 0; no 9090, no MANAGEMENT_* env entry, no
+#         NetworkPolicy, no ServiceMonitor anywhere (the management block,
+#         configuration.md §3.14, is OFF by default and the render must not
+#         differ from a chart without it).
+#   (h2)  management.expose with the NetworkPolicy and its namespace selector:
+#         exit 0; each assertion its own verdict — exactly one containerPort
+#         9090 named `management`, exactly one MANAGEMENT_SERVER_PORT entry,
+#         exactly one MANAGEMENT_SERVER_ADDRESS valued "0.0.0.0" (the opt-open
+#         switch, configuration.md §3.14), one headless Service
+#         (clusterIP: None, port `management`), one NetworkPolicy whose ingress
+#         port is the management port and whose `from` carries the selector,
+#         and NO ServiceMonitor.
+#   (h3)  serviceMonitor.enabled adds exactly one ServiceMonitor
+#         (monitoring.coreos.com/v1, selector = the headless Service's labels,
+#         endpoint port `management`, path /actuator/prometheus, interval from
+#         the values).
+#   (h4)  the extraEnv double mapping for the two MANAGEMENT_SERVER_* keys:
+#         each refused with the template's own `fail` message verbatim —
+#         Kubernetes honours the last duplicate env name silently, and the
+#         0.0.0.0 address must come only from management.expose.
+#   (h5)  networkPolicy.enabled with BOTH scraper selectors empty: refused with
+#         the template's own message (an empty from: admits every source).
 #
 # Tool: helm, PINNED. CI-only by the owner's ruling (2026-10-02): the pregate
 # and gate.sh have no helm stage (no binary on the dev box); this script runs
@@ -542,6 +566,142 @@ pvc_message='libVolume.source.persistentVolumeClaim.readOnly must be true (deplo
 check_lib_source_refusal writable-pvc '{"persistentVolumeClaim":{"claimName":"drivers","readOnly":false}}' "$pvc_message"
 check_lib_source_refusal implicit-pvc '{"persistentVolumeClaim":{"claimName":"drivers"}}' "$pvc_message"
 check_lib_source_refusal string-pvc '{"persistentVolumeClaim":{"claimName":"drivers","readOnly":"false"}}' "$pvc_message"
+
+# (h) management defaults — the management block (configuration.md §3.14) is
+# OFF by default and must render NOTHING: no 9090 anywhere, no MANAGEMENT_* env
+# entry, no NetworkPolicy, no ServiceMonitor. Paired with the Kotlin
+# HelmManagementValuesSpecDriftTest's textual pins.
+rc=0
+"$HELM" template dp "$CHART_DIR" --set "existingSecret=$PLACEHOLDER" >"$WORK/h.out" 2>"$WORK/h.err" || rc=$?
+n_9090=$(grep -c '9090' "$WORK/h.out" || true)
+n_mgmt_env=$(grep -c 'MANAGEMENT_' "$WORK/h.out" || true)
+n_np=$(grep -c 'kind: NetworkPolicy' "$WORK/h.out" || true)
+n_sm=$(grep -c 'ServiceMonitor' "$WORK/h.out" || true)
+if [ "$rc" -ne 0 ]; then
+  verdict "(h) management defaults" 1 "helm template exited $rc (expected 0)"
+elif [ "$n_9090" -ne 0 ] || [ "$n_mgmt_env" -ne 0 ] || [ "$n_np" -ne 0 ] || [ "$n_sm" -ne 0 ]; then
+  verdict "(h) management defaults" 1 "9090=$n_9090 MANAGEMENT_=$n_mgmt_env NetworkPolicy=$n_np ServiceMonitor=$n_sm (expected 0 each — the management block is off by default)"
+else
+  verdict "(h) management defaults" 0 "exit 0; no 9090, no MANAGEMENT_* env entry, no NetworkPolicy, no ServiceMonitor"
+fi
+
+# (h2) management exposed — the four objects render (values.yaml, management
+# block): the management containerPort, both MANAGEMENT_SERVER_* env entries
+# (the address is the opt-open switch, configuration.md §3.14), the headless
+# Service and the NetworkPolicy — and no ServiceMonitor. Each assertion its
+# own verdict, all against ONE render.
+rc=0
+"$HELM" template dp "$CHART_DIR" --set "existingSecret=$PLACEHOLDER" \
+  --set management.expose=true --set management.networkPolicy.enabled=true \
+  --set 'management.networkPolicy.scraperNamespaceSelector.kubernetes\.io/metadata\.name=monitoring' \
+  >"$WORK/h2.out" 2>"$WORK/h2.err" || rc=$?
+if [ "$rc" -ne 0 ]; then
+  verdict "(h2) management exposed" 1 "helm template exited $rc (expected 0)"
+else
+  n_cp=$(awk '/^ *- name: management$/{ if ((getline) > 0 && $0 == "              containerPort: 9090") cp++ } END { print cp+0 }' "$WORK/h2.out")
+  if [ "$n_cp" -eq 1 ]; then
+    verdict "(h2) containerPort management 9090" 0 "exactly one management containerPort: 9090"
+  else
+    verdict "(h2) containerPort management 9090" 1 "adjacent (name: management, containerPort: 9090) pairs = $n_cp (expected 1)"
+  fi
+  n_port=$(grep -c '^ *- name: MANAGEMENT_SERVER_PORT$' "$WORK/h2.out" || true)
+  n_vport=$(grep -cF 'value: "9090"' "$WORK/h2.out" || true)
+  if [ "$n_port" -eq 1 ] && [ "$n_vport" -eq 1 ]; then
+    verdict "(h2) MANAGEMENT_SERVER_PORT entry" 0 "named exactly once with its quoted value"
+  else
+    verdict "(h2) MANAGEMENT_SERVER_PORT entry" 1 "name count=$n_port, quoted value count=$n_vport (expected 1 each)"
+  fi
+  n_addr=$(grep -c '^ *- name: MANAGEMENT_SERVER_ADDRESS$' "$WORK/h2.out" || true)
+  n_vaddr=$(grep -cF 'value: "0.0.0.0"' "$WORK/h2.out" || true)
+  if [ "$n_addr" -eq 1 ] && [ "$n_vaddr" -eq 1 ]; then
+    verdict "(h2) MANAGEMENT_SERVER_ADDRESS = 0.0.0.0" 0 "named exactly once, valued \"0.0.0.0\" (the opt-open switch)"
+  else
+    verdict "(h2) MANAGEMENT_SERVER_ADDRESS = 0.0.0.0" 1 "name count=$n_addr, \"0.0.0.0\" value count=$n_vaddr (expected 1 each)"
+  fi
+  n_mname=$(grep -c '^  name: dp-datapipelines-management$' "$WORK/h2.out" || true)
+  n_none=$(grep -c '^  clusterIP: None$' "$WORK/h2.out" || true)
+  n_tport=$(grep -c '^      targetPort: management$' "$WORK/h2.out" || true)
+  if [ "$n_mname" -eq 2 ] && [ "$n_none" -eq 1 ] && [ "$n_tport" -eq 1 ]; then
+    verdict "(h2) headless management Service" 0 "one clusterIP: None Service (port management), named <fullname>-management like the NetworkPolicy"
+  else
+    verdict "(h2) headless management Service" 1 "<fullname>-management names=$n_mname (Service+NetworkPolicy), clusterIP: None=$n_none, targetPort: management=$n_tport"
+  fi
+  n_npk=$(grep -c '^kind: NetworkPolicy$' "$WORK/h2.out" || true)
+  n_sel=$(grep -c '^            kubernetes.io/metadata.name: monitoring$' "$WORK/h2.out" || true)
+  n_pport=$(grep -c '^          port: 9090$' "$WORK/h2.out" || true)
+  n_ing=$(grep -c '^    - Ingress$' "$WORK/h2.out" || true)
+  if [ "$n_npk" -eq 1 ] && [ "$n_sel" -eq 1 ] && [ "$n_pport" -eq 1 ] && [ "$n_ing" -eq 1 ]; then
+    verdict "(h2) NetworkPolicy confines the management port" 0 "one NetworkPolicy, Ingress-only, from carries the scraper namespace selector, ingress port 9090"
+  else
+    verdict "(h2) NetworkPolicy confines the management port" 1 "kind=$n_npk, selector=$n_sel, ingress port=$n_pport, Ingress policyType=$n_ing (expected 1 each)"
+  fi
+  n_sm2=$(grep -c 'ServiceMonitor' "$WORK/h2.out" || true)
+  if [ "$n_sm2" -eq 0 ]; then
+    verdict "(h2) no ServiceMonitor by default" 0 "serviceMonitor.enabled unset renders none"
+  else
+    verdict "(h2) no ServiceMonitor by default" 1 "grep -c 'ServiceMonitor' = $n_sm2 (expected 0)"
+  fi
+fi
+
+# (h3) serviceMonitor.enabled — exactly one ServiceMonitor: monitoring.coreos.com/v1,
+# selector = the headless Service's labels, endpoint port management,
+# path /actuator/prometheus, interval from the values. The ServiceMonitor doc is
+# extracted (from its apiVersion line through the next document separator) so the
+# selector greps cannot match another object's labels.
+rc=0
+"$HELM" template dp "$CHART_DIR" --set "existingSecret=$PLACEHOLDER" \
+  --set management.expose=true --set management.serviceMonitor.enabled=true \
+  >"$WORK/h3.out" 2>"$WORK/h3.err" || rc=$?
+awk '
+  /^kind: ServiceMonitor$/ { in_sm = 1; print prev; print; next }
+  in_sm && /^---$/ { in_sm = 0; next }
+  in_sm { print }
+  { prev = $0 }
+' "$WORK/h3.out" >"$WORK/h3-sm.doc"
+if [ "$rc" -ne 0 ]; then
+  verdict "(h3) ServiceMonitor renders once" 1 "helm template exited $rc (expected 0)"
+else
+  n_kind=$(grep -c '^kind: ServiceMonitor$' "$WORK/h3.out" || true)
+  h3_api=$(head -1 "$WORK/h3-sm.doc")
+  n_selname=$(grep -c '^      app.kubernetes.io/name: datapipelines$' "$WORK/h3-sm.doc" || true)
+  n_selinst=$(grep -c '^      app.kubernetes.io/instance: dp$' "$WORK/h3-sm.doc" || true)
+  if [ "$n_kind" -eq 1 ] && [ "$h3_api" = "apiVersion: monitoring.coreos.com/v1" ] && [ "$n_selname" -eq 1 ] && [ "$n_selinst" -eq 1 ]; then
+    verdict "(h3) ServiceMonitor renders once" 0 "monitoring.coreos.com/v1, selector matches the headless Service's labels"
+  else
+    verdict "(h3) ServiceMonitor renders once" 1 "kind=$n_kind, first extracted line=$h3_api, selector name=$n_selname instance=$n_selinst (expected 1/monitoring.coreos.com/v1/1/1)"
+  fi
+  n_eport=$(grep -c '^    - port: management$' "$WORK/h3-sm.doc" || true)
+  n_path=$(grep -c '^      path: /actuator/prometheus$' "$WORK/h3-sm.doc" || true)
+  n_interval=$(grep -c '^      interval: 30s$' "$WORK/h3-sm.doc" || true)
+  if [ "$n_eport" -eq 1 ] && [ "$n_path" -eq 1 ] && [ "$n_interval" -eq 1 ]; then
+    verdict "(h3) ServiceMonitor endpoint" 0 "port management, path /actuator/prometheus, interval from the values (30s)"
+  else
+    verdict "(h3) ServiceMonitor endpoint" 1 "port=$n_eport path=$n_path interval=$n_interval (expected 1 each)"
+  fi
+fi
+
+# (h4) the extraEnv double mapping for the two MANAGEMENT_SERVER_* keys — each
+# refused with the template's own `fail` message, verbatim (the (c) shape).
+check_double_mapping "(h4) extraEnv double-maps MANAGEMENT_SERVER_ADDRESS" \
+  MANAGEMENT_SERVER_ADDRESS 0.0.0.0 \
+  'set management.expose, not extraEnv.MANAGEMENT_SERVER_ADDRESS (deployment.md §6.4)' \
+  "$WORK/h4a.out" "$WORK/h4a.err"
+check_double_mapping "(h4) extraEnv double-maps MANAGEMENT_SERVER_PORT" \
+  MANAGEMENT_SERVER_PORT 9090 \
+  'set management.port, not extraEnv.MANAGEMENT_SERVER_PORT (deployment.md §6.4)' \
+  "$WORK/h4b.out" "$WORK/h4b.err"
+
+# (h5) networkPolicy.enabled with BOTH scraper selectors empty — refused with
+# the template's own message: an empty from: admits every source.
+rc=0
+"$HELM" template dp "$CHART_DIR" --set "existingSecret=$PLACEHOLDER" \
+  --set management.expose=true --set management.networkPolicy.enabled=true \
+  >"$WORK/h5.out" 2>"$WORK/h5.err" || rc=$?
+if [ "$rc" -ne 0 ] && grep -qF 'management.networkPolicy needs at least one scraper selector — an empty from: admits every source (deployment.md §9)' "$WORK/h5.err"; then
+  verdict "(h5) empty scraper selectors refused" 0 "exit $rc with the template's own refusal message"
+else
+  verdict "(h5) empty scraper selectors refused" 1 "exit $rc; expected the exact empty-from refusal on stderr"
+fi
 
 if [ "$fails" -eq 0 ]; then
   echo "helm-check: PASS — all cases green (helm ${HELM_VERSION}, chart ${CHART_DIR#"$ROOT"/})"

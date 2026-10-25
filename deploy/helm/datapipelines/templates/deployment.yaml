@@ -34,6 +34,10 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+            {{- if .Values.management.expose }}
+            - name: management
+              containerPort: {{ .Values.management.port }}
+            {{- end }}
           envFrom:
             - secretRef:
                 name: {{ required "existingSecret is required — see values.yaml (deployment.md §5.1)" .Values.existingSecret }}
@@ -48,10 +52,12 @@ spec:
           {{- if hasKey .Values.extraEnv "DATAPIPELINES_SCRIPT_JS_MAX_OUTPUT_BYTES" }}{{ fail "set script.js.maxOutputBytes, not extraEnv.DATAPIPELINES_SCRIPT_JS_MAX_OUTPUT_BYTES" }}{{- end }}
           {{- if hasKey .Values.extraEnv "DATAPIPELINES_SCRIPT_JS_MAX_RESULT_MB" }}{{ fail "set script.js.maxResultMb, not extraEnv.DATAPIPELINES_SCRIPT_JS_MAX_RESULT_MB" }}{{- end }}
           {{- if hasKey .Values.extraEnv "DATAPIPELINES_SCRIPT_JS_MAX_INPUT_MB" }}{{ fail "set script.js.maxInputMb, not extraEnv.DATAPIPELINES_SCRIPT_JS_MAX_INPUT_MB" }}{{- end }}
+          {{- if hasKey .Values.extraEnv "MANAGEMENT_SERVER_ADDRESS" }}{{ fail "set management.expose, not extraEnv.MANAGEMENT_SERVER_ADDRESS (deployment.md §6.4)" }}{{- end }}
+          {{- if hasKey .Values.extraEnv "MANAGEMENT_SERVER_PORT" }}{{ fail "set management.port, not extraEnv.MANAGEMENT_SERVER_PORT (deployment.md §6.4)" }}{{- end }}
           {{- range $name := keys .Values.extraEnv }}{{ if eq (upper (replace "." "_" $name)) "LOADER_PATH" }}{{ fail "LOADER_PATH comes from the image, never from extraEnv.LOADER_PATH (deployment.md §9)" }}{{ end }}{{- end }}
           {{- range $name := keys .Values.extraEnv }}{{ if has (upper $name) (list "JAVA_TOOL_OPTIONS" "JDK_JAVA_OPTIONS" "_JAVA_OPTIONS") }}{{ fail (printf "extraEnv.%s is refused: a JVM option variable can override the image's launcher path (deployment.md §9)" $name) }}{{ end }}{{- end }}
           {{- if and (ne .Values.script.js.isolateDir nil) (ne (toString .Values.script.js.isolateDir) "") (not (has .Values.script.js.isolateDir (list "/opt/graaljs" "/app/lib"))) }}{{ fail "script.js.isolateDir must be one of the image's LOADER_PATH entries (/app/lib,/opt/graaljs) and contain js-isolate.jar (deployment.md §6.4)" }}{{- end }}
-          {{- if or .Values.extraEnv .Values.duckdb.extensionDirectory .Values.duckdb.memoryLimit (and (ne .Values.script.js.isolateDir nil) (ne (toString .Values.script.js.isolateDir) "")) (and (ne .Values.script.js.maxHeapMb nil) (ne (toString .Values.script.js.maxHeapMb) "")) (and (ne .Values.script.js.isolateMemoryMb nil) (ne (toString .Values.script.js.isolateMemoryMb) "")) (and (ne .Values.script.js.maxStatements nil) (ne (toString .Values.script.js.maxStatements) "")) (and (ne .Values.script.js.maxAstDepth nil) (ne (toString .Values.script.js.maxAstDepth) "")) (and (ne .Values.script.js.maxStackFrames nil) (ne (toString .Values.script.js.maxStackFrames) "")) (and (ne .Values.script.js.maxOutputBytes nil) (ne (toString .Values.script.js.maxOutputBytes) "")) (and (ne .Values.script.js.maxResultMb nil) (ne (toString .Values.script.js.maxResultMb) "")) (and (ne .Values.script.js.maxInputMb nil) (ne (toString .Values.script.js.maxInputMb) "")) }}
+          {{- if or .Values.extraEnv .Values.duckdb.extensionDirectory .Values.duckdb.memoryLimit (and (ne .Values.script.js.isolateDir nil) (ne (toString .Values.script.js.isolateDir) "")) (and (ne .Values.script.js.maxHeapMb nil) (ne (toString .Values.script.js.maxHeapMb) "")) (and (ne .Values.script.js.isolateMemoryMb nil) (ne (toString .Values.script.js.isolateMemoryMb) "")) (and (ne .Values.script.js.maxStatements nil) (ne (toString .Values.script.js.maxStatements) "")) (and (ne .Values.script.js.maxAstDepth nil) (ne (toString .Values.script.js.maxAstDepth) "")) (and (ne .Values.script.js.maxStackFrames nil) (ne (toString .Values.script.js.maxStackFrames) "")) (and (ne .Values.script.js.maxOutputBytes nil) (ne (toString .Values.script.js.maxOutputBytes) "")) (and (ne .Values.script.js.maxResultMb nil) (ne (toString .Values.script.js.maxResultMb) "")) (and (ne .Values.script.js.maxInputMb nil) (ne (toString .Values.script.js.maxInputMb) "")) .Values.management.expose }}
           env:
             {{- if .Values.duckdb.extensionDirectory }}
             - name: DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY
@@ -96,6 +102,14 @@ spec:
             {{- if and (ne .Values.script.js.maxInputMb nil) (ne (toString .Values.script.js.maxInputMb) "") }}
             - name: DATAPIPELINES_SCRIPT_JS_MAX_INPUT_MB
               value: {{ .Values.script.js.maxInputMb | quote }}
+            {{- end }}
+            {{- if .Values.management.expose }}
+            - name: MANAGEMENT_SERVER_PORT
+              value: {{ .Values.management.port | quote }}
+            - name: MANAGEMENT_SERVER_ADDRESS
+              # The opt-open switch (configuration.md §3.14): rendered ONLY here,
+              # under management.expose — never through extraEnv (refused above).
+              value: "0.0.0.0"
             {{- end }}
             {{- range $name, $value := .Values.extraEnv }}
             - name: {{ $name }}

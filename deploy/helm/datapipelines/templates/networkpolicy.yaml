@@ -1,0 +1,33 @@
+{{- if and .Values.management.expose .Values.management.networkPolicy.enabled }}
+{{- if and (empty .Values.management.networkPolicy.scraperNamespaceSelector) (empty .Values.management.networkPolicy.scraperPodSelector) }}{{ fail "management.networkPolicy needs at least one scraper selector — an empty from: admits every source (deployment.md §9)" }}{{- end }}
+{{/* Ingress-only on the management port (values.yaml, management block): the
+     app port and egress are NOT touched — deployment.md §9's egress policy
+     stays the operator's. The two scraper selectors are OR'd (Kubernetes
+     semantics); both empty is refused above because an empty from: would admit
+     every source in the namespace. */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "datapipelines.fullname" . }}-management
+  labels:
+    {{- include "datapipelines.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "datapipelines.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        {{- if .Values.management.networkPolicy.scraperNamespaceSelector }}
+        - namespaceSelector:
+            {{- toYaml .Values.management.networkPolicy.scraperNamespaceSelector | nindent 12 }}
+        {{- end }}
+        {{- if .Values.management.networkPolicy.scraperPodSelector }}
+        - podSelector:
+            {{- toYaml .Values.management.networkPolicy.scraperPodSelector | nindent 12 }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.management.port }}
+{{- end }}
