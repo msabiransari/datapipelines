@@ -34,6 +34,33 @@ import java.nio.file.Paths
  * Anonymous throughout: the site is public.
  */
 class SiteAtlasContrastBrowserTest : BrowserSuite() {
+    /** #720: discover the full marketing census, including pages outside the contrast sample. */
+    @Suppress("UNCHECKED_CAST")
+    @Test
+    fun `links in running text are distinguishable on every marketing page`() {
+        startTrace()
+        page.setViewportSize(LOCK_VIEWPORT.first, LOCK_VIEWPORT.second)
+        page.navigate("$baseUrl/sitemap.xml")
+        val routes =
+            Regex("""<loc>([^<]+)</loc>""")
+                .findAll(page.content())
+                .map { it.groupValues[1].removePrefix("https://datapipelines.co").ifEmpty { "/" } }
+                .filterNot { it.startsWith("/docs") }
+                .toList()
+        withClue("the marketing route census is non-vacuous") { (routes.size >= MIN_MARKETING_ROUTES) shouldBe true }
+        val failures =
+            routes.flatMap { route ->
+                load(route)
+                val measured = page.evaluate(MEASURE, "main") as Map<String, Any>
+                val pairs = measured["pairs"] as List<Map<String, Any>>
+                withClue("$route rendered content for the link walk") { pairs.isNotEmpty() shouldBe true }
+                (measured["graphics"] as List<Map<String, Any>>)
+                    .filter { it["kind"] == "in-text link" && (it["ratio"] as Number).toDouble() < GRAPHICS_FLOOR }
+                    .map { "$route: ${it["href"]} at ${it["at"]} has no underline and only ${it["ratio"]}:1 contrast" }
+            }
+        withClue(failures.joinToString("\n")) { failures shouldBe emptyList() }
+    }
+
     private class Shot(
         val label: String,
         val pairs: List<Map<String, Any>>,
@@ -172,6 +199,7 @@ class SiteAtlasContrastBrowserTest : BrowserSuite() {
     }
 
     private companion object {
+        const val MIN_MARKETING_ROUTES = 41
         const val GRAPHICS_FLOOR = 3.0
         const val MAX_TAB_STOPS = 400
 
@@ -319,7 +347,7 @@ class SiteAtlasContrastBrowserTest : BrowserSuite() {
                 if (!visible(a) || !block.matches('p, li, dd, td, figcaption, blockquote') || !ownText(block)) continue;
                 if (getComputedStyle(a).textDecorationLine.includes('underline')) continue;
                 const link = rgba(getComputedStyle(a).color), text = rgba(getComputedStyle(block).color);
-                graphics.push({ kind: 'in-text link', surface: surface(paint(a)), ratio: ratio(link, text), at: path(a),
+                graphics.push({ kind: 'in-text link', href: a.getAttribute('href'), surface: surface(paint(a)), ratio: ratio(link, text), at: path(a),
                   sample: sample(a) });
               }
               // A control's boundary is its fill or its border against what is behind it, whichever is stronger.

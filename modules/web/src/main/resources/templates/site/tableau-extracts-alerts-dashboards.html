@@ -18,7 +18,7 @@
        and an old dateline fails the build. */-->
   <!-- claim: docs/dashboards.md §1 — dashboards, visualizations and parameter sets ship -->
   <!-- claim: docs/dashboards.md §6.5 — embedding through your backend, the key server-side -->
-  <!-- claim: docs/scheduler.md §1 and §9 — the scheduler ships; mail delivery does not yet -->
+  <!-- claim: docs/scheduler.md §1 and §2.3 — the scheduler and run notices ship; condition alerts are later -->
   <!-- claim: docs/pipeline-contract.md §4.12 — SCRIPT nodes ship -->
   <!-- claim: docs/ROADMAP.md §3 — scheduled extracts, email alerts, metrics: later -->
   <!-- claim: docs/rest-api.md §19 — the published endpoint beside the dashboard -->
@@ -30,7 +30,7 @@
     "@type": "Article",
     "headline": "Embedded dashboards today; scheduled extracts to your own bucket and email alerts later, beside Tableau",
     "datePublished": "2026-09-10",
-    "dateModified": "2026-10-24",
+    "dateModified": "2026-10-25",
     "author": { "@type": "Organization", "name": "datapipelines.co" },
     "publisher": { "@type": "Organization", "name": "datapipelines.co" },
     "mainEntityOfPage": "https://datapipelines.co/tableau/extracts-alerts-dashboards"
@@ -47,7 +47,7 @@
         the scheduler that reruns a pipeline. <strong>Scheduled extracts to your own bucket and condition alerts by
         email are later</strong>, with no announced release date. Each section below says which one it is.
       </p>
-      <p class="dateline" data-roadmap-updated="2026-10-24">Last updated 2026-10-24</p>
+      <p class="dateline" data-roadmap-updated="2026-10-25">Last updated 2026-10-25</p>
       <div class="btn-row">
         <a class="btn btn-primary" th:href="@{/sql-dashboards}">SQL dashboards, in detail</a>
         <a class="btn btn-secondary" th:href="@{/roadmap}">The full roadmap</a>
@@ -144,9 +144,9 @@
         </p>
         <!-- claim: docs/scheduler.md §2.3, docs/scheduler.md §5.2 -->
         <p>
-          The schedule half ships, and the mail half has started. Each schedule already saves its recipients and
-          which run events should send mail, with failed, unknown and blocked runs on by default, but nothing sends
-          until delivery ships. A condition on the result is a separate, later piece. Until then a person reads the
+          The scheduler and its run notices ship. When scheduler mail is enabled and recipients are configured,
+          selected run events queue a notice, with failed, unknown and blocked events on by default.
+          A condition on the result is a separate, later piece. Until then a person reads the
           schedule's run history, or a monitor polls a published endpoint, and both keep the audit trail an alert
           would want.
         </p>

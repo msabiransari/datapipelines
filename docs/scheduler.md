@@ -1,10 +1,10 @@
 # Scheduler Specification
 
-**Status:** v1.8 (slices 1–3 and slice 4 part a of #9 — notification settings saved; delivery and the application credential pending)
+**Status:** v1.10 (slices 1–4 of #9 — optional notification delivery implemented; the application credential remains pending)
 **Owner:** datapipelines.co core
 **Depends on:** [REST API §20](rest-api.md#20-schedules), [Auth](auth.md), [DAG Executor](dag-executor.md), [Metadata DB §4.22–§4.25](metadata-db.md#422-schedules), [Configuration §3.29](configuration.md#329-scheduler-9)
 **Design record:** [scheduler design revision](superpowers/specs/2026-09-22-scheduler-design-revision.md) (ratified 2026-09-25) — the why; this page is the what
-**Last updated:** 2026-10-19
+**Last updated:** 2026-10-25
 
 ---
 
@@ -233,8 +233,8 @@ People manage schedules on the **Schedules** page (`/schedules`, in the rail's O
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-10-25 | next | 442c (#442) | §2.3: notices use the run’s frozen target and reference timezone with known due/start/end and execution reference. §8.2: activation and rollback pointers. |
-| 2026-10-24 | next | 442b (#442) | §2.3: scheduler notification mail is delivered — off unless enabled (computed `on`/`off` + reason), one notice per selected transition written with it, one message per recipient with a fixed Message-ID, the four delivery states with bounded retries for provably-unsent sends only, `uncertain` never retried, re-checks at send, the resend (REST §20.13). §8.1: API mode sends no mail. §8.3: the three notification counters. §9: notifications struck through. |
+| 2026-10-25 | v1.10 | 442c (#442) | §2.3: notices use the run’s frozen target and reference timezone with known due/start/end and execution reference. §8.2: activation and rollback pointers. |
+| 2026-10-24 | v1.9 | 442b (#442) | §2.3: scheduler notification mail is delivered — off unless enabled (computed `on`/`off` + reason), one notice per selected transition written with it, one message per recipient with a fixed Message-ID, the four delivery states with bounded retries for provably-unsent sends only, `uncertain` never retried, re-checks at send, the resend (REST §20.13). §8.1: API mode sends no mail. §8.3: the three notification counters. §9: notifications struck through. |
 | 2026-10-19 | v1.8 | #584 | §8.4: the rail's Schedules item lands on the Schedules home (`/overview/schedules`, UI Screens §4.20a); the explorer at `/schedules` is its View all. No behaviour of the scheduler changes. |
 | 2026-10-03 | v1.7 | 442a (#442) | Saved schedule notification settings: recipients and five event choices, validated and shown by role; omitted PUT settings preserved; mail remains off pending part b. |
 | 2026-09-30 | v1.6 | lane 336 (#336 D6) | §5's tables: `unknown` gains the `outcome_unreadable` reason (an ABORTED row whose `error_json` — where the sweeper's `instance_lost` marker lives — is unreadable; blocks, because "not instance_lost" cannot be concluded), and `aborted` states the unreadable-payload case (state `aborted`, no reason — the record proves the abort; `unknown` would block an outcome that IS known). The executor logs `scheduler.outcome_evidence_unreadable` (observability §3.4E). Reasons are strings, not a closed enum (enums §24); no migration — the V38 CHECK constrains `state`, never `reason`. |

@@ -1,8 +1,8 @@
 # Configuration Reference
 
-**Status:** v1.65 (single source of truth for every config key)
+**Status:** v1.67 (single source of truth for every config key)
 **Owner:** datapipelines.co core
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 
 ---
 
@@ -1086,8 +1086,8 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-10-25 | next | 442c (#442) | §3.29: serialized deployment-wide pending admission, including resend refusal at capacity; activation pointer for a mixed-version fleet. |
-| 2026-10-24 | next | 442b (#442) | §3.29 gains six scheduler notification keys — `notifications.enabled` (default `false`; `true` needs the mail transport and `auth.base-url` or startup refuses), `recipient-domains` (the allowlist: `example.com` / `*.example.com`; empty under `development` sends nothing, under `hardened` restricts nothing), `max-attempts` (3), `retry-backoff-seconds` (30,120,600), `batch-size` (20) and `backlog-max` (1000); `max-recipients` loses its "settings only" note. Compose and `defaults.env` carry them. |
+| 2026-10-25 | v1.67 | 442c (#442) | §3.29: serialized deployment-wide pending admission, including resend refusal at capacity; activation pointer for a mixed-version fleet. |
+| 2026-10-24 | v1.66 | 442b (#442) | §3.29 gains six scheduler notification keys — `notifications.enabled` (default `false`; `true` needs the mail transport and `auth.base-url` or startup refuses), `recipient-domains` (the allowlist: `example.com` / `*.example.com`; empty under `development` sends nothing, under `hardened` restricts nothing), `max-attempts` (3), `retry-backoff-seconds` (30,120,600), `batch-size` (20) and `backlog-max` (1000); `max-recipients` loses its "settings only" note. Compose and `defaults.env` carry them. |
 | 2026-10-24 | v1.65 | #688 (Helm portion) — renumbered at merge after #686’s v1.64 | §3.28: the nine JavaScript keys are exposed as the chart's `script.js.*` values (deployment.md §6.4) — empty renders no env entry, the isolate directory must be one of the image's launcher-path entries, `extraEnv` double mappings are refused. No key, default, route or permission changes. |
 | 2026-10-24 | v1.64 | #686 JWKS fetch joins the provider read bound | §3.4's `provider-read-timeout-seconds` row: the ID-token decoder's JWKS fetch is bounded by the same key through a `JwtDecoderFactory` bean; discovery stays separate. No key added, no default change. |
 | 2026-10-22 | v1.63 | #651 enabled-provider avatar hosts | §3.4's `picture-hosts` allowlist includes only providers with a non-blank `client-id`, using the same predicate as sign-in registration. Dormant entries are still validated for shape at startup but contribute no hosts. No key, default, route or permission changes. |

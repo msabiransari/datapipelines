@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.36 (living document — updated as enums evolve)
+**Status:** v1.38 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -1130,8 +1130,8 @@ A resend (REST §20.13) returns a `failed` or `uncertain` delivery to `pending` 
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-10-25 | next | 442c (#442) | §44: backlog_full is decided by serialized deployment admission; explicit resend at the hard cap is refused. |
-| 2026-10-24 | next | 442b (#442) | **§25 `TrailKind`** gains the four V51 notification kinds; new **§43 `NotificationOutcome`** and **§44 `DeliveryState`** with the sanitized `last_error_code` set; §42 no longer says nothing is sent; §15 gains `schedule.notification_resent`. |
+| 2026-10-25 | v1.38 | 442c (#442) | §44: backlog_full is decided by serialized deployment admission; explicit resend at the hard cap is refused. |
+| 2026-10-24 | v1.37 | 442b (#442) | **§25 `TrailKind`** gains the four V51 notification kinds; new **§43 `NotificationOutcome`** and **§44 `DeliveryState`** with the sanitized `last_error_code` set; §42 no longer says nothing is sent; §15 gains `schedule.notification_resent`. |
 | 2026-10-22 | v1.36 | 8b (#8) | The JavaScript type is enabled with the isolate and stores main(input) statements. |
 | 2026-10-21 | v1.35 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The `node_type` row `TRANSFORM` is `SCRIPT`**; the template-type rows say "the script types" / "a script"; the error-prefix row is `pipeline.script.*`; the JavaScript save refusal is `script.js.unavailable`; the 503 example names `pipeline.script.pool_exhausted`. A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-09 | v1.34 | 487 (#487) | The HTTP status table moves `result.storage_unavailable` from 500 to 503 ([Pipeline Contract §13.10](pipeline-contract.md#1310-result-retrieval) v1.56) and names `pipeline.transform.pool_exhausted` beside it, the 503 the catalog already carried. |

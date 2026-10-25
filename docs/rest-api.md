@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v2.99 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.101 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-25
 
 ---
 
@@ -2814,8 +2814,8 @@ browser persistence. Clients must reject foreign/stale responses even after abor
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-10-25 | next | 442c (#442) | §20.13: resend at the deployment pending cap is 409 schedule.notification.backlog_full; no delivery change or resend audit row on refusal. |
-| 2026-10-24 | next | 442b (#442) | Additive. §20's schedule object: `notifications.delivery` is the deployment's computed state, `{"state":"on"}` or `{"state":"off","reason":"disabled"\|"mail_unconfigured"\|"no_allowlist"}`. §20.11: a run carries `deliveries` (notice, state, attempts, resend count, times, sanitized `last_error_code`; `recipient` only for `schedule.update` holders). New **§20.13** `POST /schedules/{id}/runs/{run_id}/deliveries/{delivery_id}/resend` (`schedule.update`; `may_duplicate` warning for an `uncertain` delivery; `409 schedule.notification.not_resendable`, `404 schedule.notification.not_found`). |
+| 2026-10-25 | v2.101 | 442c (#442) | §20.13: resend at the deployment pending cap is 409 schedule.notification.backlog_full; no delivery change or resend audit row on refusal. |
+| 2026-10-24 | v2.100 | 442b (#442) | Additive. §20's schedule object: `notifications.delivery` is the deployment's computed state, `{"state":"on"}` or `{"state":"off","reason":"disabled"\|"mail_unconfigured"\|"no_allowlist"}`. §20.11: a run carries `deliveries` (notice, state, attempts, resend count, times, sanitized `last_error_code`; `recipient` only for `schedule.update` holders). New **§20.13** `POST /schedules/{id}/runs/{run_id}/deliveries/{delivery_id}/resend` (`schedule.update`; `may_duplicate` warning for an `uncertain` delivery; `409 schedule.notification.not_resendable`, `404 schedule.notification.not_found`). |
 | 2026-10-22 | v2.99 | 8b (#8) | JavaScript save/evaluate is enabled with the isolate; §8.7A adds the always-present console key and failed-evaluation console detail. |
 | 2026-10-21 | v2.98 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The template-type and node prose say script**: a script caller / type / body, §8.7A "Evaluate a script template", the pipeline editor's SCRIPT card, the key `datapipelines.script.evaluate-timeout-seconds`; no route or field changes. A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-16 | v2.97 | 467 (#467) the over-cap screenshot refusal reaches the client | **§22's `visualization.test.screenshot_too_large` row**: the `Content-Length` refusal no longer closes mid-body — the route drains a declaration of up to 6 MiB after the 413 so a write-then-read client receives it; beyond that bound a reset may still replace it. No route, code, status or cap change |

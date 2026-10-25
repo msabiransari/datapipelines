@@ -13,9 +13,10 @@ object SiteCapabilitiesFaqs {
         listOf(
             FaqEntry(
                 "Does a schedule email anyone when a run fails?",
-                "Not yet. A schedule saves its recipients and the events that should send mail, with failure, " +
-                    "unknown and blocked on by default, but nothing sends: delivery is the next slice of the " +
-                    "scheduler. A schedule runs a pipeline. Reports, condition alerts and PDF delivery are not built. " +
+                "Yes, when scheduler mail is enabled and the schedule has recipients. Failure, unknown and blocked " +
+                    "events default on; start and success are opt-in. Scheduler mail is off by default, and the " +
+                    "deployment's mail and recipient-domain policy still apply. Reports, condition alerts and " +
+                    "PDF delivery are not built. " +
                     "The contract is docs/scheduler.md §2.3.",
                 "docs/scheduler.md §2.3, docs/scheduler.md §9",
             ),

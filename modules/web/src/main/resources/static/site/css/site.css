@@ -339,6 +339,7 @@ a {
 .doc-source a,
 .steps p a,
 .chart-note a,
+.container > p a:not(.btn),
 .container > ul:not([class]) > li a {
   text-decoration: underline;
   text-underline-offset: var(--space-1);
