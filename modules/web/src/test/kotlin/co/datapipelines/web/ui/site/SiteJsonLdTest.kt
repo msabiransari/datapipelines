@@ -9,7 +9,10 @@ import org.junit.jupiter.api.Test
  * The homepage's structured data (073 §D), PARSED rather than pattern-matched.
  *
  * A malformed `application/ld+json` block is the worst kind of SEO defect: the crawler drops
- * it without a word, so the page loses its rich result and nothing anywhere reports a problem.
+ * it without a word, so the page loses its structured data and nothing anywhere reports a problem.
+ * Valid markup is the schema.org contract only: it does not by itself make a page eligible for any
+ * Google rich result (#700 record: no FAQ rich results since May 2026, and a software-app result
+ * also needs a genuine review or rating, which this site does not invent).
  * A regex over the template would not catch a trailing comma; `readTree` does.
  *
  * Read off the RENDER, not the template source, because Thymeleaf is between the two — a
@@ -47,7 +50,7 @@ class SiteJsonLdTest {
     }
 
     @Test
-    fun `the SoftwareApplication block carries the fields a rich result needs`() {
+    fun `the SoftwareApplication block carries the schema fields the site can state truthfully`() {
         val app = blocks.first { it["@type"].asText() == "SoftwareApplication" }
         val missing =
             listOf("name", "url", "applicationCategory", "operatingSystem", "license", "offers", "description")
