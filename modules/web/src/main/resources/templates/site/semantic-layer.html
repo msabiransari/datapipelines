@@ -222,7 +222,7 @@
     <div class="container">
       <h2 id="sl-drift" class="ds-headline">Schema drift is detected, never guessed</h2>
       <div class="prose">
-        <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §6 (the read-time check), §2 (D-S6: never edit, never auto-remap) -->
+        <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §6 (the read-time check), docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §2 (D-S6: never edit, never auto-remap) -->
         <p>
           Every introspection response that carries facts also recomputes each fact's fingerprint from the columns it
           just read, with no extra queries. Rename or drop a column and its facts flip to <code>stale</code> at the next
@@ -295,7 +295,7 @@
     <div class="container">
       <h2 id="sl-compare" class="ds-headline">How this differs from the dbt semantic layer and the Cube semantic layer</h2>
       <div class="prose">
-        <!-- claim: docs/semantic-layer-research.md Part one (what dbt/MetricFlow and Cube say they are, from their own docs), Part five Decision 1; docs/dashboards.md §1 (dashboards over released pipelines) -->
+        <!-- claim: docs/semantic-layer-research.md Part one (what dbt/MetricFlow and Cube say they are, from their own docs), docs/semantic-layer-research.md Part five Decision 1; docs/dashboards.md §1 (dashboards over released pipelines) -->
         <p>
           The dbt semantic layer and Cube are <em>compiled metrics layers</em>: you author a model of measures,
           dimensions and joins, in YAML for dbt's MetricFlow or a data model for Cube, and their engines compile

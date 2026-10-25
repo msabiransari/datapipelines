@@ -142,9 +142,9 @@
   <section class="section band" aria-labelledby="faq-title">
     <div class="container">
       <p class="kicker">Asked before</p>
-      <!-- claim: docs/dag-executor.md §5 — do I need an orchestrator to run pipelines here -->
-      <!-- claim: docs/rest-api.md §6 — can any of the three trigger a run -->
-      <!-- claim: docs/mcp-server.md §6.1 — is this an alternative to either -->
+      <!-- claim: docs/dag-executor.md §5 — execution starts with an ExecuteRequest, then walks the pipeline DAG -->
+      <!-- claim: docs/rest-api.md §6 — POST execution endpoint and SSE events for an external orchestrator -->
+      <!-- claim: docs/mcp-server.md §2 — MCP tools are a thin adapter over REST actions -->
       <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Dagster, Airflow and Prefect, in questions')}"></div>
     </div>
   </section>

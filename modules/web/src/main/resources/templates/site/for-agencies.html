@@ -15,7 +15,7 @@
        client, an agent drafting each pipeline, and a release a person can name in the
        invoice. What embeds in the client portal today is the API and, since #699 corrected the
        page, a dashboard through the portal's own backend. */-->
-  <!-- claim: docs/auth.md §7.5 — one workspace per client, keys pinned to it -->
+  <!-- claim: docs/auth.md §5.6 — workspace context pinned to each API key -->
   <!-- claim: docs/auth.md §7.7 — endpoint keys bound to a path prefix -->
   <!-- claim: docs/versioning.md §3 — the release is a person's, and immutable -->
   <!-- claim: docs/rest-api.md §19 — the published endpoint the portal calls today -->
@@ -46,7 +46,7 @@
       <p class="kicker">Isolation by construction</p>
       <h2 id="ag-isolation" class="ds-headline">One workspace per client, one key per client</h2>
       <div class="prose">
-        <!-- claim: docs/auth.md §7.5 -->
+        <!-- claim: docs/auth.md §5.6 -->
         <p>
           Every client gets a workspace, and a key is pinned to one workspace at issuance: the analyst, or the
           agent, working client A sees nothing of client B. The other workspace's pipelines, datasources and
@@ -101,7 +101,7 @@
       <ol class="steps">
         <li>
           <h3>Open the workspace</h3>
-          <!-- claim: docs/auth.md §7.5 -->
+          <!-- claim: docs/auth.md §5.6 -->
           <p>One workspace per client, created in minutes. Everything that follows, from datasources and pipelines to releases and keys, lives inside it, invisible to every other workspace.</p>
         </li>
         <li>
@@ -205,9 +205,9 @@
   <section class="section" aria-labelledby="faq-title">
     <div class="container">
       <p class="kicker">Asked before</p>
-      <!-- claim: docs/auth.md §7.5 — can each client be kept separate -->
+      <!-- claim: docs/auth.md §5.6 — workspace context pinned to each API key -->
       <!-- claim: docs/auth.md §7.7 — can a client's key reach only its numbers -->
-      <!-- claim: docs/versioning.md §3 — who does the work and who signs it off -->
+      <!-- claim: docs/versioning.md §3 — a person releases the draft; released versions are immutable -->
       <!-- claim: docs/rest-api.md §19 — what embeds in the portal today -->
       <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Agency questions, answered plainly')}"></div>
     </div>

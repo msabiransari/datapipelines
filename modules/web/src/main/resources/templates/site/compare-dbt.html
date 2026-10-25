@@ -55,7 +55,7 @@
           <p>Eight dialects, each with its own adapter and type mapping: the databases your applications actually write to, not a warehouse they were exported into.</p>
         </article>
         <article class="card">
-          <!-- claim: docs/mcp-server.md §6.1 -->
+          <!-- claim: docs/mcp-server.md §6.2 -->
           <h3>An agent is the author</h3>
           <p>Introspect, create a template, create a pipeline, execute, read rows: the whole loop over MCP tools. dbt's authoring surface is a repository and a CLI, which is a different shape of collaboration.</p>
         </article>
@@ -86,9 +86,9 @@
   <section class="section band" aria-labelledby="faq-title">
     <div class="container">
       <p class="kicker">Asked before</p>
-      <!-- claim: docs/staging.md §1 — do I need a warehouse for this -->
-      <!-- claim: docs/datasources.md §4.1 — which sources can it read -->
-      <!-- claim: docs/mcp-server.md §6.1 — is an agent the author here -->
+      <!-- claim: docs/staging.md §1 — per-execution in-memory staging, not a warehouse prerequisite -->
+      <!-- claim: docs/datasources.md §4.1 — the supported dialect catalog and JDBC drivers -->
+      <!-- claim: docs/mcp-server.md §6.2 — tools create templates and pipelines and execute them -->
       <!-- claim: docs/datasources.md §5.7 — what is the credential story -->
       <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'The dbt comparison, in questions')}"></div>
     </div>

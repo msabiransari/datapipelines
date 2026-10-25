@@ -18,10 +18,10 @@
        SCRIPT nodes into the ships-today column; extracts, alerts and metrics stay planned. */-->
   <!-- claim: docs/rest-api.md §19 — Tableau reads the endpoint's JSON -->
   <!-- claim: docs/pipeline-contract.md §8 — write-back to a datasource Tableau connects to -->
-  <!-- claim: docs/staging.md §3 — no warehouse between the sources and Tableau -->
+  <!-- claim: docs/staging.md §3 — per-execution staging lifecycle, no persistent warehouse between sources and Tableau -->
   <!-- claim: docs/versioning.md §3 — the dataset a person released -->
-  <!-- claim: docs/auth.md §7.7 — path-scoped keys -->
-  <!-- claim: docs/scheduler.md §1 — schedules that run pipelines -->
+  <!-- claim: docs/auth.md §7.7 — endpoint key bindings restrict published paths -->
+  <!-- claim: docs/scheduler.md §1 — a schedule runs a pipeline -->
   <!-- claim: docs/dashboards.md §1, docs/dashboards.md §6.5 — dashboards embedded through your backend -->
   <!-- claim: docs/pipeline-contract.md §4.12 — SCRIPT nodes -->
   <!-- claim: docs/ROADMAP.md §3 — scheduled extracts, alerts and metrics are later -->

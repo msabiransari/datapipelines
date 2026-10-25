@@ -107,7 +107,7 @@
         server, starting with <code>pipelines_list</code> and <code>datasources_list</code>. Nothing else needs
         configuring: capabilities come from the standard <code>initialize</code> handshake.
       </p>
-      <!-- claim: docs/mcp-server.md §4.2 (the transport), docs/auth.md §9 (the refusal codes), docs/auth.md §7.5 (the key's own role) -->
+      <!-- claim: docs/mcp-server.md §3 (the transport), docs/auth.md §9 (the refusal codes), docs/auth.md §7.5 (the key's own role) -->
       <h3>If it does not connect</h3>
       <ul class="fact-list fact-list-plain">
         <li><strong><code>401 auth.api_key.missing</code></strong>: the header did not arrive. Check the header name, and that the client sends headers at all on HTTP transports.</li>
@@ -127,7 +127,7 @@
       <!-- claim: docs/mcp-server.md §3.2 — which MCP client should I use -->
       <!-- claim: docs/auth.md §7.5 — what role the key carries -->
       <!-- claim: docs/deployment.md §3.5 — which drivers ship in the image -->
-      <!-- claim: docs/auth.md §9 (refusal codes), docs/mcp-server.md §4.2 (the transport) — the tools did not come back -->
+      <!-- claim: docs/auth.md §9 (refusal codes), docs/mcp-server.md §3 (the transport) — the tools did not come back -->
       <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Client setup, in questions')}"></div>
     </div>
   </section>

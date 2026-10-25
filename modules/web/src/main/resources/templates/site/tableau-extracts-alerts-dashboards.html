@@ -216,9 +216,9 @@
     <div class="container">
       <p class="kicker">Asked before</p>
       <!-- claim: docs/dashboards.md §1, docs/dashboards.md §6.5 — are the embedded dashboards available today -->
-      <!-- claim: docs/ROADMAP.md §3, docs/scheduler.md §1 — when do scheduled extracts arrive -->
+      <!-- claim: docs/ROADMAP.md §3, docs/scheduler.md §1 — a schedule runs a pipeline; extracts still need the planned S3 output -->
       <!-- claim: docs/ROADMAP.md §3 — will there be Slack alerts -->
-      <!-- claim: docs/dashboards.md §6.5, docs/templates.md §4.5 — what does filtered per viewer mean -->
+      <!-- claim: docs/dashboards.md §6.5, docs/templates.md §4.5 — declared parameters bind viewer values on a prepared statement -->
       <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Roadmap questions, answered plainly')}"></div>
     </div>
   </section>

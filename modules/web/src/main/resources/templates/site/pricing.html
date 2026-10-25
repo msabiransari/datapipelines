@@ -51,9 +51,9 @@
         <article class="price-card featured">
           <span class="tag live">Self-hosted · public beta</span>
           <div class="price">$0 <small>software licence fee</small></div>
-          <!-- claim: docs/deployment.md §10 (every feature, every deployment, no seat count) -->
+          <!-- claim: docs/deployment.md §10 (AGPL-3.0 distribution license; no paid feature tiers) -->
           <p>One open-source product, with all currently available features. Your whole company, your contractors and your agents, everyone who can reach the server may use it.</p>
-          <!-- claim: docs/datasources.md §4 (the engines and S3), docs/datasources.md §7E (learned facts), docs/templates.md §5 and docs/versioning.md §3 (versioned templates and pipelines, human release), docs/pipeline-contract.md §12.12 (release checks), docs/rest-api.md §19 (published APIs), docs/auth.md §5.6 (workspaces) -->
+          <!-- claim: docs/datasources.md §4 (supported dialects and S3), docs/datasources.md §7E (learned facts), docs/templates.md §5 and docs/versioning.md §3 (versioned templates and pipelines, human release), docs/pipeline-contract.md §12.12 (release checks), docs/rest-api.md §19 (published APIs), docs/auth.md §5.6 (workspaces) -->
           <ul class="plain-list">
             <li>Supported SQL databases and S3 data</li>
             <li>AI-assisted authoring and learned data context</li>
@@ -68,7 +68,7 @@
         <article class="price-card">
           <p class="eyebrow">Plan for the whole cost</p>
           <h2 id="free-costs">What your team provides.</h2>
-          <!-- claim: docs/deployment.md §4 (infrastructure), §7 (persistence and backup), §8 (upgrades) -->
+          <!-- claim: docs/deployment.md §4 (infrastructure), docs/deployment.md §7 (persistence and backup), docs/deployment.md §8 (upgrades) -->
           <div class="cost-row">
             <h3>Infrastructure</h3>
             <p>A server to run the image on, the Postgres metadata database and Redis beside it, storage, network access and the databases you query. Your existing provider’s charges still apply.</p>
@@ -80,7 +80,7 @@
           </div>
           <div class="cost-row">
             <h3>Operations and review</h3>
-            <!-- claim: docs/deployment.md §7 (backups, with a restore drill), §8 (upgrades on your schedule) -->
+            <!-- claim: docs/deployment.md §7 (backups, with a restore drill), docs/deployment.md §8 (upgrades on your schedule) -->
             <p>Someone to deploy, secure, back up and update the server, with a restore drill you have actually run, and someone to verify that the answers match your business definitions. The runbooks are in <a th:href="@{/docs/deployment}">deployment.md</a>, the same docs that ship inside the product.</p>
           </div>
         </article>
