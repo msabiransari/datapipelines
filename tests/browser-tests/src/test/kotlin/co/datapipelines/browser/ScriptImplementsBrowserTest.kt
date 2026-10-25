@@ -10,7 +10,6 @@ import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import java.nio.file.Path
 import java.nio.file.Paths
-import java.sql.DriverManager
 import java.util.UUID
 
 /**
@@ -24,11 +23,8 @@ import java.util.UUID
  * successor above a confirm that stays enabled; the release then lands (a warning, never a
  * refusal). The SQL stage, which cites nothing, is never marked.
  *
- * The rule is written by SQL: `semantics_record` is an MCP tool and the MCP key reaches `/mcp`
- * only (owner ruling B2); the recording path is `ScriptImplementsE2eTest`'s. The rows are
- * what `LearnedFactRecorder` writes for a WORKSPACE definition (no refs, the empty
- * fingerprint), and the supersession is its two writes: the successor carrying `supersedes`,
- * the predecessor retired with reason `superseded`. Screenshots under build/reports/7e-screenshots.
+ * The rule and the citing script are seeded by [NeedsReviewFixtures] (the rule by SQL, the
+ * script over REST in the session). Screenshots under build/reports/7e-screenshots.
  */
 class ScriptImplementsBrowserTest : BrowserSuite() {
     @Test
@@ -135,52 +131,13 @@ class ScriptImplementsBrowserTest : BrowserSuite() {
 
     private fun suffix(): String = generatedPassword("s").takeLast(8).lowercase()
 
-    /**
-     * A WORKSPACE definition in `default` (the membership [seedLocalUser] grants), as the recorder
-     * writes it; with [supersedes], ALSO the recorder's second write — the predecessor retired
-     * `superseded` — in the same transaction. Returns the new rule's id.
-     */
+    /** A WORKSPACE definition in `default` (the membership [seedLocalUser] grants), via [NeedsReviewFixtures.recordRule]. */
     private fun recordRule(
         email: String,
         datasource: String,
         text: String,
         supersedes: UUID?,
-    ): UUID {
-        val id = UUID.randomUUID()
-        DriverManager.getConnection(SharedBrowserE2e.jdbcUrl, SharedBrowserE2e.username, SharedBrowserE2e.password).use { connection ->
-            connection.autoCommit = false
-            connection
-                .prepareStatement(
-                    """
-                    INSERT INTO learned_facts (id, scope, workspace_id, datasource_name, kind, fact, refs_json, trust,
-                                               schema_fingerprint, recorded_by, recorded_via, recorded_in, supersedes)
-                    SELECT CAST(? AS uuid), 'WORKSPACE', CAST(? AS uuid), ?, 'definition', ?, '[]'::jsonb, 'asserted', '', u.id, 'session',
-                           CAST(? AS uuid), CAST(? AS uuid)
-                      FROM users u WHERE u.email = ?
-                    """.trimIndent(),
-                ).use { insert ->
-                    insert.setObject(1, id)
-                    insert.setObject(2, DEFAULT_WORKSPACE)
-                    insert.setString(3, datasource)
-                    insert.setString(4, text)
-                    insert.setObject(5, DEFAULT_WORKSPACE)
-                    insert.setObject(6, supersedes)
-                    insert.setString(7, email)
-                    insert.executeUpdate() shouldBe 1
-                }
-            if (supersedes != null) {
-                connection
-                    .prepareStatement(
-                        "UPDATE learned_facts SET trust = 'retired', retired_at = NOW(), retired_reason = 'superseded' WHERE id = ?",
-                    ).use { retire ->
-                        retire.setObject(1, supersedes)
-                        retire.executeUpdate() shouldBe 1
-                    }
-            }
-            connection.commit()
-        }
-        return id
-    }
+    ): UUID = NeedsReviewFixtures.recordRule(email, datasource, text, supersedes, workspace = DEFAULT_WORKSPACE)
 
     /** The SQL stage, the script citing [rule] (7b's gate runs its suite), and the pipeline pinning both. */
     private fun seedPipeline(
@@ -195,7 +152,7 @@ class ScriptImplementsBrowserTest : BrowserSuite() {
             stage,
             "SELECT g AS order_id, CASE WHEN g % 2 = 0 THEN 'c' || g ELSE NULL END AS customer_id FROM generate_series(1, 6) g",
         )
-        createCitingScript(script, rule)
+        NeedsReviewFixtures.writeCitingScript(page, script, rule)
         EditorRunFixtures.postPipeline(
             page,
             folder,
@@ -206,36 +163,6 @@ class ScriptImplementsBrowserTest : BrowserSuite() {
                 "inputs": { "orders": "stg_orders" }, "output": { "target": "caller" }, "depends_on": ["stage_orders"] }
             ]""",
         )
-    }
-
-    /** A jsonata template over REST in the session (no key reaches /api/v1), citing [rule]. */
-    @Suppress("UNCHECKED_CAST")
-    private fun createCitingScript(
-        id: String,
-        rule: UUID,
-    ) {
-        val result =
-            page.evaluate(
-                """async (args) => {
-                  const csrf = document.cookie.match(/(?:^|;\s*)dp_csrf=([^;]*)/);
-                  const headers = { 'Content-Type': 'application/json', 'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : '' };
-                  const r = await fetch('/api/v1/templates', { method: 'POST', credentials: 'same-origin', headers,
-                    body: JSON.stringify({ id: args.id, type: 'jsonata', display_name: args.id, description: '7e browser fixture',
-                      body: args.body, contract: JSON.parse(args.contract), invariants: [], tests: JSON.parse(args.tests),
-                      implements: [args.rule] }) });
-                  return { status: r.status, body: r.status === 201 ? '' : await r.text() };
-                }""",
-                mapOf(
-                    "id" to id,
-                    "body" to """[ inputs.orders[customer_id != null].{ "order_id": order_id } ]""",
-                    "contract" to
-                        """{"mode":"table","inputs":{"orders":{"kind":"table","columns":[$ORDER_ID,{"name":"customer_id","type":"STRING","nullable":true}]}},
-                            "output":{"kind":"table","columns":[$ORDER_ID]}}""",
-                    "tests" to """[{"name":"empty input","input":{"inputs":{"orders":[]}},"expect":{"output":[]}}]""",
-                    "rule" to rule.toString(),
-                ),
-            ) as Map<String, Any?>
-        check((result["status"] as Number).toInt() == 201) { "script template $id: ${result["status"]} ${result["body"]}" }
     }
 
     /**
@@ -418,8 +345,6 @@ class ScriptImplementsBrowserTest : BrowserSuite() {
         const val TOAST_PROBE_COUNT = 3
 
         const val TREE_PANEL = "#nav-tree-templates"
-
-        const val ORDER_ID = """{"name":"order_id","type":"INTEGER"}"""
 
         /** The `default` workspace every [seedLocalUser] membership lands in (V29's seeded row). */
         val DEFAULT_WORKSPACE: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")

@@ -3,6 +3,7 @@ package co.datapipelines.browser
 import com.microsoft.playwright.Page
 import io.kotest.assertions.assertSoftly
 import io.kotest.assertions.withClue
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.doubles.shouldBeBetween
 import io.kotest.matchers.doubles.shouldBeGreaterThan
 import io.kotest.matchers.doubles.shouldBeGreaterThanOrEqual
@@ -12,6 +13,8 @@ import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Paths
+import java.sql.DriverManager
+import java.util.UUID
 
 /**
  * #701 — the resource row re-cut to ONE line (owner ruling 2026-10-24; the record §5/§7
@@ -351,5 +354,213 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
             withClue("ring.controlOutlineStyle") { readings["ring.controlOutlineStyle"] shouldBe "none" }
             withClue("ring.itemBoxShadow") { readings["ring.itemBoxShadow"] shouldBe "none" }
         }
+    }
+
+    // ---------------------------------------------------------------- #701 round two (owner ruling 2026-10-25)
+
+    /** F1: the supported minimum — the compact row keeps every badge inside the rail at depth 3 and 10. */
+    @Test
+    fun `at the 240px minimum every badge stays inside the rail at depth three and ten in both themes`() {
+        narrowRows(MIN_WIDTH)
+    }
+
+    /** F1, widened: the default — a depth-10 leaf overflowed by ~62px before the compact mode. */
+    @Test
+    fun `at the 300px default every badge stays inside the rail and every name keeps width at depth three and ten`() {
+        narrowRows(DEFAULT_WIDTH)
+    }
+
+    /**
+     * One width's matrix (brief 701b A.2), set the way the product sets it — the preference on
+     * `html` that browser-resize.mjs writes — and proven taken before anything is read: the
+     * pipelines tree's depth-3 and depth-10 leaves (v13 and draft) and the templates tree's
+     * (v13, draft and #533's needs review), light and dark.
+     */
+    private fun narrowRows(width: Int) {
+        startTrace()
+        readyTree()
+        PIPELINE_ROWS.forEach { releaseTimes(it, RELEASES) }
+        val workspace = UUID.fromString(field(api("GET", "/api/v1/pipelines/tree", null), "workspace_id"))
+        seedReviewedScripts(workspace)
+        val rows = mutableListOf<Map<String, Any?>>()
+        for ((family, paths) in listOf("pipelines" to PIPELINE_ROWS, "templates" to SCRIPT_ROWS)) {
+            openBrowserTree(family)
+            setBrowserWidth(width)
+            paths.forEach { openFolders(family, it) }
+            for (theme in listOf("light", "dark")) {
+                ensureTheme(theme)
+                paths.forEach { rows += requireNotNull(narrowMetrics(family, it)).plus(listOf("theme" to theme, "family" to family)) }
+                page.screenshot(Page.ScreenshotOptions().setPath(evidence("701b-$width-$family-$theme.png")))
+            }
+        }
+        // the other side of the threshold, from the default case: at 320 the full indent and badge padding return
+        val full = if (width == DEFAULT_WIDTH) fullSide() else emptyList()
+        (rows + full).forEach { row ->
+            println("701b-measure|${row["width"] ?: width}|${row["depth"]}|${row["theme"]}|${row["family"]}|$row")
+        }
+        assertSoftly {
+            rows.forEach { assertNarrowRow(width, it) }
+            full.forEach { row ->
+                withClue("$FULL_WIDTH full indent: $row") { row["indent"] shouldBe row["gapMd"] }
+                withClue("$FULL_WIDTH full badge padding: $row") { row["badgePadLeft"] shouldBe row["space2"] }
+            }
+        }
+    }
+
+    /** The templates rows at 320px (dark, the theme the loop ends on): the compact mode is off. */
+    private fun fullSide(): List<Map<String, Any?>> {
+        setBrowserWidth(FULL_WIDTH)
+        return SCRIPT_ROWS.map {
+            requireNotNull(narrowMetrics("templates", it)).plus(listOf("theme" to "dark", "family" to "templates", "width" to FULL_WIDTH))
+        }
+    }
+
+    private fun assertNarrowRow(
+        width: Int,
+        row: Map<String, Any?>,
+    ) {
+        val label = "$width ${row["theme"]} ${row["path"]}: $row"
+
+        fun n(key: String) = (row[key] as Number).toDouble()
+        withClue("$label — the width took") { n("browserWidth").shouldBeBetween(width - 0.5, width + 0.5, 0.0) }
+        withClue("$label — every badge, the version two-digit") {
+            row["badgeTexts"] shouldBe if (row["family"] == "templates") listOf("v13", "draft", "needs review") else listOf("v13", "draft")
+        }
+        withClue("$label — badges inside the browser's content edge") { n("badgeRight").shouldBeLessThanOrEqual(n("contentRight") + 0.5) }
+        withClue("$label — no sideways scroll (#541)") { n("treeScrollWidth").shouldBeLessThanOrEqual(n("treeClientWidth")) }
+        withClue("$label — meta inside the control") { n("metaRight").shouldBeLessThanOrEqual(n("controlInnerRight") + 0.5) }
+        withClue("$label — tooltip") { listOf(row["controlTitle"], row["labelTitle"]) shouldBe listOf(row["path"], row["path"]) }
+        withClue("$label — ellipsis") { row["titleTextOverflow"] shouldBe "ellipsis" }
+        if (width >= DEFAULT_WIDTH || n("depth") <= SHALLOW_DEPTH) {
+            withClue("$label — the name keeps width") { n("titleClientWidth").shouldBeGreaterThan(0.0) }
+        } else {
+            withClue("$label — the ruling accepts a 0px name here") { n("titleClientWidth").shouldBeGreaterThanOrEqual(0.0) }
+        }
+        // the compact mode (below the record's 320px): the indent and the badge sides are --space-1
+        withClue("$label — compact indent") { n("indent") shouldBe n("space1") }
+        withClue("$label — compact badge side padding") { n("badgePadLeft") shouldBe n("space1") }
+    }
+
+    /** The preference browser-resize.mjs writes; the box must report it before any reading counts. */
+    private fun setBrowserWidth(width: Int) {
+        page.evaluate("w => document.documentElement.style.setProperty('--app-browser-preferred', w + 'px')", width)
+        settle()
+        withClue("#app-browser box width") { width() shouldBe width }
+    }
+
+    private fun openFolders(
+        family: String,
+        path: String,
+    ) {
+        val segments = path.split('/').dropLast(1)
+        for (depth in 1..segments.size) {
+            val key = "folder:" + segments.take(depth).joinToString("/")
+            val folder = "#nav-tree-$family [data-tree-key='$key']"
+            if (page.locator(folder).getAttribute("aria-expanded") != "true") page.click("$folder > .dp-tree-line button")
+            page.waitForFunction(
+                "([family, key]) => window.DatapipelinesSidebarTrees.get(family).state.levels.get(key)?.complete",
+                listOf(family, key),
+            )
+        }
+        page.waitForSelector("#nav-tree-$family .dp-tree-activate[title='$path'] .dp-tree-draft:not([hidden])")
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun narrowMetrics(
+        family: String,
+        path: String,
+    ): Map<String, Any?>? =
+        page.evaluate(
+            """([family, path]) => {
+          const browser = document.getElementById('app-browser'), tree = document.getElementById('nav-tree-' + family);
+          const control = tree.querySelector(".dp-tree-activate[title='" + path + "']");
+          if (!control) return null;
+          const item = control.closest('[role=treeitem]'), group = item.parentElement.closest('.dp-tree-group');
+          const title = control.querySelector('.dp-tree-title'), meta = control.querySelector('.dp-tree-meta');
+          const scroll = tree.querySelector('.dp-tree-scroll'), br = browser.getBoundingClientRect();
+          const cs = getComputedStyle(control), cr = control.getBoundingClientRect();
+          const badges = [...control.querySelectorAll('.ds-badge:not([hidden])')];
+          const probe = document.createElement('span');
+          probe.style.display = 'none'; document.body.appendChild(probe);
+          const tok = (name) => { probe.style.paddingLeft = 'var(' + name + ')'; return parseFloat(getComputedStyle(probe).paddingLeft); };
+          const out = { path, depth: Number(item.getAttribute('aria-level')),
+            browserWidth: br.width, browserClientWidth: browser.clientWidth, contentRight: br.left + browser.clientLeft + browser.clientWidth,
+            treeScrollWidth: scroll.scrollWidth, treeClientWidth: scroll.clientWidth,
+            badgeTexts: badges.map(b => b.textContent), badgeRight: Math.max(...badges.map(b => b.getBoundingClientRect().right)),
+            badgePadLeft: parseFloat(getComputedStyle(badges[0]).paddingLeft),
+            metaRight: meta.getBoundingClientRect().right, controlInnerRight: cr.right - parseFloat(cs.paddingRight),
+            titleClientWidth: title.clientWidth, titleScrollWidth: title.scrollWidth, titleTextOverflow: getComputedStyle(title).textOverflow,
+            controlTitle: control.getAttribute('title'), labelTitle: title.getAttribute('title'),
+            indent: group ? parseFloat(getComputedStyle(group).paddingInlineStart) : null,
+            space1: tok('--space-1'), space2: tok('--space-2'), gapMd: tok('--gap-md') };
+          probe.remove();
+          return out;
+        }""",
+            listOf(family, path),
+        ) as Map<String, Any?>?
+
+    /** Creates the pipeline [name], releases it [times] times (a changed body each time after the first), then edits it once more. */
+    private fun releaseTimes(
+        name: String,
+        times: Int,
+    ) {
+        val created = api("POST", "/api/v1/pipelines", pipelineBody(name))
+        val id = field(created, "id")
+        var hash = field(created, "body_hash")
+        for (round in 1..times) {
+            if (round > 1) hash = field(api("PUT", "/api/v1/pipelines/$id", pipelineBody(name, "n$round"), hash), "body_hash")
+            api("POST", "/api/v1/pipelines/$id/release", null, hash)
+        }
+        api("PUT", "/api/v1/pipelines/$id", pipelineBody(name, "n_draft"), hash)
+    }
+
+    /**
+     * The templates tree's three badges on the real page: a jsonata script citing a workspace rule,
+     * released [RELEASES] times and edited once more, then the rule superseded (the #533 marker's
+     * path, [NeedsReviewFixtures]). Every write precedes the supersession: a retired rule is not citable.
+     */
+    private fun seedReviewedScripts(workspace: UUID) {
+        val email = workspaceCreator(workspace)
+        val datasource = "row701-src-" + generatedPassword("s").takeLast(8).lowercase()
+        EditorRunFixtures.registerSourceDatasource(page, baseUrl, datasource).shouldBeEmpty()
+        val rule = NeedsReviewFixtures.recordRule(email, datasource, "A row is a row.", supersedes = null, workspace = workspace)
+        for (script in SCRIPT_ROWS) {
+            var hash = field(NeedsReviewFixtures.writeCitingScript(page, script, rule), "body_hash")
+            for (round in 1..RELEASES) {
+                if (round > 1) hash = field(NeedsReviewFixtures.writeCitingScript(page, script, rule, round, hash), "body_hash")
+                api("POST", "/api/v1/templates/release", """{"name":"$script"}""", hash)
+                hash = field(api("GET", "/api/v1/templates?name=$script", null), "body_hash")
+            }
+            NeedsReviewFixtures.writeCitingScript(page, script, rule, RELEASES + 1, hash)
+        }
+        NeedsReviewFixtures.recordRule(email, datasource, "A row is a row with a name.", supersedes = rule, workspace = workspace)
+    }
+
+    private fun workspaceCreator(workspace: UUID): String {
+        val sql = "SELECT u.email FROM workspaces w JOIN users u ON u.id = w.created_by WHERE w.id = ?"
+        DriverManager.getConnection(SharedBrowserE2e.jdbcUrl, SharedBrowserE2e.username, SharedBrowserE2e.password).use { connection ->
+            connection.prepareStatement(sql).use { query ->
+                query.setObject(1, workspace)
+                val result = query.executeQuery()
+                check(result.next()) { "workspace $workspace has no creator" }
+                return result.getString(1)
+            }
+        }
+    }
+
+    private fun evidence(name: String) = Paths.get("build", "browser-evidence").also { Files.createDirectories(it) }.resolve(name)
+
+    private companion object {
+        const val MIN_WIDTH = 240
+        const val DEFAULT_WIDTH = 300
+        const val FULL_WIDTH = 320
+        const val SHALLOW_DEPTH = 3.0
+
+        /** Twelve releases, then a draft: the row reads `v13` and `draft` — a two-digit version. */
+        const val RELEASES = 12
+        val LONG = "x".repeat(64)
+        val DEEP = (2..9).joinToString("/", prefix = "row/") { "d$it" }
+        val PIPELINE_ROWS = listOf("row/deep/$LONG", "$DEEP/$LONG")
+        val SCRIPT_ROWS = listOf("row/deep/${LONG.drop(8)}.jsonata", "$DEEP/${LONG.drop(8)}.jsonata")
     }
 }
