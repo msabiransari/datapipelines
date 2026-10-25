@@ -2525,7 +2525,7 @@
    "headings": [
     {
      "level": "H1",
-     "text": "Embedded dashboards, scheduled extracts to S3, data-driven alerts: the roadmap"
+     "text": "Embedded dashboards today; scheduled extracts to S3 and data-driven alerts later"
     },
     {
      "level": "H2",
@@ -2561,7 +2561,7 @@
     },
     {
      "level": "H3",
-     "text": "The endpoint a dashboard will consume"
+     "text": "The endpoint beside the dashboard"
     },
     {
      "level": "H3",
@@ -2573,7 +2573,7 @@
     },
     {
      "level": "H3",
-     "text": "Script nodes, designed"
+     "text": "SCRIPT nodes for what SQL is bad at"
     },
     {
      "level": "H2",
@@ -2603,7 +2603,10 @@
    "retired": {
     "anchors": {},
     "headings": {
-     "Scheduled extracts to your own bucket": "173 (SEO coverage before indexing): renamed \"Tableau extracts, scheduled to your own bucket\" (tableau extracts, 110/mo, was body-only); anchor #tr-extract unchanged."
+     "Scheduled extracts to your own bucket": "173 (SEO coverage before indexing): renamed \"Tableau extracts, scheduled to your own bucket\" (tableau extracts, 110/mo, was body-only); anchor #tr-extract unchanged.",
+     "Embedded dashboards, scheduled extracts to S3, data-driven alerts: the roadmap": "#699: dashboards ship (docs/dashboards.md), so the H1 no longer files them under the roadmap; replaced by \"Embedded dashboards today; scheduled extracts to S3 and data-driven alerts later\", anchor #tr-title unchanged.",
+     "The endpoint a dashboard will consume": "#699: the dashboard exists, so the endpoint is no longer one a future dashboard will consume; replaced by \"The endpoint beside the dashboard\" in the same section.",
+     "Script nodes, designed": "#699: SCRIPT nodes are implemented (#7, #8 closed; docs/pipeline-contract.md §4.12), not only designed; replaced by \"SCRIPT nodes for what SQL is bad at\"."
     }
    }
   },
@@ -2667,7 +2670,7 @@
     },
     {
      "level": "H3",
-     "text": "Planned The dashboard beside it"
+     "text": "Ships today The dashboard beside it"
     },
     {
      "level": "H2",
@@ -2703,7 +2706,8 @@
     "headings": {
      "What you embed in the client's portal: the API today, the dashboard next month": "#120: removed the release-date promise; replaced by \"What you embed in the client's portal: the API today, the dashboard planned\" without changing the section anchor.",
      "Roadmap · October 2026 The dashboard beside it": "#120: removed the release-date promise; replaced by \"Planned The dashboard beside it\" without changing the section anchor.",
-     "What you embed in the client's portal: the API today, the dashboard planned": "173 (SEO coverage before indexing): renamed \"White-label reporting in the client's portal: the API today, the dashboard planned\" (white label reporting, 320/mo); anchor #ag-embed unchanged."
+     "What you embed in the client's portal: the API today, the dashboard planned": "173 (SEO coverage before indexing): renamed \"White-label reporting in the client's portal: the API today, the dashboard planned\" (white label reporting, 320/mo); anchor #ag-embed unchanged.",
+     "Planned The dashboard beside it": "#699: the portal dashboard ships through the client portal's backend (docs/dashboards.md §6.5); the status chip changes from Planned to Ships today, the H3 text otherwise unchanged."
     }
    }
   },
@@ -2739,7 +2743,7 @@
     },
     {
      "level": "H2",
-     "text": "The planned dashboards"
+     "text": "The dashboards, embedded through your backend"
     },
     {
      "level": "H2",
@@ -2801,7 +2805,8 @@
    "retired": {
     "anchors": {},
     "headings": {
-     "The dashboards, next month": "#120: removed the release-date promise; replaced by \"The planned dashboards\" without changing the section anchor."
+     "The dashboards, next month": "#120: removed the release-date promise; replaced by \"The planned dashboards\" without changing the section anchor.",
+     "The planned dashboards": "#699: dashboards ship (docs/dashboards.md §6.5); replaced by \"The dashboards, embedded through your backend\" without changing the section anchor."
     }
    }
   },
@@ -3506,6 +3511,9 @@
  "additions": {
   "/use-cases": "145 §2: the use-cases hub, added by the website transition after the 2026-09-16 baseline was frozen.",
   "/explore": "145 §2: the generated directory, added by the website transition after the baseline was frozen.",
-  "/compare/dagster-vs-airflow": "173 §B: the Dagster vs Airflow editorial comparison (dagster vs airflow 390/mo, prefect vs airflow 210, airflow vs dagster 140, dagster alternative 70), added before indexing."
+  "/compare/dagster-vs-airflow": "173 §B: the Dagster vs Airflow editorial comparison (dagster vs airflow 390/mo, prefect vs airflow 210, airflow vs dagster 140, dagster alternative 70), added before indexing.",
+  "/pipeline-scheduling": "#699 design record §5: the scheduler capability page (cron, time zone, missed-run policy, date bindings, current limits), added after the scheduler shipped on main.",
+  "/sql-dashboards": "#699 design record §5: the dashboards capability page (visualizations, refresh, review, backend-proxy embedding, current limits), added after dashboards shipped on main.",
+  "/reusable-parameter-sets": "#699 design record §5: the parameter sets capability page (INPUT/SELECT, SQL-fed options, cascades, lifecycle, current limits), added after parameter sets shipped on main."
  }
 }

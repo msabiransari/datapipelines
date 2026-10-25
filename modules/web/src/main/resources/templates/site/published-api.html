@@ -16,6 +16,7 @@
   <!-- claim: docs/auth.md §7.7 — key kinds and path bindings -->
   <!-- claim: docs/versioning.md §3 — a release is what gets published -->
   <!-- claim: docs/pipeline-contract.md §9 — the caller node is the response -->
+  <!-- claim: docs/dashboards.md §1, docs/scheduler.md §1 — the same release can feed a dashboard or run on a schedule (#699) -->
 
   <section class="section page-hero" aria-labelledby="pa-title">
     <div class="container">
@@ -26,8 +27,8 @@
         on-call. Here the SQL API is one step after a release: a released pipeline is published under a path, a
         <code>GET</code> runs it with bound parameters and returns JSON, and a key scoped to that path is the
         whole access story.
-        From data to an API in a day is the shipped half of the sentence; the dashboards you embed are
-        <a th:href="@{/roadmap}">planned</a>.
+        From data to an API in a day is one use of a released pipeline; the same release can feed a
+        <a th:href="@{/sql-dashboards}">SQL dashboard</a> or run on a <a th:href="@{/pipeline-scheduling}">schedule</a>.
       </p>
       <div class="btn-row">
         <a class="btn btn-primary" th:href="@{/docs/rest-api}">The endpoint contract</a>
@@ -153,10 +154,11 @@ DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;
           you review and release; the endpoint exists. No service was written. Nothing was deployed. The on-call is
           the server you were already running.
         </p>
+        <!-- claim: docs/dashboards.md §1, docs/dashboards.md §6.5 -->
         <p>
-          It is also why the roadmap's dashboards are built the way they are, created by the same agent and fed by the
-          same released pipelines and endpoints, embedded in your product rather than hosted in ours. The endpoint is
-          the contract; the dashboard is a consumer of it, like any other.
+          It is also why dashboards are built the way they are: drafted by the same agent, fed by pinned versions of the
+          same released pipelines, and embedded in your product through your own backend rather than hosted in ours.
+          The released pipeline is the contract; the endpoint and the dashboard are both consumers of it.
         </p>
       </div>
     </div>

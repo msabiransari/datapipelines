@@ -2,11 +2,12 @@
 # site-lighthouse.sh — the marketing site's Lighthouse budget, as a guard.
 #
 # What it measures: Lighthouse's performance, accessibility, best-practices and
-# SEO categories, on eleven pages of the exported static site:
+# SEO categories, on every page in PAGES below, of the exported static site:
 #   /  /how-it-works  /demo-data  /faq  /tableau  /published-api  /for/saas-teams  /pricing
-#   /semantic-layer  /use-cases  /explore
+#   /semantic-layer  /use-cases  /explore  /pipeline-scheduling  /sql-dashboards
+#   /reusable-parameter-sets
 # (115 §C added /how-it-works; 116 added /demo-data; 119 added /pricing and /semantic-layer;
-# 145 added /use-cases and /explore.)
+# 145 added /use-cases and /explore; #699 added the three capability pages.)
 #
 # The floor is 95 in every audited category on every page. Any score below the
 # floor names the page, the category and the score, and the script exits 1.
@@ -34,7 +35,8 @@ FLOOR=95
 EXPORT_DIR="modules/web/build/website-export"
 # Trailing slashes: the export is a directory tree, and python's http.server answers a
 # slash-less directory path with a redirect — one wasted round trip on the critical chain.
-PAGES=("/" "/how-it-works/" "/demo-data/" "/faq/" "/tableau/" "/published-api/" "/for/saas-teams/" "/pricing/" "/semantic-layer/" "/use-cases/" "/explore/")
+PAGES=("/" "/how-it-works/" "/demo-data/" "/faq/" "/tableau/" "/published-api/" "/for/saas-teams/" "/pricing/" "/semantic-layer/" "/use-cases/" "/explore/"
+  "/pipeline-scheduling/" "/sql-dashboards/" "/reusable-parameter-sets/")
 CATEGORIES=("performance" "accessibility" "best-practices" "seo")
 
 command -v python3 >/dev/null || { echo "site-lighthouse: python3 is required to serve the export" >&2; exit 1; }
@@ -175,7 +177,7 @@ if [ "$FAILED" -ne 0 ]; then
   echo "site-lighthouse: FAIL — at least one page scored below the floor; fix the cause, never lower the floor" >&2
   exit 1
 fi
-echo "site-lighthouse: OK — eleven pages, four categories, all >= $FLOOR"
+echo "site-lighthouse: OK — ${#PAGES[@]} pages, ${#CATEGORIES[@]} categories, all >= $FLOOR"
 
 # ---------------------------------------------------------------------------
 # 133 §D ran a second, DARK-theme accessibility pass here. 145 made the public site

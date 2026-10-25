@@ -131,8 +131,8 @@
           <strong>Iceberg tables register by their metadata file.</strong> DuckDB 1.5.5.1 cannot resolve a pyiceberg table by its root, so the registry names the table's current metadata file, and a table that still receives commits is re-registered to follow it.
         </li>
         <li>
-          <!-- claim: docs/datasources.md §8C.8 -->
-          <strong>No scheduler, no dashboards.</strong> A pipeline runs when you run it, or when something calls its published endpoint. Recurring cadence and a dashboard are not shipped. Nothing on this page should read as a promise of either.
+          <!-- claim: docs/datasources.md §8C.8 (no write path to the object store), docs/scheduler.md §1 (a schedule runs a pipeline), docs/dashboards.md §1 (a dashboard charts released pipelines) -->
+          <strong>It reads; it never writes the bucket.</strong> A pipeline over the lake runs when you run it, when something calls its published endpoint, or at a <a th:href="@{/pipeline-scheduling}">schedule</a>'s times, and a <a th:href="@{/sql-dashboards}">dashboard</a> can chart its result. dp-lake has no write path to your object store, so extracts to your own bucket are a later roadmap item.
         </li>
         <li>
           <!-- claim: docs/datasources.md §8C.3 -->

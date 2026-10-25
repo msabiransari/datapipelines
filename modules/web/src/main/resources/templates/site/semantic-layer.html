@@ -295,7 +295,7 @@
     <div class="container">
       <h2 id="sl-compare" class="ds-headline">How this differs from the dbt semantic layer and the Cube semantic layer</h2>
       <div class="prose">
-        <!-- claim: docs/semantic-layer-research.md Part one (what dbt/MetricFlow and Cube say they are, from their own docs), Part five Decision 1 -->
+        <!-- claim: docs/semantic-layer-research.md Part one (what dbt/MetricFlow and Cube say they are, from their own docs), Part five Decision 1; docs/dashboards.md §1 (dashboards over released pipelines) -->
         <p>
           The dbt semantic layer and Cube are <em>compiled metrics layers</em>: you author a model of measures,
           dimensions and joins, in YAML for dbt's MetricFlow or a data model for Cube, and their engines compile
@@ -308,8 +308,9 @@
           attached to your live schema, checked against it on every read, and served to the agent in the introspection
           response it was already making. There is no YAML to rot and no file to deploy; there is also, today, no
           compiled metric SQL for BI tools. If that direction matters to you, it is on the
-          <a th:href="@{/roadmap}">roadmap</a>. A universal semantic layer for dashboards and metrics is the same
-          round that brings dashboards, and the headless-BI integration it implies is named there, not here.
+          <a th:href="@{/roadmap}">roadmap</a>. <a th:href="@{/sql-dashboards}">Dashboards</a> ship today, built on
+          released pipelines; a universal semantic layer for metrics, and the headless-BI integration it implies, is
+          named on the roadmap, not here.
         </p>
       </div>
     </div>

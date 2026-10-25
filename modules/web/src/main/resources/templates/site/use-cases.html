@@ -91,8 +91,8 @@
           <h2 id="analytics-title">Prepare the dataset once.<br>Use it where you already work.</h2>
           <!-- claim: docs/templates.md §5 (versioned templates reused across pipelines), docs/datasources.md §7E (definitions recorded beside the data) -->
           <p>Use one reviewed pipeline for the revenue dataset behind your Tableau workbook. Keep the chosen exclusions and definitions with the data, and reuse versioned SQL templates as more reports need the same logic.</p>
-          <!-- claim: docs/pipeline-contract.md §8 (write-back to a datasource), docs/rest-api.md §19 (the endpoint a connector reads), docs/ROADMAP.md §2 (scheduling is planned) -->
-          <p>Write the result into a database Tableau connects to, or connect to the published API through an appropriate web data connector. Run the pipeline when you need an updated result; native scheduling is planned.</p>
+          <!-- claim: docs/pipeline-contract.md §8 (write-back to a datasource), docs/rest-api.md §19 (the endpoint a connector reads), docs/scheduler.md §1 (a schedule runs a pipeline on a cron pattern) -->
+          <p>Write the result into a database Tableau connects to, or connect to the published API through an appropriate web data connector. Run the pipeline when you need an updated result, or put it on a <a th:href="@{/pipeline-scheduling}">schedule</a>.</p>
           <div class="output-chips"><span>Tableau-ready data</span><span>Reviewable SQL</span><span>Human release</span></div>
           <p><a class="text-link" th:href="@{/tableau}">Using datapipelines with Tableau <span aria-hidden="true">&rarr;</span></a> · <a class="text-link" th:href="@{/tableau/governed-dataset}">A governed dataset, step by step <span aria-hidden="true">&rarr;</span></a></p>
         </div>
@@ -101,7 +101,7 @@
           <div class="metric-row"><span>Inputs</span><b>Multiple sources</b></div>
           <div class="metric-row"><span>Logic</span><b>Readable SQL</b></div>
           <div class="metric-row"><span>Output</span><b>Your BI dataset</b></div>
-          <p class="caption">Data preparation is available today. Visualization remains in Tableau or your own application.</p>
+          <p class="caption">Data preparation is available today. Keep visualization in Tableau, or build <a th:href="@{/sql-dashboards}">SQL dashboards</a> on the same pipelines.</p>
         </div>
       </div>
     </div>
@@ -118,7 +118,7 @@
           <div>
             <!-- claim: docs/deployment.md §4 (someone runs the server), docs/datasources.md §4 (the supported engines) -->
             <p>A good starting point: supported databases, someone who can run the server, and a recurring question worth turning into a reviewed dataset.</p>
-            <!-- claim: docs/ROADMAP.md §2 (dashboards are planned), docs/ROADMAP.md §3 (no hosted plan) -->
+            <!-- claim: docs/ROADMAP.md §3 (no hosted plan), docs/dashboards.md §3 (dashboards are authored and released, not drag-and-drop) -->
             <p>If you need a hosted, ready-made dashboard with no technical setup today, this beta won’t meet that need yet.</p>
             <a class="btn btn-light" th:href="@{/how-it-works}">See the setup and workflow <span aria-hidden="true">&rarr;</span></a>
           </div>
