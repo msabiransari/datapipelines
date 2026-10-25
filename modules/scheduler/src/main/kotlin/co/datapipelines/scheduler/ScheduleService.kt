@@ -342,6 +342,10 @@ class ScheduleService(
      * No transaction spans the walk: the lens may read the promotion target's inventory, and a
      * snapshot held across that call would hold a metadata connection with it. The across-request
      * `offset` a client pages by remains an offset, as for every list reader.
+     *
+     * #641: [condition] (`enabled` | `paused` | `blocked`, the [Schedule.condition] words; null or
+     * empty = all) narrows BOTH reads in SQL, before the lens — so a lensed reader's windows hold
+     * only rows of that condition, and the filtered list is the admitted set's rows of that word.
      */
     fun list(
         workspaceId: UUID,
@@ -349,18 +353,23 @@ class ScheduleService(
         limit: Int,
         offset: Int,
         viewer: TargetViewer,
+        condition: String? = null,
     ): List<Schedule> {
         prefix?.takeIf { it.isNotEmpty() }?.let {
             if (!PipelineNameGrammar.matchesPrefix(it)) {
                 throw requestInvalid("prefix", "a folder path: 1 to 9 lower-case segments separated by `/`")
             }
         }
-        if (!viewer.narrowed) return schedules.listLive(workspaceId, prefix, limit, offset)
+        val only =
+            condition?.takeIf { it.isNotEmpty() }?.let {
+                ScheduleCondition.fromWire(it) ?: throw requestInvalid("condition", CONDITION_WORDS)
+            }
+        if (!viewer.narrowed) return schedules.listLive(workspaceId, prefix, limit, offset, only)
         val admitted = ArrayList<Schedule>()
         var after: String? = null
         var scanned = 0
         while (admitted.size < offset + limit && scanned < LENS_SCAN_LIMIT) {
-            val window = schedules.listLiveAfter(workspaceId, prefix, after, LENS_WINDOW)
+            val window = schedules.listLiveAfter(workspaceId, prefix, after, LENS_WINDOW, only)
             admitted += admittedOf(window, workspaceId, viewer)
             if (window.size < LENS_WINDOW) break
             after = window.last().name
@@ -730,6 +739,9 @@ class ScheduleService(
         private const val KIB = 1024
         private const val MAX_KEY_CHARS = 255
         private const val MAX_ECHO = 64
+
+        /** #641 — the `condition` refusal's `expected`: the three wire words, in [ScheduleCondition]'s order. */
+        private val CONDITION_WORDS = "one of " + ScheduleCondition.entries.joinToString(", ") { it.wire }
 
         /** The states an explicit resend may queue again (#442b): never `pending` or `accepted`. */
         private val RESENDABLE = setOf(DeliveryState.FAILED, DeliveryState.UNCERTAIN)
