@@ -1,9 +1,9 @@
 # Datasources Specification
 
-**Status:** v2.53 (frozen contract — additive-only changes after this point)
+**Status:** v2.54 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-25
 
 ---
 
@@ -1497,8 +1497,11 @@ row must be re-registered to follow the table.
   catalogs remain a later, optional source.
 - **Writes to the lake.** dp-lake is a read connector; there is no write path to the object
   store.
-- **Scheduler, dashboards.** Pipelines run when executed (or when a published endpoint is
-  called); nothing schedules them and no dashboard surface ships.
+- **Scheduler, dashboards — general features.** A LAKE-backed pipeline is scheduled like any
+  pipeline ([Scheduler §1](scheduler.md)) and is a dashboard source like any pipeline
+  ([Dashboards §1 and §4.3](dashboards.md)): the same source rules apply, with SQL output
+  columns judged against the release's record, never the live schema. Nothing LAKE-specific
+  is withheld for either feature.
 - **Nested types.** LIST/STRUCT/MAP columns introspect as STRING with the mapper's warning
   (§8C.3); they are queryable in SQL but not type-mapped.
 - **Athena / Glue as engines.** Out by thesis — paid services; DuckDB on the app's box is the
