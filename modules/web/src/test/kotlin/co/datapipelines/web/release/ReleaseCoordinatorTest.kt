@@ -132,6 +132,33 @@ class ReleaseCoordinatorTest {
     }
 
     @Test
+    fun `a real native matching root snapshot flips once and audits once`() {
+        val native = CoordinatorFixture(realNative = true)
+        val root = native.pipeline("test/root")
+        val preview = native.preview(root)
+        native.coordinator().release(native.request(root, ReleasePlanRequest(preview.treeHash, emptyList())))
+        native.log.count { it.startsWith("flip:") } shouldBe 1
+        native.audited.size shouldBe 1
+    }
+
+    @Test
+    fun `a root prepared from a different body than If-Match refuses with no flips or audit`() {
+        val native = CoordinatorFixture(realNative = true)
+        val root = native.pipeline("test/root")
+        val preview = native.preview(root)
+        native.onPrepare[root.entityId] = {
+            native.body(root, """{"schema_version":1,"name":"test/root","nodes":[],"parameters":{}}""", "hash-B")
+        }
+        val error =
+            refused {
+                native.coordinator().release(native.request(root, ReleasePlanRequest(preview.treeHash, emptyList())))
+            }
+        error.code shouldBe "pipeline.release.plan_conflict"
+        native.log.none { it.startsWith("flip:") } shouldBe true
+        native.audited shouldBe emptyList()
+    }
+
+    @Test
     fun `a stale preview is plan_conflict before any preparation, guard or flip`() {
         val preview = fx.preview(a)
         fx.edit(t1, "edited-without-a-version-change")

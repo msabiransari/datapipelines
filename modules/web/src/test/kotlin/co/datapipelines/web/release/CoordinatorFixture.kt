@@ -80,7 +80,16 @@ internal class CoordinatorFixture(
                     co.datapipelines.pipeline.AuthoringGuard(true),
                     checkGate =
                         co.datapipelines.pipeline.ReleaseCheckGate { _, _, _, _, _ ->
-                            error("consented A has failing checks; it must never release without an override")
+                            listOf(
+                                co.datapipelines.pipeline.CheckRunOutcome(
+                                    "fail",
+                                    "Fail",
+                                    co.datapipelines.pipeline.CheckExpectation(kind = "value", value = 0.0),
+                                    "1",
+                                    co.datapipelines.pipeline.CheckRunVerdict.FAIL,
+                                    null,
+                                ),
+                            )
                         },
                     dashboards = mockk(relaxed = true),
                 ),
@@ -185,8 +194,14 @@ internal class CoordinatorFixture(
             PipelineRepository.DraftBodySnapshot(bodies.getValue(name), graph.getValue(identity).bodyHash)
         }
         every { pipelines.releaseDraft(workspaceId, record.id, any(), any(), any(), any(), actor, version) } answers {
-            log += "flip:$name@${arg<String>(5)}"
-            PipelineRepository.Released(record, draft.copy(status = PipelineVersionStatus.RELEASED))
+            val stored = graph.getValue(identity)
+            if (stored.status != ReleaseNodeStatus.DRAFT || stored.bodyHash != arg<String>(5)) {
+                null
+            } else {
+                graph[identity] = stored.copy(status = ReleaseNodeStatus.RELEASED, currentVersion = version)
+                log += "flip:$name@${arg<String>(5)}"
+                PipelineRepository.Released(record.copy(currentVersion = version), draft.copy(status = PipelineVersionStatus.RELEASED))
+            }
         }
         if (!realNative) {
             every { releases.prepare(workspaceId, record.id, actor, any(), any()) } answers {
@@ -195,9 +210,11 @@ internal class CoordinatorFixture(
                 PipelineReleaseService.Prepared(workspaceId, record.id, draft, "{}", model, emptyList(), arg(3))
             }
         }
-        every { releases.flip(match { it.pipelineId == record.id }, any(), actor) } answers {
-            log += "flip:$name@${secondArg<String>()}"
-            PipelineRepository.Released(record, draft.copy(status = PipelineVersionStatus.RELEASED))
+        if (!realNative) {
+            every { releases.flip(match { it.pipelineId == record.id }, any(), actor) } answers {
+                log += "flip:$name@${secondArg<String>()}"
+                PipelineRepository.Released(record, draft.copy(status = PipelineVersionStatus.RELEASED))
+            }
         }
         return identity
     }

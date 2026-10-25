@@ -643,33 +643,34 @@ class ParameterSetServiceIntegrationTest {
         }
 
         @Test
-        fun `importValidated lands a PRE-VALIDATED export without re-validating - the receive's transaction-body arm (#302)`() {
+        fun `importValidated rechecks pin metadata but never repeats customer probes`() {
             val pinned =
                 ParameterSetFixtures
                     .setJson(
                         ParameterSetFixtures.countryJson(),
                         """{ "name": "state", "label": "State", "type": "STRING", "kind": "SELECT",
-                            "source": { "template": { "id": "acme/sql/absent.sql", "version": 2 }, "datasource": "warehouse" },
-                            "depends_on": ["country"] }""",
+                        "source": { "template": { "id": "acme/sql/received.sql", "version": 1 }, "datasource": "warehouse" },
+                        "depends_on": ["country"] }""",
                         name = "acme/sales/received",
                     ).let { h.document(it).body }
-            // `import` — the REST one-call path — refuses: the pin does not resolve here.
             shouldThrow<ParameterSetValidationException> {
                 h.service.import(WORKSPACE, ParameterSetExport(UUID.randomUUID(), "acme/sales/received", 1, "x", null, pinned), AUTHOR)
             }.result.codes shouldBe listOf(ParameterErrorCodes.IMPORT_MISSING_TEMPLATE)
+            val export = ParameterSetExport(UUID.randomUUID(), "acme/sales/received", 1, h.repository.computeBodyHash(pinned), null, pinned)
+            shouldThrow<ParameterSetValidationException> {
+                h.service.importValidated(WORKSPACE, export, AUTHOR)
+            }.result.codes shouldBe listOf(ParameterErrorCodes.TEMPLATE_VERSION_NOT_FOUND)
+            h.repository.findRecord(WORKSPACE, export.id) shouldBe null
 
-            // `importValidated` — the promotion receive's transaction body — lands the SAME
-            // export: the §4 validation (the probe included) already ran outside the receive's
-            // transaction; the landing checks hash/ids/versions and probes nothing.
-            val landed =
-                h.service.importValidated(
-                    WORKSPACE,
-                    ParameterSetExport(UUID.randomUUID(), "acme/sales/received", 1, h.repository.computeBodyHash(pinned), null, pinned),
-                    AUTHOR,
-                )
+            h.template("acme/sql/received.sql", "SELECT :country AS value, :country AS display_value")
+            val canonical = h.service.validateForImport(WORKSPACE, ParameterSetDocument(export.name, pinned))
+            val probes = h.probe.probes.size
+            (probes > 0) shouldBe true
+            val landed = h.service.importValidated(WORKSPACE, export.copy(body = canonical.body), AUTHOR)
             landed.created shouldBe true
             landed.detail.status shouldBe PipelineVersionStatus.RELEASED
             landed.detail.version shouldBe 1
+            h.probe.probes.size shouldBe probes
         }
     }
 
