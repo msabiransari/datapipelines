@@ -370,8 +370,8 @@ object SitePages {
             path = "/mcp-tools",
             title = "The MCP tools: what an agent can do against your databases",
             description =
-                "Every tool the MCP server exposes, generated from its own catalogue: schema reads, catalogue " +
-                    "statistics, the SQL probe, drafts, execution, results.",
+                "Every tool the MCP server exposes, generated from its catalogue: schema reads, the SQL probe, " +
+                    "pipeline and dashboard drafts, execution, results.",
             view = "site/mcp-tools",
         )
     val TABLEAU =
@@ -587,25 +587,34 @@ object SitePages {
     // ---- #699: the three capability pages (design record §5). Public marketing routes, distinct
     // from the protected application pages /schedules, /dashboards and /parameter-sets.
 
-    /** "sql pipeline scheduling" + "schedule sql query" — the scheduler as docs/scheduler.md states it. */
+    /**
+     * The scheduler as docs/scheduler.md states it. #700: "sql scheduler" (20/mo) is the one
+     * numeric scheduler phrase in the 2026-10-24 measurement ("data pipeline scheduling" and
+     * "schedule sql queries" returned no estimate), so it leads the title; the description is
+     * the #700 design record's suggestion.
+     */
     val PIPELINE_SCHEDULING =
         SitePage(
             path = "/pipeline-scheduling",
-            title = "SQL pipeline scheduling | datapipelines.co",
+            title = "SQL scheduler for pipelines: cron, time zones and run history",
             description =
-                "Run a SQL pipeline on a five-field cron in an IANA time zone: preview the next runs, pause, run now, " +
-                    "pick a missed-run policy, bind TODAY to a date.",
+                "Schedule SQL pipelines with cron and time zones. Preview upcoming runs, pause schedules and " +
+                    "review execution history in your own environment.",
             view = "site/pipeline-scheduling",
         )
 
-    /** "sql dashboard" (140) + "self hosted dashboard" (140) + "embedded analytics" (260), measured 2026-10-24. */
+    /**
+     * "sql dashboard" (140) + "self hosted dashboard" (140) + "open source dashboard" (140) +
+     * "embedded dashboards" (90), measured 2026-10-24; "embedded analytics" (260) stays with
+     * /for/saas-teams. #700: the description is the design record's suggestion.
+     */
     val SQL_DASHBOARDS =
         SitePage(
             path = "/sql-dashboards",
-            title = "Self-hosted SQL dashboards | datapipelines.co",
+            title = "Open-source, self-hosted SQL dashboards you can embed",
             description =
-                "Charts, tables and KPI cards over pinned pipeline results, with filters, refresh history and a " +
-                    "backend proxy that keeps the dashboard key server-side.",
+                "Build self-hosted SQL dashboards from reviewed pipelines. Reuse charts, tables and KPI cards with " +
+                    "parameter controls and a backend embedding proxy.",
             view = "site/sql-dashboards",
         )
 
@@ -613,7 +622,7 @@ object SitePages {
     val REUSABLE_PARAMETER_SETS =
         SitePage(
             path = "/reusable-parameter-sets",
-            title = "Reusable parameter sets and dashboard filters | datapipelines.co",
+            title = "Reusable parameter sets: typed inputs and dashboard filters",
             description =
                 "Typed inputs and dropdowns defined once: defaults, validation, SQL-fed options and cascading " +
                     "choices, versioned like a pipeline and reused by dashboards.",
