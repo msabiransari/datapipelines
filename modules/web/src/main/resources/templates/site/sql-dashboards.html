@@ -51,7 +51,7 @@
         <li>
           <h3>A dashboard arranges them</h3>
           <!-- claim: docs/dashboards.md §2.2 -->
-          <p>It maps source results onto each visualization's inputs, places them on a 12-column grid, groups them, and adds parameter controls from one pinned <a th:href="@{/reusable-parameter-sets}">parameter set</a> and the refresh actions a viewer presses.</p>
+          <p>It maps source results onto each visualization's inputs, places them on a 12-column grid, groups them, and adds parameter controls from one pinned parameter set and the refresh actions a viewer presses.</p>
         </li>
       </ol>
       <!-- claim: docs/dashboards.md §2.2 -->
@@ -137,12 +137,14 @@
             your backend checks the values it forwards, and the source pipeline filters on them.
           </p>
         </div>
-        <figure class="mini-flow" aria-labelledby="sd-embed-cap">
-          <div class="flow-item"><b>The viewer's browser</b><small>Your page with the dashboard runtime. No key, no cookie sent.</small></div>
-          <div class="flow-arrow" aria-hidden="true">↓</div>
-          <div class="flow-item accent"><b>Your backend proxy</b><small>Your sign-in first, then the dashboard key, attached server-side to four relayed routes.</small></div>
-          <div class="flow-arrow" aria-hidden="true">↓</div>
-          <div class="flow-item"><b>Your datapipelines server</b><small>Checks the key, runs the pinned read-only sources, streams results.</small></div>
+        <figure class="how-figure" aria-labelledby="sd-embed-cap">
+          <div class="mini-flow">
+            <div class="flow-item"><b>The viewer's browser</b><small>Your page with the dashboard runtime. No key, no cookie sent.</small></div>
+            <div class="flow-arrow" aria-hidden="true">↓</div>
+            <div class="flow-item accent"><b>Your backend proxy</b><small>Your sign-in first, then the dashboard key, attached server-side to four relayed routes.</small></div>
+            <div class="flow-arrow" aria-hidden="true">↓</div>
+            <div class="flow-item"><b>Your datapipelines server</b><small>Checks the key, runs the pinned read-only sources, streams results.</small></div>
+          </div>
           <figcaption id="sd-embed-cap" class="how-footnote">Illustration of the proxy contract, not a product screenshot.</figcaption>
         </figure>
       </div>

@@ -100,7 +100,7 @@
               </svg>
               <strong th:text="|${r.topCompany} ${r.share}|">Uber 74.62%</strong>
             </div>
-            <p class="chart-note">An illustrative chart of the recorded result, drawn here rather than by the product. In the product, a <a th:href="@{/sql-dashboards}">SQL dashboard</a> charts a released pipeline the same way.</p>
+            <p class="chart-note">An illustrative chart of the recorded result, drawn here rather than by the product. In the product, a SQL dashboard charts a released pipeline the same way.</p>
           </div>
           <div class="panel" id="api" role="tabpanel" aria-labelledby="tab-api">
             <p class="panel-label">API response</p>
@@ -167,14 +167,19 @@
         <li>
           <h3>Recurring work can run on a schedule</h3>
           <!-- claim: docs/scheduler.md §1 and §3 (a schedule runs a pipeline at a cron pattern's occurrences in an IANA time zone) -->
-          <p>A <a th:href="@{/pipeline-scheduling}">schedule</a> runs a pipeline at the times you set, in your time zone, and keeps a history of every run.</p>
+          <p>A schedule runs a pipeline at the times you set, in your time zone, and keeps a history of every run.</p>
         </li>
         <li>
           <h3>Results feed dashboards or APIs</h3>
           <!-- claim: docs/dashboards.md §1 and §5 (dashboards refresh from pinned pipelines when viewed), docs/rest-api.md §19 (a released pipeline as an API) -->
-          <p>Show the result on a <a th:href="@{/sql-dashboards}">dashboard</a> with <a th:href="@{/reusable-parameter-sets}">filters</a> people can change, or serve it to your application as a <a th:href="@{/published-api}">published API</a>.</p>
+          <p>Show the result on a dashboard with filters people can change, or serve it to your application as a published API.</p>
         </li>
       </ol>
+      <p class="how-footnote">
+        Each step in depth: <a th:href="@{/pipeline-scheduling}">pipeline scheduling</a>,
+        <a th:href="@{/sql-dashboards}">SQL dashboards</a>, <a th:href="@{/reusable-parameter-sets}">reusable parameter sets</a>
+        and <a th:href="@{/published-api}">published APIs</a>.
+      </p>
     </div>
   </section>
 
