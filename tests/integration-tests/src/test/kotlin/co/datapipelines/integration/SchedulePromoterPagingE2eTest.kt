@@ -82,7 +82,42 @@ class SchedulePromoterPagingE2eTest {
         }
     }
 
+    @Test
+    @Order(2)
+    fun `a promoter's condition-filtered walk pages over the admitted rows of that condition`() {
+        // #641: block one hidden and two visible schedules — the filter sits before the lens.
+        sql(
+            "UPDATE schedules SET blocked_reason = 'e2e', blocked_at = NOW() " +
+                "WHERE workspace_id = '$WORKSPACE_ID' AND name IN ('pp/a_h1', 'pp/b_v1', 'pp/f_v3')",
+        )
+
+        withClue("blocked, one a page: the two visible blocked schedules, each once, the hidden one never") {
+            filteredWalk("blocked") shouldContainExactly listOf("pp/b_v1", "pp/f_v3")
+        }
+        withClue("enabled: the one visible schedule left unblocked") {
+            filteredWalk("enabled") shouldContainExactly listOf("pp/d_v2")
+        }
+        filteredWalk("paused") shouldBe emptyList()
+    }
+
     // ------------------------------------------------------------------------------- helpers
+
+    private fun filteredWalk(condition: String): List<String> {
+        val listed = ArrayList<String>()
+        var offset = 0
+        do {
+            val page =
+                session(PROMOTER_SESSION)
+                    .get("/api/v1/schedules?condition=$condition&offset=$offset&limit=1")
+                    .then()
+                    .statusCode(200)
+                    .extract()
+                    .jsonPath()
+            listed += page.getList<String>("data.items.name")
+            offset += 1
+        } while (page.getBoolean("data.pagination.has_more"))
+        return listed
+    }
 
     private fun session(jwt: String) = given().port(port).asSession(jwt)
 

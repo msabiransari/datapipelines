@@ -2,6 +2,7 @@ package co.datapipelines.browser
 
 import co.datapipelines.browser.ScheduleFixtures.createSchedule
 import co.datapipelines.browser.ScheduleFixtures.releasedPipeline
+import co.datapipelines.browser.ScheduleFixtures.send
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
@@ -13,7 +14,9 @@ import org.junit.jupiter.api.Test
  * zeros, the two empty notes and an author's New schedule; one schedule later, the page counts it
  * and its Up next row opens the explorer's detail for that schedule. #639: on the v2 frame a
  * panel's info button opens its dialog section, the task row leads to the explorer, and a viewer
- * sees no New schedule, only who creates schedules.
+ * sees no New schedule, only who creates schedules. #641: the Unblock task row opens the explorer
+ * filtered to blocked — a flat list, the select reading Blocked, the address bar carrying it — and
+ * All brings the tree back with the parameter gone.
  */
 class OverviewSchedulesBrowserTest : SchedulesBrowserSuite() {
     private fun openOverview() {
@@ -90,6 +93,37 @@ class OverviewSchedulesBrowserTest : SchedulesBrowserSuite() {
         upNext.click()
         page.waitForURL("**/schedules?id=$id")
         detail().waitFor()
+    }
+
+    @Test
+    fun `the Unblock row opens the explorer filtered to blocked, and All brings the tree back`() {
+        startTrace()
+        val root = ready("schovb")
+        releasedPipeline(page, "$root/jobs/rows")
+        val closing = releasedPipeline(page, "$root/jobs/close")
+        createSchedule(page, "$root/nightly/rows", "$root/jobs/rows")
+        val blocked = createSchedule(page, "$root/monthly/close", "$root/jobs/close")
+        // Blocked the way a person meets it: its pipeline's release discarded, then a Run now that cannot start.
+        send(page, "POST", "/api/v1/pipelines/$closing/versions/1/discard").status shouldBe 200
+        openSchedules("?id=$blocked")
+        detail().waitFor()
+        page.locator("[data-verb='schedule-run']").click()
+        page.locator("#schedule-detail [data-slot='blocked']:not([hidden])").waitFor()
+
+        openOverview()
+        count("blocked") shouldBe "1"
+        page.click("[data-overview-recent] [data-task='unblock'] a")
+        page.waitForURL("**/schedules?condition=blocked")
+        page.locator("#schedule-list:not([aria-busy]) .tpl-results").waitFor()
+        page.locator("#schedule-filter-condition").inputValue() shouldBe "blocked"
+        page.locator("#schedule-tree-pane [data-leaf-name]").all().map { it.getAttribute("data-leaf-name") } shouldBe listOf("$root/monthly/close")
+        page.locator("#schedule-list details.tpl-folder").count() shouldBe 0
+        page.url().substringAfter(baseUrl) shouldBe "/schedules?condition=blocked"
+
+        page.selectOption("#schedule-filter-condition", "")
+        page.locator("#schedule-list:not([aria-busy]) [role='tree'] details.tpl-folder[data-folder='$root']").waitFor()
+        page.locator("#schedule-list .tpl-results").count() shouldBe 0
+        page.url().substringAfter(baseUrl) shouldBe "/schedules"
     }
 
     @Test
