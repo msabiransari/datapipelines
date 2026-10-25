@@ -134,12 +134,12 @@ object SiteFaqs {
             ),
             FaqEntry(
                 "Is it a Tableau or dbt replacement?",
-                "Not today. It sits beside them: it can feed Tableau a governed dataset through an API or as " +
-                    "Parquet on your own bucket, and it replaces the warehouse-plus-dbt step for teams that never " +
+                "Not today. It sits beside them: it can feed Tableau a governed dataset through an API or a " +
+                    "datasource table Tableau connects to, and it replaces the warehouse-plus-dbt step for teams that never " +
                     "wanted one. It has SQL dashboards over released pipelines and schedules that run pipelines, " +
                     "without a BI tool's drag-and-drop authoring; alerts are not built. The comparison pages cite " +
                     "docs/versioning.md §3 for what is versioned.",
-                "docs/versioning.md §3, docs/dashboards.md §1, docs/scheduler.md §1",
+                "docs/versioning.md §3, docs/dashboards.md §1, docs/scheduler.md §1, docs/pipeline-contract.md §8",
             ),
         )
 
