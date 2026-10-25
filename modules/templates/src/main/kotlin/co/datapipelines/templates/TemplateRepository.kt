@@ -1497,13 +1497,13 @@ class TemplateRepository(
                    draft.created_at, draft.created_by, draft.released_at, draft.released_by, draft.discarded_at, draft.discarded_by,
                    draft.updated_by, draft.updated_at, draft.created_via, draft.updated_via
               FROM draft, guard, meta
-              JOIN templates t ON t.name = :name
+              JOIN templates t ON t.name = :name AND t.workspace_id = :workspaceId
             UNION ALL
             SELECT t.name AS template_id, noop.version, noop.status, noop.body_hash,
                    noop.created_at, noop.created_by, noop.released_at, noop.released_by, noop.discarded_at, noop.discarded_by,
                    noop.updated_by, noop.updated_at, noop.created_via, noop.updated_via
               FROM noop, meta
-              JOIN templates t ON t.name = :name
+              JOIN templates t ON t.name = :name AND t.workspace_id = :workspaceId
             """.trimIndent()
 
         /** versioning §5.2 — in-place draft write; index metadata moves at save time. */

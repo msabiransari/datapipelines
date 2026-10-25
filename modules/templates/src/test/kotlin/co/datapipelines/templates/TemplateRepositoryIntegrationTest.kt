@@ -569,6 +569,38 @@ class TemplateRepositoryIntegrationTest {
     // The draft/release lifecycle (versioning §3–§6, V6) — the template mirror of §13's floor.
     // =============================================================================================
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = [true, false])
+    fun `a released template write is independent of the same name in another workspace`(changed: Boolean) {
+        val otherWorkspace = UUID.randomUUID()
+        jdbc.update(
+            "INSERT INTO workspaces (id, name, display_name) VALUES (:id, 'peer', 'Peer')",
+            mapOf("id" to otherWorkspace),
+        )
+        val id = "test/fetch_orders.sql"
+        repository.createReleased(workspaceId, draft(), actor)
+        repository.createReleased(otherWorkspace, draft(body = "SELECT 99", displayName = "Peer"), actor)
+        val peerBefore = repository.findWorking(otherWorkspace, id)
+        val released = checkNotNull(repository.findLatest(workspaceId, id))
+        val service = TemplateDraftService(repository, co.datapipelines.pipeline.AuthoringGuard(true), TemplateImplementsRepository(jdbc))
+        val body = if (changed) "SELECT 2" else "SELECT 1"
+        val attempted =
+            runCatching {
+                service.write(workspaceId, id, draft(body = body, displayName = "Revised"), released.bodyHash, actor, WriteSurface.SESSION)
+            }
+        val persistedDraft = repository.findDraftDetail(workspaceId, id)
+        withClue("changed=$changed; failure=${attempted.exceptionOrNull()}; persisted draft=$persistedDraft") {
+            attempted.exceptionOrNull().shouldBeNull()
+            val detail = attempted.getOrThrow()
+            detail.version shouldBe if (changed) 2 else 1
+            detail.status shouldBe if (changed) PipelineVersionStatus.DRAFT else PipelineVersionStatus.RELEASED
+            checkNotNull(repository.findWorking(workspaceId, id)).body shouldBe body
+            repository.findWorking(otherWorkspace, id) shouldBe peerBefore
+            repository.findDraftDetail(otherWorkspace, id).shouldBeNull()
+            if (!changed) persistedDraft.shouldBeNull()
+        }
+    }
+
     @Test
     fun `createDraft copies the released version to a draft and leaves the released row untouched`() {
         repository.createReleased(workspaceId, draft(), actor)
