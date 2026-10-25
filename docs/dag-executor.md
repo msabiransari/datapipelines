@@ -1,6 +1,6 @@
 # DAG Executor Specification
 
-**Status:** v1.34 (revised — see Change Log)
+**Status:** next (revised — see Change Log; lander renumbers after #708 at merge)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract spec](pipeline-contract.md), [Templates spec](templates.md), [Datasources spec](datasources.md), [Staging spec](staging.md)
 **Last updated:** 2026-10-22
@@ -629,6 +629,7 @@ node lands (7c). What is already true and binding:
 | deep recursion (self-recursive lambda, depth 100 000) | BOUNDED — `ScriptTimeoutException` on budget; the thread ended inside the grace. **Re-measured at #260, outcome unchanged:** the loop is tail-recursive and the library trampolines it — depth stays flat, so TIME catches it (the 7a explanation named `isParallelCall`; the trampoline is the mechanism). A NON-tail-recursive lambda nests for real and the engine's own depth count refuses it at `max-depth` nested calls | the engine's between-steps clock |
 | `$eval` nesting (an eval'd builtin overrun) | UNBOUNDED — same shape as the pad bomb; the eval'd work inherits the evaluation's timebox but reaches no step boundary inside a builtin | the pool |
 | `$now()` | REFUSED — the engine shadows the clock builtins: pinned via `EvaluationLimits.now` (the execution's `current_timestamp`) or refused — a script is a pure function of its inputs | the engine |
+| `$random()` / `$shuffle()` | REFUSED — the engine shadows both builtins (#711; measured 2026-10-25): a script is a pure function of its inputs; `ScriptEvaluationException` (`pipeline.script.evaluation_failed`), including through `$eval` and aliases | the engine |
 | hook rebind (`$__evaluate_entry := …`, `$__evaluate_exit := …`, then a tail loop — #272) | REFUSED — `ScriptSyntaxException` (`template.validation.syntax_error`) at compile: a body may not bind a `__` name. Before the refusal (measured 2026-09-28) UNBOUNDED: both hooks were off and the loop outlived the grace | the engine, at compile |
 | hook rebind through `$eval` (the same two binds as eval'd strings — #272) | REFUSED — `ScriptEvaluationException` (`pipeline.script.evaluation_failed`): the engine's `$eval` shadow checks the string before the library runs it. Before (measured 2026-09-28) UNBOUNDED, as above | the engine's `$eval` shadow |
 
@@ -1634,6 +1635,7 @@ document a customer can read before they need it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-25 | next | #711 | The ambient-read table names JSONata's `$random()` / `$shuffle()` refusals, including `$eval` and aliases. Lander renumbers after #708's v1.35 at merge. |
 | 2026-10-22 | v1.34 | 8b (#8) | §5.3 documents both engines, the per-engine bounds and structured console logging. |
 | 2026-10-21 | v1.33 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The TRANSFORM node is the SCRIPT node throughout**: the node-type prose and its section anchors, the `pipeline.script.*` refusal codes, the `datapipelines.script.*` budget keys and the meter `script.evaluations.abandoned` (was `transform.…`). A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-20 | v1.32 | #569 | The concurrency gauge is bound by the execution-slot bean, once per instance. Executor construction does not register it; rebinding the same pool is a no-op and a different pool fails fast. |

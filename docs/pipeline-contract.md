@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.61 (revised — see Change Log)
+**Status:** next (revised — see Change Log; lander renumbers at merge)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-10-22
@@ -495,9 +495,10 @@ and the Context (the transform-nodes design record §3). The language is the pin
 `type` (`jsonata` or `javascript`, when its isolate is installed); the **mode** (`row`, `table`, `value`) and
 the input/output shapes are the pinned version's **contract** — never repeated on the node, which
 conforms to it at save time (§12.13). The function has no handle to tempdb, the network, the
-filesystem or the clock: iteration is the executor's job (`row` mode reads the single table input
+filesystem, the clock or a random source: iteration is the executor's job (`row` mode reads the single table input
 in `result-batch-size` batches), `$now()`/`$millis()` return the execution's `current_timestamp`,
-and the output is a function of the template version and its inputs — every run is reproducible.
+and `$random()`, `$shuffle()` and `Math.random()` are refused (`pipeline.script.evaluation_failed`).
+The output is a function of the template version and its inputs — every run is reproducible.
 
 | Field | Rule |
 |---|---|
@@ -1875,6 +1876,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-25 | next | #711 | §4.12 names the random-source boundary: JSONata `$random()` / `$shuffle()` and JavaScript `Math.random()` refuse with `pipeline.script.evaluation_failed`. Lander renumbers at merge. |
 | 2026-10-22 | v1.61 | 8b (#8) | JavaScript is available through the shared seam; script.js.unavailable means an absent isolate, never boot 503; resource_limit covers the byte and output limits. |
 | 2026-10-21 | v1.60 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The TRANSFORM node type is SCRIPT**: the `type` enum, §4.12 "JSON structure (SCRIPT node)", §12.13 "Script validation rules", §13.18 "Script" and its codes `pipeline.script.*`, the node fields' prose (`template`, `inputs`, `strict`, `rejects`) and every cross-reference anchor that carried the old word. A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-16 | v1.59 | 467 (#467) the over-cap screenshot refusal reaches the client | **§13's `visualization.test.screenshot_too_large` row** names the bounded drain: up to the cap + 2 MiB of a declared-over-cap body is read and discarded after the 413, so the close is a FIN after the client's last byte; beyond it Tomcat's swallow and close apply. No code or status change |
