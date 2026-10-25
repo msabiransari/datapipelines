@@ -56,7 +56,7 @@ Ratified 2026-09-08, operator ruling (implemented 101):
 |---|---|---|
 | D57 | **A pipeline always has ≥ 1 version row** (unless the entity itself is purged). Discard never removes rows — discarding the sole release is legal and lands the entity at DISCARDED with a NULL pointer. The refusal `pipeline.version.last_release` belongs to the PURGE path only: a RELEASED version is never purged, and an entity holding any non-draft version is never purged. | "Delete means it's gone … discard is per version, the entity stays." |
 | D58 | **Draft authoring may pin live DRAFT or RELEASED child versions** (#459, owner requirement superseding the original released-only save rule). Release/import require RELEASED children (`pipeline.validation.pipeline_reference_not_released`). Template draft pins remain legal during development. | Draft dependencies work throughout development; mutable children are revalidated at release. |
-| D59 | **Names are unique forever.** A discarded pipeline/template keeps its name; restore always works for the name (the pins it holds are re-judged, §3.5.3); no second entity may take the name. The partial-index idea is withdrawn; `uq_pipelines_workspace_name` / `uq_templates_workspace_name` stay as they are. | A name is an identity other environments and histories reference; recycling it re-points them at a different thing. |
+| D59 | **Names are unique forever.** A discarded pipeline/template keeps its name; restore is refused only while an outbound pin is missing, discarded or not released (§3.5.3, #517) — repair bottom-up, never by editing the released body; no second entity may take the name. The partial-index idea is withdrawn; `uq_pipelines_workspace_name` / `uq_templates_workspace_name` stay as they are. | A name is an identity other environments and histories reference; recycling it re-points them at a different thing. |
 | D60 | **`current_version` is sticky and event-driven.** It moves only on release, discard-of-current, restore-above-current, manual switch, and purge-of-current-draft; when it moves it picks the highest-numbered ELIGIBLE live version (RELEASED always; DRAFT only under development posture), else NULL. An import never moves an existing pointer — the human switches — except the first import of an entity with no current at all. | "`current_version` helps us in fallback." The pointer is what dependents run; it must move deliberately, never as a side effect. |
 | D63 | **A published endpoint serves whatever the pointer names in development, a draft included** (owner 2026-09-09: "we have to test it before the release, so we should be able to point the API to any version in dev"). Non-development holds no drafts, so released-only there by construction. | The endpoint is the thing under test; a 503 on the dev fallback made the testable path untestable. |
 
@@ -135,7 +135,8 @@ together with the draft's executions. An entity therefore always has ≥ 1 versi
 unless the entity itself is gone (D57).
 
 **Names are unique forever (D59).** A discarded pipeline or template keeps its name;
-restore always works for the name (the pins it holds are re-judged, §3.5.3, #517); no second entity may ever take the name. The V1 `is_deleted`
+restore is refused only while an outbound pin is missing, discarded or not released (§3.5.3, #517) — repair bottom-up,
+never by editing the released body; no second entity may ever take the name. The V1 `is_deleted`
 soft-delete column on both tables is **retired (V19)**: any `is_deleted = true` row is
 migrated to "every version DISCARDED" and the column dropped; every reader of
 `is_deleted` reads the derived entity status instead. `pipeline.validation.pipeline_reference_deleted`
