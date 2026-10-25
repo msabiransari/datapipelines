@@ -92,10 +92,10 @@ class SiteSeoMetaTest {
     fun `no two pages share a title, a description, an h1 or a canonical`() {
         val served =
             mapOf(
-                "title" to rendered.mapValues { (_, html) -> TITLE.find(html)?.groupValues?.get(1)?.trim() },
+                "title" to rendered.mapValues { (_, html) -> firstGroup(TITLE, html)?.trim() },
                 "description" to rendered.mapValues { (_, html) -> metaContent(html, "name=\"description\"") },
-                "h1" to rendered.mapValues { (_, html) -> H1_TEXT.find(html)?.groupValues?.get(1)?.let(::visibleText) },
-                "canonical" to rendered.mapValues { (_, html) -> CANONICAL.find(html)?.groupValues?.get(1) },
+                "h1" to rendered.mapValues { (_, html) -> firstGroup(H1_TEXT, html)?.let(::visibleText) },
+                "canonical" to rendered.mapValues { (_, html) -> firstGroup(CANONICAL, html) },
             )
         val shared =
             served.flatMap { (field, values) ->
@@ -183,6 +183,11 @@ class SiteSeoMetaTest {
             }
         bad shouldBe emptyList()
     }
+
+    private fun firstGroup(
+        regex: Regex,
+        html: String,
+    ): String? = regex.find(html)?.groupValues?.get(1)
 
     private fun visibleText(html: String): String = WHITESPACE.replace(TAG.replace(html, " "), " ").trim()
 
