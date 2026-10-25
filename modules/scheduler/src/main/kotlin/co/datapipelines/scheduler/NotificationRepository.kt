@@ -1,7 +1,9 @@
 package co.datapipelines.scheduler
 
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.sql.ResultSet
 import java.sql.Timestamp
 import java.time.Instant
@@ -63,6 +65,25 @@ class NotificationRepository(
                 "sequence" to event.sequence,
             ),
         ) == 1
+
+    private val admissionJdbc =
+        NamedParameterJdbcTemplate(
+            JdbcTemplate(requireNotNull(jdbc.jdbcTemplate.dataSource)).apply { queryTimeout = ADMISSION_TIMEOUT_SECONDS },
+        )
+
+    /**
+     * Serializes deployment-wide pending admission in the CALLER'S transaction (READ COMMITTED).
+     * Lock order: enqueue's run row → advisory; resend's delivery row → advisory. The sender
+     * claims delivery rows with SKIP LOCKED and never takes this advisory lock, so no cycle.
+     * The dedicated statement timeout bounds contention without changing the shared template.
+     */
+    fun lockAdmission() {
+        check(TransactionSynchronizationManager.isActualTransactionActive()) { "notification admission requires a transaction" }
+        admissionJdbc.query(
+            "SELECT pg_advisory_xact_lock(:key)",
+            mapOf("key" to ADMISSION_LOCK_KEY),
+        ) { _, _ -> Unit }
+    }
 
     /** Deliveries waiting to be sent, deployment-wide — the backlog the cap is judged against. */
     fun pendingCount(): Int =
@@ -209,6 +230,12 @@ class NotificationRepository(
         RowMapper { rs, n ->
             RunDelivery(NotificationOutcome.fromWire(rs.getString("outcome")), checkNotNull(deliveryMapper.mapRow(rs, n)))
         }
+
+    companion object {
+        /** One key for the entire deployment's outbox (metadata-db §4.40), never derived from input. */
+        const val ADMISSION_LOCK_KEY = 442_004_001L
+        private const val ADMISSION_TIMEOUT_SECONDS = 5
+    }
 
     private fun strings(
         rs: ResultSet,

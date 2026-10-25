@@ -187,6 +187,8 @@ data class ScheduleRun(
      */
     val executionStartedAt: Instant? = null,
     val executionCompletedAt: Instant? = null,
+    /** Safe target summary frozen at creation; null for older or ad-hoc runs (V51). */
+    val targetRef: String? = null,
 )
 
 /**

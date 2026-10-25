@@ -296,6 +296,7 @@ class ScheduleService(
                 scheduledAt = null,
                 referenceAt = now,
                 referenceTimezone = schedule.timezone,
+                targetRef = schedule.targetRef,
                 admitBy = now.plus(properties.lateness),
                 scheduleRevision = schedule.revision,
                 executorId = schedule.executorId,
@@ -468,6 +469,15 @@ class ScheduleService(
                         ScheduleErrorCodes.NOTIFICATION_NOT_RESENDABLE,
                         "Notification '$deliveryId' is ${prior.state.wire}; only a failed or uncertain notification can be resent.",
                         mapOf("delivery_id" to deliveryId.toString(), "state" to prior.state.wire),
+                    )
+                }
+                notifications.lockAdmission()
+                val pending = notifications.pendingCount()
+                if (pending >= properties.notifications.backlogMax) {
+                    throw ScheduleException(
+                        ScheduleErrorCodes.NOTIFICATION_BACKLOG_FULL,
+                        "The notification backlog is full; try resending after pending mail settles.",
+                        mapOf("pending" to pending, "backlog_max" to properties.notifications.backlogMax),
                     )
                 }
                 val now = clock.instant().truncatedTo(ChronoUnit.MICROS)

@@ -956,6 +956,7 @@ CREATE TABLE schedule_runs (
     scheduled_at            TIMESTAMPTZ,                -- the UTC occurrence; NULL for a manual run
     reference_at            TIMESTAMPTZ NOT NULL,       -- the frozen time context (record §5.1)
     reference_timezone      TEXT        NOT NULL,
+    target_ref              TEXT,                       -- safe target summary frozen at run creation (V51); NULL for older/ad-hoc runs
     admit_by                TIMESTAMPTZ NOT NULL,       -- the lateness window's end
     schedule_revision       INT,
     executor_id             TEXT        NOT NULL,
@@ -1563,6 +1564,8 @@ CREATE INDEX idx_schedule_notification_deliveries_event ON schedule_notification
 - **Decided per recipient at enqueue, never dropped silently:** a recipient outside the allowlist is written `failed` / `domain_not_allowed`; over `notifications.backlog-max` pending deliveries a new one is written `failed` / `backlog_full` (and one WARN line). The codes are listed in enums.md §44.
 - **`accepted` means the SMTP relay took it** — not that it reached an inbox; no state says "delivered". `uncertain` is a send that may have reached the relay (the connection dropped after the data was sent, or a claim whose `sending_since` went stale because the instance stopped mid-send); it is never retried automatically. A person may resend a `failed` or `uncertain` delivery (`resend_count` counts it), with a may-duplicate warning for the uncertain one.
 
+**Strict deployment backlog admission (#442 round two).** Enqueue and explicit resend take transaction-scoped `pg_advisory_xact_lock(442004001)` (`NotificationRepository.ADMISSION_LOCK_KEY`) before counting pending rows, in the same READ COMMITTED transaction as insert/requeue. Lock order: enqueue takes the run row, then the advisory lock; resend takes the delivery row, then the advisory lock. The sender claims delivery rows with `FOR UPDATE SKIP LOCKED` and never takes the advisory lock, so there is no cycle. The advisory statement has a five-second query timeout on a dedicated template. This serializes admission across schedules and instances; at the hard cap, new deliveries become `failed/backlog_full` and resend is refused (`409 schedule.notification.backlog_full`, `details.pending`, `details.backlog_max`) without changing the row. Lowering the configured cap does not discard existing pending mail.
+
 ## 5. Index Strategy Summary
 
 **This table is generated from §4 and must contain nothing §4 does not create.** Two kinds of entry appear:
@@ -2072,6 +2075,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-25 | next | 442c (#442) | Round two: serialized deployment backlog admission including resend; notices from the run’s frozen target and reference clock with known due/start/end and execution reference; notification-kind activation and older-image rollback boundary. |
 | 2026-10-24 | next | 442b (#442) | **V51 — the schedule notification outbox.** New **§4.39 `schedule_notification_events`** (one row per selected transition or block, `run_id` NOT NULL, UNIQUE `(run_id, outcome)` so a replayed transition writes none) and **§4.40 `schedule_notification_deliveries`** (one row per notice and recipient, the address snapshotted, a fixed `message_id`, `pending` / `accepted` / `failed` / `uncertain` with the due/claim CHECKs, `resend_count`); §4.24's trail CHECK gains the four `notification_*` kinds (details carry ids, counts and codes — no address, no domain; retries write no trail row); §5 lists the five new indexes. Down path documented in the migration header, not shipped. |
 | 2026-10-22 | v1.47 | 8b (#8) | The existing V33 CHECK admits JavaScript rows; the pooled save gate and availability control writes without a schema change. |
 | 2026-10-21 | v1.46 | 636 (#636) the housekeeping statements' bounds | **§8.1** — the dashboard refreshes' DELETE and the parameter evaluations' batch DELETE are bounded at 25 s like the `execution_events` DELETE (the "not bounded" clause removed); **§8.4** — the stale refresh sweep's `UPDATE` at 10 s (`REFRESH_SWEEP_STATEMENT_TIMEOUT_SECONDS`, on the sweeper's own template); **§8.5** — the evaluation sweep's `UPDATE` at the tick's 25 s. Each names the SQLState `57014` cancel, which rolls the one statement back. No DDL, no migration. |

@@ -39,7 +39,8 @@ class NotificationDeliveryRepository(
                 )
                 SELECT c.id, c.event_id, c.recipient, c.attempts, c.message_id, c.sending_since,
                        e.schedule_id, e.run_id, e.outcome, e.run_state, e.reason, e.occurred_at,
-                       s.name, s.timezone, s.target_ref, r.scheduled_at
+                       s.name, r.reference_timezone, r.target_ref, r.scheduled_at,
+                       r.started_at, r.finished_at, r.execution_id
                   FROM claimed c
                   JOIN schedule_notification_events e ON e.id = c.event_id
                   JOIN schedules s ON s.id = e.schedule_id
@@ -131,7 +132,7 @@ class NotificationDeliveryRepository(
                 NotificationNotice(
                     scheduleId = rs.getObject("schedule_id", UUID::class.java),
                     scheduleName = rs.getString("name"),
-                    timezone = rs.getString("timezone"),
+                    timezone = rs.getString("reference_timezone"),
                     targetRef = rs.getString("target_ref"),
                     runId = rs.getObject("run_id", UUID::class.java),
                     outcome = NotificationOutcome.fromWire(rs.getString("outcome")),
@@ -139,6 +140,9 @@ class NotificationDeliveryRepository(
                     reason = rs.getString("reason"),
                     occurredAt = rs.getTimestamp("occurred_at").toInstant(),
                     scheduledAt = rs.getTimestamp("scheduled_at")?.toInstant(),
+                    startedAt = rs.getTimestamp("started_at")?.toInstant(),
+                    finishedAt = rs.getTimestamp("finished_at")?.toInstant(),
+                    executionId = rs.getObject("execution_id", UUID::class.java),
                 ),
         )
 }

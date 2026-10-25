@@ -23,6 +23,7 @@
 --    and notification_uncertain (TrailKind; the run detail's Messages pane merges the trail).
 --
 -- Down path (documented, not shipped — Flyway runs forward only):
+--   ALTER TABLE schedule_runs DROP COLUMN target_ref;
 --   DROP TABLE schedule_notification_deliveries; DROP TABLE schedule_notification_events;
 --   DELETE FROM schedule_run_events WHERE kind LIKE 'notification\_%';
 --   ALTER TABLE schedule_run_events DROP CONSTRAINT chk_schedule_run_events_kind;
@@ -31,6 +32,10 @@
 --       'finished', 'unknown', 'updated_after_unknown', 'unblocked'));
 --   DELETE FROM flyway_schema_history WHERE version = '51';
 -- =============================================================================
+
+-- Safe historical target summary for mail; executor payloads remain opaque. Older/ad-hoc runs stay NULL.
+ALTER TABLE schedule_runs ADD COLUMN target_ref TEXT;
+COMMENT ON COLUMN schedule_runs.target_ref IS 'Target summary frozen from the schedule at run creation; NULL for older or ad-hoc runs';
 
 CREATE TABLE schedule_notification_events (
     id          UUID        PRIMARY KEY,

@@ -12,6 +12,10 @@ import io.mockk.spyk
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * #442b A.2 — the outbox the ledger writes in a transition's own transaction (record §6.1), over
@@ -226,6 +230,83 @@ class ScheduleNotificationOutboxIntegrationTest {
                 "lead@example.org" to (DeliveryState.FAILED to DeliveryCodes.BACKLOG_FULL),
             )
         h.notifications.pendingCount() shouldBe 3
+    }
+
+    @Test
+    fun `concurrent runs share one deployment backlog slot`() {
+        SchedulerTestDb.reset()
+        val settings = SchedulerProperties.Notifications(enabled = true, backlogMax = 1)
+        boot(settings, events = listOf("failure"))
+        h.setTime(schedule.nextDueAt!!.minusSeconds(60))
+        val second =
+            h.create(
+                h.request(name = "reports/other").copy(
+                    notifications =
+                        NotificationSettingsRequest(
+                            recipients = JsonNodeFactory.instance.arrayNode().add("ops@example.com"),
+                            events = JsonNodeFactory.instance.arrayNode().add("failure"),
+                        ),
+                ),
+            )
+        // One recipient on each of TWO schedules: a schedule-local lock cannot pass this witness.
+        SchedulerTestDb.jdbc.update(
+            "UPDATE schedules SET notification_recipients = ARRAY['ops@example.com'] WHERE id = :id",
+            mapOf("id" to schedule.id),
+        )
+        h.setTime(second.nextDueAt!!.plusSeconds(3))
+        h.tick()
+        val ids = listOf(onlyRun().id, h.runsOf(second.id).single().id)
+        val counted = AtomicInteger()
+        val firstCount = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        // Test seam: spy pendingCount AFTER its real SELECT, with the caller's transaction OPEN.
+        val repository = spyk(h.notifications)
+        every { repository.pendingCount() } answers {
+            val count = callOriginal()
+            counted.incrementAndGet()
+            firstCount.countDown()
+            check(release.await(10, TimeUnit.SECONDS)) { "count latch was not released" }
+            count
+        }
+        val outbox = NotificationOutbox(repository, h.runs, h.policy, settings.backlogMax)
+        val ledger = RunLedger(h.runs, h.schedules, h.transactions, h.clock, h.metrics, outbox, "race")
+        val pool = Executors.newFixedThreadPool(2)
+        try {
+            val first =
+                pool.submit<Boolean> {
+                    ledger.move(ids[0], setOf(RunState.QUEUED), RunState.NOT_STARTED, "capacity", TrailKind.NOT_STARTED)
+                }
+            firstCount.await(10, TimeUnit.SECONDS) shouldBe true
+            val other =
+                pool.submit<Boolean> {
+                    ledger.move(ids[1], setOf(RunState.QUEUED), RunState.NOT_STARTED, "capacity", TrailKind.NOT_STARTED)
+                }
+            // With the fix the second transaction waits BEFORE counting; without it both counts
+            // return zero. Poll on a separate connection (pg_stat_activity snapshots per transaction).
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+            var waiting = false
+            while (counted.get() < 2 && !waiting && System.nanoTime() < deadline) {
+                waiting = SchedulerTestDb.jdbc.queryForObject(
+                    "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname = current_database() " +
+                        "AND wait_event = 'advisory' AND pid <> pg_backend_pid())",
+                    emptyMap<String, Any>(),
+                    Boolean::class.java,
+                ) == true
+                Thread.yield()
+            }
+            check(counted.get() == 2 || waiting) { "second transaction neither counted nor waited for admission" }
+            release.countDown()
+            first.get(10, TimeUnit.SECONDS) shouldBe true
+            other.get(10, TimeUnit.SECONDS) shouldBe true
+        } finally {
+            release.countDown()
+            pool.shutdownNow()
+            pool.awaitTermination(10, TimeUnit.SECONDS) shouldBe true
+        }
+        h.notifications.pendingCount() shouldBe 1
+        val deliveries = ids.flatMap { h.notifications.deliveriesOfRun(it) }.map { it.delivery }
+        deliveries.map { it.state to it.lastErrorCode } shouldContainExactlyInAnyOrder
+            listOf(DeliveryState.PENDING to null, DeliveryState.FAILED to DeliveryCodes.BACKLOG_FULL)
     }
 
     @Test

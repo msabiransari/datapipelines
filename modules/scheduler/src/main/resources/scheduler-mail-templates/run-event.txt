@@ -2,11 +2,14 @@
 
 [(${explanation})]
 
-Schedule:      [(${scheduleName})]
-Runs:          [(${target})]
+Schedule:      [(${scheduleName})][# th:if="${target != null}"]
+Runs:          [(${target})][/]
 Run state:     [(${state})][# th:if="${reason != null}"]
 Reason:        [(${reason})][/][# th:if="${scheduledFor != null}"]
 Scheduled for: [(${scheduledFor})][/]
-When:          [(${when})]
+[# th:if="${started != null}"]Started: [(${started})]
+[/][# th:if="${ended != null}"]Ended: [(${ended})]
+[/][# th:if="${execution != null}"]Execution: [(${execution})]
+[/]When:          [(${when})]
 
 Open the run: [(${link})]

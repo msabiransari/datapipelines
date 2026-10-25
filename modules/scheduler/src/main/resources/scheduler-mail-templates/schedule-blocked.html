@@ -11,8 +11,12 @@
   <p style="margin:0 0 16px;" th:text="${explanation}">This schedule fires nothing until a person unblocks it.</p>
   <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:0 0 16px;">
     <tr><td style="padding:4px 12px 4px 0;color:#52606d;">Schedule</td><td style="padding:4px 0;" th:text="${scheduleName}">team/daily</td></tr>
-    <tr><td style="padding:4px 12px 4px 0;color:#52606d;">Runs</td><td style="padding:4px 0;" th:text="${target}">team/daily.pipeline</td></tr>
+    <tr th:if="${target != null}"><td style="padding:4px 12px 4px 0;color:#52606d;">Runs</td><td style="padding:4px 0;" th:text="${target}">team/daily.pipeline</td></tr>
     <tr th:if="${reason != null}"><td style="padding:4px 12px 4px 0;color:#52606d;">Reason</td><td style="padding:4px 0;" th:text="${reason}">reason</td></tr>
+    <tr th:if="${scheduledFor != null}"><td style="padding:4px 12px 4px 0;color:#52606d;">Scheduled for</td><td style="padding:4px 0;" th:text="${scheduledFor}">Scheduled for</td></tr>
+    <tr th:if="${started != null}"><td style="padding:4px 12px 4px 0;color:#52606d;">Started</td><td style="padding:4px 0;" th:text="${started}">Started</td></tr>
+    <tr th:if="${ended != null}"><td style="padding:4px 12px 4px 0;color:#52606d;">Ended</td><td style="padding:4px 0;" th:text="${ended}">Ended</td></tr>
+    <tr th:if="${execution != null}"><td style="padding:4px 12px 4px 0;color:#52606d;">Execution</td><td style="padding:4px 0;" th:text="${execution}">Execution</td></tr>
     <tr><td style="padding:4px 12px 4px 0;color:#52606d;">Blocked at</td><td style="padding:4px 0;" th:text="${when}">2026-01-01 06:00:05</td></tr>
   </table>
   <p><a th:href="${link}" th:text="${link}" style="color:#0b5cad;">https://example/schedules</a></p>

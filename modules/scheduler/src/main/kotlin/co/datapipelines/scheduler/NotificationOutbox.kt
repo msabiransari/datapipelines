@@ -42,6 +42,7 @@ class NotificationOutbox(
         val event = NotificationEventRow(UUID.randomUUID(), target.scheduleId, runId, outcome, runState, reason, at, sequence)
         if (!repository.insertEvent(event)) return null
 
+        repository.lockAdmission()
         var room = backlogMax - repository.pendingCount()
         val deliveries =
             target.recipients.map { recipient ->

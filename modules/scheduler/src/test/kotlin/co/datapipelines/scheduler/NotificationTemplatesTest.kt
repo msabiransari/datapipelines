@@ -80,6 +80,39 @@ class NotificationTemplatesTest {
         }
     }
 
+    @Test
+    fun `both families show known run times and execution reference and omit unknown facts`() {
+        listOf(NotificationOutcome.COMPLETED, NotificationOutcome.BLOCKED).forEach { outcome ->
+            val full =
+                notice(outcome).copy(
+                    startedAt = Instant.parse("2026-10-24T21:01:00Z"),
+                    finishedAt = Instant.parse("2026-10-24T21:14:00Z"),
+                    executionId = runId,
+                )
+            val rendered = templates.render(full, BASE)
+            rendered.text shouldContain "Started: 2026-10-24 23:01:00 Europe/Berlin"
+            rendered.text shouldContain "Ended: 2026-10-24 23:14:00 Europe/Berlin"
+            rendered.text shouldContain "Execution: $runId"
+            rendered.text shouldContain "Scheduled for:"
+            rendered.html shouldContain ">Started<"
+            rendered.html shouldContain ">Ended<"
+            rendered.html shouldContain runId.toString()
+            val absent =
+                templates.render(
+                    full.copy(
+                        targetRef = null,
+                        scheduledAt = null,
+                        startedAt = null,
+                        finishedAt = null,
+                        executionId = null,
+                    ),
+                    BASE,
+                )
+            listOf("Runs:", "Started:", "Ended:", "Execution:", "Scheduled for:").forEach { absent.text shouldNotContain it }
+            listOf(">Runs<", ">Started<", ">Ended<", ">Execution<", ">Scheduled for<").forEach { absent.html shouldNotContain it }
+        }
+    }
+
     private companion object {
         const val BASE = "https://dp.example.com"
     }

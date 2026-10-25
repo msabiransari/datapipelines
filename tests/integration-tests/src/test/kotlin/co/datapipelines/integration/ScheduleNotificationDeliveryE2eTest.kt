@@ -352,6 +352,17 @@ class ScheduleNotificationDeliveryE2eTest {
         val html = part(message, "text/html")
         val link = "$BASE_URL/schedules?id=$schedule&run=$run"
         text shouldContain link
+        val execution = scalar("SELECT execution_id::text FROM schedule_runs WHERE id = '$run'")
+        if (execution != null && execution != "") text shouldContain "Execution: $execution"
+        val started = scalar("SELECT started_at::text FROM schedule_runs WHERE id = '$run'")
+        val ended = scalar("SELECT finished_at::text FROM schedule_runs WHERE id = '$run'")
+        // STARTED notices may precede the eventual finish; terminal notices carry known times.
+        if (started != null && started != "") text shouldContain "Started:"
+        if (ended != null && ended != "" && message.subject?.endsWith("Started") != true) text shouldContain "Ended:"
+        println(
+            "IMAP notice subject=${message.subject} message_id=${message.messageID} to=$box " +
+                "started=${"Started:" in text} ended=${"Ended:" in text} execution=${"Execution:" in text}",
+        )
         URI(LINK.find(text)!!.value).host shouldBe URI(BASE_URL).host
         listOf(text, html).forEach { body ->
             ADDRESS.containsMatchIn(body) shouldBe false

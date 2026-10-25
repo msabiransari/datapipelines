@@ -13,21 +13,25 @@ import java.util.Locale
 import java.util.UUID
 
 /**
- * What one notice is about, as the sender reads it at send time: the schedule's name, timezone and
- * target, the run, and the outcome the event recorded. Names, codes and times — never the run's
+ * What one notice is about: the run's frozen target and reference timezone, recorded times and
+ * opaque execution reference, and the event's outcome. Only the schedule name stays live: a
+ * rename is still the same schedule identity. Names, codes and times — never the run's
  * payload, parameters, rows or SQL, so no template can print them.
  */
 data class NotificationNotice(
     val scheduleId: UUID,
     val scheduleName: String,
     val timezone: String,
-    val targetRef: String,
+    val targetRef: String?,
     val runId: UUID,
     val outcome: NotificationOutcome,
     val runState: RunState,
     val reason: String?,
     val occurredAt: Instant,
     val scheduledAt: Instant?,
+    val startedAt: Instant? = null,
+    val finishedAt: Instant? = null,
+    val executionId: UUID? = null,
 )
 
 /** A rendered notice. [toString] names the subject and sizes only. */
@@ -71,6 +75,9 @@ class NotificationTemplates {
                 "state" to notice.runState.wire,
                 "reason" to notice.reason,
                 "scheduledFor" to notice.scheduledAt?.let { format(it, zone) },
+                "started" to notice.startedAt?.let { format(it, zone) },
+                "ended" to notice.finishedAt?.let { format(it, zone) },
+                "execution" to notice.executionId?.toString(),
                 "when" to format(notice.occurredAt, zone),
                 "link" to linkOf(baseUrl, notice.scheduleId, notice.runId),
             )
@@ -115,7 +122,7 @@ class NotificationTemplates {
             runId: UUID,
         ): String = "${baseUrl.trimEnd('/')}/schedules?id=$scheduleId&run=$runId"
 
-        /** `2026-10-24 23:14:05 Europe/Berlin (21:14:05 UTC)` — the schedule's wall clock first, UTC beside it. */
+        /** `2026-10-24 23:14:05 Europe/Berlin (21:14:05 UTC)` — the run's reference clock first, UTC beside it. */
         private fun format(
             at: Instant,
             zone: ZoneId,
@@ -128,7 +135,7 @@ class NotificationTemplates {
             }
         }
 
-        /** The schedule's IANA zone; UTC if the stored id no longer parses (a notice is not where that is fixed). */
+        /** The run's IANA reference zone; UTC if the stored id no longer parses (a notice is not where that is fixed). */
         private fun zoneOf(timezone: String): ZoneId =
             try {
                 ZoneId.of(timezone)

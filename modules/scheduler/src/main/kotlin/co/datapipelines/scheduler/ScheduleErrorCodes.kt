@@ -43,6 +43,9 @@ object ScheduleErrorCodes {
      */
     const val NOTIFICATION_NOT_RESENDABLE = "schedule.notification.not_resendable"
 
+    /** 409 — resend refused by the deployment cap; details.pending and details.backlog_max name the bound. */
+    const val NOTIFICATION_BACKLOG_FULL = "schedule.notification.backlog_full"
+
     /** 400 — a missing or ill-typed request field; `details.field` names it. */
     const val REQUEST_INVALID = "schedule.validation.request_invalid"
 
@@ -103,6 +106,7 @@ object ScheduleErrorCodes {
             LIMIT_PER_WORKSPACE,
             NOTIFICATION_NOT_FOUND,
             NOTIFICATION_NOT_RESENDABLE,
+            NOTIFICATION_BACKLOG_FULL,
             REQUEST_INVALID,
             NOTIFICATIONS_INVALID,
             NAME_INVALID,

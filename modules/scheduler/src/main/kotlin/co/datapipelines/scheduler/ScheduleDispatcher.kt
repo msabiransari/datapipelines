@@ -207,6 +207,7 @@ class ScheduleDispatcher(
         scheduledAt = occurrence,
         referenceAt = occurrence,
         referenceTimezone = schedule.timezone,
+        targetRef = schedule.targetRef,
         admitBy = admitBy,
         scheduleRevision = schedule.revision,
         executorId = schedule.executorId,

@@ -21,11 +21,16 @@ import co.datapipelines.scheduler.RunDelivery
 import co.datapipelines.scheduler.RunDetail
 import co.datapipelines.scheduler.RunOrigin
 import co.datapipelines.scheduler.RunState
+import co.datapipelines.scheduler.ScheduleErrorCodes
+import co.datapipelines.scheduler.ScheduleException
 import co.datapipelines.scheduler.ScheduleRun
 import co.datapipelines.scheduler.ScheduleService
+import co.datapipelines.web.api.ApiErrorCatalog
 import co.datapipelines.web.ui.ActorNames
 import com.fasterxml.jackson.databind.ObjectMapper
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldNotContain
 import io.mockk.every
@@ -34,6 +39,7 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
+import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
@@ -158,6 +164,21 @@ class SchedulesControllerResendTest {
 
         data.containsKey("warning") shouldBe false
         audit.events.single().second["prior_state"] shouldBe "failed"
+    }
+
+    @Test
+    fun `a full backlog refusal is 409 and writes no resend audit row`() {
+        signIn(session(WorkspaceRole.AUTHOR))
+        every { service.resendDelivery(workspace, SCHEDULE_ID, RUN_ID, DELIVERY_ID) } throws
+            ScheduleException(
+                ScheduleErrorCodes.NOTIFICATION_BACKLOG_FULL,
+                "Backlog full",
+                mapOf("pending" to 1, "backlog_max" to 1),
+            )
+        val failure = shouldThrow<ScheduleException> { controller.resend(SCHEDULE_ID, RUN_ID, DELIVERY_ID) }
+        ApiErrorCatalog.statusFor(failure.code) shouldBe HttpStatus.CONFLICT
+        failure.details shouldBe mapOf("pending" to 1, "backlog_max" to 1)
+        audit.events.shouldBeEmpty()
     }
 
     @ParameterizedTest

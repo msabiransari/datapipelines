@@ -102,6 +102,39 @@ class ScheduleNotificationResendIntegrationTest {
     }
 
     @Test
+    fun `a backlog_full delivery cannot bypass the cap on resend and stays unchanged`() {
+        val first = deliveries().first()
+        SchedulerTestDb.jdbc.update(
+            "UPDATE schedule_notification_deliveries SET state = 'failed', next_attempt_at = NULL, " +
+                "last_error_code = 'backlog_full' WHERE id = :id",
+            mapOf("id" to first.id),
+        )
+        val capped =
+            SchedulerHarness(
+                properties =
+                    SchedulerProperties(
+                        minIntervalSeconds = 60,
+                        notifications = SchedulerProperties.Notifications(enabled = true, backlogMax = 1),
+                    ),
+                deployment = mailOn,
+            )
+        val before = deliveries().single { it.id == first.id }
+        val trailBefore = h.runs.trail(run.id)
+        val failure =
+            refusal {
+                capped.service.resendDelivery(SchedulerTestDb.WORKSPACE, schedule.id, run.id, first.id)
+            }
+        failure.code shouldBe ScheduleErrorCodes.NOTIFICATION_BACKLOG_FULL
+        failure.details shouldBe mapOf("pending" to 3, "backlog_max" to 1)
+        deliveries().single { it.id == first.id } shouldBe before
+        h.runs.trail(run.id) shouldBe trailBefore
+        // Once pending work settles the SAME backlog_full row is resendable.
+        h.notifier().tick()
+        capped.service.resendDelivery(SchedulerTestDb.WORKSPACE, schedule.id, run.id, first.id).prior shouldBe DeliveryState.FAILED
+        capped.notifications.pendingCount() shouldBe 1
+    }
+
+    @Test
     fun `a pending or accepted delivery is not resendable and is left exactly as it was`() {
         val pending = deliveries().first()
         refusal { resend(pending.id) }.let { e ->

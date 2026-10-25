@@ -877,6 +877,11 @@ class FlywayMigrationIntegrationTest {
     @Test
     fun `V51 creates the notification outbox and widens the trail kinds`() {
         query(
+            "SELECT data_type || '|' || is_nullable FROM information_schema.columns " +
+                "WHERE table_name = 'schedule_runs' AND column_name = 'target_ref'",
+        ) { it.getString(1) } shouldContainExactly
+            listOf("text|YES")
+        query(
             "SELECT conname || '|' || pg_get_constraintdef(oid) FROM pg_constraint WHERE conname IN " +
                 "('chk_schedule_run_events_kind', 'chk_schedule_notification_events_outcome', " +
                 "'chk_schedule_notification_deliveries_due', 'uq_schedule_notification_events_run_outcome', " +

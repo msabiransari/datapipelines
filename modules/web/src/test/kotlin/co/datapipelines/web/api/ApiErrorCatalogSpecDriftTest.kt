@@ -330,8 +330,9 @@ class ApiErrorCatalogSpecDriftTest {
          * catalog row) and `schedule.notification.not_resendable` (409 — the `schedule.` family
          * default, so no explicit row), landed in the SAME commit as their constants in
          * `ScheduleErrorCodes` and `PipelineErrorCodes.Schedule` and the resend that raises them.
+         * 379 → 380 with #442c: schedule.notification.backlog_full (409, schedule family default).
          */
-        const val SECTION_13_ROW_COUNT = 379
+        const val SECTION_13_ROW_COUNT = 380
 
         /**
          * §12's distinct validation codes.

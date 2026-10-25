@@ -90,6 +90,93 @@ class ScheduleNotificationSenderIntegrationTest {
     }
 
     @Test
+    fun `queued and historically resent notices keep the run target and timezone after a schedule edit`() {
+        boot()
+        val target = schedule.targetRef
+        SchedulerTestDb.jdbc.update(
+            "UPDATE schedules SET target_ref = :target, timezone = 'America/New_York' WHERE id = :id",
+            mapOf("target" to "changed/target", "id" to schedule.id),
+        )
+        repeat(2) { h.mailer.script += MailOutcome.Uncertain(DeliveryCodes.IO_AFTER_CONNECT) }
+        h.notifier().tick()
+        val original = h.mailer.sent.first()
+        original.text shouldContain target
+        original.text shouldContain "Europe/Berlin"
+        original.text shouldNotContain "changed/target"
+        original.text shouldNotContain "America/New_York"
+        val delivery = deliveries().first()
+        h.service.resendDelivery(SchedulerTestDb.WORKSPACE, schedule.id, run.id, delivery.id)
+        h.notifier().tick()
+        h.mailer.sent
+            .last()
+            .text shouldBe original.text
+        h.mailer.sent
+            .last()
+            .html shouldBe original.html
+    }
+
+    @Test
+    fun `manual run snapshots its target before an edit that precedes enqueue`() {
+        boot()
+        h.notifier().tick()
+        h.mailer.sent.clear()
+        val manual = h.service.runNow(SchedulerTestDb.WORKSPACE, schedule.id, SchedulerTestDb.CREATOR, null).value
+        manual.targetRef shouldBe schedule.targetRef
+        h.runs.find(run.id)!!.targetRef shouldBe schedule.targetRef // cron creation site, persisted
+        SchedulerTestDb.jdbc.update(
+            "UPDATE schedules SET target_ref = 'changed/target', timezone = 'America/New_York' WHERE id = :id",
+            mapOf("id" to schedule.id),
+        )
+        h.worker.handle(manual.id)
+        h.executor.outcomes[requireNotNull(h.runs.find(manual.id)!!.executionId)] = ExecutionOutcome.Finished(RunState.SUCCEEDED, null)
+        h.reconciler.tick()
+        h.notifier().tick()
+        h.mailer.sent.size shouldBe 2
+        h.mailer.sent.forEach { mail ->
+            mail.text shouldContain schedule.targetRef
+            mail.text shouldContain "Europe/Berlin"
+            mail.text shouldNotContain "changed/target"
+        }
+    }
+
+    @Test
+    fun `a historical resend after editing the schedule renders the original run facts`() {
+        boot()
+        repeat(2) { h.mailer.script += MailOutcome.Uncertain(DeliveryCodes.IO_AFTER_CONNECT) }
+        h.notifier().tick()
+        SchedulerTestDb.jdbc.update(
+            "UPDATE schedules SET target_ref = 'changed/target', timezone = 'America/New_York' WHERE id = :id",
+            mapOf("id" to schedule.id),
+        )
+        val delivery = deliveries().first()
+        h.service.resendDelivery(SchedulerTestDb.WORKSPACE, schedule.id, run.id, delivery.id)
+        h.notifier().tick()
+        h.mailer.sent
+            .last()
+            .text shouldContain schedule.targetRef
+        h.mailer.sent
+            .last()
+            .text shouldContain "Europe/Berlin"
+        h.mailer.sent
+            .last()
+            .text shouldNotContain "changed/target"
+    }
+
+    @Test
+    fun `legacy run with no frozen target omits Runs in both message parts`() {
+        boot()
+        SchedulerTestDb.jdbc.update("UPDATE schedule_runs SET target_ref = NULL WHERE id = :id", mapOf("id" to run.id))
+        h.notifier().tick()
+        h.mailer.sent.forEach { mail ->
+            mail.text shouldNotContain "Runs:"
+            mail.html shouldNotContain ">Runs<"
+            mail.text shouldContain "Started:"
+            mail.text shouldContain "Ended:"
+            mail.text shouldContain "Execution: ${run.executionId}"
+        }
+    }
+
+    @Test
     fun `a connect failure is retried on the backoff schedule and failed after max-attempts`() {
         boot()
         repeat(STEPS) { h.mailer.script += MailOutcome.Retryable(DeliveryCodes.CONNECT_FAILED) }
