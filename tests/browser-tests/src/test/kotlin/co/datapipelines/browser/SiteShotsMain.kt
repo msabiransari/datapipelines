@@ -10,6 +10,7 @@ import com.microsoft.playwright.options.ColorScheme
 import com.microsoft.playwright.options.ReducedMotion
 import com.microsoft.playwright.options.ScreenshotScale
 import com.microsoft.playwright.options.WaitForSelectorState
+import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -583,8 +584,9 @@ object SiteShotsMain {
             requireNotNull(link.getAttribute("href")) {
                 "the $section rail link renders without an href — the walk has nothing to wait on"
             }
+        val destinationPath = URI(page.url()).resolve(href).path
         link.click()
-        page.waitForURL({ url -> url.substringBefore('#') == "$baseUrl$href" })
+        page.waitForURL({ url -> URI(url).path == destinationPath })
         page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
         return true
     }
