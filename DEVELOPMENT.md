@@ -867,10 +867,10 @@ cache: after the first probe lints a violating tree and deletes the file, the se
 task executes, passes, and carries no path from the first. The separate `GenerateReportsTask`
 remains cacheable by the contents of `discoveredErrors`; it does not inherit the worker's
 cache exemption. Gradle's up-to-date checks and the worker's in-checkout incrementality still
-apply. A removed-only change can retain stale findings in that checkout (#703); pregate does
-not clean before stage 1. Recover under the verification lock with the affected module's lint
-check and `--rerun-tasks --no-build-cache`, so it rechecks the full source set without deleting
-the shared cache. Why tests stay out, for two independent reasons: a test verdict must come from this run, and a cached `:test` line is not fresh evidence,
+apply. A removed source forces a full lint of its source set (#703): the lazy, sorted relative
+source-path input `ktlintSourceInventory` changes, so Gradle discards incremental history and
+the worker rewrites its findings. Content-only edits remain incremental; unchanged inputs stay
+up-to-date. Why tests stay out, for two independent reasons: a test verdict must come from this run, and a cached `:test` line is not fresh evidence,
 so stage 3 would keep every guard (`pgres::guards_covered`). The cache is the pre-gate's alone:
 `scripts/gate.sh` runs `clean` and then `build`, and with the cache on that build would be
 served from the cache and stop proving the tree compiles, so neither `gate.sh`, CI's workflows
