@@ -6,6 +6,7 @@ import co.datapipelines.web.ui.site.REPORT_PROBLEM_URL
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import org.jsoup.Jsoup
 import org.junit.jupiter.api.Test
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
@@ -135,7 +136,7 @@ class VisualizationUiRenderTest {
         body shouldContain "data-lazy-url=\"/partials/visualizations/$vizId/used-by\""
         body shouldContain "data-nav-current=\"visualizations\""
         body shouldContain "id=\"dp-dialog\""
-        // Every version switch is a full navigation that keeps the tab.
+        // Every version switch is a boosted, rail-preserving navigation that keeps the tab (#714).
         body shouldContain "href=\"/visualizations/$vizId?version=2&amp;tab=preview\""
     }
 
@@ -187,6 +188,48 @@ class VisualizationUiRenderTest {
         body shouldNotContain "plotly-2d.min.js"
         body shouldNotContain "/js/visualization-preview.js"
         body shouldNotContain "data-dp-pane"
+    }
+
+    /** #714: the record follows the code — both version-link surfaces render `hx-boost="true"` (markup unchanged). */
+    @Test
+    fun `every version link on the workspace is a boosted, rail-preserving navigation that keeps the tab`() {
+        val document = Jsoup.parse(workspace(bundle = "2d", activeTab = "preview"))
+        val versionLinks = document.select("nav.dp-versions a")
+        println("#714 rendered version links: nav.dp-versions=${versionLinks.size} (the fixture carries 2 versions)")
+        versionLinks.map { it.attr("hx-boost") } shouldBe listOf("true", "true")
+        versionLinks.map { it.attr("href") } shouldBe
+            listOf(
+                "/visualizations/$vizId?version=3&tab=preview",
+                "/visualizations/$vizId?version=2&tab=preview",
+            )
+
+        val chooseHtml =
+            engine.process(
+                VisualizationUiController.WORKSPACE_VIEW,
+                webContext("/visualizations/$vizId").apply {
+                    workspaceVariables(activeTab = "preview")
+                    setVariable("bundle", null)
+                    setVariable("hasSelected", false)
+                    setVariable("viewedVersion", null)
+                    setVariable("viewedLabel", VisualizationUiController.NO_VERSION_SELECTED)
+                    setVariable("viewedIsDraft", false)
+                    setVariable(
+                        "versions",
+                        listOf(
+                            VisualizationUiController.VersionRow(2, "DRAFT", isCurrent = false, isSelected = false),
+                            VisualizationUiController.VersionRow(1, "RELEASED", isCurrent = true, isSelected = false),
+                        ),
+                    )
+                },
+            )
+        val chooseLinks = Jsoup.parse(chooseHtml).select("[data-viz-choose-version] .ds-empty-actions a")
+        println("#714 rendered choose-a-version links: ${chooseLinks.size}")
+        chooseLinks.map { it.attr("hx-boost") } shouldBe listOf("true", "true")
+        chooseLinks.map { it.attr("href") } shouldBe
+            listOf(
+                "/visualizations/$vizId?version=2&tab=preview",
+                "/visualizations/$vizId?version=1&tab=preview",
+            )
     }
 
     // ------------------------------------------------------------------ the panes
