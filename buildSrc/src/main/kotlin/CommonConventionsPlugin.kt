@@ -545,7 +545,7 @@ class CommonConventionsPlugin : Plugin<Project> {
  * minus what is not repository content.
  *
  * Why the whole tree and not a list: the inventory at 9fcc1fb08 (lane 718's evidence) found
- * tests in 15 of the 16 test-running projects reading files outside their own classpath —
+ * tests across projects reading files outside their own classpath —
  * docs, the Helm chart, compose and env files, scripts, the Dockerfile, the version catalog,
  * the plugin mirror, other modules' Kotlin source as text (a comment-only edit changes no
  * bytecode, so the classpath cannot see it) — and two scanners reading every tracked file.
@@ -554,8 +554,8 @@ class CommonConventionsPlugin : Plugin<Project> {
  * accepted cost: any edit re-runs every test task a build invokes, by design.
  *
  * [EXCLUDES] mirrors `.gitignore` (what git does not track is not repository content) plus
- * Git's own directory; [RepoTestInputsTest] fails when a `.gitignore` entry is added without
- * its mirror here. Two kinds of entry matter beyond speed:
+ * Git's own directory and the wrapper's root `gate.log`. [RepoTestInputsTest] fails when a
+ * `.gitignore` entry is added without its mirror here. Two kinds of entry matter beyond speed:
  *  - local data and state: the sample-data work directories hold gigabytes of Parquet,
  *    and the pregate writes its logs inside the checkout while its own build runs;
  *  - secrets: `deploy/secrets.env` and every other secret-shaped file `.gitignore` names
@@ -579,7 +579,8 @@ internal object RepoTestInputs {
             "**/.gradle-docker/**",
             "**/.kotlin/**",
             "**/out/**",
-            // .gate-logs/, gate-logs/, .pregate-logs/, .tools/
+            // The lander wrapper's root gate.log, plus .gate-logs/, gate-logs/, .pregate-logs/, .tools/
+            "gate.log",
             "**/.gate-logs/**",
             "**/gate-logs/**",
             "**/.pregate-logs/**",
