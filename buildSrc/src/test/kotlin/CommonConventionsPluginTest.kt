@@ -300,7 +300,12 @@ class CommonConventionsPluginTest {
     private fun docsProbeSeen(): String {
         val results = probeDir.resolve("modules/web/build/test-results/test")
         val xml = results.listFiles()!!.single { it.name.startsWith("TEST-") && it.extension == "xml" }
-        return xml.readLines().single { "docs-probe=" in it }.substringAfter("docs-probe=").substringBefore('<').trim()
+        return xml
+            .readLines()
+            .single { "docs-probe=" in it }
+            .substringAfter("docs-probe=")
+            .substringBefore('<')
+            .trim()
     }
 
     @Test
