@@ -190,11 +190,21 @@ class CommonConventionsPlugin : Plugin<Project> {
         // same relative sources is served findings named by THIS checkout's absolute
         // paths (reproduced 2026-10-24: a clean tree failed lint on a scratch test it
         // never contained). Keep worker outputs out of the build cache. Up-to-date and
-        // in-checkout incremental behavior remain, including the removed-only skip (#703).
+        // modified-only incremental behavior remain; source removals are handled below (#703).
         // The reports half (`ktlint*Check`, GenerateReportsTask) stays cacheable by the
         // contents of `discoveredErrors`; it cannot repair stale upstream findings.
         project.tasks.withType<BaseKtLintCheckTask>().configureEach {
             outputs.cacheIf(UNCACHEABLE_LINT_FINDINGS) { false }
+            // BaseKtLintCheckTask.getChangedSources drops REMOVED files, and runLint's
+            // empty-set skip leaves discoveredErrors untouched (ktlint-gradle 14.2.0).
+            // A lazy, non-file input invalidates incremental history when membership
+            // changes: Gradle then reports every current source as ADDED (#703).
+            // Content-only edits keep this inventory stable and lint incrementally.
+            val projectDirectory = project.layout.projectDirectory.asFile
+            inputs.property(
+                KTLINT_SOURCE_INVENTORY,
+                project.provider { source.files.map { it.relativeTo(projectDirectory).invariantSeparatorsPath }.sorted() },
+            )
         }
 
         project.extensions.configure<DetektExtension> {
@@ -435,6 +445,7 @@ class CommonConventionsPlugin : Plugin<Project> {
     private companion object {
         const val JDK_VERSION = 21
         const val KTLINT_VERSION = "1.8.0"
+        const val KTLINT_SOURCE_INVENTORY = "ktlintSourceInventory"
 
         /** The reason Gradle logs (--info) for every task kept out of the build cache (#480). */
         const val UNCACHEABLE_VERDICT =
