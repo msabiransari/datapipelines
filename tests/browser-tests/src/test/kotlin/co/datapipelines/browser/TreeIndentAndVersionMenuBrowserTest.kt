@@ -140,7 +140,13 @@ class TreeIndentAndVersionMenuBrowserTest : BrowserSuite() {
                       const leaf = level.querySelector(':scope > [data-tree-key^=\"artifact:\"] > .dp-tree-line > a');
                       const sibling = level.querySelector(':scope > [aria-expanded] > .dp-tree-line > button');
                       const left = (el, sel) => el.querySelector(sel).getBoundingClientRect().left;
+                      const probe = document.createElement('div');
+                      probe.style.width = 'var(--space-1)';
+                      level.appendChild(probe);
+                      const space1 = parseFloat(getComputedStyle(probe).width);
+                      probe.remove();
                       return {
+                        space1,
                         indent: parseFloat(getComputedStyle(level).paddingLeft),
                         parentLabel: left(parent, 'span[title]'),
                         leafLabel: left(leaf, 'span[title]'),
@@ -151,8 +157,12 @@ class TreeIndentAndVersionMenuBrowserTest : BrowserSuite() {
                     }""",
                 )
 
+            // #701 round two: the default browser column (300px; 270 below 1100) is under the
+            // compact threshold, so the step here is the compact one, --space-1 (owner ruling
+            // 2026-10-25); the floor is that token, still a step the one-px checks below can see.
             withClue("$screen: the level's indent must be a real, positive step") {
-                m.px("indent") shouldBeGreaterThanOrEqual 8.0
+                m.px("space1") shouldBeGreaterThanOrEqual 4.0
+                m.px("indent") shouldBeGreaterThanOrEqual m.px("space1")
             }
             (m.px("leafLabel") - m.px("parentLabel"))
                 .shouldBeWithinOnePxOf(m.px("indent"), "$screen: leaf label sits one indent right of its PARENT's label")

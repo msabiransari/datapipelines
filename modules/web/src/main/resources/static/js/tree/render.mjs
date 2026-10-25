@@ -28,9 +28,9 @@ export function createTreeRenderer(host, state, options) {
     control.tabIndex = -1; control.className = "dp-tree-activate";
     const glyph = icon(document, node.kind === "folder" ? "folder" : "file");
     control.append(glyph);
-    // #604 — the row's regions: the label is the title; the badges live in a trailing
-    // metadata region (present even when nothing shows, so the title's box never changes
-    // when a badge appears or leaves). The control stays the line's first child.
+    // #604/#701 — the row's regions: the label is the title, on one line, and yields width
+    // to the trailing metadata region that holds the badges. The region is present even when
+    // nothing shows, so the DOM contract holds. The control stays the line's first child.
     const label = document.createElement("span"); label.className = "dp-tree-title"; control.append(label);
     const meta = document.createElement("span"); meta.className = "dp-tree-meta"; control.append(meta);
     const version = document.createElement("span"); version.className = "ds-badge ds-badge-default dp-tree-version";

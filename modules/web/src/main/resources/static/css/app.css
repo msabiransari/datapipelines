@@ -103,7 +103,7 @@
   --app-text-ui: 0.8125rem;            /* 13px — base UI, controls, notices */
   --app-leading-ui: 1.5;               /* 19.5px at 13 */
   --app-text-support: 0.75rem;         /* 12px — support copy, tabs, table cells, card titles, form help/errors */
-  --app-text-name: 0.75rem;            /* 12px — resource names; wrap, never clip */
+  --app-text-name: 0.75rem;            /* 12px — resource names; one line, truncates with an ellipsis (#701) */
   --app-leading-name: 1.55;            /* 18.6px at 12 */
   --app-text-heading: 0.875rem;        /* 14px — a dialog or section heading (the prototype's dialog h3) */
   --app-text-browser-title: var(--app-text-heading); /* 14px — the resource browser's title (#554 reads it) */
@@ -1521,6 +1521,30 @@ button.app-busy::after {
    ring follows the control's rounded shape without moving off the line. */
 .app-browser .dp-tree-item:focus-visible > .dp-tree-line {
   border-radius: var(--radius-md);
+}
+
+/* #701 round two (owner ruling 2026-10-25): the browser's COMPACT mode below ~320px. A
+   one-line row's fixed parts — the 24px padding, the 12px glyph, two 8px gaps and up to
+   three badges (≈169px with their 8px sides) — need ≈217px plus 16px per level, so from
+   320 down the full indent cannot host a row deeper than ~6 levels. Below it the indent per
+   level and a badge's side padding drop to --space-1; the row's padding and gaps and the
+   badge's vertical padding stay. The label yields what is left, down to 0px on a deep leaf
+   at the 240px minimum, where the control's title carries the full name. The container is
+   the browser column itself, whose width is the grid track's (the drawer's explicit width
+   at 760 and below), so inline-size containment changes nothing about its own box. Its
+   content box is the column less the 1px border-right: `< 319px` is a column under 320. */
+.app-browser {
+  container: browser / inline-size;
+}
+
+@container browser (width < 319px) {
+  .app-browser .dp-tree-group {
+    padding-inline-start: var(--space-1);
+  }
+
+  .app-browser .dp-tree-meta .ds-badge {
+    padding-inline: var(--space-1);
+  }
 }
 
 .app-browser-foot {
