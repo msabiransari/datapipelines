@@ -1,6 +1,10 @@
 package co.datapipelines.browser
 
 import com.microsoft.playwright.Page
+import com.microsoft.playwright.PlaywrightException
+import com.microsoft.playwright.Request
+import com.microsoft.playwright.Response
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
@@ -29,6 +33,7 @@ import java.nio.file.Paths
  * a fixed 320px explorer column overflows a NARROW window, and a `1fr` that resolves against
  * content overflows a WIDE one.
  */
+@Suppress("LargeClass") // one app+browser fixture shared by 15 walk cases; #717 diagnostics stay cohesive with their case
 class AppShellBrowserTest : BrowserSuite() {
     /** Every top-level screen, in rail order — the same list siteShots photographs. */
     private val appPages =
@@ -456,7 +461,9 @@ class AppShellBrowserTest : BrowserSuite() {
         signedIn("boost")
         // The workspace-switch fixture can return before this document's DOMContentLoaded.
         // Measure a click only after htmx and the shell have installed their navigation handlers.
-        page.waitForFunction("() => window.__dpShellInit === true")
+        // #717: a timeout here (the #696 CI red) must name the document it stalled on —
+        // URL, readiness and the flag itself — not just Playwright's bare "Timeout 30000ms".
+        waitForShellInit()
 
         val documents = mutableListOf<String>()
         page.onRequest { request ->
@@ -490,9 +497,31 @@ class AppShellBrowserTest : BrowserSuite() {
 
         // A FULL page load, not a boosted swap: the collapsed class has to be on <html>
         // before the first paint, which only the layout's inline script can do.
-        page.navigate("$baseUrl/executions")
-        page.locator("html.rail-collapsed").count() shouldBe 1
-        page.evaluate("() => localStorage.getItem('dp-rail')") shouldBe "1"
+        //
+        // #717: the CI-only red at the one-shot read below could not say WHICH half
+        // failed — the WRITE (shell.js's setItem is swallowed when storage refuses) or
+        // the READ-BACK (rail.js's parser-blocking stamp in the next document). The
+        // preference is therefore read back HERE, before the navigation, with the width
+        // band that decides the click's direction; the post-navigation read stays a
+        // strict one-shot and carries the document's boundary facts in its clue.
+        val viewport = page.viewportSize()
+        val defaultCollapsedBand =
+            page.evaluate(
+                "() => window.matchMedia('(min-width: 761px) and (max-width: 1100.98px)').matches",
+            )
+        withClue(
+            "dp-rail must read \"1\" BEFORE the second navigation (a red here is the " +
+                "swallowed-setItem path, not the document); " +
+                "viewport=${viewport.width}x${viewport.height}, " +
+                "defaultCollapsedBand=$defaultCollapsedBand",
+        ) {
+            page.evaluate("() => localStorage.getItem('dp-rail')") shouldBe "1"
+        }
+
+        val response = page.navigate("$baseUrl/executions")
+        withClue(shellBoundary(response)) {
+            page.locator("html.rail-collapsed").count() shouldBe 1
+        }
 
         page.locator("#rail-collapse").click()
         page.locator("html:not(.rail-collapsed)").waitFor()
@@ -883,8 +912,91 @@ class AppShellBrowserTest : BrowserSuite() {
         ) as List<String>
     }
 
+    /**
+     * #717: waits for the shell-init flag the way `named` waits for elements — a bare
+     * Playwright timeout names neither the flag nor the document (#696's CI red spent a
+     * gate unread). A timeout becomes an AssertionError carrying the URL, the document
+     * readiness and the flag's value, read at the moment of the failure.
+     */
+    private fun waitForShellInit() {
+        try {
+            page.waitForFunction("() => window.__dpShellInit === true")
+        } catch (e: PlaywrightException) {
+            throw AssertionError("window.__dpShellInit never turned true — ${shellInitFacts()}", e)
+        }
+    }
+
+    /** The in-document facts [waitForShellInit]'s timeout names; itself read defensively. */
+    private fun shellInitFacts(): String =
+        runCatching {
+            page.evaluate(
+                "() => 'url=' + location.href + " +
+                    "' readyState=' + document.readyState + " +
+                    "' __dpShellInit=' + String(window.__dpShellInit)",
+            ) as String
+        }.getOrElse { "the document probe itself failed: $it" }
+
+    /**
+     * #717: what the document a FULL navigation just landed looks like at the moment of
+     * the one-shot `html.rail-collapsed` read — the navigation response, its redirect
+     * chain, the page URL, the document readiness and title, the shell-init flag,
+     * whether the parser-blocking rail.js script tag exists and what its resource-timing
+     * entry reports, the `<html>` class list and the stored preference. Every read is
+     * defensive: a diagnostics helper that throws would replace the very failure it
+     * exists to describe. Carries no cookie, credential, email or response body (#717).
+     */
+    private fun shellBoundary(response: Response): String {
+        val redirects =
+            buildList {
+                var request: Request? = response.request()
+                while (request != null) {
+                    add("${request.url()} [${runCatching { request.response().status() }.getOrDefault(-1)}]")
+                    request = request.redirectedFrom()
+                }
+            }.asReversed().joinToString(" -> ")
+        val document =
+            runCatching { page.evaluate(SHELL_BOUNDARY_PROBE) as String }
+                .getOrElse { "the document probe itself failed: $it" }
+        return buildString {
+            appendLine("shell boundary at the one-shot read of html.rail-collapsed:")
+            appendLine("  navigate response: ${response.status()} ${response.url()}")
+            appendLine("  redirect chain: $redirects")
+            appendLine("  page.url: ${page.url()}")
+            append("  $document")
+        }
+    }
+
     private companion object {
         /** The explorer's desktop widths (#237's acceptance): the stacked breakpoint and two desktops. */
         val DESKTOP_WIDTHS = listOf(1100, 1440, 1920)
+
+        /**
+         * The in-document half of [shellBoundary], one evaluate turn, its own try/catch —
+         * `responseStatus` is reported wherever Chromium fills it (PerformanceResourceTiming).
+         */
+        val SHELL_BOUNDARY_PROBE =
+            """
+            () => {
+              const facts = [];
+              const add = (k, v) => facts.push(k + ': ' + v);
+              try {
+                add('document.readyState', document.readyState);
+                add('document.title', JSON.stringify(document.title));
+                add('html.className', JSON.stringify(document.documentElement.className));
+                const railScript = Array.from(document.scripts)
+                  .find(s => (s.getAttribute('src') || '').endsWith('/js/rail.js'));
+                add('rail.js script tag', railScript ? railScript.getAttribute('src') : 'ABSENT');
+                add('window.__dpShellInit', String(window.__dpShellInit));
+                add('localStorage dp-rail', JSON.stringify(localStorage.getItem('dp-rail')));
+                const entries = performance.getEntriesByType('resource')
+                  .filter(e => e.name.endsWith('/js/rail.js'))
+                  .map(e => ({ name: e.name, responseStatus: e.responseStatus, durationMs: Math.round(e.duration) }));
+                add('rail.js resource entries', entries.length === 0 ? 'none' : JSON.stringify(entries));
+              } catch (e) {
+                add('probe error', String(e));
+              }
+              return facts.join('; ');
+            }
+            """.trimIndent()
     }
 }
