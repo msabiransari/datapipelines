@@ -560,6 +560,8 @@ screenshot may be illustrated, composited or retouched.
 | Reproducibility | Byte-identical across consecutive runs except `graph-cards.png` (its node run times), `executions.png` (the rows the run itself just added), and the release-step dialog's verdict rows (the check's own run stamps them) |
 | Seeded state | The release-step capture seeds its own small draft (`nyc/review/release_gate` — one node, one release check) through the REST surface, because no seeded pipeline carries `checks[]`; the dialog is photographed, never submitted (release is a human's verb) |
 
+**The `app` set (076 §E, #602).** `-PshotsSet=app` photographs every top-level screen at both review widths in both themes, plus one Playwright video of the boosted-navigation click-through. The shot list follows the menu — each of the eight families is photographed twice, the overview its rail item links and the flat catalog behind its View all — and the click-through walks the rail by `data-nav-section`, waiting on each anchor's own destination, so a menu re-route cannot strand it. The per-family table lives in the driver's KDoc (`SiteShotsMain.kt`, "The `app` set").
+
 **The `home` set (175, #175).** `-PshotsSet=home` produces the home page's seven capability
 figures (`home-*.png`): the same 1440×900 viewport at `deviceScaleFactor = 2` (2880×1800 PNGs),
 with `-PshotsTheme=dark|light` (default `light`) driving the account's theme through the

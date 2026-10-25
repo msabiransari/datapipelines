@@ -71,12 +71,45 @@ import java.nio.file.StandardCopyOption
  * ## The `app` set (076 §E)
  *
  * `-PshotsSet=app` skips the marketing list and instead photographs every top-level screen
- * (/dashboard through /admin/users) at BOTH 1440x900 and 2560x1440, in light AND dark — the
- * dark pass driven through the settings theme select (the control a user has), never an
- * emulation, and the account put back on light afterwards so a later `site` run's assertion
- * still holds. One Playwright video of a full boosted-navigation click-through is recorded
- * alongside (app/boost-navigation.webm), from its own context so the still-shot contexts
- * stay clean. Everything lands in an `app/` subfolder of the same output directory.
+ * at BOTH 1440x900 and 2560x1440, in light AND dark — the dark pass driven through the
+ * settings theme select (the control a user has), never an emulation, and the account put
+ * back on light afterwards so a later `site` run's assertion still holds. One Playwright
+ * video of a full boosted-navigation click-through is recorded alongside
+ * (app/boost-navigation.webm), from its own context so the still-shot contexts stay clean.
+ * Everything lands in an `app/` subfolder of the same output directory.
+ *
+ * The shot list follows the menu (#602). Since #556/#579–#585 a family's rail item links
+ * its OVERVIEW, so each of the eight families is photographed twice — the overview the
+ * menu leads to (`app/overview-<family>-<W>x<H>-<theme>.png`) and the flat catalog behind
+ * its View all (`app/<family>-<W>x<H>-<theme>.png`, where the catalog route still exists;
+ * every route in the table answered 200 on a `--demo nyc` instance when the table was
+ * written, 2026-10-25). Rows in rail order:
+ *
+ * | section (rail order) | overview shot         | catalog shot    |
+ * |----------------------|-----------------------|-----------------|
+ * | /dashboard           | —                     | dashboard       |
+ * | /pipelines           | overview-pipelines    | pipelines       |
+ * | /templates           | overview-templates    | templates       |
+ * | /datasources         | overview-datasources  | datasources     |
+ * | /dashboards          | overview-dashboards   | dashboards      |
+ * | /visualizations      | overview-visualizations | visualizations |
+ * | /parameter-sets      | overview-parameter-sets | parameter-sets |
+ * | /executions          | —                     | executions      |
+ * | /schedules           | overview-schedules    | schedules       |
+ * | /api-console         | overview-api-console  | api-console     |
+ * | /promotion           | —                     | promotion       |
+ * | /workspaces          | —                     | workspaces      |
+ * | /admin               | —                     | admin-users     |
+ * | /docs                | —                     | docs            |
+ * | (off-rail)           | —                     | settings        |
+ *
+ * The direct screens (dashboard, executions, promotion, workspaces, admin users, docs)
+ * keep one shot each, and settings — off-rail since 079 §B, an avatar-menu item — is
+ * photographed but has no rail link to click. The click-through itself walks the rail by
+ * `data-nav-section` in the order of `AppNav.ITEMS` (modules/web, …/web/ui/AppNav.kt) and
+ * waits on each anchor's own `href`, so a menu re-route cannot strand it (#602); the order
+ * is mirrored in [APP_SHOT_SECTIONS] because the driver's compile classpath does not carry
+ * `:modules:web` — see that table's KDoc.
  *
  * ## The `home` set (175, #175)
  *
@@ -237,29 +270,59 @@ object SiteShotsMain {
     /** The subfolder of the output dir the `app` set lands in. */
     private const val APP_DIR = "app"
 
-    /** Every top-level screen, in nav order — the `app` set's pages and the video's click path. */
-    private val APP_PAGES =
-        listOf(
-            "/dashboard",
-            "/pipelines",
-            "/datasources",
-            "/templates",
-            "/executions",
-            // 079 §C: the API section joins the shot list — it is a top-level screen now.
-            "/api-console",
-            "/workspaces",
-            "/promotion",
-            "/settings",
-            "/docs",
-            "/admin/users",
-        )
+    /**
+     * One `(section, routes…)` row of the `app` set's shot list — see [APP_SHOT_SECTIONS].
+     */
+    private data class AppSectionShots(
+        val section: String?,
+        val routes: List<String>,
+    )
 
     /**
-     * The routes the RAIL links to — APP_PAGES minus `/settings`, which 079 §B moved into the
-     * avatar menu. The still-shot list keeps /settings (it is a screen); the click-through
-     * cannot, because there is no rail link to click.
+     * The `app` set's shot list (#602): one row per nav section, in rail order — the order
+     * of `AppNav.ITEMS` (modules/web, …/web/ui/AppNav.kt). The order is mirrored HERE
+     * rather than imported: `:modules:app` depends on `:modules:web` `implementation`, so
+     * the driver's compile classpath does not carry it, and the fence for #602 forbids
+     * build-file edits. `ShellRenderTest` keeps the template's rendered sections honest
+     * against `AppNav`; when the two drift, this walk says so out loud — an unmatched
+     * section prints `SKIP` and the >= MIN_CLICKED_SECTIONS floor fails the run.
+     *
+     * A family row photographs BOTH the overview its rail item links and the flat catalog;
+     * every route below answered 200 on a `--demo nyc` instance when the table was written
+     * (2026-10-25). `/settings` is off-rail (079 §B, the avatar menu): photographed by the
+     * still pass, never clicked.
      */
-    private val RAIL_ROUTES = APP_PAGES.filterNot { it == "/settings" }
+    private val APP_SHOT_SECTIONS: List<AppSectionShots> =
+        listOf(
+            AppSectionShots("/dashboard", listOf("/dashboard")),
+            AppSectionShots("/pipelines", listOf("/overview/pipelines", "/pipelines")),
+            AppSectionShots("/templates", listOf("/overview/templates", "/templates")),
+            AppSectionShots("/datasources", listOf("/overview/datasources", "/datasources")),
+            AppSectionShots("/dashboards", listOf("/overview/dashboards", "/dashboards")),
+            AppSectionShots("/visualizations", listOf("/overview/visualizations", "/visualizations")),
+            AppSectionShots("/parameter-sets", listOf("/overview/parameter-sets", "/parameter-sets")),
+            AppSectionShots("/executions", listOf("/executions")),
+            AppSectionShots("/schedules", listOf("/overview/schedules", "/schedules")),
+            AppSectionShots("/api-console", listOf("/overview/api-console", "/api-console")),
+            AppSectionShots("/promotion", listOf("/promotion")),
+            AppSectionShots("/workspaces", listOf("/workspaces")),
+            AppSectionShots("/admin", listOf("/admin/users")),
+            AppSectionShots("/docs", listOf("/docs")),
+            AppSectionShots(null, listOf("/settings")),
+        )
+
+    /** Every screen the `app` set photographs, in table order. */
+    private val APP_PAGES: List<String> = APP_SHOT_SECTIONS.flatMap { it.routes }
+
+    /** The rail sections the click-through walks, in rail order — the table's named rows. */
+    private val RAIL_SECTIONS: List<String> = APP_SHOT_SECTIONS.mapNotNull { it.section }
+
+    /**
+     * Non-vacuity floor for the recorded walk (#602): a demo admin's rail draws most of the
+     * sections (the `th:if` items depend on role), so a run that clicked fewer than this
+     * many did not walk the menu — it skipped it.
+     */
+    private const val MIN_CLICKED_SECTIONS = 10
 
     /** The two review widths the `app` set captures every screen at. */
     private val APP_VIEWPORTS = listOf(1440 to 900, 2560 to 1440)
@@ -499,6 +562,34 @@ object SiteShotsMain {
     }
 
     /**
+     * One click-through step (#602): click the rail link whose `data-nav-section` is
+     * [section] and wait for the URL THAT ANCHOR LINKS — read from the DOM before the
+     * click, so the wait can never name a URL the menu does not link, however the routes
+     * move (#556, #579–#585). The comparison is on the path with any `#fragment` stripped
+     * (the Admin members link carries one). Returns false — printing, never hanging —
+     * when this account's rail draws no such link (the `th:if` items).
+     */
+    private fun clickNavSection(
+        page: Page,
+        section: String,
+    ): Boolean {
+        val links = page.locator(".app-nav-link[data-nav-section='$section']")
+        if (links.count() == 0) {
+            println("  SKIP $section (not in this account's rail)")
+            return false
+        }
+        val link = links.first()
+        val href =
+            requireNotNull(link.getAttribute("href")) {
+                "the $section rail link renders without an href — the walk has nothing to wait on"
+            }
+        link.click()
+        page.waitForURL({ url -> url.substringBefore('#') == "$baseUrl$href" })
+        page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+        return true
+    }
+
+    /**
      * One boosted-navigation pass, recorded (076 §E): the point of the video is that the nav
      * NEVER re-renders across the click-through — hx-boost swaps only #app-main, so per click
      * the waits are the URL change and network idle, never a fixed sleep. Its own context, so
@@ -520,13 +611,20 @@ object SiteShotsMain {
         withBrowser(options) { page ->
             signIn(page, email, password)
 
-            // 079: the walk uses RAIL_ROUTES, not APP_PAGES. /settings is still a screen and
-            // is still photographed, but it has no rail link any more — it moved into the
-            // avatar menu (§B) — so clicking `nav.app-nav a[href='/settings']` waits forever.
-            RAIL_ROUTES.forEach { route ->
-                page.locator("nav.app-nav a[href='$route']").first().click()
-                page.waitForURL({ url -> url.endsWith(route) })
-                page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+            // #602: the walk follows the menu AS IT IS — every section in rail order,
+            // clicked by data-nav-section, waited on that anchor's own destination.
+            // /settings is still a screen and is still photographed, but it has no rail
+            // link any more — it moved into the avatar menu (079 §B) — so it is not a
+            // section here at all. The floor below is the walk's non-vacuity: a run that
+            // clicked fewer sections skipped the menu rather than walking it.
+            val clicked = mutableListOf<String>()
+            RAIL_SECTIONS.forEach { section ->
+                if (clickNavSection(page, section)) clicked += section
+            }
+            println("  walk: clicked ${clicked.size} rail sections (${clicked.joinToString(", ")})")
+            check(clicked.size >= MIN_CLICKED_SECTIONS) {
+                "the click-through clicked only ${clicked.size} of ${RAIL_SECTIONS.size} rail sections " +
+                    "(${clicked.joinToString(", ")}) — the demo admin's rail should draw at least $MIN_CLICKED_SECTIONS"
             }
 
             // 079 §A/§B: the four interactions the round asks a reviewer to watch, after the
@@ -551,11 +649,10 @@ object SiteShotsMain {
             )
             page.keyboard().press("Escape")
 
-            // Three sections in the restored theme, so the film ends where a reader starts.
-            listOf("/pipelines", "/api-console", "/executions").forEach { route ->
-                page.locator("nav.app-nav a[href='$route']").first().click()
-                page.waitForURL({ url -> url.endsWith(route) })
-                page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+            // Three sections in the restored theme, so the film ends where a reader starts
+            // — through the same helper, so their waits follow their anchors too (#602).
+            listOf("/pipelines", "/api-console", "/executions").forEach { section ->
+                clickNavSection(page, section)
             }
         }
         val produced =
