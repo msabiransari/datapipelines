@@ -33,7 +33,7 @@ spec:
                 command: ["sleep", "5"]
           ports:
             - name: http
-              containerPort: 8080
+              containerPort: {{ include "datapipelines.appPort" . }}
             {{- if .Values.management.expose }}
             - name: management
               containerPort: {{ .Values.management.port }}

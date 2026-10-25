@@ -20,12 +20,16 @@ import java.io.File
  * (`MANAGEMENT_SERVER_ADDRESS=0.0.0.0`) is the one switch that decides who can reach it. Kubernetes
  * honours the LAST duplicate `env` name silently, so an `extraEnv.MANAGEMENT_SERVER_ADDRESS` would
  * override the chart's guarded entry (or the loopback default) without any error — the same shape
- * the DuckDB and `script.js` refusals refuse. Both selectors of the NetworkPolicy empty is refused
- * at render time because an empty `from:` admits every source.
+ * the DuckDB and `script.js` refusals refuse.
+ *
+ * The NetworkPolicy selects the app pods, so it isolates EVERY ingress to them (#712 round two): its
+ * refusals must exist (NETWORKPOLICY_REFUSALS), its app-port rule and the Deployment's `http`
+ * containerPort share one helper, and the documented selector example is a LabelSelector.
  *
  * The [HelmScriptJsValuesSpecDriftTest] shape: CI renders the chart with a pinned `helm`
- * (`scripts/helm-check.sh`, cases `(h)`–`(h5)`); this guard stays textual so the pregate, which has
- * no `helm`, still pins the shape — it reads the chart files, it does not render them.
+ * (`scripts/helm-check.sh`, cases `(h)`–`(h5h)`, each render validated by a pinned `kubeconform`);
+ * this guard stays textual so the pregate, which has no `helm`, still pins the shape — it reads the
+ * chart files, it does not render them.
  */
 class HelmManagementValuesSpecDriftTest {
     private val shipped: Map<String, Any?> by lazy { load("deploy/helm/datapipelines/values.yaml") }
@@ -53,6 +57,11 @@ class HelmManagementValuesSpecDriftTest {
         withClue("values.yaml must declare both scraper selector keys as (empty) maps") {
             selectorKeys shouldBe
                 listOf("scraperNamespaceSelector", "scraperPodSelector")
+        }
+        // The app-port declaration ships unset — enabling the policy without one is refused.
+        shipped["management.networkPolicy.appIngress.allowAll"] shouldBe false
+        withClue("values.yaml must declare networkPolicy.appIngress with allowAll: false and an empty from") {
+            valuesText.contains(APP_INGRESS_DEFAULTS) shouldBe true
         }
     }
 
@@ -144,18 +153,54 @@ class HelmManagementValuesSpecDriftTest {
     }
 
     @Test
-    fun `the empty selector pair is refused at render time`() {
-        // An empty from: admits every source — the refusal must exist textually (the engine-side
-        // refusal is helm-check.sh's (h5) case).
-        val refusal =
-            repoFile(NETWORKPOLICY)
-                .readLines()
-                .filter { it.contains("fail ") }
-        withClue("networkpolicy.yaml must refuse both selectors empty") { refusal.size shouldBe 1 }
-        withClue("the refusal must name the reason (an empty from: admits every source)") {
-            refusal.single().contains("admits every source") shouldBe true
+    fun `every NetworkPolicy refusal exists at render time`() {
+        // Each refusal must exist textually (the engine-side refusals are helm-check.sh's (h5)–(h5h)
+        // cases); the shape check lives in the shared helper the policy calls for every selector.
+        val policy = repoFile(NETWORKPOLICY).readText()
+        val helpers = repoFile(HELPERS).readText()
+        for (reason in NETWORKPOLICY_REFUSALS) {
+            withClue("networkpolicy.yaml must carry the `fail` naming: $reason") {
+                policy.lines().count { it.contains("fail ") && it.contains(reason) } shouldBe 1
+            }
+        }
+        withClue("_helpers.tpl must refuse a selector that is a bare label map") {
+            helpers.lines().count { it.contains("fail ") && it.contains(BARE_LABEL_MAP_REFUSAL) } shouldBe 1
+        }
+        withClue("networkpolicy.yaml must apply the LabelSelector check to both scraper selectors and the app peers") {
+            REQUIRE_SELECTOR_REGEX.findAll(policy).count() shouldBe 3
         }
     }
+
+    @Test
+    fun `the app-port rule and the Deployment's http port share one definition`() {
+        // A literal in either file could drift from the other and silently cut the app port off.
+        withClue("deployment.yaml's http containerPort must come from the datapipelines.appPort helper") {
+            template.lines().count { it.trim() == "containerPort: $APP_PORT_INCLUDE" } shouldBe 1
+        }
+        withClue("networkpolicy.yaml's app-port rule (both branches) must come from the same helper") {
+            repoFile(NETWORKPOLICY).readLines().count { it.trim() == "port: $APP_PORT_INCLUDE" } shouldBe 2
+        }
+    }
+
+    @Test
+    fun `the documented selector example is a LabelSelector, never a bare label map`() {
+        // Round one documented a bare label map (#712 lander finding 1): every scraperNamespaceSelector
+        // example in deployment.md and values.yaml must open with matchLabels or matchExpressions.
+        for (relative in listOf(DEPLOYMENT_DOC, VALUES)) {
+            val lines = repoFile(relative).readLines()
+            val examples = lines.withIndex().filter { bare(it.value) == "scraperNamespaceSelector:" }
+            withClue("$relative must carry a scraperNamespaceSelector example") { examples.isEmpty() shouldBe false }
+            for ((index, _) in examples) {
+                val next = bare(lines[index + 1])
+                withClue("$relative:${index + 2} must open the selector with matchLabels/matchExpressions (found: $next)") {
+                    (next == "matchLabels:" || next == "matchExpressions:") shouldBe true
+                }
+            }
+        }
+    }
+
+    /** A YAML line without its indentation and any leading comment marker (values.yaml's example is a comment). */
+    private fun bare(line: String): String = line.trimStart().removePrefix("#").trim()
 
     @Test
     fun `configuration md's management server address row still names the env var and the NetworkPolicy`() {
@@ -209,6 +254,24 @@ class HelmManagementValuesSpecDriftTest {
         const val TEMPLATE = "deploy/helm/datapipelines/templates/deployment.yaml"
         const val VALUES = "deploy/helm/datapipelines/values.yaml"
         const val NETWORKPOLICY = "deploy/helm/datapipelines/templates/networkpolicy.yaml"
+        const val HELPERS = "deploy/helm/datapipelines/templates/_helpers.tpl"
+        const val DEPLOYMENT_DOC = "docs/deployment.md"
+        const val APP_INGRESS_DEFAULTS = "    appIngress:\n      allowAll: false\n      from: []\n"
+        const val APP_PORT_INCLUDE = """{{ include "datapipelines.appPort" . }}"""
+        const val BARE_LABEL_MAP_REFUSAL = "not a bare label map"
+        val REQUIRE_SELECTOR_REGEX = Regex("""include "datapipelines\.requireLabelSelector"""")
+
+        // One phrase per refusal in networkpolicy.yaml, each the reason the render stops.
+        val NETWORKPOLICY_REFUSALS =
+            listOf(
+                "an empty from: admits every source",
+                "isolates every ingress of the app pods",
+                "a contradiction; keep one",
+                "a NetworkPolicyPeer has only namespaceSelector / podSelector / ipBlock",
+                "must be a NetworkPolicyPeer object",
+                "must be true or false, unquoted",
+                "must be a list of NetworkPolicyPeer objects",
+            )
 
         val EXPECTED_ENV_VARS =
             listOf(

@@ -87,12 +87,26 @@ service:
 # the Deployment gains the management containerPort and both MANAGEMENT_SERVER_*
 # env entries, a headless Service (clusterIP: None — the scraper targets pod IPs,
 # not a cluster VIP) is added, and serviceMonitor.enabled adds a ServiceMonitor
-# for the Prometheus operator. networkPolicy.enabled adds a NetworkPolicy
-# confining the port to the scraper selectors; both selectors empty is REFUSED at
-# render time (an empty from: admits every source). Both selectors set: the two
-# entries are OR'd (Kubernetes semantics) — a pod matches if it is in a namespace
-# matching scraperNamespaceSelector OR matches scraperPodSelector (the latter in
-# the app's own namespace). extraEnv.MANAGEMENT_SERVER_ADDRESS / _PORT are
+# for the Prometheus operator. networkPolicy.enabled adds the chart's ONE
+# ingress NetworkPolicy for the app pods (deployment.md §6.4). Selecting the
+# pods isolates EVERY ingress to them, so it carries two rules: the scraper
+# selectors → the management port, and appIngress → the app port. Enabling it
+# REQUIRES both: at least one scraper selector (both empty is refused — an
+# empty from: admits every source) AND an app-port declaration — a non-empty
+# appIngress.from, or the explicit appIngress.allowAll: true acknowledgement
+# (never both; neither is refused). Every selector is a full LabelSelector
+# object (matchLabels / matchExpressions), copied verbatim, e.g.
+#   scraperNamespaceSelector:
+#     matchLabels:
+#       kubernetes.io/metadata.name: monitoring
+# — a bare label map is refused at render time. appIngress.from is a list of
+# NetworkPolicyPeer objects (namespaceSelector / podSelector / ipBlock), copied
+# verbatim; an ipBlock of 0.0.0.0/0 is allow-all by another name. Both scraper
+# selectors set: the two peers are OR'd (Kubernetes semantics) — a pod matches
+# if it is in a namespace matching scraperNamespaceSelector OR matches
+# scraperPodSelector (the latter in the app's own namespace). Policies are
+# unioned: another policy on these pods keeps its allowances and this one adds
+# exactly its declared peers. extraEnv.MANAGEMENT_SERVER_ADDRESS / _PORT are
 # refused: Kubernetes honours the last duplicate env name silently, and the
 # 0.0.0.0 address is the opt-open switch this block alone governs.
 management:
@@ -102,6 +116,9 @@ management:
     enabled: false
     scraperNamespaceSelector: {}
     scraperPodSelector: {}
+    appIngress:
+      allowAll: false
+      from: []
   serviceMonitor:
     enabled: false
     interval: 30s

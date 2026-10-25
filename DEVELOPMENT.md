@@ -1365,6 +1365,22 @@ borrows the install helpers below and their exit-`2` tooling contract, but its
 own exit `1` means a chart check failed (a render verdict), never a scan
 finding.
 
+**Bumping kubeconform (#712).** `scripts/helm-check.sh` validates every
+successful render with a pinned kubeconform. As with helm, one commit carries
+BOTH edits: the new `KUBECONFORM_VERSION` and the refreshed
+`KUBECONFORM_SUMS_SHA256`. To compute the pin, download the new release's
+`CHECKSUMS` from
+`https://github.com/yannh/kubeconform/releases/download/<version>/CHECKSUMS`
+(one multi-platform manifest, like osv-scanner's), run `shasum -a 256` on it,
+and record the value (with the date) beside the version. The schemas are pinned
+separately, by commit, in `KC_SCHEMA_CORE` (yannh/kubernetes-json-schema) and
+`KC_SCHEMA_CRDS` (datreeio/CRDs-catalog), with `KC_KUBERNETES_VERSION`. Bump them
+together: read each repository's current commit, confirm that
+`v<k8s-version>-standalone-strict/networkpolicy-networking-v1.json` and
+`monitoring.coreos.com/servicemonitor_v1.json` exist at that commit, then run
+the script. A schema that cannot be fetched exits `2` (tooling), never a chart
+verdict.
+
 The shared install helpers in `scripts/lib/scan-tools.sh` (download, SHA256
 verify) exit `2` on failure for **all three** scanner scripts —
 secret-scan (`1` = leaks found) and container-scan (`1` = trivy finding)
