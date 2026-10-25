@@ -496,7 +496,7 @@ class AppShellBrowserTest : BrowserSuite() {
         page.locator("#rail-collapse").getAttribute("aria-expanded") shouldBe "false"
 
         // A FULL page load, not a boosted swap: the collapsed class has to be on <html>
-        // before the first paint, which only the layout's inline script can do.
+        // before the first paint, which the parser-blocking head script applies.
         //
         // #717: the CI-only red at the one-shot read below could not say WHICH half
         // failed — the WRITE (shell.js's setItem is swallowed when storage refuses) or
@@ -519,8 +519,10 @@ class AppShellBrowserTest : BrowserSuite() {
         }
 
         val response = page.navigate("$baseUrl/executions")
-        withClue(shellBoundary(response)) {
-            page.locator("html.rail-collapsed").count() shouldBe 1
+        val collapsedCount = page.locator("html.rail-collapsed").count()
+        val boundary = runCatching { shellBoundary(response) }.getOrElse { "shell boundary probe failed: $it" }
+        withClue(boundary) {
+            collapsedCount shouldBe 1
         }
 
         page.locator("#rail-collapse").click()
