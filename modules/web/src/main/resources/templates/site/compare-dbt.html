@@ -60,9 +60,9 @@
           <p>Introspect, create a template, create a pipeline, execute, read rows: the whole loop over MCP tools. dbt's authoring surface is a repository and a CLI, which is a different shape of collaboration.</p>
         </article>
         <article class="card">
-          <!-- claim: docs/datasources.md §5.7, docs/auth.md §10.1 -->
+          <!-- claim: docs/datasources.md §5.7, docs/auth.md §7.5, docs/auth.md §10.1 -->
           <h3>The credential story has to hold up</h3>
-          <p>Read-only datasources enforced at save and at execution, one revocable key per agent that holds no more than its person's role, and an audit log entry for every tool call.</p>
+          <p>Read-only datasources enforced at save and at execution, one revocable key per agent holding the role chosen at its creation, never more than its creator's own, and an audit log entry for every tool call.</p>
         </article>
       </div>
     </div>

@@ -547,6 +547,15 @@ anything. Stop after reporting.</code></pre>
 
         <article class="card ds-hover-lift">
           <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M9 7 4 12l5 5M15 7l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <!-- claim: docs/pipeline-contract.md §4.12 (the SCRIPT node: jsonata or javascript, row, table and value modes, no handle to tempdb, network, filesystem or clock), docs/deployment.md §6.4 (the JavaScript isolate) -->
+          <h3>SCRIPT nodes: JSONata and JavaScript</h3>
+          <p>When SQL is the wrong tool, a <code>SCRIPT</code> node runs a versioned <code>jsonata</code> or <code>javascript</code> template over staged tables, in <code>row</code>, <code>table</code> or <code>value</code> mode. The function sees only its inputs, never the network or the filesystem, so a run is reproducible. JavaScript is not Node: it runs in an isolate the image ships.</p>
+        </article>
+
+        <article class="card ds-hover-lift">
+          <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
             <rect x="3" y="4" width="8" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
             <rect x="13" y="13" width="8" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
             <path d="M11 7.5h3a2 2 0 0 1 2 2V13" fill="none" stroke="currentColor" stroke-width="1.5"/>
@@ -591,6 +600,28 @@ anything. Stop after reporting.</code></pre>
       <div class="feature-group">
         <h3 class="group-title">Operate</h3>
         <div class="features-grid ds-stagger-children">
+
+        <article class="card ds-hover-lift">
+          <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M3 12h3l2-6 4 12 2-6h7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <!-- claim: docs/scheduler.md §1, §3, §5.2 and §9 -->
+          <h3>Schedules that run pipelines</h3>
+          <p>A schedule runs one pipeline at a five-field cron pattern's times in an IANA time zone, previews the next runs, and records every run. A run whose outcome is unknown blocks the schedule until a person looks. Mail settings are saved; delivery is not built yet.</p>
+          <a class="card-link" th:href="@{/pipeline-scheduling}">Pipeline scheduling &rarr;</a>
+        </article>
+
+        <article class="card ds-hover-lift">
+          <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M4 6h16v12H4z" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M4 10h16" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M7 14h4M14 14h3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          <!-- claim: docs/dashboards.md §1, §5.5 and §6.5 -->
+          <h3>Dashboards over released pipelines</h3>
+          <p>Visualizations and dashboards are versioned like pipelines: an agent drafts, a person releases. A dashboard refreshes its pinned sources when someone opens it, with filters from a reusable parameter set, and embeds in your product through your backend, which keeps the key.</p>
+          <a class="card-link" th:href="@{/sql-dashboards}">SQL dashboards &rarr;</a>
+        </article>
 
         <article class="card ds-hover-lift">
           <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -803,7 +834,7 @@ anything. Stop after reporting.</code></pre>
       </div>
 
 
-      <p class="features-pointer">Charts and dashboards are next. <a th:href="@{/roadmap}">See the roadmap</a>.</p>
+      <p class="features-pointer">Scheduling, dashboards and parameter sets each have a page: <a th:href="@{/pipeline-scheduling}">pipeline scheduling</a>, <a th:href="@{/sql-dashboards}">SQL dashboards</a> and <a th:href="@{/reusable-parameter-sets}">parameter sets</a>. What is not built yet is on the <a th:href="@{/roadmap}">roadmap</a>.</p>
     </div>
   </section>
 
@@ -879,14 +910,16 @@ anything. Stop after reporting.</code></pre>
         </article>
         <article class="card">
           <span class="card-number">NEXT UP</span>
-          <!-- claim: docs/ROADMAP.md §2 (charts and dashboards are planned) -->
+          <!-- claim: docs/scheduler.md §1 (a schedule reruns the pipeline), docs/dashboards.md §1 (a dashboard over it), docs/ROADMAP.md §2.2 (reports and email are not built) -->
           <h3>Where the product is going</h3>
-          <p>Charts and dashboards on top of released pipelines come next. <a th:href="@{/roadmap}">See the roadmap &rarr;</a></p>
+          <p>Run the released pipeline on a <a th:href="@{/pipeline-scheduling}">schedule</a>, or chart it on a <a th:href="@{/sql-dashboards}">dashboard</a>. Report delivery and alerts are not built yet. <a th:href="@{/roadmap}">See the roadmap &rarr;</a></p>
         </article>
       </div>
       <ul class="engine-links">
         <li><a th:href="@{/mcp-server-for-sql-databases}">The SQL MCP server overview</a></li>
         <li><a th:href="@{/published-api}">Turn a release into an API</a></li>
+        <li><a th:href="@{/pipeline-scheduling}">Run it on a schedule</a></li>
+        <li><a th:href="@{/sql-dashboards}">Chart it on a dashboard</a></li>
         <li><a th:href="@{/federated-query}">Federated query, in detail</a></li>
         <li><a th:href="@{/dp-lake}">dp-lake: Parquet and Iceberg on S3</a></li>
         <li><a th:href="@{/demo-data}">The demo data, table by table</a></li>

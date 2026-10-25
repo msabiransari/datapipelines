@@ -7,29 +7,30 @@
     <ol>
       <li><a th:href="@{/}">Home</a></li>
       <li><a th:href="@{/tableau}">Tableau</a></li>
-      <li aria-current="page">Extracts, alerts, dashboards: the roadmap</li>
+      <li aria-current="page">Extracts, alerts, dashboards</li>
     </ol>
   </nav>
 
-  <!--/* Site v2 batch 2: the Tableau roadmap page. A ROADMAP page, and it says so in its first
-       paragraph: none of this is shipped; release dates are not announced. The wording is the
-       owner's, verbatim (2026-09-09). The freshness guard walks this page beside /roadmap —
-       the dateline and the Article JSON-LD carry the same date, and an old dateline fails
-       the build. */-->
-  <!-- claim: docs/ROADMAP.md §2 — the owner's planned dashboard wording -->
-  <!-- claim: docs/superpowers/specs/2026-09-07-scheduler-design.md — the planned scheduler -->
-  <!-- claim: docs/superpowers/specs/2026-09-09-transform-nodes-design.md — planned script nodes -->
+  <!--/* Site v2 batch 2: the Tableau roadmap page, corrected by #699 (2026-10-24). Dashboards,
+       the scheduler and SCRIPT nodes ship; scheduled extracts to your own bucket, report and
+       condition alerts by email stay later, and the page labels each one. The freshness guard
+       walks this page beside /roadmap: the dateline and the Article JSON-LD carry the same date,
+       and an old dateline fails the build. */-->
+  <!-- claim: docs/dashboards.md §1 — dashboards, visualizations and parameter sets ship -->
+  <!-- claim: docs/dashboards.md §6.5 — embedding through your backend, the key server-side -->
+  <!-- claim: docs/scheduler.md §1 and §9 — the scheduler ships; mail delivery does not yet -->
+  <!-- claim: docs/pipeline-contract.md §4.12 — SCRIPT nodes ship -->
   <!-- claim: docs/ROADMAP.md §3 — scheduled extracts, email alerts, metrics: later -->
-  <!-- claim: docs/rest-api.md §19 — what ships today: the endpoint a dashboard will consume -->
+  <!-- claim: docs/rest-api.md §19 — the published endpoint beside the dashboard -->
   <!-- claim: docs/templates.md §4.5 — bound parameters, the mechanism per-viewer filtering rides on -->
 
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
     "@type": "Article",
-    "headline": "Embedded dashboards, scheduled extracts to your own bucket, email alerts: the roadmap beside Tableau",
+    "headline": "Embedded dashboards today; scheduled extracts to your own bucket and email alerts later, beside Tableau",
     "datePublished": "2026-09-10",
-    "dateModified": "2026-09-16",
+    "dateModified": "2026-10-24",
     "author": { "@type": "Organization", "name": "datapipelines.co" },
     "publisher": { "@type": "Organization", "name": "datapipelines.co" },
     "mainEntityOfPage": "https://datapipelines.co/tableau/extracts-alerts-dashboards"
@@ -38,51 +39,64 @@
 
   <section class="section page-hero" aria-labelledby="tr-title">
     <div class="container">
-      <p class="kicker"><span class="status">Roadmap</span> none of this page is shipped; release dates are not announced</p>
-      <h1 id="tr-title" class="ds-display">Embedded dashboards, scheduled extracts to S3, data-driven alerts: the roadmap</h1>
+      <p class="kicker"><span class="status status-shipped">Dashboards ship</span> extracts and alerts are later; release dates are not announced</p>
+      <h1 id="tr-title" class="ds-display">Embedded dashboards today; scheduled extracts to S3 and data-driven alerts later</h1>
       <p class="section-lede">
-        This page describes the plans for these three features.
-        <strong>None of this page is shipped; release dates are not announced.</strong> What ships today
-        is the half these features stand on: a released pipeline, published as a versioned endpoint, that a
-        dashboard would consume and an extract would materialise. Everything below says roadmap, planned, or
-        later, in as many words.
+        Three things Tableau users ask a pipeline to do: show a chart inside their own product, refresh an extract
+        on a timetable, and send an alert when a number moves. <strong>Dashboards ship today</strong>, and so does
+        the scheduler that reruns a pipeline. <strong>Scheduled extracts to your own bucket and condition alerts by
+        email are later</strong>, with no announced release date. Each section below says which one it is.
       </p>
-      <p class="dateline" data-roadmap-updated="2026-09-16">Last updated 2026-09-16</p>
+      <p class="dateline" data-roadmap-updated="2026-10-24">Last updated 2026-10-24</p>
       <div class="btn-row">
-        <a class="btn btn-primary" th:href="@{/roadmap}">The full roadmap, same words</a>
-        <a class="btn btn-secondary" th:href="@{/published-api}">What ships today instead</a>
+        <a class="btn btn-primary" th:href="@{/sql-dashboards}">SQL dashboards, in detail</a>
+        <a class="btn btn-secondary" th:href="@{/roadmap}">The full roadmap</a>
       </div>
     </div>
   </section>
 
   <section class="section" aria-labelledby="tr-dash">
     <div class="container">
-      <p class="kicker"><span class="status">Planned</span></p>
+      <p class="kicker"><span class="status status-shipped">Ships today</span></p>
       <h2 id="tr-dash" class="ds-headline">Dashboards you embed</h2>
       <div class="prose">
-        <!-- claim: docs/ROADMAP.md §2 -->
+        <!-- claim: docs/dashboards.md §1, docs/dashboards.md §3 -->
         <p>
-          The roadmap's own words: <em>"dashboards, created by your agent, you embed in your own product, fed by
-          released pipelines and APIs, filtered per viewer."</em> Each clause is a decision. Created by your agent,
-          the same authoring tools that draft a pipeline today. Embedded in your own product, not a hosted
-          portal you send people to; the chart lives behind your login. Fed by released pipelines and APIs, the
-          numbers are the ones a person released, not a query someone retyped.
+          A dashboard here is charts, tables and KPI cards over pinned versions of released pipelines. Your agent
+          drafts the visualizations and the dashboard with the same authoring tools that draft a pipeline, and a
+          person reviews the draft in the application and releases it. A visualization releases only with passing
+          test evidence for its exact content, so the chart a customer sees is one a person checked.
         </p>
-        <!-- claim: docs/templates.md §4.5 -->
+        <!-- claim: docs/dashboards.md §6.5 -->
         <p>
-          <strong>Filtered per viewer</strong> means: a value bound from the viewer's request, from the session or the key,
-          becomes a declared parameter of the released pipeline, and the released SQL filters on it. The same
-          dashboard, every viewer, their own rows. That mechanism is not roadmap: declared parameters bind as
-          prepared-statement values in the released pipelines served today, which is what the dashboard feature
-          will consume.
+          Embedding goes through your own backend. It holds a <code>dashboard</code> key and relays the dashboard's
+          runtime routes; the key is attached server-side and never reaches the browser. The source includes a
+          dependency-free reference proxy you place behind your own sign-in. The chart renders behind your login, on
+          your page, with no second portal for your customers to learn.
         </p>
+        <!-- claim: docs/dashboards.md §6.5, docs/templates.md §4.5 -->
         <p>
-          The shape of the feature follows from the wording, and it is worth reading the clauses as commitments:
-          "fed by released pipelines" means the dashboard cannot show a number that did not come from a version a
-          person released, so the audit trail of a chart is the audit trail of a pipeline. "Embedded in your own
-          product" means there is no second portal to log into, no copy of your users to manage, and no hosted
-          tier, so the chart renders where your users already are. And "created by your agent" means the authoring
-          loop is the one that already works: schemas in, draft out, run checked, person releases.
+          <strong>Per viewer</strong> is your backend's decision. Every viewer behind one key shares that key's
+          identity and budget, so the key does not separate one customer from another. Your backend decides which
+          filter values a viewer may submit; those values bind as declared parameters of the released pipeline, and
+          the released SQL filters on them as prepared-statement values, never pasted text.
+        </p>
+        <!-- claim: docs/dashboards.md §5.1, docs/dashboards.md §5.8 -->
+        <p>
+          The limits are on the <a th:href="@{/sql-dashboards}">dashboards page</a> too: a dashboard refreshes when
+          someone opens it or applies its filters, a schedule does not refresh it, there is no drag-and-drop editor,
+          and its read-only rule is declared by the source nodes' types rather than enforced by a read-only database
+          connection.
+        </p>
+        <!-- claim: docs/dashboards.md §2.1.2, docs/rest-api.md §19 -->
+        <p>
+          <strong>Which one to reach for.</strong> Keep Tableau for analysts who explore: ad-hoc workbooks, drag a
+          field onto a shelf, a server full of published views your organisation already governs. Reach for a
+          dashboard here when the audience is your customers inside your product, the charts are a known set a
+          person can review before release, and the numbers must trace back to a released pipeline version. Bar,
+          line, scatter, pie, histogram, box and heatmap charts, tables and KPI cards cover that kind of embedded
+          reporting. When your own front end should draw the chart, skip the dashboard and call the published
+          endpoint for the rows instead.
         </p>
       </div>
     </div>
@@ -93,22 +107,25 @@
       <p class="kicker"><span class="status">Later · decided, not dated</span></p>
       <h2 id="tr-extract" class="ds-headline">Tableau extracts, scheduled to your own bucket</h2>
       <div class="prose">
-        <!-- claim: docs/ROADMAP.md §3 -->
+        <!-- claim: docs/ROADMAP.md §3, docs/datasources.md §8C.8 -->
         <p>
-          The roadmap item: a scheduled pipeline materialises its result as Parquet files on your own S3 bucket, in the layout the lake already reads. The
-          lake you already own becomes the extract store, with no second copy of the data anywhere else. Tableau
-          reads Parquet natively, so the extract lands where the drawing tool already looks. Two pieces, in order:
-          the <strong>scheduler</strong> is the planned roadmap item, with schedules in folders, fired exactly once
-          across instances, every run a first-class execution. And the extract itself is <strong>later</strong>,
-          decided but not dated. Until it ships, write-back can land a result in a datasource table a BI tool
-          connects to, and the lake reads Parquet and Iceberg on S3 in place.
+          The later item: a scheduled pipeline materialises its result as Parquet files on your own S3 bucket, in
+          the layout the lake already reads. The lake you already own becomes the extract store, with no second copy
+          of the data anywhere else, and Tableau reads Parquet natively. dp-lake has no write path to object storage
+          today, so this is decided and not dated.
+        </p>
+        <!-- claim: docs/scheduler.md §1, docs/pipeline-contract.md §8 -->
+        <p>
+          Half of it already exists. The <a th:href="@{/pipeline-scheduling}">scheduler</a> ships: a schedule runs a
+          pipeline at a cron pattern's times in your time zone and records every run. A pipeline with a write-back
+          node lands its result in a table of a datasource Tableau already connects to, so a nightly refreshed
+          table is a schedule plus a write-back today. What waits is the object-store target.
         </p>
         <p>
           Why your own bucket, and not a managed extract store? The same reason the rest of the product runs on
           your infrastructure: the extract is <em>your</em> data, in <em>your</em> bucket, under your retention
           rules and your access rules: the server holds the schedule, the bucket holds the bytes, and either can
-          be audited without the other. When the item ships, the extract's shape is the write-back node's contract
-          pointed at object storage: a released pipeline's result, landed where a drawing tool already reads.
+          be audited without the other.
         </p>
       </div>
     </div>
@@ -119,20 +136,19 @@
       <p class="kicker"><span class="status">Later · decided, not dated</span></p>
       <h2 id="tr-alerts" class="ds-headline">Email alerts</h2>
       <div class="prose">
-        <!-- claim: docs/ROADMAP.md §3 -->
+        <!-- claim: docs/ROADMAP.md §3, docs/scheduler.md §2.3 -->
         <p>
-          The roadmap item in full: a scheduled pipeline, a condition, an email. When a released pipeline's result
-          crosses a threshold you set, a number too low or a load too high, the schedule fires, the condition
-          decides, an email arrives. <strong>Email only.</strong> Nothing else is promised until it exists; there
-          is no Slack connector on any roadmap, and the "what this is not" section below says so in as many words.
+          The later item in full: a scheduled pipeline, a condition, an email. When a released pipeline's result
+          crosses a threshold you set, the condition decides and an email arrives. <strong>Email only.</strong>
+          Nothing else is promised until it exists; there is no Slack connector on any roadmap.
         </p>
+        <!-- claim: docs/scheduler.md §2.3, docs/scheduler.md §5.2 -->
         <p>
-          Notice what the alert inherits from what ships: the number it watches is a released pipeline's output, so
-          an alert that fires is traceable to a version, a run and a result, not to a query somebody's laptop was
-          kind enough to finish. That inheritance is the design's whole argument, and it is why the item sits
-          behind the scheduler on the roadmap rather than beside it: alerts without schedules are cron with
-          opinions. Until both ship, the closest honest substitutes are the ones already on this page: a scheduled
-          run a person checks, or an endpoint a monitor polls. Both keep the audit trail an alert would want, with nothing new to trust.
+          The schedule half ships, and the mail half has started. Each schedule already saves its recipients and
+          which run events should send mail, with failed, unknown and blocked runs on by default, but nothing sends
+          until delivery ships. A condition on the result is a separate, later piece. Until then a person reads the
+          schedule's run history, or a monitor polls a published endpoint, and both keep the audit trail an alert
+          would want.
         </p>
       </div>
     </div>
@@ -144,9 +160,9 @@
       <h2 id="tr-not" class="ds-headline">What this is not</h2>
       <div class="features-grid features-grid--two">
         <article class="card">
-          <!-- claim: docs/ROADMAP.md §2 -->
+          <!-- claim: docs/dashboards.md §2.2 -->
           <h3>Not a Tableau Server replacement</h3>
-          <p>Drawing, workbooks and Tableau's own governance stay Tableau's. The roadmap items here are the three things Tableau users keep asking the pipeline to do: embed, extract, alert. Not a suite to migrate to, and the <a th:href="@{/tableau}">Tableau page</a> keeps today's column honest.</p>
+          <p>Drawing, workbooks and Tableau's own governance stay Tableau's. A dashboard here is a reviewed document an agent writes, without a drag-and-drop editor or a workbook gallery. The <a th:href="@{/tableau}">Tableau page</a> keeps today's two columns apart.</p>
         </article>
         <article class="card">
           <!-- claim: docs/ROADMAP.md §3 -->
@@ -156,12 +172,12 @@
         <article class="card">
           <!-- claim: docs/deployment.md §10 -->
           <h3>No hosted plan</h3>
-          <p>Self-hosted, one Docker image, your infrastructure, AGPL-3.0. A hosted offering is not on the roadmap; dashboards "embedded in your own product" means your product, on your stack.</p>
+          <p>Self-hosted, one Docker image, your infrastructure, AGPL-3.0. A hosted offering is not on the roadmap; a dashboard embedded in your product means your product, on your stack.</p>
         </article>
         <article class="card">
           <!-- claim: docs/rest-api.md §19 -->
           <h3>Not a wait, if the API is the need</h3>
-          <p>If the thing you wanted the dashboard for is "customers see their numbers in our app", the endpoint ships today: released pipeline, versioned GET, keys scoped to a path, parameters bound per viewer. The dashboard is a consumer of that contract, like any other.</p>
+          <p>If what you wanted is "customers see their numbers in our app" in your own UI, the endpoint serves the same released pipeline as JSON: a versioned GET, keys scoped to a path, parameters bound per request.</p>
         </article>
       </div>
     </div>
@@ -169,28 +185,28 @@
 
   <section class="section" aria-labelledby="tr-today">
     <div class="container">
-      <p class="kicker"><span class="status status-shipped">Ships today</span> what the roadmap stands on</p>
+      <p class="kicker"><span class="status status-shipped">Ships today</span> what the later items stand on</p>
       <h2 id="tr-today" class="ds-headline">The half that is not waiting</h2>
       <div class="features-grid features-grid--two">
         <article class="card">
           <!-- claim: docs/rest-api.md §19 -->
-          <h3>The endpoint a dashboard will consume</h3>
-          <p>Release a pipeline, publish it under a path, and a <code>GET</code> serves the released version with bound parameters as typed JSON. <code>Cache-Control: no-store</code>, keys scoped to the path. The dashboard feature consumes exactly this contract.</p>
+          <h3>The endpoint beside the dashboard</h3>
+          <p>Release a pipeline, publish it under a path, and a <code>GET</code> serves the released version with bound parameters as typed JSON. <code>Cache-Control: no-store</code>, keys scoped to the path. A dashboard and an endpoint can both read the same release.</p>
         </article>
         <article class="card">
           <!-- claim: docs/templates.md §4.5 -->
           <h3>The per-viewer mechanism</h3>
-          <p>Declared parameters bind as prepared-statement values today: the viewer's key or session supplies the value, the released SQL filters on it. "Filtered per viewer" is a UI over a shipped mechanism, not a new engine.</p>
+          <p>Declared parameters bind as prepared-statement values: the caller supplies the value, the released SQL filters on it. Who may supply which value is decided where the viewer is signed in, in your backend.</p>
         </article>
         <article class="card">
-          <!-- claim: docs/pipeline-contract.md §8 -->
+          <!-- claim: docs/pipeline-contract.md §8, docs/scheduler.md §1 -->
           <h3>Write-back, the extract's small sibling</h3>
-          <p>A node can land its result in a datasource table today, the pattern a scheduled extract generalises to Parquet on your own bucket. One is shipped, one is planned; this page keeps the two apart.</p>
+          <p>A node can land its result in a datasource table, and a schedule can rerun that pipeline nightly. The extract later generalises this to Parquet on your own bucket. One is shipped, one is later; this page keeps the two apart.</p>
         </article>
         <article class="card">
-          <!-- claim: docs/superpowers/specs/2026-09-09-transform-nodes-design.md -->
-          <h3>Script nodes, designed</h3>
-          <p>JSONata and JavaScript script nodes, for the shaping SQL is bad at and the pivot Prep did with a click, are the planned roadmap item beside the scheduler, with a design record on disk. Named as roadmap here; this page does not describe designs as shipped.</p>
+          <!-- claim: docs/pipeline-contract.md §4.12 -->
+          <h3>SCRIPT nodes for what SQL is bad at</h3>
+          <p>A <code>SCRIPT</code> node runs a versioned JSONata or JavaScript template over staged rows, for the nested shaping and the pivot Prep did with a click. JavaScript is not Node: it runs in an isolate the Docker image includes.</p>
         </article>
       </div>
     </div>
@@ -199,10 +215,10 @@
   <section class="section band" aria-labelledby="faq-title">
     <div class="container">
       <p class="kicker">Asked before</p>
-      <!-- claim: docs/rest-api.md §19 — are the embedded dashboards available today -->
-      <!-- claim: docs/superpowers/specs/2026-09-07-scheduler-design.md — when do scheduled extracts arrive -->
+      <!-- claim: docs/dashboards.md §1, docs/dashboards.md §6.5 — are the embedded dashboards available today -->
+      <!-- claim: docs/ROADMAP.md §3, docs/scheduler.md §1 — when do scheduled extracts arrive -->
       <!-- claim: docs/ROADMAP.md §3 — will there be Slack alerts -->
-      <!-- claim: docs/templates.md §4.5 — what does filtered per viewer mean -->
+      <!-- claim: docs/dashboards.md §6.5, docs/templates.md §4.5 — what does filtered per viewer mean -->
       <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Roadmap questions, answered plainly')}"></div>
     </div>
   </section>
@@ -212,12 +228,12 @@
       <h2 id="tr-next" class="ds-headline">Build on the shipped half while the dates move</h2>
       <!-- claim: docs/deployment.md §Appendix B -->
       <p class="section-lede">
-        Every item on this page consumes the same contract that ships today. Publish the endpoint now, and the
-        dashboard, the extract and the alert each become an addition, not a migration.
+        The dashboard, the schedule and the endpoint all read the same released pipeline. Release one now, chart it,
+        run it nightly, and the extract and the alert each become an addition later, not a migration.
       </p>
       <div class="btn-row">
-        <a class="btn btn-primary" th:href="@{/published-api}">Publish the endpoint today</a>
-        <a class="btn btn-secondary" th:href="@{/roadmap}">The roadmap</a>
+        <a class="btn btn-primary" th:href="@{/sql-dashboards}">Build a dashboard</a>
+        <a class="btn btn-secondary" th:href="@{/pipeline-scheduling}">Schedule a pipeline</a>
       </div>
     </div>
   </section>

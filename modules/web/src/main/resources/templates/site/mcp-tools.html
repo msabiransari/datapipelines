@@ -43,10 +43,10 @@
       <p class="kicker">By family</p>
       <h2 id="mt-groups" class="ds-headline">Read what it may, write only drafts</h2>
       <div class="prose">
-        <!-- claim: docs/mcp-server.md §6.1, docs/auth.md §7.6 (each tool's permission and the roles that hold it) -->
+        <!-- claim: docs/mcp-server.md §6.1, docs/auth.md §7.5 (the key's own role, chosen at creation), docs/auth.md §7.6 (each tool's permission and the roles that hold it) -->
         <p>
           Names are <code>&lt;family&gt;_&lt;verb&gt;</code>. Every tool declares one permission, and your key holds the
-          permissions of your role, capped at author. A viewer reads and runs pipelines; an author also creates and
+          permissions of the role chosen when it was created, never more than its creator's own. A viewer reads and runs pipelines; an author also creates and
           changes drafts, registers lake tables and probes a <code>SELECT</code>. Previewing rows and probing SQL are an
           author's rather than a viewer's, because a schema is metadata and a row is your customer's; catalogue
           statistics stay a viewer's, because a count the engine already stored is shape, not data.

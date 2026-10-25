@@ -12,19 +12,20 @@
 
   <!--/* Site v2 batch 2: the product-team page — the owner's story in full. Six figures for a
        workbook nobody could embed; the Angular rebuild; the API that was a second project.
-       The shipped half is the endpoint; the dashboard half is roadmap and is named as
-       roadmap. The security section exists for the reviewer who has to say yes. */-->
+       The endpoint and, since #699 corrected the page, the dashboard both ship; the page links
+       the dashboard capability page instead of repeating it (design record §5). The security
+       section exists for the reviewer who has to say yes. */-->
   <!-- claim: docs/rest-api.md §19 — the published endpoint, bound parameters, no-store -->
   <!-- claim: docs/templates.md §4.5 — the per-viewer value binds as a parameter -->
   <!-- claim: docs/auth.md §7.7 — the customer-facing key bound to a path -->
   <!-- claim: docs/versioning.md §3 — a person releases; the release is immutable -->
   <!-- claim: docs/auth.md §10 — the audit log, never the values -->
   <!-- claim: docs/datasources.md §7 — credentials encrypted, never returned -->
-  <!-- claim: docs/ROADMAP.md §2 — the dashboards are planned, named as roadmap -->
+  <!-- claim: docs/dashboards.md §1 and §6.5 — the dashboards, embedded through your backend -->
 
   <section class="section page-hero" aria-labelledby="st-title">
     <div class="container">
-      <p class="kicker">Embedded analytics: the half that ships today</p>
+      <p class="kicker">Embedded analytics: the API and the dashboard</p>
       <h1 id="st-title" class="ds-display">Embedded analytics without a warehouse: customers see their own numbers, in your app</h1>
       <p class="section-lede">
         Every product team eventually gets the same request: customers want <em>their</em> numbers inside the
@@ -33,7 +34,8 @@
         infrastructure to be served. This page is that story: the expensive way it usually goes, and the shorter
         one, where an agent authors the pipeline
         against your databases, a person releases it, and a versioned endpoint serves each customer their own rows.
-        The API half ships today; the dashboard half is planned, and the page keeps them labelled.
+        The API ships today, and so does a dashboard your product can embed; the page says what each one does,
+        and where its limits are.
       </p>
       <div class="btn-row">
         <a class="btn btn-primary" th:href="@{/published-api}">How a release becomes an endpoint</a>
@@ -65,8 +67,9 @@
           datapipelines collapses the first two. The dataset is a versioned pipeline across your databases, drafted
           by an agent that reads your real schemas and released by a person. The API is one step after the release:
           a published endpoint under your own <code>/api</code> namespace, parameters bound from the request, keys scoped to the
-          path. What remains is the embedding. The dashboard your agent creates is a planned roadmap item.
-          It would consume the same published endpoint contract instead of needing a hand-built API.
+          path. What remains is the embedding, and the same agent can draft that too: a dashboard that pins the
+          released pipeline, renders its charts inside your product, and is relayed by your backend so the key never
+          reaches a customer's browser. Or your front end renders the endpoint's JSON itself.
         </p>
       </div>
     </div>
@@ -139,22 +142,29 @@ DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;
 
   <section class="section band" aria-labelledby="st-dash">
     <div class="container">
-      <p class="kicker"><span class="status">Planned</span></p>
-      <h2 id="st-dash" class="ds-headline">The planned dashboards</h2>
+      <p class="kicker"><span class="status status-shipped">Ships today</span></p>
+      <h2 id="st-dash" class="ds-headline">The dashboards, embedded through your backend</h2>
       <div class="prose">
-        <!-- claim: docs/ROADMAP.md §2 -->
+        <!-- claim: docs/dashboards.md §1, docs/dashboards.md §3 -->
         <p>
-          The roadmap's words: <em>"dashboards, created by your agent, you embed in your own product, fed by
-          released pipelines and APIs, filtered per viewer."</em> Created by the same agent that authors the
-          pipeline; embedded behind your login, not hosted in a portal; fed by the released pipelines that already
-          serve the endpoints; filtered so each viewer sees their rows. Named as roadmap here and on the
-          <a th:href="@{/roadmap}">roadmap page</a>, not described as if it shipped, because it has not.
+          The same agent that authors the pipeline drafts the visualizations and the dashboard: charts, tables and
+          KPI cards bound to pinned versions of released pipelines, with filters from a reusable parameter set. A
+          person on your team reviews the draft and releases it, so the numbers a customer sees came from a version
+          someone signed off.
         </p>
+        <!-- claim: docs/dashboards.md §6.5 -->
         <p>
-          For planning purposes, the useful reading is architectural: the dashboard is a <em>consumer</em> of the
-          same released pipeline and endpoint you can publish today, a rendering over the contract, not a new
-          one. Teams that publish the endpoint now are not building throwaway work; they are building the exact
-          thing the dashboard will render from.
+          Your backend embeds it. It holds a <code>dashboard</code> key, relays the dashboard's runtime routes and
+          attaches the key server-side; the customer's browser talks only to you. Every viewer behind one key shares
+          its identity and budget, so the key does not tell your tenants apart: your backend signs the customer in
+          and decides which filter values that customer may submit, and the source pipeline filters on them.
+        </p>
+        <!-- claim: docs/dashboards.md §5.8 -->
+        <p>
+          What it does not do yet: no drag-and-drop editor, no live subscriptions, no scheduled refresh and no report
+          delivery. The <a th:href="@{/sql-dashboards}">SQL dashboards page</a> walks through the build, the review,
+          the refresh and the proxy contract in full; if your own front end should draw every chart, the endpoint
+          above is the whole integration.
         </p>
       </div>
     </div>

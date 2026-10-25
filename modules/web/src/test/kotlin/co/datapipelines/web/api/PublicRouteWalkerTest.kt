@@ -109,6 +109,11 @@ class PublicRouteWalkerTest {
                 // /explore directory — in their own controller, same shape and reasoning.
                 "SiteHubController#explore",
                 "SiteHubController#useCases",
+                // #699: the three capability pages (scheduling, dashboards, parameter sets), each an
+                // exact PublicPaths entry; the application's own pages of those names stay private.
+                "SiteCapabilitiesController#pipelineScheduling",
+                "SiteCapabilitiesController#reusableParameterSets",
+                "SiteCapabilitiesController#sqlDashboards",
                 // Crawler infrastructure (073) — robots.txt is a static file, not a handler.
                 "SitemapController#sitemap",
                 // The packaged spec set (073) and the agent skill (095): jar-packaged

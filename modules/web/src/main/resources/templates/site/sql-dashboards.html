@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{site/_layout :: page(~{::content})}">
+<th:block th:fragment="content">
+
+  <nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+      <li><a th:href="@{/}">Home</a></li>
+      <li aria-current="page">SQL dashboards</li>
+    </ol>
+  </nav>
+
+  <!--/* #699: the dashboards capability page (design record §5). Every behaviour named here is
+       docs/dashboards.md's. The embedding diagram is a labelled, code-native illustration of
+       §6.5's proxy contract, not a product screenshot. */-->
+  <!-- claim: docs/dashboards.md §1 — visualizations and dashboards, two versioned artifacts -->
+  <!-- claim: docs/dashboards.md §5 — the runtime -->
+  <!-- claim: docs/dashboards.md §6.5 — the session and proxy credentials -->
+
+  <section class="section page-hero" aria-labelledby="sd-title">
+    <div class="container">
+      <p class="kicker">SQL dashboards</p>
+      <h1 id="sd-title" class="ds-display">Turn pipeline results into useful dashboards.</h1>
+      <p class="section-lede">
+        A dashboard here is built from the SQL pipelines you already review: charts, tables and KPI cards bound to
+        pinned pipeline versions, with filters a viewer can change. It runs on your own server, an agent drafts it,
+        a person releases it, and your product can show it to customers without the key ever reaching their browser.
+      </p>
+      <div class="btn-row">
+        <a class="btn btn-primary" th:href="@{/docs/dashboards}">The dashboards contract</a>
+        <a class="btn btn-secondary" th:href="@{/for/saas-teams}">Customer-facing analytics</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="sd-parts">
+    <div class="container">
+      <p class="kicker">How it is built</p>
+      <h2 id="sd-parts" class="ds-headline">A pipeline, a visualization, a dashboard</h2>
+      <ol class="steps">
+        <li>
+          <h3>A released pipeline is the source</h3>
+          <!-- claim: docs/dashboards.md §5.1 -->
+          <p>A dashboard pins exact pipeline versions as its sources. Every source must pass the read-only rule, checked at save, at release and again before each refresh, so a pipeline with a write node is never a source.</p>
+        </li>
+        <li>
+          <h3>A visualization is a reusable chart</h3>
+          <!-- claim: docs/dashboards.md §2.1.2 -->
+          <p>A Plotly chart, a table or a KPI card, bound to named inputs rather than to one pipeline. The same release can appear on several dashboards. Bar, line and scatter, pie, histogram, box and heatmap are supported, with three 3D trace types loaded only when a dashboard uses one.</p>
+        </li>
+        <li>
+          <h3>A dashboard arranges them</h3>
+          <!-- claim: docs/dashboards.md §2.2 -->
+          <p>It maps source results onto each visualization's inputs, places them on a 12-column grid, groups them, and adds parameter controls from one pinned <a th:href="@{/reusable-parameter-sets}">parameter set</a> and the refresh actions a viewer presses.</p>
+        </li>
+      </ol>
+      <!-- claim: docs/dashboards.md §2.2 -->
+      <div class="code-block">
+        <pre><code>{
+  "display_name": "Revenue overview",
+  "parameter_set": { "name": "finance/parameters/reporting_period", "version": 1 },
+  "sources": [
+    { "name": "revenue_source",
+      "pipeline": { "name": "finance/pipelines/monthly_revenue", "version": 7 },
+      "parameters": { "year": { "parameter": "year" }, "currency": { "value": "USD" } } }
+  ],
+  "visualizations": [
+    { "name": "revenue_chart", "type": "visualization",
+      "visualization": { "name": "finance/visualizations/monthly_revenue", "version": 3 },
+      "inputs": { "revenue": { "source": "revenue_source" } } }
+  ],
+  "layout": { "grid": [ { "name": "revenue_chart", "x": 0, "y": 0, "w": 6, "h": 4 } ], "columns": 12 }
+}</code></pre>
+        <button type="button" class="copy-btn" hidden>Copy</button>
+      </div>
+      <p class="how-footnote">An excerpt of the dashboard document from the contract: every reference names an exact version.</p>
+    </div>
+  </section>
+
+  <section class="section band" aria-labelledby="sd-review">
+    <div class="container">
+      <p class="kicker">Review and run</p>
+      <h2 id="sd-review" class="ds-headline">Drafted by an agent, released by a person</h2>
+      <div class="features-grid">
+        <article class="card">
+          <!-- claim: docs/dashboards.md §3, docs/dashboards.md §4.4 -->
+          <h3>Drafts first</h3>
+          <p>An agent creates and edits visualizations and dashboards over MCP, and everything it writes is a draft. A person opens the draft in the application, checks it and releases it.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/dashboards.md §3.1 -->
+          <h3>Tested before release</h3>
+          <p>A visualization declares test cases, and it releases only with a passing run for its exact content plus the server's own mechanical check. A change after the run makes the evidence stale.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/dashboards.md §3.2 -->
+          <h3>Released means pinned</h3>
+          <p>A released dashboard requires released dependencies, and every reference is an exact version. Editing a chart opens a new draft; the board that pinned the old one keeps it.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/dashboards.md §5.5, docs/dashboards.md §5.6 -->
+          <h3>A refresh you can watch</h3>
+          <p>Opening a board or applying its filters runs its sources and streams each chart's result as it arrives. Two charts reading the same source and values share one run, and a viewer can abort a refresh.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/dashboards.md §5.7 -->
+          <h3>A record of every refresh</h3>
+          <p>Every admitted refresh is recorded and closed however it ends, with one audit row per refresh. Its source runs appear among the person's executions.</p>
+        </article>
+        <article class="card">
+          <!-- claim: docs/dashboards.md §5.5 -->
+          <h3>Bounded per refresh</h3>
+          <p>Each source's rows are counted against a byte cap, a refresh reserves its execution slots all at once or waits, and a full instance answers with a retry time instead of queueing without limit.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="sd-embed">
+    <div class="container">
+      <p class="kicker">Embedding</p>
+      <h2 id="sd-embed" class="ds-headline">Show a dashboard in your product, keep the key on your server</h2>
+      <div class="split">
+        <div class="prose">
+          <!-- claim: docs/dashboards.md §6.5, docs/auth.md §7.7 -->
+          <p>
+            Your backend holds a <code>dashboard</code> key and relays the four runtime routes: the configuration, the
+            parameter evaluation, the refresh stream and the abort. The browser talks only to your backend: the proxy
+            attaches the key server-side and strips cookies and CSRF headers. The source includes a dependency-free
+            reference proxy and a test that fails if a proxy buffers the stream or forwards a cookie.
+          </p>
+          <!-- claim: docs/dashboards.md §6.5 -->
+          <p>
+            Your backend decides who your user is: the reference proxy is an example you place behind your own
+            sign-in. Every viewer behind one key shares that key's identity and budget, so
+            the key does not separate one customer's data from another's. If a viewer may only see their own rows,
+            your backend checks the values it forwards, and the source pipeline filters on them.
+          </p>
+        </div>
+        <figure class="mini-flow" aria-labelledby="sd-embed-cap">
+          <div class="flow-item"><b>The viewer's browser</b><small>Your page with the dashboard runtime. No key, no cookie sent.</small></div>
+          <div class="flow-arrow" aria-hidden="true">↓</div>
+          <div class="flow-item accent"><b>Your backend proxy</b><small>Your sign-in first, then the dashboard key, attached server-side to four relayed routes.</small></div>
+          <div class="flow-arrow" aria-hidden="true">↓</div>
+          <div class="flow-item"><b>Your datapipelines server</b><small>Checks the key, runs the pinned read-only sources, streams results.</small></div>
+          <figcaption id="sd-embed-cap" class="how-footnote">Illustration of the proxy contract, not a product screenshot.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="section band" aria-labelledby="sd-limits">
+    <div class="container">
+      <p class="kicker">Current limits</p>
+      <h2 id="sd-limits" class="ds-headline">What dashboards do not do yet</h2>
+      <!-- claim: docs/dashboards.md §5.1, docs/dashboards.md §5.8, docs/dashboards.md §6.5 -->
+      <ul class="fact-list fact-list-plain">
+        <li><strong>Read-only is declared, not enforced by the database.</strong> A source is admitted by its nodes' declared types and targets; running source statements on a read-only connection is tracked separately.</li>
+        <li><strong>No drag-and-drop editor.</strong> The layout is part of the dashboard document an agent writes and a person reviews.</li>
+        <li><strong>Refreshes, not live feeds.</strong> A refresh streams progress while it runs; there are no continuous subscriptions, and a schedule does not refresh a dashboard.</li>
+        <li><strong>No report delivery or alerts.</strong> Scheduled report mail, PDF export and condition alerts are not built.</li>
+        <li><strong>The refresh history is not relayed.</strong> A shared key cannot tell your viewers apart, so the reference proxy leaves those routes out; build your own per-user history if you need one.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="sd-try">
+    <div class="container">
+      <p class="kicker">Try it</p>
+      <h2 id="sd-try" class="ds-headline">From a pipeline you trust to a board people use</h2>
+      <div class="prose">
+        <!-- claim: docs/dashboards.md §7 -->
+        <p>
+          Start the server with the <a th:href="@{/how-it-works}">tutorial</a> and release a pipeline. Ask your agent
+          for a visualization over its result and a dashboard that pins both, then review the draft in the
+          application's Dashboards workspace and release it. For filters, define a
+          <a th:href="@{/reusable-parameter-sets}">parameter set</a> first; for an API instead of a chart, see
+          <a th:href="@{/published-api}">published endpoints</a>.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section band" aria-labelledby="faq-title">
+    <div class="container">
+      <p class="kicker">Asked before</p>
+      <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Dashboards, in three questions')}"></div>
+    </div>
+  </section>
+
+</th:block>
+</html>

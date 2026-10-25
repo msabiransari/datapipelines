@@ -96,7 +96,15 @@ class SiteRouteFloorTest {
             registry.keys shouldContainAll marketing
             (registry.keys - marketing) shouldBe additions.keys
             additions.keys shouldBe
-                setOf(SitePages.USE_CASES.path, SitePages.EXPLORE.path, SitePages.COMPARE_DAGSTER_AIRFLOW.path)
+                setOf(
+                    SitePages.USE_CASES.path,
+                    SitePages.EXPLORE.path,
+                    SitePages.COMPARE_DAGSTER_AIRFLOW.path,
+                    // #699: the three capability pages.
+                    SitePages.PIPELINE_SCHEDULING.path,
+                    SitePages.SQL_DASHBOARDS.path,
+                    SitePages.REUSABLE_PARAMETER_SETS.path,
+                )
         }
         withClue("every addition names its reason") {
             additions.filterValues { it.length < MIN_REASON_CHARS }.keys.shouldBeEmpty()
