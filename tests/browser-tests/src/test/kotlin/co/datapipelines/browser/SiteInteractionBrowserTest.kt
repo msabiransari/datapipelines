@@ -193,6 +193,39 @@ class SiteInteractionBrowserTest : BrowserSuite() {
         }
     }
 
+    @Test
+    fun `the tutorial index fits a short desktop viewport and scrolls to its final link`() {
+        startTrace()
+        page.setViewportSize(1024, 600)
+        navigate("/how-it-works")
+        val index = page.locator(".workflow-index")
+        index.locator("a").count() shouldBe 13
+        page.evaluate("() => window.scrollTo(0, 1000)")
+        withClue("the sticky index stays below the header and inside the viewport") {
+            index.evaluate(
+                """el => {
+                    const r = el.getBoundingClientRect();
+                    const header = document.querySelector('.site-header').getBoundingClientRect();
+                    return r.top >= header.bottom && r.bottom <= innerHeight;
+                }""",
+            ) shouldBe true
+        }
+        index.evaluate("el => { el.scrollTop = el.scrollHeight; }")
+        val lastLink = index.locator("a").last()
+        lastLink.getAttribute("href") shouldBe "#faq"
+        withClue("the final index link can be reached inside its scroll area") {
+            lastLink.evaluate(
+                """el => {
+                    const r = el.getBoundingClientRect();
+                    const index = el.closest('.workflow-index').getBoundingClientRect();
+                    return r.top >= index.top && r.bottom <= index.bottom;
+                }""",
+            ) shouldBe true
+        }
+        lastLink.click()
+        page.waitForCondition { page.url().endsWith("#faq") }
+    }
+
     private fun navigate(path: String) {
         page.navigate("$baseUrl$path")
         page.waitForLoadState(LoadState.NETWORKIDLE)

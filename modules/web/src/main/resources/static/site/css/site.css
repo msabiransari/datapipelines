@@ -2380,6 +2380,8 @@ code {
     display: block;
     position: sticky;
     top: calc(var(--site-header-height) + var(--space-6));
+    max-height: calc(100dvh - var(--site-header-height) - var(--space-6));
+    overflow-y: auto;
     padding-block: var(--site-section-pad) var(--space-6);
   }
 }

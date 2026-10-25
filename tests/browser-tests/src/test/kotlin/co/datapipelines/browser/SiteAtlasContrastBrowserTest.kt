@@ -23,7 +23,7 @@ import java.nio.file.Paths
  * Measured, never derived from the stylesheet: each element with its own text is paired with the
  * ground the browser paints behind it (the background chain composited bottom-up; an SVG label
  * over the shapes painted beneath it), and filed by surface — paper, raised, soft, dark (the band
- * and its panels), forest (a primary button) — and by role. The walk covers six pages at 1440×900
+ * and its panels), forest (a primary button) — and by role. The walk covers eight pages at 1440×900
  * and 390×844 under reduced motion: at rest, a full Tab walk, each of the worked example's three
  * tabs, and the open header menu. Non-vacuity: every cell in [REQUIRED] holds at least one pair.
  * Light lock: under a dark colour scheme and a saved dark theme, `/` and `/how-it-works` paint
