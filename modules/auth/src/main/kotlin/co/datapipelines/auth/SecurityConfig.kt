@@ -131,6 +131,13 @@ class SecurityConfig(
                 // as Access Denied on the completion dispatch and the container aborts
                 // the (already committed) response mid-chunk.
                 auth.dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
+                // #231 item 1 (failure-flow record §17 row 11): on the MANAGEMENT port — loopback-bound by
+                // default; NetworkPolicy/Service isolation documented in deployment.md §9 — the actuator
+                // index, `/actuator/health` and `/actuator/prometheus` are anonymous: the port, not a
+                // credential, is the boundary. Never a `PublicPaths` entry — this is not an application-port
+                // contract (auth.md §8.3); the matcher never matches a request the application port serves
+                // ([ManagementEndpointMatcher]'s KDoc says why it is not Boot's `EndpointRequest`).
+                auth.requestMatchers(ManagementEndpointMatcher()).permitAll()
                 // The permitAll allowlist lives in [PublicPaths] (096 §A, review F1): one row
                 // per pattern WITH the sentence that justifies it, frozen by `PublicPathsTest`,
                 // walked against every request mapping by `PublicRouteWalkerTest`, and rendered

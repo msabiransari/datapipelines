@@ -2,7 +2,7 @@
 
 **Status:** v1.65 (single source of truth for every config key)
 **Owner:** datapipelines.co core
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 
 ---
 
@@ -226,22 +226,20 @@ These framework key paths appear in `application.yml` as internal wiring. They a
 |---|---|
 | `spring.application.name` | Log/metric attribution (`datapipelines`) |
 | `spring.flyway.enabled` / `.locations` / `.baseline-on-migrate` | Migration wiring — Flyway always runs on startup ([Deployment §8.2](deployment.md#82-database-migrations)) |
-| `management.endpoints.web.exposure.include` | `"health"` — served on the **management port** only; `prometheus` joins it when the metrics registry lands ([Observability §6.4](observability.md#64-actuator-security)). **Must not be set to `""` or `exclude: "*"`:** Spring's `@ConditionalOnAvailableEndpoint` keys bean creation off exposure, so an empty include falls back to Boot's default set (re-exposing health on whatever port serves actuator), and excluding everything deletes the `HealthEndpoint` bean the root `/health` controller injects — context startup fails outright. |
+| `management.endpoints.web.exposure.include` | `"health,prometheus"` — served on the **management port** only, both anonymously there: the port, not a credential, is the boundary ([Observability §4.2](observability.md#42-exposure), [§6.4](observability.md#64-actuator-security)). Widening it does not widen the anonymous surface — the permit names the two paths (auth.md §8.6.1), so any further endpoint needs a session. **Must not be set to `""` or `exclude: "*"`:** Spring's `@ConditionalOnAvailableEndpoint` keys bean creation off exposure, so an empty include falls back to Boot's default set (re-exposing health on whatever port serves actuator), and excluding everything deletes the `HealthEndpoint` bean the root `/health` controller injects — context startup fails outright. |
 | `management.health.diskspace.enabled` | `false` — the health contract has no disk component ([REST API §11.1](rest-api.md#111-health-check)) |
 
 **Operator-tunable exception:**
 
 | YAML path | Env var | Default | Description |
 |---|---|---|---|
-| `management.server.port` | `MANAGEMENT_SERVER_PORT` | `9090` | Separate management port serving `/actuator/health` (and later `/actuator/prometheus`) — never publish it; nothing actuator is routable on the application port. |
+| `management.server.port` | `MANAGEMENT_SERVER_PORT` | `9090` | Separate management port serving `/actuator/health` and `/actuator/prometheus`, both anonymously ([Observability §4.2](observability.md#42-exposure)) — never publish it; nothing actuator is routable on the application port. |
 | `management.server.address` | `MANAGEMENT_SERVER_ADDRESS` | `127.0.0.1` | **Loopback by default** — the management surface is silently-public on no deployment shape. Kubernetes scraping (scraper → pod IP) requires explicitly setting `0.0.0.0`, paired with a NetworkPolicy restricting the port to the monitoring namespace ([Deployment §9](deployment.md#9-security-hardening-checklist-deployment)). Explicit opt-open, never default-open. |
 
 ### 3.15 Observability
 
 | YAML path | Env var | Default | Description |
 |---|---|---|---|
-| `datapipelines.observability.tracing.enabled` | `DATAPIPELINES_OBSERVABILITY_TRACING_ENABLED` | `false` | Enable OpenTelemetry tracing |
-| `datapipelines.observability.tracing.endpoint` | `OTEL_EXPORTER_OTLP_ENDPOINT` | (none) | OTLP collector endpoint (standard OTel env var, exception to §1 derivation) |
 | `datapipelines.observability.logging.format` | `DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT` | `json` (prod), `console` (dev) | Log output format — the closed set `json` \| `console` ([Observability §3.1](observability.md#31-format)). **Bound at startup (#337)**: resolved before logging initialises, and an unknown value refuses startup with the offending value named. `console` is the human-readable development output (`defaults.env` ships it for local runs); `json` is the structured §3.1 line a log collector parses (compose passes `json`, the VPS included, until an operator sets the env otherwise). `json` also switches Spring's startup banner off, so stdout carries JSON lines only; `console` keeps it (#337-b). |
 
 ### 3.16 Pipelines
@@ -483,7 +481,7 @@ The budgets every script evaluation runs under — the save/release test suite o
 | `datapipelines.script.suite-timeout-seconds` | `60` | Wall clock for the whole save/release test suite |
 | `datapipelines.script.pool-size` | `4` | Concurrent running script evaluations |
 | `datapipelines.script.pool-queue` | `64` | Evaluations admitted in total, running plus waiting — never "the wait queue" (the bulkhead holds an abandoned evaluation's slot until its thread ends) |
-| `datapipelines.script.abandon-grace-seconds` | `30` | Grace past the wall clock before an evaluation is abandoned, counted (`script.evaluations.abandoned`) and logged at ERROR. Must be ≥ 1 (§7) |
+| `datapipelines.script.abandon-grace-seconds` | `30` | Grace past the wall clock before an evaluation is abandoned, counted (`datapipelines.script.evaluations.abandoned`) and logged at ERROR. Must be ≥ 1 (§7) |
 | `datapipelines.script.max-input-rows` | `100000` | Row cap on any table input — the `rows` batch or any table input — refused BEFORE evaluation with the record §4.3's input-cap code (§13.18, 7c) |
 | `datapipelines.script.max-value-bytes` | `1048576` | Cap on a value/object output (the record §4.3's value-cap code, §13.18, 7c) — a Context value is not a table |
 | `datapipelines.script.max-string-bytes` | `1048576` | Cap on a single string in any returned row (the same §4.3 code, with the row number) |
@@ -678,7 +676,7 @@ management:                      # §3.14 — actuator on the management port ON
   endpoints:
     web:
       exposure:
-        include: "health"        # never "" and never exclude:"*" — see §3.14
+        include: "health,prometheus"   # both anonymous on this port; never "" and never exclude:"*" — see §3.14
   health:
     diskspace:
       enabled: false
@@ -831,8 +829,6 @@ datapipelines:
     retention-days: ${DATAPIPELINES_AUDIT_RETENTION_DAYS:365}
 
   observability:
-    tracing:
-      enabled: ${DATAPIPELINES_OBSERVABILITY_TRACING_ENABLED:false}
     logging:
       format: ${DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT:json}
 
@@ -1080,6 +1076,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-25 | v1.66 | #708 the Prometheus scrape | §3.14: `management.endpoints.web.exposure.include` is `"health,prometheus"`, both served anonymously on the management port (#231 item 1, the failure-flow and telemetry record §17 row 11), and the `management.server.port` row says so. §3.15: the two tracing keys (`tracing.enabled` and `tracing.endpoint` under the observability prefix — the latter read from the standard OTLP endpoint variable) are removed with no deprecation window (record §17 row 12 — declared and never wired; tracing is deferred, record §12), here and in the yml excerpt; §5's template follows both. `ObservabilityConfigKeysSpecDriftTest` holds §3.15, the three operator-facing `management.*` rows and §5's template to `application.yml`. §3.28's `abandon-grace-seconds` names the renamed gauge `datapipelines.script.evaluations.abandoned`. |
 | 2026-10-24 | v1.65 | #688 (Helm portion) — renumbered at merge after #686’s v1.64 | §3.28: the nine JavaScript keys are exposed as the chart's `script.js.*` values (deployment.md §6.4) — empty renders no env entry, the isolate directory must be one of the image's launcher-path entries, `extraEnv` double mappings are refused. No key, default, route or permission changes. |
 | 2026-10-24 | v1.64 | #686 JWKS fetch joins the provider read bound | §3.4's `provider-read-timeout-seconds` row: the ID-token decoder's JWKS fetch is bounded by the same key through a `JwtDecoderFactory` bean; discovery stays separate. No key added, no default change. |
 | 2026-10-22 | v1.63 | #651 enabled-provider avatar hosts | §3.4's `picture-hosts` allowlist includes only providers with a non-blank `client-id`, using the same predicate as sign-in registration. Dormant entries are still validated for shape at startup but contribute no hosts. No key, default, route or permission changes. |

@@ -3,7 +3,7 @@
 **Status:** v3.57 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 
 ---
 
@@ -1381,8 +1381,9 @@ Handler methods are not listed here: §7.6 is their reviewed table (B3 — one t
 | scheduler-task | `schedule-reconciler` | `recurring` | `every PT10S` | Maps each watched run's execution outcome onto the run (R6) — the executor's standardized outcome, never a pipeline table. | no | At most 500 watched runs per tick; one conditional UPDATE per changed run. |
 | scheduler-task | `schedule-run` | `one-time` | `one instance per recorded run` | Admits one run: capacity, preparation, the start claim, the launch through the executor — as the system identity, never a request's principal. | no | One run per delivery; returns once the execution's record exists (it never holds a thread for the run). |
 | port | `server.port` | `listening socket` | `bound to *` | The application port: every handler, `/mcp`, the site and the published endpoints. | yes | Tomcat's thread and connection limits. |
-| port | `management.server.port` | `listening socket` | `bound to 127.0.0.1` | Actuator only, on loopback by default ([Configuration §3.14](configuration.md#314-framework-wiring-keys)); nothing under `/actuator` is routable on the application port. | yes | Tomcat's limits; one endpoint exposed. |
-| actuator | `health` | `management endpoint` | `/actuator/health · anonymous 401` | The one exposed actuator endpoint (`management.endpoints.web.exposure.include: health`). The application's security chain guards the management context too, so an anonymous caller is refused; orchestrator probes use `/health` and `/ready` on the application port (§8.3). | yes | The health indicators' own timeouts. |
+| port | `management.server.port` | `listening socket` | `bound to 127.0.0.1` | Actuator only, on loopback by default ([Configuration §3.14](configuration.md#314-framework-wiring-keys)); nothing under `/actuator` is routable on the application port. | yes | Tomcat's limits; two endpoints exposed. |
+| actuator | `health` | `management endpoint` | `/actuator/health · anonymous 200` | One of the two exposed actuator endpoints (`management.endpoints.web.exposure.include: health,prometheus`). Anonymous on the management port only: the port, not a credential, is the boundary (#231, [Observability §4.2](observability.md#42-exposure)) — `ManagementEndpointMatcher` permits `GET`/`HEAD` of the index and the two exposed paths in the management context and nowhere else, so every other management path still needs a session and the same paths stay refused on the application port. Orchestrator probes still use `/health` and `/ready` on the application port (§8.3). | yes | The health indicators' own timeouts. |
+| actuator | `prometheus` | `management endpoint` | `/actuator/prometheus · anonymous 200` | The Prometheus scrape (#708), the meters of [Observability §4.1](observability.md#41-metric-naming) in the text exposition format. Anonymous on the management port for the same reason as `health`: a scraper carries no key that would outlive rotation. | yes | One registry snapshot per scrape; series bounded by §4.1's tag rules. |
 
 **The public contract:** one row per [§8.3](#83-public-endpoints-no-auth-required) glob, its reason exactly as `PublicPaths` states it. `PublicContractE2eTest` holds the running application to it. Every handler under a public glob is named in the row of the FIRST glob, in declaration order, that covers it. A row names only handlers that are registered: `resources` for the static-resource handler, `filter:<Class>` for a security-chain endpoint. The rows and `PublicPaths` are the same set of globs, reason for reason. An anonymous GET of the probe answers the row's status, never with a stack trace and never with a session cookie. An anonymous POST, PUT and DELETE on the probe (with a matching CSRF pair, so the refusal measured is the route's) are `refused` (403, 404 or 405). The exceptions: the row names the suites that own those verbs (`own E2E:` — the login and OIDC flows are tested where they live, and the test checks that those suites exist), or states that every verb gets the GET's answer (`same answer:`). The "principal · write · content" cell is the reviewed claim; no test measures datastore writes here (the record's slice B effect witnesses will).
 
@@ -1863,7 +1864,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 - [ ] API keys hashed with Argon2id, never stored plaintext.
 - [ ] Session cookies `HttpOnly`, `Secure`, `SameSite=Lax` (§5.5 — Strict is unusable with an IdP redirect chain; CSRF, not SameSite, is the control).
 - [ ] CSRF protection on all state-changing UI endpoints.
-- [ ] No `/actuator/*` path reachable without auth on the application port; `/actuator/prometheus` served only on the separate management port ([Observability §4.2](observability.md#42-exposure)). Root `/health`, `/ready`, `/info` are the only public probes.
+- [ ] No `/actuator/*` path reachable on the application port; `/actuator/health` and `/actuator/prometheus` answer anonymously only on the separate management port, every other management path needs a session ([Observability §4.2](observability.md#42-exposure)). Root `/health`, `/ready`, `/info` are the application port's only public probes.
 - [ ] All auth events audited.
 - [ ] All traffic over TLS.
 - [ ] OIDC redirect URI locked to the deployment's exact domain (not `localhost` in production).
@@ -1901,6 +1902,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-25 | v3.58 | #708 the Prometheus scrape | **§8.6.1: the management port serves two endpoints, both anonymous** (#231 item 1, decided by the failure-flow and telemetry record §17 row 11): `actuator health` is now `anonymous 200`, and a new `actuator prometheus` row (`/actuator/prometheus · anonymous 200`). The permit is `ManagementEndpointMatcher` in the security chain — the management context only, `GET`/`HEAD`, the index and the two exposed paths — never a §8.3 `PublicPaths` entry, so the application port still refuses every `/actuator` path. §13's checklist line follows. |
 | 2026-10-24 | v3.57 | #686 JWKS fetch joins the provider read bound | §5.5: the ID-token decoder's JWKS fetch is bounded by `datapipelines.auth.oidc.provider-read-timeout-seconds` through a `JwtDecoderFactory` bean that re-creates Spring's decoder with the bounded client — the same algorithm resolution, validators and claim-type conversion, one decoder per registration; a stalled JWKS read fails the decode as `invalid_id_token` and reaches the failure path. §11's key row names the JWKS fetch. No key added, no default change, no route, row or role cell change. |
 | 2026-10-22 | v3.56 | #651 enabled-provider avatar hosts | §11.1's `picture-hosts` allowlist includes only providers with a non-blank `client-id`, using the same predicate as sign-in registration. Dormant entries are still validated for shape at startup but contribute no hosts. No key, default, route or permission changes. |
 | 2026-10-22 | v3.55 | #682 | Shared provider read timeout for token exchange, OAuth2 user-info/emails and OIDC user-info; JWKS exception documented (§5.5, §11.1). |

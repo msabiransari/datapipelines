@@ -64,8 +64,8 @@ sealed interface SelectorAdmission {
  *    names the set, the parameter, the datasource and the cause (`deadline` or `caller`, #425). The
  *    worker thread lives on, detached, and frees its slot when the driver returns.
  *  - **No Micrometer here.** [abandoned] is the `LongAdder` the assembling layer scrapes into the
- *    `parameters.selectors.abandoned` gauge (record §11 — lane D's bean, the
- *    `script.evaluations.abandoned` shape).
+ *    `datapipelines.parameters.selectors.abandoned` gauge (record §11 — lane D's bean, the
+ *    `datapipelines.script.evaluations.abandoned` shape).
  *
  * NOT a `ThreadPoolExecutor`: the fixed resource is the CAPACITY, not a worker set — an abandoned
  * statement's thread is never handed new work, and its slot comes back only when that thread ends.
@@ -86,7 +86,7 @@ class SelectorPool(
 
     /**
      * Statements abandoned when their evaluate's await was cancelled (its deadline or its caller) — scrape
-     * into the `parameters.selectors.abandoned` gauge.
+     * into the `datapipelines.parameters.selectors.abandoned` gauge.
      */
     val abandoned = LongAdder()
 

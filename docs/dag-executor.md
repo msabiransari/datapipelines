@@ -3,7 +3,7 @@
 **Status:** v1.34 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract spec](pipeline-contract.md), [Templates spec](templates.md), [Datasources spec](datasources.md), [Staging spec](staging.md)
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-25
 
 ---
 
@@ -598,7 +598,7 @@ node lands (7c). What is already true and binding:
   evaluation gets its OWN daemon thread
   (`script-eval-N`) — a thread whose evaluation outlives its budget is abandoned by its caller
   (the JSONata engine never reads `Thread.interrupted()`), logged at ERROR, counted
-  (`script.evaluations.abandoned` is the record's meter name) and never handed new work —
+  (`datapipelines.script.evaluations.abandoned`) and never handed new work —
   and it **keeps its slot until it ends**: the thread, not the caller, returns the permits, so
   at most `size` evaluation threads are alive at any moment, abandoned ones included. A caller
   waits for a slot at most its own wall clock, then gets the pool-exhausted refusal. This is the
@@ -1634,6 +1634,7 @@ document a customer can read before they need it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-25 | v1.35 | #708 the Prometheus scrape | §5.3: the abandoned-evaluation gauge is `datapipelines.script.evaluations.abandoned` — renamed from the un-prefixed `script.evaluations.abandoned`, which broke observability §4.1's `datapipelines.` prefix rule (the failure-flow and telemetry record §7). The meter is unchanged otherwise. |
 | 2026-10-22 | v1.34 | 8b (#8) | §5.3 documents both engines, the per-engine bounds and structured console logging. |
 | 2026-10-21 | v1.33 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The TRANSFORM node is the SCRIPT node throughout**: the node-type prose and its section anchors, the `pipeline.script.*` refusal codes, the `datapipelines.script.*` budget keys and the meter `script.evaluations.abandoned` (was `transform.…`). A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-20 | v1.32 | #569 | The concurrency gauge is bound by the execution-slot bean, once per instance. Executor construction does not register it; rebinding the same pool is a no-op and a different pool fails fast. |
