@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.61 (revised — see Change Log)
+**Status:** v1.64 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-25
 
 ---
 
@@ -495,9 +495,10 @@ and the Context (the transform-nodes design record §3). The language is the pin
 `type` (`jsonata` or `javascript`, when its isolate is installed); the **mode** (`row`, `table`, `value`) and
 the input/output shapes are the pinned version's **contract** — never repeated on the node, which
 conforms to it at save time (§12.13). The function has no handle to tempdb, the network, the
-filesystem or the clock: iteration is the executor's job (`row` mode reads the single table input
+filesystem, the clock or a random source: iteration is the executor's job (`row` mode reads the single table input
 in `result-batch-size` batches), `$now()`/`$millis()` return the execution's `current_timestamp`,
-and the output is a function of the template version and its inputs — every run is reproducible.
+and `$random()`, `$shuffle()` and `Math.random()` are refused (`pipeline.script.evaluation_failed`).
+The output is a function of the template version and its inputs — every run is reproducible.
 
 | Field | Rule |
 |---|---|
@@ -1444,17 +1445,20 @@ checks are §12.13's ten `pipeline.validation.script_…` rows.
 
 ### 13.19 Schedules
 
-The scheduler's refusals (#9; [Scheduler](scheduler.md), the scheduler design revision's §5). Two families, like the rest of §13: `schedule.validation.*` is the caller's request (400 — `details.field` names the field), and the bare `schedule.*` codes are a state the schedule is in (409), except the two not-found rows. Nothing here is raised while a schedule FIRES: a run the scheduler could not start is a `not_started` run with a reason on its trail ([Scheduler §5](scheduler.md#5-runs-states-and-reasons)), never an error response. A Run-now replay with a different body answers §13.11's `idempotency.key_reused_for_different_request`, and a pipeline's parameter refusals are exactly an interactive run's (§13.4). Landed with the constants — the catalog's `PipelineErrorCodes.Schedule` and the scheduler's own `ScheduleErrorCodes`, pinned equal by `SchedulerUnitTest` — and their `ApiErrorCatalog` rows.
+The scheduler's refusals (#9; [Scheduler](scheduler.md), the scheduler design revision's §5). Two families, like the rest of §13: `schedule.validation.*` is the caller's request (400 — `details.field` names the field), and the bare `schedule.*` codes are a state the schedule is in (409), except the three not-found rows. Nothing here is raised while a schedule FIRES: a run the scheduler could not start is a `not_started` run with a reason on its trail ([Scheduler §5](scheduler.md#5-runs-states-and-reasons)), never an error response. A Run-now replay with a different body answers §13.11's `idempotency.key_reused_for_different_request`, and a pipeline's parameter refusals are exactly an interactive run's (§13.4). Landed with the constants — the catalog's `PipelineErrorCodes.Schedule` and the scheduler's own `ScheduleErrorCodes`, pinned equal by `SchedulerUnitTest` — and their `ApiErrorCatalog` rows.
 
 | Code | HTTP | Description |
 |---|---|---|
 | `schedule.not_found` | 404 | no live schedule with that id in the caller's workspace — a deleted schedule is absent, never "deleted" |
 | `schedule.run.not_found` | 404 | no run with that id under that schedule |
+| `schedule.notification.not_found` | 404 | no notification delivery with that id on that run (#442b, [REST API §20.13](rest-api.md#2013-resend-a-notification)) |
 | `schedule.name_taken` | 409 | another live schedule of the workspace holds the name |
 | `schedule.revision_conflict` | 409 | `If-Match` named a revision that is no longer current — someone changed the schedule since it was read; `details.current_revision` |
 | `schedule.run.overlap` | 409 | Run now while a run of the schedule is queued, starting or running (one run in flight per schedule) |
 | `schedule.blocked` | 409 | Run now against a blocked schedule; `details.blocked_reason` — unblock first (resume never clears a block) |
 | `schedule.not_blocked` | 409 | unblock on a schedule that is not blocked |
+| `schedule.notification.not_resendable` | 409 | resend of a notification that is `pending` or `accepted` — only a `failed` or `uncertain` one can be queued again (#442b); `details.state` names the state it is in |
+| `schedule.notification.backlog_full` | 409 | resend refused at the strict deployment pending-delivery cap; `details.pending` and `details.backlog_max`; the delivery stays unchanged |
 | `schedule.limit.per_workspace` | 409 | the workspace already holds `datapipelines.scheduler.max-schedules-per-workspace` live schedules |
 | `schedule.validation.request_invalid` | 400 | a missing or ill-typed request field |
 | `schedule.validation.name_invalid` | 400 | the name breaks the folder-path grammar pipelines and templates use |
@@ -1467,7 +1471,7 @@ The scheduler's refusals (#9; [Scheduler](scheduler.md), the scheduler design re
 | `schedule.validation.target_not_released` | 400 | the payload names a pipeline with no current version to follow (#280) — release it, or switch its current version, then save again; `details.pipeline` |
 | `schedule.validation.binding_invalid` | 400 | a `parameter_bindings` entry cannot be resolved (#9 slice 3) — an unknown parameter, a non-`DATE` type, an unknown keyword (`TODAY`/`YESTERDAY` only), an unknown source, a literal binding without a value, or a keyword with no reference at run time; `details.reason` (`unknown_parameter` / `type_mismatch` / `unknown_keyword` / `unknown_source` / `literal_invalid` / `no_reference`) and `details.parameter` name why |
 | `schedule.validation.binding_conflict` | 400 | the same parameter is supplied in `parameters` and in `parameter_bindings` — give it one source; the resolver rejects ambiguity instead of applying a precedence rule (`details.parameter`) |
-| `schedule.validation.notifications_invalid` | 400 | Notification settings refused (#442a). `details` contains only `{field, reason}`: `notifications`, `notifications.recipients`, an indexed recipient or event field; `not_an_object`, `not_a_list`, `not_a_string`, `syntax`, `too_long`, `too_many`, `unknown_event`. No address is echoed |
+| `schedule.validation.notifications_invalid` | 400 | Notification settings refused (#442a). `details` contains only `{field, reason}`: `notifications`, `notifications.recipients`, an indexed recipient or event field; `not_an_object`, `not_a_list`, `not_a_string`, `syntax`, `too_long`, `too_many`, `unknown_event`, `domain_not_allowed` (#442b: outside a non-empty recipient-domain allowlist). No address is echoed |
 
 ### 13.20 Parameter sets
 
@@ -1912,6 +1916,9 @@ Out of scope for v1.1, tracked for future:
 | Date | Version | Author | Change |
 |---|---|---|---|
 | 2026-10-24 | next | #517 release dependencies, core (S1) | **§13:** the release-plan codes in each family's subsection (record §14: `dependency_not_released` replacing the template-only refusal code for pipeline and parameter, `plan_conflict`, `plan_required`, `plan_invalid`, `dependency_cycle`, `dependency_limit`, `busy`, `bundle_unsupported`; the families whose participant lands later carry Reserved rows). **§12.9:** a release that flips a DRAFT child validates in authoring mode outside the transaction and strictly inside it. |
+| 2026-10-25 | v1.64 | #711 — renumbered at merge after #442's v1.63 | §4.12 names the random-source boundary: JSONata `$random()` / `$shuffle()` and JavaScript `Math.random()` refuse with `pipeline.script.evaluation_failed`. |
+| 2026-10-25 | v1.63 | 442c (#442) | §13.19: schedule.notification.backlog_full (409), with details.pending and details.backlog_max; refused resend leaves its delivery unchanged. |
+| 2026-10-24 | v1.62 | 442b (#442) | **§13.19 gains two notification codes**: `schedule.notification.not_found` (404) and `schedule.notification.not_resendable` (409, the `schedule.*` state family) — the explicit resend of a run's notification ([REST API §20.13](rest-api.md#2013-resend-a-notification)). Landed with their `ScheduleErrorCodes` constants, the `PipelineErrorCodes.Schedule` mirror and the 404 catalog row. |
 | 2026-10-22 | v1.61 | 8b (#8) | JavaScript is available through the shared seam; script.js.unavailable means an absent isolate, never boot 503; resource_limit covers the byte and output limits. |
 | 2026-10-21 | v1.60 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The TRANSFORM node type is SCRIPT**: the `type` enum, §4.12 "JSON structure (SCRIPT node)", §12.13 "Script validation rules", §13.18 "Script" and its codes `pipeline.script.*`, the node fields' prose (`template`, `inputs`, `strict`, `rejects`) and every cross-reference anchor that carried the old word. A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-16 | v1.59 | 467 (#467) the over-cap screenshot refusal reaches the client | **§13's `visualization.test.screenshot_too_large` row** names the bounded drain: up to the cap + 2 MiB of a declared-over-cap body is read and discarded after the 413, so the close is a FIN after the client's last byte; beyond it Tomcat's swallow and close apply. No code or status change |

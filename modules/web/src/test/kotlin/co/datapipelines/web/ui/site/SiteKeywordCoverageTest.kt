@@ -135,6 +135,12 @@ class SiteKeywordCoverageTest {
             Row("duckdb s3", SitePages.DP_LAKE, H2),
             Row("sql on s3", SitePages.DP_LAKE, BODY),
             Row("iceberg sql", SitePages.DP_LAKE, BODY),
+            // ---- #700: the three capability pages, from the 2026-10-24 measurement (50 phrases).
+            Row("sql scheduler", SitePages.PIPELINE_SCHEDULING, TITLE),
+            Row("sql scheduler", SitePages.PIPELINE_SCHEDULING, BODY),
+            Row("sql dashboard", SitePages.SQL_DASHBOARDS, TITLE),
+            Row("parameter sets", SitePages.REUSABLE_PARAMETER_SETS, TITLE),
+            Row("dashboard filters", SitePages.REUSABLE_PARAMETER_SETS, TITLE),
         )
 
     private val rendered: Map<String, String> by lazy {

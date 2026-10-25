@@ -68,6 +68,22 @@
           <pre class="app-code sch-json" data-slot="resolved" hidden></pre>
         </details>
 
+        <!-- #442b (§20.11 `deliveries`, §20.13): the run's scheduler mail, one row per notice and
+             recipient. The address column is filled only for a schedule.update holder — the API
+             sends no part of it to anyone else. Resend sits in the row template's role guard. -->
+        <section data-slot="deliveries-section" hidden>
+          <h3 class="sch-messages-h">Notifications</h3>
+          <p class="u-text-sm u-muted u-m0 u-mb-xs">Accepted means the mail relay took the message, not that it reached an inbox.</p>
+          <div class="dt-frame dt-scroll dt-h-sm dt-fit">
+            <div class="dt-viewport" tabindex="-1">
+            <table class="ds-table">
+              <thead><tr><th>Notice</th><th>Recipient</th><th>State</th><th>Attempts</th><th>Last error</th><th><span class="u-sr-only">Actions</span></th></tr></thead>
+              <tbody data-slot="deliveries"></tbody>
+            </table>
+            </div>
+          </div>
+        </section>
+
         <h3 class="sch-messages-h">Messages</h3>
         <p class="u-text-sm u-muted u-m0 u-mb-xs" data-slot="messages-note"></p>
         <!-- 282 (#282): a FIXED data-table frame (ui-screens §3.7); schedules.css's
@@ -82,6 +98,20 @@
         </div>
       </div>
     </div>
+  </template>
+
+  <template id="sch-tpl-delivery">
+    <tr data-delivery-id="">
+      <td data-slot="notice"></td>
+      <td class="u-mono" data-slot="recipient"></td>
+      <td><span class="ds-badge" data-slot="delivery-state"></span></td>
+      <td data-slot="delivery-attempts"></td>
+      <td class="u-mono" data-slot="delivery-error"></td>
+      <td>
+        <button th:if="${canAuthor == true}" data-verb="schedule-notification-resend" type="button"
+                class="ds-button ds-button-secondary ds-button-sm" data-sch-action="resend-delivery" hidden>Resend</button>
+      </td>
+    </tr>
   </template>
 
   <template id="sch-tpl-message">

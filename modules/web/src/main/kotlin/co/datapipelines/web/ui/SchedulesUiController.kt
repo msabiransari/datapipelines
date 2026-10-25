@@ -2,7 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.scheduler.NotificationDelivery
+import co.datapipelines.scheduler.ScheduleService
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
@@ -29,12 +29,15 @@ import java.time.ZoneId
  *    sets equal). Hiding is not authorization: §20's routes enforce the same rows.
  *  - **the timezone list** ([ScheduleTimezones]) — the IANA region ids the scheduler accepts.
  *
- * Notification settings are saved in slice 4 part a; delivery arrives in part b (#442).
+ * Notification settings are saved in slice 4 part a; the deployment's computed mail state (on, or off
+ * with its reason) is rendered for the form's note (#442 part b).
  * A schedule fires as the system identity (R2), with no key or role assignment.
  */
 @Controller
 class SchedulesUiController(
     private val themeResolver: ThemeResolver,
+    /** #442 — read for the deployment's computed mail state only; every schedule read stays a REST fetch. */
+    private val schedules: ScheduleService,
 ) : ShellPage {
     @GetMapping("/schedules")
     @RequiredScope(Permission.SCHEDULE_READ)
@@ -45,7 +48,7 @@ class SchedulesUiController(
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         RoleModel.stamp(model)
         model.addAttribute("timezoneGroups", ScheduleTimezones.GROUPS)
-        model.addAttribute("notificationDelivery", NotificationDelivery.CURRENT)
+        model.addAttribute("notificationDelivery", schedules.notificationDelivery().toWire())
         return "schedules/index"
     }
 }

@@ -560,6 +560,8 @@ screenshot may be illustrated, composited or retouched.
 | Reproducibility | Byte-identical across consecutive runs except `graph-cards.png` (its node run times), `executions.png` (the rows the run itself just added), and the release-step dialog's verdict rows (the check's own run stamps them) |
 | Seeded state | The release-step capture seeds its own small draft (`nyc/review/release_gate` — one node, one release check) through the REST surface, because no seeded pipeline carries `checks[]`; the dialog is photographed, never submitted (release is a human's verb) |
 
+**The `app` set (076 §E, #602).** `-PshotsSet=app` photographs every top-level screen at both review widths in both themes, plus one Playwright video of the boosted-navigation click-through. The shot list follows the menu — each of the eight families is photographed twice, the overview its rail item links and the flat catalog behind its View all — and the click-through walks the rail by `data-nav-section`, waiting on each anchor's own destination, so a menu re-route cannot strand it. The per-family table lives in the driver's KDoc (`SiteShotsMain.kt`, "The `app` set").
+
 **The `home` set (175, #175).** `-PshotsSet=home` produces the home page's seven capability
 figures (`home-*.png`): the same 1440×900 viewport at `deviceScaleFactor = 2` (2880×1800 PNGs),
 with `-PshotsTheme=dark|light` (default `light`) driving the account's theme through the
@@ -867,10 +869,10 @@ cache: after the first probe lints a violating tree and deletes the file, the se
 task executes, passes, and carries no path from the first. The separate `GenerateReportsTask`
 remains cacheable by the contents of `discoveredErrors`; it does not inherit the worker's
 cache exemption. Gradle's up-to-date checks and the worker's in-checkout incrementality still
-apply. A removed-only change can retain stale findings in that checkout (#703); pregate does
-not clean before stage 1. Recover under the verification lock with the affected module's lint
-check and `--rerun-tasks --no-build-cache`, so it rechecks the full source set without deleting
-the shared cache. Why tests stay out, for two independent reasons: a test verdict must come from this run, and a cached `:test` line is not fresh evidence,
+apply. A removed source forces a full lint of its source set (#703): the lazy, sorted relative
+source-path input `ktlintSourceInventory` changes, so Gradle discards incremental history and
+the worker rewrites its findings. Content-only edits remain incremental; unchanged inputs stay
+up-to-date. Why tests stay out, for two independent reasons: a test verdict must come from this run, and a cached `:test` line is not fresh evidence,
 so stage 3 would keep every guard (`pgres::guards_covered`). The cache is the pre-gate's alone:
 `scripts/gate.sh` runs `clean` and then `build`, and with the cache on that build would be
 served from the cache and stop proving the tree compiles, so neither `gate.sh`, CI's workflows

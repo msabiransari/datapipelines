@@ -641,7 +641,7 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/scheduler.md §1, §3, §5.2 and §9 -->
           <h3>Schedules that run pipelines</h3>
-          <p>A schedule runs one pipeline at a five-field cron pattern's times in an IANA time zone, previews the next runs, and records every run. A run whose outcome is unknown blocks the schedule until a person looks. Mail settings are saved; delivery is not built yet.</p>
+          <p>A schedule runs one pipeline at a five-field cron pattern's times in an IANA time zone, previews the next runs, and records every run. A run whose outcome is unknown blocks the schedule until a person looks. Run notices are available when scheduler mail is enabled and the schedule has recipients.</p>
           <a class="card-link" th:href="@{/pipeline-scheduling}">Pipeline scheduling &rarr;</a>
         </article>
 
@@ -944,7 +944,7 @@ anything. Stop after reporting.</code></pre>
         </article>
         <article class="card">
           <span class="card-number">NEXT UP</span>
-          <!-- claim: docs/scheduler.md §1 (a schedule reruns the pipeline), docs/dashboards.md §1 (a dashboard over it), docs/ROADMAP.md §2.2 (reports and email are not built) -->
+          <!-- claim: docs/scheduler.md §1 (a schedule reruns the pipeline), docs/dashboards.md §1 (a dashboard over it), docs/ROADMAP.md §2.2 (report delivery and condition alerts are not built) -->
           <h3>Where the product is going</h3>
           <p>Run the released pipeline on a <a th:href="@{/pipeline-scheduling}">schedule</a>, or chart it on a <a th:href="@{/sql-dashboards}">dashboard</a>. Report delivery and alerts are not built yet. <a th:href="@{/roadmap}">See the roadmap &rarr;</a></p>
         </article>

@@ -272,6 +272,7 @@ class ScheduleRunRepository(
             "scheduledAt" to run.scheduledAt?.let(Timestamp::from),
             "referenceAt" to Timestamp.from(run.referenceAt),
             "referenceTimezone" to run.referenceTimezone,
+            "targetRef" to run.targetRef,
             "admitBy" to Timestamp.from(run.admitBy),
             "scheduleRevision" to run.scheduleRevision,
             "executorId" to run.executorId,
@@ -299,6 +300,7 @@ class ScheduleRunRepository(
             scheduledAt = rs.getTimestamp("scheduled_at")?.toInstant(),
             referenceAt = rs.getTimestamp("reference_at").toInstant(),
             referenceTimezone = rs.getString("reference_timezone"),
+            targetRef = rs.getString("target_ref"),
             admitBy = rs.getTimestamp("admit_by").toInstant(),
             scheduleRevision = rs.getObject("schedule_revision") as Int?,
             executorId = rs.getString("executor_id"),
@@ -329,11 +331,11 @@ class ScheduleRunRepository(
                                        reference_timezone, admit_by, schedule_revision, executor_id,
                                        payload_schema_version, payload_json, parameters_json, actor_user_id, requested_by,
                                        state, reason, idempotency_key, idempotency_hash, created_at, updated_at,
-                                       finished_at)
+                                       finished_at, target_ref)
             VALUES (:id, :scheduleId, :workspaceId, :origin, :scheduledAt, :referenceAt, :referenceTimezone,
                     :admitBy, :scheduleRevision, :executorId, :payloadSchemaVersion, CAST(:payload AS jsonb),
                     CAST(:parameters AS jsonb), :actorUserId, :requestedBy, :state, :reason, :idempotencyKey,
-                    :idempotencyHash, :createdAt, :createdAt, :finishedAt)
+                    :idempotencyHash, :createdAt, :createdAt, :finishedAt, :targetRef)
             """
     }
 }
@@ -360,6 +362,7 @@ data class NewRun(
     val createdAt: Instant,
     val idempotencyKey: String? = null,
     val idempotencyHash: String? = null,
+    val targetRef: String? = null,
 ) {
     /** A run born terminal is finished at birth. */
     val finishedAt: Instant? get() = if (state.active) null else createdAt

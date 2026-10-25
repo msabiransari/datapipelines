@@ -326,13 +326,19 @@ class ApiErrorCatalogSpecDriftTest {
          * the SAME commit as its constant, the catalog rows and the retirement. Re-derived from the
          * document's own parse.
          *
-         * 377 → 413 with #517: the release-dependency switch (record §14, no deprecation window) —
+         * 377 → 379 with #442b: §13.19 gains `schedule.notification.not_found` (404, an explicit
+         * catalog row) and `schedule.notification.not_resendable` (409 — the `schedule.` family
+         * default, so no explicit row), landed in the SAME commit as their constants in
+         * `ScheduleErrorCodes` and `PipelineErrorCodes.Schedule` and the resend that raises them.
+         * 379 → 380 with #442c: schedule.notification.backlog_full (409, schedule family default).
+         *
+         * 380 → 416 with #517: the release-dependency switch (record §14, no deprecation window) —
          * eight `<family>.release.*` rows in each of §13.9, §13.13, §13.20, §13.22 and §13.23 (40),
          * minus the four rows they replace (the pipeline and parameter template-only refusals,
          * renamed to `dependency_not_released`, and the visualization/dashboard
          * `dependency_not_released` rows, rewritten in place). Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 413
+        const val SECTION_13_ROW_COUNT = 416
 
         /**
          * §12's distinct validation codes.

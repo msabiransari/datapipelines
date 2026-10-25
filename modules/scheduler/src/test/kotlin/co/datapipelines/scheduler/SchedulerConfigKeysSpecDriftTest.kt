@@ -38,7 +38,9 @@ class SchedulerConfigKeysSpecDriftTest {
                 .filterNot { Modifier.isStatic(it.modifiers) }
                 .flatMap { field ->
                     if (field.name == "notifications") {
-                        listOf("$PREFIX.notifications.max-recipients")
+                        SchedulerProperties.Notifications::class.java.declaredFields
+                            .filterNot { Modifier.isStatic(it.modifiers) }
+                            .map { "$PREFIX.notifications.${kebab(it.name)}" }
                     } else {
                         listOf("$PREFIX.${kebab(field.name)}")
                     }
@@ -53,11 +55,8 @@ class SchedulerConfigKeysSpecDriftTest {
     fun `the shipped defaults are the binding's defaults`() {
         val defaults = SchedulerProperties()
         val byKey =
-            SchedulerProperties::class.java.declaredFields
-                .filterNot { Modifier.isStatic(it.modifiers) }
-                .associate { field -> "$PREFIX.${kebab(field.name)}" to field.apply { isAccessible = true }.get(defaults).toString() }
-                .filterKeys { it != "$PREFIX.notifications" } +
-                mapOf("$PREFIX.notifications.max-recipients" to defaults.notifications.maxRecipients.toString())
+            defaultsOf(SchedulerProperties::class.java, defaults, PREFIX).filterKeys { it != "$PREFIX.notifications" } +
+                defaultsOf(SchedulerProperties.Notifications::class.java, defaults.notifications, "$PREFIX.notifications")
 
         EXPECTED.forEach { key -> "$key=${defaultOf(key)}" shouldBe "$key=${byKey.getValue(key)}" }
     }
@@ -78,6 +77,19 @@ class SchedulerConfigKeysSpecDriftTest {
         shipped["management.health.diskspace.enabled"] shouldBe false
         shipped["datapipelines.script.max-depth"] shouldBe "\${DATAPIPELINES_SCRIPT_MAX_DEPTH:100}"
     }
+
+    /** Each non-static field's default as the YAML spells it: a list is comma-joined (`30,120,600`; empty = ""). */
+    private fun defaultsOf(
+        type: Class<*>,
+        instance: Any,
+        prefix: String,
+    ): Map<String, String> =
+        type.declaredFields
+            .filterNot { Modifier.isStatic(it.modifiers) }
+            .associate { field ->
+                val value = field.apply { isAccessible = true }.get(instance)
+                "$prefix.${kebab(field.name)}" to if (value is List<*>) value.joinToString(",") else value.toString()
+            }
 
     private fun defaultOf(key: String): String {
         val raw = checkNotNull(shipped[key]?.toString()) { "application.yml has no $key" }
@@ -109,7 +121,13 @@ class SchedulerConfigKeysSpecDriftTest {
                 "$PREFIX.max-concurrent-runs",
                 "$PREFIX.max-schedules-per-workspace",
                 "$PREFIX.min-interval-seconds",
+                "$PREFIX.notifications.backlog-max",
+                "$PREFIX.notifications.batch-size",
+                "$PREFIX.notifications.enabled",
+                "$PREFIX.notifications.max-attempts",
                 "$PREFIX.notifications.max-recipients",
+                "$PREFIX.notifications.recipient-domains",
+                "$PREFIX.notifications.retry-backoff-seconds",
                 "$PREFIX.polling-interval-seconds",
                 "$PREFIX.shutdown-wait-seconds",
                 "$PREFIX.threads",

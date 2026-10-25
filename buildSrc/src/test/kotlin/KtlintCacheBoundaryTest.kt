@@ -27,11 +27,11 @@ import java.io.File
  *
  *  - probe A lints a violating tree (the failure is asserted by name — the
  *    guard's ability-to-FAIL floor), deletes the violating file, and lints
- *    again: the removed-only change drives the skip path, whose output is
- *    whatever the previous execution left. NOTE the step order: the clean
+ *    again. Before #703 this drove the stale-output skip; the inventory
+ *    input now forces a full lint. NOTE the step order: the clean
  *    key must be UNOCCUPIED at the delete (probe A's first run compiles
  *    only), or Gradle would serve the honest clean entry FROM-CACHE and the
- *    poisoning would not happen — the same trap the full-scale replay hit.
+ *    original poisoning would not happen — the same trap the full-scale replay hit.
  *  - probe B, the identical clean tree, then runs: `compileKotlin` IS
  *    `FROM_CACHE` (the cache still works — compile stored by probe A's
  *    first run), while `runKtlintCheckOverMainSourceSet` is never
@@ -41,8 +41,9 @@ import java.io.File
  *
  * Falsification: remove the `cacheIf { false }` line for
  * `BaseKtLintCheckTask` in CommonConventionsPlugin — probe B's run task is
- * then served probe A's stale output FROM-CACHE and this guard is red at
- * the FROM_CACHE/failure assertion. (Verified 2026-10-24.)
+ * then served probe A's output FROM-CACHE and this guard is red at the
+ * task-outcome assertion. Stale-output poisoning was verified before #703
+ * (2026-10-24); [KtlintRemovedOnlyTest] separately guards the deletion fix.
  *
  * Same TestKit mechanics as [CommonConventionsPluginTest]: the probes apply
  * THIS buildSrc's compiled plugin via withPluginClasspath(), reuse the
@@ -165,12 +166,10 @@ class KtlintCacheBoundaryTest {
             "the red run must name the violating file:\n$a2Output",
         )
 
-        // Probe A, run 3: the file DELETED — a removed-only change. The plugin's
-        // incremental path finds no files to lint and leaves `discoveredErrors`
-        // holding the previous run's findings. What happens NEXT is the whole
-        // boundary under test: with the fix, nothing is stored; without it, the
-        // stale output is stored under the clean tree's key. The in-worktree
-        // report may still refuse the deleted file (the plugin's incrementality, kept).
+        // Probe A, run 3: the file DELETED — a removed-only change. Without #703,
+        // the plugin skips and leaves discoveredErrors holding old findings.
+        // With #703 it fully lints the current tree. Either way, #689 prevents
+        // storing worker outputs under the clean tree's key.
         // The worker must nevertheless complete: swallowing a setup/worker failure here
         // could leave the clean cache key unoccupied and make probe B a false green.
         assertTrue(probeA.resolve("modules/web/src/main/kotlin/Violation.kt").delete())

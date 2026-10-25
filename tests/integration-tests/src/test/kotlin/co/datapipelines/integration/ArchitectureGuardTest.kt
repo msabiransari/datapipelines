@@ -514,7 +514,7 @@ class ArchitectureGuardTest {
             Regex(
                 "\\b(StaleExecutionSweeper|ExecutionEventRetention|reapRetiredPools|StaleExecutionSweepScheduler|" +
                     "DatasourcePoolReaperScheduler|ExecutionEventRetentionScheduler|AuditLogRetention|" +
-                    "ScheduleDispatcher|ScheduledRunWorker|RunReconciler|SchedulerTasks|SchedulerAdmission|" +
+                    "ScheduleDispatcher|ScheduledRunWorker|RunReconciler|ScheduleNotifier|SchedulerTasks|SchedulerAdmission|" +
                     "ParameterEvaluationSweeper|ParameterEvaluationRetention)\\b",
             )
 

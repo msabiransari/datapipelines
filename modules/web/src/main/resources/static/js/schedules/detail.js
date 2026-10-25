@@ -157,6 +157,13 @@
     latest: "The latest missed occurrence runs once, if it is less than a day old",
   };
 
+  // The off reason in plain words (#442b) — the delivery object never reads as "delivered".
+  var MAIL_OFF_TEXT = {
+    disabled: "mail not enabled on this deployment",
+    mail_unconfigured: "mail off — no mail server is configured",
+    no_allowlist: "mail off — no recipient domains are allowed on this development deployment",
+  };
+
   function renderOverview(root, s, c) {
     var cond = S.text(root, "condition", s.condition);
     cond.className = "ds-badge " + M().conditionBadge(s.condition);
@@ -179,7 +186,7 @@
     var notifications = s.notifications || { recipient_count: 0, events: [], delivery: { state: "off" } };
     var eventLabels = { start: "Started", success: "Succeeded", failure: "Failed", unknown: "Outcome unknown", blocked: "Schedule blocked" };
     var notificationText = notifications.recipient_count ? notifications.recipient_count + (notifications.recipient_count === 1 ? " recipient · " : " recipients · ") + (notifications.events.map(function (event) { return eventLabels[event]; }).join(", ") || "no events selected") : "Off — no recipients";
-    if (notifications.delivery.state === "off") notificationText += " · mail not enabled on this deployment";
+    if (notifications.delivery.state === "off") notificationText += " · " + (MAIL_OFF_TEXT[notifications.delivery.reason] || MAIL_OFF_TEXT.disabled);
     S.text(root, "notifications", notificationText);
     if (s.condition !== "enabled") {
       S.text(root, "next-due", s.condition === "paused" ? "— paused: nothing is recorded until it resumes" : "— blocked: nothing fires until it is unblocked");

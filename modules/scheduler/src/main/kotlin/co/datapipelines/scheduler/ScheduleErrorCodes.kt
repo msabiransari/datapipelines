@@ -34,6 +34,18 @@ object ScheduleErrorCodes {
     /** 409 — the workspace already holds `max-schedules-per-workspace` live schedules (B18, L4). */
     const val LIMIT_PER_WORKSPACE = "schedule.limit.per_workspace"
 
+    /** 404 — no notification delivery with that id on that run (#442b). */
+    const val NOTIFICATION_NOT_FOUND = "schedule.notification.not_found"
+
+    /**
+     * 409 — resend of a notification that is `pending` or `accepted` (#442b): only a `failed` or
+     * `uncertain` delivery can be queued again; `details.state` names the state it is in.
+     */
+    const val NOTIFICATION_NOT_RESENDABLE = "schedule.notification.not_resendable"
+
+    /** 409 — resend refused by the deployment cap; details.pending and details.backlog_max name the bound. */
+    const val NOTIFICATION_BACKLOG_FULL = "schedule.notification.backlog_full"
+
     /** 400 — a missing or ill-typed request field; `details.field` names it. */
     const val REQUEST_INVALID = "schedule.validation.request_invalid"
 
@@ -92,6 +104,9 @@ object ScheduleErrorCodes {
             BLOCKED,
             NOT_BLOCKED,
             LIMIT_PER_WORKSPACE,
+            NOTIFICATION_NOT_FOUND,
+            NOTIFICATION_NOT_RESENDABLE,
+            NOTIFICATION_BACKLOG_FULL,
             REQUEST_INVALID,
             NOTIFICATIONS_INVALID,
             NAME_INVALID,

@@ -34,7 +34,9 @@ internal class SchedulerHarness(
     val executor: FakeExecutor = FakeExecutor(),
     val capacity: FakeCapacityGate = FakeCapacityGate(),
     val properties: SchedulerProperties = SchedulerProperties(minIntervalSeconds = 60),
-    workerName: String = "instance-" + UUID.randomUUID().toString().take(4),
+    val deployment: NotificationDeployment = NotificationDeployment.UNKNOWN,
+    val mailer: CapturingMailer = CapturingMailer(),
+    val workerName: String = "instance-" + UUID.randomUUID().toString().take(4),
 ) {
     val clock: Clock = SettableJavaClock(settable)
     val registry = SimpleMeterRegistry()
@@ -42,12 +44,32 @@ internal class SchedulerHarness(
     val schedules = ScheduleRepository(SchedulerTestDb.jdbc, SchedulerAutoConfiguration.JSON)
     val runs = ScheduleRunRepository(SchedulerTestDb.jdbc, SchedulerAutoConfiguration.JSON)
     val transactions = TransactionTemplate(DataSourceTransactionManager(SchedulerTestDb.dataSource))
-    val ledger = RunLedger(runs, schedules, transactions, clock, metrics, workerName)
+    val notifications = NotificationRepository(SchedulerTestDb.jdbc)
+    val policy = NotificationPolicy(properties.notifications, deployment)
+    val outbox = NotificationOutbox(notifications, runs, policy, properties.notifications.backlogMax)
+    val ledger = RunLedger(runs, schedules, transactions, clock, metrics, outbox, workerName)
     val executors = JobExecutors(listOf(executor))
     val admission = SchedulerAdmission(properties.shutdownWait).also { it.start() }
     val dispatcher = ScheduleDispatcher(schedules, runs, ledger, transactions, clock, properties, metrics) { SchedulerTestDb.SYSTEM_ACTOR }
     val worker = ScheduledRunWorker(runs, schedules, executors, capacity, admission, ledger, transactions, clock, metrics)
     val reconciler = RunReconciler(runs, executors, ledger, clock, properties)
+    val deliveries = NotificationDeliveryRepository(SchedulerTestDb.jdbc)
+
+    /** The sender as the configuration wires it; [policy] defaults to this instance's — a test passes another to change it AT SEND. */
+    fun notifier(policy: NotificationPolicy = this.policy): ScheduleNotifier =
+        ScheduleNotifier(
+            deliveries,
+            runs,
+            policy,
+            properties.notifications,
+            mailer,
+            NotificationTemplates(),
+            transactions,
+            clock,
+            metrics,
+            properties.startGrace,
+            workerName,
+        )
 
     /** db-scheduler over the SAME database, the SAME clock and our JSON serializer — the starter's shape. */
     val manual: ManualScheduler =
@@ -73,6 +95,8 @@ internal class SchedulerHarness(
             queue,
             SchedulerAutoConfiguration.JSON,
             ScheduleTargetReads(SchedulerTestDb.jdbc),
+            policy,
+            notifications,
         ) {
             SchedulerTestDb.SYSTEM_ACTOR
         }
@@ -219,6 +243,27 @@ internal class FakeCapacityGate(
             }
         }
     }
+}
+
+/**
+ * The mail port, capturing: every [NotificationMail] it is handed, answered from [script] in order
+ * (then [Accepted][MailOutcome.Accepted]); a [Throw] entry makes the port throw, which it promises not to.
+ */
+internal class CapturingMailer : NotificationMailer {
+    val sent = CopyOnWriteArrayList<NotificationMail>()
+    val script = java.util.concurrent.ConcurrentLinkedQueue<Any>()
+
+    override fun send(mail: NotificationMail): MailOutcome {
+        sent += mail
+        return when (val next = script.poll()) {
+            null -> MailOutcome.Accepted
+            is MailOutcome -> next
+            else -> error("scripted port failure")
+        }
+    }
+
+    /** A script entry that makes the port throw. */
+    object Throw
 }
 
 /** A narrowed viewer for the lens tests. */

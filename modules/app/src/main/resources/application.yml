@@ -551,6 +551,16 @@ datapipelines:
     max-schedules-per-workspace: ${DATAPIPELINES_SCHEDULER_MAX_SCHEDULES_PER_WORKSPACE:100}
     notifications:
       max-recipients: ${DATAPIPELINES_SCHEDULER_NOTIFICATIONS_MAX_RECIPIENTS:20}
+      # Scheduler mail is OFF unless true (owner ruling 2026-10-03, #442); true needs the shared
+      # transport (datapipelines.mail host + from) and datapipelines.auth.base-url, or startup refuses.
+      enabled: ${DATAPIPELINES_SCHEDULER_NOTIFICATIONS_ENABLED:false}
+      # Comma-separated domains (example.com) or subdomain wildcards (*.example.com). Empty under the
+      # development posture = nothing sends; under hardened = no domain restriction.
+      recipient-domains: ${DATAPIPELINES_SCHEDULER_NOTIFICATIONS_RECIPIENT_DOMAINS:}
+      max-attempts: ${DATAPIPELINES_SCHEDULER_NOTIFICATIONS_MAX_ATTEMPTS:3}
+      retry-backoff-seconds: ${DATAPIPELINES_SCHEDULER_NOTIFICATIONS_RETRY_BACKOFF_SECONDS:30,120,600}
+      batch-size: ${DATAPIPELINES_SCHEDULER_NOTIFICATIONS_BATCH_SIZE:20}
+      backlog-max: ${DATAPIPELINES_SCHEDULER_NOTIFICATIONS_BACKLOG_MAX:1000}
   # The parameter engine (#194; configuration.md §3.30, the design record §11). Appended as the LAST child of
   # datapipelines: (the reparenting lesson — MISTAKES.md); ParametersConfigKeysSpecDriftTest pins its neighbours.
   parameters:

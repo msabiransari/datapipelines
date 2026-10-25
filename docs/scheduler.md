@@ -1,10 +1,10 @@
 # Scheduler Specification
 
-**Status:** v1.8 (slices 1–3 and slice 4 part a of #9 — notification settings saved; delivery and the application credential pending)
+**Status:** v1.10 (slices 1–4 of #9 — optional notification delivery implemented; the application credential remains pending)
 **Owner:** datapipelines.co core
 **Depends on:** [REST API §20](rest-api.md#20-schedules), [Auth](auth.md), [DAG Executor](dag-executor.md), [Metadata DB §4.22–§4.25](metadata-db.md#422-schedules), [Configuration §3.29](configuration.md#329-scheduler-9)
 **Design record:** [scheduler design revision](superpowers/specs/2026-09-22-scheduler-design-revision.md) (ratified 2026-09-25) — the why; this page is the what
-**Last updated:** 2026-10-19
+**Last updated:** 2026-10-25
 
 ---
 
@@ -71,11 +71,26 @@ Each run's detail shows `prepared.resolved_parameters` — the literal map the e
 
 Each schedule stores recipients as a list (entered comma-separated in the form); an empty list means off. The five event checkboxes are **start, success, failure, unknown, blocked**. Failure, unknown and blocked default on; start and success default off. Addresses are validated and deduplicated server-side, with the configured recipient limit (default 20), one WHATWG valid e-mail address grammar and at most 254 characters. Invalid settings report only a field/index and reason, never an address.
 
-The delivery policy for part b is the owner's 2026-10-03 ruling: start means execution confirmed running, success means successful completion; failure covers `failed`, every `not_started` reason (Could not start), `cancelled` (Stopped — cancelled) and `aborted` (Stopped — instance shut down), each with its own subject. Unknown is never described as a stop; its later reconciled outcome is an update about the same run under the unknown checkbox. Blocked is a separate schedule-level notice only on the actual transition to blocked. No mail for skipped ticks or pause/resume. Manual runs use the same policy.
+The delivery policy is the owner's 2026-10-03 ruling: start means execution confirmed running, success means successful completion; failure covers `failed`, every `not_started` reason (Could not start), `cancelled` (Stopped — cancelled) and `aborted` (Stopped — instance shut down), each with its own subject. Unknown is never described as a stop; its later reconciled outcome is an update about the same run under the unknown checkbox. Blocked is a separate schedule-level notice only on the actual transition to blocked. No mail for skipped ticks or pause/resume. Manual runs use the same policy.
 
 Recipient addresses are visible only to roles with `schedule.update` (author, workspace admin, super admin and their MCP counterparts). Every other schedule reader sees a count and the event set; details never display addresses. Writing settings uses the existing schedule create/update permissions. Audit rows carry counts/events, never addresses. PUT omission preserves stored settings, including omitted members of a present object (the frozen additive REST contract).
 
-**Settings are delivered in part a; mail delivery is pending part b. Nothing sends yet.** The form and schedule details state plainly that scheduler mail is not enabled. Part b will supply the enable flag (default off), development recipient restrictions, outbox, transport and delivery states; saved settings are never described as successful delivery.
+**Delivery (#442b).** Scheduler mail is **off unless `datapipelines.scheduler.notifications.enabled` is `true`** ([Configuration §3.29](configuration.md#329-scheduler-9)); `true` needs the shared mail transport and `datapipelines.auth.base-url`, or startup refuses. The deployment's state is computed, never stored, and every schedule shows it (`notifications.delivery`, [REST §20](rest-api.md#20-schedules)): `on`, or `off` with a reason — `disabled` (the flag), `mail_unconfigured`, or `no_allowlist` (the `development` posture with an empty `recipient-domains` allowlist: nothing sends until a domain is listed; under `hardened` an empty allowlist means no domain restriction). While off, saved settings are kept, nothing is queued and nothing leaves; the form and details say so, and saved settings are never described as delivered.
+
+While on, each transition the schedule's event set selects writes ONE notice — `schedule_notification_events`, [Metadata DB §4.39](metadata-db.md#439-schedule_notification_events) — in the transition's own transaction, beside its trail row, plus one delivery per recipient ([§4.40](metadata-db.md#440-schedule_notification_deliveries)), the address snapshotted at that moment. A run reaches each outcome at most once, so a replayed reconciliation or a duplicate callback writes no second notice. A recipient removed later still receives what was already queued, and a schedule deleted after its notice was queued still sends it; a deleted schedule queues nothing new. A recipient outside a non-empty allowlist is written `failed` / `domain_not_allowed` at once, and more than `backlog-max` pending deliveries writes the rest `failed` / `backlog_full` — visible on the run, never dropped silently.
+
+Notices render the run's target summary and reference timezone frozen at creation, due/start/end times and generic execution reference when known. Older runs with no frozen target omit “Runs”; executor payloads remain opaque. The schedule's name stays live because a rename retains its identity.
+
+The **sender** (the `schedule-notifier` task, every `tick-interval-seconds`, on dispatching instances only — §8.1) claims due deliveries in batches and sends each as **its own message**: `To` is that one address, the subject is `<schedule name> — <state words>` ([Enums §43](enums.md#43-notificationoutcome--what-one-notice-reports-442b)), the plain-text and HTML bodies name the schedule, the run's outcome and its times, and link to `<base-url>/schedules?id=<schedule>&run=<run>`. A body never carries rows, SQL, parameter values, error text, a bearer link or any other address. The `Message-ID` is fixed when the delivery is queued. The sender re-checks the flag and the allowlist at send: a delivery queued while mail was on and sent after it was turned off, or after its domain was narrowed out, ends `failed` with that reason.
+
+| State ([Enums §44](enums.md#44-deliverystate--one-recipients-copy-of-a-notice-442b)) | Meaning | Next |
+|---|---|---|
+| `pending` | Queued, or due again after a send that provably never reached the relay (connection refused, SMTP 4xx, credentials) | Sent at `next_attempt_at`; after `max-attempts` tries (default 3, waits `retry-backoff-seconds` 30, 120, 600) it is `failed` |
+| `accepted` | The relay took the message — not proof it reached an inbox | Final |
+| `failed` | Refused (5xx, an address the transport rejects), out of tries, refused at enqueue, or found with mail off / its domain outside the allowlist at send; `last_error_code` says which | Final unless resent |
+| `uncertain` | The message may have been sent: the connection failed after the data went out, or an instance died holding the claim (`interrupted`, recovered once the claim is older than the start grace) | **Never retried automatically**, final unless resent |
+
+A person holding `schedule.update` may **resend** a `failed` or `uncertain` delivery ([REST §20.13](rest-api.md#2013-resend-a-notification)): it is queued again under the same `Message-ID`, its tries kept — so a retryable failure after a resend is final. Resending an `uncertain` one warns that the recipient may receive it twice. Each send is a trail row on the run (`notification_sent` / `notification_failed` / `notification_uncertain`, ids and codes, never an address); the resend itself is the person's act and is audited (`schedule.notification_resent`, [Auth §10](auth.md#10-audit-log)). The run dialog's **Notifications** table lists the run's deliveries and offers the resend ([UI Screens §4.20](ui-screens.md#420-schedules)); addresses there follow the same rule as the settings.
 
 ## 3. Occurrences and the DST rule
 
@@ -182,11 +197,13 @@ A scheduled execution has the instance's ordinary execution timeout (`datapipeli
 
 ### 8.1 One dispatcher, any number of instances
 
-Every instance serves the schedule REST routes. An instance with `datapipelines.scheduler.enabled: true` also dispatches; `false` is **API mode**. Among dispatching instances there is ONE dispatcher: the tick is a single cluster-wide task, and each tick locks the due schedules it handles, so two instances never record the same occurrence twice and never launch one occurrence twice (an occurrence is a unique row, and a start claim is a conditional write). Run tasks are spread over the dispatching instances' worker threads (`threads`, default 2); a worker holds a thread only while it admits and launches, never for the pipeline's runtime.
+Every instance serves the schedule REST routes. An instance with `datapipelines.scheduler.enabled: true` also dispatches; `false` is **API mode** — it runs no scheduler task, so it never sends scheduler mail (§2.3's sender runs only on dispatching instances). Among dispatching instances there is ONE dispatcher: the tick is a single cluster-wide task, and each tick locks the due schedules it handles, so two instances never record the same occurrence twice and never launch one occurrence twice (an occurrence is a unique row, and a start claim is a conditional write). Run tasks are spread over the dispatching instances' worker threads (`threads`, default 2); a worker holds a thread only while it admits and launches, never for the pipeline's runtime.
 
 If an instance dies, its in-progress tasks are revived elsewhere after six missed heartbeats (`heartbeat-interval-seconds`, default 30 s). A revived task never launches again: it finds the claim, and either the execution exists (the run is `running`) or it does not (the run is `unknown`, and the schedule blocks).
 
 ### 8.2 Deploys and shutdown
+
+For notification activation on a mixed-version fleet and rollback to an image predating V51's trail kinds, follow [Deployment §8.3](deployment.md#83-upgrade-procedure-recommended) and [§8.4](deployment.md#84-rollback).
 
 On shutdown the instance first stops admitting — a run not yet claimed stays `queued` and is picked up by another instance or after restart — then waits up to `shutdown-wait-seconds` (default 5) for launches in progress to reach "started", and only then do the local executions drain. A scheduled execution cut off by the drain ends `aborted` / `shutdown`: a conclusive outcome that does not block. Under `skip` that occurrence does not run again.
 
@@ -194,7 +211,7 @@ The drain can need 20 seconds, and the admission gate's wait up to 15 more. A co
 
 ### 8.3 Watching it
 
-Metrics ([Observability §4.1](observability.md#41-metric-naming)): `datapipelines.scheduler.occurrences{outcome}`, `datapipelines.scheduler.runs.finished{state}`, `datapipelines.scheduler.capacity.retries` and `datapipelines.scheduler.runs.in_flight`. Log events: [Observability §3.4E](observability.md#34e-the-scheduler-events-9) — `scheduler.schedule_blocked` is the one that needs a person. There is no scheduler health component: an API-mode instance never starts the scheduler, and a stalled dispatcher is not a reason to restart a pod.
+Metrics ([Observability §4.1](observability.md#41-metric-naming)): `datapipelines.scheduler.occurrences{outcome}`, `datapipelines.scheduler.runs.finished{state}`, `datapipelines.scheduler.capacity.retries`, `datapipelines.scheduler.runs.in_flight` and the notices' `datapipelines.scheduler.notifications.{sent,failed,uncertain}`. Log events: [Observability §3.4E](observability.md#34e-the-scheduler-events-9) — `scheduler.schedule_blocked` is the one that needs a person. There is no scheduler health component: an API-mode instance never starts the scheduler, and a stalled dispatcher is not a reason to restart a pod.
 
 ### 8.4 The page
 
@@ -205,7 +222,7 @@ People manage schedules on the **Schedules** page (`/schedules`, in the rail's O
 ## 9. Not in slice 1
 
 - ~~**The Schedules page.**~~ Delivered by slice 2 — §8.4.
-- **Notifications** — settings delivered in slice 4 part a (§2.3); delivery pending part b. Until then nothing sends.
+- ~~**Notifications.**~~ Settings delivered by slice 4 part a, delivery by part b — §2.3.
 - ~~**Parameter bindings** (values computed per run, e.g. "the day before the occurrence").~~ Delivered by slice 3 — §2.2.
 - **An application credential.** Slice 1's routes are session-only; organizations that offer scheduling to their own customers call them from a backend with a management credential in slice 5.
 - **Background one-time runs** of a pipeline — slice 6.
@@ -216,6 +233,8 @@ People manage schedules on the **Schedules** page (`/schedules`, in the rail's O
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-25 | v1.10 | 442c (#442) | §2.3: notices use the run’s frozen target and reference timezone with known due/start/end and execution reference. §8.2: activation and rollback pointers. |
+| 2026-10-24 | v1.9 | 442b (#442) | §2.3: scheduler notification mail is delivered — off unless enabled (computed `on`/`off` + reason), one notice per selected transition written with it, one message per recipient with a fixed Message-ID, the four delivery states with bounded retries for provably-unsent sends only, `uncertain` never retried, re-checks at send, the resend (REST §20.13). §8.1: API mode sends no mail. §8.3: the three notification counters. §9: notifications struck through. |
 | 2026-10-19 | v1.8 | #584 | §8.4: the rail's Schedules item lands on the Schedules home (`/overview/schedules`, UI Screens §4.20a); the explorer at `/schedules` is its View all. No behaviour of the scheduler changes. |
 | 2026-10-03 | v1.7 | 442a (#442) | Saved schedule notification settings: recipients and five event choices, validated and shown by role; omitted PUT settings preserved; mail remains off pending part b. |
 | 2026-09-30 | v1.6 | lane 336 (#336 D6) | §5's tables: `unknown` gains the `outcome_unreadable` reason (an ABORTED row whose `error_json` — where the sweeper's `instance_lost` marker lives — is unreadable; blocks, because "not instance_lost" cannot be concluded), and `aborted` states the unreadable-payload case (state `aborted`, no reason — the record proves the abort; `unknown` would block an outcome that IS known). The executor logs `scheduler.outcome_evidence_unreadable` (observability §3.4E). Reasons are strings, not a closed enum (enums §24); no migration — the V38 CHECK constrains `state`, never `reason`. |

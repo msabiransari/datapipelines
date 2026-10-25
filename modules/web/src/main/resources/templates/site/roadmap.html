@@ -27,7 +27,7 @@
     "@type": "Article",
     "headline": "datapipelines.co roadmap: what ships now, what is planned, and what comes later",
     "datePublished": "2026-09-09",
-    "dateModified": "2026-10-24",
+    "dateModified": "2026-10-25",
     "author": { "@type": "Organization", "name": "datapipelines.co" },
     "publisher": { "@type": "Organization", "name": "datapipelines.co" },
     "mainEntityOfPage": "https://datapipelines.co/roadmap"
@@ -43,7 +43,7 @@
         specified in the packaged docs. <strong>Planned</strong> describes features being designed or developed. <strong>Later</strong>
         describes longer-term direction. Planned features have no announced release date.
       </p>
-      <p class="dateline" data-roadmap-updated="2026-10-24">Last updated 2026-10-24</p>
+      <p class="dateline" data-roadmap-updated="2026-10-25">Last updated 2026-10-25</p>
     </div>
   </section>
 
@@ -88,9 +88,15 @@
           <p>A schedule runs one pipeline at a five-field cron pattern's times in an IANA time zone, with a preview of the next runs, pause, resume, run now and a history of every run. People manage schedules in the application; agents do not. <a th:href="@{/pipeline-scheduling}">Pipeline scheduling.</a></p>
         </article>
         <article class="card">
+          <!-- claim: docs/scheduler.md §2.3 -->
+          <h3>Schedule notices by mail</h3>
+          <p>When scheduler mail is enabled and a schedule has recipients, selected run events queue a notice.
+            Failure, unknown and blocked events default on; start and success are opt-in.</p>
+        </article>
+        <article class="card">
           <!-- claim: docs/dashboards.md §1 -->
           <h3>Dashboards</h3>
-          <p>Charts, tables and KPI cards over pinned, released pipelines, with filters from a reusable parameter set. An agent drafts them, a person releases them, and your product can embed them through its own backend. <a th:href="@{/sql-dashboards}">SQL dashboards.</a></p>
+          <p>Charts, tables and KPI cards over pinned, released pipelines, with filters from a <a th:href="@{/reusable-parameter-sets}">reusable parameter set</a>. An agent drafts them, a person releases them, and your product can embed them through its own backend. <a th:href="@{/sql-dashboards}">SQL dashboards.</a></p>
         </article>
         <article class="card">
           <!-- claim: docs/pipeline-contract.md §4.12, docs/dag-executor.md §5.3, docs/deployment.md §6.4 -->
@@ -121,16 +127,15 @@
         <li><strong>No in-browser pipeline or template authoring without an agent</strong>: the editors
           preview, execute, release and discard; authoring is MCP-first today.
           <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §2.2</a></li>
-        <li><strong>Schedules send no mail yet</strong>: recipients and events are saved with a schedule,
-          and delivery is the next slice. Schedules run pipelines only, and their routes take a signed-in
-          session. <a th:href="@{/docs/scheduler}">docs/scheduler.md §9</a></li>
+        <li><strong>Schedules run pipelines only</strong>: report delivery and condition alerts remain later,
+          and schedule routes take a signed-in session. <a th:href="@{/docs/scheduler}">docs/scheduler.md §9</a></li>
         <li><strong>No report generation yet</strong>: dashboards ship; scheduled reports, PDF export and
           condition alerts do not. <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §2.2</a></li>
         <li><strong>A dashboard's read-only rule is declared</strong>: sources are admitted by their nodes'
           declared types, not by a read-only database connection; enforcing it at the connection is tracked
           separately. <a th:href="@{/docs/dashboards}">docs/dashboards.md §5.1</a></li>
-        <li><strong>No email delivery yet</strong>: schedule notices, alerts, report delivery and email
-          output targets all wait on it. <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §2.2</a></li>
+        <li><strong>No report or query-result mail yet</strong>: condition alerts, report delivery and email
+          output targets remain future work; schedule run notices are available. <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §2.2</a></li>
         <li><strong>No audit-log screen yet</strong>: the audit log is written on every call and read
           by SQL today; the filter screen is on the backlog. <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §2.2</a></li>
         <li><strong>The v2 band is design-stage</strong>: nested types, conditional execution, per-node
@@ -151,14 +156,6 @@
       <h2 id="rm-next" class="ds-headline">Designed, in progress</h2>
       <div class="split">
         <div>
-          <!-- claim: docs/scheduler.md §2.3 and §9 -->
-          <h3>Schedule notices by mail</h3>
-          <ul>
-            <li><b>The settings exist</b>: each schedule already saves its recipients and which events send mail.</li>
-            <li><b>Delivery is next</b>: a failed, unknown or blocked run will send mail by default once it ships.</li>
-          </ul>
-        </div>
-        <div>
           <!-- claim: docs/scheduler.md §9 -->
           <h3>Schedules for your own backend</h3>
           <ul>
@@ -171,7 +168,7 @@
           <h3>Report generation</h3>
           <ul>
             <li><b>A document, not a chart</b>, rendered over a released pipeline's result and delivered by email first.</li>
-            <li>The design is pending, and it waits on the scheduler's mail.</li>
+            <li>The design is pending.</li>
           </ul>
         </div>
       </div>

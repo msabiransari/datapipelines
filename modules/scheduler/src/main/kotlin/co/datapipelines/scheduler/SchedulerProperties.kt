@@ -77,18 +77,73 @@ data class SchedulerProperties(
      */
     val startGrace: Duration get() = Duration.ofSeconds(heartbeatIntervalSeconds * MISSED_HEARTBEATS_LIMIT)
 
-    /** Limits on stored notification settings; the sender belongs to slice 4 part b. */
+    /**
+     * Schedule notification mail (#442; configuration.md §3.29). Off unless [enabled] (owner
+     * ruling 2026-10-03); [recipientDomains] is the deployment's recipient-domain allowlist, read at
+     * save AND again at send. The sender's bounds: [maxAttempts] tries for a send that provably never
+     * reached the relay, [retryBackoffSeconds] between them, [batchSize] deliveries per sender tick,
+     * [backlogMax] pending deliveries per deployment before a new one is written `failed`.
+     * [retryBackoffSeconds] is read by [backoffAfter].
+     */
     data class Notifications(
         val maxRecipients: Int = 20,
+        val enabled: Boolean = false,
+        val recipientDomains: List<String> = emptyList(),
+        val maxAttempts: Int = 3,
+        val retryBackoffSeconds: List<Long> = DEFAULT_BACKOFF,
+        val batchSize: Int = 20,
+        val backlogMax: Int = 1000,
     ) {
         init {
             require(maxRecipients in 1..MAX_RECIPIENTS) {
                 "datapipelines.scheduler.notifications.max-recipients must be 1..$MAX_RECIPIENTS"
             }
+            recipientDomains.forEach { entry ->
+                require(RecipientDomains.valid(entry)) {
+                    "datapipelines.scheduler.notifications.recipient-domains entry '$entry' is not a domain " +
+                        "(example.com) or a subdomain wildcard (*.example.com)"
+                }
+            }
+            require(maxAttempts in 1..MAX_ATTEMPTS) {
+                "datapipelines.scheduler.notifications.max-attempts must be 1..$MAX_ATTEMPTS, was $maxAttempts"
+            }
+            require(retryBackoffSeconds.isNotEmpty()) {
+                "datapipelines.scheduler.notifications.retry-backoff-seconds must list at least one wait"
+            }
+            require(retryBackoffSeconds.all { it in 1..MAX_BACKOFF_SECONDS }) {
+                "datapipelines.scheduler.notifications.retry-backoff-seconds entries must be 1..$MAX_BACKOFF_SECONDS"
+            }
+            require(batchSize in 1..MAX_BATCH) {
+                "datapipelines.scheduler.notifications.batch-size must be 1..$MAX_BATCH, was $batchSize"
+            }
+            require(backlogMax >= 1) { "datapipelines.scheduler.notifications.backlog-max must be at least 1, was $backlogMax" }
         }
+
+        /** The allowlist as compared: trimmed and lower-cased (a domain is case-insensitive). */
+        val allowedDomains: RecipientDomains get() = RecipientDomains(recipientDomains)
+
+        /**
+         * The wait after failed attempt [attempt] (1-based) before the next one: the list's entry
+         * at that position, its LAST entry beyond the list — so raising [maxAttempts] never needs
+         * the list edited in step.
+         */
+        fun backoffAfter(attempt: Int): Duration =
+            Duration.ofSeconds(retryBackoffSeconds[(attempt - 1).coerceIn(0, retryBackoffSeconds.size - 1)])
 
         companion object {
             const val MAX_RECIPIENTS = 100
+            const val MAX_ATTEMPTS = 10
+            const val MAX_BATCH = 200
+
+            /** One day: a notice later than that is stale news, not a retry. */
+            const val MAX_BACKOFF_SECONDS = 86_400L
+
+            private const val FIRST_BACKOFF = 30L
+            private const val SECOND_BACKOFF = 120L
+            private const val THIRD_BACKOFF = 600L
+
+            /** The waits after attempts 1, 2 and 3; the default three attempts use the first two. */
+            val DEFAULT_BACKOFF: List<Long> = listOf(FIRST_BACKOFF, SECOND_BACKOFF, THIRD_BACKOFF)
         }
     }
 

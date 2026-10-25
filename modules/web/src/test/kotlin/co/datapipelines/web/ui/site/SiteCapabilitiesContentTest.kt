@@ -19,6 +19,10 @@ import java.io.File
  *  2. **The capability pages stay wired** — each of the three pages is a registry page with its
  *     record H1, links the docs and siblings the design record names, and is reachable from the
  *     home page, How it works and the shared header and footer.
+ *  3. **The #700 link architecture** — every contextual link the SEO record's link graph names
+ *     is a real `<a href>` inside the source page's `<main>`, so the shared Product menu and the
+ *     footer cannot stand in for a reader's next step; a missing one fails as missing discovery,
+ *     naming the source and the target, never as a lower total.
  */
 class SiteCapabilitiesContentTest {
     private val rendered: Map<SitePage, String> by lazy { SitePages.ALL.associateWith { SitePageRenderer.render(it) } }
@@ -58,10 +62,35 @@ class SiteCapabilitiesContentTest {
 
     @Test
     fun `each capability page links the docs and siblings the record names`() {
+        // #700: in the page's own content — the shared Product menu links every sibling, so a
+        // whole-document scan passed with the sibling link deleted from the body.
         REQUIRED_LINKS.forEach { (page, targets) ->
-            val hrefs = hrefs(rendered.getValue(page))
-            targets.forEach { target -> withClue("${page.path} links $target") { hrefs shouldContain target } }
+            val hrefs = hrefs(mainContent(rendered.getValue(page)))
+            targets.forEach { target -> withClue("${page.path} links $target in its own content") { hrefs shouldContain target } }
         }
+    }
+
+    @Test
+    fun `every contextual link in the record's link architecture is in its source page's content`() {
+        withClue("the link map is non-vacuous") { (LINK_ARCHITECTURE.values.sumOf { it.size } >= LINK_ARCHITECTURE_FLOOR) shouldBe true }
+        val missing =
+            LINK_ARCHITECTURE.flatMap { (from, targets) ->
+                val hrefs = hrefs(mainContent(SitePageRenderer.render(from)))
+                targets.filterNot { it.path in hrefs }.map { "missing discovery: ${from.path} has no contextual link to ${it.path}" }
+            }
+        withClue(missing.joinToString("\n")) { missing.shouldBeEmpty() }
+    }
+
+    @Test
+    fun `every engine page hands the reader to the SQL MCP hub and the tutorial`() {
+        val missing =
+            SitePages.ENGINES.map(SitePages::enginePage).flatMap { page ->
+                val hrefs = hrefs(mainContent(SitePageRenderer.render(page)))
+                listOf(SitePages.PILLAR, SitePages.HOW_IT_WORKS)
+                    .filterNot { it.path in hrefs }
+                    .map { "missing discovery: ${page.path} has no contextual link to ${it.path}" }
+            }
+        withClue(missing.joinToString("\n")) { missing.shouldBeEmpty() }
     }
 
     @Test
@@ -142,6 +171,42 @@ class SiteCapabilitiesContentTest {
                 SitePages.SQL_DASHBOARDS to listOf("/docs/dashboards", "/for/saas-teams", "/reusable-parameter-sets"),
                 SitePages.REUSABLE_PARAMETER_SETS to listOf("/sql-dashboards", "/docs/rest-api", "/docs/mcp-server"),
             )
+
+        /**
+         * #700 design record, "Content and link architecture": source page → the pages its own
+         * content must link. Scheduling reaches authoring and the comparisons; dashboards reach
+         * parameter sets, authoring and the SaaS case; parameter sets lead back to dashboards;
+         * the AI pages, personas and comparisons hand the reader to the capability they describe.
+         * The docs targets live in [REQUIRED_LINKS].
+         */
+        val LINK_ARCHITECTURE: Map<SitePage, List<SitePage>> =
+            mapOf(
+                SitePages.PIPELINE_SCHEDULING to
+                    listOf(SitePages.AI_DATA_PIPELINE, SitePages.COMPARE_AIRFLOW, SitePages.COMPARE_DAGSTER_AIRFLOW),
+                SitePages.SQL_DASHBOARDS to
+                    listOf(SitePages.REUSABLE_PARAMETER_SETS, SitePages.AI_DATA_PIPELINE, SitePages.FOR_SAAS_TEAMS),
+                SitePages.REUSABLE_PARAMETER_SETS to listOf(SitePages.SQL_DASHBOARDS),
+                SitePages.AI_DATA_PIPELINE to
+                    listOf(
+                        SitePages.PIPELINE_SCHEDULING,
+                        SitePages.SQL_DASHBOARDS,
+                        SitePages.REUSABLE_PARAMETER_SETS,
+                        SitePages.PUBLISHED_API,
+                    ),
+                SitePages.TEXT_TO_SQL_AGENT to listOf(SitePages.AI_DATA_PIPELINE, SitePages.PIPELINE_SCHEDULING, SitePages.SQL_DASHBOARDS),
+                SitePages.FOR_SAAS_TEAMS to listOf(SitePages.SQL_DASHBOARDS, SitePages.REUSABLE_PARAMETER_SETS),
+                SitePages.FOR_ANALYSTS to listOf(SitePages.PIPELINE_SCHEDULING, SitePages.SQL_DASHBOARDS),
+                SitePages.FOR_AGENCIES to listOf(SitePages.PIPELINE_SCHEDULING, SitePages.SQL_DASHBOARDS),
+                SitePages.USE_CASES to listOf(SitePages.PIPELINE_SCHEDULING, SitePages.SQL_DASHBOARDS),
+                SitePages.COMPARE_AIRFLOW to listOf(SitePages.PIPELINE_SCHEDULING),
+                SitePages.COMPARE_DAGSTER_AIRFLOW to listOf(SitePages.PIPELINE_SCHEDULING),
+                SitePages.ROADMAP to
+                    listOf(SitePages.PIPELINE_SCHEDULING, SitePages.SQL_DASHBOARDS, SitePages.REUSABLE_PARAMETER_SETS),
+                SitePages.TABLEAU_ROADMAP to listOf(SitePages.SQL_DASHBOARDS),
+            )
+
+        /** The 28 edges above at #700; a map that lost its rows would pass by checking nothing. */
+        const val LINK_ARCHITECTURE_FLOOR = 28
 
         val HREF = Regex("""<a[^>]*\shref="([^"]*)"""")
         val TAG = Regex("<[^>]+>")
