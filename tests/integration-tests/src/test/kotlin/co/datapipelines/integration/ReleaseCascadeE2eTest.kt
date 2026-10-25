@@ -230,7 +230,9 @@ class ReleaseCascadeE2eTest {
         val root = nodes.first()
         val nodeJson =
             nodes.map { n ->
-                "{\"id\":${n.id},\"status\":\"${n.status}\",\"body_hash\":\"${n.bodyHash}\",\"current\":${n.current ?: "null"}}"
+                "{\"id\":${n.id},\"entity_uuid\":\"${entityUuid(
+                    n,
+                )}\",\"status\":\"${n.status}\",\"body_hash\":\"${n.bodyHash}\",\"current\":${n.current ?: "null"}}"
             }
         val edgeJson = edges.map { (from, to, path) -> "{\"from\":${from.id},\"to\":${to.id},\"path\":\"$path\"}" }
         val canonical =
@@ -242,6 +244,25 @@ class ReleaseCascadeE2eTest {
                 .digest(canonical.toByteArray(Charsets.UTF_8))
         return "v1:" + digest.joinToString("") { "%02x".format(it) }
     }
+
+    /** Independent UUID lookup, scoped to the workspace and one of the fixture's two static families. */
+    private fun entityUuid(node: Snap): String =
+        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            val sql =
+                when (node.family) {
+                    "pipeline" -> "SELECT id FROM pipelines WHERE workspace_id = ?::uuid AND name = ?"
+                    "template" -> "SELECT id FROM templates WHERE workspace_id = ?::uuid AND name = ?"
+                    else -> error("unsupported fixture family")
+                }
+            connection.prepareStatement(sql).use { statement ->
+                statement.setString(1, MCP_WORKSPACE)
+                statement.setString(2, node.key)
+                statement.executeQuery().use { rows ->
+                    check(rows.next())
+                    rows.getString(1)
+                }
+            }
+        }
 
     /** A's snapshot as the preview sees it now: A (n0) pins TEMPLATE_ONE (n1) and TEMPLATE_TWO (n2), all DRAFT. */
     private fun previewOfA(): String {
@@ -507,6 +528,94 @@ class ReleaseCascadeE2eTest {
         pipelineRow["dependencies_released"].map { it["name"].asText() } shouldBe listOf(TEMPLATE_THREE)
         // TEMPLATE_ONE was RELEASED already: a released pin is shown, never flipped again.
         auditRows("template.version.released", TEMPLATE_ONE).size shouldBe 1
+    }
+
+    @Suppress("LongMethod") // the exact supported unpin/purge/recreate/restore/submit sequence is one acceptance witness
+    @Test
+    @Order(8)
+    fun `purge and identical recreation under the same child name refuses the old plan`() {
+        val childName = "test/recreated_517b_child"
+        val parentName = "test/recreated_517b_parent"
+        val (childId, childHash) = createPipeline(81, childName, listOf(TEMPLATE_ONE))
+        val parentArgs =
+            mapOf(
+                "name" to parentName,
+                "display_name" to "Parent",
+                "description" to "Recreation witness",
+                "nodes" to
+                    listOf(
+                        mapOf(
+                            "id" to "child",
+                            "type" to "PIPELINE",
+                            "pipeline" to mapOf("name" to childName, "version" to 1),
+                            "depends_on" to emptyList<String>(),
+                        ),
+                    ),
+            )
+        val (parent, failed) = callTool(82, "pipelines_create", parentArgs)
+        withClue("parent created: $parent") { failed shouldBe false }
+        val parentId = parent["id"].asText()
+        val parentHash = parent["draft"]["body_hash"].asText()
+        val root = Snap("pipeline", parentName, 1, "DRAFT", parentHash, null)
+        val child = Snap("pipeline", childName, 1, "DRAFT", childHash, null)
+        val template = Snap("template", TEMPLATE_ONE, 1, "RELEASED", templateHashes.getValue(TEMPLATE_ONE), 1)
+        val preview =
+            treeHash(
+                listOf(root, child, template),
+                listOf(
+                    Triple(root, child, "nodes[0].pipeline"),
+                    Triple(child, template, "nodes[0].template"),
+                ),
+            )
+        // A matching old plan reaches selection validation before any mutation.
+        releaseWithPlan(parentId, parentHash, preview, emptyList())
+            .statusCode(409)
+            .body("error.code", equalTo("pipeline.release.dependency_not_released"))
+        val unpinnedArgs =
+            parentArgs +
+                mapOf(
+                    "nodes" to
+                        listOf(
+                            mapOf(
+                                "id" to "n0",
+                                "type" to "DQL",
+                                "source" to DATASOURCE,
+                                "template" to mapOf("id" to TEMPLATE_ONE, "version" to 1),
+                                "depends_on" to emptyList<String>(),
+                            ),
+                        ),
+                )
+        val (unpinned, unpinError) = callTool(83, "pipelines_update", unpinnedArgs + mapOf("id" to parentId, "expected_hash" to parentHash))
+        withClue("unpin succeeds: $unpinned") { unpinError shouldBe false }
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .`when`()
+            .delete("/api/v1/pipelines/$childId/versions/1")
+            .then()
+            .statusCode(204)
+        val (newId, newHash) = createPipeline(84, childName, listOf(TEMPLATE_ONE))
+        (newId != childId) shouldBe true
+        newHash shouldBe childHash
+        val (restored, restoreError) =
+            callTool(
+                85,
+                "pipelines_update",
+                parentArgs +
+                    mapOf(
+                        "id" to parentId,
+                        "expected_hash" to unpinned["draft"]["body_hash"].asText(),
+                    ),
+            )
+        withClue("restore succeeds: $restored") { restoreError shouldBe false }
+        restored["draft"]["body_hash"].asText() shouldBe parentHash
+        releaseWithPlan(parentId, parentHash, preview, listOf("n1"))
+            .statusCode(409)
+            .body("error.code", equalTo("pipeline.release.plan_conflict"))
+        pipelineStatus(parentId) shouldBe "DRAFT"
+        pipelineStatus(newId) shouldBe "DRAFT"
+        auditRows("pipeline.version.released", parentId).size shouldBe 0
+        auditRows("pipeline.version.released", newId).size shouldBe 0
     }
 
     companion object {

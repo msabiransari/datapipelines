@@ -375,6 +375,30 @@ class PipelineRepository(
         lifecycle?.let { InventorySource.membership(NavigationFamily.PIPELINES, "pipelines", it, releasedOnly) }
             ?: ENTITY_LIVE
 
+    /** Body and its database-computed hash from ONE statement, bound to the exact draft version. */
+    data class DraftBodySnapshot(
+        val bodyJson: String,
+        val bodyHash: String,
+    )
+
+    /** Reads the bytes checked at release and their hash together; no separate metadata/body race. */
+    fun findDraftBodySnapshot(
+        workspaceId: UUID,
+        pipelineId: UUID,
+        version: Int,
+    ): DraftBodySnapshot? =
+        jdbc
+            .query(
+                """
+                SELECT v.body_json::TEXT AS body_json, v.body_hash
+                  FROM pipeline_versions v JOIN pipelines p ON p.id = v.pipeline_id
+                 WHERE p.workspace_id = :workspaceId AND p.id = :pipelineId
+                   AND v.version = :version AND v.status = 'DRAFT'
+                """.trimIndent(),
+                mapOf("workspaceId" to workspaceId, "pipelineId" to pipelineId, "version" to version),
+            ) { rs, _ -> DraftBodySnapshot(rs.getString("body_json"), rs.getString("body_hash")) }
+            .singleOrNull()
+
     /**
      * The stored body JSON of one version, or null when that version does not exist or the
      * pipeline lives in another workspace.
@@ -833,6 +857,7 @@ class PipelineRepository(
         description: String,
         expectedHash: String,
         actor: UUID,
+        expectedVersion: Int? = null,
     ): Released? =
         mappingDuplicateName(name) {
             jdbc
@@ -845,6 +870,7 @@ class PipelineRepository(
                         "displayName" to displayName,
                         "description" to description,
                         "expectedHash" to expectedHash,
+                        "expectedVersion" to expectedVersion,
                         "actor" to actor,
                     ),
                     RELEASE_MAPPER,
@@ -1541,6 +1567,7 @@ class PipelineRepository(
                        )
                   FROM pipelines p
                  WHERE v.pipeline_id = :pipelineId AND v.status = 'DRAFT' AND v.body_hash = :expectedHash
+                   AND (CAST(:expectedVersion AS integer) IS NULL OR v.version = :expectedVersion)
                    AND p.id = v.pipeline_id AND p.workspace_id = :workspaceId
                 RETURNING $DETAIL_COLUMNS
             ), bumped AS (

@@ -47,6 +47,7 @@ import java.util.UUID
  */
 internal class CoordinatorFixture(
     private val bounds: ReleaseBounds = ReleaseBounds(),
+    private val realNative: Boolean = false,
 ) {
     val workspaceId: UUID = UUID.randomUUID()
     val actor: UUID = UUID.randomUUID()
@@ -65,8 +66,28 @@ internal class CoordinatorFixture(
     private val source = DependencySource { identity -> graph[identity] }
     val sources: Map<ReleaseFamily, DependencySource> = mapOf(ReleaseFamily.PIPELINE to source, ReleaseFamily.TEMPLATE to source)
 
-    val releases = mockk<PipelineReleaseService>()
     val pipelines = mockk<PipelineRepository>()
+    private val bodies = HashMap<String, String>()
+    val releases =
+        if (realNative) {
+            io.mockk.spyk(
+                PipelineReleaseService(
+                    pipelines,
+                    mockk(relaxed = true),
+                    mockk<co.datapipelines.pipeline.PipelineValidator> {
+                        every { validateOrThrow(any(), any(), any()) } answers { firstArg() }
+                    },
+                    co.datapipelines.pipeline.AuthoringGuard(true),
+                    checkGate =
+                        co.datapipelines.pipeline.ReleaseCheckGate { _, _, _, _, _ ->
+                            error("consented A has failing checks; it must never release without an override")
+                        },
+                    dashboards = mockk(relaxed = true),
+                ),
+            )
+        } else {
+            mockk<PipelineReleaseService>()
+        }
     val templateReleases = mockk<TemplateReleaseService>()
 
     val guard = ReleaseMutationGuard { _, family -> log += "guard:${family.wire}" }
@@ -95,7 +116,7 @@ internal class CoordinatorFixture(
         }
 
     init {
-        every { releases.revalidateStrict(any()) } returns Unit
+        if (!realNative) every { releases.revalidateStrict(any()) } returns Unit
         every { releases.warnings(any()) } returns emptyList()
         every { releases.finish(any(), any(), any(), any(), any(), any()) } answers {
             val flipped = secondArg<PipelineRepository.Released>()
@@ -135,6 +156,7 @@ internal class CoordinatorFixture(
         val path = { index: Int, pin: ReleaseNodeIdentity ->
             if (pin.family == ReleaseFamily.PIPELINE) "nodes[$index].pipeline" else "nodes[$index].template"
         }
+        val record = PipelineRecord(UUID.randomUUID(), name, name, "d", actor, null, Instant.EPOCH, Instant.EPOCH)
         graph[identity] =
             ResolvedNode(
                 identity,
@@ -143,18 +165,35 @@ internal class CoordinatorFixture(
                 hash,
                 if (status == ReleaseNodeStatus.RELEASED) version else null,
                 pins.mapIndexed { index, pin -> ReleasePin(pin, pin.entityId, path(index, pin)) },
+                record.id,
             )
-        val record = PipelineRecord(UUID.randomUUID(), name, name, "d", actor, null, Instant.EPOCH, Instant.EPOCH)
         records[name] = record
         val draft = PipelineVersionDetail(record.id, version, PipelineVersionStatus.DRAFT, hash, Instant.EPOCH, actor)
         every { pipelines.findByNameAnyStatus(workspaceId, name) } returns record
         every { pipelines.findById(workspaceId, record.id) } returns record
         every { pipelines.findDraftDetail(workspaceId, record.id) } returns draft.takeIf { status == ReleaseNodeStatus.DRAFT }
         val model = mockk<Pipeline> { every { this@mockk.name } returns name }
-        every { releases.prepare(workspaceId, record.id, actor, any(), any()) } answers {
-            log += "prepare:$name"
+        bodies[name] =
+            """{"schema_version":1,"name":"$name","display_name":"$name","description":"d","parameters":{},""" +
+            """"settings":{"tempdb":{"engine":"H2"}},"nodes":[]}"""
+        every { pipelines.findVersionBody(workspaceId, record.id, version) } answers {
             onPrepare[name]?.invoke()
-            PipelineReleaseService.Prepared(workspaceId, record.id, draft, "{}", model, emptyList(), arg(3))
+            bodies.getValue(name)
+        }
+        every { pipelines.findDraftBodySnapshot(workspaceId, record.id, version) } answers {
+            onPrepare[name]?.invoke()
+            PipelineRepository.DraftBodySnapshot(bodies.getValue(name), graph.getValue(identity).bodyHash)
+        }
+        every { pipelines.releaseDraft(workspaceId, record.id, any(), any(), any(), any(), actor, version) } answers {
+            log += "flip:$name@${arg<String>(5)}"
+            PipelineRepository.Released(record, draft.copy(status = PipelineVersionStatus.RELEASED))
+        }
+        if (!realNative) {
+            every { releases.prepare(workspaceId, record.id, actor, any(), any()) } answers {
+                log += "prepare:$name"
+                onPrepare[name]?.invoke()
+                PipelineReleaseService.Prepared(workspaceId, record.id, draft, "{}", model, emptyList(), arg(3))
+            }
         }
         every { releases.flip(match { it.pipelineId == record.id }, any(), actor) } answers {
             log += "flip:$name@${secondArg<String>()}"
@@ -172,7 +211,7 @@ internal class CoordinatorFixture(
         current: Int? = if (status == ReleaseNodeStatus.RELEASED) version else null,
     ): ReleaseNodeIdentity {
         val identity = ReleaseNodeIdentity(workspaceId, ReleaseFamily.TEMPLATE, id, version)
-        graph[identity] = ResolvedNode(identity, id, status, hash, current, emptyList())
+        graph[identity] = ResolvedNode(identity, id, status, hash, current, emptyList(), UUID.nameUUIDFromBytes(id.toByteArray()))
         return identity
     }
 
@@ -185,6 +224,21 @@ internal class CoordinatorFixture(
         hash: String,
     ) {
         graph[identity] = graph.getValue(identity).copy(bodyHash = hash)
+    }
+
+    /** Changes the actual body consumed by the REAL native preparation as well as its stored hash. */
+    fun body(
+        identity: ReleaseNodeIdentity,
+        body: String,
+        hash: String,
+    ) {
+        bodies[identity.entityId] = body
+        edit(identity, hash)
+    }
+
+    /** Simulates a purge/recreation: same pin key and facts, fresh resolved identity. */
+    fun replaceEntity(identity: ReleaseNodeIdentity) {
+        graph[identity] = graph.getValue(identity).copy(entityUuid = UUID.randomUUID())
     }
 
     /** Moves a node's entity current pointer: a release of another version of it. */

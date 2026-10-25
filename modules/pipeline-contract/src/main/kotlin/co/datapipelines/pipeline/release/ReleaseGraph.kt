@@ -49,6 +49,7 @@ class ReleaseGraph(
                     status = resolved?.status ?: ReleaseNodeStatus.MISSING,
                     bodyHash = resolved?.bodyHash,
                     currentVersion = resolved?.currentVersion,
+                    entityUuid = resolved?.entityUuid,
                 )
             nodes[identity] = node
             return node
@@ -196,6 +197,8 @@ data class ClosureNode(
     /** Null exactly when [status] is MISSING — an unresolved pin has no body hash (record §2.1). */
     val bodyHash: String?,
     val currentVersion: Int?,
+    /** Null only for an unresolved pin. */
+    val entityUuid: java.util.UUID?,
 )
 
 /** One pin occurrence between two closure nodes. */

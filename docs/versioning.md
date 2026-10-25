@@ -747,7 +747,10 @@ Preconditions, evaluated server-side before the statement runs:
      optionally `check_overrides` (a node's own release-check override reason). The digest is compared before
      any validation or check work, and again inside the transaction under the writer guard; any drift between
      preview and submit — a body changed in place without a version change included — refuses
-     `pipeline.release.plan_conflict`. The caller must hold each flipped family's release permission.
+     `pipeline.release.plan_conflict`. The snapshot includes the resolved entity UUID as well as the body hash;
+     purging and recreating an identical name/version cannot reuse consent. Native preparation reads the body and its
+     database hash together; validation, checks, released entity metadata and the exact-version CAS use that same body.
+     The caller must hold each flipped family's release permission.
    - *The arming rule* — the alias together with `include_dependencies` is `pipeline.release.plan_invalid` (two
      authorities); any plan field without `tree_hash` is `428 pipeline.release.plan_required`. The record's
      428 for a BARE alias (§17 row 6) is armed by one constant, `LegacyReleaseAlias.LEGACY_ALIAS_WITHOUT_PLAN_ADMITTED`,
@@ -882,6 +885,10 @@ datapipelines:
 ---
 
 ## 6. Templates: Same Lifecycle, Plus the Pin Rule
+
+Parameter-set create, draft write and validated import (including promotion receive) recheck template pin existence,
+live status, type and dialect after acquiring the workspace writer guard. Customer selector probes remain outside the
+metadata transaction. A purge or discard that wins before the guard makes the set writer refuse without storing a pin.
 
 `template_versions` gains the identical statuses, hash column, one-draft index, and four
 write paths (mirrored codes `template.version.conflict`, `template.version.not_draft`).

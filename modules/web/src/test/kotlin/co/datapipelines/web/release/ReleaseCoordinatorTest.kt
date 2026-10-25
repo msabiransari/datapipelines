@@ -99,6 +99,39 @@ class ReleaseCoordinatorTest {
     }
 
     @Test
+    fun `a same name replacement refuses with no flips or audits`() {
+        val preview = fx.preview(a)
+        fx.replaceEntity(c)
+        val error = refused { fx.coordinator().release(fx.request(a, ReleasePlanRequest(preview.treeHash, preview.ids(t1, c)))) }
+        error.code shouldBe "pipeline.release.plan_conflict"
+        fx.log.none { it.startsWith("flip:") } shouldBe true
+        fx.audited shouldBe emptyList()
+    }
+
+    @Test
+    fun `a restored child cannot release consented A using checks from B`() {
+        val native = CoordinatorFixture(realNative = true)
+        val child = native.pipeline("test/child")
+        val root = native.pipeline("test/root", listOf(child))
+        val body =
+            """{"schema_version":1,"name":"test/child","display_name":"A","description":"d","parameters":{},""" +
+                """"settings":{"tempdb":{"engine":"H2"}},"nodes":[],""" +
+                """"checks":[{"id":"fail","name":"Fail","datasource":"pg","sql":"SELECT 1","expected":{"kind":"value","value":0}}]}"""
+        val alternate = body.replace("\"checks\":[", "\"unused_checks\":[").replace("\"A\"", "\"B\"")
+        native.body(child, body, "hash-test/child")
+        val preview = native.preview(root)
+        native.onPrepare[child.entityId] = { native.body(child, alternate, "hash-B") }
+        native.onPrepare[root.entityId] = { native.body(child, body, "hash-test/child") }
+        val error =
+            refused {
+                native.coordinator().release(native.request(root, ReleasePlanRequest(preview.treeHash, preview.ids(child))))
+            }
+        error.code shouldBe "pipeline.release.plan_conflict"
+        native.log.none { it.startsWith("flip:") } shouldBe true
+        native.audited shouldBe emptyList()
+    }
+
+    @Test
     fun `a stale preview is plan_conflict before any preparation, guard or flip`() {
         val preview = fx.preview(a)
         fx.edit(t1, "edited-without-a-version-change")

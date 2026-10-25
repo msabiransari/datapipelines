@@ -115,6 +115,18 @@ class ParameterSetValidator(
         }
     }
 
+    /** Rechecks only local pin metadata under the workspace writer guard; opens no customer connection. */
+    fun validatePinMetadata(
+        workspaceId: UUID,
+        body: ParameterSetBody,
+    ): ValidationResult {
+        val failures = ParameterSetFailures()
+        body.parameters.forEachIndexed { index, parameter ->
+            pins.checkMetadata(workspaceId, index, parameter, failures, requireLiveStatus = true)
+        }
+        return failures.toResult()
+    }
+
     /** Steps 5–6 alone, on a body that passed steps 1–4 ([validate] with `dryRun = false`). */
     fun dryRun(
         workspaceId: UUID,

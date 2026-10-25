@@ -35,6 +35,7 @@ class ReleaseGraphFixture(
                 bodyHash = bodyHash,
                 currentVersion = currentVersion,
                 pins = pins.map { (target, path) -> ReleasePin(target, "acme/${target.entityId}", path) },
+                entityUuid = UUID.nameUUIDFromBytes(identity.entityId.toByteArray()),
             )
         return identity
     }

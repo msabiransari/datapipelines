@@ -658,6 +658,18 @@ class TemplateRepository(
     // Lifecycle reads (versioning §4/§7)
     // ---------------------------------------------------------------------------------------------
 
+    /** The resolved surrogate identity of a workspace-local template name. */
+    fun findEntityUuid(
+        workspaceId: UUID,
+        name: String,
+    ): UUID? =
+        jdbc
+            .query(
+                "SELECT id FROM templates WHERE workspace_id = :workspaceId AND name = :name",
+                mapOf("workspaceId" to workspaceId, "name" to name),
+            ) { rs, _ -> rs.getObject("id", UUID::class.java) }
+            .singleOrNull()
+
     /** One version's lifecycle detail, or null when the template/version does not exist in the workspace. */
     fun findVersionDetail(
         workspaceId: UUID,

@@ -56,6 +56,16 @@ class TreeHashTest {
     }
 
     @Test
+    fun `the entity UUID moves the digest`() {
+        val before = closure()
+        val moved =
+            before.nodes.map { node ->
+                if (node == before.rootNode) node.copy(entityUuid = java.util.UUID.randomUUID()) else node
+            }
+        hash(before.copy(nodes = moved)) shouldNotBe hash(before)
+    }
+
+    @Test
     fun `every covered fact moves the digest`() {
         val base = hash(closure())
         listOf(
@@ -103,13 +113,16 @@ class TreeHashTest {
         /** The v1 canonical form of the fixture, byte for byte (one raw string per node and edge, concatenated). */
         const val GOLDEN_CANONICAL =
             """{"format":"v1","workspace":"00000000-0000-0000-0000-0000000005a7","root":["pipeline","acme/orders",7],"nodes":[""" +
-                """{"id":["pipeline","acme/child",2],"status":"RELEASED","body_hash":"hash-acme/child-2","current":null},""" +
-                """{"id":["pipeline","acme/orders",7],"status":"DRAFT","body_hash":"hash-acme/orders-7","current":null},""" +
-                """{"id":["template","gone",1],"status":"MISSING","body_hash":null,"current":null},""" +
-                """{"id":["template","region",4],"status":"DRAFT","body_hash":"hash-region","current":3}],"edges":[""" +
+                """{"id":["pipeline","acme/child",2],"entity_uuid":"cedca0e7-54a4-356d-b843-4f5e6ca3377a",""" +
+                """"status":"RELEASED","body_hash":"hash-acme/child-2","current":null},""" +
+                """{"id":["pipeline","acme/orders",7],"entity_uuid":"8a6d103a-22f5-36ce-9721-4e74cbdd58eb",""" +
+                """"status":"DRAFT","body_hash":"hash-acme/orders-7","current":null},""" +
+                """{"id":["template","gone",1],"entity_uuid":null,"status":"MISSING","body_hash":null,"current":null},""" +
+                """{"id":["template","region",4],"entity_uuid":"960db2ed-8220-3a97-86b9-7775a4269378",""" +
+                """"status":"DRAFT","body_hash":"hash-region","current":3}],"edges":[""" +
                 """{"from":["pipeline","acme/orders",7],"to":["pipeline","acme/child",2],"path":"nodes[1].pipeline"},""" +
                 """{"from":["pipeline","acme/orders",7],"to":["template","gone",1],"path":"nodes[2].template"},""" +
                 """{"from":["pipeline","acme/orders",7],"to":["template","region",4],"path":"nodes[0].template"}]}"""
-        const val GOLDEN_DIGEST = "v1:972bd561d5159b0d2c36a62bf054149b68cc1c67915b5569672a74fc27e46b84"
+        const val GOLDEN_DIGEST = "v1:454ae6b78b76ccb6ef53d01ad28c6c1be65feeac0f8cb67dc6f7b2e8c4faa872"
     }
 }

@@ -139,6 +139,7 @@ class ParameterSetService(
         val canonical = validOrThrow(validator.validate(workspaceId, document))
         val id = newId()
         return guarded(workspaceId) {
+            validator.validatePinMetadata(workspaceId, canonical.body).throwIfInvalid()
             val detail = repository.create(workspaceId, id, canonical.name, canonical.body, actor, CreateLifecycle.DRAFT, via)
             checkNotNull(repository.findVersion(workspaceId, id, detail.version))
         }
@@ -171,6 +172,7 @@ class ParameterSetService(
         // An open draft is overwritten in place (§5.2); a failed write there — a stale hash — falls through to
         // the copy-on-write arm (§5.1), whose guard then decides: both answer null on a stale base.
         return guarded(workspaceId) {
+            validator.validatePinMetadata(workspaceId, canonical.body).throwIfInvalid()
             val inPlace =
                 repository.findDraft(workspaceId, id)?.let {
                     repository.writeDraft(workspaceId, id, canonical.body, expectedHash, actor, via)
@@ -355,9 +357,10 @@ class ParameterSetService(
 
     /**
      * [import]'s landing half, alone: hash check, the id/rename/version-taken rules and the insert —
-     * NO validation. [export]'s body must already be canonical and §4-proven: the receive's transaction
+     * metadata-only pin recheck. [export]'s body must already be canonical and §4-proven: the receive's transaction
      * body lands what [validateForImport] answered outside it (#302, C36 — one §10.4 transaction, no
-     * probe inside it). A caller that skips the validation stores an unproven body; the arm exists for
+     * probe inside it). Pin existence, status, type and dialect are checked again under the writer guard.
+     * A caller that skips the validation stores an unproven body; the arm exists for
      * the receive's validate-then-land split, not as a looser import.
      */
     fun importValidated(
@@ -374,6 +377,7 @@ class ParameterSetService(
         actor: UUID,
     ): ParameterSetImported {
         val canonical = export.body
+        validator.validatePinMetadata(workspaceId, canonical).throwIfInvalid()
         if (export.version != null) {
             val declared = export.bodyHash ?: throw hashRefused("body_hash_missing", null, null)
             val actual = repository.computeBodyHash(canonical)

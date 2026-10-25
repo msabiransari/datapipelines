@@ -35,6 +35,7 @@ internal class ParametersHarness(
     datasources: FakeDatasources = FakeDatasources(),
     customers: CustomerRegistry? = null,
     val config: ParametersConfig = ParametersConfig(),
+    guard: co.datapipelines.pipeline.release.ReleaseMutationGuard = co.datapipelines.pipeline.release.ReleaseMutationGuard.NONE,
 ) {
     val jdbc = ParametersTestDb.jdbc
     val repository = ParameterSetRepository(jdbc)
@@ -121,7 +122,16 @@ internal class ParametersHarness(
             }
         }
     val service =
-        ParameterSetService(repository, validator, AuthoringGuard(authoringEnabled), statuses, consumers, releaser, transactions)
+        ParameterSetService(
+            repository,
+            validator,
+            AuthoringGuard(authoringEnabled),
+            statuses,
+            consumers,
+            releaser,
+            transactions,
+            guard = guard,
+        )
 
     /** Seeds an `sql` template (POSTGRES — the fake `warehouse`'s dialect) and answers its pin. */
     fun template(

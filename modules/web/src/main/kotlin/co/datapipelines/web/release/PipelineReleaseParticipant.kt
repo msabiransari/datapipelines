@@ -44,11 +44,14 @@ class PipelineReleaseParticipant(
         val identity = node.identity
         val rootFamily = context.closure.root.family
         val record =
-            pipelines.findByNameAnyStatus(identity.workspaceId, identity.entityId)
+            node.entityUuid?.let { pipelines.findById(identity.workspaceId, it) }
                 ?: throw ReleaseRefusals.planConflict(rootFamily, node.nodeId)
         val native =
             releases.prepare(identity.workspaceId, record.id, context.actor, context.checkOverrideReason, allowDraftChildren = true)
-        if (native.draft.version != identity.version) throw ReleaseRefusals.planConflict(rootFamily, node.nodeId)
+        val matchesBody = native.draft.bodyHash == node.bodyHash && native.draft.bodyHash == context.expectedHash
+        if (native.draft.version != identity.version || !matchesBody || native.pipelineId != node.entityUuid) {
+            throw ReleaseRefusals.planConflict(rootFamily, node.nodeId)
+        }
         return Prepared(node, context.expectedHash, context.actor, native)
     }
 

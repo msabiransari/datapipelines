@@ -7,11 +7,11 @@ import java.security.MessageDigest
  * every resolved node's identity, exact version, status, body hash and current pointer, and every pin occurrence (from,
  * to, path), each list sorted by its members' UTF-8 bytes, digested with SHA-256 and prefixed with the format version.
  *
- * Covered: identity (family word, pin key, version), status, body hash (null kept distinct from absent — a MISSING node
+ * Covered: identity (family word, pin key, resolved UUID, version), status, body hash (null kept distinct from absent — a MISSING node
  * has `"body_hash":null`), current pointer, edges with their paths. NOT covered: display names, `node_id`s (positional
  * locators), selections, warnings. It is a token, not an authorisation: permission, lens, posture and evidence are
- * rechecked separately at submit. `TreeHashTest` pins a golden digest — changing this serialisation is a format bump
- * (`v2`), never a silent edit.
+ * rechecked separately at submit. `TreeHashTest` pins a golden digest. S1 is unmerged and stateless; its UUID correction retains `v1`.
+ * Subsequent changes to a shipped serialisation require a format bump.
  */
 object TreeHash {
     const val FORMAT = "v1"
@@ -34,7 +34,8 @@ object TreeHash {
     fun canonical(closure: ReleaseClosure): String {
         val nodes =
             closure.nodes.map { node ->
-                "{\"id\":${id(node.identity)},\"status\":${string(node.status.name)}," +
+                "{\"id\":${id(node.identity)},\"entity_uuid\":${node.entityUuid?.toString()?.let(::string) ?: "null"}," +
+                    "\"status\":${string(node.status.name)}," +
                     "\"body_hash\":${node.bodyHash?.let(::string) ?: "null"},\"current\":${node.currentVersion ?: "null"}}"
             }
         val edges = closure.edges.map { "{\"from\":${id(it.from)},\"to\":${id(it.to)},\"path\":${string(it.path)}}" }

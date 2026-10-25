@@ -31,7 +31,7 @@ class PipelineDependencySource(
                 val body = pipelines.findVersionBody(identity.workspaceId, record.id, identity.version) ?: return null
                 pinsOf(identity.workspaceId, deserializer.readOrThrow(body))
             }
-        return ResolvedNode(identity, record.name, status, detail.bodyHash, record.currentVersion, pins)
+        return ResolvedNode(identity, record.name, status, detail.bodyHash, record.currentVersion, pins, record.id)
     }
 
     companion object {

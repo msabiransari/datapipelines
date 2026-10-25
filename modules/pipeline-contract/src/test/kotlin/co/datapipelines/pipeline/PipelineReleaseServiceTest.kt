@@ -28,6 +28,20 @@ import java.util.UUID
  */
 class PipelineReleaseServiceTest {
     private val pipelines = mockk<PipelineRepository>()
+
+    @org.junit.jupiter.api.BeforeEach
+    fun snapshotRead() {
+        every { pipelines.findDraftBodySnapshot(any(), any(), any()) } answers {
+            val body = pipelines.findVersionBody(firstArg(), secondArg(), thirdArg())
+            body?.let {
+                PipelineRepository.DraftBodySnapshot(
+                    it,
+                    checkNotNull(pipelines.findDraftDetail(firstArg(), secondArg())).bodyHash,
+                )
+            }
+        }
+    }
+
     private val templates = mockk<TemplateVersionStatuses>()
     private val validator = mockk<PipelineValidator>()
     private val dashboards = mockk<PipelineVersionConsumers>(relaxed = true)
@@ -110,7 +124,7 @@ class PipelineReleaseServiceTest {
             }
 
         error.code shouldBe "pipeline.validation.cycle_detected"
-        verify(exactly = 0) { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any(), 2) }
     }
 
     @Test
@@ -125,7 +139,7 @@ class PipelineReleaseServiceTest {
         error.code shouldBe PipelineErrorCodes.Versioning.RELEASE_DEPENDENCY_NOT_RELEASED
         // #517 §14: the shared blockers shape — the typed identity, the status and the reason, never the old flat keys.
         blockersOf(error) shouldBe listOf(Triple("test/t.sql", 2, "DRAFT/not_included"))
-        verify(exactly = 0) { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any(), 2) }
     }
 
     @Test
@@ -135,7 +149,7 @@ class PipelineReleaseServiceTest {
         every { validator.validateOrThrow(any(), workspaceId) } answers { firstArg() }
         every { templates.statusOf(workspaceId, "test/t.sql", 2) } returns PipelineVersionStatus.RELEASED
         every {
-            pipelines.releaseDraft(workspaceId, pipelineId, "test/monthly_revenue", "M", "d", "draft-hash", userId)
+            pipelines.releaseDraft(workspaceId, pipelineId, "test/monthly_revenue", "M", "d", "draft-hash", userId, 2)
         } returns
             PipelineRepository.Released(
                 co.datapipelines.pipeline.PipelineRecord(
@@ -176,13 +190,13 @@ class PipelineReleaseServiceTest {
         every { pipelines.findVersionBody(workspaceId, pipelineId, 2) } returns draftBody
         every { validator.validateOrThrow(any(), workspaceId) } answers { firstArg() }
         every { templates.statusOf(workspaceId, "test/t.sql", 2) } returns PipelineVersionStatus.RELEASED
-        every { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any()) } returns
+        every { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any(), 2) } returns
             releasedFlip().copy(version = releasedFlip().version.copy(callerOutputJson = null))
 
         service.release(workspaceId, pipelineId, "draft-hash", userId).callerOutput shouldBe
             ReleaseCallerOutput.NOT_OBSERVED
 
-        every { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any()) } returns
+        every { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any(), 2) } returns
             releasedFlip().copy(
                 version = releasedFlip().version.copy(callerOutputJson = """[{"name":"a","type":"STRING","nullable":true}]"""),
             )
@@ -203,7 +217,7 @@ class PipelineReleaseServiceTest {
         every { pipelines.findVersionBody(workspaceId, pipelineId, 2) } returns tempdbBody
         every { validator.validateOrThrow(any(), workspaceId) } answers { firstArg() }
         every { templates.statusOf(workspaceId, "test/t.sql", 2) } returns PipelineVersionStatus.RELEASED
-        every { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any()) } returns releasedFlip()
+        every { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any(), 2) } returns releasedFlip()
 
         service.release(workspaceId, pipelineId, "draft-hash", userId).callerOutput shouldBe ReleaseCallerOutput.NONE
     }
@@ -221,7 +235,7 @@ class PipelineReleaseServiceTest {
         every { validator.validateOrThrow(any(), workspaceId) } answers { firstArg() }
         every { templates.statusOf(workspaceId, "test/t.sql", 2) } returns PipelineVersionStatus.RELEASED
         // Even WITH a copied record on the row, the declared contract outranks it (D4).
-        every { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any()) } returns
+        every { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any(), 2) } returns
             releasedFlip().copy(
                 version = releasedFlip().version.copy(callerOutputJson = """[{"name":"a","type":"STRING","nullable":true}]"""),
             )
@@ -247,7 +261,7 @@ class PipelineReleaseServiceTest {
         every { validator.validateOrThrow(any(), workspaceId) } answers { firstArg() }
         every { templates.statusOf(workspaceId, "test/t.sql", 2) } returns PipelineVersionStatus.RELEASED
         every {
-            pipelines.releaseDraft(workspaceId, pipelineId, "test/monthly_revenue", "M", "d", "draft-hash", userId)
+            pipelines.releaseDraft(workspaceId, pipelineId, "test/monthly_revenue", "M", "d", "draft-hash", userId, 2)
         } returns releasedFlip()
         val pin = TemplateRef("test/t.sql", 2)
         every { marks.retiredCitations(workspaceId, listOf(pin)) } returns
@@ -263,7 +277,7 @@ class PipelineReleaseServiceTest {
         warning.template shouldBe "test/t.sql"
         warning.version shouldBe 2
         warning.message shouldContain "fact-old — superseded by fact-new"
-        verify(exactly = 1) { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 1) { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any(), 2) }
     }
 
     @Test
@@ -276,7 +290,7 @@ class PipelineReleaseServiceTest {
         every { validator.validateOrThrow(any(), workspaceId) } answers { firstArg() }
         every { templates.statusOf(workspaceId, "test/t.sql", 2) } returns PipelineVersionStatus.RELEASED
         every {
-            pipelines.releaseDraft(workspaceId, pipelineId, "test/monthly_revenue", "M", "d", "draft-hash", userId)
+            pipelines.releaseDraft(workspaceId, pipelineId, "test/monthly_revenue", "M", "d", "draft-hash", userId, 2)
         } returns releasedFlip()
         every { marks.retiredCitations(workspaceId, any()) } returns emptyMap()
 
@@ -294,7 +308,7 @@ class PipelineReleaseServiceTest {
         every { pipelines.findVersionBody(workspaceId, pipelineId, 2) } returns draftBody
         every { validator.validateOrThrow(any(), workspaceId) } answers { firstArg() }
         every { templates.statusOf(workspaceId, "test/t.sql", 2) } returns PipelineVersionStatus.RELEASED
-        every { pipelines.releaseDraft(workspaceId, pipelineId, any(), any(), any(), "stale", any()) } returns null
+        every { pipelines.releaseDraft(workspaceId, pipelineId, any(), any(), any(), "stale", any(), 2) } returns null
 
         val error = shouldThrow<DatapipelinesException> { service.release(workspaceId, pipelineId, "stale", userId) }
 
@@ -331,7 +345,7 @@ class PipelineReleaseServiceTest {
         every { validator.validateOrThrow(any(), workspaceId) } answers { firstArg() }
         every { templates.statusOf(workspaceId, "test/t.sql", 2) } returns PipelineVersionStatus.RELEASED
         every {
-            pipelines.releaseDraft(workspaceId, pipelineId, "test/monthly_revenue", "M", "d", "draft-hash", userId)
+            pipelines.releaseDraft(workspaceId, pipelineId, "test/monthly_revenue", "M", "d", "draft-hash", userId, 2)
         } returns
             PipelineRepository.Released(
                 pipelineRecord().copy(currentVersion = 2),
@@ -359,7 +373,7 @@ class PipelineReleaseServiceTest {
         val checks = error.details["checks"] as List<Map<String, Any?>>
         checks.single()["check_id"] shouldBe "revenue_matches"
         checks.single()["verdict"] shouldBe "fail"
-        verify(exactly = 0) { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any(), 2) }
     }
 
     @Test
@@ -414,7 +428,7 @@ class PipelineReleaseServiceTest {
 
         shouldThrow<DatapipelinesException> { gated.release(workspaceId, pipelineId, "draft-hash", userId, overrideChecksReason = "ok") }
             .code shouldBe PipelineErrorCodes.Check.FAILED
-        verify(exactly = 0) { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any(), 2) }
     }
 
     @Test
@@ -487,7 +501,7 @@ class PipelineReleaseServiceTest {
         every { templates.statusOf(workspaceId, "test/t.sql", 2) } returns PipelineVersionStatus.DRAFT
         every { templates.statusOf(workspaceId, "test/u.sql", 1) } returns PipelineVersionStatus.DRAFT
         every {
-            pipelines.releaseDraft(workspaceId, pipelineId, "test/monthly_revenue", "M", "d", "draft-hash", userId)
+            pipelines.releaseDraft(workspaceId, pipelineId, "test/monthly_revenue", "M", "d", "draft-hash", userId, 2)
         } returns
             PipelineRepository.Released(
                 pipelineRecord().copy(currentVersion = 2),
@@ -538,7 +552,7 @@ class PipelineReleaseServiceTest {
         blockersOf(error) shouldBe listOf(Triple("test/t.sql", 2, "DRAFT/not_included"), Triple("test/u.sql", 1, "DRAFT/not_included"))
         error.details["blockers_truncated"] shouldBe false
         releaser.released shouldBe emptyList()
-        verify(exactly = 0) { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any(), 2) }
     }
 
     @Test
@@ -547,7 +561,7 @@ class PipelineReleaseServiceTest {
         val order = mutableListOf<String>()
         val releaser = RecordingReleaser { order += "template:${it.id}@${it.version}" }
         every {
-            pipelines.releaseDraft(workspaceId, pipelineId, "test/monthly_revenue", "M", "d", "draft-hash", userId)
+            pipelines.releaseDraft(workspaceId, pipelineId, "test/monthly_revenue", "M", "d", "draft-hash", userId, 2)
         } answers {
             order += "pipeline"
             PipelineRepository.Released(
@@ -601,7 +615,7 @@ class PipelineReleaseServiceTest {
         // The pin scan refuses BEFORE the cascade starts: test/t.sql (a releasable DRAFT) was
         // never released on the way to the refusal.
         releaser.released shouldBe emptyList()
-        verify(exactly = 0) { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any(), 2) }
     }
 
     @Test
@@ -621,7 +635,7 @@ class PipelineReleaseServiceTest {
             }
 
         error shouldBe refusal
-        verify(exactly = 0) { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any(), 2) }
     }
 
     /**
@@ -664,7 +678,7 @@ class PipelineReleaseServiceTest {
                 listOf(outcome(CheckRunVerdict.PASS))
             }
         every {
-            pipelines.releaseDraft(workspaceId, pipelineId, "test/monthly_revenue", "M", "d", "draft-hash", userId)
+            pipelines.releaseDraft(workspaceId, pipelineId, "test/monthly_revenue", "M", "d", "draft-hash", userId, 2)
         } answers {
             transactions.log += "flip(inside=${transactions.inside})"
             PipelineRepository.Released(
@@ -690,7 +704,7 @@ class PipelineReleaseServiceTest {
     fun `atomicity - a stale hash after the templates flipped throws out of the SAME transaction`() {
         stubTwoDraftPins()
         every { pipelines.findDraftDetail(workspaceId, pipelineId) } returns draftDetail("current-hash")
-        every { pipelines.releaseDraft(workspaceId, pipelineId, any(), any(), any(), "stale", any()) } returns null
+        every { pipelines.releaseDraft(workspaceId, pipelineId, any(), any(), any(), "stale", any(), 2) } returns null
         val transactions = RecordingTransactions()
         val releaser = RecordingReleaser { transactions.log += "template:${it.id}" }
 

@@ -263,14 +263,21 @@ open class PipelineReleaseService(
             pipelines.findDraftDetail(workspaceId, pipelineId)
                 ?: throw notDraft(pipelineId)
 
-        val bodyJson =
-            pipelines.findVersionBody(workspaceId, pipelineId, draft.version)
-                ?: throw notDraft(pipelineId)
+        val snapshot = pipelines.findDraftBodySnapshot(workspaceId, pipelineId, draft.version) ?: throw notDraft(pipelineId)
+        val bodyJson = snapshot.bodyJson
         val pipeline = deserializer.readOrThrow(bodyJson)
         validator.validateOrThrow(pipeline, workspaceId, allowDraftPipelineReferences = allowDraftChildren)
 
         val overridden = runCheckGate(workspaceId, pipelineId, draft.version, pipeline, actor, overrideChecksReason)
-        return Prepared(workspaceId, pipelineId, draft, bodyJson, pipeline, overridden.first, overridden.second)
+        return Prepared(
+            workspaceId,
+            pipelineId,
+            draft.copy(bodyHash = snapshot.bodyHash),
+            bodyJson,
+            pipeline,
+            overridden.first,
+            overridden.second,
+        )
     }
 
     /** Strict §12 validation of a prepared body, in the caller's transaction: children flipped in it now read RELEASED. */
@@ -286,16 +293,19 @@ open class PipelineReleaseService(
         prepared: Prepared,
         expectedHash: String,
         actor: UUID,
-    ): PipelineRepository.Released =
-        pipelines.releaseDraft(
+    ): PipelineRepository.Released {
+        if (prepared.draft.bodyHash != expectedHash) throw conflictAfterGuardFailure(prepared.workspaceId, prepared.pipelineId)
+        return pipelines.releaseDraft(
             workspaceId = prepared.workspaceId,
             pipelineId = prepared.pipelineId,
             name = prepared.pipeline.name,
             displayName = prepared.pipeline.displayName,
             description = prepared.pipeline.description,
-            expectedHash = expectedHash,
+            expectedHash = prepared.draft.bodyHash,
             actor = actor,
+            expectedVersion = prepared.draft.version,
         ) ?: throw conflictAfterGuardFailure(prepared.workspaceId, prepared.pipelineId)
+    }
 
     /**
      * The release's result after its transaction committed: 7e's warnings are read AFTER the flip and outside its
@@ -416,7 +426,15 @@ open class PipelineReleaseService(
             DependencySource { identity ->
                 if (identity == root) {
                     val pins = PipelineDependencySource.pinsOf(prepared.workspaceId, prepared.pipeline)
-                    ResolvedNode(root, prepared.pipeline.name, ReleaseNodeStatus.DRAFT, prepared.draft.bodyHash, null, pins)
+                    ResolvedNode(
+                        root,
+                        prepared.pipeline.name,
+                        ReleaseNodeStatus.DRAFT,
+                        prepared.draft.bodyHash,
+                        null,
+                        pins,
+                        prepared.pipelineId,
+                    )
                 } else {
                     stored.resolve(identity)
                 }
@@ -424,7 +442,7 @@ open class PipelineReleaseService(
         val templateStatuses =
             DependencySource { identity ->
                 templates.statusOf(identity.workspaceId, identity.entityId, identity.version)?.let { status ->
-                    ResolvedNode(identity, identity.entityId, PipelineDependencySource.statusOf(status), "", null, emptyList())
+                    ResolvedNode(identity, identity.entityId, PipelineDependencySource.statusOf(status), "", null, emptyList(), UUID(0, 0))
                 }
             }
         val graph =

@@ -26,6 +26,8 @@ data class ResolvedNode(
     /** The entity's `current_version` pointer, null when none (record §2.1 hashes it). */
     val currentVersion: Int?,
     val pins: List<ReleasePin>,
+    /** Resolved database identity; the pin key remains a lookup key only. */
+    val entityUuid: java.util.UUID,
 ) {
     init {
         require(status != ReleaseNodeStatus.MISSING) { "a resolved node is never MISSING; answer null instead" }
