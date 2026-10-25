@@ -317,6 +317,9 @@ db-scheduler-spring-boot-starter = { module = "com.github.kagkarlsson:db-schedul
 
 # --- Metrics / logging (BOM-managed) -----------------------------------------
 micrometer-core = { module = "io.micrometer:micrometer-core" }
+# #708 — the Prometheus scrape registry (observability.md §4.2). Only modules/app declares it: the
+# exporting registry is a deployment concern; library modules keep micrometer-core only.
+micrometer-registry-prometheus = { module = "io.micrometer:micrometer-registry-prometheus" }
 slf4j-api = { module = "org.slf4j:slf4j-api" }
 # Tests only, and only where no Spring Boot starter already brings it: modules/persistence's
 # suite records the writer's WARN lines with a ListAppender (#266b — a store's message must

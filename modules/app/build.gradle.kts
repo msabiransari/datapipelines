@@ -17,6 +17,10 @@ dependencies {
 
     implementation(libs.spring.boot.starter)
     implementation(libs.spring.boot.starter.actuator)
+    // #708 — Boot's PrometheusMetricsExportAutoConfiguration registers the scrape registry and
+    // `/actuator/prometheus` on the management port (observability.md §4.2). Runtime only:
+    // nothing compiles against it, and library modules keep micrometer-core (module-structure §5.10).
+    runtimeOnly(libs.micrometer.registry.prometheus)
     // Authorized by module-structure.md §5.10: serves the root-level /health,
     // /ready and /info probes (rest-api.md §11, observability.md §6).
     implementation(libs.spring.boot.starter.web)
