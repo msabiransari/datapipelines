@@ -1,9 +1,9 @@
 # Auth & Security Specification
 
-**Status:** v3.57 (revised — see Change Log)
+**Status:** v3.58 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 
 ---
 
@@ -1904,6 +1904,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-25 | v3.58 | 442 (#442) integration | §7.6: the session-only resend action uses SCHEDULE_UPDATE; §8.6.2: the schedule notifier joins the recurring-job inventory. |
 | 2026-10-24 | v3.57 | #686 JWKS fetch joins the provider read bound | §5.5: the ID-token decoder's JWKS fetch is bounded by `datapipelines.auth.oidc.provider-read-timeout-seconds` through a `JwtDecoderFactory` bean that re-creates Spring's decoder with the bounded client — the same algorithm resolution, validators and claim-type conversion, one decoder per registration; a stalled JWKS read fails the decode as `invalid_id_token` and reaches the failure path. §11's key row names the JWKS fetch. No key added, no default change, no route, row or role cell change. |
 | 2026-10-22 | v3.56 | #651 enabled-provider avatar hosts | §11.1's `picture-hosts` allowlist includes only providers with a non-blank `client-id`, using the same predicate as sign-in registration. Dormant entries are still validated for shape at startup but contribute no hosts. No key, default, route or permission changes. |
 | 2026-10-22 | v3.55 | #682 | Shared provider read timeout for token exchange, OAuth2 user-info/emails and OIDC user-info; JWKS exception documented (§5.5, §11.1). |

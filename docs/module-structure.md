@@ -1,9 +1,9 @@
 # Module Structure Specification
 
-**Status:** v1.5 (frozen contract — additive-only changes after this point)
+**Status:** v1.7 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** (all other specs — this spec operationalizes them into code structure)
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-25
 
 ---
 
@@ -1287,7 +1287,7 @@ Before considering the module structure "ready":
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-10-24 | #442b schedule notification delivery | 442b (#442) | §5.16: `scheduler` gains `thymeleaf-spring6` (BOM-managed, already on `auth`'s and `web`'s class paths — the scheduler's lock gains its four lines) for the notice templates; its public API gains the `NotificationMailer` port and the `ScheduleNotifier` job (B5). `web` implements the port over `auth`'s `MailSender`. No internal dependency edge changes. |
+| 2026-10-24 | v1.7 | 442b (#442) | §5.16: `scheduler` gains `thymeleaf-spring6` (BOM-managed, already on `auth`'s and `web`'s class paths — the scheduler's lock gains its four lines) for the notice templates; its public API gains the `NotificationMailer` port and the `ScheduleNotifier` job (B5). `web` implements the port over `auth`'s `MailSender`. No internal dependency edge changes. |
 | 2026-10-22 | JavaScript product wiring | 8b (#8) | One availability-aware engine map supplies templates, the pool runner and node support; §3.1/§5.15 name the two engines and their responsibilities. |
 | 2026-10-21 | #8 the JavaScript engine | 8a (#8) | §5.15: the module gains the round-two engine — `JavaScriptEngine` on the same seam, `JavaScriptRuntime` (the one Engine/Context factory: UNTRUSTED policy, spawned isolate, one Engine per JVM), its options, `Availability`, `EngineScope`, the console sink types and `JavaScriptResourcesMain`. External dependencies gain GraalVM polyglot, nativebridge and truffle-api 25.4.4.1.1 (UPL 1.0; with collections, nativeimage, word and jniutils) and the test-runtime-only `js-isolate-community` (MIT + UPL 1.0); no isolate binary in the jar. The internal edge set is unchanged (`scripting` → `typesystem` only). No product surface: a javascript template is still refused until 8b. |
 | 2026-10-21 | #8 lane 8a the image's loader path (owner ruling 2026-10-21) | 8a (#8) | §5.4.1: the image's value is now `LOADER_PATH=/app/lib,/opt/graaljs` in the fence, the prose and the readiness checklist — the drop-in directory, then the JavaScript isolate's (§5.15). One list in one `ENV`, never a `-Dloader.path` beside it: `PropertiesLauncher` reads the system property before the environment, so a `-Dloader.path` for the isolate would silently drop the drop-in (measured in lane 8a). `ImageLoaderPathSpecDriftTest` pins the new value and refuses a `-Dloader.path` in the Dockerfile. |

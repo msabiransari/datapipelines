@@ -1,9 +1,9 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.47 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.49 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-25
 
 ---
 
@@ -2075,8 +2075,8 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-10-25 | next | 442c (#442) | §4.23: nullable target_ref frozen at run creation (V51). §4.40: strict pending cap, shared advisory key, bounded acquisition, lock order and resend refusal. |
-| 2026-10-24 | next | 442b (#442) | **V51 — the schedule notification outbox.** New **§4.39 `schedule_notification_events`** (one row per selected transition or block, `run_id` NOT NULL, UNIQUE `(run_id, outcome)` so a replayed transition writes none) and **§4.40 `schedule_notification_deliveries`** (one row per notice and recipient, the address snapshotted, a fixed `message_id`, `pending` / `accepted` / `failed` / `uncertain` with the due/claim CHECKs, `resend_count`); §4.24's trail CHECK gains the four `notification_*` kinds (details carry ids, counts and codes — no address, no domain; retries write no trail row); §5 lists the five new indexes. Down path documented in the migration header, not shipped. |
+| 2026-10-25 | v1.49 | 442c (#442) | §4.23: nullable target_ref frozen at run creation (V51). §4.40: strict pending cap, shared advisory key, bounded acquisition, lock order and resend refusal. |
+| 2026-10-24 | v1.48 | 442b (#442) | **V51 — the schedule notification outbox.** New **§4.39 `schedule_notification_events`** (one row per selected transition or block, `run_id` NOT NULL, UNIQUE `(run_id, outcome)` so a replayed transition writes none) and **§4.40 `schedule_notification_deliveries`** (one row per notice and recipient, the address snapshotted, a fixed `message_id`, `pending` / `accepted` / `failed` / `uncertain` with the due/claim CHECKs, `resend_count`); §4.24's trail CHECK gains the four `notification_*` kinds (details carry ids, counts and codes — no address, no domain; retries write no trail row); §5 lists the five new indexes. Down path documented in the migration header, not shipped. |
 | 2026-10-22 | v1.47 | 8b (#8) | The existing V33 CHECK admits JavaScript rows; the pooled save gate and availability control writes without a schema change. |
 | 2026-10-21 | v1.46 | 636 (#636) the housekeeping statements' bounds | **§8.1** — the dashboard refreshes' DELETE and the parameter evaluations' batch DELETE are bounded at 25 s like the `execution_events` DELETE (the "not bounded" clause removed); **§8.4** — the stale refresh sweep's `UPDATE` at 10 s (`REFRESH_SWEEP_STATEMENT_TIMEOUT_SECONDS`, on the sweeper's own template); **§8.5** — the evaluation sweep's `UPDATE` at the tick's 25 s. Each names the SQLState `57014` cancel, which rolls the one statement back. No DDL, no migration. |
 | 2026-10-20 | v1.45 | V50 (#640, script-node-rename lane, owner ruling 2026-10-20) | The **TRANSFORM→SCRIPT node-type rename**, no alias and no deprecation window. V50 rewrites every stored `pipeline_versions.body_json` node `type` value `TRANSFORM` → `SCRIPT` (RELEASED and DRAFT alike), rebuilding the `nodes` array order-preservingly and re-stamping `body_hash` over the NEW body text in the same statement (all rows carry `body_hash` = sha256 over `body_json::text` again; the untouched control rows are byte-identical). Prose that merely mentions the word — node ids, descriptions — is deliberately NOT rewritten. `template_versions`' blocks constraint is RENAMED `chk_transform_blocks` → `chk_script_blocks` (metadata-only; the V33 file itself stays byte-identical — shipped migrations are immutable). The row-level proof is `ScriptNodeMigrationTest` (V1–V49 on a scratch database, seeded pre-V50 rows, then V50): typed field moved, prose and the no-transform control intact, hash re-stamped, node order preserved, the constraint answering to the new name. Renumbered at merge after #326's v1.44. |

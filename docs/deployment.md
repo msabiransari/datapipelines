@@ -1,9 +1,9 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.51
+**Status:** v1.53
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 
 ---
 
@@ -1262,8 +1262,8 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-10-25 | next | 442c (#442) | §8.3: keep scheduler mail off until every instance understands V51 notification trail kinds. §8.4: disable, drain and account for old readers refusing historical notification kinds before downgrade. |
-| 2026-10-24 | next | 442b (#442) | §5.1: the one optional key with a startup requirement of its own — `datapipelines.scheduler.notifications.enabled=true` needs the mail transport and `auth.base-url` or startup refuses; under `development` nothing sends until the recipient-domain allowlist names a domain. |
+| 2026-10-25 | v1.53 | 442c (#442) | §8.3: keep scheduler mail off until every instance understands V51 notification trail kinds. §8.4: disable, drain and account for old readers refusing historical notification kinds before downgrade. |
+| 2026-10-24 | v1.52 | 442b (#442) | §5.1: the one optional key with a startup requirement of its own — `datapipelines.scheduler.notifications.enabled=true` needs the mail transport and `auth.base-url` or startup refuses; under `development` nothing sends until the recipient-domain allowlist names a domain. |
 | 2026-10-24 | v1.51 | #688 (Helm portion) — renumbered at merge after #677’s v1.50 | **§6.4:** the nine JavaScript runtime keys (configuration.md §3.28) are named chart values under `script.js`, all empty by default — an empty value renders no env entry, inheriting the image's own isolate directory and the app's derived isolate memory. `script.js.isolateDir` is refused at render time outside the image's launcher-path entries (`/app/lib`, `/opt/graaljs`), and an `extraEnv` double mapping of any of the nine is refused like the DuckDB keys. Number validation stays the app's (startup, by name). Chart 0.2.0; `helm-check.sh` grows to lint plus ten template cases (all-nine render, the single-key or-clause proof, the nine double-mapping refusals, the isolateDir refusal and its two admitted entries); `HelmScriptJsValuesSpecDriftTest` pins doc, chart, values and the Dockerfile's launcher-path list together. |
 | 2026-10-24 | v1.50 | #677 third-party notices | §10 documents generated Maven/isolate notices in the jar and image, the unresolved/stale licence guards, optional-driver terms and the remaining distribution boundaries. |
 | 2026-10-22 | v1.49 | 8b (#8) | Documents the isolate directory/loader agreement, pre-installed resources on read-only roots, shared-isolate failure mode and memory sizing. |
