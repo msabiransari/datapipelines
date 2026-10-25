@@ -3,7 +3,7 @@
 **Status:** v1.212
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-24 (#668; #684); 2026-10-23 (#623 merge follow-up); 2026-10-22 (#681; #623; #652; #660; #644); 2026-10-21 (#642; #654; #591; #659; #589; #640); 2026-10-20 (#574; #595; #588; #541; #634; #635; #622 merge follow-up; #622; #599; #604; #639; #638; #610; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-10-25 (#632; #632 merge follow-up); 2026-10-24 (#668; #684); 2026-10-23 (#623 merge follow-up); 2026-10-22 (#681; #623; #652; #660; #644); 2026-10-21 (#642; #654; #591; #659; #589; #640); 2026-10-20 (#574; #595; #588; #541; #634; #635; #622 merge follow-up; #622; #599; #604; #639; #638; #610; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 ---
 
 ## 1. Purpose
@@ -1511,10 +1511,11 @@ paint keeps the arrival URL; Back/Forward re-select in the same document without
 The helper synchronizes htmx's current-path record, so a boosted leave after a switch snapshots
 under the current URL and Back is a cache hit with the selected pane and a working tab strip.
 One window listener dispatches by family; detached roots or a different pathname hand the entry
-to htmx, and a restored root re-arms once (#528). A version switch is a FULL navigation
-(there is no active run to protect, so nothing justifies in-page state): every tab's facts
-re-resolve server-side, which is what keeps a stale Overview from lying about a switched
-version. The resource browser's foreign-response guard (the REST payload's `view_token` admission,
+to htmx, and a restored root re-arms once (#528). A version switch uses boosted,
+rail-preserving main-content navigation (`hx-boost="true"`; #632): every tab's facts
+re-resolve server-side for the selected version, independently of transport, which keeps a
+stale Overview from lying about a switched version. The resource browser's foreign-response
+guard (the REST payload's `view_token` admission,
 §3.4, rest-api §24) applies to every workspace navigation as to any page. A promoter's lens: a hidden template, draft or
 version answers the family's 404 — never a disabled row; no route returns a row the CSS hides.
 Role-forbidden controls are absent (RoleVisibilityRenderTest); the fragments' endpoints
@@ -3103,7 +3104,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-10-25 | v1.212 | #632 template version navigation transport | **§4.7 htmx row:** the version selector and Versions-tab Open are boosted, rail-preserving navigations, matching `hx-boost="true"` since `1d7b8457a`. R5's read-only selected version resolves server-side independently of transport. The catalog links have no explicit boost attribute. `TemplateHtmxRenderAuditTest` renders two versions and pins both selector and Versions-tab Open attributes and version URLs. No template, route or permission change. |
+| 2026-10-25 | v1.212 | #632 template version navigation transport | **§4.7 htmx row and State and roles:** the version selector and Versions-tab Open are boosted, rail-preserving navigations, matching `hx-boost="true"` since `1d7b8457a`. R5's read-only selected version resolves server-side independently of transport. The catalog links have no explicit boost attribute. `TemplateHtmxRenderAuditTest` renders two versions and pins both selector and Versions-tab Open attributes and version URLs. No template, route or permission change. |
 | 2026-10-24 | v1.211 | #668 — renumbered at merge after #684's v1.210 — the ui-screens transport vocabulary guard | New guard `UiScreensTransportVocabularyTest` scans this document alone: a line outside the Change Log matching `sidebar uses` (#654's F1 grep) or a sidebar-then-`REST tree`/`tree/search` shape (both case-insensitive) fails the suite unless a dated-quote keep entry with its reason admits it, and a keep entry that admits no line fails as stale. The change-log skip is docs-audit's heading flip, copied verbatim, and the scan asserts its own honesty (at least 3,000 lines read; the flip seen). The keep list seeds empty at 5e1326773 — the sweep found zero matching sentences outside the Change Log, the #466 v1.140 row being inside it. The self-check carries the six pre-#654 transport sentences from aedfaa6bb verbatim (the five `sidebar uses` lines plus the §4.4 picker note, which matches the second shape only). Documentation only; no route, permission, template or script change. |
 | 2026-10-23 | v1.210 | #684 one keyboard ring on template workspace tabs | **§4.7:** `.tw-tab` resets the vendored global focus shadow, retaining its own outline as the only ring. `TemplateWorkspaceBrowserTest` reads both computed properties after keyboard focus. |
 | 2026-10-23 | v1.209 | #623 merge follow-up | §4.1 names `auth.css` as the ceremony geometry stylesheet, completing the outstanding filename clarification. |
