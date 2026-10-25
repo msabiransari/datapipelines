@@ -191,6 +191,18 @@ class ScriptEngineConformanceTest {
     }
 
     @Test
+    fun `every engine refuses ambient randomness`() {
+        val random = mapOf(ScriptLanguage.JSONATA to "\$random()", ScriptLanguage.JAVASCRIPT to "return Math.random();")
+        engines.forEach { engine ->
+            withClue(engine.type) {
+                val caught = runCatching { engine.evaluate(engine.program(random), null, DEFAULT_LIMITS) }.exceptionOrNull()
+                val failure = caught.shouldNotBeNull() as ScriptEvaluationException
+                failure.code shouldBe "pipeline.script.evaluation_failed"
+            }
+        }
+    }
+
+    @Test
     fun `every engine has no host access - the deny-list names are absent from the catalogue`() {
         // JSONata: `$eval` of a Java name finds nothing (null). JavaScript: every name a host or
         // module bridge would answer to is undefined in the guest (`import(` is a breach-suite row —

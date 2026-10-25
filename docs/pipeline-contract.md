@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.63 (revised — see Change Log)
+**Status:** v1.64 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-10-25
@@ -495,9 +495,10 @@ and the Context (the transform-nodes design record §3). The language is the pin
 `type` (`jsonata` or `javascript`, when its isolate is installed); the **mode** (`row`, `table`, `value`) and
 the input/output shapes are the pinned version's **contract** — never repeated on the node, which
 conforms to it at save time (§12.13). The function has no handle to tempdb, the network, the
-filesystem or the clock: iteration is the executor's job (`row` mode reads the single table input
+filesystem, the clock or a random source: iteration is the executor's job (`row` mode reads the single table input
 in `result-batch-size` batches), `$now()`/`$millis()` return the execution's `current_timestamp`,
-and the output is a function of the template version and its inputs — every run is reproducible.
+and `$random()`, `$shuffle()` and `Math.random()` are refused (`pipeline.script.evaluation_failed`).
+The output is a function of the template version and its inputs — every run is reproducible.
 
 | Field | Rule |
 |---|---|
@@ -1878,6 +1879,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-25 | v1.64 | #711 — renumbered at merge after #442's v1.63 | §4.12 names the random-source boundary: JSONata `$random()` / `$shuffle()` and JavaScript `Math.random()` refuse with `pipeline.script.evaluation_failed`. |
 | 2026-10-25 | v1.63 | 442c (#442) | §13.19: schedule.notification.backlog_full (409), with details.pending and details.backlog_max; refused resend leaves its delivery unchanged. |
 | 2026-10-24 | v1.62 | 442b (#442) | **§13.19 gains two notification codes**: `schedule.notification.not_found` (404) and `schedule.notification.not_resendable` (409, the `schedule.*` state family) — the explicit resend of a run's notification ([REST API §20.13](rest-api.md#2013-resend-a-notification)). Landed with their `ScheduleErrorCodes` constants, the `PipelineErrorCodes.Schedule` mirror and the 404 catalog row. |
 | 2026-10-22 | v1.61 | 8b (#8) | JavaScript is available through the shared seam; script.js.unavailable means an absent isolate, never boot 503; resource_limit covers the byte and output limits. |
