@@ -105,7 +105,7 @@ internal object OverviewRenderSupport {
      */
     fun assertGuideWords(
         doc: Document,
-        family: OverviewPage.Family,
+        family: OverviewFamily,
         words: GuideWords,
     ) {
         withClue("$family's guide words") {
