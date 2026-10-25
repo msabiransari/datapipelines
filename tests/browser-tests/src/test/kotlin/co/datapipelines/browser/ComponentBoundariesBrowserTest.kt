@@ -427,6 +427,7 @@ class ComponentBoundariesBrowserTest : VisualizationBrowserSuite() {
         const val MIN_THEMES = 9
         const val EDITOR_WIDTH = 1440
         const val EDITOR_HEIGHT = 900
+
         /** Empty since design-tokens 0.5.0 (#628); a listed pair that passes must still fail the sweep. */
         val GAPS: List<Gap> = emptyList()
 
