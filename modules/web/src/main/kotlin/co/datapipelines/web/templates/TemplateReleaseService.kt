@@ -4,6 +4,8 @@ import co.datapipelines.application.templates.TemplateUsage
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.release.ReleaseFamily
+import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDraft
 import co.datapipelines.templates.TemplateRepository
@@ -32,6 +34,11 @@ import java.util.UUID
  * template that keeps other versions ask the LIVE-exact question (rule 1); an entity purge, and a draft purge that
  * takes the entity with it (the only version), ask the ANY-version question (rule 3, R12: a discarded dependent
  * version can be restored and must keep what it pins).
+ *
+ * ## The writer guard (#517, release-dependencies record §4.3)
+ * Every verb here changes what a release resolves — a status, a pointer, a version's existence — so each runs in a
+ * metadata transaction and acquires the workspace writer guard first, before any template row is read for its
+ * decision; the pin guards above then answer under it, and no pin save can land between their read and the write.
  */
 open class TemplateReleaseService(
     private val templates: TemplateRepository,
@@ -44,7 +51,11 @@ open class TemplateReleaseService(
      * every pinner.
      */
     private val usage: TemplateUsage,
+    /** The workspace writer guard (#517); [ReleaseMutationGuard.NONE] in a directly constructed test. */
+    private val guard: ReleaseMutationGuard = ReleaseMutationGuard.NONE,
 ) {
+    private fun lockWorkspace(workspaceId: UUID) = guard.acquire(workspaceId, ReleaseFamily.TEMPLATE)
+
     /** What a release produced: the released version detail and the stored template at it. */
     data class Released(
         val detail: TemplateVersionDetail,
@@ -57,8 +68,12 @@ open class TemplateReleaseService(
      * @throws DatapipelinesException `template.authoring.disabled` (§5.5),
      *   `template.version.not_draft` or `template.version.conflict`
      *   (stale hash); `TemplateValidationException` when the draft content no longer validates.
+     *
+     * Transactional and guarded since #517: until then the flip was a bare statement outside any transaction. Inside
+     * the pipeline coordinator's transaction it joins that one (the guard is already held; re-acquiring it is a no-op).
      */
     @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal the caller distinguishes
+    @Transactional("metadataTransactionManager")
     open fun release(
         workspaceId: UUID,
         id: String,
@@ -67,6 +82,7 @@ open class TemplateReleaseService(
     ): Released {
         // §5.5: release is an authoring action — a promotion receiver refuses it.
         authoring.requireTemplateAuthoring()
+        lockWorkspace(workspaceId)
 
         val draft =
             templates.findDraftDetail(workspaceId, id)
@@ -144,6 +160,26 @@ open class TemplateReleaseService(
     }
 
     /**
+     * #517 — the coordinator's template flip (`TemplateReleaseParticipant`, record §4.1 step 6): releases exactly
+     * [version] at exactly the [consentedHash] the plan's snapshot recorded, replacing #142's current-hash pickup. The
+     * coordinator re-resolved the closure under the guard just before, so a draft that is no longer that version at that
+     * hash is a changed snapshot: [conflict] is the ROOT family's `plan_conflict` (the root's prefix names a cascade's
+     * refusal, record §14), never a template code.
+     */
+    open fun releaseExact(
+        workspaceId: UUID,
+        id: String,
+        version: Int,
+        consentedHash: String,
+        actor: UUID,
+        conflict: () -> DatapipelinesException,
+    ): Released {
+        val draft = templates.findDraftDetail(workspaceId, id) ?: throw conflict()
+        if (draft.version != version || draft.bodyHash != consentedHash) throw conflict()
+        return release(workspaceId, id, consentedHash, actor)
+    }
+
+    /**
      * Purges the template's DRAFT at [expectedHash] (versioning §5.4, 101 — a hard delete;
      * the sole-draft case takes the entity row with it, D57's twin).
      *
@@ -158,6 +194,7 @@ open class TemplateReleaseService(
     ) {
         // §5.5: purging authored content is authoring — a promotion receiver refuses it.
         authoring.requireTemplateAuthoring()
+        lockWorkspace(workspaceId)
 
         val draft = templates.findDraftDetail(workspaceId, id) ?: throw notDraft(id)
         refuseIfDraftPinned(workspaceId, id, draft.version)
@@ -174,6 +211,7 @@ open class TemplateReleaseService(
      * @throws DatapipelinesException `template.authoring.disabled`, `template.not_found`,
      *   `template.version.not_released`, `template.in_use`.
      */
+    @Transactional("metadataTransactionManager")
     open fun discardVersion(
         workspaceId: UUID,
         id: String,
@@ -181,6 +219,7 @@ open class TemplateReleaseService(
         actor: UUID,
     ): TemplateVersionDetail {
         authoring.requireTemplateAuthoring()
+        lockWorkspace(workspaceId)
         requireTemplate(workspaceId, id)
         val detail = findVersionOr404(workspaceId, id, version)
         if (detail.status != PipelineVersionStatus.RELEASED) throw notReleased(id, version, detail.status)
@@ -191,12 +230,14 @@ open class TemplateReleaseService(
     }
 
     /** §3.1 (101) — restore DISCARDED version [version]; the pointer moves only above-current-or-NULL. */
+    @Transactional("metadataTransactionManager")
     open fun restoreVersion(
         workspaceId: UUID,
         id: String,
         version: Int,
     ): TemplateVersionDetail {
         authoring.requireTemplateAuthoring()
+        lockWorkspace(workspaceId)
         requireTemplate(workspaceId, id)
         val detail = findVersionOr404(workspaceId, id, version)
         if (detail.status != PipelineVersionStatus.DISCARDED) throw notDiscarded(id, version, detail.status)
@@ -215,6 +256,7 @@ open class TemplateReleaseService(
         version: Int,
     ) {
         authoring.requireTemplateAuthoring()
+        lockWorkspace(workspaceId)
         requireTemplate(workspaceId, id)
         val detail = findVersionOr404(workspaceId, id, version)
         if (detail.status != PipelineVersionStatus.DRAFT) throw lastRelease(id, version, detail.status)
@@ -235,6 +277,7 @@ open class TemplateReleaseService(
         id: String,
     ) {
         authoring.requireTemplateAuthoring()
+        lockWorkspace(workspaceId)
         requireTemplate(workspaceId, id)
         val versions = templates.listVersions(workspaceId, id)
         if (versions.size != 1 || versions[0].status != PipelineVersionStatus.DRAFT) {
@@ -248,11 +291,13 @@ open class TemplateReleaseService(
     }
 
     /** §3.4 (101) — the manual switch; NOT an authoring verb (the promotion receiver's lever). */
+    @Transactional("metadataTransactionManager")
     open fun switchCurrent(
         workspaceId: UUID,
         id: String,
         version: Int,
     ): Int {
+        lockWorkspace(workspaceId)
         requireTemplate(workspaceId, id)
         val detail = findVersionOr404(workspaceId, id, version)
         if (!PipelineVersionStatus.eligibleForPointer(detail.status, authoring.developmentPosture)) {

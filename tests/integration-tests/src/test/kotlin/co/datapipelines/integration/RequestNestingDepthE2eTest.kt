@@ -79,6 +79,8 @@ class RequestNestingDepthE2eTest {
             StringRoute("POST", "/api/v1/pipelines", PIPELINE_MALFORMED),
             StringRoute("PUT", "/api/v1/pipelines/${UUID.randomUUID()}", PIPELINE_MALFORMED),
             StringRoute("POST", "/api/v1/pipelines/import", PIPELINE_MALFORMED),
+            // #517: the release plan body is read through the same request mapper, BEFORE any lookup.
+            StringRoute("POST", "/api/v1/pipelines/${UUID.randomUUID()}/release", PIPELINE_MALFORMED),
             StringRoute("POST", "/api/v1/pipelines/${UUID.randomUUID()}/execute", EXECUTE_MALFORMED),
             StringRoute("POST", "/api/v1/schedules", SCHEDULE_MALFORMED),
             StringRoute("PUT", "/api/v1/schedules/${UUID.randomUUID()}", SCHEDULE_MALFORMED),
@@ -183,7 +185,7 @@ class RequestNestingDepthE2eTest {
         val swept =
             mapOf(
                 "TemplatesController.kt" to 10,
-                "PipelinesController.kt" to 2,
+                "PipelinesController.kt" to 3,
                 "PipelineTransferController.kt" to 1,
                 "PipelineExecuteController.kt" to 1,
                 "SchedulesController.kt" to 2,
@@ -203,7 +205,7 @@ class RequestNestingDepthE2eTest {
             found.entries.map { it.key to it.value } shouldContainExactlyInAnyOrder
                 (swept + ALLOWLISTED).entries.map { it.key to it.value }
         }
-        stringRoutes.size shouldBe swept.values.sum() // 30 routes sweep themselves: the allowlist is empty (#323, #10 L1c, #353, #375)
+        stringRoutes.size shouldBe swept.values.sum() // 31 routes sweep themselves: no allowlist (#323, #10 L1c, #353, #375, #517)
     }
 
     @Test

@@ -1,9 +1,9 @@
 # Versioning: Draft, Release, Promotion
 
-**Status:** v1.29 — #563: an object whose current pointer names a DRAFT is not promotable and is invisible to a promoter whatever releases it holds (§10.2, §3.4). v1.28 — #459: draft authoring may pin DRAFT or RELEASED children (D58, §3); #462: both pipeline draft purges refuse named parent/dashboard pins before destructive writes. #328: the release flip records the caller output (§5.3). #349: the UI workspace row states the in-page version switch (§7.2); #344: the push closure is read at the pinned versions without the promoter lens (§10.4); #332: the three families audit every lifecycle verb (§7's blanket sentence); #348: §7.2's table disambiguates the REST `GET /api/v1/pipelines/{id}` from the UI read workspace `GET /pipelines/{id}`; #10 L1c-c: the count ceiling stated as aggregate; the receive's refused-dashboard rollback witnessed (§10.4); #320: the reverse arrows into other families (§3.5.3); #10: visualizations and dashboards join the lifecycle table (§3.5)
+**Status:** v1.30 — #517: a release takes its whole dependency closure, flips consented dependency drafts in one transaction with strict audit, and every pin-affecting write takes the workspace writer guard (§5.3, §3.5, §10.4); a pipeline or parameter-set restore re-judges its outbound pins (§3.5.3). v1.29 — #563: an object whose current pointer names a DRAFT is not promotable and is invisible to a promoter whatever releases it holds (§10.2, §3.4). v1.28 — #459: draft authoring may pin DRAFT or RELEASED children (D58, §3); #462: both pipeline draft purges refuse named parent/dashboard pins before destructive writes. #328: the release flip records the caller output (§5.3). #349: the UI workspace row states the in-page version switch (§7.2); #344: the push closure is read at the pinned versions without the promoter lens (§10.4); #332: the three families audit every lifecycle verb (§7's blanket sentence); #348: §7.2's table disambiguates the REST `GET /api/v1/pipelines/{id}` from the UI read workspace `GET /pipelines/{id}`; #10 L1c-c: the count ceiling stated as aggregate; the receive's refused-dashboard rollback witnessed (§10.4); #320: the reverse arrows into other families (§3.5.3); #10: visualizations and dashboards join the lifecycle table (§3.5)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md) (§13 error catalog, §17 persistence), [Templates](templates.md), [Metadata DB](metadata-db.md) (§4.4/§4.5/§4.8/§4.9 — DDL authority), [REST API](rest-api.md), [Pipeline Editor UI](pipeline-editor.md)
-**Last updated:** 2026-10-06
+**Last updated:** 2026-10-25
 
 ---
 
@@ -56,7 +56,7 @@ Ratified 2026-09-08, operator ruling (implemented 101):
 |---|---|---|
 | D57 | **A pipeline always has ≥ 1 version row** (unless the entity itself is purged). Discard never removes rows — discarding the sole release is legal and lands the entity at DISCARDED with a NULL pointer. The refusal `pipeline.version.last_release` belongs to the PURGE path only: a RELEASED version is never purged, and an entity holding any non-draft version is never purged. | "Delete means it's gone … discard is per version, the entity stays." |
 | D58 | **Draft authoring may pin live DRAFT or RELEASED child versions** (#459, owner requirement superseding the original released-only save rule). Release/import require RELEASED children (`pipeline.validation.pipeline_reference_not_released`). Template draft pins remain legal during development. | Draft dependencies work throughout development; mutable children are revalidated at release. |
-| D59 | **Names are unique forever.** A discarded pipeline/template keeps its name; restore always works; no second entity may take the name. The partial-index idea is withdrawn; `uq_pipelines_workspace_name` / `uq_templates_workspace_name` stay as they are. | A name is an identity other environments and histories reference; recycling it re-points them at a different thing. |
+| D59 | **Names are unique forever.** A discarded pipeline/template keeps its name; restore is refused only while an outbound pin is missing, discarded or not released (§3.5.3, #517) — repair bottom-up, never by editing the released body; no second entity may take the name. The partial-index idea is withdrawn; `uq_pipelines_workspace_name` / `uq_templates_workspace_name` stay as they are. | A name is an identity other environments and histories reference; recycling it re-points them at a different thing. |
 | D60 | **`current_version` is sticky and event-driven.** It moves only on release, discard-of-current, restore-above-current, manual switch, and purge-of-current-draft; when it moves it picks the highest-numbered ELIGIBLE live version (RELEASED always; DRAFT only under development posture), else NULL. An import never moves an existing pointer — the human switches — except the first import of an entity with no current at all. | "`current_version` helps us in fallback." The pointer is what dependents run; it must move deliberately, never as a side effect. |
 | D63 | **A published endpoint serves whatever the pointer names in development, a draft included** (owner 2026-09-09: "we have to test it before the release, so we should be able to point the API to any version in dev"). Non-development holds no drafts, so released-only there by construction. | The endpoint is the thing under test; a 503 on the dev fallback made the testable path untestable. |
 
@@ -90,6 +90,9 @@ Five verbs act on versions, and they pair with the statuses exactly:
   DISCARDED (`discarded_at`, `discarded_by`); no dependent may run it, and the row stays.
 - **Restore** is the DISCARDED verb (`POST …/versions/{v}/restore`): the row returns to
   RELEASED — its original `released_at`/`released_by` return, the discard stamps clear.
+  Before it lands, the pins the version holds are rechecked under the workspace writer guard
+  (§3.5.3, #517): a missing or DISCARDED pin refuses with the family's validation code (400),
+  a present-but-DRAFT one `<family>.release.dependency_not_released` (409).
   **Discard is reversible; purge is not.**
 - **Release** is the DRAFT→RELEASED verb (§5.3, unchanged). **Who may:** an **author** or a
   workspace admin (roles design D8, ratified 2026-09-20: "the author releases, the promoter
@@ -132,7 +135,8 @@ together with the draft's executions. An entity therefore always has ≥ 1 versi
 unless the entity itself is gone (D57).
 
 **Names are unique forever (D59).** A discarded pipeline or template keeps its name;
-restore always works; no second entity may ever take the name. The V1 `is_deleted`
+restore is refused only while an outbound pin is missing, discarded or not released (§3.5.3, #517) — repair bottom-up,
+never by editing the released body; no second entity may ever take the name. The V1 `is_deleted`
 soft-delete column on both tables is **retired (V19)**: any `is_deleted = true` row is
 migrated to "every version DISCARDED" and the column dropped; every reader of
 `is_deleted` reads the derived entity status instead. `pipeline.validation.pipeline_reference_deleted`
@@ -340,7 +344,7 @@ substitute `template.version.last_release` / `not_released` / `not_discarded` /
 | {R} | `1R cur=1` | switch(v1) | both | — | allowed (no-op: v is live and eligible) | `1R cur=1` | ACTIVE |
 | {R} | `1R cur=1` | import (subsequent) | both | — | allowed — lands RELEASED; the pointer does NOT move (D60) | `1R 2R cur=1` | ACTIVE |
 | {R,D} | `1R 2D cur=1` | release | dev | — | allowed | `1R 2R cur=2` | ACTIVE |
-| {R,D} | `1R 2D cur=1` | release | dev | draft pins a DRAFT template version | refused `pipeline.release.template_not_released` (§5.3's rule, restated) | `1R 2D cur=1` | ACTIVE |
+| {R,D} | `1R 2D cur=1` | release | dev | draft pins a DRAFT template version | refused `pipeline.release.dependency_not_released` (§5.3's rule, restated) | `1R 2D cur=1` | ACTIVE |
 | {R,D} | `1R 2D cur=1` | release(releasePinnedTemplates) | dev | draft pins a DRAFT template version (template twin: the pinned template releases with it) | allowed — the pinned template version and the pipeline flip in ONE transaction, templates first (§5.3's cascade, 142); a refusal anywhere rolls both back | `1R 2R cur=2` | ACTIVE |
 | {R,D} | `1R 2D cur=1` | purge(v2) | dev | — | allowed — draft + its executions deleted | `1R cur=1` | ACTIVE |
 | {R,D} | `1R 2D cur=1` | purge(v2) | dev | live parent version pins v2 | refused `pipeline.version.pinned` | `1R 2D cur=1` | ACTIVE |
@@ -397,6 +401,16 @@ substitute `template.version.last_release` / `not_released` / `not_discarded` /
 the model test in §13 runs the DOC's rows, not a copy. Editing a row is editing the rule;
 the parser fails the build on a row it cannot read.
 
+**Release across entities, and the twins (#517).** The table models ONE entity, so a release that flips
+dependencies appears only as the `release(releasePinnedTemplates)` row — the legacy alias, its template twin
+releasing with it. A release plan (§5.3: `tree_hash`, `include_dependencies`) is the same transition applied to
+every selected DRAFT in the closure, dependency-first, in one transaction: each selected node takes its own
+`release` row's outcome, and any refused row refuses the whole release. The template twin's `release` row runs
+in one metadata transaction under the workspace writer guard since #517 (it was a bare statement before). Every
+other event in the table — and both import rows, first and subsequent — is a write that changes what a release
+resolves, so it too runs under the writer guard; a guard wait past `lock-wait-seconds` refuses the row with
+`pipeline.release.busy` / `template.release.busy`, nothing written. The table's outcomes are otherwise unchanged.
+
 #### 3.5.3 The reverse arrows into other families (#320)
 
 A visualization and a dashboard pin other artifacts by name and exact version (the design record §4.2:
@@ -434,6 +448,18 @@ while it is discarded. `dashboards`' and `visualizations`' restore therefore re-
 state and refuses `dashboard.validation.dependency_not_found` / `visualization.validation.transform_binding_invalid`
 (`reason: template_not_found` or `template_version_not_found`), naming the dead pin — only the dependency failures; a
 rule that tightened since is not a dangling pin.
+
+Pipelines and parameter sets do the same since #517 (release-dependencies record §12.1, ruled 2026-10-25), under the
+workspace writer guard and from metadata alone (no render, no check gate, no selector dry run, no customer connection).
+A missing or DISCARDED pin refuses with the family's validation code (400): a template pin `template_not_found` /
+`template_version_not_found` (`reason: discarded` when the version is DISCARDED; the version-1 probe tells a missing
+template from a missing version), a pipeline's child pin `pipeline_not_found` / `pipeline_version_not_found` /
+`pipeline_reference_not_released` (`status: DISCARDED`). A present-but-DRAFT pin refuses
+`<family>.release.dependency_not_released` (409, the import-landing precedent, `reason: not_released` in the shared
+blockers shape); no save rule lets a once-released body pin a draft, so that branch is defensive. The dashboard and
+visualization restores have no such branch: they refuse the missing pin only and admit a present-but-DRAFT one. The 400
+answers first. Repair is bottom-up: restore the dependency, then the dependent. A refusal writes nothing — status, pointer and
+audit stand.
 
 **The lens.** `templates_used_by` and the template screen narrow the visualization arm like the others: a hidden
 visualization is never named, and a narrowing view reports RELEASED rows only. The refusals need no lens: every verb above
@@ -713,36 +739,63 @@ shape, bounds and the reader's precedence are [pipeline-contract §3.3.1](pipeli
 Preconditions, evaluated server-side before the statement runs:
 
 1. The expected hash matches the draft (§4.2) — *you release what you tested*.
-2. **Every template version pinned by the draft body is RELEASED** — templates lock first.
-   A pin on a DRAFT template version fails with `pipeline.release.template_not_released`
-   naming the template and version. (Pinning a DRAFT template version from a DRAFT pipeline
-   is legal while iterating — §6 — and only becomes an error at pipeline release time.)
-   The refusal's `details` name the first offending pin at the top level (`template_id`,
-   `template_version`, `template_status`) and, since 142, list every pin that is not
-   RELEASED under `pins_not_released`.
+2. **Every dependency in the draft's release closure is RELEASED, or flips in the same release** —
+   dependencies lock first (#517, release-dependencies record §1, §4). The closure is every template
+   version the body pins and every child pipeline version a PIPELINE node pins, transitively, enumerated
+   within the configured bounds ([configuration §3.35](configuration.md#335-release-dependencies): depth,
+   versions, edges, wire bytes — over a bound refuses `pipeline.release.dependency_limit`, a cycle
+   `pipeline.release.dependency_cycle`). A dependency that is not RELEASED and not flipped by this request
+   refuses `pipeline.release.dependency_not_released` in the shared blockers shape
+   (`{root, blockers:[{node_id, family, name, version, status, reason, paths}], blockers_truncated}`,
+   [REST §5.10](rest-api.md#510-release-pipeline)). (Pinning a DRAFT dependency from a DRAFT pipeline is legal
+   while iterating — §6 — and only becomes an error at release time.) A DISCARDED or MISSING pin is never
+   releasable; a hidden pin answers exactly as an absent one.
 
-   **The cascade (142, owner 2026-09-15: "a headache-free promotion").** The promoter may
-   CONSENT to release the pinned draft templates as part of the same release —
-   `release(…, releasePinnedTemplates = true)`; `?release_pinned_templates=true` over REST;
-   the checked-by-default "Also release these N draft templates" group in the release
-   dialog. Consent is explicit (the default is the refusal above, byte for byte), the write
-   is atomic (every DRAFT pin is released through the `TemplateReleaser` port in the SAME
-   metadata transaction as the pipeline flip, templates first, pipeline last — a refusal
-   anywhere, a template's own preconditions, the pin guard, a stale hash on the flip, a
-   concurrent write, rolls the whole transaction back, so no template is ever left released
-   with the pipeline still a draft), and the audit trail reads as if each template had been
-   released by hand: one `template.version.released` per cascaded template with the direct
-   verb's shape plus `cascade_from_pipeline_id` / `cascade_from_version`, then the pipeline's
-   `pipeline.version.released` with `templates_released: [{template_id, version}]` (an empty
-   list when nothing cascaded). The cascade releases the PINNED version and nothing newer —
-   the pin names the exact version, which is precondition 1 per template without a second
-   hash handshake; a template whose draft is a different version than the pin refuses
-   `template.version.conflict`. A DISCARDED or MISSING pin is NOT releasable and refuses
-   `pipeline.release.template_not_released` exactly as before, flag or no flag. The release
-   check gate (precondition 4) runs before the transaction exactly as now. Promotion receive
-   is unaffected: promoted content arrives RELEASED (§10), so the flag is not exposed there.
-   The same role holds both verbs (auth §7.6, "Release a version"), so the cascade grants no
-   new capability; the MCP surface is untouched — no tool releases anything.
+   **What the request consents to flip.** Explicit consent, never implied; the default is the refusal above.
+   - *No consent* — only the pipeline flips.
+   - *The legacy alias (142, owner 2026-09-15: "a headache-free promotion")* — `releasePinnedTemplates = true`,
+     `?release_pinned_templates=true` over REST, the checked-by-default "Also release these N draft templates"
+     group in the release dialog. It selects exactly the root's DIRECT DRAFT template pins, each released at its
+     PINNED version and nothing newer; a deeper DRAFT is a blocker. Its success response and audit keys are
+     release 142's.
+   - *A release plan (#517)* — `tree_hash` (the preview digest of the closure the caller reviewed),
+     `include_dependencies` (the DRAFT nodes it consents to flip; every reachable DRAFT must be selected) and
+     optionally `check_overrides` (a node's own release-check override reason). The digest is compared before
+     any validation or check work, and again inside the transaction under the writer guard; any drift between
+     preview and submit — a body changed in place without a version change included — refuses
+     `pipeline.release.plan_conflict`. The snapshot includes the resolved entity UUID as well as the body hash;
+     purging and recreating an identical name/version cannot reuse consent. Native preparation reads the body and its
+     database hash together; validation, checks, released entity metadata and the exact-version CAS use that same body.
+     The caller must hold each flipped family's release permission.
+   - *The arming rule* — the alias together with `include_dependencies` is `pipeline.release.plan_invalid` (two
+     authorities); any plan field without `tree_hash` is `428 pipeline.release.plan_required`. The record's
+     428 for a BARE alias (§17 row 6) is armed by one constant, `LegacyReleaseAlias.LEGACY_ALIAS_WITHOUT_PLAN_ADMITTED`,
+     which stays `true` until the release dialog sends `tree_hash` (#522): until then a bare alias is the legacy
+     cascade above, unchanged.
+
+   **One transaction, strictly audited.** Every release — consent or none — runs in ONE metadata transaction:
+   the workspace writer guard first (below), then the dependencies flip dependency-first, each at the hash the
+   closure read, the pipeline last; one `*.version.released` audit row per actual flip is written in that same
+   transaction, and an audit store that refuses the row refuses the release. A refusal anywhere — a dependency's
+   own preconditions, a stale hash on the flip, a concurrent write, the audit row — rolls the whole transaction
+   back, so no dependency is ever left released with the pipeline still a draft. Each cascaded row keeps the
+   direct verb's shape (a template's `cascade_from_pipeline_id` / `cascade_from_version`) plus `cascade_root`;
+   every row of the release shares `release_id` and carries `scope: "version"`; the pipeline's row keeps
+   `templates_released: [{template_id, version}]` (an empty list when nothing cascaded) and gains
+   `dependencies_released`. Each dependency flips by compare-and-set at the exact version and hash the closure
+   read — the pin names the exact version, so there is no second hash handshake per dependency. The release check gate (precondition 4) runs before the transaction, for each
+   flipped node against its draft. Promotion receive is unaffected: promoted content arrives RELEASED (§10), so
+   no consent is exposed there. The same role holds both verbs (auth §7.6, "Release a version"), so consent
+   grants no new capability; the MCP surface is untouched — no tool releases anything.
+
+   **The workspace writer guard (#517, record §4.3).** A release must judge a closure no concurrent write can
+   change under it. Every metadata write that changes what a release resolves — a pipeline, template,
+   parameter-set, visualization or dashboard save, discard, restore, purge, manual switch or import, and a
+   visualization test session's open and submit — runs in a metadata transaction that first locks the
+   workspace's own `workspaces` row (`SET LOCAL lock_timeout` from the server-validated
+   `lock-wait-seconds`, then `SELECT … FOR NO KEY UPDATE`). Writers in one workspace serialise; other workspaces
+   never wait. A wait past the bound answers the writer's family `<family>.release.busy` and nothing is written.
+
 3. Full [pipeline-contract §12](pipeline-contract.md) validation re-runs on the draft body. Release is the final save-time
    gate; nothing is released that the validator would refuse.
 4. **Every release check the body carries passes (140).** When the draft body declares
@@ -848,6 +901,10 @@ datapipelines:
 ---
 
 ## 6. Templates: Same Lifecycle, Plus the Pin Rule
+
+Parameter-set create, draft write and validated import (including promotion receive) recheck template pin existence,
+live status, type and dialect after acquiring the workspace writer guard. Customer selector probes remain outside the
+metadata transaction. A purge or discard that wins before the guard makes the set writer refuse without storing a pin.
 
 `template_versions` gains the identical statuses, hash column, one-draft index, and four
 write paths (mirrored codes `template.version.conflict`, `template.version.not_draft`).
@@ -1170,7 +1227,10 @@ The receiver applies the batch in ONE transaction in that order, then — since 
 parameter sets' entries and, LAST (D61), the batch's **visualizations** and **dashboards**:
 the transfer families bind through the families' strict readers and land inside the
 transaction, where the just-landed templates and pipelines are what the import lens resolves
-against. A refusal at any entry rolls the whole batch back — the templates included.
+against. A refusal at any entry rolls the whole batch back — the templates included. Since #517
+the batch's transaction acquires the workspace writer guard FIRST (§5.3), so no release, purge or
+discard in the receiving workspace interleaves with a batch; a wait past `lock-wait-seconds` refuses
+the batch with `pipeline.release.busy` and nothing lands.
 
 The transfer arms carry one family each (the L1c-b round, O1): a dashboard root's pinned
 visualizations travel as entries of the `visualizations` arm — deduplicated by name + version
@@ -1421,7 +1481,7 @@ and the test goes red (a guard that cannot fail is not a guard).
   predicate and watch these go red.
 - **One-draft index:** second draft insert violates the partial unique index.
 - **Release pin rule:** pipeline release with a DRAFT template pin ⇒
-  `pipeline.release.template_not_released`; with all pins released ⇒ succeeds.
+  `pipeline.release.dependency_not_released`; with all pins released ⇒ succeeds.
 - **Import table (§9.2):** each row of the conflict table as a case; hash recompute guard
   catches a doctored payload; the D60 pointer rule (subsequent import never moves the
   pointer; first import onto a current-less entity sets it).
@@ -1499,6 +1559,7 @@ re-opening it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-24 | v1.30 | #517 release dependencies, core (S1) | **§5.3:** precondition 2 is the release closure (templates and child pipelines, bounded): no consent / the legacy alias (direct template drafts) / a release plan; the arming rule (`LEGACY_ALIAS_WITHOUT_PLAN_ADMITTED`, #522); one transaction, one strict audit row per flip; the workspace writer guard over every pin-affecting write. **§3.5:** the twins paragraph (a plan applies each node's `release` row; every event incl. both imports runs under the guard; `<family>.release.busy`); the table row's code renamed. **§10.4:** the receive batch acquires the guard first. Round three (#719): **§3.5.3** a pipeline's and a parameter set's restore re-judge their outbound pins under the guard (missing/DISCARDED → the family validation code, 400; DRAFT → `<family>.release.dependency_not_released`, 409); §3.1's restore verb and D59 say so. |
 | 2026-10-17 | v1.29 | #563 draft pointer not promotable | §10.2 states the rule: an object whose current pointer names a DRAFT (§3.4's development-posture fallback or a manual switch) is not promotable and is invisible to a promoter whatever releases it holds; it returns when the pointer names a release. §3.4 carries the cross-reference. Code: the pointer-row status travels with the four current-version readers and the promotion derivation filters RELEASED itself (the lens, the listing, the counts and the family inventory read one computation). |
 | 2026-10-06 | v1.28 | #462 draft purge pins | Both pipeline draft purge entry points refuse named inbound pins before deletion; §3.5 adds draft-pin refusal rows and the dashboard reverse arrow, states the existing parent/dashboard scope asymmetry and residual concurrency window; §5.4 states hash precedence and preflight behavior. |
 | 2026-10-06 | v1.27 | 459 (#459) draft dependencies — merge follow-up | **D58 relaxed** (the row was changed by the lane): a draft pipeline may pin a live DRAFT or RELEASED child at save; release and import still require RELEASED children (`pipeline_reference_not_released`). **§3's composition paragraph** now says so (it still said RELEASED-only at save). **§3 graph rule 3 and the "moot" paragraph** no longer rest on "a never-released pipeline cannot be pinned": the pipeline entity purge asks the any-version question (it always ran `refuseIfPinned`). The pipeline draft purges (`purge`, `purgeVersion`) carry no pin guard and now owe one, because a draft parent or a draft dashboard may pin the draft they take. That gap and its traced impact are stated in rule 3 and tracked as #462. |

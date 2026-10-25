@@ -2,6 +2,9 @@ package co.datapipelines.visualization
 
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateRef
+import co.datapipelines.pipeline.release.GuardedTransaction
+import co.datapipelines.pipeline.release.ReleaseFamily
+import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import co.datapipelines.typesystem.DatapipelinesException
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ArrayNode
@@ -45,6 +48,12 @@ data class DashboardImport(
  * RELEASED in its own transaction before the dashboard was judged, evidence-less and unaudited. The
  * lifecycle's inner `transactions.execute` joins this one, exactly as it joins the promotion receive's (the
  * transfer E2E's case 8 proves the join); production wiring passes the metadata manager's template.
+ *
+ * ## The writer guard (#517, release-dependencies record §4.3)
+ * The dashboard import acquires the workspace writer [guard] first inside its one transaction. The visualization
+ * import keeps its accepted per-step shape: the templates land in their own guarded transactions, then the RELEASE
+ * judgement is re-run and the visualization lands in ONE guarded transaction, so no template can be discarded
+ * between the judgement and the landing.
  */
 class ArtifactTransferService(
     private val visualizations: VisualizationService,
@@ -59,6 +68,8 @@ class ArtifactTransferService(
     private val releaseRules: ArtifactImportReleaseRules,
     /** O7: the envelope arrays' count ceiling before their members bind — the family's one `too_many` shape. */
     private val config: VisualizationConfig = VisualizationConfig(),
+    /** #517 — the workspace writer guard; [ReleaseMutationGuard.NONE] in a directly constructed test. */
+    private val guard: ReleaseMutationGuard = ReleaseMutationGuard.NONE,
 ) {
     /** The export envelope of [id]'s CURRENT release. */
     fun exportVisualization(
@@ -116,7 +127,10 @@ class ArtifactTransferService(
         // the pins this workspace does not hold at all).
         releaseRules.judgeVisualization(workspaceId, parsed.export.body)
         bundle.import(workspaceId, parsed.templates, actor)
-        return visualizations.import(workspaceId, parsed.export, actor)
+        return GuardedTransaction.run(transactions, guard, workspaceId, ReleaseFamily.VISUALIZATION) {
+            releaseRules.judgeVisualization(workspaceId, parsed.export.body)
+            visualizations.import(workspaceId, parsed.export, actor)
+        }
     }
 
     /**
@@ -135,6 +149,7 @@ class ArtifactTransferService(
         // transaction (the transfer E2E's case 8 proves the join at the receive; the same mechanism here).
         return checkNotNull(
             transactions.execute {
+                guard.acquire(workspaceId, ReleaseFamily.DASHBOARD)
                 bundled.forEach { parsed ->
                     // O2: each bundled artifact lands RELEASED — the RELEASE rules judge its pins first.
                     releaseRules.judgeVisualization(workspaceId, parsed.export.body)

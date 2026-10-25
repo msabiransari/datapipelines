@@ -1,5 +1,7 @@
 package co.datapipelines.web.api
 
+import co.datapipelines.pipeline.release.ReleaseFamily
+import co.datapipelines.pipeline.release.ReleaseRefusal
 import co.datapipelines.scheduler.ScheduleErrorCodes
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
@@ -60,5 +62,18 @@ class ApiErrorCatalogUserMessageTest {
         val message = ApiErrorCatalog.userMessageFor(co.datapipelines.pipeline.PipelineErrorCodes.Request.QUERY_TOO_LONG)
         message shouldNotBe family
         message shouldContain "${co.datapipelines.pipeline.SearchNeedle.MAX_LENGTH} characters"
+    }
+
+    @Test
+    fun `every family's release-plan refusal speaks the family's release line - never the generic our-side line`() {
+        val generic = ApiErrorCatalog.userMessageFor("no_such_family.no_such_code_probe")
+        val codes = ReleaseFamily.entries.flatMap { family -> ReleaseRefusal.entries.map { family.code(it) } }
+
+        codes.size shouldBe ReleaseFamily.entries.size * ReleaseRefusal.entries.size
+        codes.forEach { code ->
+            withClue("$code is a client refusal answering the generic our-side line — add its family's release line") {
+                ApiErrorCatalog.userMessageFor(code) shouldNotBe generic
+            }
+        }
     }
 }

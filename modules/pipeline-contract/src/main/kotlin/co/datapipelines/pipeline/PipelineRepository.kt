@@ -1,5 +1,6 @@
 package co.datapipelines.pipeline
 
+import co.datapipelines.pipeline.release.RaceSavepoint
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.RowMapper
@@ -373,6 +374,30 @@ class PipelineRepository(
     ): String =
         lifecycle?.let { InventorySource.membership(NavigationFamily.PIPELINES, "pipelines", it, releasedOnly) }
             ?: ENTITY_LIVE
+
+    /** Body and its database-computed hash from ONE statement, bound to the exact draft version. */
+    data class DraftBodySnapshot(
+        val bodyJson: String,
+        val bodyHash: String,
+    )
+
+    /** Reads the bytes checked at release and their hash together; no separate metadata/body race. */
+    fun findDraftBodySnapshot(
+        workspaceId: UUID,
+        pipelineId: UUID,
+        version: Int,
+    ): DraftBodySnapshot? =
+        jdbc
+            .query(
+                """
+                SELECT v.body_json::TEXT AS body_json, v.body_hash
+                  FROM pipeline_versions v JOIN pipelines p ON p.id = v.pipeline_id
+                 WHERE p.workspace_id = :workspaceId AND p.id = :pipelineId
+                   AND v.version = :version AND v.status = 'DRAFT'
+                """.trimIndent(),
+                mapOf("workspaceId" to workspaceId, "pipelineId" to pipelineId, "version" to version),
+            ) { rs, _ -> DraftBodySnapshot(rs.getString("body_json"), rs.getString("body_hash")) }
+            .singleOrNull()
 
     /**
      * The stored body JSON of one version, or null when that version does not exist or the
@@ -832,6 +857,7 @@ class PipelineRepository(
         description: String,
         expectedHash: String,
         actor: UUID,
+        expectedVersion: Int? = null,
     ): Released? =
         mappingDuplicateName(name) {
             jdbc
@@ -844,6 +870,7 @@ class PipelineRepository(
                         "displayName" to displayName,
                         "description" to description,
                         "expectedHash" to expectedHash,
+                        "expectedVersion" to expectedVersion,
                         "actor" to actor,
                     ),
                     RELEASE_MAPPER,
@@ -1180,7 +1207,8 @@ class PipelineRepository(
      * Null when that number is already taken (the sequential case: the `NOT EXISTS` guard
      * suppresses the insert) — the caller re-reads via [findVersionDetail] and classifies
      * per §9.2's table. A TRUE concurrent same-version insert still loses on the PK and
-     * raises the DuplicateKeyException for the same classification.
+     * raises the DuplicateKeyException for the same classification — under a savepoint inside the
+     * writer guard's transaction (#517), so the caller's classification read still answers.
      */
     @Suppress("LongParameterList") // the row's whole shape; a parameter object would just rename these ten
     fun insertReleasedVersion(
@@ -1196,25 +1224,27 @@ class PipelineRepository(
         actor: UUID,
         callerOutputJson: String? = null,
     ): PipelineVersionDetail? =
-        jdbc
-            .query(
-                INSERT_RELEASED_VERSION_SQL,
-                mapOf(
-                    "pipelineId" to pipelineId,
-                    "workspaceId" to workspaceId,
-                    "version" to version,
-                    "name" to name,
-                    "displayName" to displayName,
-                    "description" to description,
-                    "bodyJson" to bodyJson,
-                    "bodyHash" to bodyHash,
-                    "releasedAt" to releasedAt?.let(Timestamp::from),
-                    "actor" to actor,
-                    // #328 — the pushed release's caller-output record; see importPipelineVersion.
-                    "callerOutputJson" to callerOutputJson,
-                ),
-                DETAIL_MAPPER,
-            ).singleOrNull()
+        RaceSavepoint.attempt(jdbc.jdbcTemplate) {
+            jdbc
+                .query(
+                    INSERT_RELEASED_VERSION_SQL,
+                    mapOf(
+                        "pipelineId" to pipelineId,
+                        "workspaceId" to workspaceId,
+                        "version" to version,
+                        "name" to name,
+                        "displayName" to displayName,
+                        "description" to description,
+                        "bodyJson" to bodyJson,
+                        "bodyHash" to bodyHash,
+                        "releasedAt" to releasedAt?.let(Timestamp::from),
+                        "actor" to actor,
+                        // #328 — the pushed release's caller-output record; see importPipelineVersion.
+                        "callerOutputJson" to callerOutputJson,
+                    ),
+                    DETAIL_MAPPER,
+                ).singleOrNull()
+        }
 
     // ---------------------------------------------------------------------------------------------
     // Constraint translation
@@ -1264,13 +1294,16 @@ class PipelineRepository(
      * and `pipeline_versions_pkey` when both computed the same next number — the loser of
      * two simultaneous first-writes must re-read and rebase either way, and the response's
      * job is to point it at what it lost to.
+     *
+     * Inside the writer guard's transaction (#517) the statement runs under a savepoint, so the
+     * winner read still answers (guarded writers never race here; an unguarded one still can).
      */
     private fun <T> mappingDraftRace(
         pipelineId: UUID,
         block: () -> T,
     ): T =
         try {
-            block()
+            RaceSavepoint.attempt(jdbc.jdbcTemplate, block)
         } catch (e: DuplicateKeyException) {
             val message = e.mostSpecificCause.message
             if (message?.contains(DRAFT_INDEX) != true && message?.contains(DRAFT_PK) != true) throw e
@@ -1534,6 +1567,7 @@ class PipelineRepository(
                        )
                   FROM pipelines p
                  WHERE v.pipeline_id = :pipelineId AND v.status = 'DRAFT' AND v.body_hash = :expectedHash
+                   AND (CAST(:expectedVersion AS integer) IS NULL OR v.version = :expectedVersion)
                    AND p.id = v.pipeline_id AND p.workspace_id = :workspaceId
                 RETURNING $DETAIL_COLUMNS
             ), bumped AS (

@@ -25,7 +25,6 @@ internal class PinRules(
     /** Names a selector template may bind without a dependency: the org and platform tiers, minus `execution_id` (P30). */
     private val tierKeys: Set<String>,
 ) {
-    @Suppress("ReturnCount") // one early answer per refused pin shape
     fun check(
         workspaceId: UUID,
         index: Int,
@@ -33,9 +32,24 @@ internal class PinRules(
         byName: Map<String, ParameterDefinition>,
         failures: ParameterSetFailures,
     ) {
-        val source = parameter.source ?: return
-        val ref = source.template ?: return
-        val datasource = source.datasource ?: return
+        if (checkMetadata(workspaceId, index, parameter, failures)) {
+            val at = "parameters[$index].source"
+            interpolation(workspaceId, at, parameter, failures)
+            binds(workspaceId, at, parameter, byName, failures)
+        }
+    }
+
+    /** Local existence/status/type/dialect only; safe while holding the metadata writer guard. */
+    @Suppress("ReturnCount") // one early answer per refused pin shape
+    fun checkMetadata(
+        workspaceId: UUID,
+        index: Int,
+        parameter: ParameterDefinition,
+        failures: ParameterSetFailures,
+        requireLiveStatus: Boolean = false,
+    ): Boolean {
+        val ref = parameter.source?.template ?: return false
+        val datasource = parameter.source.datasource ?: return false
         val at = "parameters[$index].source"
         val facts = datasources.describe(datasource, workspaceId)
         if (facts == null) {
@@ -46,19 +60,17 @@ internal class PinRules(
                 mapOf("datasource" to datasource.safeEcho()),
             )
         }
+        if (requireLiveStatus && !livePin(workspaceId, index, ref, failures)) return false
         val pin = mapOf("template_id" to ref.id.safeEcho(), "template_version" to ref.version)
-        when (val lookup = templates.lookup(workspaceId, ref)) {
+        return when (val lookup = templates.lookup(workspaceId, ref)) {
             TemplateLookup.TemplateNotFound -> {
                 failures.add(ParameterErrorCodes.TEMPLATE_NOT_FOUND, "$at.template", "Template '${ref.id.safeEcho()}' does not exist.", pin)
+                false
             }
 
             TemplateLookup.VersionNotFound -> {
-                failures.add(
-                    ParameterErrorCodes.TEMPLATE_VERSION_NOT_FOUND,
-                    "$at.template",
-                    "Template '${ref.id.safeEcho()}' has no version ${ref.version}.",
-                    pin,
-                )
+                missingVersion(at, ref, failures)
+                false
             }
 
             is TemplateLookup.Found -> {
@@ -69,7 +81,7 @@ internal class PinRules(
                         "Template '${ref.id.safeEcho()}' version ${ref.version} is DISCARDED; pin a live version.",
                         pin + ("reason" to "discarded"),
                     )
-                    return
+                    return false
                 }
                 if (lookup.type != TemplateType.SQL) {
                     failures.add(
@@ -78,7 +90,7 @@ internal class PinRules(
                         "A selector template is type 'sql'; this one is '${lookup.type.wire}'.",
                         pin + ("type" to lookup.type.wire),
                     )
-                    return
+                    return false
                 }
                 if (facts != null && lookup.dialect != facts.dialect) {
                     failures.add(
@@ -88,10 +100,80 @@ internal class PinRules(
                         pin + mapOf("template_dialect" to lookup.dialect?.wire, "datasource_dialect" to facts.dialect.wire),
                     )
                 }
-                interpolation(workspaceId, at, parameter, failures)
-                binds(workspaceId, at, parameter, byName, failures)
+                true
             }
         }
+    }
+
+    /**
+     * A RESTORE's recheck of one selector pin (#517 round three, record §12.1 RULED 2026-10-25): existence and status
+     * only, read from the uncached status port, so the registry cache cannot pass a pin discarded meanwhile. Never the
+     * datasource, type or dialect: a rule that tightened since the version was released is not a dangling pin. Reports a
+     * missing or DISCARDED pin; answers the pin's live status, or null when it has none.
+     */
+    fun restorePin(
+        workspaceId: UUID,
+        index: Int,
+        parameter: ParameterDefinition,
+        failures: ParameterSetFailures,
+    ): PipelineVersionStatus? {
+        val ref = parameter.source?.template ?: return null
+        val at = "parameters[$index].source"
+        val pin = mapOf("template_id" to ref.id.safeEcho(), "template_version" to ref.version)
+        val status = templateStatuses.statusOf(workspaceId, ref.id, ref.version)
+        when {
+            status == PipelineVersionStatus.DISCARDED -> {
+                failures.add(
+                    ParameterErrorCodes.TEMPLATE_VERSION_NOT_FOUND,
+                    "$at.template",
+                    "Template '${ref.id.safeEcho()}' version ${ref.version} is DISCARDED; a restore lands RELEASED and " +
+                        "may pin only a live version.",
+                    pin + ("reason" to "discarded"),
+                )
+            }
+
+            status == null && ref.version != 1 && templateStatuses.statusOf(workspaceId, ref.id, 1) != null -> {
+                missingVersion(at, ref, failures)
+            }
+
+            status == null -> {
+                failures.add(ParameterErrorCodes.TEMPLATE_NOT_FOUND, "$at.template", "Template '${ref.id.safeEcho()}' does not exist.", pin)
+            }
+        }
+        return status.takeUnless { it == PipelineVersionStatus.DISCARDED }
+    }
+
+    private fun missingVersion(
+        at: String,
+        ref: co.datapipelines.pipeline.TemplateRef,
+        failures: ParameterSetFailures,
+    ) {
+        failures.add(
+            ParameterErrorCodes.TEMPLATE_VERSION_NOT_FOUND,
+            "$at.template",
+            "Template '${ref.id.safeEcho()}' has no version ${ref.version}.",
+            mapOf("template_id" to ref.id.safeEcho(), "template_version" to ref.version),
+        )
+    }
+
+    private fun livePin(
+        workspaceId: UUID,
+        index: Int,
+        ref: co.datapipelines.pipeline.TemplateRef,
+        failures: ParameterSetFailures,
+    ): Boolean {
+        if (templateStatuses.statusOf(workspaceId, ref.id, ref.version) in
+            setOf(PipelineVersionStatus.DRAFT, PipelineVersionStatus.RELEASED)
+        ) {
+            return true
+        }
+        failures.add(
+            ParameterErrorCodes.TEMPLATE_VERSION_NOT_FOUND,
+            "parameters[$index].source.template",
+            "The pinned template version is missing or discarded; pin a live version.",
+            mapOf("template_id" to ref.id.safeEcho(), "template_version" to ref.version),
+        )
+        return false
     }
 
     /** §4 step 4: a parent (or a tier key) inside `${}` is refused with the existing template code (042 B2's rule). */

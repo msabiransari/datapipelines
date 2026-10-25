@@ -9,6 +9,7 @@ import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import io.restassured.response.ValidatableResponse
 import org.hamcrest.Matchers.equalTo
+import org.hamcrest.Matchers.nullValue
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
@@ -36,19 +37,33 @@ import java.util.UUID
  * 1. two templates created over MCP land as DRAFT v1 (D55); pipeline A pins both, pipeline B
  *    pins the first — the shared-object shape;
  * 2. releasing A over REST WITHOUT `release_pinned_templates` is refused
- *    `409 pipeline.release.template_not_released` exactly as before 142 — the first pin at
- *    the top level — and `details.pins_not_released` names BOTH draft pins;
- * 3. **atomicity, falsified:** releasing A WITH the flag but a STALE `If-Match` makes the
+ *    `409 pipeline.release.dependency_not_released` in the shared details shape of #517 (record
+ *    §14: `root`, `blockers[]` with `node_id/family/name/version/status/reason/paths`,
+ *    `blockers_truncated`) naming BOTH draft pins — the §14 switch replaced #142's
+ *    `template_id` / `pins_not_released` keys at once, with no deprecation window;
+ * 3. **#517, a plan over a changed snapshot:** a plan carrying the preview's `tree_hash` is
+ *    first proven accepted (an unticked draft answers `dependency_not_released`, which only a
+ *    matching digest reaches), then a template body is edited WITHOUT a version change and the
+ *    same plan is refused `409 pipeline.release.plan_conflict` — statuses and audit unchanged.
+ *    The digest is computed by an oracle of this test's own ([treeHash]), never by the product;
+ * 4. **atomicity, falsified:** releasing A WITH the flag but a STALE `If-Match` makes the
  *    pipeline flip fail AFTER the two templates flipped inside the same transaction. The
  *    answer is `409 pipeline.version.conflict`, both templates are still DRAFT, A is still a
  *    draft, and the audit table carries no released event for any of the three — asserted at
  *    the TABLE, because an in-memory fake cannot see a skipped hop;
- * 4. releasing A with the flag and the right hash releases both templates at their pinned
+ * 5. releasing A with the flag and the right hash releases both templates at their pinned
  *    version and A itself, and the audit log holds three events: one
  *    `template.version.released` per template carrying `cascade_from_pipeline_id` /
  *    `cascade_from_version`, then A's `pipeline.version.released` with `templates_released`;
- * 5. B is untouched and now pins a RELEASED version: it releases WITHOUT the flag, its event
- *    carries an empty `templates_released`, and the shared template was released exactly once.
+ * 6. B is untouched and now pins a RELEASED version: it releases WITHOUT the flag, its event
+ *    carries an empty `templates_released`, and the shared template was released exactly once;
+ * 7. **#517, the plan path:** pipeline C pins a new DRAFT template and the released one; a plan
+ *    ticking the draft releases both in one transaction, the response appends
+ *    `dependencies_released`, and every audit row carries the one `release_id`, the cascaded row
+ *    its `cascade_root`.
+ *
+ * Cases 4–6 are #142's, byte for byte (the brief's falsification 6 replays their responses
+ * captured at the base): the legacy alias keeps its exact behaviour until S6 (#522).
  */
 @SpringBootTest(
     classes = [co.datapipelines.DatapipelinesApplication::class],
@@ -120,6 +135,7 @@ class ReleaseCascadeE2eTest {
             )
         withClue("templates_create must succeed: $payload") { isError shouldBe false }
         withClue("a create lands a DRAFT (D55): $payload") { payload["status"].asText() shouldBe "DRAFT" }
+        templateHashes[templateId] = payload["body_hash"].asText()
     }
 
     private fun createPipeline(
@@ -169,6 +185,91 @@ class ReleaseCascadeE2eTest {
                 .header("If-Match", hash)
         if (cascade) request.queryParam("release_pinned_templates", "true")
         return request.`when`().post("/api/v1/pipelines/$pipelineId/release").then()
+    }
+
+    /** A release with a plan body (#517, record §6): the preview's tree hash and the ticked node ids. */
+    private fun releaseWithPlan(
+        pipelineId: String,
+        hash: String,
+        treeHash: String,
+        include: List<String>,
+    ): ValidatableResponse =
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .header("If-Match", hash)
+            .contentType(ContentType.JSON)
+            .body(mapper.writeValueAsString(mapOf("tree_hash" to treeHash, "include_dependencies" to include)))
+            .`when`()
+            .post("/api/v1/pipelines/$pipelineId/release")
+            .then()
+
+    /** One node of the oracle's snapshot: `[family, pin key, version]`, status, body hash, current pointer. */
+    private data class Snap(
+        val family: String,
+        val key: String,
+        val version: Int,
+        val status: String,
+        val bodyHash: String,
+        val current: Int?,
+    ) {
+        val id: String get() = "[\"$family\",\"$key\",$version]"
+    }
+
+    /**
+     * The plan's tree hash, recomputed INDEPENDENTLY of the product (record §2.1, format `v1`): the canonical UTF-8
+     * serialisation of the workspace, the root identity, every node (identity, status, body hash, current pointer) and
+     * every pin occurrence (from, to, field path), each list sorted by its members' bytes, SHA-256, `v1:` + hex. Every
+     * string in this fixture is plain ASCII without quotes or backslashes, so no escaping is needed and the natural
+     * string order IS the byte order.
+     */
+    private fun treeHash(
+        nodes: List<Snap>,
+        edges: List<Triple<Snap, Snap, String>>,
+    ): String {
+        val root = nodes.first()
+        val nodeJson =
+            nodes.map { n ->
+                val uuid = entityUuid(n)
+                "{\"id\":${n.id},\"entity_uuid\":\"$uuid\",\"status\":\"${n.status}\"," +
+                    "\"body_hash\":\"${n.bodyHash}\",\"current\":${n.current ?: "null"}}"
+            }
+        val edgeJson = edges.map { (from, to, path) -> "{\"from\":${from.id},\"to\":${to.id},\"path\":\"$path\"}" }
+        val canonical =
+            "{\"format\":\"v1\",\"workspace\":\"$MCP_WORKSPACE\",\"root\":${root.id}," +
+                "\"nodes\":${nodeJson.sorted().joinToString(",", "[", "]")},\"edges\":${edgeJson.sorted().joinToString(",", "[", "]")}}"
+        val digest =
+            java.security.MessageDigest
+                .getInstance("SHA-256")
+                .digest(canonical.toByteArray(Charsets.UTF_8))
+        return "v1:" + digest.joinToString("") { "%02x".format(it) }
+    }
+
+    /** Independent UUID lookup, scoped to the workspace and one of the fixture's two static families. */
+    private fun entityUuid(node: Snap): String =
+        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            val sql =
+                when (node.family) {
+                    "pipeline" -> "SELECT id FROM pipelines WHERE workspace_id = ?::uuid AND name = ?"
+                    "template" -> "SELECT id FROM templates WHERE workspace_id = ?::uuid AND name = ?"
+                    else -> error("unsupported fixture family")
+                }
+            connection.prepareStatement(sql).use { statement ->
+                statement.setString(1, MCP_WORKSPACE)
+                statement.setString(2, node.key)
+                statement.executeQuery().use { rows ->
+                    check(rows.next())
+                    rows.getString(1)
+                }
+            }
+        }
+
+    /** A's snapshot as the preview sees it now: A (n0) pins TEMPLATE_ONE (n1) and TEMPLATE_TWO (n2), all DRAFT. */
+    private fun previewOfA(): String {
+        val a = Snap("pipeline", PIPELINE_A, 1, "DRAFT", hashA, null)
+        val one = Snap("template", TEMPLATE_ONE, 1, "DRAFT", templateHashes.getValue(TEMPLATE_ONE), null)
+        val two = Snap("template", TEMPLATE_TWO, 1, "DRAFT", templateHashes.getValue(TEMPLATE_TWO), null)
+        return treeHash(listOf(a, one, two), listOf(Triple(a, one, "nodes[0].template"), Triple(a, two, "nodes[1].template")))
     }
 
     private fun templateStatus(templateId: String): String =
@@ -242,19 +343,28 @@ class ReleaseCascadeE2eTest {
 
     @Test
     @Order(2)
-    fun `without the flag the release is refused template_not_released, naming both draft pins`() {
+    fun `without the flag the release is refused dependency_not_released, naming both draft pins in the shared shape`() {
         release(pipelineA, hashA, cascade = false)
             .statusCode(409)
-            .body("error.code", equalTo("pipeline.release.template_not_released"))
-            // The pre-142 shape, byte for byte: the FIRST offending pin at the top level.
-            .body("error.details.template_id", equalTo(TEMPLATE_ONE))
-            .body("error.details.template_version", equalTo(1))
-            .body("error.details.template_status", equalTo("DRAFT"))
-            .body("error.message", equalTo("Template '$TEMPLATE_ONE' version 1 is not released; release the template first."))
-            // 142: EVERY non-released pin, so a client can decide to retry with the flag.
-            .body("error.details.pins_not_released.size()", equalTo(2))
-            .body("error.details.pins_not_released.collect { it.template_id }", equalTo(listOf(TEMPLATE_ONE, TEMPLATE_TWO)))
-            .body("error.details.pins_not_released.collect { it.template_status }.toSet()", equalTo(setOf("DRAFT")))
+            .body("error.code", equalTo("pipeline.release.dependency_not_released"))
+            .body(
+                "error.message",
+                equalTo("Release blocked: 2 dependencies are not released. Release them first, or include the drafts in this release."),
+            )
+            // #517 (record §14): the shared shape — the root's typed identity, then EVERY blocker in discovery order.
+            .body("error.details.root", equalTo(mapOf("node_id" to "n0", "family" to "pipeline", "name" to PIPELINE_A, "version" to 1)))
+            .body("error.details.blockers.size()", equalTo(2))
+            .body("error.details.blockers.collect { it.node_id }", equalTo(listOf("n1", "n2")))
+            .body("error.details.blockers.collect { it.family }.toSet()", equalTo(setOf("template")))
+            .body("error.details.blockers.collect { it.name }", equalTo(listOf(TEMPLATE_ONE, TEMPLATE_TWO)))
+            .body("error.details.blockers.collect { it.version }.toSet()", equalTo(setOf(1)))
+            .body("error.details.blockers.collect { it.status }.toSet()", equalTo(setOf("DRAFT")))
+            .body("error.details.blockers.collect { it.reason }.toSet()", equalTo(setOf("not_included")))
+            .body("error.details.blockers.collect { it.paths }", equalTo(listOf(listOf("nodes[0].template"), listOf("nodes[1].template"))))
+            .body("error.details.blockers_truncated", equalTo(false))
+            // The §14 switch: the #142 keys are gone, not answered alongside.
+            .body("error.details.template_id", nullValue())
+            .body("error.details.pins_not_released", nullValue())
 
         templateStatus(TEMPLATE_ONE) shouldBe "DRAFT"
         templateStatus(TEMPLATE_TWO) shouldBe "DRAFT"
@@ -263,6 +373,51 @@ class ReleaseCascadeE2eTest {
 
     @Test
     @Order(3)
+    fun `a plan over a template edited after the preview is plan_conflict - statuses and audit unchanged`() {
+        val preview = previewOfA()
+        // Non-vacuity: the oracle's digest is the product's — an unticked draft can only be judged after step 3 passed.
+        releaseWithPlan(pipelineA, hashA, preview, listOf("n1"))
+            .statusCode(409)
+            .body("error.code", equalTo("pipeline.release.dependency_not_released"))
+            .body("error.details.blockers.collect { it.name }", equalTo(listOf(TEMPLATE_TWO)))
+
+        // The edit: a new body for the DRAFT, in place — same version, new hash (§5.2).
+        val (updated, updateError) =
+            callTool(
+                5,
+                "templates_update",
+                mapOf(
+                    "id" to TEMPLATE_ONE,
+                    "expected_hash" to templateHashes.getValue(TEMPLATE_ONE),
+                    "display_name" to "Release cascade (142)",
+                    "description" to "Expects: nothing (plain SQL).",
+                    "body" to "SELECT 2 AS n",
+                ),
+            )
+        withClue("templates_update must succeed: $updated") { updateError shouldBe false }
+        withClue("the edit keeps the version: $updated") { updated["version"].asInt() shouldBe 1 }
+        templateHashes[TEMPLATE_ONE] = updated["body_hash"].asText()
+
+        releaseWithPlan(pipelineA, hashA, preview, listOf("n1", "n2"))
+            .statusCode(409)
+            .body("error.code", equalTo("pipeline.release.plan_conflict"))
+            .body("error.details.reason", equalTo("snapshot_changed"))
+
+        withClue("nothing flipped and nothing was audited") {
+            templateStatus(TEMPLATE_ONE) shouldBe "DRAFT"
+            templateStatus(TEMPLATE_TWO) shouldBe "DRAFT"
+            pipelineStatus(pipelineA) shouldBe "DRAFT"
+            auditRows("template.version.released", TEMPLATE_ONE).size shouldBe 0
+            auditRows("pipeline.version.released", pipelineA).size shouldBe 0
+        }
+        // The re-read preview is accepted again — the conflict was the edit, not the request.
+        releaseWithPlan(pipelineA, hashA, previewOfA(), listOf("n1"))
+            .statusCode(409)
+            .body("error.code", equalTo("pipeline.release.dependency_not_released"))
+    }
+
+    @Test
+    @Order(4)
     fun `atomicity falsified - a stale hash after the templates flipped rolls everything back and audits nothing`() {
         // The stale hash is the injected failure: the service releases both templates FIRST
         // (inside the metadata transaction), then the pipeline's flip statement matches no
@@ -285,7 +440,7 @@ class ReleaseCascadeE2eTest {
     }
 
     @Test
-    @Order(4)
+    @Order(5)
     fun `with the flag both templates release at their pinned version, then the pipeline - three audit events`() {
         release(pipelineA, hashA, cascade = true)
             .statusCode(200)
@@ -331,7 +486,7 @@ class ReleaseCascadeE2eTest {
     }
 
     @Test
-    @Order(5)
+    @Order(6)
     fun `the second draft pipeline now pins a RELEASED version - it releases without the flag, cascading nothing`() {
         pipelineStatus(pipelineB) shouldBe "DRAFT"
 
@@ -346,9 +501,202 @@ class ReleaseCascadeE2eTest {
         auditRows("template.version.released", TEMPLATE_ONE).size shouldBe 1
     }
 
+    @Test
+    @Order(7)
+    fun `a plan ticking a draft template releases it and the pipeline in one transaction, audited under one release_id`() {
+        createTemplate(6, TEMPLATE_THREE)
+        val (pipelineC, hashC) = createPipeline(7, PIPELINE_C, listOf(TEMPLATE_THREE, TEMPLATE_ONE))
+        val c = Snap("pipeline", PIPELINE_C, 1, "DRAFT", hashC, null)
+        val three = Snap("template", TEMPLATE_THREE, 1, "DRAFT", templateHashes.getValue(TEMPLATE_THREE), null)
+        val one = Snap("template", TEMPLATE_ONE, 1, "RELEASED", templateHashes.getValue(TEMPLATE_ONE), 1)
+        val preview = treeHash(listOf(c, three, one), listOf(Triple(c, three, "nodes[0].template"), Triple(c, one, "nodes[1].template")))
+
+        releaseWithPlan(pipelineC, hashC, preview, listOf("n1"))
+            .statusCode(200)
+            .body("data.status", equalTo("RELEASED"))
+            .body("data.dependencies_released", equalTo(listOf(mapOf("family" to "template", "name" to TEMPLATE_THREE, "version" to 1))))
+
+        templateStatus(TEMPLATE_THREE) shouldBe "RELEASED"
+        val templateRow = auditRows("template.version.released", TEMPLATE_THREE).single()
+        val pipelineRow = auditRows("pipeline.version.released", pipelineC).single()
+        templateRow["scope"].asText() shouldBe "version"
+        templateRow["release_id"].asText() shouldBe pipelineRow["release_id"].asText()
+        templateRow["cascade_root"]["family"].asText() shouldBe "pipeline"
+        templateRow["cascade_root"]["id"].asText() shouldBe pipelineC
+        templateRow["cascade_root"]["version"].asInt() shouldBe 1
+        pipelineRow.has("cascade_root") shouldBe false
+        pipelineRow["dependencies_released"].map { it["name"].asText() } shouldBe listOf(TEMPLATE_THREE)
+        // TEMPLATE_ONE was RELEASED already: a released pin is shown, never flipped again.
+        auditRows("template.version.released", TEMPLATE_ONE).size shouldBe 1
+    }
+
+    @Suppress("LongMethod") // the exact supported unpin/purge/recreate/restore/submit sequence is one acceptance witness
+    @Test
+    @Order(8)
+    fun `purge and identical recreation under the same child name refuses the old plan`() {
+        val childName = "test/recreated_517b_child"
+        val parentName = "test/recreated_517b_parent"
+        val (childId, childHash) = createPipeline(81, childName, listOf(TEMPLATE_ONE))
+        val parentArgs =
+            mapOf(
+                "name" to parentName,
+                "display_name" to "Parent",
+                "description" to "Recreation witness",
+                "nodes" to
+                    listOf(
+                        mapOf(
+                            "id" to "child",
+                            "type" to "PIPELINE",
+                            "pipeline" to mapOf("name" to childName, "version" to 1),
+                            "depends_on" to emptyList<String>(),
+                        ),
+                    ),
+            )
+        val (parent, failed) = callTool(82, "pipelines_create", parentArgs)
+        withClue("parent created: $parent") { failed shouldBe false }
+        val parentId = parent["id"].asText()
+        val parentHash = parent["draft"]["body_hash"].asText()
+        val root = Snap("pipeline", parentName, 1, "DRAFT", parentHash, null)
+        val child = Snap("pipeline", childName, 1, "DRAFT", childHash, null)
+        val template = Snap("template", TEMPLATE_ONE, 1, "RELEASED", templateHashes.getValue(TEMPLATE_ONE), 1)
+        val preview =
+            treeHash(
+                listOf(root, child, template),
+                listOf(
+                    Triple(root, child, "nodes[0].pipeline"),
+                    Triple(child, template, "nodes[0].template"),
+                ),
+            )
+        // A matching old plan reaches selection validation before any mutation.
+        releaseWithPlan(parentId, parentHash, preview, emptyList())
+            .statusCode(409)
+            .body("error.code", equalTo("pipeline.release.dependency_not_released"))
+        val unpinnedArgs =
+            parentArgs +
+                mapOf(
+                    "nodes" to
+                        listOf(
+                            mapOf(
+                                "id" to "n0",
+                                "type" to "DQL",
+                                "source" to DATASOURCE,
+                                "template" to mapOf("id" to TEMPLATE_ONE, "version" to 1),
+                                "depends_on" to emptyList<String>(),
+                            ),
+                        ),
+                )
+        val (unpinned, unpinError) = callTool(83, "pipelines_update", unpinnedArgs + mapOf("id" to parentId, "expected_hash" to parentHash))
+        withClue("unpin succeeds: $unpinned") { unpinError shouldBe false }
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .`when`()
+            .delete("/api/v1/pipelines/$childId/versions/1")
+            .then()
+            .statusCode(204)
+        val (newId, newHash) = createPipeline(84, childName, listOf(TEMPLATE_ONE))
+        (newId != childId) shouldBe true
+        newHash shouldBe childHash
+        val (restored, restoreError) =
+            callTool(
+                85,
+                "pipelines_update",
+                parentArgs +
+                    mapOf(
+                        "id" to parentId,
+                        "expected_hash" to unpinned["draft"]["body_hash"].asText(),
+                    ),
+            )
+        withClue("restore succeeds: $restored") { restoreError shouldBe false }
+        restored["draft"]["body_hash"].asText() shouldBe parentHash
+        val response = releaseWithPlan(parentId, parentHash, preview, listOf("n1")).extract().response()
+        val parentStatus = pipelineStatus(parentId)
+        val childStatus = pipelineStatus(newId)
+        val parentAudits = auditRows("pipeline.version.released", parentId).size
+        val childAudits = auditRows("pipeline.version.released", newId).size
+        withClue("HTTP ${response.statusCode}; parent=$parentStatus child=$childStatus; release audits=$parentAudits/$childAudits") {
+            response.statusCode shouldBe 409
+            response.jsonPath().getString("error.code") shouldBe "pipeline.release.plan_conflict"
+            parentStatus shouldBe "DRAFT"
+            childStatus shouldBe "DRAFT"
+            parentAudits shouldBe 0
+            childAudits shouldBe 0
+        }
+    }
+
+    /**
+     * #517 round three — the lander's refusal of 887784d59 (comment 6399333063), replayed: a restore lands RELEASED with no
+     * human's consent, so it rechecks the restored version's outbound pins under the workspace guard. A template version
+     * discarded after the pipeline refuses the restore with the save rules' code (400, record §12.1 RULED 2026-10-25 — the
+     * D7 precedent): the parent and the template stay DISCARDED and no restore audit row commits. Relies on order 1's
+     * datasource.
+     */
+    @Test
+    @Order(9)
+    fun `restore rechecks outbound pins - a template discarded after the pipeline refuses 400 and writes nothing`() {
+        val template = "test/restore_517_outbound.sql"
+        createTemplate(901, template)
+        val (id, hash) = createPipeline(902, "test/restore_517_outbound", listOf(template))
+        release(id, hash, cascade = true).statusCode(200)
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .post("/api/v1/pipelines/$id/versions/1/discard")
+            .then()
+            .statusCode(200)
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .asSession(ADMIN_SESSION)
+            .body(mapOf("name" to template, "version" to 1))
+            .post("/api/v1/templates/version/discard")
+            .then()
+            .statusCode(200)
+
+        val response = given().port(port).asSession(ADMIN_SESSION).post("/api/v1/pipelines/$id/versions/1/restore")
+
+        val (parent, target) = versionStatuses(id, template)
+        val restores = auditRows("pipeline.version.restored", id).size
+        withClue(
+            "restore HTTP ${response.statusCode} ${response.body.asString()}; parent=$parent template=$target restoreAudits=$restores",
+        ) {
+            response.statusCode shouldBe 400
+            response.jsonPath().getString("error.code") shouldBe "pipeline.validation.template_version_not_found"
+            response.jsonPath().getString("error.details.failures[0].path") shouldBe "nodes[0].template"
+            response.jsonPath().getString("error.details.failures[0].details.reason") shouldBe "discarded"
+            parent shouldBe "DISCARDED"
+            target shouldBe "DISCARDED"
+            restores shouldBe 0
+        }
+    }
+
+    /** The parent's v1 status and the template's v1 status, read at the TABLES (the parent is wholly discarded). */
+    private fun versionStatuses(
+        pipelineId: String,
+        templateId: String,
+    ): Pair<String, String> =
+        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            connection
+                .prepareStatement(
+                    "SELECT (SELECT status FROM pipeline_versions WHERE pipeline_id = ?::uuid AND version = 1)," +
+                        " (SELECT tv.status FROM template_versions tv JOIN templates t ON t.id = tv.template_id" +
+                        " WHERE t.name = ? AND t.workspace_id = ?::uuid AND tv.version = 1)",
+                ).use { statement ->
+                    statement.setString(1, pipelineId)
+                    statement.setString(2, templateId)
+                    statement.setString(3, MCP_WORKSPACE)
+                    statement.executeQuery().use { rows ->
+                        check(rows.next())
+                        rows.getString(1) to rows.getString(2)
+                    }
+                }
+        }
+
     companion object {
         private const val TEMPLATE_ONE = "test/cascade_142_one.sql"
         private const val TEMPLATE_TWO = "test/cascade_142_two.sql"
+        private const val TEMPLATE_THREE = "test/cascade_517_three.sql"
+        private const val PIPELINE_C = "test/cascade_517_c"
         private const val PIPELINE_A = "test/cascade_142_a"
         private const val PIPELINE_B = "test/cascade_142_b"
         private const val DATASOURCE = "h2-cascade-142"
@@ -374,6 +722,7 @@ class ReleaseCascadeE2eTest {
         private var hashA: String = ""
         private var pipelineB: String = ""
         private var hashB: String = ""
+        private val templateHashes = mutableMapOf<String, String>()
 
         private val postgres get() = SharedE2e.postgres
         private val redis get() = SharedE2e.redis

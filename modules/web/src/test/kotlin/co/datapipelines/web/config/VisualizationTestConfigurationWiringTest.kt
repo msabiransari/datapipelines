@@ -63,6 +63,11 @@ class VisualizationTestConfigurationWiringTest {
     @Configuration
     @Suppress("unused")
     class Collaborators {
+        /** #517 — the workspace writer guard the services now require; the graph, not the lock, is under test here. */
+        @Bean
+        fun releaseMutationGuard(): co.datapipelines.pipeline.release.ReleaseMutationGuard =
+            co.datapipelines.pipeline.release.ReleaseMutationGuard.NONE
+
         private fun dataSource(): javax.sql.DataSource = io.mockk.mockk(relaxed = true)
 
         @Bean

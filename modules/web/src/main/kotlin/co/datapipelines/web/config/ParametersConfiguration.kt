@@ -76,6 +76,7 @@ class ParametersConfiguration {
     ): ParameterSetValidator = ParameterSetValidator(config, registry, statuses, datasources, probe)
 
     @Bean
+    @Suppress("LongParameterList") // one collaborator per seam; #517 added the writer guard
     fun parameterSetService(
         repository: ParameterSetRepository,
         validator: ParameterSetValidator,
@@ -85,6 +86,10 @@ class ParametersConfiguration {
         consumers: co.datapipelines.parameters.ParameterSetConsumers,
         releaser: TemplateReleaser,
         transactionManager: PlatformTransactionManager,
+        // #517 — every pin-affecting set write under the workspace writer guard (release-dependencies §4.3).
+        guard: co.datapipelines.pipeline.release.ReleaseMutationGuard,
+        // #517 round three — the blockers one restore refusal lists.
+        bounds: co.datapipelines.pipeline.release.ReleaseBounds,
     ): ParameterSetService =
         ParameterSetService(
             repository,
@@ -97,6 +102,8 @@ class ParametersConfiguration {
             // cascade and the import are all-or-nothing over the same rows the template
             // import writes (the PromotionReceiveService precedent).
             transactions = TransactionTemplate(transactionManager) as TransactionOperations,
+            guard = guard,
+            maxBlockers = bounds.maxBlockers,
         )
 
     /** #376 — the durable evaluation history's tables (V48), read by the History tab and the hourly housekeeping. */

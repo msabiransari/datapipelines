@@ -245,6 +245,11 @@ object LifecycleVerbs {
      * `pipeline.version.released` naming them. Called only after the service returned, i.e.
      * after the one transaction committed; a refusal anywhere threw before this and logs
      * nothing, which is the audit half of the cascade's atomicity.
+     *
+     * Since #517 a release through the release coordinator arrives with every row already written, strictly, inside
+     * its own transaction ([co.datapipelines.pipeline.PipelineReleaseService.Released.auditedInTransaction]); this emits
+     * nothing for it, so no release is audited twice (record §11). Only a directly constructed service reaches the rows
+     * below.
      */
     fun auditRelease(
         sink: AuditEventSink,
@@ -253,6 +258,7 @@ object LifecycleVerbs {
         pipelineId: UUID,
         released: co.datapipelines.pipeline.PipelineReleaseService.Released,
     ) {
+        if (released.auditedInTransaction) return
         val source = CascadeSource(pipelineId, released.version.version)
         released.templatesReleased.forEach { template ->
             audit(

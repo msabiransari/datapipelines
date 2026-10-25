@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.101 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.102 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-10-25
@@ -134,7 +134,7 @@ Every 4xx and 5xx response uses this shape:
 
 One envelope answers **before any handler**: a request body over the platform cap ([Configuration §3.31](configuration.md#331-web-request-limits)) is refused at a servlet filter with `413 request.body_too_large` (`details.limit_bytes`) on `/api/v1` and `/mcp` alike — the pre-handler 413 (the parameter engine's evaluate response budget answers 413 too — pipeline-contract §13.20), carried before authentication and before any parser reads the body (pipeline-contract §13.21).
 
-A body **within** the cap that cannot be read — not JSON, or nested past §13.21's stated depth of 100 — is the route family's malformed-body `400` with `details.reason: malformed_json` on EVERY route, including the ones that take their body as text and parse it themselves (#291): the templates routes (create, update, the lifecycle verbs, render, evaluate, import), pipelines create, update and import, execute, and the parameter-set routes (create, update, evaluate, import — #323; the family's code is `parameter.validation.body_invalid`). Until #291 a malformed body on templates create/update/import and pipelines create/update/import reached the `500` backstop, and those routes parsed under Jackson's inherited depth of 1000; the parameter-set routes did the same until #323.
+A body **within** the cap that cannot be read — not JSON, or nested past §13.21's stated depth of 100 — is the route family's malformed-body `400` with `details.reason: malformed_json` on EVERY route, including the ones that take their body as text and parse it themselves (#291): the templates routes (create, update, the lifecycle verbs, render, evaluate, import), pipelines create, update, import and the release plan body (#517), execute, and the parameter-set routes (create, update, evaluate, import — #323; the family's code is `parameter.validation.body_invalid`). Until #291 a malformed body on templates create/update/import and pipelines create/update/import reached the `500` backstop, and those routes parsed under Jackson's inherited depth of 1000; the parameter-set routes did the same until #323.
 
 **Scalar shapes (#333).** A body that reads but carries a JSON value of the wrong SHAPE — a number or boolean where the contract declares a string, a string or float where it declares an integer — is refused with the path and the expected shape, never bound as text and never echoing the value (`"name": 12` is no longer the key named "12"). The answer is each family's own: `pipeline.validation.schema_version_unsupported` with `details.reason: "wrong_type"` on a pipeline body, `template.contract_invalid` with `details.rule: "wrong_type"` on a template body or a script block (including the `input` of `…/evaluate`), and `pipeline.execution.invalid_parameter_type` with `details.reason` `wrong_type` / `unknown_key` / `missing` and `details.path` on the five routes that bind a typed request body (`POST /auth/api-keys` §16.1, `POST /endpoints` and `POST /endpoints/bindings` §19.5, `POST /promotion/push` §18.2, `POST /dashboards/bindings` §23.2). Every echoed path or key is clipped to 160 characters. The status stays `400`; see [Pipeline Contract §13.21](pipeline-contract.md#1321-request-limits).
 
@@ -313,14 +313,16 @@ outcome is "already in that state".
 POST /pipelines/{id}/release
 If-Match: <the draft's body_hash>
 [?override_checks_reason=<text — only when a check is failing>]
-[?release_pinned_templates=true — consent to release the DRAFT template versions the body pins]
+[?release_pinned_templates=true — the legacy consent: release the DRAFT template versions the body pins directly]
+[Content-Type: application/json — optional release plan body (#517):]
+[{"tree_hash": "<preview digest>", "include_dependencies": ["n1", "n2"], "check_overrides": [{"node_id": "n1", "reason": "…"}]}]
 ```
 
 Locks the draft: the version flips to RELEASED, `pipelines.current_version` moves to it,
 and the index row's name/display_name/description adopt the released body's values
 (metadata rides the release — versioning §3.5). Preconditions evaluated server-side:
 §12 re-validation on the draft body; every pinned template version RELEASED
-(`409 pipeline.release.template_not_released` naming it); the hash guard
+(`409 pipeline.release.dependency_not_released` naming it); the hash guard
 (`409 pipeline.version.conflict`); no draft at all (`409 pipeline.version.not_draft`);
 and — when the body carries [`checks[]`](pipeline-contract.md#33-release-checks-checks) —
 **the release-check gate** (versioning §5.3 precondition 4): a fresh check run whose every
@@ -329,19 +331,68 @@ observed and message per failing check). Releasing past a failing check needs
 `override_checks_reason`, a non-blank reason of ≥ 10 characters, and is recorded:
 `pipeline.version.released` gains `checks_overridden: [ids]` and `override_reason`. A
 version with no checks releases exactly as before.
-**The cascade (142, versioning §5.3):** without `release_pinned_templates` a DRAFT template pin
-refuses `409 pipeline.release.template_not_released` exactly as before — `details.template_id`
-/ `template_version` / `template_status` name the first offending pin, and
-`details.pins_not_released` lists EVERY pin that is not RELEASED, so a client can decide whether
-retrying with the flag would succeed (all DRAFT) or not (a DISCARDED or MISSING pin, which is
-never releasable). With `release_pinned_templates=true` every DRAFT pin is released at its
-pinned version in the SAME transaction as the pipeline flip, templates first; any refusal
-(a template's own preconditions, a stale `If-Match`, a concurrent write) rolls the whole
-transaction back. Each cascaded release is audited as `template.version.released` with
-`cascade_from_pipeline_id` / `cascade_from_version`, and the pipeline's event carries
-`templates_released: [{template_id, version}]` (empty when nothing cascaded). The flag rides the
-query like `override_checks_reason`, for the same reason: the endpoint has no body. The same
-role holds both release verbs (auth §7.6), so the flag grants no new capability.
+**Dependencies (142, #517, versioning §5.3):** the release takes the draft's whole release closure into
+account — every template version it pins and every child pipeline version a PIPELINE node pins, transitively,
+within the configured bounds ([configuration §3.35](configuration.md#335-release-dependencies)). A release flips
+only RELEASED-ready work: every dependency must already be RELEASED or be flipped by the same request.
+Anything else refuses `409 pipeline.release.dependency_not_released` before anything is written, in the
+**shared blockers shape** every family's `<family>.release.dependency_not_released` uses (pipeline-contract
+§13, release-dependencies record §14):
+
+```json
+{"root": {"node_id": "n0", "family": "pipeline", "name": "acme/daily", "version": 3},
+ "blockers": [{"node_id": "n2", "family": "template", "name": "acme/one.sql", "version": 2,
+               "status": "DRAFT", "reason": "not_included", "paths": ["nodes[1].template"]}],
+ "blockers_truncated": false}
+```
+
+`node_id` is an opaque locator inside this one closure snapshot, never an entity id; `status` is `DRAFT`,
+`DISCARDED` or `MISSING`; `reason` is `not_included` (a DRAFT the request did not consent to), `discarded` or
+`missing`, and on a restore's refusal (§5.13) `not_released` (a DRAFT a restore cannot include); `paths` names the pin fields that reach the node (`nodes[1].pipeline/nodes[0].template`). A pin that is
+absent and a pin the caller may not see are the same `MISSING` blocker, byte for byte.
+At most `max-blockers` are listed in closure discovery order; the rest set `blockers_truncated`.
+
+Three request shapes consent to flipping dependencies:
+
+- **No plan, no flag** — only the pipeline flips; every dependency must already be RELEASED.
+- **`release_pinned_templates=true`, no plan (the legacy alias)** — the root's DIRECT DRAFT template pins are
+  released at their pinned versions in the SAME transaction as the pipeline flip, templates first. A deeper
+  DRAFT (a child pipeline, a child's template) is a `not_included` blocker. The alias is admitted without a
+  plan until the release dialog sends `tree_hash` (#522); a successful response carries release 142's bytes.
+- **A plan body** — `tree_hash` is the preview digest of the closure the caller reviewed, and
+  `include_dependencies` lists the DRAFT nodes it consents to flip (each a node of that snapshot, none twice,
+  never the root, only DRAFTs). Every reachable DRAFT must be selected. `check_overrides` gives a node its own
+  release-check override reason (the root's may instead ride `override_checks_reason`, never both). The digest
+  is compared BEFORE any validation or check work and again inside the transaction under the workspace
+  writer guard; any drift between preview and submit — a new pin, a status change, a body changed in place —
+  refuses `409 pipeline.release.plan_conflict` and nothing flips. The caller must hold each flipped family's
+  release permission (auth §7.6). The response appends `dependencies_released: [{family, name, version}]` in
+  release order; a request without a plan never carries the field.
+
+A body whose bytes cannot be read — not JSON, or nested past the request bound — is the pipeline family's
+malformed-body 400 (`details.reason: malformed_json`, [§13.21](pipeline-contract.md#1321-request-limits)), refused before any lookup like
+every string body. Plan refusals: `428 pipeline.release.plan_required` — a plan field without `tree_hash`; `400
+pipeline.release.plan_invalid` — a body that is not a JSON object, a field the plan does not have, a node id that
+is not a DRAFT dependency of the snapshot, a duplicate, an override for a node the plan does not flip, or the
+alias together with `include_dependencies` (`details: {field, reason}`, the field a locator such as
+`include_dependencies[2]`, never the submitted value); `422 pipeline.release.dependency_limit` — the closure or
+the body exceeds a configured bound (`details: {limit, maximum}`, `limit` one of `depth`, `versions`, `edges`,
+`wire_bytes`); `409 pipeline.release.dependency_cycle` — the pins form a cycle (`details.path`, the visible
+nodes' identities); `409 pipeline.release.busy` — another write in the workspace held the writer guard longer
+than `lock-wait-seconds` (`details.lock_wait_seconds`; nothing was written, retry). Every metadata write that
+changes what a release resolves — a save, a discard, a restore, a purge, a manual switch, an import, a
+visualization test session's evidence — takes the same workspace writer guard first, so each can answer its own
+family's `<family>.release.busy` the same way ([versioning §5.3](versioning.md#53-release-lock)).
+
+Every release — with or without a plan — is ONE metadata transaction: the dependencies flip first (each at the
+hash the closure read), the pipeline last, and one `*.version.released` audit row per actual flip is written
+in that same transaction, strictly (an audit store that refuses the row refuses the release). Any refusal —
+a dependency's own preconditions, a stale `If-Match`, a concurrent write, the audit row — rolls the whole
+release back. The audit rows of one release share `release_id`, carry `scope: "version"`, the cascaded rows
+`cascade_root: {family, id, version}`, and the pipeline's row `dependencies_released`; the 142 keys stay —
+each cascaded template row keeps `cascade_from_pipeline_id` / `cascade_from_version`, and the pipeline's row
+`templates_released: [{template_id, version}]` (empty when nothing cascaded). The same role holds both release
+verbs (auth §7.6), so neither the flag nor a plan grants a new capability.
 UI-driven in practice — agents never release (versioning D4); no MCP tool exists. Over REST
 the verb needs `pipeline.release` — an author's or workspace admin's session (release is the
 author's since 2026-09-20, D8); no key reaches it (the MCP key is confined to `/mcp` since #215
@@ -420,8 +471,12 @@ POST /pipelines/{id}/versions/{v}/restore
 
 Returns DISCARDED version v to RELEASED (101): the original `released_at`/`released_by`
 return untouched, the discard stamps clear, and the pointer moves only when v > current or
-current is NULL. `409 pipeline.version.not_discarded` otherwise. **Session-only**; audited
-as `pipeline.version.restored`.
+current is NULL. `409 pipeline.version.not_discarded` otherwise. Under the workspace writer guard the
+version's outbound pins are re-judged first (#517, versioning §3.5.3): a missing or DISCARDED template or
+child pin is `400` with §12's validation code (`template_not_found`, `template_version_not_found` with
+`reason: discarded`, `pipeline_not_found`, `pipeline_version_not_found`, `pipeline_reference_not_released`),
+a present-but-DRAFT one `409 pipeline.release.dependency_not_released` in §5.10's blockers shape
+(`reason: not_released`); a refusal writes nothing. **Session-only**; audited as `pipeline.version.restored`.
 
 Response: `200 OK` with the pipeline's full shape.
 
@@ -1179,8 +1234,9 @@ If-Match: <the draft's body_hash>
 
 Locks the template draft (§5.10's mirror; templates lock BEFORE pipelines — versioning
 §6's pin rule is enforced at pipeline release). Errors: `template.version.not_draft`,
-`template.version.conflict`, or the template validator's §13.9 codes re-run on the draft
-content. **Audited** as `template.version.released` (`template_id`, `version`, `via`). Response: `200 OK` with the released version.
+`template.version.conflict`, the template validator's §13.9 codes re-run on the draft
+content, or `template.release.busy` — the flip runs in one metadata transaction under the
+workspace writer guard (#517, §5.10). **Audited** as `template.version.released` (`template_id`, `version`, `via`). Response: `200 OK` with the released version.
 
 ### 8.10 Purge template draft
 
@@ -2493,10 +2549,10 @@ Reads follow the working-version rule ([Versioning §7.1](versioning.md#71-autho
 | `GET /api/v1/parameter-sets/{id}/versions` | `parameter_set.read` | Version metadata, newest first; no bodies. |
 | `GET /api/v1/parameter-sets/{id}/versions/{version}` | `parameter_set.read` | One version. A version other than RELEASED is 404 under a narrowing lens (the promoter's). |
 | `PUT /api/v1/parameter-sets/{id}` | `parameter_set.update` | The draft write (copy-on-write, then in-place; `If-Match` required). The hash precondition is checked BEFORE the body is parsed. An identical body is a no-op and reports the current state. |
-| `POST /api/v1/parameter-sets/{id}/release?release_pinned_templates=` | `parameter_set.release` | Release (lock) the draft. Every pinned template version must be RELEASED (`409 parameter.release.template_not_released`, `details.pins_not_released`) — or, with `release_pinned_templates=true`, is released WITH the set in one transaction, templates first (142). Release re-runs the §4 source validation against the pins as they are now. |
+| `POST /api/v1/parameter-sets/{id}/release?release_pinned_templates=` | `parameter_set.release` | Release (lock) the draft. Every pinned template version must be RELEASED (`409 parameter.release.dependency_not_released`, `details.pins_not_released`) — or, with `release_pinned_templates=true`, is released WITH the set in one transaction, templates first (142). Release re-runs the §4 source validation against the pins as they are now. |
 | `POST /api/v1/parameter-sets/{id}/draft/discard` | `parameter_set.version.manage` | Purge the DRAFT (versioning §5.4); the sole draft takes the set with it. Session-only. **`409 parameter.in_use`** while a dashboard pins it (#320) — see the note below the table. |
 | `POST /api/v1/parameter-sets/{id}/versions/{version}/discard` | `parameter_set.version.manage` | Discard a RELEASED version (reversible); the pointer falls back per D60. `409 parameter.in_use` while a live dashboard version pins it (#320). |
-| `POST /api/v1/parameter-sets/{id}/versions/{version}/restore` | `parameter_set.version.manage` | Restore a DISCARDED version; the pointer moves only above-current-or-NULL. |
+| `POST /api/v1/parameter-sets/{id}/versions/{version}/restore` | `parameter_set.version.manage` | Restore a DISCARDED version; the pointer moves only above-current-or-NULL. Its selector-template pins are re-judged first under the writer guard (#517): missing or DISCARDED → `400 parameter.validation.template_not_found` / `template_version_not_found`; DRAFT → `409 parameter.release.dependency_not_released` (§5.10's shape, `reason: not_released`). |
 | `DELETE /api/v1/parameter-sets/{id}/versions/{version}` | `parameter_set.version.manage` | Purge a DRAFT version. A release is discarded, never purged (`409 parameter.version.last_release`); `409 parameter.in_use` while a dashboard pins the draft (#320). |
 | `POST /api/v1/parameter-sets/{id}/current` | `parameter_set.switch_version` | The manual switch (the promotion receiver's rollout/rollback lever): body `{"version": n}`. A missing `version` — or one that is not an integer — refuses `400 parameter.validation.body_invalid` (`details.path = "version"`, `details.reason = "missing"` / `"wrong_type"`); the set lookup happens only after the body's shape is judged. Session-only. |
 | `DELETE /api/v1/parameter-sets/{id}` | `parameter_set.delete` | The entity purge — only when the set's only version is a DRAFT; `409 parameter.in_use` while ANY stored dashboard version of a live dashboard pins any version of the set (#320). |
@@ -2540,7 +2596,7 @@ Export bundles the CURRENT release — the set body with its lifecycle fields, t
 | `parameter.authoring.disabled` | 403 | A promotion receiver refuses every authoring write (reads, evaluate and import unaffected) |
 | `parameter.version.conflict` | 409 | A stale `If-Match`, a taken version number, or a kept id held by another workspace (`id_taken`, C29) |
 | `parameter.version.not_draft` / `.not_released` / `.not_discarded` / `.last_release` / `.not_eligible` | 409 | The lifecycle precondition of the verb |
-| `parameter.release.template_not_released` | 409 | Release with a pinned template version still DRAFT (`details.pins_not_released`) |
+| `parameter.release.dependency_not_released` | 409 | Release with a pinned template version still DRAFT (`details.pins_not_released`) |
 | `parameter.import.missing_template` | 400 | An import whose pinned template is absent here (templates are promoted first) |
 | `parameter.evaluate.unknown_parameter` | 400 | A `selections` key names no parameter of the set |
 | `parameter.evaluate.timeout` | 504 | The evaluate's deadline (`evaluate-timeout-seconds`) passed |
@@ -2814,6 +2870,7 @@ browser persistence. Clients must reject foreign/stale responses even after abor
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-24 | v2.102 | #517 release dependencies, core (S1) | **§5.10:** the release takes the draft's whole release closure (templates and child pipelines, bounded); an optional JSON plan body (`tree_hash`, `include_dependencies`, `check_overrides`) flips the selected dependency drafts in the same transaction and appends `dependencies_released`; the plan refusals `428 plan_required`, `400 plan_invalid`, `422 dependency_limit`, `409 plan_conflict` / `dependency_cycle` / `busy`. **Deliberate break (record §14, ruled 2026-10-18, no deprecation window):** the template-only refusal code (record §14) is `pipeline.release.dependency_not_released`, and its details are the shared blockers shape `{root, blockers, blockers_truncated}` (the old `template_id` / `template_version` / `template_status` / `pins_not_released` are gone). A request without a plan answers a success with release 142's bytes. Every release is one transaction with strict in-transaction audit rows. **§8.9:** `template.release.busy`; the template flip runs in a guarded transaction. **§21:** the parameter set's template-only refusal code is `parameter.release.dependency_not_released` (details unchanged until #519). Round three (#719): **§5.13 / §21** a restore re-judges its outbound pins (400 validation code; 409 `dependency_not_released`), **§5.10** the blockers' `reason` gains `not_released`. |
 | 2026-10-25 | v2.101 | 442c (#442) | §20.13: resend at the deployment pending cap is 409 schedule.notification.backlog_full; no delivery change or resend audit row on refusal. |
 | 2026-10-24 | v2.100 | 442b (#442) | Additive. §20's schedule object: `notifications.delivery` is the deployment's computed state, `{"state":"on"}` or `{"state":"off","reason":"disabled"\|"mail_unconfigured"\|"no_allowlist"}`. §20.11: a run carries `deliveries` (notice, state, attempts, resend count, times, sanitized `last_error_code`; `recipient` only for `schedule.update` holders). New **§20.13** `POST /schedules/{id}/runs/{run_id}/deliveries/{delivery_id}/resend` (`schedule.update`; `may_duplicate` warning for an `uncertain` delivery; `409 schedule.notification.not_resendable`, `404 schedule.notification.not_found`). |
 | 2026-10-22 | v2.99 | 8b (#8) | JavaScript save/evaluate is enabled with the isolate; §8.7A adds the always-present console key and failed-evaluation console detail. |

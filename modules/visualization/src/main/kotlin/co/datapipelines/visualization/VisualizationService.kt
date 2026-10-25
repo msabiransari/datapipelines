@@ -8,6 +8,9 @@ import co.datapipelines.pipeline.TemplateReleaser
 import co.datapipelines.pipeline.TemplateVersionStatuses
 import co.datapipelines.pipeline.ValidationResult
 import co.datapipelines.pipeline.WriteSurface
+import co.datapipelines.pipeline.release.GuardedTransaction
+import co.datapipelines.pipeline.release.ReleaseFamily
+import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.transaction.support.TransactionOperations
 import java.util.UUID
@@ -32,6 +35,9 @@ data class VisualizationReleased(
  *   (`version.pinned`, `details.pinned_by`); the whole artifact is never purged while any of its versions is pinned.
  * - **Import** (§12): the rules against THIS deployment; a transform pin it lacks is `import.missing_template`
  *   (templates are promoted first); then the lifecycle's landing (id kept, C29).
+ * - **The writer guard** (#517, release-dependencies record §4.3): every write runs in one metadata transaction that
+ *   acquires the workspace writer [guard] first, so the pin checks above answer under it and no dashboard pin can land
+ *   between their read and the write. The validator's pin reads (metadata only, no egress) run under it too.
  */
 @Suppress("TooManyFunctions", "LongParameterList", "ThrowsCount") // one façade over the verb table; each throw is its own refusal
 class VisualizationService(
@@ -47,12 +53,20 @@ class VisualizationService(
     private val evidence: ReleaseEvidence = ReleaseEvidence.NOT_INSTALLED,
     transactions: TransactionOperations = ArtifactLifecycle.DIRECT,
     newId: () -> UUID = UUID::randomUUID,
+    /** #517 — the workspace writer guard; [ReleaseMutationGuard.NONE] in a directly constructed test. */
+    private val guard: ReleaseMutationGuard = ReleaseMutationGuard.NONE,
 ) {
     /** Repository-owned, lens-filtered navigation metadata only. */
     fun navigation(request: co.datapipelines.pipeline.NavigationRequest): List<co.datapipelines.pipeline.NavigationRow> =
         repository.navigation(request)
 
     private val lifecycle = ArtifactLifecycle(repository, authoring, transactions, newId)
+
+    /** [block] in one metadata transaction, the workspace writer guard acquired first (#517); the lifecycle's transactions join it. */
+    private fun <T> guarded(
+        workspaceId: UUID,
+        block: () -> T,
+    ): T = GuardedTransaction.run(lifecycle.transactions, guard, workspaceId, ReleaseFamily.VISUALIZATION, block)
 
     // ---- writes ---------------------------------------------------------------------------------------
 
@@ -64,8 +78,10 @@ class VisualizationService(
         via: WriteSurface,
     ): ArtifactVersion<VisualizationBody> {
         lifecycle.requireAuthoring()
-        val valid = validated(workspaceId, document)
-        return lifecycle.create(workspaceId, valid.name, valid.body, actor, via)
+        return guarded(workspaceId) {
+            val valid = validated(workspaceId, document)
+            lifecycle.create(workspaceId, valid.name, valid.body, actor, via)
+        }
     }
 
     /** The draft write (copy-on-write, or in place) at [expectedHash]; never a rename. */
@@ -78,8 +94,10 @@ class VisualizationService(
         via: WriteSurface,
     ): ArtifactVersion<VisualizationBody> {
         lifecycle.requireAuthoring()
-        val valid = validated(workspaceId, document)
-        return lifecycle.write(workspaceId, id, valid.name, valid.body, expectedHash, actor, via)
+        return guarded(workspaceId) {
+            val valid = validated(workspaceId, document)
+            lifecycle.write(workspaceId, id, valid.name, valid.body, expectedHash, actor, via)
+        }
     }
 
     /** Release the DRAFT at [expectedHash] (see the class KDoc for the order of the checks). */
@@ -101,6 +119,7 @@ class VisualizationService(
         val released =
             checkNotNull(
                 lifecycle.transactions.execute {
+                    guard.acquire(workspaceId, ReleaseFamily.VISUALIZATION)
                     when (val verdict = evidence.verdict(workspaceId, candidate)) {
                         EvidenceVerdict.Pass -> Unit
                         is EvidenceVerdict.Refused -> throw DatapipelinesException(verdict.code, verdict.message, verdict.details)
@@ -117,10 +136,11 @@ class VisualizationService(
         workspaceId: UUID,
         id: UUID,
         expectedHash: String,
-    ): Purged {
-        repository.findDraft(workspaceId, id)?.let { unpinned(workspaceId, id, it.version) }
-        return lifecycle.purgeDraft(workspaceId, id, expectedHash)
-    }
+    ): Purged =
+        guarded(workspaceId) {
+            repository.findDraft(workspaceId, id)?.let { unpinned(workspaceId, id, it.version) }
+            lifecycle.purgeDraft(workspaceId, id, expectedHash)
+        }
 
     /** Purge version [version] — drafts only, and never a pinned one. */
     fun purgeVersion(
@@ -128,19 +148,21 @@ class VisualizationService(
         id: UUID,
         version: Int,
         expectedHash: String? = null,
-    ): Purged {
-        unpinned(workspaceId, id, version)
-        return lifecycle.purgeVersion(workspaceId, id, version, expectedHash)
-    }
+    ): Purged =
+        guarded(workspaceId) {
+            unpinned(workspaceId, id, version)
+            lifecycle.purgeVersion(workspaceId, id, version, expectedHash)
+        }
 
     /** Purge the whole visualization — only a draft-only one that no live dashboard version pins at any version. */
     fun purgeEntity(
         workspaceId: UUID,
         id: UUID,
-    ): Purged {
-        unpinned(workspaceId, id, null)
-        return lifecycle.purgeEntity(workspaceId, id)
-    }
+    ): Purged =
+        guarded(workspaceId) {
+            unpinned(workspaceId, id, null)
+            lifecycle.purgeEntity(workspaceId, id)
+        }
 
     /** Discard RELEASED version [version] — never a pinned one. */
     fun discardVersion(
@@ -148,10 +170,11 @@ class VisualizationService(
         id: UUID,
         version: Int,
         actor: UUID,
-    ): VersionMoved {
-        unpinned(workspaceId, id, version)
-        return lifecycle.discardVersion(workspaceId, id, version, actor)
-    }
+    ): VersionMoved =
+        guarded(workspaceId) {
+            unpinned(workspaceId, id, version)
+            lifecycle.discardVersion(workspaceId, id, version, actor)
+        }
 
     /**
      * Restore DISCARDED version [version] — after its script template pin is judged against today's state (#320, D7).
@@ -166,9 +189,11 @@ class VisualizationService(
         version: Int,
     ): VersionMoved {
         lifecycle.requireAuthoring()
-        val stored = repository.findVersion(workspaceId, id, version)
-        if (stored != null && stored.detail.status == PipelineVersionStatus.DISCARDED) refuseDanglingPin(workspaceId, id, stored.body)
-        return lifecycle.restoreVersion(workspaceId, id, version)
+        return guarded(workspaceId) {
+            val stored = repository.findVersion(workspaceId, id, version)
+            if (stored != null && stored.detail.status == PipelineVersionStatus.DISCARDED) refuseDanglingPin(workspaceId, id, stored.body)
+            lifecycle.restoreVersion(workspaceId, id, version)
+        }
     }
 
     private fun refuseDanglingPin(
@@ -189,7 +214,7 @@ class VisualizationService(
         workspaceId: UUID,
         id: UUID,
         version: Int,
-    ): Switched = lifecycle.switchCurrent(workspaceId, id, version)
+    ): Switched = guarded(workspaceId) { lifecycle.switchCurrent(workspaceId, id, version) }
 
     /** Import (§12, versioning §9.2): [validateForImport] then the lifecycle's landing. Not an authoring write. */
     fun import(
@@ -197,11 +222,10 @@ class VisualizationService(
         export: ArtifactExport<VisualizationBody>,
         actor: UUID,
     ): ArtifactImported =
-        lifecycle.importValidated(
-            workspaceId,
-            export.copy(body = validateForImport(workspaceId, VisualizationDocument(export.name, export.body)).body),
-            actor,
-        )
+        guarded(workspaceId) {
+            val validated = export.copy(body = validateForImport(workspaceId, VisualizationDocument(export.name, export.body)).body)
+            lifecycle.importValidated(workspaceId, validated, actor)
+        }
 
     /** The rules against THIS deployment with the import lens: a transform pin it lacks is `import.missing_template`. */
     fun validateForImport(

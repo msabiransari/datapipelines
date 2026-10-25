@@ -88,6 +88,27 @@ object VisualizationErrorCodes {
     /** 409 — a pinned script template is not RELEASED and the cascade was not consented to. */
     const val RELEASE_DEPENDENCY_NOT_RELEASED = "visualization.release.dependency_not_released"
 
+    /** §13.22 — 409: a consented snapshot fact changed between the preview and the submit. */
+    const val RELEASE_PLAN_CONFLICT = "visualization.release.plan_conflict"
+
+    /** §13.22 — 428: cascade consent without a preview `tree_hash`. */
+    const val RELEASE_PLAN_REQUIRED = "visualization.release.plan_required"
+
+    /** §13.22 — 400: a malformed digest or selection, unknown or duplicate ids, or incompatible aliases. */
+    const val RELEASE_PLAN_INVALID = "visualization.release.plan_invalid"
+
+    /** §13.22 — 409: the closure repeats an exact node on its active path. */
+    const val RELEASE_DEPENDENCY_CYCLE = "visualization.release.dependency_cycle"
+
+    /** §13.22 — 422: the complete closure exceeds a configured bound; `details.limit`, `details.maximum`. */
+    const val RELEASE_DEPENDENCY_LIMIT = "visualization.release.dependency_limit"
+
+    /** §13.22 — 409: the workspace mutation guard's lock wait ran out; nothing was written. */
+    const val RELEASE_BUSY = "visualization.release.busy"
+
+    /** §13.22 — 409: the promotion peer lacks the full-closure envelope capability. */
+    const val RELEASE_BUNDLE_UNSUPPORTED = "visualization.release.bundle_unsupported"
+
     // ---- import, authoring ------------------------------------------------------------------------------
 
     /** 409 — the exported id belongs to another visualization on this server (C29: never re-issued). */

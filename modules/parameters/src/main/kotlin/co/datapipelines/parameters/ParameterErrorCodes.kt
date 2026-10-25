@@ -275,8 +275,29 @@ object ParameterErrorCodes {
     /** 400 — a destructive verb's typed confirmation did not match. */
     const val VERSION_CONFIRM_MISMATCH = "parameter.version.confirm_mismatch"
 
-    /** 409 — release with a pinned template version that is not RELEASED; `details.pins_not_released`. */
-    const val RELEASE_TEMPLATE_NOT_RELEASED = "parameter.release.template_not_released"
+    /** §13.20 — 409: a visible missing/discarded pin or an unticked required draft; shared `blockers` details. */
+    const val RELEASE_DEPENDENCY_NOT_RELEASED = "parameter.release.dependency_not_released"
+
+    /** §13.20 — 409: a consented snapshot fact changed between the preview and the submit. */
+    const val RELEASE_PLAN_CONFLICT = "parameter.release.plan_conflict"
+
+    /** §13.20 — 428: cascade consent without a preview `tree_hash`. */
+    const val RELEASE_PLAN_REQUIRED = "parameter.release.plan_required"
+
+    /** §13.20 — 400: a malformed digest or selection, unknown or duplicate ids, or incompatible aliases. */
+    const val RELEASE_PLAN_INVALID = "parameter.release.plan_invalid"
+
+    /** §13.20 — 409: the closure repeats an exact node on its active path. */
+    const val RELEASE_DEPENDENCY_CYCLE = "parameter.release.dependency_cycle"
+
+    /** §13.20 — 422: the complete closure exceeds a configured bound; `details.limit`, `details.maximum`. */
+    const val RELEASE_DEPENDENCY_LIMIT = "parameter.release.dependency_limit"
+
+    /** §13.20 — 409: the workspace mutation guard's lock wait ran out; nothing was written. */
+    const val RELEASE_BUSY = "parameter.release.busy"
+
+    /** §13.20 — 409: the promotion peer lacks the full-closure envelope capability. */
+    const val RELEASE_BUNDLE_UNSUPPORTED = "parameter.release.bundle_unsupported"
 
     /** 400 — an import whose pinned template is absent on the target (promotion order: templates first). */
     const val IMPORT_MISSING_TEMPLATE = "parameter.import.missing_template"

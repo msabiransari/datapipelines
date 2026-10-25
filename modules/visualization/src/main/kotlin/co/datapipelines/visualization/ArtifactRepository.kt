@@ -4,6 +4,7 @@ import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.LifecycleBucket
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.WriteSurface
+import co.datapipelines.pipeline.release.RaceSavepoint
 import co.datapipelines.typesystem.DatapipelinesException
 import com.fasterxml.jackson.databind.JsonNode
 import org.springframework.dao.DuplicateKeyException
@@ -569,6 +570,8 @@ open class ArtifactRepository<B : Any>(
      * The first-writer race → `version.conflict` carrying the WINNER's state (versioning §3.3). Both writers allocate
      * `max(version) + 1`, so the loser usually collides on the version PRIMARY KEY before the one-draft index — either
      * constraint is the same race (the parameter-set forced race's finding).
+     *
+     * Inside the writer guard's transaction (#517) the statement runs under a savepoint, so the winner read still answers.
      */
     private fun <T> mappingDraftRace(
         workspaceId: UUID,
@@ -576,7 +579,7 @@ open class ArtifactRepository<B : Any>(
         block: () -> T,
     ): T =
         try {
-            block()
+            RaceSavepoint.attempt(jdbc.jdbcTemplate, block)
         } catch (e: DuplicateKeyException) {
             val cause = e.mostSpecificCause.message.orEmpty()
             if (kind.draftIndex !in cause && kind.versionKey !in cause) throw e

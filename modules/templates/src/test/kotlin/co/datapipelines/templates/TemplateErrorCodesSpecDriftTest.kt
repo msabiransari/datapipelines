@@ -60,10 +60,12 @@ class TemplateErrorCodesSpecDriftTest {
             // design §7) names them without the `validation.` infix.
             // §13.9 gained `template.implements_unresolved` on 2026-09-25 (7e, #7) — the same
             // bare shape, the record's §7 row.
+            // §13.9 gained the `template.release.*` block on 2026-10-24 (#517) — the eight
+            // release-dependency refusals every family carries (release-dependencies record §14).
             val nonValidationShape =
                 documented.filterNot {
                     it.startsWith("template.validation.") || it.startsWith("template.version.") ||
-                        it.startsWith("template.authoring.") ||
+                        it.startsWith("template.authoring.") || it.startsWith("template.release.") ||
                         it == PipelineErrorCodes.Template.NOT_FOUND ||
                         it == PipelineErrorCodes.Template.IN_USE ||
                         it == PipelineErrorCodes.Template.CONTRACT_INVALID ||

@@ -634,6 +634,16 @@ datapipelines:
       max-refresh-seconds: ${DATAPIPELINES_DASHBOARDS_MAX_REFRESH_SECONDS:900}
       parameter-lock-seconds: ${DATAPIPELINES_DASHBOARDS_PARAMETER_LOCK_SECONDS:30}
       render-seconds: ${DATAPIPELINES_DASHBOARDS_RENDER_SECONDS:20}
+  # Release dependencies (configuration.md §3.35, #517): the closure bounds a cascading release enumerates under,
+  # and the workspace mutation guard's lock wait.
+  release:
+    dependencies:
+      max-depth: ${DATAPIPELINES_RELEASE_DEPENDENCIES_MAX_DEPTH:32}
+      max-versions: ${DATAPIPELINES_RELEASE_DEPENDENCIES_MAX_VERSIONS:1024}
+      max-edges: ${DATAPIPELINES_RELEASE_DEPENDENCIES_MAX_EDGES:4096}
+      max-blockers: ${DATAPIPELINES_RELEASE_DEPENDENCIES_MAX_BLOCKERS:100}
+      max-wire-bytes: ${DATAPIPELINES_RELEASE_DEPENDENCIES_MAX_WIRE_BYTES:1048576}
+      lock-wait-seconds: ${DATAPIPELINES_RELEASE_DEPENDENCIES_LOCK_WAIT_SECONDS:5}
 
 # db-scheduler's starter reads its OWN prefix; every value is a datapipelines.scheduler.* key above
 # (configuration.md §3.29 is the one definition — D8), so the library's defaults (10 threads, a

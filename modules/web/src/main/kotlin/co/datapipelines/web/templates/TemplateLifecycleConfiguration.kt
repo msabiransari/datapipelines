@@ -58,5 +58,7 @@ class TemplateLifecycleConfiguration {
         authoring: AuthoringGuard,
         // The guards cover pipeline, parameter-set (#194 lane D) and visualization (#320) pins — one composed answer.
         usage: co.datapipelines.application.templates.TemplateUsage,
-    ): TemplateReleaseService = TemplateReleaseService(templates, validator, authoring, usage)
+        // #517 — the workspace writer guard every lifecycle verb acquires first.
+        guard: co.datapipelines.pipeline.release.ReleaseMutationGuard,
+    ): TemplateReleaseService = TemplateReleaseService(templates, validator, authoring, usage, guard)
 }

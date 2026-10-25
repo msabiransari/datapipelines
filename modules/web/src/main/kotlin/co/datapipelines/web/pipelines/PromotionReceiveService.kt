@@ -67,6 +67,13 @@ class PromotionReceiveService(
     private val dashboardPromotion: co.datapipelines.web.visualizations.DashboardPromotion,
     /** O7 — the batch's two family lists are count-bounded BEFORE any member binds; the config carries the key's name. */
     private val visualizationConfig: co.datapipelines.visualization.VisualizationConfig,
+    /**
+     * #517 — the workspace writer guard (release-dependencies record §4.3: a promotion receive is a pin-affecting
+     * writer), acquired FIRST in the batch's one transaction so no release or purge interleaves with the batch; the import
+     * services re-acquire it in the same transaction as a no-op. [ReleaseMutationGuard.NONE] in a directly built test.
+     */
+    private val guard: co.datapipelines.pipeline.release.ReleaseMutationGuard =
+        co.datapipelines.pipeline.release.ReleaseMutationGuard.NONE,
 ) {
     private val log = LoggerFactory.getLogger(PromotionReceiveService::class.java)
 
@@ -140,6 +147,7 @@ class PromotionReceiveService(
         boundTransferArms(batch)
 
         transactionTemplate.executeWithoutResult {
+            guard.acquire(workspace.id, co.datapipelines.pipeline.release.ReleaseFamily.PIPELINE)
             if (batch.templates.isNotEmpty()) {
                 templateImportService.import(templatesPayload(batch), workspace.id, actor)
             }
