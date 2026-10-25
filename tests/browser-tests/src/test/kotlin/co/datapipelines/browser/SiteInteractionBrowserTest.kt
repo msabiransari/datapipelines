@@ -218,9 +218,9 @@ class SiteInteractionBrowserTest : BrowserSuite() {
     private companion object {
         const val TAB_STOPS = 12
 
-        /** `--site-ground` (#F5F7FA) and `--site-ink` (#101820) as the browser reports them. */
-        const val LIGHT_GROUND = "rgb(245, 247, 250)"
-        const val INK = "rgb(16, 24, 32)"
+        /** `--site-ground` (#F3F1E9, Atlas paper) and `--site-ink` (#142B21) as the browser reports them (698). */
+        const val LIGHT_GROUND = "rgb(243, 241, 233)"
+        const val INK = "rgb(20, 43, 33)"
 
         /** The focused element's label and its computed outline. */
         const val FOCUS_JS =

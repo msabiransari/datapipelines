@@ -34,6 +34,37 @@
     </div>
   </section>
 
+  <!--/* 698 (Atlas): the reference's ordered reading structure — the eight executed steps in
+       one column beside a desktop index that stays in view while they are read. The index is
+       navigation, not outline: no headings, so the page's heading tree and every anchor are
+       unchanged. Below 64rem it is not drawn and the steps read as one natural column; the
+       hero's "Start at step 1" and every deep link reach the same anchors either way. The
+       step sections keep their markup (not re-indented: their <pre> blocks are verbatim) and
+       are separated by rules instead of alternating slabs. */-->
+  <div class="container workflow-layout">
+  <nav class="workflow-index" aria-label="Tutorial steps">
+    <p class="workflow-index-title">The tutorial</p>
+    <ol>
+      <li><a href="#quickstart"><span>01</span> Run it locally</a></li>
+      <li><a href="#step-key"><span>02</span> Create your key</a></li>
+      <li><a href="#step-connect"><span>03</span> Connect the agent</a></li>
+      <li><a href="#step-author"><span>04</span> Author and run</a></li>
+      <li><a href="#review"><span>05</span> Release it</a></li>
+      <li><a href="#step-publish"><span>06</span> Publish an API</a></li>
+      <li><a href="#step-endpoint-key"><span>07</span> Bind a key</a></li>
+      <li><a href="#step-call"><span>08</span> Call it</a></li>
+    </ol>
+    <p class="workflow-index-title">Then</p>
+    <ol>
+      <li><a href="#application">Inside the application</a></li>
+      <li><a href="#engineering">The engineering depth</a></li>
+      <li><a href="#capabilities">What's in the box</a></li>
+      <li><a href="#security">Security</a></li>
+      <li><a href="#faq">Questions</a></li>
+    </ol>
+  </nav>
+  <div class="workflow-steps">
+
   <!-- ============================ STEP 1: RUN IT ============================ -->
   <section class="section" id="quickstart" aria-labelledby="quickstart-title">
     <div class="container">
@@ -69,7 +100,7 @@
   </section>
 
   <!-- ============================ STEP 2: THE AGENT'S KEY ============================ -->
-  <section class="section band" id="step-key" aria-labelledby="step-key-title">
+  <section class="section" id="step-key" aria-labelledby="step-key-title">
     <div class="container">
       <p class="kicker">Step 2</p>
       <h2 id="step-key-title" class="ds-headline">Create your key on the Keys page</h2>
@@ -111,7 +142,7 @@ datapipelines: http://localhost:8080/mcp (HTTP) - ✔ Connected</code></pre>
   </section>
 
   <!-- ============================ STEP 4: AUTHOR AND EXECUTE ============================ -->
-  <section class="section band" id="step-author" aria-labelledby="step-author-title">
+  <section class="section" id="step-author" aria-labelledby="step-author-title">
     <div class="container">
       <p class="kicker">Step 4</p>
       <h2 id="step-author-title" class="ds-headline">The agent authors a pipeline and runs it</h2>
@@ -181,7 +212,7 @@ anything. Stop after reporting.</code></pre>
   </section>
 
   <!-- ============================ STEP 6: PUBLISH THE ENDPOINT ============================ -->
-  <section class="section band" id="step-publish" aria-labelledby="step-publish-title">
+  <section class="section" id="step-publish" aria-labelledby="step-publish-title">
     <div class="container">
       <p class="kicker">Step 6</p>
       <h2 id="step-publish-title" class="ds-headline">Publish it as an API</h2>
@@ -231,7 +262,7 @@ anything. Stop after reporting.</code></pre>
   </section>
 
   <!-- ============================ STEP 8: CALL IT ============================ -->
-  <section class="section band" id="step-call" aria-labelledby="step-call-title">
+  <section class="section" id="step-call" aria-labelledby="step-call-title">
     <div class="container">
       <p class="kicker">Step 8</p>
       <h2 id="step-call-title" class="ds-headline">Call it, and page the result</h2>
@@ -257,6 +288,9 @@ anything. Stop after reporting.</code></pre>
       <p><strong>What just happened.</strong> The endpoint executed the latest released version in-process, audited against the key, and materialized the full result before answering. <code>DP-Result-Page-Rows: 5</code> returns five rows with <code>has_more: true</code>, and the cursor pages the rest inside the TTL with <code>GET …/result?offset=5&amp;limit=5</code>. The pipeline's declared parameters arrive as the query string, like <code>?year=2023</code>. Validation is strict on purpose: a typo like <code>?yr=2023</code> is a <code>400</code> listing every accepted parameter, because a silently defaulted year would return plausible, wrong rows. A run that outlives the endpoint's timeout answers <code>202</code> with the cursor instead of an error. The answer is coming.</p>
     </div>
   </section>
+
+  </div>
+  </div>
 
   <!-- ============================ INSIDE THE APPLICATION ============================ -->
   <!--/* 169: the three reserved frames hold real captures now, and every remaining shot the

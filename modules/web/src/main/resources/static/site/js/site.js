@@ -162,19 +162,6 @@
   }
 
   /* ------------------------------------------------------
-     The header's hairline appears once the page has scrolled,
-     so the top of every page is clean.
-     ------------------------------------------------------ */
-  var siteHeader = document.querySelector('.site-header');
-  if (siteHeader) {
-    var onScroll = function () {
-      siteHeader.classList.toggle('scrolled', window.scrollY > 8);
-    };
-    window.addEventListener('scroll', onScroll, { passive: true });
-    onScroll();
-  }
-
-  /* ------------------------------------------------------
      Copy-to-clipboard on code blocks, the install chip and the
      quickstart command. Buttons ship `hidden`; they appear only
      when this script runs. The fallback selects the text so a
