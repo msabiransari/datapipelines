@@ -21,7 +21,7 @@
       <p class="kicker">Pipeline scheduling</p>
       <h1 id="ps-title" class="ds-display">Run your pipelines on a schedule.</h1>
       <p class="section-lede">
-        A schedule runs one SQL pipeline at the times a cron pattern names, in the time zone you choose. You see
+        The built-in SQL scheduler runs one pipeline at the times a cron pattern names, in the time zone you choose. You see
         the next runs before you save, every run keeps a history of what happened to it, and a run whose outcome
         nobody can confirm stops the schedule until a person looks. Recurring work stops being somebody's
         calendar reminder.
@@ -141,10 +141,17 @@
       <div class="prose">
         <!-- claim: docs/scheduler.md §8.4, docs/versioning.md §3 -->
         <p>
-          Run the server locally with the <a th:href="@{/how-it-works}">tutorial</a>, let an agent author a pipeline and
-          release it, then open Schedules in the application's Operate group. The same pipeline can also serve a
+          Run the server locally with the <a th:href="@{/how-it-works}">tutorial</a>, let an agent
+          <a th:href="@{/ai-data-pipeline}">author a pipeline</a> and release it, then open Schedules in the
+          application's Operate group. The same pipeline can also serve a
           <a th:href="@{/published-api}">published API</a> or feed <a th:href="@{/sql-dashboards}">a dashboard</a>;
           a schedule runs it, it does not refresh either of them.
+        </p>
+        <!-- claim: docs/scheduler.md §1 — a schedule runs one pipeline; it is not an orchestrator -->
+        <p>
+          A schedule covers one pipeline on a timetable. Dependencies between jobs, range backfills and sensors
+          belong to an orchestrator: <a th:href="@{/compare/airflow}">the Airflow comparison</a> draws that line,
+          and <a th:href="@{/compare/dagster-vs-airflow}">Dagster vs Airflow</a> helps when you are choosing one.
         </p>
       </div>
     </div>

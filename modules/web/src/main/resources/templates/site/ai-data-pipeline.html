@@ -77,6 +77,13 @@
         Moving a release into a higher environment is a human, UI-triggered action, and there is no MCP tool for
         promotion and no schedule. An agent can author and run; a person promotes.
       </p>
+      <!-- claim: docs/rest-api.md §19 — a released pipeline as an endpoint; docs/scheduler.md §1 — a schedule runs a pipeline at a cron pattern's occurrences; docs/dashboards.md §1, docs/dashboards.md §2.2 — a dashboard pins released pipeline versions and one parameter set -->
+      <p>
+        The pipeline then feeds the rest of the product: a <a th:href="@{/published-api}">published endpoint</a>
+        serves a release, a <a th:href="@{/pipeline-scheduling}">schedule</a> runs it on a cron pattern, and a
+        <a th:href="@{/sql-dashboards}">dashboard</a> pins released versions, with filters from a
+        <a th:href="@{/reusable-parameter-sets}">reusable parameter set</a>.
+      </p>
     </div>
   </section>
 

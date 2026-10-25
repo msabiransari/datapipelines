@@ -8,7 +8,8 @@
      interactive run uses (R7). A refusal comes back as the catalog's message BESIDE the field
      it names; anything that names no field is a toast.
 
-     Notification settings are saved in slice 4 part a; mail delivery awaits part b.
+     Notification settings are saved in slice 4 part a; the note below states, with its reason, when
+     this deployment sends no scheduler mail (#442 part b) — never described as delivery.
      Key and role assignment remain outside this form (R2 — a schedule fires as the system
      identity). The version is `current`, fixed: slice 1 refuses a numeric version
      (scheduler.md §2.1). -->
@@ -140,7 +141,9 @@
             <label class="sch-radio"><input type="checkbox" name="notification_event" value="unknown" checked> <span>Outcome unknown</span></label>
             <label class="sch-radio"><input type="checkbox" name="notification_event" value="blocked" checked> <span>Schedule blocked</span></label>
             <p class="ds-field-error" data-field-error="notifications" hidden></p>
-            <div class="app-alert app-alert-warning" role="note" th:if="${notificationDelivery == null or notificationDelivery.state == 'off'}">Scheduler mail is not enabled on this deployment — these settings are saved, but no mail is sent.</div>
+            <div class="app-alert app-alert-warning" role="note" th:if="${notificationDelivery == null or notificationDelivery.state == 'off'}"
+                 th:attr="data-mail-off=${notificationDelivery == null ? 'disabled' : notificationDelivery.reason}"
+                 th:switch="${notificationDelivery == null ? 'disabled' : notificationDelivery.reason}"><span th:case="'no_allowlist'">Scheduler mail is off: no recipient domains are allowed on this development deployment — these settings are saved, but no mail is sent.</span><span th:case="'mail_unconfigured'">Scheduler mail is off: this deployment has no mail server configured — these settings are saved, but no mail is sent.</span><span th:case="*">Scheduler mail is not enabled on this deployment — these settings are saved, but no mail is sent.</span></div>
           </fieldset>
 
           <div class="u-row u-gap-sm u-right sch-form-actions">

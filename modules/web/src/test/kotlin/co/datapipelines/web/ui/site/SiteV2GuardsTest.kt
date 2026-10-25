@@ -36,7 +36,18 @@ class SiteV2GuardsTest {
     @Test
     fun `every FAQ block's JSON-LD mirrors the visible details, question for question`() {
         val pagesWithFaq = rendered.filter { (_, html) -> "\"@type\":\"FAQPage\"" in html || "\"@type\": \"FAQPage\"" in html }
-        pagesWithFaq.keys.map { it.path } shouldContainAll listOf("/", "/faq", "/security", "/published-api", "/tableau")
+        pagesWithFaq.keys.map { it.path } shouldContainAll
+            listOf(
+                "/",
+                "/faq",
+                "/security",
+                "/published-api",
+                "/tableau",
+                // #700: the three capability pages' FAQs, whose answers #699 corrected.
+                SitePages.PIPELINE_SCHEDULING.path,
+                SitePages.SQL_DASHBOARDS.path,
+                SitePages.REUSABLE_PARAMETER_SETS.path,
+            )
 
         pagesWithFaq.forEach { (page, html) ->
             val visible =

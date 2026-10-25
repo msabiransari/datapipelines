@@ -956,6 +956,7 @@ CREATE TABLE schedule_runs (
     scheduled_at            TIMESTAMPTZ,                -- the UTC occurrence; NULL for a manual run
     reference_at            TIMESTAMPTZ NOT NULL,       -- the frozen time context (record §5.1)
     reference_timezone      TEXT        NOT NULL,
+    target_ref              TEXT,                       -- safe target summary frozen at run creation (V51); NULL for older/ad-hoc runs
     admit_by                TIMESTAMPTZ NOT NULL,       -- the lateness window's end
     schedule_revision       INT,
     executor_id             TEXT        NOT NULL,
@@ -1019,7 +1020,8 @@ CREATE TABLE schedule_run_events (
     details_json JSONB       NOT NULL DEFAULT '{}'::jsonb,  -- the execution reference, a retry number, a summary's counts
     PRIMARY KEY (run_id, seq),
     CONSTRAINT chk_schedule_run_events_kind CHECK (kind IN ('recorded', 'capacity_retry', 'claimed',
-        'execution_started', 'not_started', 'skipped', 'finished', 'unknown', 'updated_after_unknown', 'unblocked')),
+        'execution_started', 'not_started', 'skipped', 'finished', 'unknown', 'updated_after_unknown', 'unblocked',
+        'notification_enqueued', 'notification_sent', 'notification_failed', 'notification_uncertain')),  -- V51 widened it
     CONSTRAINT chk_schedule_run_events_seq CHECK (seq >= 1)
 );
 ```
@@ -1027,7 +1029,8 @@ CREATE TABLE schedule_run_events (
 **Notes:**
 - **Append-only by construction**, not by a trigger (§2: this schema has none): the one INSERT in `ScheduleRunRepository.appendTrail` draws `seq` from `schedule_runs.trail_seq` in the same statement, and no code path updates or deletes a row — `ScheduleTrailAppendOnlyTest` scans the sources. Like §2's other immutable tables it carries no `updated_at`.
 - **No copy of the pipeline's events.** The execution's own events stay in [`execution_events`](#47-execution_events); `schedule_runs.execution_id` is the join a merged Messages read uses (record §5.4).
-- **Retention** follows the run's history: slice 1 deletes neither (a retention policy for runs and their trail is a later slice's, with the notification outbox).
+- **Retention** follows the run's history: slice 1 deletes neither (a retention policy for runs and their trail is a later slice's; the notification outbox, [§4.39](#439-schedule_notification_events)–[§4.40](#440-schedule_notification_deliveries), is kept with them).
+- **The notification kinds** (V51, #442b): `notification_enqueued` is written in the transition's own transaction when the outbox queued a notice (details: the notice id, its event and outcome, the queued and refused counts — never an address); `notification_sent` / `notification_failed` / `notification_uncertain` when the sender settles a delivery, or recovers a claim a stopped instance left (details: the delivery id, the notice id, the attempt count and the code — no part of the address, not even its domain: the trail is read by every `schedule.read` holder). A retry that returns a delivery to `pending` writes no row.
 
 ### 4.25 `scheduled_tasks`
 
@@ -1492,6 +1495,77 @@ CREATE INDEX idx_parameter_evaluation_queries_evaluation ON parameter_evaluation
 - **Constants and free inputs are resolution steps, not query rows**: a `constants` selector and a plain-default `INPUT` produce NO row (their outcomes ride `outcomes_json`); the SAVE-time probe is authoring validation and records nothing here.
 - An evaluation holds at most `max-parameters-per-set` rows. `outcome` stays NULL on the rows of an evaluation the sweep closed `INCOMPLETE` — nobody saw them end.
 
+### 4.39 `schedule_notification_events`
+
+**One row per run transition — or schedule block — that the schedule's event set selected at that moment** (V51; #442b, the [scheduler design revision](superpowers/specs/2026-09-22-scheduler-design-revision.md) §6.1). Written by `RunLedger` through `NotificationOutbox` in the SAME transaction as the transition and its trail row: both commit or neither, so there is never a notice without its transition nor a transition whose selected notice was lost.
+
+```sql
+CREATE TABLE schedule_notification_events (
+    id          UUID        PRIMARY KEY,
+    schedule_id UUID        NOT NULL REFERENCES schedules(id),
+    run_id      UUID        NOT NULL REFERENCES schedule_runs(id),  -- a block is always caused by a run; the notice attaches to it
+    event       TEXT        NOT NULL,                               -- the checkbox (NotificationEvent, enums.md §42)
+    outcome     TEXT        NOT NULL,                               -- what happened (NotificationOutcome, enums.md §43)
+    run_state   TEXT        NOT NULL,                               -- the run's state after the transition
+    reason      TEXT,                                               -- the run's (or the block's) reason word
+    occurred_at TIMESTAMPTZ NOT NULL,
+    sequence    INT         NOT NULL,                               -- the trail seq of the transition that produced it
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_schedule_notification_events_run_outcome UNIQUE (run_id, outcome),
+    CONSTRAINT chk_schedule_notification_events_event CHECK (event IN ('start', 'success', 'failure', 'unknown', 'blocked')),
+    CONSTRAINT chk_schedule_notification_events_outcome CHECK (
+        (event = 'start' AND outcome = 'started')
+        OR (event = 'success' AND outcome = 'completed')
+        OR (event = 'failure' AND outcome IN ('failed', 'could_not_start', 'cancelled', 'aborted'))
+        OR (event = 'unknown' AND outcome IN ('unknown', 'unknown_update'))
+        OR (event = 'blocked' AND outcome = 'blocked')),
+    CONSTRAINT chk_schedule_notification_events_sequence CHECK (sequence >= 1)
+);
+CREATE INDEX idx_schedule_notification_events_schedule ON schedule_notification_events (schedule_id);
+```
+
+**Notes:**
+- **Nothing is written when delivery is off** (`notifications.enabled=false`, mail unconfigured, or a development posture with no allowlist), when the event set does not select the outcome, when the schedule has no recipients, or when the schedule is deleted — no phantom rows a later enable would send.
+- **A run reaches each outcome once**, so the UNIQUE makes a replayed transition write nothing (`ON CONFLICT … DO NOTHING`). `blocked` is written only on the ACTUAL transition to blocked (`ScheduleRepository.block` returned true), never for a block that was already in place. A skipped run (its schedule blocked or deleted) writes nothing.
+
+### 4.40 `schedule_notification_deliveries`
+
+**One row per (event, recipient)** (V51; #442b, record §6.1) — one message per recipient, never a shared address list. The address is snapshotted at enqueue; the Message-ID (`<delivery-id@host-of-base-url>`) is fixed at enqueue, so a resend carries the same one.
+
+```sql
+CREATE TABLE schedule_notification_deliveries (
+    id              UUID        PRIMARY KEY,
+    event_id        UUID        NOT NULL REFERENCES schedule_notification_events(id),
+    recipient       TEXT        NOT NULL,                           -- personal data: never logged; shown only to schedule.update holders
+    state           TEXT        NOT NULL,                           -- DeliveryState (enums.md §44)
+    attempts        INT         NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMPTZ,                                    -- set exactly while pending
+    sending_since   TIMESTAMPTZ,                                    -- a claimed send in flight
+    last_error_code TEXT,                                           -- a sanitized code, never transport text
+    message_id      TEXT        NOT NULL,
+    sent_at         TIMESTAMPTZ,                                    -- the relay accepted it
+    resend_count    INT         NOT NULL DEFAULT 0,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_schedule_notification_deliveries_event_recipient UNIQUE (event_id, recipient),
+    CONSTRAINT uq_schedule_notification_deliveries_message_id UNIQUE (message_id),
+    CONSTRAINT chk_schedule_notification_deliveries_state CHECK (state IN ('pending', 'accepted', 'failed', 'uncertain')),
+    CONSTRAINT chk_schedule_notification_deliveries_due CHECK ((state = 'pending') = (next_attempt_at IS NOT NULL)),
+    CONSTRAINT chk_schedule_notification_deliveries_sending CHECK (sending_since IS NULL OR state = 'pending'),
+    CONSTRAINT chk_schedule_notification_deliveries_accepted CHECK (state <> 'accepted' OR sent_at IS NOT NULL),
+    CONSTRAINT chk_schedule_notification_deliveries_failure CHECK (state NOT IN ('failed', 'uncertain') OR last_error_code IS NOT NULL),
+    CONSTRAINT chk_schedule_notification_deliveries_counts CHECK (attempts >= 0 AND resend_count >= 0)
+);
+CREATE INDEX idx_schedule_notification_deliveries_due ON schedule_notification_deliveries (state, next_attempt_at);
+CREATE INDEX idx_schedule_notification_deliveries_event ON schedule_notification_deliveries (event_id);
+```
+
+**Notes:**
+- **Decided per recipient at enqueue, never dropped silently:** a recipient outside the allowlist is written `failed` / `domain_not_allowed`; over `notifications.backlog-max` pending deliveries a new one is written `failed` / `backlog_full` (and one WARN line). The codes are listed in enums.md §44.
+- **`accepted` means the SMTP relay took it** — not that it reached an inbox; no state says "delivered". `uncertain` is a send that may have reached the relay (the connection dropped after the data was sent, or a claim whose `sending_since` went stale because the instance stopped mid-send); it is never retried automatically. A person may resend a `failed` or `uncertain` delivery (`resend_count` counts it), with a may-duplicate warning for the uncertain one.
+
+**Strict deployment backlog admission (#442 round two).** Enqueue and explicit resend take transaction-scoped `pg_advisory_xact_lock(442004001)` (`NotificationRepository.ADMISSION_LOCK_KEY`) before counting pending rows, in the same READ COMMITTED transaction as insert/requeue. Lock order: enqueue takes the run row, then the advisory lock; resend takes the delivery row, then the advisory lock. The sender claims delivery rows with `FOR UPDATE SKIP LOCKED` and never takes the advisory lock, so there is no cycle. The advisory statement has a five-second query timeout on a dedicated template. This serializes admission across schedules and instances; at the hard cap, new deliveries become `failed/backlog_full` and resend is refused (`409 schedule.notification.backlog_full`, `details.pending`, `details.backlog_max`) without changing the row. Lowering the configured cap does not discard existing pending mail.
+
 ## 5. Index Strategy Summary
 
 **This table is generated from §4 and must contain nothing §4 does not create.** Two kinds of entry appear:
@@ -1610,6 +1684,14 @@ CREATE INDEX idx_parameter_evaluation_queries_evaluation ON parameter_evaluation
 | `parameter_evaluations` | `idx_parameter_evaluations_finished` | explicit (partial) | V48: the retention step's cutoff scan on `started_at` over finished rows |
 | `parameter_evaluation_queries` | `parameter_evaluation_queries_pkey` | via PK | Each attempt's guarded terminal write ([§4.38](#438-parameter_evaluation_queries)) |
 | `parameter_evaluation_queries` | `idx_parameter_evaluation_queries_evaluation` | explicit | V48: a record's attempts (the detail) and the cascade from a deleted record (retention) |
+| `schedule_notification_events` | `schedule_notification_events_pkey` | via PK | Lookup by the notice id ([§4.39](#439-schedule_notification_events)) |
+| `schedule_notification_events` | `uq_schedule_notification_events_run_outcome` | via UNIQUE | V51 (#442b): a run reaches each outcome once — the outbox's `ON CONFLICT` arbiter, and a run's notices |
+| `schedule_notification_events` | `idx_schedule_notification_events_schedule` | explicit | V51: a schedule's notices (the FK to `schedules`) |
+| `schedule_notification_deliveries` | `schedule_notification_deliveries_pkey` | via PK | The sender's settle and the resend, by delivery id ([§4.40](#440-schedule_notification_deliveries)) |
+| `schedule_notification_deliveries` | `uq_schedule_notification_deliveries_event_recipient` | via UNIQUE | V51: one message per recipient per notice |
+| `schedule_notification_deliveries` | `uq_schedule_notification_deliveries_message_id` | via UNIQUE | V51: a Message-ID is never reused across deliveries |
+| `schedule_notification_deliveries` | `idx_schedule_notification_deliveries_due` | explicit | V51: the sender's claim — pending rows by `next_attempt_at` — and the backlog count |
+| `schedule_notification_deliveries` | `idx_schedule_notification_deliveries_event` | explicit | V51: a notice's deliveries — the run detail |
 
 **Deliberately absent:**
 - `uq_users_email` — this name never existed. The uniqueness rule is a `UNIQUE` *constraint* declared inline in §4, so Postgres names its index `users_email_key`. The old entry would have sent a migration author looking for a `CREATE UNIQUE INDEX` statement that was not there. (`uq_pipelines_name`/`pipelines_name_key` are gone too — V4 replaced the global rule with the explicitly named `uq_pipelines_workspace_name`.)
@@ -1675,6 +1757,8 @@ table and the test's expected-table list in the same commit.
 | `dashboard_refresh_executions` | derived | DashboardRefresh | — | — | The refresh's link to its executions — the refresh's classification |
 | `parameter_evaluations` | derived | ParameterEvaluation | — | — | What THIS deployment's callers evaluated (#376); per-environment diagnostics by construction, never authored, never promoted |
 | `parameter_evaluation_queries` | derived | ParameterEvaluation | — | — | The evaluation's statement attempts — the record's classification |
+| `schedule_notification_events` | derived | ScheduleNotification | — | — | Notices THIS deployment's scheduler queued for its own runs (#442b); produced, never authored |
+| `schedule_notification_deliveries` | derived | ScheduleNotification | — | — | The per-recipient sends of those notices — the event's classification; addresses never leave the environment |
 | `template_implements` | promotable | Template | — (follows `template_versions`) | `(name, version)` + the fact ids | The citations ride the template version's payload (export, import, the promotion batch) outside its `body_hash` (R9). Their targets are [`learned_facts`](#418-learned_facts) rows, which are environment-local: the importing workspace stores the ids that resolve there and drops the rest without refusing (owner ruling 2026-09-25), so a cross-deployment promotion lands with none ([§4.21](#421-template_implements)) |
 
 ---
@@ -1991,6 +2075,8 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-25 | next | 442c (#442) | §4.23: nullable target_ref frozen at run creation (V51). §4.40: strict pending cap, shared advisory key, bounded acquisition, lock order and resend refusal. |
+| 2026-10-24 | next | 442b (#442) | **V51 — the schedule notification outbox.** New **§4.39 `schedule_notification_events`** (one row per selected transition or block, `run_id` NOT NULL, UNIQUE `(run_id, outcome)` so a replayed transition writes none) and **§4.40 `schedule_notification_deliveries`** (one row per notice and recipient, the address snapshotted, a fixed `message_id`, `pending` / `accepted` / `failed` / `uncertain` with the due/claim CHECKs, `resend_count`); §4.24's trail CHECK gains the four `notification_*` kinds (details carry ids, counts and codes — no address, no domain; retries write no trail row); §5 lists the five new indexes. Down path documented in the migration header, not shipped. |
 | 2026-10-22 | v1.47 | 8b (#8) | The existing V33 CHECK admits JavaScript rows; the pooled save gate and availability control writes without a schema change. |
 | 2026-10-21 | v1.46 | 636 (#636) the housekeeping statements' bounds | **§8.1** — the dashboard refreshes' DELETE and the parameter evaluations' batch DELETE are bounded at 25 s like the `execution_events` DELETE (the "not bounded" clause removed); **§8.4** — the stale refresh sweep's `UPDATE` at 10 s (`REFRESH_SWEEP_STATEMENT_TIMEOUT_SECONDS`, on the sweeper's own template); **§8.5** — the evaluation sweep's `UPDATE` at the tick's 25 s. Each names the SQLState `57014` cancel, which rolls the one statement back. No DDL, no migration. |
 | 2026-10-20 | v1.45 | V50 (#640, script-node-rename lane, owner ruling 2026-10-20) | The **TRANSFORM→SCRIPT node-type rename**, no alias and no deprecation window. V50 rewrites every stored `pipeline_versions.body_json` node `type` value `TRANSFORM` → `SCRIPT` (RELEASED and DRAFT alike), rebuilding the `nodes` array order-preservingly and re-stamping `body_hash` over the NEW body text in the same statement (all rows carry `body_hash` = sha256 over `body_json::text` again; the untouched control rows are byte-identical). Prose that merely mentions the word — node ids, descriptions — is deliberately NOT rewritten. `template_versions`' blocks constraint is RENAMED `chk_transform_blocks` → `chk_script_blocks` (metadata-only; the V33 file itself stays byte-identical — shipped migrations are immutable). The row-level proof is `ScriptNodeMigrationTest` (V1–V49 on a scratch database, seeded pre-V50 rows, then V50): typed field moved, prose and the no-transform control intact, hash re-stamped, node order preserved, the constraint answering to the new name. Renumbered at merge after #326's v1.44. |

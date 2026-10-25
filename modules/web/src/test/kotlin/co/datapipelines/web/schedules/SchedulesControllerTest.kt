@@ -9,7 +9,9 @@ import co.datapipelines.auth.PermissionResolverInstallation
 import co.datapipelines.auth.RolePermissionsResolver
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
+import co.datapipelines.scheduler.DeliveryOffReason
 import co.datapipelines.scheduler.MissedRunPolicy
+import co.datapipelines.scheduler.NotificationDeliveryState
 import co.datapipelines.scheduler.Occurrence
 import co.datapipelines.scheduler.RunDetail
 import co.datapipelines.scheduler.RunOrigin
@@ -75,6 +77,8 @@ class SchedulesControllerTest {
         every {
             jdbc.query(any<String>(), any<Map<String, Any?>>(), any<RowMapper<Pair<UUID, String>>>())
         } answers { listOf(user to "Alice") }
+        // #442b — the deployment's computed delivery state; the default deployment's is off/disabled.
+        every { service.notificationDelivery() } returns NotificationDeliveryState(DeliveryOffReason.DISABLED)
         actorNames = ActorNames(jdbc)
         controller = SchedulesController(service, audit, mapper, actorNames)
     }

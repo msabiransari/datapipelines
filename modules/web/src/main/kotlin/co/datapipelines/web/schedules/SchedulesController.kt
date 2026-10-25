@@ -4,10 +4,10 @@ import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.scheduler.NotificationDelivery
 import co.datapipelines.scheduler.NotificationEvent
 import co.datapipelines.scheduler.NotificationSettingsRequest
 import co.datapipelines.scheduler.Occurrence
+import co.datapipelines.scheduler.RunDelivery
 import co.datapipelines.scheduler.RunDetail
 import co.datapipelines.scheduler.Schedule
 import co.datapipelines.scheduler.ScheduleErrorCodes
@@ -140,7 +140,10 @@ class SchedulesController(
         return ApiResponse.of(PagedData(mapped, Pagination.unknownTotal(page, size, mapped.size, found.size > size)))
     }
 
-    /** §20.11 — one run and its append-only trail (R10). */
+    /**
+     * §20.11 — one run, its append-only trail (R10) and its notification deliveries (#442b): each
+     * delivery's address only for a `schedule.update` holder, as §20.4 shows the recipients.
+     */
     @GetMapping("/{id}/runs/{runId}")
     @RequiredScope(Permission.SCHEDULE_READ)
     fun run(
@@ -150,7 +153,7 @@ class SchedulesController(
         val principal = currentPrincipal()
         val run = schedules.run(workspaceOf(principal), id, runId, PrincipalTargetViewer(principal))
         val names = namesOf(listOfNotNull(run.run.requestedBy))
-        return ApiResponse.of(runDetailJson(run, names))
+        return ApiResponse.of(runDetailJson(run, names, principal.holds(Permission.SCHEDULE_UPDATE)))
     }
 
     // ------------------------------------------------------------------------------ writes
@@ -253,6 +256,35 @@ class SchedulesController(
             ).body(ApiResponse.of(runJson(written.value, namesOf(listOfNotNull(written.value.requestedBy)))))
     }
 
+    /**
+     * §20.13 — resend one of a run's notifications that ended `failed` or `uncertain` (#442b): it is
+     * queued again under its own Message-ID. `warning: may_duplicate` when it was `uncertain` — the
+     * first copy may already have arrived. The permission that edits the recipients sends to them.
+     */
+    @PostMapping("/{id}/runs/{runId}/deliveries/{deliveryId}/resend")
+    @RequiredScope(Permission.SCHEDULE_UPDATE)
+    fun resend(
+        @PathVariable id: UUID,
+        @PathVariable runId: UUID,
+        @PathVariable deliveryId: UUID,
+    ): ApiResponse<Map<String, Any?>> {
+        val principal = currentPrincipal()
+        val resent = schedules.resendDelivery(workspaceOf(principal), id, runId, deliveryId)
+        audit.log(
+            event = ScheduleAuditEvents.NOTIFICATION_RESENT,
+            userId = principal.userId,
+            details =
+                mapOf(
+                    "schedule_id" to id.toString(),
+                    "run_id" to runId.toString(),
+                    "delivery_id" to deliveryId.toString(),
+                    "prior_state" to resent.prior.wire,
+                ),
+        )
+        val delivery = deliveryJson(resent.delivery, mayReadRecipient = true)
+        return ApiResponse.of(if (resent.mayDuplicate) delivery + ("warning" to MAY_DUPLICATE) else delivery)
+    }
+
     // ------------------------------------------------------------------------------ mapping
 
     private fun workspaceOf(principal: AuthenticatedPrincipal): UUID = principal.requireWorkspace().id
@@ -345,7 +377,7 @@ class SchedulesController(
                 linkedMapOf<String, Any?>(
                     "recipient_count" to schedule.notificationRecipients.size,
                     "events" to NotificationEvent.entries.filter { it in schedule.notificationEvents }.map { it.wire },
-                    "delivery" to NotificationDelivery.CURRENT,
+                    "delivery" to schedules.notificationDelivery().toWire(),
                 ).apply { if (mayReadRecipients) put("recipients", schedule.notificationRecipients) },
             "enabled" to schedule.enabled,
             "condition" to schedule.condition,
@@ -404,9 +436,37 @@ class SchedulesController(
     private fun runDetailJson(
         detail: RunDetail,
         names: Map<UUID, String>,
+        mayReadRecipients: Boolean,
     ): Map<String, Any?> =
         runJson(detail.run, names) +
-            mapOf("payload" to detail.run.payload, "parameters" to detail.run.parameters, "trail" to detail.trail.map(::trailJson))
+            mapOf(
+                "payload" to detail.run.payload,
+                "parameters" to detail.run.parameters,
+                "trail" to detail.trail.map(::trailJson),
+                "deliveries" to detail.deliveries.map { deliveryJson(it, mayReadRecipients) },
+            )
+
+    /**
+     * One notification delivery (#442b). The address is personal data: present only for a
+     * `schedule.update` holder; anyone else reads the state with no part of the address — not
+     * even its domain (the 442a rule for the recipients list).
+     */
+    private fun deliveryJson(
+        row: RunDelivery,
+        mayReadRecipient: Boolean,
+    ): Map<String, Any?> {
+        val d = row.delivery
+        return linkedMapOf<String, Any?>(
+            "id" to d.id.toString(),
+            "notice" to row.outcome.wire,
+            "state" to d.state.wire,
+            "attempts" to d.attempts,
+            "resend_count" to d.resendCount,
+            "next_attempt_at" to d.nextAttemptAt?.toString(),
+            "sent_at" to d.sentAt?.toString(),
+            "last_error_code" to d.lastErrorCode,
+        ).apply { if (mayReadRecipient) put("recipient", d.recipient) }
+    }
 
     /**
      * The trail as §20.11 answers it (#253): the `worker` column (`hostname:pid:suffix`) stays in
@@ -431,6 +491,9 @@ class SchedulesController(
 
     private companion object {
         const val DEFAULT_PREVIEW = 5
+
+        /** §20.13 — the resend of an `uncertain` delivery may be a second copy of a message that arrived. */
+        const val MAY_DUPLICATE = "may_duplicate"
 
         fun requestInvalid(
             field: String,

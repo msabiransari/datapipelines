@@ -3,7 +3,10 @@ package co.datapipelines.web.ui
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.RolePermissions
+import co.datapipelines.scheduler.DeliveryOffReason
+import co.datapipelines.scheduler.NotificationDeliveryState
 import co.datapipelines.scheduler.OccurrenceFunction
+import co.datapipelines.scheduler.ScheduleService
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContain
@@ -28,11 +31,13 @@ import org.springframework.web.bind.annotation.GetMapping
  */
 class SchedulesUiControllerTest {
     private val themeResolver = mockk<ThemeResolver>()
-    private val controller = SchedulesUiController(themeResolver)
+    private val schedules = mockk<ScheduleService>()
+    private val controller = SchedulesUiController(themeResolver, schedules)
 
     @Test
     fun `the page renders the schedules shell with the theme, the roles and the zone list`() {
         every { themeResolver.resolve(any()) } returns "dark"
+        every { schedules.notificationDelivery() } returns NotificationDeliveryState(DeliveryOffReason.NO_ALLOWLIST)
         val model = ExtendedModelMap()
 
         controller.page(model, MockHttpServletRequest()) shouldBe "schedules/index"
@@ -41,6 +46,8 @@ class SchedulesUiControllerTest {
         // No principal in this unit context: RoleModel's NONE — every verb boolean false.
         model["canAuthor"] shouldBe false
         model["timezoneGroups"] shouldBe ScheduleTimezones.GROUPS
+        // #442: the deployment's COMPUTED mail state, reason included, for the form's note.
+        model["notificationDelivery"] shouldBe mapOf("state" to "off", "reason" to "no_allowlist")
     }
 
     @Test
