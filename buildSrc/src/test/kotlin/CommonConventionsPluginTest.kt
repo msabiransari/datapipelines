@@ -299,7 +299,8 @@ class CommonConventionsPluginTest {
     /** The docs-probe line the last executed test run wrote to its XML report. */
     private fun docsProbeSeen(): String {
         val results = probeDir.resolve("modules/web/build/test-results/test")
-        val xml = results.listFiles()!!.single { it.name.startsWith("TEST-") && it.extension == "xml" }
+        val files = requireNotNull(results.listFiles()) { "no test-result directory at ${results.path}" }
+        val xml = files.single { it.name.startsWith("TEST-") && it.extension == "xml" }
         return xml
             .readLines()
             .single { "docs-probe=" in it }
@@ -348,6 +349,7 @@ class CommonConventionsPluginTest {
         probeDir.resolve("docs/probe.md").apply { parentFile.mkdirs() }.writeText("probe one\n")
         val secrets = probeDir.resolve("deploy/secrets.env").apply { parentFile.mkdirs() }
         secrets.writeText("DATAPIPELINES_SECRET=one\n")
+        val gateLog = probeDir.resolve("gate.log").apply { writeText("gate started\n") }
         val lakeData = probeDir.resolve("scripts/sample-data-lake/work/trips.parquet").apply { parentFile.mkdirs() }
         lakeData.writeText("one\n")
         val template = probeDir.resolve("deploy/secrets.env.example")
@@ -361,11 +363,12 @@ class CommonConventionsPluginTest {
 
         secrets.writeText("DATAPIPELINES_SECRET=two\n")
         lakeData.writeText("two\n")
+        gateLog.writeText("gate advanced\n")
         val excludedOnly = runner(test, "--info").build()
         assertEquals(
             TaskOutcome.UP_TO_DATE,
             excludedOnly.task(test)?.outcome,
-            "a change to deploy/secrets.env or a sample-data work file re-ran the task\n${excludedOnly.output}",
+            "a change to secrets, local data or gate.log re-ran the task\n${excludedOnly.output}",
         )
 
         template.writeText("DATAPIPELINES_SECRET=\nDATAPIPELINES_OTHER=\n")
