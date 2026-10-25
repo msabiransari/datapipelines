@@ -319,7 +319,7 @@ class ScheduleNotificationDeliveryE2eTest {
         lines.captured.filter { ADDRESS.containsMatchIn(it) } shouldBe emptyList()
         withClue("non-vacuity: the legs above logged their sends") {
             lines.captured
-                .filter { it.contains("event=scheduler.notification.sent") && it.contains("domain=deliver.test") }
+                .filter { it.contains("event=scheduler.notification.sent") && it.contains("domain=example.com") }
                 .shouldNotBeEmpty()
         }
         // The Security list: a line names its schedule and run, so an operator can find the notice
@@ -720,18 +720,18 @@ class ScheduleNotificationDeliveryE2eTest {
         private val SCHEDULE_ID = Regex("""schedule_id=[0-9a-f]{8}-[0-9a-f-]{27}""")
         private val RUN_ID = Regex("""run_id=[0-9a-f]{8}-[0-9a-f-]{27}""")
 
-        private const val OPS = "ops@deliver.test"
-        private const val LEAD = "lead@deliver.test"
-        private const val FAIL = "fail@deliver.test"
-        private const val REFUSED = "refused@deliver.test"
-        private const val CANCEL = "cancel@deliver.test"
-        private const val UNKNOWN = "unknown@deliver.test"
-        private const val LISTED = "listed@deliver.test"
-        private const val OUTSIDE = "outside@elsewhere.test"
-        private const val TRANSIENT = "transient@deliver.test"
-        private const val UNCERTAIN = "uncertain@deliver.test"
-        private const val CRASH_PENDING = "crash-pending@deliver.test"
-        private const val CRASH_CLAIMED = "crash-claimed@deliver.test"
+        private const val OPS = "ops@example.com"
+        private const val LEAD = "lead@example.com"
+        private const val FAIL = "fail@example.com"
+        private const val REFUSED = "refused@example.com"
+        private const val CANCEL = "cancel@example.com"
+        private const val UNKNOWN = "unknown@example.com"
+        private const val LISTED = "listed@example.com"
+        private const val OUTSIDE = "outside@example.org"
+        private const val TRANSIENT = "transient@example.com"
+        private const val UNCERTAIN = "uncertain@example.com"
+        private const val CRASH_PENDING = "crash-pending@example.com"
+        private const val CRASH_CLAIMED = "crash-claimed@example.com"
         private val BOXES =
             listOf(OPS, LEAD, FAIL, REFUSED, CANCEL, UNKNOWN, LISTED, OUTSIDE, TRANSIENT, UNCERTAIN, CRASH_PENDING, CRASH_CLAIMED)
 
@@ -834,7 +834,7 @@ class ScheduleNotificationDeliveryE2eTest {
             registry.add("datapipelines.scheduler.tick-interval-seconds") { "1" }
             registry.add("datapipelines.scheduler.polling-interval-seconds") { "1" }
             registry.add("datapipelines.scheduler.notifications.enabled") { "true" }
-            registry.add("datapipelines.scheduler.notifications.recipient-domains") { "deliver.test" }
+            registry.add("datapipelines.scheduler.notifications.recipient-domains") { "example.com" }
             registry.add("datapipelines.scheduler.notifications.retry-backoff-seconds") { "1" }
             registry.add("datapipelines.scheduler.notifications.max-attempts") { "3" }
         }
