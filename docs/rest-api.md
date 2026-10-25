@@ -348,7 +348,7 @@ Anything else refuses `409 pipeline.release.dependency_not_released` before anyt
 
 `node_id` is an opaque locator inside this one closure snapshot, never an entity id; `status` is `DRAFT`,
 `DISCARDED` or `MISSING`; `reason` is `not_included` (a DRAFT the request did not consent to), `discarded` or
-`missing`; `paths` names the pin fields that reach the node (`nodes[1].pipeline/nodes[0].template`). A pin that is
+`missing`, and on a restore's refusal (§5.13) `not_released` (a DRAFT a restore cannot include); `paths` names the pin fields that reach the node (`nodes[1].pipeline/nodes[0].template`). A pin that is
 absent and a pin the caller may not see are the same `MISSING` blocker, byte for byte.
 At most `max-blockers` are listed in closure discovery order; the rest set `blockers_truncated`.
 
@@ -471,8 +471,12 @@ POST /pipelines/{id}/versions/{v}/restore
 
 Returns DISCARDED version v to RELEASED (101): the original `released_at`/`released_by`
 return untouched, the discard stamps clear, and the pointer moves only when v > current or
-current is NULL. `409 pipeline.version.not_discarded` otherwise. **Session-only**; audited
-as `pipeline.version.restored`.
+current is NULL. `409 pipeline.version.not_discarded` otherwise. Under the workspace writer guard the
+version's outbound pins are re-judged first (#517, versioning §3.5.3): a missing or DISCARDED template or
+child pin is `400` with §12's validation code (`template_not_found`, `template_version_not_found` with
+`reason: discarded`, `pipeline_not_found`, `pipeline_version_not_found`, `pipeline_reference_not_released`),
+a present-but-DRAFT one `409 pipeline.release.dependency_not_released` in §5.10's blockers shape
+(`reason: not_released`); a refusal writes nothing. **Session-only**; audited as `pipeline.version.restored`.
 
 Response: `200 OK` with the pipeline's full shape.
 
@@ -2548,7 +2552,7 @@ Reads follow the working-version rule ([Versioning §7.1](versioning.md#71-autho
 | `POST /api/v1/parameter-sets/{id}/release?release_pinned_templates=` | `parameter_set.release` | Release (lock) the draft. Every pinned template version must be RELEASED (`409 parameter.release.dependency_not_released`, `details.pins_not_released`) — or, with `release_pinned_templates=true`, is released WITH the set in one transaction, templates first (142). Release re-runs the §4 source validation against the pins as they are now. |
 | `POST /api/v1/parameter-sets/{id}/draft/discard` | `parameter_set.version.manage` | Purge the DRAFT (versioning §5.4); the sole draft takes the set with it. Session-only. **`409 parameter.in_use`** while a dashboard pins it (#320) — see the note below the table. |
 | `POST /api/v1/parameter-sets/{id}/versions/{version}/discard` | `parameter_set.version.manage` | Discard a RELEASED version (reversible); the pointer falls back per D60. `409 parameter.in_use` while a live dashboard version pins it (#320). |
-| `POST /api/v1/parameter-sets/{id}/versions/{version}/restore` | `parameter_set.version.manage` | Restore a DISCARDED version; the pointer moves only above-current-or-NULL. |
+| `POST /api/v1/parameter-sets/{id}/versions/{version}/restore` | `parameter_set.version.manage` | Restore a DISCARDED version; the pointer moves only above-current-or-NULL. Its selector-template pins are re-judged first under the writer guard (#517): missing or DISCARDED → `400 parameter.validation.template_not_found` / `template_version_not_found`; DRAFT → `409 parameter.release.dependency_not_released` (§5.10's shape, `reason: not_released`). |
 | `DELETE /api/v1/parameter-sets/{id}/versions/{version}` | `parameter_set.version.manage` | Purge a DRAFT version. A release is discarded, never purged (`409 parameter.version.last_release`); `409 parameter.in_use` while a dashboard pins the draft (#320). |
 | `POST /api/v1/parameter-sets/{id}/current` | `parameter_set.switch_version` | The manual switch (the promotion receiver's rollout/rollback lever): body `{"version": n}`. A missing `version` — or one that is not an integer — refuses `400 parameter.validation.body_invalid` (`details.path = "version"`, `details.reason = "missing"` / `"wrong_type"`); the set lookup happens only after the body's shape is judged. Session-only. |
 | `DELETE /api/v1/parameter-sets/{id}` | `parameter_set.delete` | The entity purge — only when the set's only version is a DRAFT; `409 parameter.in_use` while ANY stored dashboard version of a live dashboard pins any version of the set (#320). |
@@ -2866,7 +2870,7 @@ browser persistence. Clients must reject foreign/stale responses even after abor
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-10-24 | next | #517 release dependencies, core (S1) | **§5.10:** the release takes the draft's whole release closure (templates and child pipelines, bounded); an optional JSON plan body (`tree_hash`, `include_dependencies`, `check_overrides`) flips the selected dependency drafts in the same transaction and appends `dependencies_released`; the plan refusals `428 plan_required`, `400 plan_invalid`, `422 dependency_limit`, `409 plan_conflict` / `dependency_cycle` / `busy`. **Deliberate break (record §14, ruled 2026-10-18, no deprecation window):** the template-only refusal code (record §14) is `pipeline.release.dependency_not_released`, and its details are the shared blockers shape `{root, blockers, blockers_truncated}` (the old `template_id` / `template_version` / `template_status` / `pins_not_released` are gone). A request without a plan answers a success with release 142's bytes. Every release is one transaction with strict in-transaction audit rows. **§8.9:** `template.release.busy`; the template flip runs in a guarded transaction. **§21:** the parameter set's template-only refusal code is `parameter.release.dependency_not_released` (details unchanged until #519). |
+| 2026-10-24 | next | #517 release dependencies, core (S1) | **§5.10:** the release takes the draft's whole release closure (templates and child pipelines, bounded); an optional JSON plan body (`tree_hash`, `include_dependencies`, `check_overrides`) flips the selected dependency drafts in the same transaction and appends `dependencies_released`; the plan refusals `428 plan_required`, `400 plan_invalid`, `422 dependency_limit`, `409 plan_conflict` / `dependency_cycle` / `busy`. **Deliberate break (record §14, ruled 2026-10-18, no deprecation window):** the template-only refusal code (record §14) is `pipeline.release.dependency_not_released`, and its details are the shared blockers shape `{root, blockers, blockers_truncated}` (the old `template_id` / `template_version` / `template_status` / `pins_not_released` are gone). A request without a plan answers a success with release 142's bytes. Every release is one transaction with strict in-transaction audit rows. **§8.9:** `template.release.busy`; the template flip runs in a guarded transaction. **§21:** the parameter set's template-only refusal code is `parameter.release.dependency_not_released` (details unchanged until #519). Round three (#719): **§5.13 / §21** a restore re-judges its outbound pins (400 validation code; 409 `dependency_not_released`), **§5.10** the blockers' `reason` gains `not_released`. |
 | 2026-10-25 | v2.101 | 442c (#442) | §20.13: resend at the deployment pending cap is 409 schedule.notification.backlog_full; no delivery change or resend audit row on refusal. |
 | 2026-10-24 | v2.100 | 442b (#442) | Additive. §20's schedule object: `notifications.delivery` is the deployment's computed state, `{"state":"on"}` or `{"state":"off","reason":"disabled"\|"mail_unconfigured"\|"no_allowlist"}`. §20.11: a run carries `deliveries` (notice, state, attempts, resend count, times, sanitized `last_error_code`; `recipient` only for `schedule.update` holders). New **§20.13** `POST /schedules/{id}/runs/{run_id}/deliveries/{delivery_id}/resend` (`schedule.update`; `may_duplicate` warning for an `uncertain` delivery; `409 schedule.notification.not_resendable`, `404 schedule.notification.not_found`). |
 | 2026-10-22 | v2.99 | 8b (#8) | JavaScript save/evaluate is enabled with the isolate; §8.7A adds the always-present console key and failed-evaluation console detail. |

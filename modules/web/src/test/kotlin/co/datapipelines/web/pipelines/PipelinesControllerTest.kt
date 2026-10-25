@@ -471,6 +471,8 @@ class PipelinesControllerTest {
         every { repository.restoreVersion(workspaceId, pipelineId, 2, any()) } returns
             PipelineRestoreResult(record.copy(currentVersion = 3), currentVersionBefore = 2)
         every { repository.findVersionBody(workspaceId, pipelineId, 3) } returns "{}"
+        // #517 round three: the restore rechecks the restored body's pins first; this body pins nothing.
+        every { repository.findVersionBody(workspaceId, pipelineId, 2) } returns "{}"
 
         val answered = controller.restoreVersion(pipelineId, 2)
 

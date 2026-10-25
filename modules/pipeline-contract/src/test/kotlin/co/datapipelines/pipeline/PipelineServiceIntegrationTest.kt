@@ -84,26 +84,21 @@ class PipelineServiceIntegrationTest {
         draftTemplates: ExclusiveDraftTemplates = emptyDraftTemplates(),
     ): PipelineService {
         val validator = Fixtures.validator()
+        // Per-ID, not one answer for everything: a BLANK id is not a template at all
+        // (a CALCULATOR or PIPELINE node's empty default ref), and the registry's honest
+        // answer for it is "no such version". Without that distinction the
+        // no-template-pin test below could not go red — the empty ref would come back
+        // RELEASED along with the real one. The restore recheck (#517 round three) reads the same port.
+        val statuses = TemplateVersionStatuses { _, id, _ -> if (id.isBlank()) null else templateStatus }
         return PipelineService(
             pipelines = repository,
             validator = validator,
             drafts = PipelineDraftService(repository, authoring),
-            releases =
-                PipelineReleaseService(
-                    repository,
-                    // Per-ID, not one answer for everything: a BLANK id is not a template at all
-                    // (a CALCULATOR or PIPELINE node's empty default ref), and the registry's honest
-                    // answer for it is "no such version". Without that distinction the
-                    // no-template-pin test below could not go red — the empty ref would come back
-                    // RELEASED along with the real one.
-                    TemplateVersionStatuses { _, id, _ -> if (id.isBlank()) null else templateStatus },
-                    validator,
-                    authoring,
-                    dashboards = recordingDashboards(),
-                ),
+            releases = PipelineReleaseService(repository, statuses, validator, authoring, dashboards = recordingDashboards()),
             authoring = authoring,
             draftTemplates = draftTemplates,
             dashboards = recordingDashboards(),
+            templateStatuses = statuses,
         )
     }
 

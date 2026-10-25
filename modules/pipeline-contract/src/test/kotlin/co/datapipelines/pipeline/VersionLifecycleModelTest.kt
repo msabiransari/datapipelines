@@ -847,21 +847,17 @@ class VersionLifecycleModelTest {
                 PipelineResolver { _, _, _ -> null },
                 5,
             )
+        val statuses = TemplateVersionStatuses { _, _, _ -> PipelineVersionStatus.RELEASED }
         return PipelineService(
             pipelines = repository,
             validator = validator,
             drafts = PipelineDraftService(repository, guard),
-            releases =
-                PipelineReleaseService(
-                    repository,
-                    TemplateVersionStatuses { _, _, _ -> PipelineVersionStatus.RELEASED },
-                    validator,
-                    guard,
-                    dashboards = NoDashboards,
-                ),
+            releases = PipelineReleaseService(repository, statuses, validator, guard, dashboards = NoDashboards),
             authoring = guard,
             draftTemplates = NoExclusiveDraftTemplates,
             dashboards = NoDashboards,
+            // The model's templates are always RELEASED, so a restore's pin recheck (#517 round three) passes.
+            templateStatuses = statuses,
         )
     }
 

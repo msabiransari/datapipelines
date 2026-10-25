@@ -16,6 +16,8 @@ import co.datapipelines.pipeline.release.GuardedTransaction
 import co.datapipelines.pipeline.release.ReleaseBounds
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseMutationGuard
+import co.datapipelines.pipeline.release.ReleaseNodeIdentity
+import co.datapipelines.pipeline.release.ReleaseRefusals
 import co.datapipelines.pipeline.through
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.transaction.support.SimpleTransactionStatus
@@ -287,7 +289,12 @@ class ParameterSetService(
         }
     }
 
-    /** Restore DISCARDED version [version]; the pointer moves only above-current-or-NULL (D60). */
+    /**
+     * Restore DISCARDED version [version]; the pointer moves only above-current-or-NULL (D60). A restore lands RELEASED
+     * without a human's consent, so under the guard the stored body's selector-template pins are rechecked first (#517
+     * round three, record §12.1): a missing or DISCARDED pin refuses with the save rules' validation code (400), a DRAFT
+     * one `parameter.release.dependency_not_released` (409). A refusal writes nothing.
+     */
     fun restoreVersion(
         workspaceId: UUID,
         id: UUID,
@@ -295,11 +302,25 @@ class ParameterSetService(
     ): VersionMoved {
         requireAuthoring()
         return guarded(workspaceId) {
-            val detail = repository.findVersionDetail(workspaceId, id, version) ?: throw notFound(id, version)
-            if (detail.status != PipelineVersionStatus.DISCARDED) {
-                throw wrongStatus(ParameterErrorCodes.VERSION_NOT_DISCARDED, id, version, detail.status)
+            val stored = repository.findVersion(workspaceId, id, version) ?: throw notFound(id, version)
+            if (stored.detail.status != PipelineVersionStatus.DISCARDED) {
+                throw wrongStatus(ParameterErrorCodes.VERSION_NOT_DISCARDED, id, version, stored.detail.status)
             }
+            refuseDanglingPins(workspaceId, stored)
             transactions.execute { repository.restoreVersion(workspaceId, id, version) } ?: throw staleBase(workspaceId, id)
+        }
+    }
+
+    private fun refuseDanglingPins(
+        workspaceId: UUID,
+        stored: ParameterSetVersion,
+    ) {
+        val pins = validator.validateRestorePins(workspaceId, stored.body)
+        if (pins.result.failures.isNotEmpty()) throw ParameterSetValidationException(pins.result)
+        if (pins.drafts.isNotEmpty()) {
+            val name = stored.record.name
+            val root = ReleaseNodeIdentity(workspaceId, ReleaseFamily.PARAMETER_SET, name, stored.detail.version)
+            throw ReleaseRefusals.restoreDependencyNotReleased(root, name, pins.drafts, maxBlockers)
         }
     }
 

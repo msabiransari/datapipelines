@@ -13,6 +13,10 @@ import co.datapipelines.pipeline.TemplateLookup
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.pipeline.TemplateVersionStatuses
 import co.datapipelines.pipeline.ValidationResult
+import co.datapipelines.pipeline.release.ReleaseFamily
+import co.datapipelines.pipeline.release.ReleaseNodeIdentity
+import co.datapipelines.pipeline.release.ReleaseNodeStatus
+import co.datapipelines.pipeline.release.RestoreBlocker
 import co.datapipelines.typesystem.DeclarationRule
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.typesystem.ParameterCardinality
@@ -36,6 +40,12 @@ sealed interface ParameterSetValidation {
         val result: ValidationResult,
     ) : ParameterSetValidation
 }
+
+/** What [ParameterSetValidator.validateRestorePins] answered: the dangling pins (400) and the draft ones (409). */
+data class RestorePins(
+    val result: ValidationResult,
+    val drafts: List<RestoreBlocker>,
+)
 
 /**
  * The save-time validator (record §4) — every write of a parameter set passes it, and nothing it
@@ -125,6 +135,34 @@ class ParameterSetValidator(
             pins.checkMetadata(workspaceId, index, parameter, failures, requireLiveStatus = true)
         }
         return failures.toResult()
+    }
+
+    /**
+     * A RESTORE's recheck of the stored body's selector pins under the writer guard (#517 round three, record §12.1):
+     * the missing or DISCARDED pins as failures, the present-but-DRAFT ones as blockers. Metadata only; no render,
+     * no dry run, no customer connection.
+     */
+    fun validateRestorePins(
+        workspaceId: UUID,
+        body: ParameterSetBody,
+    ): RestorePins {
+        val failures = ParameterSetFailures()
+        val drafts =
+            body.parameters.mapIndexedNotNull { index, parameter ->
+                val ref = parameter.source?.template
+                val status = pins.restorePin(workspaceId, index, parameter, failures)
+                if (ref == null || status != PipelineVersionStatus.DRAFT) {
+                    null
+                } else {
+                    RestoreBlocker(
+                        ReleaseNodeIdentity(workspaceId, ReleaseFamily.TEMPLATE, ref.id, ref.version),
+                        ref.id,
+                        ReleaseNodeStatus.DRAFT,
+                        "parameters[$index].source.template",
+                    )
+                }
+            }
+        return RestorePins(failures.toResult(), drafts)
     }
 
     /** Steps 5–6 alone, on a body that passed steps 1–4 ([validate] with `dryRun = false`). */

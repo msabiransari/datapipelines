@@ -131,6 +131,7 @@ open class PipelineService(
     private val maxBlockers: Int = ReleaseBounds.DEFAULT_MAX_BLOCKERS,
 ) {
     private val pinGuard = PipelinePurgePinGuard(pipelines, dashboards)
+    private val restorePins = PipelineRestorePins(pipelines, templateStatuses, maxBlockers, deserializer)
 
     /** The writer guard, acquired first inside every pin-affecting write's transaction. */
     private fun lockWorkspace(workspaceId: UUID) = guard.acquire(workspaceId, ReleaseFamily.PIPELINE)
@@ -726,8 +727,10 @@ open class PipelineService(
      * §3.1 (101) — restore DISCARDED version [version] to RELEASED. Its original
      * `released_at`/`released_by` return untouched (§8's derivation depends on one release
      * stamp per version); the pointer moves only above-current-or-NULL (D60). No pin can
-     * exist on a DISCARDED version (the `pinned` guard blocked its discard), so restore is
-     * always safe. An authoring write (§5.5).
+     * exist ON a DISCARDED version (the `pinned` guard blocked its discard), but the pins it
+     * HOLDS may have been discarded or purged since: under the guard, [PipelineRestorePins]
+     * rechecks every outbound template and child pin first (#517 round three, record §12.1)
+     * and refuses a dangling one 400, a draft one 409. An authoring write (§5.5).
      *
      * Answers the statement's own pointer pair ([PipelineRestoreResult]) — the pair the
      * `pipeline.version.restored` audit row carries (enums.md §15, #379), never a re-read.
@@ -743,11 +746,13 @@ open class PipelineService(
         lockWorkspace(workspaceId)
         // AnyStatus: restoring the first version of a DISCARDED entity is the one way back
         // (§3.5's `{X,X}` rows) — a live-only read would 404 the restore.
-        pipelines.findByIdAnyStatus(workspaceId, pipelineId) ?: throw pipelineNotFound(pipelineId)
+        val record = pipelines.findByIdAnyStatus(workspaceId, pipelineId) ?: throw pipelineNotFound(pipelineId)
         val detail =
             pipelines.findVersionDetail(workspaceId, pipelineId, version)
                 ?: throw versionNotFound(pipelineId, version)
         if (detail.status != PipelineVersionStatus.DISCARDED) throw notDiscarded(pipelineId, version, detail.status)
+        val body = pipelines.findVersionBody(workspaceId, pipelineId, version) ?: throw versionNotFound(pipelineId, version)
+        restorePins.recheck(workspaceId, record, version, body)
 
         return pipelines.restoreVersion(
             workspaceId,

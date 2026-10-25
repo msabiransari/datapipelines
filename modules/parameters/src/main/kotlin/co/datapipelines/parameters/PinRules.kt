@@ -105,6 +105,44 @@ internal class PinRules(
         }
     }
 
+    /**
+     * A RESTORE's recheck of one selector pin (#517 round three, record §12.1 RULED 2026-10-25): existence and status
+     * only, read from the uncached status port, so the registry cache cannot pass a pin discarded meanwhile. Never the
+     * datasource, type or dialect: a rule that tightened since the version was released is not a dangling pin. Reports a
+     * missing or DISCARDED pin; answers the pin's live status, or null when it has none.
+     */
+    fun restorePin(
+        workspaceId: UUID,
+        index: Int,
+        parameter: ParameterDefinition,
+        failures: ParameterSetFailures,
+    ): PipelineVersionStatus? {
+        val ref = parameter.source?.template ?: return null
+        val at = "parameters[$index].source"
+        val pin = mapOf("template_id" to ref.id.safeEcho(), "template_version" to ref.version)
+        val status = templateStatuses.statusOf(workspaceId, ref.id, ref.version)
+        when {
+            status == PipelineVersionStatus.DISCARDED -> {
+                failures.add(
+                    ParameterErrorCodes.TEMPLATE_VERSION_NOT_FOUND,
+                    "$at.template",
+                    "Template '${ref.id.safeEcho()}' version ${ref.version} is DISCARDED; a restore lands RELEASED and " +
+                        "may pin only a live version.",
+                    pin + ("reason" to "discarded"),
+                )
+            }
+
+            status == null && ref.version != 1 && templateStatuses.statusOf(workspaceId, ref.id, 1) != null -> {
+                missingVersion(at, ref, failures)
+            }
+
+            status == null -> {
+                failures.add(ParameterErrorCodes.TEMPLATE_NOT_FOUND, "$at.template", "Template '${ref.id.safeEcho()}' does not exist.", pin)
+            }
+        }
+        return status.takeUnless { it == PipelineVersionStatus.DISCARDED }
+    }
+
     private fun missingVersion(
         at: String,
         ref: co.datapipelines.pipeline.TemplateRef,

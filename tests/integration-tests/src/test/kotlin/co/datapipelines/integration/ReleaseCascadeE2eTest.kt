@@ -624,6 +624,74 @@ class ReleaseCascadeE2eTest {
         }
     }
 
+    /**
+     * #517 round three — the lander's refusal of 887784d59 (comment 6399333063), replayed: a restore lands RELEASED with no
+     * human's consent, so it rechecks the restored version's outbound pins under the workspace guard. A template version
+     * discarded after the pipeline refuses the restore with the save rules' code (400, record §12.1 RULED 2026-10-25 — the
+     * D7 precedent): the parent and the template stay DISCARDED and no restore audit row commits. Relies on order 1's
+     * datasource.
+     */
+    @Test
+    @Order(9)
+    fun `restore rechecks outbound pins - a template discarded after the pipeline refuses 400 and writes nothing`() {
+        val template = "test/restore_517_outbound.sql"
+        createTemplate(901, template)
+        val (id, hash) = createPipeline(902, "test/restore_517_outbound", listOf(template))
+        release(id, hash, cascade = true).statusCode(200)
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .post("/api/v1/pipelines/$id/versions/1/discard")
+            .then()
+            .statusCode(200)
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .asSession(ADMIN_SESSION)
+            .body(mapOf("name" to template, "version" to 1))
+            .post("/api/v1/templates/version/discard")
+            .then()
+            .statusCode(200)
+
+        val response = given().port(port).asSession(ADMIN_SESSION).post("/api/v1/pipelines/$id/versions/1/restore")
+
+        val (parent, target) = versionStatuses(id, template)
+        val restores = auditRows("pipeline.version.restored", id).size
+        withClue(
+            "restore HTTP ${response.statusCode} ${response.body.asString()}; parent=$parent template=$target restoreAudits=$restores",
+        ) {
+            response.statusCode shouldBe 400
+            response.jsonPath().getString("error.code") shouldBe "pipeline.validation.template_version_not_found"
+            response.jsonPath().getString("error.details.failures[0].path") shouldBe "nodes[0].template"
+            response.jsonPath().getString("error.details.failures[0].details.reason") shouldBe "discarded"
+            parent shouldBe "DISCARDED"
+            target shouldBe "DISCARDED"
+            restores shouldBe 0
+        }
+    }
+
+    /** The parent's v1 status and the template's v1 status, read at the TABLES (the parent is wholly discarded). */
+    private fun versionStatuses(
+        pipelineId: String,
+        templateId: String,
+    ): Pair<String, String> =
+        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            connection
+                .prepareStatement(
+                    "SELECT (SELECT status FROM pipeline_versions WHERE pipeline_id = ?::uuid AND version = 1)," +
+                        " (SELECT tv.status FROM template_versions tv JOIN templates t ON t.id = tv.template_id" +
+                        " WHERE t.name = ? AND t.workspace_id = ?::uuid AND tv.version = 1)",
+                ).use { statement ->
+                    statement.setString(1, pipelineId)
+                    statement.setString(2, templateId)
+                    statement.setString(3, MCP_WORKSPACE)
+                    statement.executeQuery().use { rows ->
+                        check(rows.next())
+                        rows.getString(1) to rows.getString(2)
+                    }
+                }
+        }
+
     companion object {
         private const val TEMPLATE_ONE = "test/cascade_142_one.sql"
         private const val TEMPLATE_TWO = "test/cascade_142_two.sql"
