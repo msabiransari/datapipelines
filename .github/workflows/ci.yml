@@ -276,6 +276,14 @@ jobs:
             tests/browser-tests/build/test-results/test/*.xml
           retention-days: 7
           if-no-files-found: warn
+      - name: keep browser traces on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: browser-traces
+          path: tests/browser-tests/build/reports/browser-traces/*.zip
+          retention-days: 7
+          if-no-files-found: warn
       - name: docs audit (the served manual exported first — 242a)
         run: |
           ./gradlew :modules:mcp-server:docsExport --offline -q
