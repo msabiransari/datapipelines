@@ -321,7 +321,7 @@ class ScheduleNotificationOutboxIntegrationTest {
         SchedulerTestDb.reset()
         val settings = SchedulerProperties.Notifications(enabled = true, backlogMax = 1)
         boot(settings, events = listOf("failure"))
-        h.setTime(schedule.nextDueAt!!.minusSeconds(60))
+        h.setTime(requireNotNull(schedule.nextDueAt).minusSeconds(60))
         val second =
             h.create(
                 h.request(name = "reports/other").copy(
@@ -337,7 +337,7 @@ class ScheduleNotificationOutboxIntegrationTest {
             "UPDATE schedules SET notification_recipients = ARRAY['ops@example.com'] WHERE id = :id",
             mapOf("id" to schedule.id),
         )
-        h.setTime(second.nextDueAt!!.plusSeconds(3))
+        h.setTime(requireNotNull(second.nextDueAt).plusSeconds(3))
         h.tick()
         return listOf(onlyRun().id, h.runsOf(second.id).single().id)
     }

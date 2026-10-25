@@ -122,13 +122,13 @@ class ScheduleNotificationSenderIntegrationTest {
         h.mailer.sent.clear()
         val manual = h.service.runNow(SchedulerTestDb.WORKSPACE, schedule.id, SchedulerTestDb.CREATOR, null).value
         manual.targetRef shouldBe schedule.targetRef
-        h.runs.find(run.id)!!.targetRef shouldBe schedule.targetRef // cron creation site, persisted
+        requireNotNull(h.runs.find(run.id)).targetRef shouldBe schedule.targetRef // cron creation site, persisted
         SchedulerTestDb.jdbc.update(
             "UPDATE schedules SET target_ref = 'changed/target', timezone = 'America/New_York' WHERE id = :id",
             mapOf("id" to schedule.id),
         )
         h.worker.handle(manual.id)
-        h.executor.outcomes[requireNotNull(h.runs.find(manual.id)!!.executionId)] = ExecutionOutcome.Finished(RunState.SUCCEEDED, null)
+        h.executor.outcomes[requireNotNull(h.runs.find(manual.id)?.executionId)] = ExecutionOutcome.Finished(RunState.SUCCEEDED, null)
         h.reconciler.tick()
         h.notifier().tick()
         h.mailer.sent.size shouldBe 2
