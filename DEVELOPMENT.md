@@ -898,8 +898,9 @@ pregate's stage-3 guards instead of reporting them `UP-TO-DATE`. Not inputs: wha
 names — build output and Gradle/Kotlin state, `.claude/` (lane worktrees), IDE and tool
 directories, the gate and pregate logs, the sample-data `work/` directories, and the secrets
 (`deploy/secrets.env`, `.env` files, keys and keystores, `credentials.*`, `secrets.*`; the tracked
-template `deploy/secrets.env.example` stays an input) — plus Git's own directory. A secret file
-never enters Gradle's task history, not even as a hash. `RepoTestInputsTest` fails when a
+template `deploy/secrets.env.example` stays an input) — plus Git's own directory and the
+lander wrapper's root `gate.log`. A secret file never enters Gradle's task history, not even
+as a hash. `RepoTestInputsTest` fails when a
 `.gitignore` entry lands without its mirror in `RepoTestInputs`. The `--rerun` #712 needed is no
 longer needed for this cause; `modules/parameters` and `modules/templates` carried their own input
 lists for it (049), which the convention replaced.

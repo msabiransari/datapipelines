@@ -114,11 +114,18 @@ class RepoTestInputsTest {
                 "README.md",
                 "settings.gradle.kts",
             )
-        val secret = listOf("deploy/secrets.env", "modules/app/build/tmp/x.txt", "scripts/sample-data-lake/work/t.parquet", ".git/HEAD")
+        val secret =
+            listOf(
+                "deploy/secrets.env",
+                "modules/app/build/tmp/x.txt",
+                "scripts/sample-data-lake/work/t.parquet",
+                ".git/HEAD",
+                "gate.log",
+            )
 
         val inputs = declared(read + secret)
 
         assertEquals(emptyList<String>(), read.filterNot { it in inputs }, "repo files tests read dropped from the inputs")
-        assertEquals(emptyList<String>(), secret.filter { it in inputs }, "secrets, build output or local data leaked into the inputs")
+        assertEquals(emptyList<String>(), secret.filter { it in inputs }, "secrets, build output, gate logs or local data leaked into the inputs")
     }
 }
