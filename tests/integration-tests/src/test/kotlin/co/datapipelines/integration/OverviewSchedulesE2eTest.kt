@@ -160,12 +160,17 @@ class OverviewSchedulesE2eTest {
     fun `a paused schedule that blocks counts and filters as blocked - blocked wins on both sides`() {
         // Last: it changes the fixture. b is paused; blocking it makes the row a paused clause
         // without its blocked_at term would still list.
-        sql("UPDATE schedules SET blocked_reason = 'e2e', blocked_at = NOW() WHERE workspace_id = '$WORKSPACE_ID' AND name = 'ov/b_paused_failed'")
+        sql(
+            "UPDATE schedules SET blocked_reason = 'e2e', blocked_at = NOW() " +
+                "WHERE workspace_id = '$WORKSPACE_ID' AND name = 'ov/b_paused_failed'",
+        )
         val page = page(VIEWER_SESSION)
 
         counts(page) shouldBe mapOf("schedules" to 4, "enabled" to 2, "paused" to 0, "blocked" to 2)
         CONDITIONS.forEach { word ->
-            withClue("?condition=$word equals the home's $word count") { walk(VIEWER_SESSION, word).size shouldBe counts(page).getValue(word) }
+            withClue("?condition=$word equals the home's $word count") {
+                walk(VIEWER_SESSION, word).size shouldBe counts(page).getValue(word)
+            }
         }
         walk(VIEWER_SESSION, "blocked") shouldContainExactly listOf("ov/b_paused_failed", "ov/c_blocked")
         page.substringAfter("data-task=\"unblock\"").substringBefore("</li>").contains("Unblock 2 schedules<") shouldBe true

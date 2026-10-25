@@ -382,7 +382,9 @@ class SchedulesControllerTest {
         every { service.list(workspace, null, 3, 0, any(), "nope") } throws
             ScheduleException(ScheduleErrorCodes.REQUEST_INVALID, "refused", mapOf("field" to "condition"))
 
-        controller.list(null, 0, 2, "blocked").data.items.size shouldBe 1
+        controller
+            .list(null, 0, 2, "blocked")
+            .data.items.size shouldBe 1
         shouldThrow<ScheduleException> { controller.list(null, 0, 2, "nope") }.details["field"] shouldBe "condition"
         verify(exactly = 1) { service.list(workspace, null, 3, 0, any(), "blocked") }
     }

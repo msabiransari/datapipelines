@@ -116,7 +116,8 @@ class OverviewSchedulesBrowserTest : SchedulesBrowserSuite() {
         page.waitForURL("**/schedules?condition=blocked")
         page.locator("#schedule-list:not([aria-busy]) .tpl-results").waitFor()
         page.locator("#schedule-filter-condition").inputValue() shouldBe "blocked"
-        page.locator("#schedule-tree-pane [data-leaf-name]").all().map { it.getAttribute("data-leaf-name") } shouldBe listOf("$root/monthly/close")
+        page.locator("#schedule-tree-pane [data-leaf-name]").all().map { it.getAttribute("data-leaf-name") } shouldBe
+            listOf("$root/monthly/close")
         page.locator("#schedule-list details.tpl-folder").count() shouldBe 0
         page.url().substringAfter(baseUrl) shouldBe "/schedules?condition=blocked"
 
