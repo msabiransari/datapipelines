@@ -172,12 +172,18 @@
           read next quarter when the figure is questioned. The draft stays a draft until then. The agent can
           iterate all day, but the version your team repeats is the one a person signed off.
         </p>
-        <!-- claim: docs/rest-api.md §19 -->
+        <!-- claim: docs/rest-api.md §19, docs/dashboards.md §5.1 -->
         <p>
           And the release is the last step of the analyst's job and the first step of everyone else's: publish the
-          endpoint and the finance team's script, the dashboard's refresh, or the PM's curl call all read the same
-          versioned answer, parameters bound and keys scoped, instead of asking you to re-run it every Monday. The
-          question stops being yours to carry, and the answer stops depending on your calendar.
+          endpoint and the finance team's script, the <a th:href="@{/sql-dashboards}">dashboard</a>'s refresh, or
+          the PM's curl call all read the same versioned answer, parameters bound and keys scoped, instead of asking
+          you to re-run it every Monday. The question stops being yours to carry, and the answer stops depending on
+          your calendar.
+        </p>
+        <!-- claim: docs/scheduler.md §1, docs/scheduler.md §3 — a schedule runs a pipeline at a cron pattern's occurrences in an IANA time zone -->
+        <p>
+          If the Monday run itself is the chore, a <a th:href="@{/pipeline-scheduling}">schedule</a> runs the pipeline
+          on a cron pattern in your time zone and keeps a history of every run.
         </p>
         <p>
           The quieter benefit compounds: because every analysis is a versioned document rather than a session that

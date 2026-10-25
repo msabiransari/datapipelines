@@ -51,9 +51,9 @@
           <p><code>datasources_get_schemas</code>, <code>datasources_get_tables</code>, <code>datasources_get_columns</code> and <code>datasources_preview_rows</code>. The agent looks at the columns and a few real values first, so its SQL is grounded rather than inferred.</p>
         </article>
         <article class="card">
-          <!-- claim: docs/pipeline-contract.md §3.1 -->
+          <!-- claim: docs/pipeline-contract.md §3.1, docs/scheduler.md §1, docs/dashboards.md §5.1 -->
           <h3>The answer becomes an artifact</h3>
-          <p>The query is saved as a template, referenced by a pipeline in declarative JSON. It has a name, parameters, and a diff. Somebody else can run it without asking the agent again.</p>
+          <p>The query is saved as a template, referenced by a pipeline in declarative JSON. It has a name, parameters, and a diff. Somebody else can run it without asking the agent again, put it on a <a th:href="@{/pipeline-scheduling}">schedule</a>, or chart its released version on a <a th:href="@{/sql-dashboards}">dashboard</a>.</p>
         </article>
         <article class="card">
           <!-- claim: docs/versioning.md §3.1, docs/versioning.md §3.2 -->
