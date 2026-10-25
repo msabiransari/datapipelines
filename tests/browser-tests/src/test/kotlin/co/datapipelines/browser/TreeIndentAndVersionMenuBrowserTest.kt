@@ -157,9 +157,9 @@ class TreeIndentAndVersionMenuBrowserTest : BrowserSuite() {
                     }""",
                 )
 
-            // #701 round two: the default browser column (300px; 270 below 1100) is under the
-            // compact threshold, so the step here is the compact one, --space-1 (owner ruling
-            // 2026-10-25); the floor is that token, still a step the one-px checks below can see.
+            // #701 round two: the browser's rows are compact at every width, so the step here is
+            // --space-1 (owner ruling 2026-10-25, amended); the floor is that token, still a step
+            // the one-px checks below can see.
             withClue("$screen: the level's indent must be a real, positive step") {
                 m.px("space1") shouldBeGreaterThanOrEqual 4.0
                 m.px("indent") shouldBeGreaterThanOrEqual m.px("space1")

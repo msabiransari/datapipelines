@@ -381,9 +381,10 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
         readyTree()
         PIPELINE_ROWS.forEach { releaseTimes(it, RELEASES) }
         val workspace = UUID.fromString(field(api("GET", "/api/v1/pipelines/tree", null), "workspace_id"))
-        seedReviewedScripts(workspace)
+        val scripts = scriptRows(width)
+        seedReviewedScripts(workspace, scripts)
         val rows = mutableListOf<Map<String, Any?>>()
-        for ((family, paths) in listOf("pipelines" to PIPELINE_ROWS, "templates" to SCRIPT_ROWS)) {
+        for ((family, paths) in listOf("pipelines" to PIPELINE_ROWS, "templates" to scripts)) {
             openBrowserTree(family)
             setBrowserWidth(width)
             paths.forEach { openFolders(family, it) }
@@ -393,25 +394,29 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
                 page.screenshot(Page.ScreenshotOptions().setPath(evidence("701b-$width-$family-$theme.png")))
             }
         }
-        // the other side of the threshold, from the default case: at 320 the full indent and badge padding return
-        val full = if (width == DEFAULT_WIDTH) fullSide() else emptyList()
-        (rows + full).forEach { row ->
+        // the other end, from the default case: at the 480px maximum the rows are still compact (no
+        // threshold, owner ruling 2026-10-25 amended), and widening never takes width from a name
+        val widest = if (width == DEFAULT_WIDTH) widestSide(scripts) else emptyList()
+        (rows + widest).forEach { row ->
             println("701b-measure|${row["width"] ?: width}|${row["depth"]}|${row["theme"]}|${row["family"]}|$row")
         }
         assertSoftly {
             rows.forEach { assertNarrowRow(width, it) }
-            full.forEach { row ->
-                withClue("$FULL_WIDTH full indent: $row") { row["indent"] shouldBe row["gapMd"] }
-                withClue("$FULL_WIDTH full badge padding: $row") { row["badgePadLeft"] shouldBe row["space2"] }
+            widest.forEach { row ->
+                assertNarrowRow(MAX_WIDTH, row)
+                val narrower = rows.single { it["path"] == row["path"] && it["theme"] == row["theme"] }
+                withClue("$MAX_WIDTH the name only grows: $row vs $narrower") {
+                    (row["titleClientWidth"] as Number).toDouble().shouldBeGreaterThan((narrower["titleClientWidth"] as Number).toDouble())
+                }
             }
         }
     }
 
-    /** The templates rows at 320px (dark, the theme the loop ends on): the compact mode is off. */
-    private fun fullSide(): List<Map<String, Any?>> {
-        setBrowserWidth(FULL_WIDTH)
-        return SCRIPT_ROWS.map {
-            requireNotNull(narrowMetrics("templates", it)).plus(listOf("theme" to "dark", "family" to "templates", "width" to FULL_WIDTH))
+    /** The templates rows (dark, the theme the loop ends on) at the browser's 480px maximum. */
+    private fun widestSide(scripts: List<String>): List<Map<String, Any?>> {
+        setBrowserWidth(MAX_WIDTH)
+        return scripts.map {
+            requireNotNull(narrowMetrics("templates", it)).plus(listOf("theme" to "dark", "family" to "templates", "width" to MAX_WIDTH))
         }
     }
 
@@ -428,7 +433,15 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
         }
         withClue("$label — badges inside the browser's content edge") { n("badgeRight").shouldBeLessThanOrEqual(n("contentRight") + 0.5) }
         withClue("$label — no sideways scroll (#541)") { n("treeScrollWidth").shouldBeLessThanOrEqual(n("treeClientWidth")) }
-        withClue("$label — meta inside the control") { n("metaRight").shouldBeLessThanOrEqual(n("controlInnerRight") + 0.5) }
+        if (width == MIN_WIDTH && n("depth") > SHALLOW_DEPTH && row["family"] == "templates") {
+            // owner ruling 2026-10-25 (amended): at the minimum a three-badge leaf deeper than 7 levels may
+            // let its badges reach into the row's right padding — inside the rail, never clipped
+            withClue("$label — the accepted residue stays inside the rail") {
+                n("metaRight").shouldBeLessThanOrEqual(n("contentRight") + 0.5)
+            }
+        } else {
+            withClue("$label — meta inside the control") { n("metaRight").shouldBeLessThanOrEqual(n("controlInnerRight") + 0.5) }
+        }
         withClue("$label — tooltip") { listOf(row["controlTitle"], row["labelTitle"]) shouldBe listOf(row["path"], row["path"]) }
         withClue("$label — ellipsis") { row["titleTextOverflow"] shouldBe "ellipsis" }
         if (width >= DEFAULT_WIDTH || n("depth") <= SHALLOW_DEPTH) {
@@ -436,7 +449,7 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
         } else {
             withClue("$label — the ruling accepts a 0px name here") { n("titleClientWidth").shouldBeGreaterThanOrEqual(0.0) }
         }
-        // the compact mode (below the record's 320px): the indent and the badge sides are --space-1
+        // the compact rows (every width): the indent and the badge sides are --space-1
         withClue("$label — compact indent") { n("indent") shouldBe n("space1") }
         withClue("$label — compact badge side padding") { n("badgePadLeft") shouldBe n("space1") }
     }
@@ -492,7 +505,7 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
             titleClientWidth: title.clientWidth, titleScrollWidth: title.scrollWidth, titleTextOverflow: getComputedStyle(title).textOverflow,
             controlTitle: control.getAttribute('title'), labelTitle: title.getAttribute('title'),
             indent: group ? parseFloat(getComputedStyle(group).paddingInlineStart) : null,
-            space1: tok('--space-1'), space2: tok('--space-2'), gapMd: tok('--gap-md') };
+            space1: tok('--space-1') };
           probe.remove();
           return out;
         }""",
@@ -519,12 +532,15 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
      * released [RELEASES] times and edited once more, then the rule superseded (the #533 marker's
      * path, [NeedsReviewFixtures]). Every write precedes the supersession: a retired rule is not citable.
      */
-    private fun seedReviewedScripts(workspace: UUID) {
+    private fun seedReviewedScripts(
+        workspace: UUID,
+        scripts: List<String>,
+    ) {
         val email = workspaceCreator(workspace)
         val datasource = "row701-src-" + generatedPassword("s").takeLast(8).lowercase()
         EditorRunFixtures.registerSourceDatasource(page, baseUrl, datasource).shouldBeEmpty()
         val rule = NeedsReviewFixtures.recordRule(email, datasource, "A row is a row.", supersedes = null, workspace = workspace)
-        for (script in SCRIPT_ROWS) {
+        for (script in scripts) {
             NeedsReviewFixtures.writeCitingScript(page, script, rule)
             for (round in 1..RELEASES) {
                 if (round > 1) NeedsReviewFixtures.writeCitingScript(page, script, rule, round, workingHash(script))
@@ -555,7 +571,9 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
     private companion object {
         const val MIN_WIDTH = 240
         const val DEFAULT_WIDTH = 300
-        const val FULL_WIDTH = 320
+
+        /** The browser's maximum column (`--app-browser-max`). */
+        const val MAX_WIDTH = 480
         const val SHALLOW_DEPTH = 3.0
 
         /** Twelve releases, then a draft: the row reads `v13` and `draft` — a two-digit version. */
@@ -563,6 +581,17 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
         val LONG = "x".repeat(64)
         val DEEP = (2..9).joinToString("/", prefix = "row/") { "d$it" }
         val PIPELINE_ROWS = listOf("row/deep/$LONG", "$DEEP/$LONG")
-        val SCRIPT_ROWS = listOf("row/deep/${LONG.drop(8)}.jsonata", "$DEEP/${LONG.drop(8)}.jsonata")
+
+        /**
+         * The templates rows of one case, under a root that names its width: each case's workspace
+         * holds template names no other workspace holds. A first draft write after a release is
+         * refused 409 when another workspace has a template of the same name (the create-draft
+         * statement reads `templates` by name alone; the handback's follow-up), so the two cases
+         * must never share one.
+         */
+        fun scriptRows(width: Int): List<String> {
+            val leaf = "${LONG.drop(8)}.jsonata"
+            return listOf("t$width/deep/$leaf", (2..9).joinToString("/", prefix = "t$width/", postfix = "/$leaf") { "d$it" })
+        }
     }
 }
