@@ -1,6 +1,6 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.54
+**Status:** v1.55
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-10-25
@@ -1122,9 +1122,15 @@ or drop the jar into `lib/`. `./app.sh --start --demo nyc[,trade[,lake]]` does t
    `demo` workspace — workspaces are created by super admins, not provisioned per
    user ([Auth §4.2](auth.md#42-user-provisioning) step 4, D-R11) — which is where
    the example pipelines are seeded.
-2. **Copy your MCP key** from the top bar. It is created when you sign in to the
-   workspace, one per person per workspace, and the chip's Copy button puts it on your
-   clipboard (`GET /api/v1/auth/api-keys/mine` reads it; there is no endpoint that creates one).
+2. **Create your MCP key** after signing in: open the [Keys page
+   (UI Screens §4.19)](ui-screens.md#419-api-keys-keys-v2--the-one-creation-path-for-every-kind)
+   at `/api-keys`, choose **New API key**, select kind `mcp`, and choose a role the
+   creator may give under the subset rule. The demo's bootstrap super admin may
+   choose any offered MCP role; authors, promoters and workspace admins may also
+   create MCP keys, but viewers cannot. Copy the plaintext from the one-time reveal.
+   To rotate a key, revoke it on the Keys page and create another. REST clients can
+   create one with `POST /api/v1/auth/api-keys` ([Auth §7.4](auth.md#74-issuance),
+   [REST API §16.1](rest-api.md#161-api-keys-creation-is-on-the-keys-page--keys-v2)).
 3. **Give the agent the MCP endpoint** `http://localhost:8080/mcp` and that key.
    It can list the seeded pipelines, read the three sample datasources' schemas,
    and execute `nyc/mobility/revenue_by_borough` or `nyc/mobility/rainy_vs_dry_ridership` immediately —
@@ -1332,6 +1338,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-25 | v1.55 | #702 | **Appendix B step 2:** replaced the top-bar chip, login mint and `GET /api/v1/auth/api-keys/mine` flow retired by keys v2 (#233, Auth v3.5) with the Keys page / `POST /api/v1/auth/api-keys`, the role chosen under the subset rule and the one-time reveal. The v1.28 row remains as history. Prose only. |
 | 2026-10-25 | v1.54 | #712 — renumbered at merge after #442’s v1.52/v1.53 | **§6.4:** the management port's chart exposure (configuration.md §3.14) — a `management` values block, everything OFF by default (byte-identical default render): `management.expose` adds the management `containerPort` (from `management.port`), pins both `MANAGEMENT_SERVER_*` env entries (address `0.0.0.0` — the opt-open switch) and a headless `Service` (`clusterIP: None`); `management.networkPolicy.enabled` adds the chart's one ingress `NetworkPolicy` for the app pods, which carries two rules: the scraper peers on the management port, and the app-port rule from `appIngress.from` (`NetworkPolicyPeer`s, verbatim) or every source under the explicit `appIngress.allowAll: true`. Every selector is a full `LabelSelector`. The render refuses both scraper selectors empty, no app-port declaration, `allowAll` with a `from`, a bare label map, an unknown or empty peer and a quoted `allowAll`; the isolation and union semantics, and how the policy combines with operator-owned ones, are stated. `management.serviceMonitor.enabled` adds a `ServiceMonitor`. Any `extraEnv.MANAGEMENT_SERVER_*` double mapping is refused (Kubernetes honours the last duplicate env name silently). Chart 0.2.0 → 0.2.1. `helm-check.sh` grows to lint plus eighty-nine verdicts (`(h)`–`(h5h)`), with a pinned `kubeconform` validating every successful render against the Kubernetes 1.35.0 schema and a parsed NetworkPolicy contract. **§9:** the management-port sentence names the app-port rule. `HelmManagementValuesSpecDriftTest` pins the values, the expose guards, the refusals, the three templates' flag lines, the shared app port, the `matchLabels` example and the configuration.md §3.14 row. |
 | 2026-10-25 | v1.53 | 442c (#442) | §8.3: keep scheduler mail off until every instance understands V51 notification trail kinds. §8.4: disable, drain and account for old readers refusing historical notification kinds before downgrade. |
 | 2026-10-24 | v1.52 | 442b (#442) | §5.1: the one optional key with a startup requirement of its own — `datapipelines.scheduler.notifications.enabled=true` needs the mail transport and `auth.base-url` or startup refuses; under `development` nothing sends until the recipient-domain allowlist names a domain. |
