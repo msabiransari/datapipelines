@@ -13,6 +13,7 @@ import co.datapipelines.pipeline.TemplateVersionStatuses
 import co.datapipelines.pipeline.ValidationResult
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.pipeline.release.GuardedTransaction
+import co.datapipelines.pipeline.release.ReleaseBounds
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import co.datapipelines.pipeline.through
@@ -115,6 +116,8 @@ class ParameterSetService(
     private val newId: () -> UUID = UUID::randomUUID,
     /** #517 — the workspace writer guard; [ReleaseMutationGuard.NONE] in a directly constructed test. */
     private val guard: ReleaseMutationGuard = ReleaseMutationGuard.NONE,
+    /** Blockers one restore refusal lists (`datapipelines.release.dependencies.max-blockers`, record §14). */
+    private val maxBlockers: Int = ReleaseBounds.DEFAULT_MAX_BLOCKERS,
 ) {
     /** [block] in one metadata transaction with the workspace writer guard acquired first (#517). */
     private fun <T> guarded(

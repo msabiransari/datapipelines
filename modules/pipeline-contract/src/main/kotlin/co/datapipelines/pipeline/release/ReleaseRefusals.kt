@@ -21,6 +21,27 @@ object ReleaseRefusals {
             details = ReleaseBlockers.details(closure, blockers, maxBlockers),
         )
 
+    /**
+     * A RESTORE's refusal (#517 round three, record §12.1 RULED 2026-10-25, the import-landing precedent): a direct pin of
+     * the restored version is present but not RELEASED. The code carries the restored version's family; the details are
+     * [ReleaseBlockers.restoreDetails]. A restore never includes a draft, so the remedy is to release it first.
+     */
+    fun restoreDependencyNotReleased(
+        root: ReleaseNodeIdentity,
+        rootName: String,
+        blockers: List<RestoreBlocker>,
+        maxBlockers: Int,
+    ): DatapipelinesException {
+        val count = blockers.map { it.identity }.distinct().size
+        return DatapipelinesException(
+            code = root.family.code(ReleaseRefusal.DEPENDENCY_NOT_RELEASED),
+            message =
+                "Restore blocked: $count ${if (count == 1) "dependency it pins is" else "dependencies it pins are"} " +
+                    "not released. A restore lands RELEASED; release them first, then restore.",
+            details = ReleaseBlockers.restoreDetails(root, rootName, blockers, maxBlockers),
+        )
+    }
+
     fun cycle(
         rootFamily: ReleaseFamily,
         trail: List<ClosureNode>,

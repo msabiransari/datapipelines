@@ -16,6 +16,7 @@ import co.datapipelines.pipeline.TemplateReleaser
 import co.datapipelines.pipeline.TemplateReviewMarks
 import co.datapipelines.pipeline.TemplateVersionStatuses
 import co.datapipelines.pipeline.release.PipelineReleaseCoordination
+import co.datapipelines.pipeline.release.ReleaseBounds
 import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import co.datapipelines.templates.TemplateRepository
 import org.springframework.context.annotation.Bean
@@ -204,6 +205,9 @@ class PipelineLifecycleConfiguration {
         // #517 — every release through the one coordinator; every pin-affecting verb under the workspace writer guard.
         coordination: PipelineReleaseCoordination,
         guard: ReleaseMutationGuard,
+        // #517 round three — a restore rechecks its outbound pins under the guard: template statuses uncached, the bound.
+        templateStatuses: TemplateVersionStatuses,
+        bounds: ReleaseBounds,
     ): PipelineService =
         PipelineService(
             pipelines,
@@ -215,5 +219,7 @@ class PipelineLifecycleConfiguration {
             dashboards,
             coordination = coordination,
             guard = guard,
+            templateStatuses = templateStatuses,
+            maxBlockers = bounds.maxBlockers,
         )
 }

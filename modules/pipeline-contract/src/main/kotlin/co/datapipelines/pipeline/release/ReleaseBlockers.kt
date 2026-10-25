@@ -49,12 +49,55 @@ object ReleaseBlockers {
             "blockers_truncated" to (blockers.size > maxBlockers),
         )
 
+    /**
+     * A RESTORE's refusal details (#517 round three, record §12.1 RULED 2026-10-25) in the same shape over a one-level
+     * walk: the restored version is `n0`, each distinct present-but-not-RELEASED direct pin is `n1`, `n2`… in pin order
+     * with every field path that pins it (at most [ReleaseClosure.MAX_PATHS_PER_NODE]), reason `not_released`; at most
+     * [maxBlockers] are listed and the rest set `blockers_truncated`.
+     */
+    fun restoreDetails(
+        root: ReleaseNodeIdentity,
+        rootName: String,
+        pins: List<RestoreBlocker>,
+        maxBlockers: Int,
+    ): Map<String, Any?> {
+        val targets = pins.groupBy { it.identity }.values.toList()
+        return linkedMapOf(
+            "root" to identity("n0", root, rootName),
+            "blockers" to
+                targets.take(maxBlockers).mapIndexed { index, occurrences ->
+                    val first = occurrences.first()
+                    identity("n${index + 1}", first.identity, first.name) +
+                        linkedMapOf(
+                            "status" to first.status.name,
+                            "reason" to BlockerReason.NOT_RELEASED.wire,
+                            "paths" to occurrences.take(ReleaseClosure.MAX_PATHS_PER_NODE).map { it.path },
+                        )
+                },
+            "blockers_truncated" to (targets.size > maxBlockers),
+        )
+    }
+
     /** A node's typed identity as every refusal names it: the locator, the family word, the authored name, the version. */
-    fun identityOf(node: ClosureNode): Map<String, Any?> =
+    fun identityOf(node: ClosureNode): Map<String, Any?> = identity(node.nodeId, node.identity, node.name)
+
+    private fun identity(
+        nodeId: String,
+        identity: ReleaseNodeIdentity,
+        name: String,
+    ): Map<String, Any?> =
         linkedMapOf(
-            "node_id" to node.nodeId,
-            "family" to node.identity.family.wire,
-            "name" to node.name,
-            "version" to node.identity.version,
+            "node_id" to nodeId,
+            "family" to identity.family.wire,
+            "name" to name,
+            "version" to identity.version,
         )
 }
+
+/** One pin occurrence a RESTORE found present but not RELEASED: the target, its authored name, its status, the field path. */
+data class RestoreBlocker(
+    val identity: ReleaseNodeIdentity,
+    val name: String,
+    val status: ReleaseNodeStatus,
+    val path: String,
+)

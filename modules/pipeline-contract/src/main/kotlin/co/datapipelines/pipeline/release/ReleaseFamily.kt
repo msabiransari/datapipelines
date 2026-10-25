@@ -68,6 +68,12 @@ enum class BlockerReason(
 
     /** The node lies past an exhausted bound. */
     LIMIT("limit"),
+
+    /**
+     * A RESTORE's direct pin that is present but not RELEASED (record §12.1, RULED 2026-10-25): a restore lands the version
+     * RELEASED without a release's consent, so it cannot include the draft. A release refusal never emits it.
+     */
+    NOT_RELEASED("not_released"),
 }
 
 /** Which bound a `dependency_limit` refusal names (record §14: `{limit, maximum}`). */

@@ -2,6 +2,7 @@ package co.datapipelines.pipeline
 
 import co.datapipelines.pipeline.release.PipelineReleaseCoordination
 import co.datapipelines.pipeline.release.PipelineReleaseRequest
+import co.datapipelines.pipeline.release.ReleaseBounds
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import co.datapipelines.pipeline.release.ReleasePlanRequest
@@ -120,6 +121,14 @@ open class PipelineService(
     private val coordination: PipelineReleaseCoordination? = null,
     /** The workspace writer guard (#517, record §4.3); [ReleaseMutationGuard.NONE] in a directly constructed test. */
     private val guard: ReleaseMutationGuard = ReleaseMutationGuard.NONE,
+    /**
+     * The pinned template versions' statuses, read uncached (#517 round three): a restore rechecks its template pins
+     * against them under the guard. The default answers "absent" for every pin, so a construction that does not wire
+     * the real port refuses a template-pinning restore rather than passing it unchecked (fail closed).
+     */
+    private val templateStatuses: TemplateVersionStatuses = TemplateVersionStatuses { _, _, _ -> null },
+    /** Blockers one restore refusal lists (`datapipelines.release.dependencies.max-blockers`, record §14). */
+    private val maxBlockers: Int = ReleaseBounds.DEFAULT_MAX_BLOCKERS,
 ) {
     private val pinGuard = PipelinePurgePinGuard(pipelines, dashboards)
 
