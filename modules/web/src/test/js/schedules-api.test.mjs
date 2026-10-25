@@ -72,3 +72,28 @@ test("resend posts to the delivery's path with the CSRF header", async () => {
     delete globalThis.window;
   }
 });
+
+// #641 — the explorer's filtered read is §20.1 with `condition`, paged through has_more like
+// every list; no condition is the unfiltered query it always was.
+test("listAll pages §20.1 with the condition word when one is set, and without it otherwise", async () => {
+  const seen = [];
+  globalThis.fetch = (url) => {
+    seen.push(url);
+    const second = url.indexOf("offset=1") !== -1;
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      text: async () => JSON.stringify({ data: { items: [{ id: second ? "b" : "a" }], pagination: { has_more: !second } } }),
+    });
+  };
+  const items = await api.listAll("", "blocked");
+  assert.deepEqual(items.map((i) => i.id), ["a", "b"]);
+  assert.deepEqual(seen, [
+    "/api/v1/schedules?offset=0&limit=200&condition=blocked",
+    "/api/v1/schedules?offset=1&limit=200&condition=blocked",
+  ]);
+  seen.length = 0;
+  await api.listAll("ops");
+  assert.equal(seen[0], "/api/v1/schedules?prefix=ops&offset=0&limit=200");
+});

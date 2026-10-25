@@ -2,11 +2,15 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
+import co.datapipelines.scheduler.ScheduleCondition
 import co.datapipelines.scheduler.ScheduleService
 import jakarta.servlet.http.HttpServletRequest
+import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.RequestParam
+import org.springframework.web.server.ResponseStatusException
 import java.time.ZoneId
 
 /**
@@ -28,6 +32,9 @@ import java.time.ZoneId
  *    `schedule.create/update/pause/delete/run` rows (`SchedulesUiControllerTest` pins the two
  *    sets equal). Hiding is not authorization: §20's routes enforce the same rows.
  *  - **the timezone list** ([ScheduleTimezones]) — the IANA region ids the scheduler accepts.
+ *  - **the condition deep link** (#641, [ScheduleConditionFilter]) — `?condition=` is bound and
+ *    validated HERE, as the catalogs' `?lifecycle=` is (a bad word is the house 400), and the
+ *    parsed word is stamped on the page root for the script; the filtered read itself is §20.1's.
  *
  * Notification settings are saved in slice 4 part a; the deployment's computed mail state (on, or off
  * with its reason) is rendered for the form's note (#442 part b).
@@ -44,13 +51,57 @@ class SchedulesUiController(
     fun page(
         model: Model,
         request: HttpServletRequest,
+        @RequestParam(required = false) condition: String?,
     ): String {
+        val only = ScheduleConditionFilter.parse(condition)
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         RoleModel.stamp(model)
+        model.addAttribute("condition", only?.wire ?: "")
+        model.addAttribute("conditionOptions", ScheduleConditionFilter.OPTIONS)
         model.addAttribute("timezoneGroups", ScheduleTimezones.GROUPS)
         model.addAttribute("notificationDelivery", schedules.notificationDelivery().toWire())
         return "schedules/index"
     }
+}
+
+/**
+ * #641 — the explorer's `condition` query parameter, in [CatalogLifecycle]'s shape: its ONE page
+ * parse, the words every surface shows for a condition, and the filtered explorer's address.
+ *
+ * Bound as a STRING by the page: an unknown value is the house 400 with the constant
+ * [BAD_CONDITION], which never carries the input; the wire words are exact and lower-case, as
+ * [ScheduleCondition.fromWire] is. The filtered READ is rest-api §20.1's own `condition` (the page
+ * has no partial, §4.20), so a filtered explorer lists exactly what the Schedules home counts.
+ */
+object ScheduleConditionFilter {
+    /** The refusal's one reason — a constant, so nothing of the input can ride it. */
+    const val BAD_CONDITION = "The condition parameter is not a filter the schedules explorer offers."
+
+    /** One control option: the query value and its words. */
+    data class Option(
+        val value: String,
+        val label: String,
+    )
+
+    /** The select's options after "All conditions", in [ScheduleCondition]'s order. */
+    val OPTIONS: List<Option> = ScheduleCondition.entries.map { Option(it.wire, label(it)) }
+
+    /** `null`/empty → null (the whole list); a wire word → its condition; anything else → the 400. */
+    fun parse(raw: String?): ScheduleCondition? {
+        if (raw.isNullOrEmpty()) return null
+        return ScheduleCondition.fromWire(raw) ?: throw ResponseStatusException(HttpStatus.BAD_REQUEST, BAD_CONDITION)
+    }
+
+    /** The condition's name on every surface — the home's tiles and bars, the explorer's select. */
+    fun label(condition: ScheduleCondition): String =
+        when (condition) {
+            ScheduleCondition.ENABLED -> "Enabled"
+            ScheduleCondition.PAUSED -> "Paused"
+            ScheduleCondition.BLOCKED -> "Blocked"
+        }
+
+    /** The explorer filtered to [condition] — what the home's tiles, bars and Unblock row open. */
+    fun href(condition: ScheduleCondition): String = "/schedules?condition=${condition.wire}"
 }
 
 /**

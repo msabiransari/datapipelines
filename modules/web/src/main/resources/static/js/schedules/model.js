@@ -91,6 +91,35 @@
       .sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
   }
 
+  // ------------------------------------------------------------------ the condition filter (#641)
+
+  /** §20.1's `condition` words — Schedule.condition's, in the server's order. */
+  var CONDITIONS = ["enabled", "paused", "blocked"];
+
+  /**
+   * The filter a raw value (the address bar's `condition`, the page's stamp) names: one of the
+   * three words exactly, else "" — no filter. Anything else is ignored, never echoed.
+   */
+  function conditionFilter(raw) {
+    return typeof raw === "string" && CONDITIONS.indexOf(raw) !== -1 ? raw : "";
+  }
+
+  /**
+   * Whether a schedule belongs in the list while [condition] is the filter ("" = every one). It
+   * reads the SERVER's word, where blocked already wins: a paused-and-blocked schedule is
+   * "blocked", so it stays in the blocked list and is absent from the paused one.
+   */
+  function matchesCondition(schedule, condition) {
+    return !condition || !!(schedule && schedule.condition === condition);
+  }
+
+  /** The empty list's title: the condition named, and the search when there is one. */
+  function filteredEmptyTitle(condition, query) {
+    var q = String(query || "").trim();
+    if (!condition) return "No schedules match “" + q + "”";
+    return q ? "No " + condition + " schedules match “" + q + "”." : "No " + condition + " schedules.";
+  }
+
   // ------------------------------------------------------------------ cron presets
 
   var DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -676,6 +705,10 @@
     conditionBadge: conditionBadge,
     pipelineOf: pipelineOf,
     search: search,
+    CONDITIONS: CONDITIONS,
+    conditionFilter: conditionFilter,
+    matchesCondition: matchesCondition,
+    filteredEmptyTitle: filteredEmptyTitle,
     describeCron: describeCron,
     buildCron: buildCron,
     localText: localText,

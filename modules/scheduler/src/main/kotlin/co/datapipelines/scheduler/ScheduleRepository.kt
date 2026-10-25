@@ -102,17 +102,21 @@ class ScheduleRepository(
             ) { rs, n -> rowMapper.mapRow(rs, n)!! to rs.getString("idempotency_hash") }
             .singleOrNull()
 
-    /** The workspace's live schedules, by name, optionally under a folder [prefix] (the explorer's read). */
+    /**
+     * The workspace's live schedules, by name, optionally under a folder [prefix] and in one
+     * [condition] (#641; null = every condition) — the explorer's read.
+     */
     fun listLive(
         workspaceId: UUID,
         prefix: String?,
         limit: Int,
         offset: Int,
+        condition: ScheduleCondition? = null,
     ): List<Schedule> {
         val params = mutableMapOf<String, Any?>("ws" to workspaceId, "limit" to limit, "offset" to offset)
         return jdbc.query(
-            "SELECT * FROM schedules WHERE workspace_id = :ws AND deleted_at IS NULL${prefixClause(prefix, params)} " +
-                "ORDER BY name LIMIT :limit OFFSET :offset",
+            "SELECT * FROM schedules WHERE workspace_id = :ws AND deleted_at IS NULL${prefixClause(prefix, params)}" +
+                "${conditionClause(condition)} ORDER BY name LIMIT :limit OFFSET :offset",
             params,
             rowMapper,
         )
@@ -130,6 +134,7 @@ class ScheduleRepository(
         prefix: String?,
         afterName: String?,
         limit: Int,
+        condition: ScheduleCondition? = null,
     ): List<Schedule> {
         val params = mutableMapOf<String, Any?>("ws" to workspaceId, "limit" to limit)
         val afterClause =
@@ -140,8 +145,8 @@ class ScheduleRepository(
                 " AND name > :after"
             }
         return jdbc.query(
-            "SELECT * FROM schedules WHERE workspace_id = :ws AND deleted_at IS NULL${prefixClause(prefix, params)}$afterClause " +
-                "ORDER BY name LIMIT :limit",
+            "SELECT * FROM schedules WHERE workspace_id = :ws AND deleted_at IS NULL${prefixClause(prefix, params)}" +
+                "${conditionClause(condition)}$afterClause ORDER BY name LIMIT :limit",
             params,
             rowMapper,
         )
@@ -160,6 +165,21 @@ class ScheduleRepository(
         params["prefix"] = prefix.replace("_", "\\_") + "/%"
         return " AND name LIKE :prefix"
     }
+
+    /**
+     * #641 — [Schedule.condition]'s rule as SQL: blocked wins (`blocked_at` set, whatever
+     * `enabled` says), paused is not enabled and not blocked, enabled is the dispatcher's own
+     * predicate (`enabled AND blocked_at IS NULL`). Chosen by `when` over [ScheduleCondition], so no
+     * input text reaches the statement; `ScheduleConditionFilterIntegrationTest` pins each word to
+     * the getter over the same rows.
+     */
+    private fun conditionClause(condition: ScheduleCondition?): String =
+        when (condition) {
+            null -> ""
+            ScheduleCondition.BLOCKED -> " AND blocked_at IS NOT NULL"
+            ScheduleCondition.PAUSED -> " AND blocked_at IS NULL AND NOT enabled"
+            ScheduleCondition.ENABLED -> " AND blocked_at IS NULL AND enabled"
+        }
 
     /** Live schedules in [workspaceId] — the B18 cap's count (L4). */
     fun countLive(workspaceId: UUID): Int =

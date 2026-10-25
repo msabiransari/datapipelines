@@ -50,6 +50,35 @@ class SchedulesPageRenderTest {
     }
 
     @Test
+    fun `the condition select sits beside the search - All conditions first, the deep link's word selected and stamped`() {
+        val all = SchedulesRender.page()
+        val select = all.substringAfter("<select id=\"schedule-filter-condition\"").substringBefore("</select>")
+        select shouldContain "name=\"condition\""
+        select shouldContain "aria-label=\"Filter by condition\""
+        Regex("""<option value="([a-z]*)"""").findAll(select).map { it.groupValues[1] }.toList() shouldBe
+            listOf("", "enabled", "paused", "blocked")
+        Regex("""<option[^>]*selected[^>]*>([^<]*)<""").findAll(select).map { it.groupValues[1] }.toList() shouldBe
+            listOf("All conditions")
+        all shouldNotContain "data-schedule-condition"
+        // The select is in the search row, after the box.
+        val row = all.substringAfter("tplx-search-row").substringBefore("tplx-body")
+        (row.indexOf("schedule-filter-q") in 0 until row.indexOf("schedule-filter-condition")) shouldBe true
+
+        val blocked = SchedulesRender.page(condition = "blocked")
+        val chosen = blocked.substringAfter("<select id=\"schedule-filter-condition\"").substringBefore("</select>")
+        Regex("""<option[^>]*selected[^>]*>([^<]*)<""").findAll(chosen).map { it.groupValues[1] }.toList() shouldBe listOf("Blocked")
+        Regex("""data-schedules-root[^>]*data-schedule-condition="blocked"""").containsMatchIn(blocked.replace("\n", " ")) shouldBe true
+    }
+
+    @Test
+    fun `a filter with no rows has its own empty state - Clear filters resets the select and the search`() {
+        val skeleton = SchedulesRender.skeleton(SchedulesRender.page(), "sch-tpl-no-match-filtered")
+        skeleton shouldContain "data-empty=\"no-match-filtered\""
+        skeleton shouldContain "data-sch-action=\"clear-filters\""
+        skeleton shouldContain ">Clear filters<"
+    }
+
+    @Test
     fun `the page is a shell over REST - no htmx request attribute and no partial route anywhere`() {
         val main = SchedulesRender.page().substringAfter("<main").substringBefore("</main>")
         // The record's §6: every schedule operation is a §20 call from the page's script.

@@ -43,14 +43,39 @@ data class Schedule(
     /** Blocked takes display precedence over paused (record §1.1). */
     val blocked: Boolean get() = blockedAt != null
 
-    /** The operational condition shown for a schedule: `blocked`, `paused` or `enabled`. */
-    val condition: String
-        get() =
+    /** The operational condition shown for a schedule: `blocked`, `paused` or `enabled` ([ScheduleCondition]'s wire word). */
+    val condition: String get() = ScheduleCondition.of(enabled = enabled, blocked = blocked).wire
+}
+
+/**
+ * #641 — a schedule's operational condition, the ONE vocabulary of its three words: the
+ * [Schedule.condition] getter reads it, and the explorer's filter (rest-api §20.1 `condition`)
+ * is its SQL twin in [ScheduleRepository], chosen by `when` over these entries so the predicate
+ * and the getter cannot name different sets. Blocked wins over paused (record §1.1).
+ */
+enum class ScheduleCondition(
+    val wire: String,
+) {
+    ENABLED("enabled"),
+    PAUSED("paused"),
+    BLOCKED("blocked"),
+    ;
+
+    companion object {
+        /** Blocked takes precedence over paused; enabled is what remains. */
+        fun of(
+            enabled: Boolean,
+            blocked: Boolean,
+        ): ScheduleCondition =
             when {
-                blocked -> "blocked"
-                !enabled -> "paused"
-                else -> "enabled"
+                blocked -> BLOCKED
+                !enabled -> PAUSED
+                else -> ENABLED
             }
+
+        /** The exact lower-case wire word, else null. */
+        fun fromWire(value: String): ScheduleCondition? = entries.firstOrNull { it.wire == value }
+    }
 }
 
 /** The five per-schedule notification choices, serialized in declaration order (#442). */

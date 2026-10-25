@@ -67,18 +67,23 @@ class SchedulesController(
 ) {
     // ------------------------------------------------------------------------------ reads
 
-    /** §20.1 — the workspace's schedules, by name; `prefix` narrows to a folder. */
+    /**
+     * §20.1 — the workspace's schedules, by name; `prefix` narrows to a folder and `condition`
+     * (#641: `enabled` | `paused` | `blocked`) to one condition. The service validates the word —
+     * its refusal is the §20 `request_invalid` — and applies it in SQL before the lens.
+     */
     @GetMapping
     @RequiredScope(Permission.SCHEDULE_READ)
     fun list(
         @RequestParam(required = false) prefix: String?,
         @RequestParam(required = false) offset: Int?,
         @RequestParam(required = false) limit: Int?,
+        @RequestParam(required = false) condition: String?,
     ): ApiResponse<PagedData<Map<String, Any?>>> {
         val principal = currentPrincipal()
         val page = Pagination.clampOffset(offset)
         val size = Pagination.clampLimit(limit)
-        val found = schedules.list(workspaceOf(principal), prefix?.trim(), size + 1, page, PrincipalTargetViewer(principal))
+        val found = schedules.list(workspaceOf(principal), prefix?.trim(), size + 1, page, PrincipalTargetViewer(principal), condition)
         val items = found.take(size)
         val names = namesOf(items.flatMap { listOf(it.createdBy, it.updatedBy) })
         val mayReadRecipients = principal.holds(Permission.SCHEDULE_UPDATE)

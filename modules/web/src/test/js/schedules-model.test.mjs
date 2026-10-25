@@ -325,3 +325,35 @@ test("accepted is the relay's word and uncertain warns; a resend of an uncertain
   assert.match(M.resendNotice({ state: "pending", warning: "may_duplicate" }).message, /twice/);
   assert.equal(M.resendNotice({ state: "pending" }).variant, "success");
 });
+
+// #641 — the condition filter's client half: the address bar's word is trusted only when it is
+// one of the three, a schedule stays in a filtered list only while the server's condition still
+// says that word (blocked wins on the server: a paused-and-blocked schedule reads "blocked"), and
+// the filtered empty state names the filter and the search.
+test("a condition word from the address bar is one of the three, else no filter", () => {
+  assert.deepEqual(M.CONDITIONS, ["enabled", "paused", "blocked"]);
+  ["enabled", "paused", "blocked"].forEach((w) => assert.equal(M.conditionFilter(w), w));
+  [null, undefined, "", "BLOCKED", "nope", " blocked", "blocked<b>", "constructor", "__proto__"].forEach((raw) =>
+    assert.equal(M.conditionFilter(raw), "", String(raw)),
+  );
+});
+
+test("a schedule matches the active filter while its condition is the filter's word - blocked wins", () => {
+  assert.equal(M.matchesCondition(s("a"), ""), true);
+  assert.equal(M.matchesCondition(s("a", { condition: "paused" }), ""), true);
+  assert.equal(M.matchesCondition(s("a", { condition: "blocked" }), "blocked"), true);
+  // Unblocked from the detail: it leaves the blocked list.
+  assert.equal(M.matchesCondition(s("a", { condition: "enabled" }), "blocked"), false);
+  // Paused AND blocked reads blocked: it is in the blocked list and not in the paused one.
+  const both = s("a", { enabled: false, blocked: { reason: "target_not_found" }, condition: "blocked" });
+  assert.equal(M.matchesCondition(both, "blocked"), true);
+  assert.equal(M.matchesCondition(both, "paused"), false);
+  // Resumed while still blocked: still blocked.
+  assert.equal(M.matchesCondition(s("a", { enabled: true, condition: "blocked" }), "blocked"), true);
+});
+
+test("the filtered empty state names the condition, and the search when there is one", () => {
+  assert.equal(M.filteredEmptyTitle("blocked", ""), "No blocked schedules.");
+  assert.equal(M.filteredEmptyTitle("paused", "nightly"), "No paused schedules match “nightly”.");
+  assert.equal(M.filteredEmptyTitle("", "nightly"), "No schedules match “nightly”");
+});

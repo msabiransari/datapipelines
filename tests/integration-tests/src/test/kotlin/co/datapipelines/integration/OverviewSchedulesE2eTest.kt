@@ -34,6 +34,9 @@ import java.util.UUID
  * environment already holds at its released version — hidden from the promoter (versioning §10.2),
  * the [SchedulePromoterPagingE2eTest] stub. A second workspace holds one more schedule the page
  * must never count or name. The schedules never fire (a yearly pattern; the scheduler is off).
+ *
+ * #641: each condition tile links the explorer filtered to it, so each count must equal what
+ * `?condition=` walks to over §20.1 — for the viewer and through the promoter's lens.
  */
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @SpringBootTest(
@@ -95,6 +98,84 @@ class OverviewSchedulesE2eTest {
         page(ADMIN_SESSION).contains("data-overview-new-schedule") shouldBe true
     }
 
+    @Test
+    @Order(4)
+    fun `each condition tile counts what the explorer's condition filter lists, and the Unblock row opens it`() {
+        val page = page(VIEWER_SESSION)
+
+        withClue("the one blocked schedule is the Unblock row, first, linked to the filtered explorer") {
+            tasks(page).first() shouldBe "unblock"
+            page.substringAfter("data-task=\"unblock\"").substringBefore("</li>").let { row ->
+                row.contains("href=\"/schedules?condition=blocked\"") shouldBe true
+                row.contains("Unblock 1 schedule<") shouldBe true
+            }
+        }
+        CONDITIONS.forEach { word ->
+            withClue("§20.1 ?condition=$word walks to exactly the home's $word count") {
+                walk(VIEWER_SESSION, word).size shouldBe counts(page).getValue(word)
+            }
+        }
+        walk(VIEWER_SESSION, "blocked") shouldContainExactly listOf("ov/c_blocked")
+        walk(VIEWER_SESSION, "paused") shouldContainExactly listOf("ov/b_paused_failed")
+        walk(VIEWER_SESSION, "enabled") shouldContainExactly listOf("ov/a_enabled_ok", "ov/d_enabled_new")
+    }
+
+    @Test
+    @Order(5)
+    fun `a promoter's condition filter reads its admitted rows only, as its home counts them`() {
+        val page = page(PROMOTER_SESSION)
+
+        CONDITIONS.forEach { word ->
+            withClue("the promoter's ?condition=$word walk equals its home's $word count") {
+                walk(PROMOTER_SESSION, word).size shouldBe counts(page).getValue(word)
+            }
+        }
+        walk(PROMOTER_SESSION, "blocked") shouldContainExactly listOf("ov/c_blocked")
+        walk(PROMOTER_SESSION, "paused") shouldBe emptyList()
+        walk(PROMOTER_SESSION, "enabled") shouldContainExactly listOf("ov/a_enabled_ok")
+    }
+
+    @Test
+    @Order(6)
+    fun `the explorer page and the list refuse a word outside the three`() {
+        val filtered =
+            session(VIEWER_SESSION)
+                .get("/schedules?condition=blocked")
+                .then()
+                .statusCode(200)
+                .extract()
+                .asString()
+        filtered.contains("data-schedule-condition=\"blocked\"") shouldBe true
+        session(VIEWER_SESSION).get("/schedules?condition=x").then().statusCode(400)
+
+        val refused = session(VIEWER_SESSION).get("/api/v1/schedules?condition=nope")
+        refused.statusCode shouldBe 400
+        refused.jsonPath().getString("error.code") shouldBe "schedule.validation.request_invalid"
+        refused.jsonPath().getString("error.details.field") shouldBe "condition"
+        refused.jsonPath().getString("error.details.expected") shouldBe "one of enabled, paused, blocked"
+    }
+
+    @Test
+    @Order(7)
+    fun `a paused schedule that blocks counts and filters as blocked - blocked wins on both sides`() {
+        // Last: it changes the fixture. b is paused; blocking it makes the row a paused clause
+        // without its blocked_at term would still list.
+        sql(
+            "UPDATE schedules SET blocked_reason = 'e2e', blocked_at = NOW() " +
+                "WHERE workspace_id = '$WORKSPACE_ID' AND name = 'ov/b_paused_failed'",
+        )
+        val page = page(VIEWER_SESSION)
+
+        counts(page) shouldBe mapOf("schedules" to 4, "enabled" to 2, "paused" to 0, "blocked" to 2)
+        CONDITIONS.forEach { word ->
+            withClue("?condition=$word equals the home's $word count") {
+                walk(VIEWER_SESSION, word).size shouldBe counts(page).getValue(word)
+            }
+        }
+        walk(VIEWER_SESSION, "blocked") shouldContainExactly listOf("ov/b_paused_failed", "ov/c_blocked")
+        page.substringAfter("data-task=\"unblock\"").substringBefore("</li>").contains("Unblock 2 schedules<") shouldBe true
+    }
+
     // ------------------------------------------------------------------------------- reading
 
     private fun page(jwt: String): String =
@@ -116,6 +197,29 @@ class OverviewSchedulesE2eTest {
         body.getBoolean("data.pagination.has_more") shouldBe false
         return body.getList("data.items.name")
     }
+
+    /** §20.1 with `condition`, one row a page through `has_more` — the filter must page, not only answer. */
+    private fun walk(
+        jwt: String,
+        condition: String,
+    ): List<String> {
+        val names = ArrayList<String>()
+        var offset = 0
+        do {
+            val body =
+                session(jwt)
+                    .get("/api/v1/schedules?condition=$condition&offset=$offset&limit=1")
+                    .then()
+                    .statusCode(200)
+                    .extract()
+                    .jsonPath()
+            names += body.getList<String>("data.items.name")
+            offset += 1
+        } while (body.getBoolean("data.pagination.has_more"))
+        return names
+    }
+
+    private fun tasks(html: String): List<String> = TASK.findAll(html).map { it.groupValues[1] }.toList()
 
     private fun counts(html: String): Map<String, Int> = COUNT.findAll(html).associate { it.groupValues[1] to it.groupValues[2].toInt() }
 
@@ -273,6 +377,8 @@ class OverviewSchedulesE2eTest {
                 RegexOption.DOT_MATCHES_ALL,
             )
         private val ENTRY = Regex("""href="/schedules\?id=[0-9a-f-]+"[^>]*>([^<]+)</a>""")
+        private val TASK = Regex("""data-task="([a-z-]+)"""")
+        private val CONDITIONS = listOf("enabled", "paused", "blocked")
 
         private const val WORKSPACE = "ov-e2e"
         private const val OTHER = "ov-e2e-other"

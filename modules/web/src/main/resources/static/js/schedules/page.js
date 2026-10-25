@@ -1,7 +1,8 @@
 /*
  * #9 slice 2 — the Schedules page's wiring: one delegated click listener for every
- * `data-sch-action`, the search box, the folder toggle, Escape and the backdrop for dialogs,
- * and the deep link (`?id=<schedule>&run=<run>`) on arrival.
+ * `data-sch-action`, the search box, the condition select (#641), the folder toggle, Escape and
+ * the backdrop for dialogs, and the deep link (`?condition=<word>&id=<schedule>&run=<run>`) on
+ * arrival.
  *
  * Under hx-boost this file re-executes on every visit to /schedules (its tag rides inside
  * #app-main — 076 §B). The page ROOT is a fresh element each visit and gets fresh state and
@@ -88,6 +89,18 @@
         }
         S.explorer.setQuery("");
         break;
+      case "clear-filters":
+        // #641 — both controls back to all: the search text and the condition (a §20.1 re-read).
+        var q = document.getElementById("schedule-filter-q");
+        var select = document.getElementById("schedule-filter-condition");
+        if (q) q.value = "";
+        if (select) {
+          select.value = "";
+          select.focus();
+        }
+        S.state.query = "";
+        S.explorer.setCondition("");
+        break;
       case "retry":
         S.explorer.load();
         break;
@@ -107,6 +120,10 @@
     }, 150);
   }
 
+  function onCondition(event) {
+    if (S.live()) S.explorer.setCondition(event.target.value);
+  }
+
   var docWired = false;
 
   function init() {
@@ -114,7 +131,12 @@
     if (!root || root.__schWired) return;
     root.__schWired = true;
     if (S.state && S.state.pollTimer) clearTimeout(S.state.pollTimer);
-    S.state = { root: root, all: null, query: "", openFolders: {}, selectedId: null };
+    // #641 — the condition: the server's stamp (the controller parsed the deep link and refused
+    // any other word), else the address bar's word if it is one of the three; anything else is
+    // ignored and never written anywhere.
+    var params = new URLSearchParams(window.location.search);
+    var condition = window.DpSchedulesModel.conditionFilter(root.getAttribute("data-schedule-condition") || params.get("condition"));
+    S.state = { root: root, all: null, query: "", condition: condition, openFolders: {}, selectedId: null };
 
     // The root, its detail pane and the dialog host are the three regions a click can land in.
     root.addEventListener("click", onClick);
@@ -130,6 +152,11 @@
       box.addEventListener("input", onSearch);
       box.addEventListener("search", onSearch);
     }
+    var select = document.getElementById("schedule-filter-condition");
+    if (select) {
+      select.value = condition;
+      select.addEventListener("change", onCondition);
+    }
     if (!docWired) {
       docWired = true;
       document.addEventListener("keydown", function (event) {
@@ -140,7 +167,6 @@
       });
     }
 
-    var params = new URLSearchParams(window.location.search);
     var id = params.get("id");
     var run = params.get("run");
     S.explorer.load().then(function () {

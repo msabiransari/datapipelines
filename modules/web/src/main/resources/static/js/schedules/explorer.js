@@ -10,6 +10,12 @@
  * Search is the explorers' rule: text in the box replaces the tree with a flat list of full
  * paths matching every column the list renders (§5.1); clearing it returns the tree.
  *
+ * #641 — the condition filter is the pipelines catalog's lifecycle select without htmx: a chosen
+ * condition re-reads §20.1 WITH `condition` (the predicate is the server's, before the lens), and
+ * a filtered view is a flat list, like a search; the search then composes over the filtered set.
+ * After a pause, resume or unblock the detail's answer is the schedule's new truth, and a row
+ * whose condition no longer matches leaves the list (model.matchesCondition) — no list re-read.
+ *
  * Selection, focus and the keyboard are template-explorer.js's (the pane carries
  * `data-explorer-pane`); this file re-runs its init after each render so new rows join the
  * roving tabindex. A leaf's click is what loads the detail — the keyboard layer's debounced
@@ -95,8 +101,9 @@
     S.clear(root);
     busy(root, false);
     var query = S.state.query || "";
-    if (query) {
-      renderSearch(root, query);
+    var condition = S.state.condition || "";
+    if (query || condition) {
+      renderSearch(root, query, condition);
     } else if (!S.state.all.length) {
       root.appendChild(S.clone("sch-tpl-empty"));
     } else {
@@ -111,18 +118,20 @@
     reinitKeyboard();
   }
 
-  function renderSearch(root, query) {
-    var hits = M().search(S.state.all, query);
+  /** The flat list: the search's hits, or — a condition chosen and no text — every filtered row by name. */
+  function renderSearch(root, query, condition) {
+    var hits = query ? M().search(S.state.all, query) : byName(S.state.all);
     if (!hits.length) {
-      var none = S.clone("sch-tpl-no-match");
-      S.text(none, "title", "No schedules match “" + query + "”");
+      var none = S.clone(condition ? "sch-tpl-no-match-filtered" : "sch-tpl-no-match");
+      S.text(none, "title", M().filteredEmptyTitle(condition, query));
+      S.show(S.slot(none, "clear-search"), !!query);
       root.appendChild(none);
       return;
     }
     var ul = document.createElement("ul");
     ul.className = "tpl-results";
     ul.setAttribute("role", "listbox");
-    ul.setAttribute("aria-label", "Search results");
+    ul.setAttribute("aria-label", query ? "Search results" : "Schedules");
     hits.forEach(function (s) {
       var li = S.clone("sch-tpl-result");
       var button = li.querySelector(".tpl-result");
@@ -137,12 +146,19 @@
     root.appendChild(ul);
   }
 
-  /** §20.1 without a prefix: every schedule the reader may see (the lens applies server-side). */
+  function byName(schedules) {
+    return (schedules || []).slice().sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
+  }
+
+  /**
+   * §20.1 without a prefix: every schedule the reader may see (the lens applies server-side) —
+   * in the active condition only, when one is chosen (#641).
+   */
   function load() {
     var root = listRoot();
     busy(root, true);
     return API()
-      .listAll("")
+      .listAll("", S.state.condition || "")
       .then(function (items) {
         if (!S.live()) return;
         S.state.all = items;
@@ -201,8 +217,16 @@
 
   // ------------------------------------------------------------------ rows the detail changes
 
-  /** A schedule's condition changed (pause, resume, unblock, a block): its rows follow. */
+  /**
+   * A schedule's condition changed (pause, resume, unblock, a block): its rows follow — and under
+   * a condition filter a row whose new condition no longer matches leaves the list (#641).
+   */
   function updateRow(schedule) {
+    if (!M().matchesCondition(schedule, S.state.condition || "")) {
+      S.state.all = (S.state.all || []).filter(function (s) { return s.id !== schedule.id; });
+      render();
+      return;
+    }
     (S.state.all || []).forEach(function (s, i) {
       if (s.id === schedule.id) S.state.all[i] = schedule;
     });
@@ -233,6 +257,16 @@
     render();
   }
 
+  /**
+   * #641 — the select's change: the validated word (anything else is no filter), the address bar
+   * rewritten through S.url (the selection kept), and the list re-read through §20.1.
+   */
+  function setCondition(word) {
+    S.state.condition = M().conditionFilter(word);
+    S.remember(S.state.selectedId);
+    return load();
+  }
+
   S.explorer = {
     load: load,
     render: render,
@@ -241,5 +275,6 @@
     markSelected: markSelected,
     reveal: reveal,
     setQuery: setQuery,
+    setCondition: setCondition,
   };
 })();
