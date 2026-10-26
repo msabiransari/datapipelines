@@ -190,8 +190,10 @@ class SitePublicPresentationGuardTest {
             compositionOf(
                 "planted.html",
                 """<section class="section"><div class="container"><h2 id="a">A</h2><div class="prose"><p>x</p></div></div></section>
-                   <section class="section"><div class="container"><h2 id="b">B</h2><div class="prose text-columns"><p>x</p></div></div></section>
-                   <section class="section"><div class="container"><h2 id="c">C</h2><p class="section-lede">x</p><div class="features-grid"></div></div></section>""",
+                   <section class="section"><div class="container"><h2 id="b">B</h2>
+                   <div class="prose text-columns"><p>x</p></div></div></section>
+                   <section class="section"><div class="container"><h2 id="c">C</h2><p class="section-lede">x</p>
+                   <div class="features-grid"></div></div></section>""",
             )
         planted.offenders shouldBe listOf("planted.html #a: div.prose is a standalone text block at the measure")
     }
@@ -229,7 +231,10 @@ class SitePublicPresentationGuardTest {
                     el.hasClass("text-columns") -> columns++
                     el.hasClass("section-lede") && el !== body.last() -> Unit
                     "$name#$id" in STANDALONE_EXCEPTIONS -> Unit
-                    else -> offenders += "$name #$id: ${el.tagName()}.${el.classNames().joinToString(".")} is a standalone text block at the measure"
+                    else -> {
+                        val tag = "${el.tagName()}.${el.classNames().joinToString(".")}"
+                        offenders += "$name #$id: $tag is a standalone text block at the measure"
+                    }
                 }
             }
         }

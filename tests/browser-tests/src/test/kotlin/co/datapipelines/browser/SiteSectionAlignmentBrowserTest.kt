@@ -75,7 +75,10 @@ class SiteSectionAlignmentBrowserTest : BrowserSuite() {
             page.setViewportSize(w, VIEWPORT_HEIGHT)
             consumerRoutes.forEach { route -> narrowOffenders(route, w, measure(route), offenders) }
         }
-        println("698b alignment sweep: ${routes.size} routes, ${consumerRoutes.size} with consumers, $columns column bodies, $calls calls at $SCREENSHOT_WIDTH")
+        println(
+            "698b alignment sweep: ${routes.size} routes, ${consumerRoutes.size} with consumers, " +
+                "$columns column bodies, $calls calls at $SCREENSHOT_WIDTH",
+        )
         withClue("section alignment offenders") { offenders.shouldBeEmpty() }
     }
 
@@ -97,7 +100,9 @@ class SiteSectionAlignmentBrowserTest : BrowserSuite() {
         page.navigate("$baseUrl/sitemap.xml")
         val doc = LOC.findAll(page.content()).map { it.groupValues[1].removePrefix(SITE_ORIGIN) }.first { it.startsWith("/docs/") }
         val body = probe(doc, ".doc-body")
-        withClue("$doc's reading column stays within 48rem: $body") { ((body["width"] as Number).toDouble() <= DOC_MEASURE_PX + 1) shouldBe true }
+        withClue("$doc's reading column stays within 48rem: $body") {
+            ((body["width"] as Number).toDouble() <= DOC_MEASURE_PX + 1) shouldBe true
+        }
     }
 
     private data class Shape(
@@ -111,7 +116,11 @@ class SiteSectionAlignmentBrowserTest : BrowserSuite() {
         page.navigate("$baseUrl$route")
         page.waitForLoadState(LoadState.NETWORKIDLE)
         val raw = page.evaluate(SWEEP_JS) as Map<String, Any>
-        return Shape(raw["columns"] as List<Map<String, Any>>, raw["calls"] as List<Map<String, Any>>, (raw["docOver"] as Number).toDouble())
+        return Shape(
+            columns = raw["columns"] as List<Map<String, Any>>,
+            calls = raw["calls"] as List<Map<String, Any>>,
+            docOver = (raw["docOver"] as Number).toDouble(),
+        )
     }
 
     @Suppress("UNCHECKED_CAST")
@@ -133,7 +142,9 @@ class SiteSectionAlignmentBrowserTest : BrowserSuite() {
     ) {
         shape.columns.forEach { c ->
             val at = "$route at $w: ${c["label"]}"
-            if (!near(c["left"], 0.0) || !near(c["right"], 0.0)) offenders += "$at spans ${c["left"]}..${c["right"]}px inside the content box (want 0 and 0)"
+            if (!near(c["left"], 0.0) || !near(c["right"], 0.0)) {
+                offenders += "$at spans ${c["left"]}..${c["right"]}px inside the content box (want 0 and 0)"
+            }
             if (c["count"] != "2") offenders += "$at computes column-count ${c["count"]} (want 2)"
             if (c["secondColumn"] != true) offenders += "$at has no text in its right half"
         }
@@ -142,7 +153,9 @@ class SiteSectionAlignmentBrowserTest : BrowserSuite() {
             if (!near(c["ledeLeft"], 0.0)) offenders += "$at lede starts ${c["ledeLeft"]}px from the content edge"
             if (!near(c["buttonsRight"], 0.0)) offenders += "$at buttons end ${c["buttonsRight"]}px short of the right edge"
             if (c["beside"] != true) offenders += "$at buttons are not beside the lede"
-            if (!near(c["bottomDelta"], 0.0, CALL_BOTTOM_TOLERANCE)) offenders += "$at buttons sit ${c["bottomDelta"]}px off the lede's bottom"
+            if (!near(c["bottomDelta"], 0.0, CALL_BOTTOM_TOLERANCE)) {
+                offenders += "$at buttons sit ${c["bottomDelta"]}px off the lede's bottom"
+            }
         }
         if (shape.docOver > 0) offenders += "$route at $w scrolls sideways by ${shape.docOver}px"
     }
@@ -156,7 +169,9 @@ class SiteSectionAlignmentBrowserTest : BrowserSuite() {
         shape.columns.forEach { c ->
             val at = "$route at $w: ${c["label"]}"
             if (c["count"] != "auto") offenders += "$at computes column-count ${c["count"]} (want one column)"
-            if (!near(c["left"], 0.0) || (c["right"] as Number).toDouble() < -TOLERANCE) offenders += "$at spans ${c["left"]}..${c["right"]}px (want inside the content box)"
+            if (!near(c["left"], 0.0) || (c["right"] as Number).toDouble() < -TOLERANCE) {
+                offenders += "$at spans ${c["left"]}..${c["right"]}px (want inside the content box)"
+            }
         }
         if (shape.docOver > 0) offenders += "$route at $w scrolls sideways by ${shape.docOver}px"
     }
@@ -177,6 +192,7 @@ class SiteSectionAlignmentBrowserTest : BrowserSuite() {
         const val TOLERANCE = 1.5
         const val CALL_BOTTOM_TOLERANCE = 2.0
         const val MIN_MARKETING_ROUTES = 41
+
         /** The 2026-10-26 offline render (websiteExport): 63 marked bodies + demo-data's three
          *  per-family provenance lists; 21 marked calls, the engine page's rendered on all 8 engines. */
         const val MIN_COLUMNS = 66
@@ -186,7 +202,7 @@ class SiteSectionAlignmentBrowserTest : BrowserSuite() {
         const val DOC_MEASURE_PX = 768.0
 
         /** Offsets are measured from the container's CONTENT box (padding = the gutter). */
-        val SWEEP_JS =
+        const val SWEEP_JS =
             """() => {
                  const content = (c) => { const r = c.getBoundingClientRect(); const s = getComputedStyle(c);
                    return { left: r.left + parseFloat(s.paddingLeft), right: r.right - parseFloat(s.paddingRight) }; };
@@ -212,7 +228,7 @@ class SiteSectionAlignmentBrowserTest : BrowserSuite() {
                }"""
 
         /** One element's box against its container's content box; null when absent. */
-        val PROBE_JS =
+        const val PROBE_JS =
             """(sel) => { const el = document.querySelector(sel); if (!el) return null;
                  const host = el.closest('.container') || el.parentElement; const r = el.getBoundingClientRect();
                  const hr = host.getBoundingClientRect(); const s = getComputedStyle(host);
