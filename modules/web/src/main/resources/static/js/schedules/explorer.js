@@ -155,18 +155,23 @@
    * in the active condition only, when one is chosen (#641).
    */
   function load() {
+    var state = S.state;
+    var revision = (state.listRevision || 0) + 1;
+    state.listRevision = revision;
+    // Only this page's newest request owns the list, its busy flag and its error state.
+    function current() { return S.live() && S.state === state && state.listRevision === revision; }
     var root = listRoot();
     busy(root, true);
     return API()
       .listAll("", S.state.condition || "")
       .then(function (items) {
-        if (!S.live()) return;
+        if (!current()) return;
         S.state.all = items;
         render();
         if (S.form && S.form.refreshFolders) S.form.refreshFolders();
       })
       .catch(function (err) {
-        if (!S.live()) return;
+        if (!current()) return;
         S.clear(root);
         busy(root, false);
         root.appendChild(errorBlock(err));
