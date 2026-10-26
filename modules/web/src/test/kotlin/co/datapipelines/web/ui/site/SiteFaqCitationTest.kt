@@ -132,14 +132,27 @@ class SiteFaqCitationTest {
     fun `every rendered FAQ question belongs to a registered list`() {
         val registered = lists.flatMap { it.second }.map { it.question }.toSet()
         check(lists.sumOf { it.second.size } >= MIN_ENTRIES) { "FAQ registry lost entries" }
+        var renderedQuestions = 0
         val unregistered =
             SitePages.ALL.flatMap { page ->
                 DETAILS.findAll(SitePageRenderer.render(page)).mapNotNull { match ->
+                    renderedQuestions++
                     val question = HtmlUtils.htmlUnescape(match.groupValues[1]).trim()
                     if (question in registered) null else "${page.path}: $question"
                 }
             }
+        check(renderedQuestions >= MIN_ENTRIES) { "only $renderedQuestions rendered FAQ questions — the sweep must not be empty" }
         check(unregistered.isEmpty()) { "rendered FAQ questions missing from registry:\n${unregistered.joinToString("\n")}" }
+    }
+
+    @Test
+    fun `an unrelated earlier statement cannot satisfy a later citation`() {
+        val answer =
+            "Parameters belong to an earlier statement. Frobnication is unrelated. " +
+                "Widgets wobble (docs/templates.md §4.5)."
+        check(probe(answer, "docs/templates.md", "4.5", "Parameters are bound scalars.") == false) {
+            "an unrelated earlier statement must not satisfy this citation"
+        }
     }
 
     private fun probe(
@@ -153,9 +166,16 @@ class SiteFaqCitationTest {
         // In a same-document chain only the first anchor repeats the path.
         val start = marker.find(answer)?.range?.first ?: answer.indexOf(doc)
         if (start < 0) return false
-        val before = answer.substring(0, start)
-        // The last clause is often only "The contract is". Include the claim it summarizes.
-        val tokens = ClaimCitations.probeTokens(before)
+        // A citation-only sentence can follow its claim. Include that adjacent sentence,
+        // never unrelated claims from the beginning of the answer.
+        val nearbyClaim =
+            answer
+                .substring(0, start)
+                .split(SENTENCE_BREAK)
+                .filter { it.isNotBlank() }
+                .takeLast(2)
+                .joinToString(" ")
+        val tokens = ClaimCitations.probeTokens(nearbyClaim)
         return tokens.any { ClaimCitations.sectionMentions(section.lowercase(), it) }
     }
 
@@ -169,6 +189,7 @@ class SiteFaqCitationTest {
         const val MIN_ENTRIES = 120
         const val MIN_REFERENCES = 250
         const val REPORT_VARIABLE = "FAQ_CITATION_REPORT"
+        val SENTENCE_BREAK = Regex("[.!?]\\s+")
         val DETAILS = Regex("""<details[^>]*>\s*<summary>([^<]*)</summary>\s*<p>(.*?)</p>""", RegexOption.DOT_MATCHES_ALL)
     }
 }
