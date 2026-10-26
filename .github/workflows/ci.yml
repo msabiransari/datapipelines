@@ -373,3 +373,7 @@ jobs:
         env:
           GRADLE_USER_HOME: ${{ runner.temp }}/cold-gradle-home
         run: ./gradlew help :modules:app:bootJar resolveDependencyVerificationSurface
+      - name: buildSrc tests under dependency verification
+        env:
+          GRADLE_USER_HOME: ${{ runner.temp }}/cold-gradle-home
+        run: ./gradlew :buildSrc:cleanTest :buildSrc:test
