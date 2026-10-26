@@ -76,6 +76,15 @@ tasks.test {
     inputs.files(rootProject.file("../Dockerfile"), rootProject.file("../.gitignore"))
         .withPathSensitivity(PathSensitivity.NAME_ONLY)
         .withPropertyName("repoFilesReadByBuildSrcTests")
+    // The module and integration test sources RepoTestInputsTest scans for absent-path assertions
+    // (#728): a guard added there must re-run that witness, which sees them only as text.
+    inputs.files(
+        fileTree(rootProject.file("..")) {
+            include("modules/*/src/test/kotlin/**/*.kt", "tests/*/src/test/kotlin/**/*.kt")
+        },
+    )
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+        .withPropertyName("testSourcesScannedByRepoTestInputsTest")
     // The probes apply the same JDK 21 toolchain the modules get; hand the
     // tests a RESOLVED installation (detection finds the daemon JDK /
     // ~/.gradle/jdks / any auto-provisioned install) so the probe builds need
