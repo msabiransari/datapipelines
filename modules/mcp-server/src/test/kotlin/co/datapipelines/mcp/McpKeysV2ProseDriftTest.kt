@@ -59,6 +59,7 @@ class McpKeysV2ProseDriftTest {
     fun `§4_1 names the shipped role-refusal code`() {
         withClue("§4.1 must state the code an MCP key's own-role refusal carries — the shipped constant") {
             section("### 4.1 Auth model", "### 4.2 Unauthorized behavior") shouldContain AuthErrorCodes.ROLE_REQUIRED
+            section("### 4.1 Auth model", "### 4.2 Unauthorized behavior") shouldContain "creator's deactivation"
         }
     }
 
@@ -70,6 +71,7 @@ class McpKeysV2ProseDriftTest {
         }
         withClue("§9.3 must state the repair that works: a replacement key under the subset rule") {
             nine3 shouldContain "subset rule"
+            nine3 shouldContain "MCP creator"
         }
     }
 
