@@ -45,7 +45,7 @@
     <div class="container">
       <p class="kicker">What each one is for</p>
       <h2 id="fa-jobs" class="ds-headline">A Fivetran or Airbyte alternative? Two products that share a vocabulary and not a job</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <p>
           Fivetran and Airbyte solve a real problem: the data your analytics needs lives in a dozen systems, and the
           warehouse needs it delivered, on time, in the right shape, every night. Their connectors handle the
@@ -107,7 +107,7 @@
     <div class="container">
       <p class="kicker">Where datapipelines stops</p>
       <h2 id="fa-stops" class="ds-headline">The four things to not ask of this tool</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/staging.md §3 -->
         <p>
           First, history. The query sees the source as it is now, and the scratch database is dropped after the run,
@@ -177,7 +177,7 @@
         <figcaption>The demo pipeline <code>demo/top_company_by_borough</code> mid-run, with the lake read in place, the join staged, the result in the results dock. No warehouse between them.</figcaption>
         <div th:replace="~{site/_demo-console :: console(${facts.demo})}"></div>
       </figure>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/deployment.md §Appendix B -->
         <p>
           The demo stack runs this pattern end to end: <code>./app.sh --start --demo nyc,lake</code> brings up
@@ -201,7 +201,7 @@
   </section>
 
   <section class="section" aria-labelledby="fa-next">
-    <div class="container">
+    <div class="container section-call">
       <h2 id="fa-next" class="ds-headline">Point it at your two databases this afternoon</h2>
       <!-- claim: docs/deployment.md §Appendix B -->
       <p class="section-lede">

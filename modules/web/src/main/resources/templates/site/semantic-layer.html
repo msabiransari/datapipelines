@@ -56,7 +56,7 @@
   <section class="section" aria-labelledby="sl-what">
     <div class="container">
       <h2 id="sl-what" class="ds-headline">What a semantic layer is, in the searcher's words</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/semantic-layer-research.md Part one (the convergence: dataset, dimension, measure, relationship, AI context) -->
         <p>
           A semantic layer is the set of shared definitions that make numbers agree across people and across agents:
@@ -74,7 +74,7 @@
   <section class="section band" aria-labelledby="sl-rot">
     <div class="container">
       <h2 id="sl-rot" class="ds-headline">Why a written semantic model rots</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/semantic-layer-research.md Part five, Decision 1 (the owner rejects the hand-authored model as the authoring mechanism) -->
         <p>
           The person who knew what <code>pickup_ts</code> really is leaves. The schema changes under the model. The YAML
@@ -180,7 +180,7 @@
   <section class="section band" aria-labelledby="sl-scopes">
     <div class="container">
       <h2 id="sl-scopes" class="ds-headline" th:text="|${#strings.capitalize(facts.learnedFactScopeCountWord)} scopes of fact: a business glossary that maintains itself|">Two scopes of fact: a business glossary that maintains itself</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §2 (D-S1: two scopes, one table) -->
         <p>
           Facts come in <span th:text="${facts.learnedFactScopeCountWord}">two</span> scopes, and the split is the difference between physics and policy. A <strong>datasource
@@ -203,7 +203,7 @@
   <section class="section" aria-labelledby="sl-trust">
     <div class="container">
       <h2 id="sl-trust" class="ds-headline">Trust is earned, not assumed</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §5 (D-S4, D-S5) -->
         <p>
           Every fact carries its trust state, and the ladder is short. <code>asserted</code> means recorded without
@@ -221,7 +221,7 @@
   <section class="section band" aria-labelledby="sl-drift">
     <div class="container">
       <h2 id="sl-drift" class="ds-headline">Schema drift is detected, never guessed</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §6 (the read-time check), docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §2 (D-S6: never edit, never auto-remap) -->
         <p>
           Every introspection response that carries facts also recomputes each fact's fingerprint from the columns it
@@ -231,12 +231,12 @@
           visible, none fatal:
         </p>
       </div>
-      <ul class="fact-list-plain sec-list">
+      <ul class="fact-list-plain sec-list text-columns">
         <li><strong>served as stored</strong>: every reference resolves and the fingerprint matches;</li>
         <li><strong>needs_review</strong>: the refs still resolve but the table changed since the fact was recorded;</li>
         <li><strong>stale</strong>: a referenced column or table no longer exists; the fact is shown only as history, never as current truth.</li>
       </ul>
-      <div class="prose">
+      <div class="prose text-columns">
         <p>
           What a machine never does is decide that a dropped column and a new column are the same thing. A rename and
           a "drop plus unrelated add" are indistinguishable to software, so nothing is re-mapped automatically. Someone
@@ -281,7 +281,7 @@
       <p class="kicker"><span class="status">Next · decided, not scheduled</span></p>
       <h2 id="sl-next" class="ds-headline">What is next</h2>
       <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §11 (round 2: harvesting, the index, UI recording, promotion by agreement, OSI export) -->
-      <ul class="fact-list-plain sec-list">
+      <ul class="fact-list-plain sec-list text-columns">
         <li>Recording and verifying from the UI; round 1's screen is deliberately read-only.</li>
         <li>Harvesting candidate definitions from saved pipelines, proposed as <code>asserted</code>, never auto-observed.</li>
         <li>A question-level index: "what do we know about revenue?" across datasources.</li>
@@ -294,7 +294,7 @@
   <section class="section" aria-labelledby="sl-compare">
     <div class="container">
       <h2 id="sl-compare" class="ds-headline">How this differs from the dbt semantic layer and the Cube semantic layer</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/semantic-layer-research.md Part one (what dbt/MetricFlow and Cube say they are, from their own docs), docs/semantic-layer-research.md Part five Decision 1; docs/dashboards.md §1 (dashboards over released pipelines) -->
         <p>
           The dbt semantic layer and Cube are <em>compiled metrics layers</em>: you author a model of measures,
@@ -319,7 +319,7 @@
   <section class="section band" aria-labelledby="sl-engineer">
     <div class="container">
       <h2 id="sl-engineer" class="ds-headline">For the engineer: the tools, the kinds, the rules</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/mcp-server.md §6.2 (the semantics tools' schemas, renumbered by 118's merge); docs/auth.md §7.6 (the permission catalog) -->
         <p>
           <span th:text="|${#strings.capitalize(facts.semanticsToolCountWord)} tools, from|">Three tools, from</span> <code>tools/list</code>: <code>semantics_record</code> takes one fact, its structural

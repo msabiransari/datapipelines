@@ -6,6 +6,7 @@ import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import org.jsoup.Jsoup
 import org.junit.jupiter.api.Test
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver
 
@@ -26,6 +27,13 @@ import org.springframework.core.io.support.PathMatchingResourcePatternResolver
  *     layout carries no theme toggle and no theme storage key.
  *  4. **No external font or asset host** in the site sheets (the vendored-fonts audit covers
  *     the app's; this covers the site's `url()`s and `@import`s).
+ *  5. **No standalone section leaves its container half empty** (698b). A section body made
+ *     only of measure-capped text (`.prose`, `.section-lede`, `.sec-list`) is a marked
+ *     consumer of the full-container composition: `.text-columns`, or `.section-call` for a
+ *     closing call. An intro lede above a further body is not a consumer (the body spans);
+ *     hero, split and closing-band sections keep their own widths. The browser geometry is
+ *     SiteSectionAlignmentBrowserTest's; this holds the markup on every template, so a new
+ *     standalone section cannot ship at the left 62ch unmarked.
  *
  * Each sweep proves it saw something (template count, rule count, a positive control on
  * its own pattern) before it asserts nothing was found — falsified at birth by injecting a
@@ -47,6 +55,9 @@ class SitePublicPresentationGuardTest {
                 resolver.getResources("classpath*:templates/docs/*-public.html").toList()
         ).filter { it.filename != null }
             .associate { it.filename!! to it.inputStream.readBytes().decodeToString() }
+
+    private val siteTemplateNames: Set<String> =
+        resolver.getResources("classpath*:templates/site/*.html").mapNotNull { it.filename }.toSet()
 
     private val siteCss: String = read("static/site/css/site.css")
     private val bundle: String = read("static/site/css/site-chrome.css")
@@ -164,6 +175,70 @@ class SitePublicPresentationGuardTest {
         FONT_URL.findAll(siteCss).count() shouldBeGreaterThanOrEqual MIN_FONT_URLS
     }
 
+    @Test
+    fun `every standalone section's text is a marked full-container consumer`() {
+        val siteTemplates = templates.filterKeys { it in siteTemplateNames }
+        siteTemplates.size shouldBeGreaterThanOrEqual MIN_SITE_TEMPLATES
+        val found = siteTemplates.map { (name, source) -> compositionOf(name, source) }
+        val offenders = found.flatMap { it.offenders }
+        withClue("standalone text blocks at the measure with no full-container composition") { offenders.shouldBeEmpty() }
+        // Non-vacuity: the inventory of 2026-10-26 (63 column bodies, 21 closing calls).
+        found.sumOf { it.columns } shouldBeGreaterThanOrEqual MIN_TEXT_COLUMNS
+        found.sumOf { it.calls } shouldBeGreaterThanOrEqual MIN_SECTION_CALLS
+        // Positive control: an unmarked prose body is found, a marked one and an intro lede are not.
+        val planted =
+            compositionOf(
+                "planted.html",
+                """<section class="section"><div class="container"><h2 id="a">A</h2><div class="prose"><p>x</p></div></div></section>
+                   <section class="section"><div class="container"><h2 id="b">B</h2>
+                   <div class="prose text-columns"><p>x</p></div></div></section>
+                   <section class="section"><div class="container"><h2 id="c">C</h2><p class="section-lede">x</p>
+                   <div class="features-grid"></div></div></section>""",
+            )
+        planted.offenders shouldBe listOf("planted.html #a: div.prose is a standalone text block at the measure")
+    }
+
+    private data class Composition(
+        val offenders: List<String>,
+        val columns: Int,
+        val calls: Int,
+    )
+
+    /** Rule 5 over one template: every `.section > .container` body, `th:block` children flattened. */
+    private fun compositionOf(
+        name: String,
+        source: String,
+    ): Composition {
+        val offenders = mutableListOf<String>()
+        var columns = 0
+        var calls = 0
+        Jsoup.parse(source).select("section.section > div.container").forEach { container ->
+            val children = container.children().flatMap { if (it.tagName() == "th:block") it.children() else listOf(it) }
+            val classes = container.parent()?.classNames().orEmpty() + container.classNames() + children.flatMap { it.classNames() }
+            if (classes.any { it in OWN_WIDTH }) return@forEach
+            val id = children.firstOrNull { it.tagName() == "h2" }?.id().orEmpty()
+            val body = children.filter { el -> el.tagName() != "h2" && el.classNames().none { it in HEAD_PARTS } }
+            if (container.hasClass("section-call")) {
+                calls++
+                withClue("$name #$id: a section-call is a headline, one lede and its buttons") {
+                    body.map { it.className() } shouldBe listOf("section-lede")
+                    children.any { it.hasClass("btn-row") } shouldBe true
+                }
+                return@forEach
+            }
+            body.filter { el -> el.classNames().any { it in MEASURED } }.forEach { el ->
+                val tag = "${el.tagName()}.${el.classNames().joinToString(".")}"
+                when {
+                    el.hasClass("text-columns") -> columns++
+                    el.hasClass("section-lede") && el !== body.last() -> Unit
+                    "$name#$id" in STANDALONE_EXCEPTIONS -> Unit
+                    else -> offenders += "$name #$id: $tag is a standalone text block at the measure"
+                }
+            }
+        }
+        return Composition(offenders, columns, calls)
+    }
+
     /** The text with every CSS or HTML comment blanked (newlines kept, so a finding's line is real). */
     private fun withoutComments(text: String): String = COMMENT.replace(text) { match -> match.value.filter { it == '\n' } }
 
@@ -174,6 +249,21 @@ class SitePublicPresentationGuardTest {
         const val MIN_SITE_JS_LINES = 100
         const val MIN_TEMPLATES = 37
         const val MIN_FONT_URLS = 2
+        const val MIN_SITE_TEMPLATES = 39
+        const val MIN_TEXT_COLUMNS = 63
+        const val MIN_SECTION_CALLS = 21
+
+        /** Rule 5's measure-capped text classes, the head parts beside a body, and the sections
+         *  whose composition is deliberately their own (hero, split hero, closing band). */
+        val MEASURED = setOf("prose", "section-lede", "sec-list")
+        val HEAD_PARTS = setOf("kicker", "eyebrow", "ds-headline", "btn-row", "demo-note", "dateline")
+        val OWN_WIDTH = setOf("page-hero", "hero", "split-hero", "final-cta", "breadcrumbs")
+
+        /** Standalone text kept at the measure on purpose, each with its reason. */
+        val STANDALONE_EXCEPTIONS =
+            mapOf(
+                "security.html#sec-report" to "two sentences, three lines at the measure: nothing to balance into a second column",
+            )
 
         val COLOUR_LITERAL = Regex("""(?:#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?)\()""")
         val INLINE_STYLE = Regex("""\s(?:th:)?style\s*=""")

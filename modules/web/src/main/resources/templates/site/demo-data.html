@@ -54,7 +54,7 @@
     <div class="container">
       <p class="kicker">What ships, and why it is real</p>
       <h2 id="dd-ships" class="ds-headline">A sample SQL database you can load in one command, from published artifacts, not fixtures</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/deployment.md Appendix B — published versioned artifact sets; loading is a deployment step -->
         <p>
           Nothing here is generated test data. Each family is <strong>real public data</strong>, rebuilt
@@ -89,7 +89,7 @@
     <div class="container">
       <p class="kicker">Family one, <code>nyc</code>, version <span th:text="${demoNyc.version}">v7</span></p>
       <h2 id="dd-nyc" class="ds-headline" th:text="|NYC mobility: one question, ${facts.demoEngineCountWord('nyc')} engines|">NYC mobility: one question, three engines</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/deployment.md Appendix B — the nyc family row -->
         <p>
           The mobility family is the demo's founding question: <em>how do taxi and rideshare respond to
@@ -130,7 +130,7 @@
         </tbody>
       </table>
       <!-- claim: notes of the licence dossier are carried in the manifest provenance rows; scripts/sample-data/sources.lock licence header -->
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- The attribution below is a licence claim, so it renders only while the manifest
              itself carries the verified stamp; unverified, the status above is all it says. -->
         <th:block th:if="${demoNyc.licenseVerified != null}">
@@ -158,7 +158,7 @@
     <div class="container">
       <p class="kicker">Family two, <code>trade</code>, version <span th:text="${demoTrade.version}">v4</span></p>
       <h2 id="dd-trade" class="ds-headline">US trade: Census facts, mirrored and priced</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/deployment.md Appendix B — the trade family row -->
         <p>
           The trade family answers the second kind of question a demo should survive: do the
@@ -202,7 +202,7 @@
           </tr>
         </tbody>
       </table>
-      <div class="prose">
+      <div class="prose text-columns">
         <th:block th:if="${demoTrade.licenseVerified != null}">
           <p>
             <!-- claim: scripts/sample-data-trade/README.md — the verbatim, mandatory Census notice; the Comtrade re-dissemination line; the Fed's public-domain position -->
@@ -226,7 +226,7 @@
     <div class="container">
       <p class="kicker">Family three, <code>lake</code>, version <span th:text="${demoLake.version}">v1</span></p>
       <h2 id="dd-lake" class="ds-headline">dp-lake: the rideshare census, read in place</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/deployment.md Appendix B — the lake family row; scripts/sample-data-lake/README.md — read in place, no loader -->
         <p>
           The lake family is the demo's biggest dataset and its different shape: NYC TLC <strong>high-volume
@@ -268,7 +268,7 @@
           </tr>
         </tbody>
       </table>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: scripts/sample-data-lake/publish-layout.sh — the layout decided once; the bucket denies listing, so this listing renders the manifest's recorded locations -->
         <h3>The objects, exactly</h3>
         <p>
@@ -310,7 +310,7 @@
     <div class="container">
       <p class="kicker">What you can ask it</p>
       <h2 id="dd-ask" class="ds-headline">Pipelines the demo ships, and the question each answers</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: scripts/sample-data/content/examples.json — the six nyc pipelines and their questions -->
         <p>
           Every family seeds worked pipelines into your workspace at first login. The mobility six:
@@ -351,7 +351,7 @@
     <div class="container">
       <p class="kicker">Call it as an API</p>
       <h2 id="dd-api" class="ds-headline">Call the demo pipelines as APIs, no account needed</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <p>
           The demo workspace also ships a working API key, printed below. It is public by design, and it serves
           the demo workspace only: it can call the demo endpoints published beneath <code>/api/demo/</code> and
@@ -390,7 +390,7 @@
     <div class="container">
       <p class="kicker">Licence and attribution</p>
       <h2 id="dd-licence" class="ds-headline">Every source, and the terms it ships under</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: modules/web/src/main/resources/site/demo/manifest-*.json — the provenance rows below render from the manifests; a family with no licence stamp renders as unverified and makes no claim -->
         <p>
           Each manifest carries its sources as provenance rows: the URL, the transform, the licence string and
@@ -407,7 +407,7 @@
           </h3>
           <div class="status" th:if="${f.licenseVerified != null}" th:text="'Licence verified ' + ${f.licenseVerified}">verified</div>
           <div class="status" th:if="${f.licenseVerified == null}">not yet verified. No licence claim.</div>
-          <ul class="prose" th:if="${f.licenseVerified != null}">
+          <ul class="prose text-columns" th:if="${f.licenseVerified != null}">
             <li th:each="p : ${f.provenance}">
               <strong th:text="${p.source}">source</strong>:
               <code th:text="${p.sourceUrl}">url</code>;
@@ -433,7 +433,7 @@
     <div class="container">
       <p class="kicker">Reproduce it</p>
       <h2 id="dd-reproduce" class="ds-headline">You do not have to trust the bucket</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: scripts/sample-data/README.md, scripts/sample-data-trade/README.md, scripts/sample-data-lake/README.md — the build runbooks and check-published.sh -->
         <p>
           The artifacts are rebuildable from their pinned sources: each family's

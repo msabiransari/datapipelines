@@ -3074,6 +3074,64 @@ code {
   margin-top: var(--space-6);
 }
 
+/* 698b — a standalone section's text uses the whole container, not its left 62ch
+   (owner, 2026-10-25 correction; option A ruled 2026-10-26). Two opt-in consumers, each
+   marked in its template:
+   - `.text-columns` — a body of running text (`.prose`, a lede that IS the body, a fact
+     list) under a full-width headline. From 64rem it drops the measure and flows in two
+     balanced columns, each near the measure (472px at 1024, 552px at 1183, 560px at 1440),
+     like the card grid the next section draws. Paragraphs may continue into the second
+     column; lists, code, tables and headings never split. Below 64rem it is one column
+     at the measure, in source order.
+   - `.section-call` — a closing call (headline, one lede, buttons): the text keeps its
+     measure on the left and the buttons sit at the container's right edge, bottom-aligned
+     with the lede.
+   An intro lede above a full-width body is not a consumer: the body spans. Split, hero,
+   card and docs reading columns keep their own widths. SiteSectionAlignmentBrowserTest
+   measures both against the container; SitePublicPresentationGuardTest holds the markup. */
+@media (min-width: 64rem) {
+  .text-columns {
+    max-width: none;
+    column-count: 2;
+    column-gap: var(--gap-xl);
+  }
+
+  .text-columns.fact-list {
+    display: block;
+  }
+
+  .text-columns.fact-list > li + li {
+    margin-top: var(--gap-md);
+  }
+
+  .text-columns :is(li, pre, table, figure, .code-block, h3, h4) {
+    break-inside: avoid;
+  }
+
+  .text-columns :is(h3, h4) {
+    break-after: avoid;
+  }
+
+  .section-call {
+    display: grid;
+    grid-template-columns: minmax(0, var(--site-measure)) auto;
+    justify-content: space-between;
+    align-items: end;
+    column-gap: var(--gap-xl);
+  }
+
+  .section-call > :not(.btn-row) {
+    grid-column: 1;
+  }
+
+  .section .container.section-call > .btn-row {
+    grid-column: 2;
+    grid-row: 1 / span 3;
+    justify-content: flex-end;
+    margin-top: 0;
+  }
+}
+
 .engine-strip .container > h2 {
   margin-top: 0;
 }
