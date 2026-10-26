@@ -23,11 +23,13 @@ import java.util.UUID
  * The 400 answers before the 409. Only dependency failures block: a rule that tightened since the body was released is
  * not a dangling pin, so the validator is never consulted. Metadata reads only: no render, no check gate, no customer
  * connection while the guard is held. Template statuses come from the uncached port (the registry cache can be stale);
- * a template is told apart from its version by the version-1 probe the save rules use.
+ * a template is told apart from its version by the ENTITY row ([TemplateIds]) — no version number stands in for it, since
+ * a preserved-number import or a draft purge leaves a template without version 1 (#733).
  */
 internal class PipelineRestorePins(
     private val pipelines: PipelineRepository,
     private val templateStatuses: TemplateVersionStatuses,
+    private val templateIds: TemplateIds,
     private val maxBlockers: Int,
     private val deserializer: PipelineDeserializer,
 ) {
@@ -85,7 +87,7 @@ internal class PipelineRestorePins(
                 )
             }
 
-            status == null && version != 1 && templateStatuses.statusOf(workspaceId, template, 1) != null -> {
+            status == null && templateIds.isRegistered(workspaceId, template) -> {
                 into.add(
                     Validation.TEMPLATE_VERSION_NOT_FOUND,
                     pin.path,

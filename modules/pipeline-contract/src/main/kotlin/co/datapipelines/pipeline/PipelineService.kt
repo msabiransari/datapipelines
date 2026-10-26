@@ -127,11 +127,17 @@ open class PipelineService(
      * the real port refuses a template-pinning restore rather than passing it unchecked (fail closed).
      */
     private val templateStatuses: TemplateVersionStatuses = TemplateVersionStatuses { _, _, _ -> null },
+    /**
+     * Whether a pinned template is registered at all (#733): tells `template_not_found` from `template_version_not_found`
+     * by the entity row. The default answers "not registered" for every pin, so an unwired construction reports
+     * `template_not_found`, never a false "known" (fail closed).
+     */
+    private val templateIds: TemplateIds = TemplateIds { _, _ -> false },
     /** Blockers one restore refusal lists (`datapipelines.release.dependencies.max-blockers`, record §14). */
     private val maxBlockers: Int = ReleaseBounds.DEFAULT_MAX_BLOCKERS,
 ) {
     private val pinGuard = PipelinePurgePinGuard(pipelines, dashboards)
-    private val restorePins = PipelineRestorePins(pipelines, templateStatuses, maxBlockers, deserializer)
+    private val restorePins = PipelineRestorePins(pipelines, templateStatuses, templateIds, maxBlockers, deserializer)
 
     /** The writer guard, acquired first inside every pin-affecting write's transaction. */
     private fun lockWorkspace(workspaceId: UUID) = guard.acquire(workspaceId, ReleaseFamily.PIPELINE)
