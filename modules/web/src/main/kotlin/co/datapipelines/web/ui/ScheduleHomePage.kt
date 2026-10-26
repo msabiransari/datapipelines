@@ -233,8 +233,7 @@ internal object ScheduleHomePage {
     /**
      * #641 — Continue your work's first row while any schedule is blocked: the explorer filtered
      * to blocked, N from the one summary read — the set the filtered §20.1 lists, by construction
-     * (§4.20a). The frame's task tones are draft (the warning tint) and released; it offers no
-     * danger tint, so the row wears draft's.
+     * (§4.20a). Its danger tint matches the Blocked metric and condition bar.
      */
     private fun unblockTask(summary: ScheduleSummary): OverviewPage.TaskRow? =
         summary.blocked.takeIf { it > 0 }?.let { n ->
@@ -248,7 +247,7 @@ internal object ScheduleHomePage {
                     "$n schedules are stopped by a failure until someone unblocks them."
                 },
                 ScheduleConditionFilter.href(ScheduleCondition.BLOCKED),
-                "draft",
+                OverviewPage.TaskTone.DANGER,
             )
         }
 
@@ -260,7 +259,7 @@ internal object ScheduleHomePage {
             "See what runs next",
             "Every schedule with its next run, its condition and its runs.",
             "/schedules",
-            "released",
+            OverviewPage.TaskTone.RELEASED,
         )
 
     /** "1 schedule", "3 schedules". */

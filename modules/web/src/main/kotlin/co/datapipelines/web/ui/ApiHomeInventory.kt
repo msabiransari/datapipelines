@@ -152,7 +152,7 @@ internal object ApiHomeWords {
                 "Open the console",
                 "Every published path, what it serves and how to call it.",
                 ApiOverviewController.CONSOLE,
-                "released",
+                OverviewPage.TaskTone.RELEASED,
             ),
             OverviewPage
                 .TaskRow(
@@ -161,7 +161,7 @@ internal object ApiHomeWords {
                     "Manage keys",
                     "See which keys are live, and which paths each one reaches.",
                     ApiOverviewController.KEYS_PAGE,
-                    "released",
+                    OverviewPage.TaskTone.RELEASED,
                 ).takeIf { keysReadable },
         )
 
