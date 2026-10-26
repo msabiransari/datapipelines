@@ -211,14 +211,14 @@ class SiteClaimCitationTest {
         val root = repoRoot()
         val docSections = mutableMapOf<Pair<String, String>, String?>()
         val citations =
-            templates.flatMap { (template, source) ->
-                CLAIM_COMMENT.findAll(source).flatMap { comment ->
-                    ClaimCitations.parse(comment.value).map { citation ->
-                        citationKey(template, citation) to probeMiss(template, citation, root, docSections)
+            templates
+                .flatMap { (template, source) ->
+                    CLAIM_COMMENT.findAll(source).flatMap { comment ->
+                        ClaimCitations.parse(comment.value).map { citation ->
+                            citationKey(template, citation) to probeMiss(template, citation, root, docSections)
+                        }
                     }
-                }
-            }
-                .groupBy({ it.first }, { it.second })
+                }.groupBy({ it.first }, { it.second })
         val absent = KNOWN_UNPROBED.keys.filter { it !in citations }
         val passing = KNOWN_UNPROBED.keys.filter { key -> citations[key]?.any { it == null } == true }
         check(absent.isEmpty() && passing.isEmpty()) {
