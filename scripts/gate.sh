@@ -196,7 +196,9 @@ done
 # the stage would print PASS having executed nothing. cleanTest deletes the
 # task's outputs, forcing the guards to RUN on every gate pass; the catalog
 # CONTENT is also declared a test input in buildSrc/build.gradle.kts, so a
-# bare `-p buildSrc test` re-executes on a libs.versions.toml edit too.
+# bare `:buildSrc:test` re-executes on a libs.versions.toml edit too.
+# Task paths from the root apply gradle/verification-metadata.xml (#740);
+# `-p buildSrc` makes a separate root build with no verification metadata.
 #
 # Offline (013/F6 → 014/F4 → 018/F1+F2): the stage is ATTEMPTED regardless
 # of the network preflight — the old classification-only skip left the guard
@@ -223,7 +225,7 @@ done
 source "$ROOT/scripts/lib/scan-tools.sh"
 echo
 bnet="$(scan_tools_classify_network gate https://repo.maven.apache.org/maven2/)"
-btest=$(run "$LOGDIR/buildsrc-test.log" -p buildSrc cleanTest test ktlintCheck detekt --continue)
+btest=$(run "$LOGDIR/buildsrc-test.log" :buildSrc:cleanTest :buildSrc:test :buildSrc:ktlintCheck :buildSrc:detekt --continue)
 bverdict="$(gate_classify_buildsrc "$btest" "$LOGDIR/buildsrc-test.log" "$ROOT/buildSrc/build/test-results/test" "$bnet")"
 if [ "$bverdict" = skip ] \
   && grep -qE 'KtLint found code style violations|Analysis failed with [0-9]+ weighted issues' "$LOGDIR/buildsrc-test.log"; then
