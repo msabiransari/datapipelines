@@ -5,6 +5,7 @@ import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import java.io.File
 
@@ -109,6 +110,32 @@ class SiteCapabilitiesContentTest {
         }
     }
 
+    @Test
+    fun `the scheduler page keeps the generic category the 2026-10-25 correction requires`() {
+        // #735 owner correction (2026-10-25): the product is a generic job scheduler; the
+        // pipeline is the job type it runs today. The SQL-only category title/lede and any
+        // present-tense report/AI availability must not return; the pipeline example stays.
+        val html = rendered.getValue(SitePages.PIPELINE_SCHEDULING)
+        val title =
+            TITLE_TAG.find(html)?.groupValues?.get(1)
+                ?: error("no <title> rendered for ${SitePages.PIPELINE_SCHEDULING.path}")
+        withClue("the title must lead with the generic scheduler category (#735)") {
+            normalize(title) shouldContain "job scheduler"
+        }
+        withClue("the retired SQL-only category title must not return (#735)") {
+            normalize(title) shouldNotContain "sql scheduler"
+        }
+        val body = normalize(COMMENT.replace(html, " "))
+        withClue("the old SQL-only lede must not return (#735)") { body shouldNotContain "the built-in sql scheduler" }
+        withClue("present-tense report/AI availability must not appear (#735)") {
+            body shouldNotContain "the scheduler runs reports"
+            body shouldNotContain "the scheduler runs ai jobs"
+        }
+        // Allow side, and the sweep's non-vacuity: the correction is about the CATEGORY, not
+        // about deleting SQL — the page must still walk a pipeline example.
+        withClue("the pipeline example must survive the correction (#735)") { body shouldContain "sql pipeline" }
+    }
+
     private fun hrefs(html: String): Set<String> = HREF.findAll(html).map { it.groupValues[1].substringBefore('#') }.toSet()
 
     /** The page body between the header and the footer, so the shared navigation cannot satisfy a content link. */
@@ -138,7 +165,9 @@ class SiteCapabilitiesContentTest {
         /**
          * Lower-case phrasings the pre-#699 site used for what now ships. Each is a whole claim,
          * never a word that a true sentence also uses ("planned" alone stays legitimate: mail,
-         * reports, extracts and alerts are planned).
+         * reports, extracts and alerts are planned). The #735 correction (2026-10-25) adds the
+         * old SQL-only scheduler lede and the present-tense report/AI availability claims; the
+         * category TITLE itself is pinned by the dedicated #735 test below.
          */
         val STALE_CLAIMS =
             listOf(
@@ -155,6 +184,9 @@ class SiteCapabilitiesContentTest {
                 "runs sql and nothing else",
                 "capped at author",
                 "its person's role",
+                "the built-in sql scheduler",
+                "the scheduler runs reports",
+                "the scheduler runs ai jobs",
             )
 
         val CAPABILITY_H1 =
@@ -210,6 +242,7 @@ class SiteCapabilitiesContentTest {
 
         val HREF = Regex("""<a[^>]*\shref="([^"]*)"""")
         val TAG = Regex("<[^>]+>")
+        val TITLE_TAG = Regex("<title>(.*?)</title>", RegexOption.DOT_MATCHES_ALL)
         val COMMENT = Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL)
         val WHITESPACE = Regex("\\s+")
         val STRING_LITERAL = Regex(""""((?:[^"\\\n]|\\.)*)"""")

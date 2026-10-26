@@ -37,6 +37,14 @@ object SiteCapabilitiesFaqs {
                     "are docs/scheduler.md §1 and docs/scheduler.md §6.",
                 "docs/scheduler.md §1, docs/scheduler.md §6",
             ),
+            FaqEntry(
+                "Is this a SQL scheduler?",
+                "The scheduler is a job scheduler; the job it runs today is a SQL pipeline. The scheduler stores " +
+                    "the payload without reading it, so a report or AI job would be a new job type, decided later — " +
+                    "not a capability to count on today. Pipeline scheduling is the example this page walks " +
+                    "through. The contracts are docs/scheduler.md §1 and docs/scheduler.md §2.",
+                "docs/scheduler.md §1, docs/scheduler.md §2",
+            ),
         )
 
     /** `/sql-dashboards` — embedding through a backend, and what refreshes a dashboard. */
