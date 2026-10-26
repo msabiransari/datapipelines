@@ -278,6 +278,7 @@ jobs:
             modules/*/build/test-results/*/*.xml
             modules/scripting/build/reports/jsonata-breach.md
             tests/browser-tests/build/test-results/test/*.xml
+            tests/browser-tests/build/reports/site-section-alignment/*
           retention-days: 7
           if-no-files-found: warn
       - name: keep browser traces on failure

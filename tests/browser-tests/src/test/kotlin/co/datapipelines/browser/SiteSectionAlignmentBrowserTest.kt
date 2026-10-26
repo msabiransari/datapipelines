@@ -1,5 +1,6 @@
 package co.datapipelines.browser
 
+import com.microsoft.playwright.Page
 import com.microsoft.playwright.options.LoadState
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -7,36 +8,16 @@ import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
+import java.nio.file.Files
+import java.nio.file.Paths
 
 /**
- * 698b — standalone marketing sections use their whole content container, measured in a
- * real browser. The owner's screenshot (2026-10-25, 1183px): `/compare/fivetran-airbyte`'s
- * `#fa-jobs` body sat in the left 62ch while the next section's card grid spanned the
- * container. The fix marks two consumers (site.css's 698b block): `.text-columns` flows a
- * text body in two balanced columns from 64rem, and `.section-call` puts a closing call's
- * buttons at the container's right edge. The markup inventory is
- * SitePublicPresentationGuardTest rule 5; this is the geometry.
- *
- * Routes are DISCOVERED from `/sitemap.xml` (marketing routes only), so every page a consumer
- * renders on is measured, engine pages and demo-data's per-family lists included. Per width:
- *
- *  - **desktop (1183, the screenshot's width, and 1440)**: every `.text-columns` box starts
- *    and ends at the container's content edges (± 1.5px, the gutter excluded), computes two
- *    columns, and has text in its right half; every `.section-call` lede starts at the
- *    content's left edge, its buttons end at the right edge, beside the lede and on its
- *    bottom line;
- *  - **tablet (768) and phone (390, 320)**: one column, inside the content box, starting at
- *    its left edge; no page scrolls sideways.
- *
- * Non-vacuity: the 1183 sweep measures at least [MIN_COLUMNS] column bodies and
- * [MIN_CALLS] calls, and `#fa-jobs` is among them. Negative controls at 1440: the
- * reference `#fa-cost` grid spans the container (what the fix matches), `/sql-dashboards`'
- * deliberate `.split` keeps two side-by-side halves, an intro lede (`#sec-title` on
- * `/how-it-works`) keeps its measure, and a public doc's reading column stays within 48rem.
- *
- * Falsified at birth by removing site.css's 698b media block (the old left-only
- * composition): the desktop assertion names `#fa-jobs div.prose.text-columns` with a
- * ~530px right gap at 1183. Anonymous throughout.
+ * #698b: measure every marked marketing section against its container at five widths.
+ * The sitemap-driven sweep has non-vacuity floors and preserves split/docs negative controls.
+ * A separate control removes only the 698b media rule in the live CSSOM, requires the original
+ * #fa-jobs right-edge defect, restores the exact rule, and requires green geometry again.
+ * It also retains five-width screenshots and bounds in the gate-reports artifact.
+ * These are CI-only checks; adding the control does not claim an execution before CI runs.
  */
 class SiteSectionAlignmentBrowserTest : BrowserSuite() {
     @Test
@@ -105,16 +86,49 @@ class SiteSectionAlignmentBrowserTest : BrowserSuite() {
         }
     }
 
+    @Test
+    fun `the old composition fails the geometry check and restored sections retain five-width evidence`() {
+        startTrace()
+        page.setViewportSize(SCREENSHOT_WIDTH, VIEWPORT_HEIGHT)
+        measure(COMPARE_ROUTE)
+        val saved = page.evaluate(REMOVE_RULE_JS)
+        try {
+            val broken = mutableListOf<String>()
+            desktopOffenders(COMPARE_ROUTE, SCREENSHOT_WIDTH, currentShape(), broken)
+            withClue("the old #fa-jobs right-edge defect must be detected: $broken") {
+                broken.any { "#fa-jobs" in it && "spans" in it } shouldBe true
+            }
+            println("698b red control: ${broken.filter { "#fa-jobs" in it }}")
+        } finally {
+            page.evaluate("s => Array.from(document.styleSheets).find(x => x.href === s.href).insertRule(s.rule, s.index)", saved)
+        }
+        val restored = mutableListOf<String>()
+        desktopOffenders(COMPARE_ROUTE, SCREENSHOT_WIDTH, currentShape(), restored)
+        withClue("restored 698b rule") { restored.shouldBeEmpty() }
+        val output = Files.createDirectories(Paths.get("build", "reports", "site-section-alignment"))
+        (listOf(SCREENSHOT_WIDTH, WIDE_WIDTH) + NARROW_WIDTHS).forEach { width ->
+            page.setViewportSize(width, VIEWPORT_HEIGHT)
+            measure(COMPARE_ROUTE)
+            Files.writeString(output.resolve("bounds-$width.json"), page.evaluate(BOUNDS_JS) as String)
+            page.screenshot(Page.ScreenshotOptions().setPath(output.resolve("sections-$width.png")).setFullPage(true))
+        }
+    }
+
     private data class Shape(
         val columns: List<Map<String, Any>>,
         val calls: List<Map<String, Any>>,
         val docOver: Double,
     )
 
-    @Suppress("UNCHECKED_CAST")
     private fun measure(route: String): Shape {
         page.navigate("$baseUrl$route")
         page.waitForLoadState(LoadState.NETWORKIDLE)
+        page.evaluate("async () => { await document.fonts.ready; }")
+        return currentShape()
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun currentShape(): Shape {
         val raw = page.evaluate(SWEEP_JS) as Map<String, Any>
         return Shape(
             columns = raw["columns"] as List<Map<String, Any>>,
@@ -185,6 +199,7 @@ class SiteSectionAlignmentBrowserTest : BrowserSuite() {
     private companion object {
         val LOC = Regex("""<loc>([^<]+)</loc>""")
         const val SITE_ORIGIN = "https://datapipelines.co"
+        const val COMPARE_ROUTE = "/compare/fivetran-airbyte"
         const val SCREENSHOT_WIDTH = 1183
         const val WIDE_WIDTH = 1440
         val NARROW_WIDTHS = listOf(768, 390, 320)
@@ -200,6 +215,25 @@ class SiteSectionAlignmentBrowserTest : BrowserSuite() {
         const val ANCHOR = "/compare/fivetran-airbyte #fa-jobs div.prose.text-columns"
         const val MIN_MEASURE_GAP = 100.0
         const val DOC_MEASURE_PX = 768.0
+
+        const val REMOVE_RULE_JS =
+            """() => {
+                 const hits = Array.from(document.styleSheets).flatMap(s => Array.from(s.cssRules).flatMap((r, index) =>
+                   r.type === CSSRule.MEDIA_RULE && r.cssText.includes('.text-columns') && r.cssText.includes('.section-call')
+                     ? [{href: s.href, index, rule: r.cssText}] : []));
+                 if (hits.length !== 1) throw new Error('expected exactly one 698b media rule, got ' + hits.length);
+                 const saved = hits[0]; Array.from(document.styleSheets).find(s => s.href === saved.href).deleteRule(saved.index);
+                 return saved;
+               }"""
+
+        const val BOUNDS_JS =
+            """() => JSON.stringify({width: innerWidth, boxes: Object.fromEntries([
+                 ['container', '#fa-jobs'], ['heading', '#fa-jobs'], ['body', '#fa-jobs + .prose'],
+                 ['costHeading', '#fa-cost'], ['costGrid', '#fa-cost ~ .features-grid']
+               ].map(([name, selector]) => { const el = document.querySelector(selector);
+                 if (!el) throw new Error('missing capture selector ' + selector);
+                 const host = name === 'container' ? el.closest('.container') : el;
+                 return [name, host.getBoundingClientRect().toJSON()]; }))}, null, 2)"""
 
         /** Offsets are measured from the container's CONTENT box (padding = the gutter). */
         const val SWEEP_JS =
