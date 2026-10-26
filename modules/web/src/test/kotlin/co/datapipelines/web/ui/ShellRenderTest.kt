@@ -47,6 +47,23 @@ class ShellRenderTest {
         html shouldContain "/js/shell.js"
     }
 
+    /** #739: each server-rendered panel carries the menu family's fixed leaf glyph. */
+    @Test
+    fun `browser panels declare their family's leaf glyph`() {
+        val html = engine.process("pipelines/list", webContext().apply { fillList() })
+        val glyphs =
+            mapOf(
+                "Pipelines" to "workflow",
+                "Templates" to "code",
+                "Dashboards" to "boxes",
+                "Visualizations" to "chart-line",
+                "Parameter Sets" to "sliders-horizontal",
+            )
+        for ((label, glyph) in glyphs) {
+            html shouldContain "data-browser-label=\"$label\" data-browser-glyph=\"$glyph\""
+        }
+    }
+
     /**
      * 114 §C.4 — the role badge beside the switcher's workspace name.
      *

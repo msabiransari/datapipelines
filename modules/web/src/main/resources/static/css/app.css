@@ -1411,12 +1411,11 @@ button.app-busy::after {
 }
 
 .app-browser-tree {
-  /* The explorers' guide geometry (template-tree.css derives the rows' guides from these;
-     `.tplx-tree` declares them for the page explorer). --tpl-row-h follows the compact
-     row padding, so the guides still meet the chevrons. */
-  --tpl-indent: calc(var(--gap-md) + var(--gap-xs));
-  --tpl-row-h: calc(var(--space-1) * 2 + var(--text-sm) * var(--leading-normal));
-  --tpl-guide-x: calc(var(--gap-xs) + var(--icon-xs) / 2 - var(--tpl-indent));
+  /* #739: the browser's own guide geometry; the explorer's --tpl-* stays separate. */
+  --dp-tree-indent: var(--space-2);
+  --dp-tree-inset: var(--space-2);
+  --dp-tree-row-h: calc(var(--space-3) * 2 + var(--app-text-name) * var(--app-leading-name));
+  --dp-tree-guide-x: calc(var(--dp-tree-inset) + var(--icon-xs) / 2 - var(--dp-tree-indent));
 
   flex: 1;
   min-height: 0;
@@ -1444,7 +1443,8 @@ button.app-busy::after {
 }
 
 /* Record §5/§7 (#604, re-cut by #701 — owner ruling 2026-10-24): a browser row is ONE
-   line on the overlay surface. The control paints the 12px padding, the 8px radius, the
+   line on the overlay surface. The control paints 12px vertical / 8px horizontal padding,
+   the 8px radius, the
    hover tint and the selection tint; the line stays transparent so the surface shows
    through. The 12px title truncates with an ellipsis — the control's title attribute
    carries the full canonical name — and yields width to the badges, which stay on the
@@ -1453,6 +1453,8 @@ button.app-busy::after {
    glyph follows the renderer's aria-expanded. The line keeps display: block so the
    control fills the row and the #516 ring rides the line (kept below). */
 .app-browser .dp-tree-line {
+  position: relative;
+  z-index: calc(var(--z-base) + 1);
   display: block;
   min-width: 0;
 }
@@ -1460,9 +1462,9 @@ button.app-busy::after {
 .app-browser .dp-tree-activate {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1);
   min-width: 0;
-  padding: var(--space-3);
+  padding: var(--space-3) var(--dp-tree-inset);
   border-radius: var(--radius-md);
   white-space: nowrap;
   text-align: start;
@@ -1489,7 +1491,7 @@ button.app-busy::after {
 .app-browser .dp-tree-meta {
   flex: none;
   display: flex;
-  gap: var(--space-1);
+  gap: var(--space-0-5);
   color: var(--text-secondary);
 }
 
@@ -1523,23 +1525,61 @@ button.app-busy::after {
   border-radius: var(--radius-md);
 }
 
-/* #701 round two (owner ruling 2026-10-25, amended the same day): the browser's rows are
-   COMPACT at every width. A one-line row's fixed parts — the 24px padding, the 12px glyph,
-   two 8px gaps and up to three badges (≈169px with their 8px sides) — need ≈217px plus the
-   indent per level, and a name runs ten segments deep. The full 16px indent left a deep
-   three-badge row overflowing every default column, and a threshold between the two modes
-   made widening the browser HIDE names (measured: a depth-10 name 131px wide at 381px
-   compact, 0px at 382px full). So here the indent per level and a badge's side padding are
-   --space-1; the row's padding and gaps and the badge's vertical padding stay. The label
-   yields what is left, down to 0px on a deep leaf at the 240px minimum, where the control's
-   title carries the full name (and a three-badge leaf deeper than 7 levels may reach into
-   the row's right padding, inside the rail — accepted). */
+/* #739 (owner ruling 2026-10-26, spacing reduction approved after the 240px probe):
+   compact at every width, 8px per level, 8px row insets, 4px row gaps, 2px badge gaps
+   and sides. Previous spacing put the depth-10 three-badge row 26px outside the rail
+   at 240px. No width threshold: #701's threshold hid a name on widening (131px at
+   381px compact, 0px at 382px full). Vertical padding and the 4px row rhythm stay. */
 .app-browser .dp-tree-group {
-  padding-inline-start: var(--space-1);
+  padding-inline-start: var(--dp-tree-indent);
+  margin-block-start: var(--space-1);
+}
+
+/* The item wraps its subtree. Non-last guides span it and the next 4px gap; the last
+   stops at its OWN row centre. :not(:has(~ .dp-tree-item)) ignores trailing notices.
+   Search keeps its server-provided hierarchy, but never paints browse guides. Controls
+   paint hover/selection over the guide, as in the 085 §A explorer exemplar. */
+.app-browser .dp-tree-rows[data-tree-searching="false"] .dp-tree-group > .dp-tree-item {
+  position: relative;
+}
+
+.app-browser .dp-tree-rows[data-tree-searching="false"] .dp-tree-group > .dp-tree-item::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: var(--dp-tree-guide-x);
+  top: 0;
+  bottom: calc(-1 * var(--space-1));
+  width: var(--space-px);
+  background: var(--border-subtle);
+  pointer-events: none;
+}
+
+.app-browser .dp-tree-rows[data-tree-searching="false"] .dp-tree-group > .dp-tree-item:first-child::before {
+  top: calc(-1 * (var(--dp-tree-row-h) / 2 + var(--space-1)));
+}
+
+.app-browser .dp-tree-rows[data-tree-searching="false"] .dp-tree-group > .dp-tree-item:not(:has(~ .dp-tree-item))::before {
+  bottom: auto;
+  height: calc(var(--dp-tree-row-h) / 2);
+}
+
+.app-browser .dp-tree-rows[data-tree-searching="false"] .dp-tree-group > .dp-tree-item:first-child:not(:has(~ .dp-tree-item))::before {
+  height: calc(var(--dp-tree-row-h) + var(--space-1));
+}
+
+.app-browser .dp-tree-rows[data-tree-searching="false"] .dp-tree-group > .dp-tree-item::after {
+  content: "";
+  position: absolute;
+  inset-inline-start: var(--dp-tree-guide-x);
+  top: calc(var(--dp-tree-row-h) / 2);
+  width: calc(var(--dp-tree-inset) - var(--dp-tree-guide-x));
+  height: var(--space-px);
+  background: var(--border-subtle);
+  pointer-events: none;
 }
 
 .app-browser .dp-tree-meta .ds-badge {
-  padding-inline: var(--space-1);
+  padding-inline: var(--space-0-5);
 }
 
 .app-browser-foot {
