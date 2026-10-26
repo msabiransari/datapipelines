@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
+import java.util.UUID
 
 /**
  * Configuration-time proofs for the coverage-floor guard in
@@ -43,6 +44,15 @@ import java.io.File
  * changed; `deploy/secrets.env` and a sample-data work directory never
  * re-run it and never appear in `--info`, while the tracked
  * `deploy/secrets.env.example` does re-run it.
+ *
+ * Cases (h), (i) and (j) prove the existence-only input (#728): `deploy/env/secrets.env.example` is a
+ * path a guard asserts ABSENT that the secret exclusions hide, so creating it after a green run
+ * must still re-run the guard (h), while its content — edited, touched, never — re-runs nothing
+ * and reaches no build output (i); removing it re-runs the guard again.
+ *
+ * The probe in (h) asserts the path absent, the shape of `PostureDefaultsSpecDriftTest`; the
+ * probe in (i) only records whether it exists, so it passes while the content is edited. Case (j)
+ * repeats the creation under `--configuration-cache`, where an input frozen at store time would stay stale.
  *
  * The probe projects reuse the repo's real version catalog — the plugin
  * resolves catalog aliases at apply time. Tests (a) and (b) stop at
@@ -301,14 +311,17 @@ class CommonConventionsPluginTest {
     }
 
     /** The docs-probe line the last executed test run wrote to its XML report. */
-    private fun docsProbeSeen(): String {
+    private fun docsProbeSeen(): String = probeLineSeen("docs-probe=")
+
+    /** The value after [key] on the line the last executed test run wrote to its XML report. */
+    private fun probeLineSeen(key: String): String {
         val results = probeDir.resolve("modules/web/build/test-results/test")
         val files = requireNotNull(results.listFiles()) { "no test-result directory at ${results.path}" }
         val xml = files.single { it.name.startsWith("TEST-") && it.extension == "xml" }
         return xml
             .readLines()
-            .single { "docs-probe=" in it }
-            .substringAfter("docs-probe=")
+            .single { key in it }
+            .substringAfter(key)
             .substringBefore('<')
             .trim()
     }
@@ -389,5 +402,153 @@ class CommonConventionsPluginTest {
             val leaks = build.output.lines().filter { secretMention.containsMatchIn(it) }
             assertEquals(emptyList<String>(), leaks, "deploy/secrets.env reached Gradle's output")
         }
+    }
+
+    /**
+     * A probe test about [RETIRED_PATH], walking up to settings.gradle.kts the way the repo's drift
+     * tests do. [asGuard] true asserts the path absent (the PostureDefaultsSpecDriftTest shape);
+     * false only records whether it exists, so the probe passes either way.
+     */
+    private fun writeRetiredPathProbe(asGuard: Boolean) {
+        val body =
+            if (asGuard) {
+                """check(!File(dir, "$RETIRED_PATH").exists()) { "retired-path-is-back" }"""
+            } else {
+                """println("retired-exists=" + File(dir, "$RETIRED_PATH").exists())"""
+            }
+        probeDir.resolve("modules/web/src/test/kotlin/ProbeTest.kt").apply { parentFile.mkdirs() }.writeText(
+            """
+            package co.datapipelines.probe
+            import org.junit.jupiter.api.Test
+            import java.io.File
+            class ProbeTest {
+                @Test fun probesTheRetiredPath() {
+                    var dir = File(".").absoluteFile
+                    while (!File(dir, "settings.gradle.kts").isFile) dir = dir.parentFile ?: error("no settings.gradle.kts")
+                    $body
+                }
+            }
+            """.trimIndent(),
+        )
+    }
+
+    /**
+     * The retired path's directory as the repo has it: `deploy/env/` holds the tracked `defaults.env`. Without
+     * a file there, creating the path would add a DIRECTORY to the tree input and re-run the task for that reason.
+     */
+    private fun writeEnvDirectory(): File =
+        probeDir.resolve("deploy/env/defaults.env").apply {
+            parentFile.mkdirs()
+            writeText("DATAPIPELINES_POSTURE=development\n")
+        }
+
+    private fun assertNeverMentions(
+        marker: String,
+        builds: List<String>,
+    ) {
+        val leaks = builds.flatMap { output -> output.lines().filter { marker in it } }
+        assertEquals(emptyList<String>(), leaks, "the content of $RETIRED_PATH reached Gradle's output")
+    }
+
+    @Test
+    fun `a path a guard asserts absent re-runs the guard when it appears or disappears though the path is a secret exclusion`() {
+        writeSettings(":modules:web")
+        writeBuild("modules/web/build.gradle.kts")
+        writeRetiredPathProbe(asGuard = true)
+        writeEnvDirectory()
+        val retired = probeDir.resolve(RETIRED_PATH)
+        val marker = "RETIRED_CONTENT_${UUID.randomUUID()}"
+        val test = ":modules:web:test"
+
+        val first = runner(test, "--info").build()
+        assertEquals(TaskOutcome.SUCCESS, first.task(test)?.outcome, first.output)
+        val unchanged = runner(test, "--info").build()
+        assertEquals(TaskOutcome.UP_TO_DATE, unchanged.task(test)?.outcome, "no change must leave the task UP-TO-DATE\n${unchanged.output}")
+
+        // The #728 silence: the path matches the secret exclusions, so no content input sees it appear.
+        retired.writeText("$marker\n")
+        // run(), not buildAndFail(): without the input the build SUCCEEDS and the outcome below is what reads red.
+        val created = runner(test, "--info").run()
+        assertEquals(
+            TaskOutcome.FAILED,
+            created.task(test)?.outcome,
+            "creating $RETIRED_PATH left $test ${created.task(test)?.outcome}: the guard did not run\n${created.output}",
+        )
+        assertTrue("retired-path-is-back" in created.output, "the guard ran but did not report the path\n${created.output}")
+        assertTrue("repoPathsCheckedForExistence" in created.output, "--info does not name the existence input\n${created.output}")
+
+        assertTrue(retired.delete(), "could not delete ${retired.path}")
+        val removed = runner(test, "--info").build()
+        assertEquals(TaskOutcome.SUCCESS, removed.task(test)?.outcome, "removing $RETIRED_PATH did not re-run the guard\n${removed.output}")
+        val settled = runner(test, "--info").build()
+        assertEquals(TaskOutcome.UP_TO_DATE, settled.task(test)?.outcome, "no change must leave the task UP-TO-DATE\n${settled.output}")
+
+        assertNeverMentions(marker, listOf(first, unchanged, created, removed, settled).map { it.output })
+    }
+
+    @Test
+    fun `the content of an existence-only path never re-runs a test task or reaches Gradle's output`() {
+        writeSettings(":modules:web")
+        writeBuild("modules/web/build.gradle.kts")
+        writeRetiredPathProbe(asGuard = false)
+        writeEnvDirectory()
+        val retired = probeDir.resolve(RETIRED_PATH)
+        val marker = "RETIRED_CONTENT_${UUID.randomUUID()}"
+        val test = ":modules:web:test"
+
+        val absent = runner(test, "--info").build()
+        assertEquals(TaskOutcome.SUCCESS, absent.task(test)?.outcome, absent.output)
+        assertEquals("false", probeLineSeen("retired-exists="))
+
+        retired.writeText("$marker one\n")
+        val created = runner(test, "--info").build()
+        assertEquals(TaskOutcome.SUCCESS, created.task(test)?.outcome, "creating $RETIRED_PATH did not re-run $test\n${created.output}")
+        assertEquals("true", probeLineSeen("retired-exists="), "the re-run did not see the created path")
+
+        // Existence is the whole input: content, size and mtime of the present path change nothing.
+        retired.writeText("$marker two, longer than one\n")
+        val edited = runner(test, "--info").build()
+        assertEquals(TaskOutcome.UP_TO_DATE, edited.task(test)?.outcome, "a content edit re-ran the task\n${edited.output}")
+        assertTrue(retired.setLastModified(retired.lastModified() + 60_000), "could not touch ${retired.path}")
+        val touched = runner(test, "--info").build()
+        assertEquals(TaskOutcome.UP_TO_DATE, touched.task(test)?.outcome, "an mtime change re-ran the task\n${touched.output}")
+
+        assertTrue(retired.delete(), "could not delete ${retired.path}")
+        val removed = runner(test, "--info").build()
+        assertEquals(TaskOutcome.SUCCESS, removed.task(test)?.outcome, "removing $RETIRED_PATH did not re-run $test\n${removed.output}")
+        assertEquals("false", probeLineSeen("retired-exists="), "the re-run did not see the removal")
+
+        assertNeverMentions(marker, listOf(absent, created, edited, touched, removed).map { it.output })
+    }
+
+    @Test
+    fun `under the configuration cache a path created between two builds re-runs the guard`() {
+        writeSettings(":modules:web")
+        writeBuild("modules/web/build.gradle.kts")
+        writeRetiredPathProbe(asGuard = false)
+        writeEnvDirectory()
+        val retired = probeDir.resolve(RETIRED_PATH)
+        val test = ":modules:web:test"
+        val args = arrayOf(test, "--configuration-cache")
+
+        val stored = runner(*args).build()
+        assertEquals(TaskOutcome.SUCCESS, stored.task(test)?.outcome, stored.output)
+        assertTrue("Configuration cache entry stored" in stored.output, "the cache was not on\n${stored.output}")
+
+        // Nothing relevant changed: the entry is reused and the task stays UP-TO-DATE.
+        val reused = runner(*args).build()
+        assertTrue("Reusing configuration cache" in reused.output, "the entry was not reused\n${reused.output}")
+        assertEquals(TaskOutcome.UP_TO_DATE, reused.task(test)?.outcome, reused.output)
+
+        // A value frozen when the entry was stored would leave this build UP-TO-DATE.
+        retired.writeText("created between two builds\n")
+        val created = runner(*args).build()
+        assertEquals(TaskOutcome.SUCCESS, created.task(test)?.outcome, "a path created between builds was not seen\n${created.output}")
+        assertEquals("true", probeLineSeen("retired-exists="), "the re-run did not see the created path")
+    }
+
+    private companion object {
+        /** A path PostureDefaultsSpecDriftTest asserts absent that the secret exclusions hide (#728). */
+        const val RETIRED_PATH = "deploy/env/secrets.env.example"
     }
 }

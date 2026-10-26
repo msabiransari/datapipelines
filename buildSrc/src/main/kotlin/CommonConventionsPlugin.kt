@@ -7,8 +7,13 @@ import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.artifacts.VersionCatalogsExtension
 import org.gradle.api.artifacts.dsl.LockMode
+import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.FileCollection
 import org.gradle.api.plugins.JavaPluginExtension
+import org.gradle.api.provider.ListProperty
+import org.gradle.api.provider.Provider
+import org.gradle.api.provider.ValueSource
+import org.gradle.api.provider.ValueSourceParameters
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.testing.Test
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
@@ -285,6 +290,9 @@ class CommonConventionsPlugin : Plugin<Project> {
                 .files(RepoTestInputs.files(project))
                 .withPathSensitivity(PathSensitivity.RELATIVE)
                 .withPropertyName(RepoTestInputs.PROPERTY)
+            // The NAMES of the paths a guard asserts absent that the exclusions above hide (#728):
+            // creating or removing one re-runs the guard; its content is never read.
+            inputs.property(RepoTestInputs.EXISTENCE_PROPERTY, RepoTestInputs.existing(project))
             // The ONE-TestEngine rule (see this class's KDoc) enforced instead of merely
             // written down. `classpath` is this task's own input, so reading it here is
             // configuration-cache safe.
@@ -587,6 +595,16 @@ class CommonConventionsPlugin : Plugin<Project> {
  *    never enter Gradle's task history, not even as a content hash.
  * [REINCLUDES] mirrors the `.gitignore` negations that name tracked content a test reads
  * (`deploy/secrets.env.example`, the committed template — never a secret).
+ *
+ * The one thing a guard can do with an excluded path without reading it is assert that it does
+ * NOT exist (#728): creating `deploy/env/secrets.env.example` after a green run changes no
+ * declared input, so the guard stays UP-TO-DATE and the stale verdict stands. [EXISTENCE_ONLY]
+ * names such paths (a committed literal list, as [REINCLUDES] is) and [existing] feeds the
+ * subset that exists to the input [EXISTENCE_PROPERTY]: names only, never a hash, a size or a
+ * timestamp, so a content-only edit of an excluded secret still re-runs nothing.
+ * [RepoTestInputsTest] keeps the list in step with the negative-existence assertions the
+ * module and integration test sources make. That scan reads source text: it cannot see a path
+ * built at runtime, or one relative to a variable directory.
  */
 internal object RepoTestInputs {
     /** The input property name Gradle prints for these files in `--info` and in build scans. */
@@ -657,6 +675,30 @@ internal object RepoTestInputs {
      */
     val REINCLUDES: List<String> = listOf("deploy/secrets.env.example")
 
+    /** The input property name Gradle prints for the existence-only paths. */
+    const val EXISTENCE_PROPERTY = "repoPathsCheckedForExistence"
+
+    /**
+     * Repo-relative FILE paths a guard asserts ABSENT that an [EXCLUDES] pattern hides; names only.
+     * Each must match an exclusion (otherwise the tree input already sees it) and must not be a
+     * [REINCLUDES] entry.
+     */
+    val EXISTENCE_ONLY: List<String> =
+        listOf(
+            // PostureDefaultsSpecDriftTest: 081 retired it; the committed template is deploy/secrets.env.example.
+            "deploy/env/secrets.env.example",
+        )
+
+    /**
+     * The [EXISTENCE_ONLY] paths that exist right now, as names. A [ValueSource], so the answer is
+     * re-asked on every build under the configuration cache instead of frozen when it was stored.
+     */
+    fun existing(project: Project): Provider<List<String>> =
+        project.providers.of(ExistingRepoPaths::class.java) {
+            parameters.root.set(project.rootProject.layout.projectDirectory)
+            parameters.paths.set(EXISTENCE_ONLY)
+        }
+
     /** Lazy: nothing is walked until Gradle fingerprints the task's inputs. */
     fun files(project: Project): FileCollection {
         val root = project.rootProject.layout.projectDirectory
@@ -665,6 +707,26 @@ internal object RepoTestInputs {
             REINCLUDES.map { root.file(it) },
         )
     }
+}
+
+/**
+ * Which of [ExistingRepoPaths.Parameters.paths] exist under [ExistingRepoPaths.Parameters.root].
+ * Existence only: no content, size or timestamp is read (#728).
+ */
+internal abstract class ExistingRepoPaths : ValueSource<List<String>, ExistingRepoPaths.Parameters> {
+    interface Parameters : ValueSourceParameters {
+        val root: DirectoryProperty
+        val paths: ListProperty<String>
+    }
+
+    override fun obtain(): List<String> =
+        parameters.paths.get().filter {
+            parameters.root
+                .get()
+                .file(it)
+                .asFile
+                .exists()
+        }
 }
 
 /** The JUnit Platform's engine service descriptor, one per providing artifact. */
