@@ -908,7 +908,8 @@ as a hash. The one thing a guard may do with such a path is assert it ABSENT (th
 list, never content — so creating or removing one re-runs every test task while editing one re-runs nothing (#728).
 `RepoTestInputsTest` fails when a
 `.gitignore` entry lands without its mirror in `RepoTestInputs`, and when a module or integration test
-asserts an excluded path absent without a listing. The `--rerun` #712 needed is no
+asserts an excluded literal path absent in one of the scan's recognized forms without a listing.
+Runtime-built paths and other assertion forms need a manual listing. The `--rerun` #712 needed is no
 longer needed for this cause; `modules/parameters` and `modules/templates` carried their own input
 lists for it (049), which the convention replaced.
 
