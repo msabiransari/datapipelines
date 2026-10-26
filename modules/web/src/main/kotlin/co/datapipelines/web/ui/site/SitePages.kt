@@ -601,8 +601,8 @@ object SitePages {
             path = "/pipeline-scheduling",
             title = "Job scheduler for pipelines: cron, time zones and run history",
             description =
-                "A built-in job scheduler: today it runs SQL pipelines on cron patterns with time zones. Preview " +
-                    "upcoming runs, pause schedules and review execution history in your own environment.",
+                "A built-in job scheduler: today it runs SQL pipelines on cron patterns with time zones. " +
+                    "Preview runs, pause schedules and review run history.",
             view = "site/pipeline-scheduling",
         )
 
