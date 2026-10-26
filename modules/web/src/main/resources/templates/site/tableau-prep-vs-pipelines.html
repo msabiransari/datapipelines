@@ -47,7 +47,7 @@
     <div class="container">
       <p class="kicker">The artifact</p>
       <h2 id="tp-artifact" class="ds-headline">Same job, different artifact, and the artifact decides the second week</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/pipeline-contract.md §3 -->
         <p>
           A Prep flow is a diagram you edit. A pipeline here is a JSON document of SQL nodes with explicit
@@ -121,7 +121,7 @@
     <div class="container">
       <p class="kicker">The honest column</p>
       <h2 id="tp-better" class="ds-headline">What Prep does better</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <p>
           Visual profiling, the distributions, the nulls and the value counts a flow shows while you drag, is a real
           strength, and this server does not ship an equivalent: the agent reads catalogue statistics and the probe's
@@ -143,7 +143,7 @@
     <div class="container">
       <p class="kicker">The move</p>
       <h2 id="tp-migrate" class="ds-headline">Migrating a flow, step by step</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <p>
           Pick the flow you would least like to rebuild from scratch next quarter: the weekly one, with the joins
           someone has memorised. That flow pays for the migration twice: once in the move, and once every week it
@@ -196,7 +196,7 @@
           <div th:replace="~{site/_demo-console :: console(${facts.demo})}"></div>
         </figure>
       </div>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/deployment.md §Appendix B, site facts: the recorded run of record -->
         <p>Both panels are the demo workspace's run of record, <code>demo/top_company_by_borough</code>, a
           recorded acceptance result over the published sample data, with the reference zones and the lake's
@@ -217,7 +217,7 @@
   </section>
 
   <section class="section" aria-labelledby="tp-next">
-    <div class="container">
+    <div class="container section-call">
       <h2 id="tp-next" class="ds-headline">Bring one flow over and compare</h2>
       <!-- claim: docs/deployment.md §Appendix B -->
       <p class="section-lede">

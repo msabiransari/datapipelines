@@ -44,7 +44,7 @@
     <div class="container">
       <p class="kicker">Said plainly</p>
       <h2 id="po-enough" class="ds-headline">Postgres as data warehouse: when Postgres alone is enough</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <p>
           One database, one team, questions the database itself can answer: that is Postgres doing its job, and it
           does it superbly. Postgres for analytics is a sound default, and Postgres analytics on a read replica
@@ -103,7 +103,7 @@
     <div class="container">
       <p class="kicker">What this adds</p>
       <h2 id="po-adds" class="ds-headline">datapipelines adds the four without taking Postgres away</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/datasources.md §3 -->
         <p>
           Postgres stays exactly where it is, serving your application. It becomes a datasource: a named, governed
@@ -167,7 +167,7 @@
         <figcaption>The datasources screen: Postgres registered read-only, credentials encrypted, the agent's view of it bounded by the key it holds.</figcaption>
         <div th:replace="~{site/_demo-datasources :: datasources(${facts.demo})}"></div>
       </figure>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/deployment.md §Appendix B -->
         <p>
           The demo is the small case made real: <code>./app.sh --start --demo nyc</code> seeds Postgres trips,
@@ -196,7 +196,7 @@
   </section>
 
   <section class="section" aria-labelledby="po-next">
-    <div class="container">
+    <div class="container section-call">
       <h2 id="po-next" class="ds-headline">Meet the arrivals on the demo, not in production</h2>
       <!-- claim: docs/deployment.md §Appendix B -->
       <p class="section-lede">

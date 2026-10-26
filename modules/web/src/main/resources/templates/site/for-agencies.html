@@ -45,7 +45,7 @@
     <div class="container">
       <p class="kicker">Isolation by construction</p>
       <h2 id="ag-isolation" class="ds-headline">One workspace per client, one key per client</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/auth.md §5.6 -->
         <p>
           Every client gets a workspace, and a key is pinned to one workspace at issuance: the analyst, or the
@@ -75,7 +75,7 @@
     <div class="container">
       <p class="kicker">The first draft, automated</p>
       <h2 id="ag-agent" class="ds-headline">The agent does the first draft of every client's pipeline</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/mcp-server.md §6.2 -->
         <p>
           The repetitive half of agency work is walking a new client's schema: what tables exist, what the columns
@@ -132,7 +132,7 @@
     <div class="container">
       <p class="kicker">Sign-off with a version number</p>
       <h2 id="ag-release" class="ds-headline">A release per client, with a version you can name in the invoice itself</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/versioning.md §3 -->
         <p>
           The report a client disputes is the report you can defend: the pipeline that produced it was released, by
@@ -188,7 +188,7 @@
         <figcaption>The API section: one published endpoint per client, the version each serves, and the key bound to each path. It is the roster, read at a glance. The panel here is the demo workspace's own endpoint, rendered from the same recorded run the home page shows, so what a client receives is never a mock-up.</figcaption>
         <div th:replace="~{site/_demo-api :: api(${facts.demo})}"></div>
       </figure>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/auth.md §10 -->
         <p>
           One more property matters at review season: the audit log. Every call a client's key made, every release
@@ -214,7 +214,7 @@
   </section>
 
   <section class="section band" aria-labelledby="ag-next">
-    <div class="container">
+    <div class="container section-call">
       <h2 id="ag-next" class="ds-headline">Pilot it on one real client this week</h2>
       <!-- claim: docs/deployment.md §Appendix B -->
       <p class="section-lede">
