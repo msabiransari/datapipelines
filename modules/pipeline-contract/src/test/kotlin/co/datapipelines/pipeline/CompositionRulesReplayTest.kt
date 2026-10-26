@@ -98,7 +98,15 @@ class CompositionRulesReplayTest {
                 // not the whole validator (the corpus bodies cite datasources and templates this
                 // harness does not carry, and those verdicts are not this guard's question).
                 val into = FailureCollector()
-                CompositionRules.check(pipeline, replayResolver(corpus), MAX_DEPTH, UUID.randomUUID(), OrgContext.DEFAULTS, into)
+                CompositionRules.check(
+                    pipeline,
+                    replayResolver(corpus),
+                    PipelineNames { _, name -> name in corpus },
+                    MAX_DEPTH,
+                    UUID.randomUUID(),
+                    OrgContext.DEFAULTS,
+                    into,
+                )
                 judged.count(into.toResult().failures)
                 judged.judgedMappings += node.parameters.orEmpty().count { it.key in child.pipeline.parameters }
             }

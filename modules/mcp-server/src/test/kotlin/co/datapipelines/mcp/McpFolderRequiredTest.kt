@@ -6,6 +6,7 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineFolder
 import co.datapipelines.pipeline.PipelineFolderLevel
 import co.datapipelines.pipeline.PipelineNameGrammar
+import co.datapipelines.pipeline.PipelineNames
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineResolver
 import co.datapipelines.pipeline.PipelineValidationException
@@ -56,6 +57,7 @@ class McpFolderRequiredTest {
             datasources = DatasourceRegistry.EMPTY,
             templates = EmptyDryRenderer,
             pipelines = PipelineResolver { _, _, _ -> null },
+            pipelineNames = PipelineNames { _, _ -> false },
             maxCompositionDepth = 5,
         )
 

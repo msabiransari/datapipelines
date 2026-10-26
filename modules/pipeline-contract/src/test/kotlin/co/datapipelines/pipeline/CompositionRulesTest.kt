@@ -75,11 +75,43 @@ class CompositionRulesTest {
 
     @Test
     fun `an unknown pinned version of a known name is pipeline_version_not_found`() {
-        // The name resolves at version 1 (every registered pipeline has one), so the resolver
-        // returning null for the pinned 99 means the VERSION is what is missing.
-        val result = validatorWith(resolver(child())).validate(parent(ref = PipelineNodeRef(CHILD, 99)), workspaceId)
+        // The ENTITY is registered, so the resolver returning null for the pinned 99 means the
+        // VERSION is what is missing.
+        val result =
+            validatorWith(resolver(child()), names = registered(CHILD)).validate(parent(ref = PipelineNodeRef(CHILD, 99)), workspaceId)
 
         result.codes shouldContainExactly listOf(Validation.PIPELINE_VERSION_NOT_FOUND)
+    }
+
+    @Test
+    fun `a registered child without version 1 is still a missing VERSION, never a missing pipeline`() {
+        // #723: a preserved-number import lands an entity at the version it carries (versioning
+        // §9.2), and a purged draft v1 beneath an imported release leaves it without one (§3.3,
+        // §5.4). The resolver answers v3 and nothing else; the entity is registered.
+        val onlyV3 = PipelineResolver { _, name, version -> if (name == CHILD && version == 3) ResolvedPipeline(child(), false) else null }
+        val validator = validatorWith(onlyV3, names = registered(CHILD))
+
+        validator.validate(parent(ref = PipelineNodeRef(CHILD, 2)), workspaceId).codes shouldContainExactly
+            listOf(Validation.PIPELINE_VERSION_NOT_FOUND)
+        validator.validate(parent(ref = PipelineNodeRef(CHILD, 1)), workspaceId).codes shouldContainExactly
+            listOf(Validation.PIPELINE_VERSION_NOT_FOUND)
+        validator.validate(parent(ref = PipelineNodeRef(CHILD, 3)), workspaceId).failures shouldContainExactly emptyList()
+    }
+
+    @Test
+    fun `the entity question is asked in the saving workspace`() {
+        // Another workspace's entity of the same name is not registered HERE (workspaces design §3).
+        val elsewhere = UUID.randomUUID()
+        val unresolved = PipelineResolver { _, _, _ -> null }
+
+        fun registeredIn(workspace: UUID) = PipelineNames { asked, name -> asked == workspace && name == CHILD }
+
+        validatorWith(unresolved, names = registeredIn(workspaceId))
+            .validate(parent(ref = PipelineNodeRef(CHILD, 2)), workspaceId)
+            .codes shouldContainExactly listOf(Validation.PIPELINE_VERSION_NOT_FOUND)
+        validatorWith(unresolved, names = registeredIn(elsewhere))
+            .validate(parent(ref = PipelineNodeRef(CHILD, 2)), workspaceId)
+            .codes shouldContainExactly listOf(Validation.PIPELINE_NOT_FOUND)
     }
 
     @Test
@@ -610,7 +642,7 @@ class CompositionRulesTest {
             "region" to Parameter(LogicalType.STRING, default = Fixtures.json("\"EU\"")),
         )
 
-    /** A resolver that knows [body] at version 1 (the name-existence probe) and the pinned version. */
+    /** A resolver that knows [body] at version 1 and at the pinned version. */
     private fun resolver(
         body: Pipeline,
         deleted: Boolean = false,
@@ -626,7 +658,11 @@ class CompositionRulesTest {
     private fun validatorWith(
         pipelines: PipelineResolver,
         maxDepth: Int = 5,
-    ): PipelineValidator = Fixtures.validator(pipelines = pipelines, maxCompositionDepth = maxDepth)
+        names: PipelineNames = PipelineNames { _, _ -> false },
+    ): PipelineValidator = Fixtures.validator(pipelines = pipelines, pipelineNames = names, maxCompositionDepth = maxDepth)
+
+    /** The §12.9 entity answer: exactly [names] are registered, in every workspace the test asks about. */
+    private fun registered(vararg names: String): PipelineNames = PipelineNames { _, name -> name in names }
 
     private fun parent(
         ref: PipelineNodeRef? = PipelineNodeRef(CHILD, CHILD_VERSION),

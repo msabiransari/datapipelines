@@ -37,10 +37,17 @@ import co.datapipelines.calculators.CalculatorRegistry
  * unresolvable datasource, a template that cannot render, or a pipeline reference that does not
  * resolve is rejected at save, not discovered at 3am by an execution.
  */
+@Suppress("LongParameterList") // the environment's registries plus the operator's bound ceilings, each its own seam
 class PipelineValidator(
     private val datasources: DatasourceRegistry,
     private val templates: TemplateDryRenderer,
     private val pipelines: PipelineResolver,
+    /**
+     * §12.9's entity question (#723): whether a pinned child's NAME is registered, asked only when
+     * [pipelines] cannot resolve the pinned version. Required, no default — a construction that
+     * cannot answer it must say so rather than inherit a guess.
+     */
+    private val pipelineNames: PipelineNames,
     private val maxCompositionDepth: Int,
     /**
      * The deployment's org tier (calculators design §0.1). Defaulted so a test or an in-memory
@@ -102,6 +109,7 @@ class PipelineValidator(
         CompositionRules.check(
             pipeline,
             pipelines,
+            pipelineNames,
             maxCompositionDepth,
             workspaceId,
             orgContext,

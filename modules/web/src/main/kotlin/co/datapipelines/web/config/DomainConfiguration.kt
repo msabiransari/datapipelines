@@ -26,6 +26,7 @@ import co.datapipelines.datasources.crypto.KeyProviders
 import co.datapipelines.datasources.pooling.PoolLifecycleMetrics
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.DatasourceFacts
+import co.datapipelines.pipeline.PipelineNames
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineResolver
 import co.datapipelines.pipeline.PipelineValidator
@@ -462,6 +463,7 @@ class DomainConfiguration {
         datasources: ContractDatasourceRegistry,
         dryRenderer: TemplateDryRenderer,
         pipelines: PipelineResolver,
+        repository: PipelineRepository,
         properties: PipelineProperties,
         orgContext: co.datapipelines.pipeline.OrgContext,
         executor: ExecutorProperties,
@@ -470,6 +472,8 @@ class DomainConfiguration {
             datasources,
             dryRenderer,
             pipelines,
+            // #723: §12.9 tells a missing pipeline from a missing version by the ENTITY row.
+            PipelineNames.of(repository),
             properties.maxCompositionDepth,
             orgContext,
             // 108: §12.8's ceiling on a node's own `settings.timeout_seconds`. The OPERATOR's

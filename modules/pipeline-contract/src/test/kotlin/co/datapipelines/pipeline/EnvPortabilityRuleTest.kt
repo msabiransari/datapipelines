@@ -163,5 +163,11 @@ class EnvPortabilityRuleTest {
     private fun validate(
         pipeline: Pipeline,
         datasources: DatasourceRegistry = StubDatasources(),
-    ) = PipelineValidator(datasources, StubTemplates(), PipelineResolver { _, _, _ -> null }, 5).validate(pipeline, workspaceId)
+    ) = PipelineValidator(
+        datasources,
+        StubTemplates(),
+        PipelineResolver { _, _, _ -> null },
+        PipelineNames { _, _ -> false },
+        5,
+    ).validate(pipeline, workspaceId)
 }

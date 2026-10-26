@@ -373,7 +373,13 @@ class ReferenceRulesTest {
         pipeline: Pipeline,
         datasources: DatasourceRegistry = StubDatasources(),
         templates: TemplateDryRenderer = StubTemplates(),
-    ) = PipelineValidator(datasources, templates, PipelineResolver { _, _, _ -> null }, 5).validate(pipeline, workspaceId)
+    ) = PipelineValidator(
+        datasources,
+        templates,
+        PipelineResolver { _, _, _ -> null },
+        PipelineNames { _, _ -> false },
+        5,
+    ).validate(pipeline, workspaceId)
 
     private fun h2Templates() = StubTemplates(defaultLookup = TemplateLookup.Found(Dialect.H2))
 }
