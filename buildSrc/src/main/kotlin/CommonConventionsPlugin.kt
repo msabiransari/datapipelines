@@ -80,9 +80,11 @@ class CommonConventionsPlugin : Plugin<Project> {
         project.plugins.apply("org.jetbrains.kotlinx.kover")
 
         val libs = project.extensions.getByType<VersionCatalogsExtension>().named("libs")
-        fun lib(alias: String) = libs.findLibrary(alias).orElseThrow {
-            IllegalStateException("Version catalog alias '$alias' is missing from gradle/libs.versions.toml")
-        }
+
+        fun lib(alias: String) =
+            libs.findLibrary(alias).orElseThrow {
+                IllegalStateException("Version catalog alias '$alias' is missing from gradle/libs.versions.toml")
+            }
 
         project.extensions.configure<JavaPluginExtension> {
             sourceCompatibility = JavaVersion.VERSION_21
@@ -144,7 +146,6 @@ class CommonConventionsPlugin : Plugin<Project> {
                     }
                 }
             }
-
 
             add("testImplementation", lib("junit-jupiter"))
             add("testImplementation", lib("mockk"))
@@ -234,7 +235,11 @@ class CommonConventionsPlugin : Plugin<Project> {
             // build script AFTER this (tests/integration-tests: 6g; the two Testcontainers
             // suites: dp.test.forks.e2e). Providers, so a -P override is a tracked input.
             maxParallelForks =
-                project.providers.gradleProperty("dp.test.forks").orNull?.toIntOrNull()?.coerceAtLeast(1) ?: 1
+                project.providers
+                    .gradleProperty("dp.test.forks")
+                    .orNull
+                    ?.toIntOrNull()
+                    ?.coerceAtLeast(1) ?: 1
             maxHeapSize = project.providers.gradleProperty("dp.test.heap").orNull ?: "1g"
             // Order-shuffle verification (round 060 §A): `./gradlew :m:test
             // -Pjunit.jupiter.testmethod.order.default=org.junit.jupiter.api.MethodOrderer$Random
@@ -250,7 +255,10 @@ class CommonConventionsPlugin : Plugin<Project> {
                 "junit.jupiter.execution.order.random.seed",
                 "versionLifecycle.sequences",
             ).forEach { key ->
-                project.providers.gradleProperty(key).orNull?.let { value -> systemProperty(key, value) }
+                project.providers
+                    .gradleProperty(key)
+                    .orNull
+                    ?.let { value -> systemProperty(key, value) }
             }
             // If the platform discovers no tests at all, that is a broken test setup,
             // not a pass. Guards the "engine found nothing" half of the false-green.
@@ -407,43 +415,54 @@ class CommonConventionsPlugin : Plugin<Project> {
     private fun registerZeroTestGuard(project: Project) {
         // Values are resolved at configuration time: the task action must not reach
         // back into the project (configuration-cache safe).
-        val testSourceDir = project.layout.projectDirectory.dir("src/test/kotlin").asFile
-        val resultsDir = project.layout.buildDirectory.dir("test-results/test").get().asFile
+        val testSourceDir =
+            project.layout.projectDirectory
+                .dir("src/test/kotlin")
+                .asFile
+        val resultsDir =
+            project.layout.buildDirectory
+                .dir("test-results/test")
+                .get()
+                .asFile
         val modulePath = project.path
 
-        val guard = project.tasks.register("verifyTestsExecuted") {
-            group = "verification"
-            description = "Fails if this module produced fewer test result files than it has test sources."
-            dependsOn(project.tasks.named("test"))
-            // No declared outputs, so Gradle would not cache it today; explicit so that a
-            // future output declaration cannot turn this run's count into a cached one (#480).
-            outputs.cacheIf(UNCACHEABLE_VERDICT) { false }
-            doLast {
-                val sourceCount = testSourceDir.walkTopDown()
-                    .count { it.isFile && it.name.endsWith("Test.kt") }
-                if (sourceCount == 0) return@doLast
+        val guard =
+            project.tasks.register("verifyTestsExecuted") {
+                group = "verification"
+                description = "Fails if this module produced fewer test result files than it has test sources."
+                dependsOn(project.tasks.named("test"))
+                // No declared outputs, so Gradle would not cache it today; explicit so that a
+                // future output declaration cannot turn this run's count into a cached one (#480).
+                outputs.cacheIf(UNCACHEABLE_VERDICT) { false }
+                doLast {
+                    val sourceCount =
+                        testSourceDir
+                            .walkTopDown()
+                            .count { it.isFile && it.name.endsWith("Test.kt") }
+                    if (sourceCount == 0) return@doLast
 
-                val resultCount = resultsDir
-                    .listFiles { f -> f.isFile && f.name.startsWith("TEST-") && f.name.endsWith(".xml") }
-                    ?.size ?: 0
+                    val resultCount =
+                        resultsDir
+                            .listFiles { f -> f.isFile && f.name.startsWith("TEST-") && f.name.endsWith(".xml") }
+                            ?.size ?: 0
 
-                // `<` not `!=`: @Nested / parameterised suites legitimately emit MORE
-                // result files than source files. Fewer means a class silently vanished.
-                if (resultCount < sourceCount) {
-                    throw GradleException(
-                        "$modulePath produced $resultCount test result file(s) for $sourceCount test " +
-                            "source file(s) in $resultsDir. The build would otherwise have reported " +
-                            "success while silently skipping tests. " +
-                            "A FILTERED run (--tests …) ALWAYS fails this guard, by design — it ran " +
-                            "fewer classes than the module has, which is exactly what this counts. " +
-                            "That is not a red suite: read the XML in $resultsDir (or run " +
-                            "./scripts/test-recount.sh) for the verdict. " +
-                            "On an UNFILTERED run: re-run with --rerun-tasks; if it persists, the test " +
-                            "task is being skipped as NO-SOURCE, or a test class died without reporting.",
-                    )
+                    // `<` not `!=`: @Nested / parameterised suites legitimately emit MORE
+                    // result files than source files. Fewer means a class silently vanished.
+                    if (resultCount < sourceCount) {
+                        throw GradleException(
+                            "$modulePath produced $resultCount test result file(s) for $sourceCount test " +
+                                "source file(s) in $resultsDir. The build would otherwise have reported " +
+                                "success while silently skipping tests. " +
+                                "A FILTERED run (--tests …) ALWAYS fails this guard, by design — it ran " +
+                                "fewer classes than the module has, which is exactly what this counts. " +
+                                "That is not a red suite: read the XML in $resultsDir (or run " +
+                                "./scripts/test-recount.sh) for the verdict. " +
+                                "On an UNFILTERED run: re-run with --rerun-tasks; if it persists, the test " +
+                                "task is being skipped as NO-SOURCE, or a test class died without reporting.",
+                        )
+                    }
                 }
             }
-        }
 
         project.tasks.named("check").configure { dependsOn(guard) }
         // Also finalize `test` itself, not just `check`. Running `gradlew :m:test`
@@ -484,43 +503,44 @@ class CommonConventionsPlugin : Plugin<Project> {
          * catch regressions; they do not demand new tests. Raise a floor only when
          * the module's coverage has genuinely improved.
          */
-        val COVERAGE_FLOORS: Map<String, Int> = mapOf(
-            ":modules:typesystem" to 96,
-            // #194: measured baseline 100.0 on the module's first Kover run (DagTest moved with Dag.kt), minus 2.
-            ":modules:graph" to 98,
-            // #266: measured baseline 97.27 on the module's first Kover run (30 tests), minus 2, floored.
-            ":modules:persistence" to 95,
-            // 072: measured baseline 95.9 on the module's first Kover run, minus 2, floored.
-            ":modules:calculators" to 93,
-            // 7a: measured baseline 91.4 on the module's first Kover run, minus 2, floored.
-            ":modules:scripting" to 89,
-            ":modules:pipeline-contract" to 94,
-            ":modules:templates" to 91,
-            ":modules:datasources" to 94,
-            ":modules:staging" to 93,
-            ":modules:auth" to 95,
-            // #9 scheduler lane 1: measured baseline 93.4 on the module's first Kover run, minus 2, floored.
-            ":modules:scheduler" to 91,
-            // 056: measured baseline 86.1 on the module's first Kover run, minus 2, floored.
-            // 083 §D: re-measured at 96.9 after the three JDBC classes here got direct tests —
-            // they were exercised only by the WEB module's suite, so this module earned no
-            // coverage for its own code and sat at 84.9 against 84, a margin thin enough that
-            // the next class added here would have tripped someone else's gate. The structural
-            // cause is fixed, so the floor follows the house rule again: baseline minus 2.
-            ":modules:application" to 94,
-            // #194: Dag.kt (100% covered) moved to graph; the lane measured 90.19 on the module after the move, minus 2
-            // (the house rule) — 90 left a 0.19-point margin a CI runner's coverage could fall under (MISTAKES: the race floor).
-            ":modules:dag" to 88,
-            // #194 lane B: measured baseline 95.71 on the module as delivered (A.1's 91.18 measured the model alone),
-            // minus 2, floored. The container suite (the repository and the lifecycle) carries a third of the lines.
-            ":modules:parameters" to 93,
-            // #10 L1a (dashboard implementation spec §1, §17): 90 until the first measured baseline; the
-            // orchestrator sets baseline minus 2 at the merge (the house rule).
-            ":modules:visualization" to 94,
-            ":modules:mcp-server" to 94,
-            ":modules:web" to 72,
-            ":modules:app" to 90,
-        )
+        val COVERAGE_FLOORS: Map<String, Int> =
+            mapOf(
+                ":modules:typesystem" to 96,
+                // #194: measured baseline 100.0 on the module's first Kover run (DagTest moved with Dag.kt), minus 2.
+                ":modules:graph" to 98,
+                // #266: measured baseline 97.27 on the module's first Kover run (30 tests), minus 2, floored.
+                ":modules:persistence" to 95,
+                // 072: measured baseline 95.9 on the module's first Kover run, minus 2, floored.
+                ":modules:calculators" to 93,
+                // 7a: measured baseline 91.4 on the module's first Kover run, minus 2, floored.
+                ":modules:scripting" to 89,
+                ":modules:pipeline-contract" to 94,
+                ":modules:templates" to 91,
+                ":modules:datasources" to 94,
+                ":modules:staging" to 93,
+                ":modules:auth" to 95,
+                // #9 scheduler lane 1: measured baseline 93.4 on the module's first Kover run, minus 2, floored.
+                ":modules:scheduler" to 91,
+                // 056: measured baseline 86.1 on the module's first Kover run, minus 2, floored.
+                // 083 §D: re-measured at 96.9 after the three JDBC classes here got direct tests —
+                // they were exercised only by the WEB module's suite, so this module earned no
+                // coverage for its own code and sat at 84.9 against 84, a margin thin enough that
+                // the next class added here would have tripped someone else's gate. The structural
+                // cause is fixed, so the floor follows the house rule again: baseline minus 2.
+                ":modules:application" to 94,
+                // #194: Dag.kt (100% covered) moved to graph; the lane measured 90.19 on the module after the move, minus 2
+                // (the house rule) — 90 left a 0.19-point margin a CI runner's coverage could fall under (MISTAKES: the race floor).
+                ":modules:dag" to 88,
+                // #194 lane B: measured baseline 95.71 on the module as delivered (A.1's 91.18 measured the model alone),
+                // minus 2, floored. The container suite (the repository and the lifecycle) carries a third of the lines.
+                ":modules:parameters" to 93,
+                // #10 L1a (dashboard implementation spec §1, §17): 90 until the first measured baseline; the
+                // orchestrator sets baseline minus 2 at the merge (the house rule).
+                ":modules:visualization" to 94,
+                ":modules:mcp-server" to 94,
+                ":modules:web" to 72,
+                ":modules:app" to 90,
+            )
 
         /**
          * Modules with NO line-coverage floor, each with its reason — the same
@@ -529,14 +549,15 @@ class CommonConventionsPlugin : Plugin<Project> {
          * fails configuration, so the next module (or a renamed one) can never
          * silently escape the floors and the aggregate report.
          */
-        val NO_COVERAGE_FLOOR_ALLOWLIST: Set<String> = setOf(
-            // No main sources of its own — nothing to measure. (2026-08-15)
-            ":tests:integration-tests",
-            // Same reason as integration-tests, plus: pulling Playwright's browser
-            // launch into the Kover-instrumented unit graph would defeat the suite's
-            // deliberate separate invocation (module-structure §5.12). (2026-09-03)
-            ":tests:browser-tests",
-        )
+        val NO_COVERAGE_FLOOR_ALLOWLIST: Set<String> =
+            setOf(
+                // No main sources of its own — nothing to measure. (2026-08-15)
+                ":tests:integration-tests",
+                // Same reason as integration-tests, plus: pulling Playwright's browser
+                // launch into the Kover-instrumented unit graph would defeat the suite's
+                // deliberate separate invocation (module-structure §5.12). (2026-09-03)
+                ":tests:browser-tests",
+            )
     }
 }
 
@@ -699,17 +720,19 @@ private fun declaredTestEngines(classpath: FileCollection): Map<String, String> 
 
     classpath.files.forEach { entry ->
         when {
-            entry.isDirectory ->
+            entry.isDirectory -> {
                 File(entry, TEST_ENGINE_SERVICE)
                     .takeIf { it.isFile }
                     ?.let { record(it.readLines(), entry.name) }
+            }
 
-            entry.isFile && entry.name.endsWith(".jar") ->
+            entry.isFile && entry.name.endsWith(".jar") -> {
                 ZipFile(entry).use { jar ->
                     jar.getEntry(TEST_ENGINE_SERVICE)?.let { service ->
                         record(jar.getInputStream(service).bufferedReader().readLines(), entry.name)
                     }
                 }
+            }
         }
     }
     return found

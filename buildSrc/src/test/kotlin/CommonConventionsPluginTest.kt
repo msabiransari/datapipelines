@@ -61,13 +61,13 @@ import java.io.File
  * run on the pre-resolved JDK 21 handed in via `probe.jdk21`.
  */
 class CommonConventionsPluginTest {
-
     @TempDir
     lateinit var probeDir: File
 
     private val catalogPath: String
-        get() = System.getProperty("repo.catalog")
-            ?: error("repo.catalog system property not set — run via buildSrc's test task")
+        get() =
+            System.getProperty("repo.catalog")
+                ?: error("repo.catalog system property not set — run via buildSrc's test task")
 
     /** Probe settings reusing the repo catalog; optionally including subprojects. */
     private fun writeSettings(vararg includes: String) {
@@ -103,21 +103,24 @@ class CommonConventionsPluginTest {
     }
 
     private val jdk21Home: String
-        get() = System.getProperty("probe.jdk21")
-            ?: error("probe.jdk21 system property not set — run via buildSrc's test task")
+        get() =
+            System.getProperty("probe.jdk21")
+                ?: error("probe.jdk21 system property not set — run via buildSrc's test task")
 
-    private fun runner(vararg args: String) = GradleRunner.create()
-        .withPluginClasspath()
-        .withProjectDir(probeDir)
-        .withArguments(
-            *args,
-            // The probe's Kotlin compilation wants the JDK 21 toolchain; hand it
-            // the installation the build resolved (see build.gradle.kts) instead
-            // of relying on the probe settings' foojay resolver — the probes
-            // never download a toolchain. (Dependency resolution is separate:
-            // compile-bearing probes resolve from Maven Central — see KDoc.)
-            "-Porg.gradle.java.installations.paths=$jdk21Home",
-        )
+    private fun runner(vararg args: String) =
+        GradleRunner
+            .create()
+            .withPluginClasspath()
+            .withProjectDir(probeDir)
+            .withArguments(
+                *args,
+                // The probe's Kotlin compilation wants the JDK 21 toolchain; hand it
+                // the installation the build resolved (see build.gradle.kts) instead
+                // of relying on the probe settings' foojay resolver — the probes
+                // never download a toolchain. (Dependency resolution is separate:
+                // compile-bearing probes resolve from Maven Central — see KDoc.)
+                "-Porg.gradle.java.installations.paths=$jdk21Home",
+            )
 
     @Test
     fun `a project missing from floors and allowlist fails configuration with the documented message`() {
@@ -175,9 +178,10 @@ class CommonConventionsPluginTest {
             """.trimIndent(),
         )
 
-        val floorsEngage = runCatching {
-            runner(":modules:web:koverVerify").build()
-        }.exceptionOrNull()
+        val floorsEngage =
+            runCatching {
+                runner(":modules:web:koverVerify").build()
+            }.exceptionOrNull()
         assertTrue(floorsEngage is UnexpectedBuildFailure, "expected the floor rule to fail at ~0% coverage, got success")
         val floorOutput = (floorsEngage as UnexpectedBuildFailure).message.orEmpty()
         assertTrue(
