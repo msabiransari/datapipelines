@@ -1,9 +1,9 @@
 # MCP Server Specification
 
-**Status:** v1.76 (frozen contract — additive-only changes after this point)
+**Status:** v1.77 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-25
 
 ---
 
@@ -87,7 +87,7 @@ Server response: JSON for single-message exchanges, `text/event-stream` for stre
 - `DP-API-Key: dpk_<id>.<secret>` — the REST convention; the primary case.
 - `Authorization: Bearer dpk_<id>.<secret>` — for MCP clients that can only set the standard Authorization header (Claude Desktop and several others). The filter recognizes the `dpk_` prefix and routes the token through the identical validation path.
 
-Both are validated by [Auth §7.3](auth.md#73-validation-flow) — same lookup, same Argon2id verification, same 60s-TTL revocation/liveness re-check ([Auth §11.4](auth.md#114-api-key-validation-cache)). A revoked key, a deactivated member or a role change takes effect within the auth cache TTL (60 s by default, #215 B5).
+Both are validated by [Auth §7.3](auth.md#73-validation-flow) — same lookup, same Argon2id verification, same 60s-TTL revocation/liveness re-check ([Auth §11.4](auth.md#114-api-key-validation-cache)). A revoked key, a deactivated identity or a deactivated pinned workspace takes effect within the auth cache TTL (60 s by default, #215 B5) — nothing else is re-read: a later change to the creator's member role changes nothing for the key, whose authority is its own chosen role (keys v2, [Auth §7.5](auth.md#75-key-roles)).
 
 **Session JWTs are not accepted on `/mcp`.** There is no cookie auth and no non-`dpk_` Bearer token path — a browser-embedded MCP client must use an API key like any other agent.
 
@@ -100,11 +100,11 @@ API keys of the `mcp` kind (keys v2 #233, A13–A19) are:
 
 **Enforcement is the ROLE** ([Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative), [§11A](auth.md#11a-roles)). Each tool declares ONE catalog permission on its catalog entry (`McpToolCatalog.Entry.permission`) — this spec restates it in §6.2 for readability, but the catalog is authoritative on any conflict, and one function (`ScopeMatrix.allowedTool`) answers here and at the REST interceptor. A tool that declares none is refused (`auth.permission.undeclared`).
 
-**A key does what its MEMBER can do NOW, capped at author.** On every request the member's CURRENT role in the pinned workspace is checked against the tool's permission — re-read inside the same 60 s validation-cache TTL as revocation. So a member's role change reaches their key within about a minute (a promotion widens it, a demotion narrows it — C2), and a refusal is `auth.key_issuer_role_lost`: the key is fine, the member's role does not reach this tool, and the fix is a role, not a retry.
+**A key acts as its OWN identity, at the role chosen at creation** (keys v2, [Auth §7.5](auth.md#75-key-roles)): every request judges the key's OWN role against the tool's permission — nothing is derived from a membership at request time, so a later change to the creator's member role changes nothing for the key. What DOES reach the key within the 60 s validation-cache TTL is revocation and deactivation (§4.2): a revoked key, a deactivated identity or a deactivated workspace stops working within about a minute. A refusal is `auth.role_required` ([Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)) — `details.required` names the permission and `details.held` the key's own role; the fix is a key whose role holds the permission (create one under the subset rule, revoke this one), never a member-role change.
 
 **A promoter's key sees through the promoter LENS (178, [Auth §11A.1](auth.md#11a1-the-404-rule)).** The role narrows what a READ returns, never who may read: `pipelines_list/get`, `templates_list/get/used_by`, `endpoints_list/get`, the resource catalogue and the pipeline/template resources answer a promoter with RELEASED objects newer than the promotion target's inventory entry ([Versioning §10.2](versioning.md#102-the-listing-rule-what-the-ui-shows)) and nothing else — a draft, an already-promoted object, or a pipeline behind the target is ABSENT for that key and resolves as not-found, exactly as another workspace's would; a visible object's pending DRAFT is invisible too — `pipelines_get` / `templates_get` default to the RELEASE for that key, carry no `draft` pointer, and an explicit draft `version` is not-found. The inventory is read through a per-workspace cache (`datapipelines.deployment.promotion.inventory-cache-ttl-seconds`); when the target cannot be read the lens fails CLOSED — lists are empty, gets are not-found, never a 502 to a read — and the server logs `pipeline.promotion.lens_unavailable` once per window. Every other role's key is unaffected and triggers no target call.
 
-No MCP tool needs more than author (record §3.4), so the PK4 cap withholds nothing an agent can call. Release, promote, workspace creation and membership have no MCP tool at all: they are human verbs, which is the same reason no key is ever a super admin. Registering, editing and deleting datasources remain UI/REST-only.
+A key's role can be `promoter` or `workspace_admin`, and such a key is limited by its ROLE — the permission catalog rows it holds and, for a `promoter`, the release lens above — never by a cap. Release, promote, workspace creation and membership have no MCP tool at all: they are human verbs, which is the same reason no key is ever a super admin. Registering, editing and deleting datasources remain UI/REST-only.
 
 **Datasource visibility is a GRANT** ([Auth §11A](auth.md#11a-roles)). A datasource not granted to the key's pinned workspace does not exist for it: `datasources_list` is the truth, and guessing a name gets the not-found envelope, never a "forbidden".
 
@@ -249,7 +249,7 @@ A future enhancement: dynamically-generated per-pipeline tools (e.g., `pipeline_
 
 ### 6.2 Tool definitions
 
-Every tool definition below carries a **Permission** row: the catalog permission the tool declares (`McpToolCatalog.Entry.permission`), which the calling key's role must hold — its member's role in the pinned workspace, capped at author (PK4). Those values are sourced from the [Auth §7.6 permission catalog](auth.md#76-operation-matrix--the-permission-catalog-authoritative), which is authoritative — if this doc and the catalog ever disagree, the catalog wins. Scopes were removed (#215). No MCP tool needs more than author, so the cap costs an agent nothing.
+Every tool definition below carries a **Permission** row: the catalog permission the tool declares (`McpToolCatalog.Entry.permission`), which the calling key's ROLE must hold — the role chosen at creation ([Auth §7.5](auth.md#75-key-roles)). Those values are sourced from the [Auth §7.6 permission catalog](auth.md#76-operation-matrix--the-permission-catalog-authoritative), which is authoritative — if this doc and the catalog ever disagree, the catalog wins. Scopes were removed (#215): the role is the one axis, so a `promoter`- or `workspace_admin`-role key reaches farther than an `author`-role one — exactly as far as its catalog rows allow, and no farther.
 
 Every tool's result envelope, including its error shape, is §6.3.
 
@@ -2830,7 +2830,7 @@ The error payload inside the tool result matches the [REST API `error` object](r
 
 - HTTP 401 (`auth.api_key.missing` / `.invalid` / `.expired`) → the key is absent, revoked or expired. Retrying does not help; the user must supply a new key.
 - HTTP 401 (`auth.principal_deactivated`) → the key's member was deactivated; HTTP 404 (`auth.key_workspace_inactive`) → the workspace the key is pinned to was deactivated. Neither is a key problem: an administrator reactivating the user or the workspace restores the same key.
-- `isError` with `auth.key_issuer_role_lost` → your role in the key's workspace does not hold the tool's permission (§6.2, [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)). Retrying does not help: the key acts as you, so the fix is a role in that workspace, not a new key.
+- A tool result with `isError` and `auth.role_required` → the key's OWN role (chosen at creation) does not hold the tool's permission; `details.required` names it and `details.held` is the key's role (§6.2, [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)). Retrying does not help and neither does a role change on the Keys page: the key is judged by its own role, so the fix is a key whose role holds the permission — create one under the subset rule ([Auth §7.4](auth.md#74-issuance)) and revoke this one. (`auth.key_issuer_role_lost` is never an MCP answer: an MCP key always carries a role of its own and refuses with `auth.role_required`; that code survives only on the context-judged path, where a key principal is judged through a workspace context — the promotion peer, [Auth §9](auth.md#9-auth-errors).)
 - HTTP 429 (`rate_limit.exceeded`) → rate limited. Limits are **per-user**, shared across REST and MCP ([REST API §12](rest-api.md#12-rate-limiting)); honor `Retry-After` and back off.
 - HTTP 429 (`rate_limit.unavailable`) → the limiter could not decide and refused the call (fail closed, [REST API §12.3](rest-api.md#123-when-the-limiter-itself-is-unavailable)). Not your budget: honor `Retry-After` and retry, and do not treat it as a signal to reduce your request rate permanently.
 - HTTP 5xx → server error; agent should retry with backoff.
@@ -2907,7 +2907,7 @@ Out of scope for v1, tracked for future ([ROADMAP](ROADMAP.md) is the authoritat
 - [ ] Every MCP endpoint requires auth (no unauthenticated access).
 - [ ] API key validated on every request, not just session establishment — via `DP-API-Key` **and** `Authorization: Bearer dpk_...`, both through the single [Auth §7.3](auth.md#73-validation-flow) path. No second, laxer code path for the Bearer form.
 - [ ] Session JWTs (`dp_session` cookie, non-`dpk_` Bearer tokens) are **rejected** on `/mcp` — verify with a test that a valid browser session cannot call a tool.
-- [ ] Key revocation, member deactivation and a role change take effect within the cache TTL (~60s) on `/mcp`, not just on REST.
+- [ ] Key revocation and identity/workspace deactivation take effect within the cache TTL (~60s) on `/mcp`; a member role change does not reach the key — its authority is its own chosen role (keys v2).
 - [ ] The permission enforced per tool against the [Auth §7.6 catalog](auth.md#76-operation-matrix--the-permission-catalog-authoritative) — every tool walked with every role an MCP key can act with (viewer, promoter, author), admitted exactly where the role's column holds the tool's permission.
 - [ ] Execution ownership enforced on `executions_get`, `executions_get_result`, and execution resources — a key of a member without `execution.read_all` cannot read another user's results.
 - [ ] `resources/list` filtered by the caller's role (each family's read permission) and ownership (§7.3), not just paginated.
@@ -3118,6 +3118,7 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-25 | v1.77 | 706 (#706) | **§4.1/§6 preamble/§9.3: the live prose still taught the retired PK4 cap, the membership-freshness rule (C2) and `auth.key_issuer_role_lost` as the MCP refusal, contradicting §4.1's own keys-v2 bullets and §4.2 — rewritten to the key's chosen role and `auth.role_required`; recovery = a new key under the subset rule. §13's checklist item and the §4.1 TTL sentence say the same (revocation and deactivation reach the key; a member role change does not). History rows v1.47/v1.50 unchanged. No tool, route, permission or code change.** |
 | 2026-10-22 | v1.76 | 8b (#8) | The type description and §6.2.43 describe JavaScript availability, statement bodies and console results. |
 | 2026-10-21 | v1.75 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The template-type and node prose say script**: the script contract / invariants / tests descriptions, the `scripts` docs area and `skill/scripts-contracts`, the `templates_*` refusal reason `type_not_script`, the key `datapipelines.script.evaluate-timeout-seconds`; the visualization write tools' block property stays `transform` (restored in this lane's third round; `ArtifactWriteSchemaReaderParityTest` pins schema = reader keys). A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-11 | v1.74 | 504b (#504b) one shared search-needle rule | **§6.2.2 `pipelines_list` and §6.2.6 `templates_list` say what `q` matches and its bound**: the `inputSchema`'s `q` description now states the case-insensitive substring match, the columns actually searched (name, display name and description on pipelines; name and display name on templates — #424's understatements corrected), that a present `prefix` wins, and the shared 200-after-trim bound (#490, [pipeline-contract §13.21](pipeline-contract.md) v1.58). A longer `q` on ANY list tool is refused JSON-RPC `-32602 invalid params` (§9.1) naming the limit, the length and `request.query_too_long`, before any read and without echoing the term — the mapping moved from `parameter_sets_list`'s own catch to the dispatcher, so all three tools answer identically. REST answers the same term with `400` ([REST §21.2](rest-api.md#212-routes) v2.95). No tool, argument name, count or permission changed. |
