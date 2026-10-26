@@ -4,10 +4,6 @@ import co.datapipelines.application.templates.TemplateUsage
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.NewPipeline
-import co.datapipelines.pipeline.Node
-import co.datapipelines.pipeline.NodeOutput
-import co.datapipelines.pipeline.NodeType
-import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineDraftService
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineRecord
@@ -15,26 +11,22 @@ import co.datapipelines.pipeline.PipelineReleaseService
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineSerializer
 import co.datapipelines.pipeline.PipelineService
-import co.datapipelines.pipeline.PipelineSettings
 import co.datapipelines.pipeline.PipelineValidationException
 import co.datapipelines.pipeline.PipelineValidator
-import co.datapipelines.pipeline.TemplateIds
 import co.datapipelines.pipeline.TemplateRef
-import co.datapipelines.pipeline.TemplateType
-import co.datapipelines.pipeline.TemplateVersionStatuses
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.CitableFacts
 import co.datapipelines.templates.ScriptBlocks
-import co.datapipelines.templates.TemplateDraft
 import co.datapipelines.templates.TemplateImplementsRepository
 import co.datapipelines.templates.TemplateJson
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.typesystem.DatapipelinesException
-import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.NO_DASHBOARDS
 import co.datapipelines.web.NO_EXCLUSIVE_DRAFT_TEMPLATES
 import co.datapipelines.web.SharedPostgres
+import co.datapipelines.web.pipelines.TemplateVersionProbeModels.draft
+import co.datapipelines.web.pipelines.TemplateVersionProbeModels.pipeline
 import co.datapipelines.web.templates.TemplateImportService
 import co.datapipelines.web.templates.TemplateReleaseService
 import com.fasterxml.jackson.databind.node.ObjectNode
@@ -61,8 +53,8 @@ import java.util.UUID
  * ([SharedPostgres], the app's migrations): [TemplateReleaseService.purgeVersion] and
  * [TemplateImportService]'s preserved-number import (versioning §9.2), over the real
  * [TemplateRepository]. The restore then runs [PipelineService.restoreVersion] with the PRODUCTION
- * `TemplateVersionStatuses` (`templates.findVersionStatus`, as `PipelineLifecycleConfiguration` wires
- * it) and the PRODUCTION entity port (`templates.existsId`).
+ * adapters returned by [PipelineLifecycleConfiguration.templateVersionStatuses] and
+ * [PipelineLifecycleConfiguration.templateIds], over the real repository.
  *
  * Doubles outside the question: the template validator answers its input (a template body is not
  * under test), the usage evidence is empty (no pinners block a purge), and the pipeline validator is
@@ -110,7 +102,8 @@ class TemplateVersionProbeIntegrationTest {
         releases = TemplateReleaseService(templates, validator, authoring, usage)
         imports = TemplateImportService(templates, validator, CitableFacts.NONE, TemplateImplementsRepository(jdbc))
 
-        val statuses = TemplateVersionStatuses { workspaceId, id, version -> templates.findVersionStatus(workspaceId, id, version) }
+        val wiring = PipelineLifecycleConfiguration()
+        val statuses = wiring.templateVersionStatuses(templates)
         val pipelineValidator = mockk<PipelineValidator>()
         restores =
             PipelineService(
@@ -122,8 +115,7 @@ class TemplateVersionProbeIntegrationTest {
                 draftTemplates = NO_EXCLUSIVE_DRAFT_TEMPLATES,
                 dashboards = NO_DASHBOARDS,
                 templateStatuses = statuses,
-                // The production bean's answer (PipelineLifecycleConfiguration.templateIds).
-                templateIds = TemplateIds { workspaceId, id -> templates.existsId(workspaceId, id) },
+                templateIds = wiring.templateIds(templates),
             )
     }
 
@@ -295,43 +287,6 @@ class TemplateVersionProbeIntegrationTest {
                 String::class.java,
             ),
         )
-
-    private fun draft(
-        id: String,
-        body: String = "SELECT 1",
-    ) = TemplateDraft(
-        id = id,
-        // The wire carries an explicit type: a null one is `type_invalid` on import (creation resolves it, import does not).
-        type = TemplateType.SQL,
-        dialect = Dialect.POSTGRES,
-        displayName = "Probe",
-        description = "Template version probe fixture.",
-        body = body,
-    )
-
-    private fun pipeline(
-        name: String,
-        template: TemplateRef,
-    ) = Pipeline(
-        schemaVersion = Pipeline.SUPPORTED_SCHEMA_VERSION,
-        name = name,
-        displayName = name,
-        description = "",
-        settings = PipelineSettings(),
-        parameters = emptyMap(),
-        nodes =
-            listOf(
-                Node(
-                    id = "q",
-                    description = "q",
-                    type = NodeType.DQL,
-                    source = "tempdb",
-                    template = template,
-                    output = NodeOutput.Caller,
-                    dependsOn = emptyList(),
-                ),
-            ),
-    )
 
     private companion object {
         val WORKSPACE: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
