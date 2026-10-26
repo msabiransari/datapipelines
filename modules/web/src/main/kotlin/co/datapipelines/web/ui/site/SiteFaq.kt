@@ -7,7 +7,7 @@ import com.fasterxml.jackson.databind.json.JsonMapper
  * One FAQ entry, rendered TWICE from ONE value: as a visible `<details>` in the page and as a
  * `Question` inside the page's `FAQPage` JSON-LD. Site v2's rule (mock 2026-09-09): the
  * structured data can never say more, less, or other than what the reader sees — a snippet
- * Google shows must be a sentence on the page. `SiteFaqParityTest` reads both back and
+ * Google shows must be a sentence on the page. `SiteV2GuardsTest` reads both back and
  * compares them.
  *
  * @property question ends with `?` — SiteJsonLdTest's shape rule for a `Question.name`.

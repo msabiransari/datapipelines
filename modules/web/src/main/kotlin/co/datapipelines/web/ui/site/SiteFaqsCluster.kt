@@ -82,8 +82,8 @@ object SiteFaqsCluster {
                     "wrong, revoked or expired; auth.principal_deactivated means the key's identity or MCP-key " +
                     "creator is deactivated; auth.role_required means the key's own role does not reach that tool. " +
                     "A silently ignored browser session is expected, because /mcp takes API keys only. " +
-                    "The refusal codes are docs/auth.md §13.7; the transport is docs/mcp-server.md §4.2.",
-                "docs/auth.md §13.7",
+                    "The refusal codes are docs/pipeline-contract.md §13.7; the transport is docs/mcp-server.md §4.2.",
+                "docs/pipeline-contract.md §13.7",
             ),
         )
 
@@ -95,8 +95,8 @@ object SiteFaqsCluster {
                 "Your real schema: datasources_get_schemas, datasources_get_tables, datasources_get_columns and " +
                     "datasources_preview_rows return the columns that exist and the values they actually hold, so " +
                     "the query is grounded rather than inferred from table names. The tool list is " +
-                    "docs/mcp-server.md §6.1.",
-                "docs/mcp-server.md §6.1",
+                    "docs/mcp-server.md §6.2.",
+                "docs/mcp-server.md §6.2",
             ),
             FaqEntry(
                 "How do parameter values reach the SQL?",
@@ -128,8 +128,8 @@ object SiteFaqsCluster {
                 "Does datapipelines generate the SQL?",
                 "No. Your agent does that, and the page says so in its first sentence. What the server adds is " +
                     "everything on either side: the real schema going in, and a versioned, reviewable artifact " +
-                    "coming out. The grounding tools are docs/mcp-server.md §6.1.",
-                "docs/mcp-server.md §6.1",
+                    "coming out. The grounding tools are docs/mcp-server.md §6.2.",
+                "docs/mcp-server.md §6.2",
             ),
             FaqEntry(
                 "What happens to the query after it answers once?",
@@ -164,7 +164,7 @@ object SiteFaqsCluster {
                     "between schedules, no range backfills, no sensors and no task fan-out across other systems. If " +
                     "orchestrating many systems is the problem, Airflow is the answer. The contract is " +
                     "docs/scheduler.md §1.",
-                "docs/scheduler.md §1, docs/scheduler.md §4",
+                "docs/scheduler.md §1",
             ),
             FaqEntry(
                 "Can Airflow trigger these pipelines?",
@@ -177,8 +177,8 @@ object SiteFaqsCluster {
                 "Can an agent author the work?",
                 "The full lifecycle is on the MCP tools: introspect schemas, create a template, create a " +
                     "pipeline, execute it and read the rows back. That is the shape an Airflow DAG repository " +
-                    "does not offer a tool-calling agent. The tool list is docs/mcp-server.md §6.1.",
-                "docs/mcp-server.md §6.1",
+                    "does not offer a tool-calling agent. The tool list is docs/mcp-server.md §6.2.",
+                "docs/mcp-server.md §6.2",
             ),
             FaqEntry(
                 "Are reruns reproducible?",
@@ -211,8 +211,8 @@ object SiteFaqsCluster {
                 "That is the intended shape: introspect, create a template, create a pipeline, execute, read rows " +
                     "so the whole loop runs over MCP tools, with a person releasing what the agent drafts. dbt's " +
                     "authoring surface is a repository and a CLI, a different shape of collaboration. The tools " +
-                    "are docs/mcp-server.md §6.1.",
-                "docs/mcp-server.md §6.1",
+                    "are docs/mcp-server.md §6.2.",
+                "docs/mcp-server.md §6.2",
             ),
             FaqEntry(
                 "What is the credential story?",
@@ -220,7 +220,7 @@ object SiteFaqsCluster {
                     "revocable agent keys that are identities of their own, each holding the role its creator chose " +
                     "and never more than the creator's own, and an audit log entry for every tool call. Those are the " +
                     "checks an agent-facing warehouse pipeline needs. The read-only flag is docs/datasources.md §5.7.",
-                "docs/datasources.md §5.7, docs/auth.md §7.5",
+                "docs/datasources.md §5.7",
             ),
         )
 
@@ -239,7 +239,7 @@ object SiteFaqsCluster {
                     "schedules, no range backfills and no sensors. If the work needs those, that is the " +
                     "orchestrator's job, and the page says which one fits which team. The execution lifecycle is " +
                     "docs/dag-executor.md §5.",
-                "docs/dag-executor.md §5, docs/scheduler.md §1",
+                "docs/dag-executor.md §5",
             ),
             FaqEntry(
                 "Can Dagster, Airflow or Prefect trigger a pipeline here?",
@@ -255,8 +255,8 @@ object SiteFaqsCluster {
                     "server runs SQL pipelines across several operational databases, authored by an agent and " +
                     "executed under governed, read-only-by-default credentials. It is a narrower thing that composes " +
                     "with either rather than replacing it. What it does run is docs/dag-executor.md §5; what an " +
-                    "agent can author is docs/mcp-server.md §6.1.",
-                "docs/dag-executor.md §5, docs/mcp-server.md §6.1",
+                    "agent can author is docs/mcp-server.md §6.2.",
+                "docs/dag-executor.md §5, docs/mcp-server.md §6.2",
             ),
             FaqEntry(
                 "Where do the facts about Dagster, Airflow and Prefect on this page come from?",
@@ -331,8 +331,8 @@ object SiteFaqsCluster {
                 "Can the agent register the datasource itself?",
                 "No. No credential travels through an agent, so a person registers the connection and the agent " +
                     "uses it by name. What the agent gets instead is the read side: schemas, tables, columns and " +
-                    "preview rows over the introspection tools. The tool list is docs/mcp-server.md §6.1.",
-                "docs/mcp-server.md §6.1",
+                    "preview rows over the introspection tools. The tool list is docs/mcp-server.md §6.2.",
+                "docs/mcp-server.md §6.2",
             ),
         )
 }
