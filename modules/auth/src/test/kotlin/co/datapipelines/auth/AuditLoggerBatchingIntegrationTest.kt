@@ -175,6 +175,33 @@ class AuditLoggerBatchingIntegrationTest {
     }
 
     @Test
+    fun `inside a caller's transaction a refused row propagates and the caller's own write rolls back with it`() {
+        // #704 (auth.md §10.1A): the strict direction. The refused INSERT has already aborted the
+        // Postgres transaction, so the caller's write is gone either way — what the swallow got wrong
+        // was the ANSWER: log returned, the caller went on, and its COMMIT became a silent rollback
+        // behind a success. So the assertion that flips is "log threw"; red with the swallow restored.
+        // With the writer configured and without it: inside a transaction neither path batches.
+        listOf(logger, AuditLogger(jdbc, ObjectMapper())).forEach { sink ->
+            val callerWrite = UUID.randomUUID().toString()
+            val refused = UUID.randomUUID().toString()
+            shouldThrow<DataIntegrityViolationException> {
+                TransactionTemplate(DataSourceTransactionManager(dataSource)).executeWithoutResult {
+                    jdbc.update(
+                        "INSERT INTO audit_log (event, user_id, details_json) " +
+                            "VALUES ('audit.strict.caller_write', :user, CAST(:d AS JSONB))",
+                        mapOf("user" to userId, "d" to """{"marker":"$callerWrite"}"""),
+                    )
+                    // A user id with no user row: the foreign key refuses it.
+                    sink.log("audit.strict.refused", userId = UUID.randomUUID(), details = mapOf("marker" to refused))
+                }
+            }
+            withClue("the caller's own write rolled back with the refused row") { rowsWith(callerWrite) shouldBe 0 }
+            rowsWith(refused) shouldBe 0
+        }
+        withClue("the writer never saw a row logged inside a transaction") { committed.get() shouldBe 0 }
+    }
+
+    @Test
     fun `one key's events commit in the order they were logged`() {
         repeat(ORDERED) { n -> logger.log("audit.batching.order", keyId = "k_order", details = mapOf("n" to n)) }
         jdbc.queryForList(
@@ -187,7 +214,8 @@ class AuditLoggerBatchingIntegrationTest {
     @Test
     fun `a failed audit write is logged and swallowed, never thrown into the request`() {
         // A row the database refuses (a user id with no user row — the foreign key) must not break
-        // the request path; today's contract, kept on the batched path.
+        // the request path OUTSIDE a transaction; the #266b contract, kept on the batched path. The
+        // case above is the other direction (#704) — the two together are auth.md §10.1A's rule.
         val marker = UUID.randomUUID().toString()
         logger.log("audit.batching.refused", userId = UUID.randomUUID(), details = mapOf("marker" to marker))
         rowsWith(marker) shouldBe 0

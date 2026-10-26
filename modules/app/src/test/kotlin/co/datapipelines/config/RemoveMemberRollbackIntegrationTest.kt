@@ -47,8 +47,9 @@ import kotlin.reflect.full.primaryConstructor
  *
  * The plant is created inside the test and dropped in `finally`; [afterAll] proves the drop
  * (`pg_trigger` count = 0). The error reaches the service as a [DataAccessException] (nothing in
- * the chain catches it — `AuditLogger` swallows only its OWN insert), the proxy marks the
- * transaction rollback-only, and the commit never happens. The assertions read the committed
+ * the chain catches it — `AuditLogger` propagates a refused insert inside a transaction since #704;
+ * the plant here is on `api_keys`/`users`, never `audit_log`), the proxy marks the transaction
+ * rollback-only, and the commit never happens. The assertions read the committed
  * state straight from SQL: READ COMMITTED on a fresh statement sees only committed rows, so a
  * row that "survived" here really was rolled back, never merely uncommitted.
  *
