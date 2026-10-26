@@ -165,7 +165,7 @@ layer 9
 
 layer 10 — the test suites
 ┌─────────────────────────┐ ┌─────────────────────┐
-│ tests/integration-tests │ │ tests/browser-tests │  ← app
+│ tests/integration-tests │ │ tests/browser-tests │  ← app (browser-tests: + web)
 └─────────────────────────┘ └─────────────────────┘
 ```
 
@@ -196,7 +196,7 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 | `web` | `typesystem`, `calculators`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server`, `scheduler`, `parameters`, `persistence`, `visualization` |
 | `app` | `web` |
 | `tests/integration-tests` | `app` |
-| `tests/browser-tests` | `app` |
+| `tests/browser-tests` | `app`, `web` |
 
 Notes on the shape (explanatory, not additional rules):
 
@@ -538,7 +538,7 @@ was vendored like the rest (`VendoredHtmxAuditTest` pins the bytes and the licen
 
 ### 5.12 `tests/browser-tests`
 
-**Dependencies (internal):** `:modules:app` (full app context, same allowance as §5.11).
+**Dependencies (internal):** `:modules:app` (full app context, same allowance as §5.11) and `:modules:web` (`testImplementation`, #721: `SiteShotsRailOrderTest` reads `AppNav.ITEMS`; `app` carries `web` as `implementation`, so the edge is declared, not leaked).
 
 **Dependencies (external):**
 - `com.microsoft.playwright:playwright` — pinned in the catalog; the pin covers the
@@ -1287,6 +1287,7 @@ Before considering the module structure "ready":
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-26 | v1.8 | 721 (#721) | §4.1/§4.2/§5.12: `tests/browser-tests` gains the internal edge `web` (`testImplementation`, a direct edge per the §4.2 rule — not `api` leakage through `app`) so `SiteShotsRailOrderTest` can pin the screenshot driver's rail table against `AppNav.ITEMS`. The root `allowedInternalDependencies` map and the §4.2 row move together (`verifyModuleDependencies`). Test-scope only: no production edge, public API or runtime change. |
 | 2026-10-24 | v1.7 | 442b (#442) | §5.16: `scheduler` gains `thymeleaf-spring6` (BOM-managed, already on `auth`'s and `web`'s class paths — the scheduler's lock gains its four lines) for the notice templates; its public API gains the `NotificationMailer` port and the `ScheduleNotifier` job (B5). `web` implements the port over `auth`'s `MailSender`. No internal dependency edge changes. |
 | 2026-10-22 | JavaScript product wiring | 8b (#8) | One availability-aware engine map supplies templates, the pool runner and node support; §3.1/§5.15 name the two engines and their responsibilities. |
 | 2026-10-21 | #8 the JavaScript engine | 8a (#8) | §5.15: the module gains the round-two engine — `JavaScriptEngine` on the same seam, `JavaScriptRuntime` (the one Engine/Context factory: UNTRUSTED policy, spawned isolate, one Engine per JVM), its options, `Availability`, `EngineScope`, the console sink types and `JavaScriptResourcesMain`. External dependencies gain GraalVM polyglot, nativebridge and truffle-api 25.4.4.1.1 (UPL 1.0; with collections, nativeimage, word and jniutils) and the test-runtime-only `js-isolate-community` (MIT + UPL 1.0); no isolate binary in the jar. The internal edge set is unchanged (`scripting` → `typesystem` only). No product surface: a javascript template is still refused until 8b. |
