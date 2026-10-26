@@ -126,6 +126,9 @@ class SiteCapabilitiesContentTest {
             normalize(title) shouldNotContain "sql scheduler"
         }
         val body = normalize(COMMENT.replace(html, " "))
+        withClue("the current job type is pipeline; SQL is the example (#735)") {
+            body shouldNotContain "the job it runs today is a sql pipeline"
+        }
         withClue("the old SQL-only lede must not return (#735)") { body shouldNotContain "the built-in sql scheduler" }
         withClue("present-tense report/AI availability must not appear (#735)") {
             body shouldNotContain "the scheduler runs reports"
