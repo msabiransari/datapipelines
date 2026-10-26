@@ -9,6 +9,7 @@ export function icon(document, name) {
 /** Keyed reconciliation touches only groups whose children or status changed. */
 export function createTreeRenderer(host, state, options) {
   const document = host.ownerDocument;
+  const leafGlyph = ["file", "workflow", "code", "boxes", "chart-line", "sliders-horizontal"].includes(options.leafGlyph) ? options.leafGlyph : "file";
   const rows = new Map(); const groups = new Map(); const notices = new Map();
   const root = document.createElement("div"); root.className = "dp-tree-rows"; root.setAttribute("role", "tree");
   root.setAttribute("aria-label", options.label || "Items"); host.append(root); groups.set(null, root);
@@ -26,7 +27,7 @@ export function createTreeRenderer(host, state, options) {
     const control = document.createElement(node.kind === "folder" ? "button" : (options.getHref?.(node) ? "a" : "button"));
     if (control.tagName === "BUTTON") control.type = "button";
     control.tabIndex = -1; control.className = "dp-tree-activate";
-    const glyph = icon(document, node.kind === "folder" ? "folder" : "file");
+    const glyph = icon(document, node.kind === "folder" ? "folder" : leafGlyph);
     control.append(glyph);
     // #604/#701 — the row's regions: the label is the title, on one line, and yields width
     // to the trailing metadata region that holds the badges. The region is present even when
@@ -54,11 +55,11 @@ export function createTreeRenderer(host, state, options) {
   }
   function toggle(key) { state.open.has(key) ? state.collapse(key) : state.expand(key); }
   // #701 — a row's glyph (owner ruling 2026-10-24): a folder's follows its expansion in
-  // the same indent slot (folder closed / folder-open expanded), a leaf's file glyph
+  // the same indent slot (folder closed / folder-open expanded), a leaf's allowlisted family glyph
   // never changes. Rewriting the <use> href keeps icon() the only constructor and the
   // vendored sprite the only source.
   function setGlyph(row) {
-    const name = row.node.kind === "folder" ? (state.open.has(row.node.key) ? "folder-open" : "folder") : "file";
+    const name = row.node.kind === "folder" ? (state.open.has(row.node.key) ? "folder-open" : "folder") : leafGlyph;
     const href = `/vendor/icons/lucide-sprite.svg#${name}`;
     const use = row.glyph.children[0];
     if (use && use.getAttribute("href") !== href) use.setAttribute("href", href);
@@ -148,6 +149,7 @@ export function createTreeRenderer(host, state, options) {
     return groups.get(parent);
   }
   function render(scope) {
+    root.setAttribute("data-tree-searching", String(Boolean(state.query)));
     if (scope && !scope.searching && !state.query && groups.has(scope.parent) &&
         (scope.parent === null || (rows.has(scope.parent) && state.open.has(scope.parent)))) return renderLevel(scope.parent);
     const hadFocus = root.contains(document.activeElement);
