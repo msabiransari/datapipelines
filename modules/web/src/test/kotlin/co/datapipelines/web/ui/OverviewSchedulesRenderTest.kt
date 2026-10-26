@@ -121,6 +121,8 @@ class OverviewSchedulesRenderTest {
     fun `blocked schedules put Unblock first - linking the explorer filtered to blocked, the count worded`() {
         val doc = Jsoup.parse(controllerHtml(WorkspaceRole.AUTHOR, blocked = 2))
         doc.select("[data-overview-recent] [data-task]").map { it.attr("data-task") } shouldContainExactly listOf("unblock", "next")
+        doc.select("[data-task=unblock] .app-overview-task-icon[data-tone=danger]").size shouldBe 1
+        doc.select("[data-task=next] .app-overview-task-icon[data-tone=released]").size shouldBe 1
         val unblock = doc.selectFirst("[data-task=unblock] a").shouldNotBeNull()
         unblock.attr("href") shouldBe "/schedules?condition=blocked"
         unblock.selectFirst("b")!!.text() shouldBe "Unblock 2 schedules"

@@ -120,6 +120,15 @@ data class OverviewPage(
         val text: String,
     )
 
+    /** The task icon's closed set of token-backed tints; [wire] is the template's CSS word. */
+    enum class TaskTone(
+        val wire: String,
+    ) {
+        DRAFT("draft"),
+        RELEASED("released"),
+        DANGER("danger"),
+    }
+
     /**
      * #638 — one Continue your work row: a tinted [icon] in [tone], the [title], the
      * sentence, and the catalog it opens.
@@ -130,7 +139,7 @@ data class OverviewPage(
         val title: String,
         val text: String,
         val href: String,
-        val tone: String,
+        val tone: TaskTone,
     )
 
     /**

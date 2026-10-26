@@ -266,7 +266,7 @@ class DatasourceOverviewController(
                     "Browse datasources",
                     "Open one to read its connection facts and test it.",
                     "/datasources",
-                    "released",
+                    OverviewPage.TaskTone.RELEASED,
                 ),
             )
     }
