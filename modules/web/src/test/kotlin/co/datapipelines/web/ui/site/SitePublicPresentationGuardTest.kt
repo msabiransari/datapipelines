@@ -227,14 +227,12 @@ class SitePublicPresentationGuardTest {
                 return@forEach
             }
             body.filter { el -> el.classNames().any { it in MEASURED } }.forEach { el ->
+                val tag = "${el.tagName()}.${el.classNames().joinToString(".")}"
                 when {
                     el.hasClass("text-columns") -> columns++
                     el.hasClass("section-lede") && el !== body.last() -> Unit
                     "$name#$id" in STANDALONE_EXCEPTIONS -> Unit
-                    else -> {
-                        val tag = "${el.tagName()}.${el.classNames().joinToString(".")}"
-                        offenders += "$name #$id: $tag is a standalone text block at the measure"
-                    }
+                    else -> offenders += "$name #$id: $tag is a standalone text block at the measure"
                 }
             }
         }
