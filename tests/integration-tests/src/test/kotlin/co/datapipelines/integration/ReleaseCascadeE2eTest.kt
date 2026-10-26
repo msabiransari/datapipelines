@@ -677,34 +677,34 @@ class ReleaseCascadeE2eTest {
     @ValueSource(booleans = [false, true])
     @Order(10)
     fun `compatibility release resolves a renamed draft by its registry identity and keeps native hash refusals`(hadRelease: Boolean) {
-        val (id, renamed, oldHash, newHash) = renamedDraft(hadRelease)
-        (newHash == oldHash) shouldBe false
-        val auditBefore = auditRows("pipeline.version.released", id).size
+        val draft = renamedDraft(hadRelease)
+        (draft.newHash == draft.oldHash) shouldBe false
+        val auditBefore = auditRows("pipeline.version.released", draft.id).size
 
-        release(id, oldHash, cascade = false)
+        release(draft.id, draft.oldHash, cascade = false)
             .statusCode(409)
             .body("error.code", equalTo("pipeline.version.conflict"))
-            .body("error.details.current_body_hash", equalTo(newHash))
-        auditRows("pipeline.version.released", id).size shouldBe auditBefore
+            .body("error.details.current_body_hash", equalTo(draft.newHash))
+        auditRows("pipeline.version.released", draft.id).size shouldBe auditBefore
         given()
             .port(port)
             .asSession(ADMIN_SESSION)
-            .get("/api/v1/pipelines/$id")
+            .get("/api/v1/pipelines/${draft.id}")
             .then()
             .statusCode(200)
-            .body("data.draft.body_hash", equalTo(newHash))
+            .body("data.draft.body_hash", equalTo(draft.newHash))
             .body("data.current_version", equalTo(if (hadRelease) 1 else null))
 
-        release(id, newHash, cascade = false).statusCode(200).body("data.status", equalTo("RELEASED"))
+        release(draft.id, draft.newHash, cascade = false).statusCode(200).body("data.status", equalTo("RELEASED"))
         given()
             .port(port)
             .asSession(ADMIN_SESSION)
-            .get("/api/v1/pipelines/$id")
+            .get("/api/v1/pipelines/${draft.id}")
             .then()
             .statusCode(200)
-            .body("data.name", equalTo(renamed))
+            .body("data.name", equalTo(draft.name))
             .body("data.current_version", equalTo(if (hadRelease) 2 else 1))
-        auditRows("pipeline.version.released", id).size shouldBe auditBefore + 1
+        auditRows("pipeline.version.released", draft.id).size shouldBe auditBefore + 1
     }
 
     private data class RenamedDraft(
