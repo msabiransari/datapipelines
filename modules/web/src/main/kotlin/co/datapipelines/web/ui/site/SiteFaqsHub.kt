@@ -21,7 +21,7 @@ object SiteFaqsHub {
         listOf(
             FaqEntry(
                 "Do I need someone technical to set it up?",
-                "Yes. Someone deploys the server on your infrastructure, registers the database connections in " +
+                "Yes. Someone deploys the server on your infrastructure (docs/deployment.md §4), registers the database connections in " +
                     "the application, because there is deliberately no agent tool that registers one " +
                     "(docs/mcp-server.md §6.2.22), and connects the AI client. After setup, business questions can be asked in plain " +
                     "language; a person who understands your data reviews the resulting SQL and numbers.",

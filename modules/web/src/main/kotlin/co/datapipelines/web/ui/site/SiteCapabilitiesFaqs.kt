@@ -18,7 +18,7 @@ object SiteCapabilitiesFaqs {
                     "deployment's mail and recipient-domain policy still apply. Reports, condition alerts and " +
                     "PDF delivery are not built. " +
                     "The contract is docs/scheduler.md §2.3.",
-                "docs/scheduler.md §2.3, docs/scheduler.md §9",
+                "docs/scheduler.md §2.3",
             ),
             FaqEntry(
                 "Which version of the pipeline does a schedule run?",
@@ -26,7 +26,7 @@ object SiteCapabilitiesFaqs {
                     "point that at a draft under the development posture. Each run freezes the exact version and the " +
                     "resolved parameter values it launched with, so its history says what actually ran. The contract " +
                     "is docs/scheduler.md §2.1.",
-                "docs/scheduler.md §2.1, docs/scheduler.md §2.2",
+                "docs/scheduler.md §2.1",
             ),
             FaqEntry(
                 "Can an AI agent create or change a schedule?",
@@ -49,7 +49,7 @@ object SiteCapabilitiesFaqs {
                     "source. Your backend signs your own user in first. Every viewer behind one key shares that key's " +
                     "identity and budget, so which customer's values a viewer may submit is decided in your backend, " +
                     "not by the key. The contract is docs/dashboards.md §6.5.",
-                "docs/dashboards.md §6.5, docs/auth.md §7.7",
+                "docs/dashboards.md §6.5",
             ),
             FaqEntry(
                 "Does a schedule refresh my dashboards?",
@@ -66,7 +66,7 @@ object SiteCapabilitiesFaqs {
                     "draft. A person reviews it in the application and releases it; a visualization releases only " +
                     "with passing test evidence for its exact content. There is no drag-and-drop editor: the layout " +
                     "is a 12-column grid in the dashboard document. The contract is docs/dashboards.md §3.1.",
-                "docs/dashboards.md §3.1, docs/dashboards.md §2.2",
+                "docs/dashboards.md §3.1",
             ),
         )
 
@@ -79,7 +79,7 @@ object SiteCapabilitiesFaqs {
                     "supplies values for those. A parameter set is a separate, versioned form definition. Today its " +
                     "consumer is a dashboard, which pins one set version and maps the set's values onto its source " +
                     "pipelines' parameters. The contract is docs/dashboards.md §2.2.",
-                "docs/dashboards.md §1, docs/dashboards.md §2.2",
+                "docs/dashboards.md §2.2",
             ),
             FaqEntry(
                 "Does the browser run the SQL behind a dropdown?",
