@@ -550,8 +550,8 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
         withClue("$label — badges inside the browser's content edge") { n("badgeRight").shouldBeLessThanOrEqual(n("contentRight") + 0.5) }
         withClue("$label — no sideways scroll (#541)") { n("treeScrollWidth").shouldBeLessThanOrEqual(n("treeClientWidth")) }
         if (width == MIN_WIDTH && n("depth") > SHALLOW_DEPTH && row["family"] == "templates") {
-            // owner ruling 2026-10-25 (amended): at the minimum a three-badge leaf deeper than ~3 levels may
-            // let its badges reach into the row's right padding — inside the rail, never clipped
+            // #739 spacing amendment: a deep three-badge leaf at the minimum may use the trailing
+            // row/scroll inset — inside the rail, never clipped
             withClue("$label — the accepted residue stays inside the rail") {
                 n("metaRight").shouldBeLessThanOrEqual(n("contentRight") + 0.5)
             }
