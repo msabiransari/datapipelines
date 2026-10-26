@@ -15,7 +15,7 @@
   <!--/* 073 §D — structured data. Parsed by SiteJsonLdTest (a block that stops being valid
        JSON is worse than no block: the crawler drops it silently). The description restates
        the visible copy: what the product is and does today. */-->
-  <!-- claim: docs/deployment.md §10 (AGPL-3.0, free), docs/datasources.md §4 (the engines), docs/rest-api.md §19 (published APIs) -->
+  <!-- claim: docs/deployment.md §10 (AGPL-3.0 distribution license), docs/datasources.md §4 (the supported dialects), docs/rest-api.md §19 (published APIs) -->
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -65,7 +65,7 @@
             <a class="btn btn-primary" href="#example">Explore a worked example <span aria-hidden="true">&rarr;</span></a>
             <a class="btn btn-secondary" th:href="@{/how-it-works#quickstart}">Self-hosted quickstart</a>
           </div>
-          <!-- claim: docs/deployment.md §10 (free, AGPL-3.0, self-hosted) -->
+          <!-- claim: docs/deployment.md §10 (AGPL-3.0 distribution license), docs/deployment.md §1 (self-hosted deployment) -->
           <p class="support">Open source · Free software · Runs on your infrastructure<br>Need help getting started? <a th:href="'mailto:' + ${contactEmail}">Talk to the founder</a></p>
           <!--/* 127 §B.1: the release stage, rendered from the ONE constant (SitePages.RELEASE_STAGE). */-->
           <p class="hero-note"><b th:text="${releaseStage}">Public beta. Self-hosted, AGPL, actively developed.</b> <a th:href="@{/faq#support-and-feedback}" th:text="${releaseStageCta}">Report what breaks.</a></p>
@@ -105,7 +105,7 @@
           <div class="panel" id="api" role="tabpanel" aria-labelledby="tab-api">
             <p class="panel-label">API response</p>
             <p class="chart-title">The released pipeline’s endpoint, and its first row as JSON</p>
-            <!-- claim: docs/rest-api.md §19.1 (the path grammar), §19.3 (declared parameters from the query string) -->
+            <!-- claim: docs/rest-api.md §19.1 (the path grammar), docs/rest-api.md §19.3 (declared parameters from the query string) -->
             <pre class="code"><span>GET </span><span th:text="${facts.demo.endpoint}">/api/demo/v1/…</span>
 
 {
@@ -202,7 +202,7 @@
       <div class="section-title">
         <p class="eyebrow">Your databases, as they are</p>
         <h2 id="cap-connect-title">Connect the databases you already have.</h2>
-        <!-- claim: docs/datasources.md §4 (the engine catalog), docs/ui-screens.md §4.5 (the registry screen) -->
+        <!-- claim: docs/datasources.md §4 (the dialect catalog), docs/ui-screens.md §4.5 (the registry screen) -->
         <p>Register the databases and object storage you already run: Postgres, MySQL, SQL Server, Oracle, SQLite, DuckDB, H2, and Parquet or Iceberg files on S3. Credentials are stored encrypted and never rendered back. Nothing is copied, and nothing moves until a pipeline reads it.</p>
       </div>
       <figure class="media-frame">
@@ -434,7 +434,7 @@
         <article class="status-box">
           <span class="tag live">Available today</span>
           <h3>Build, review and share datasets</h3>
-          <!-- claim: docs/datasources.md §4 (the engines and S3), docs/datasources.md §7E (learned facts), docs/templates.md §5 (versioned templates), docs/versioning.md §3 (human release), docs/rest-api.md §19 (published APIs), docs/auth.md §5.6, §7.5 and §7.7 (workspaces, key roles, key kinds), docs/scheduler.md §1 (schedules), docs/dashboards.md §1 (dashboards and parameter sets) -->
+          <!-- claim: docs/datasources.md §4 (supported dialects and S3), docs/datasources.md §7E (learned facts), docs/templates.md §5 (versioned templates), docs/versioning.md §3 (human release), docs/rest-api.md §19 (published APIs), docs/auth.md §5.6, §7.5 and §7.7 (workspaces, key roles, key kinds), docs/scheduler.md §1 (a schedule runs a pipeline), docs/dashboards.md §1 (dashboards and parameter sets) -->
           <ul>
             <li>Queries across supported databases and S3</li>
             <li>Learned data facts and business definitions</li>
@@ -463,14 +463,14 @@
   <section class="section border" id="faq" aria-labelledby="faq-title">
     <div class="container">
       <p class="kicker" th:text="|The product, in ${faqEntries.size()} questions|">The product, in eight questions</p>
-      <!-- claim: docs/deployment.md §4, docs/datasources.md §3, docs/versioning.md §3 — FAQ "Do I need a data engineer" -->
+      <!-- claim: docs/deployment.md §4, docs/datasources.md §3, docs/versioning.md §3 — FAQ review and release of an immutable version -->
       <!-- claim: docs/datasources.md §7, docs/staging.md §3, docs/rest-api.md §7, docs/pipeline-contract.md §8 — FAQ "Where does my data go" -->
       <!-- claim: docs/scheduler.md §1, docs/dashboards.md §1, docs/ROADMAP.md §2 — FAQ "What do I get today, and what is planned" -->
-      <!-- claim: docs/rest-api.md §10, docs/pipeline-contract.md §12.12 — FAQ "How do I know the numbers are right" -->
-      <!-- claim: docs/rest-api.md §19.3, docs/auth.md §7.7 — FAQ "Can each customer see only their own rows" -->
+      <!-- claim: docs/rest-api.md §10, docs/pipeline-contract.md §12.12 — FAQ configured release checks -->
+      <!-- claim: docs/rest-api.md §19.3, docs/auth.md §7.7 — FAQ endpoint key bindings restrict published paths; row authorization stays in your backend -->
       <!-- claim: docs/pipeline-editor.md §11, docs/ROADMAP.md §2 — FAQ "Do I have to use an AI agent" -->
-      <!-- claim: docs/deployment.md §10 — FAQ "What does it cost" -->
-      <!-- claim: docs/datasources.md §4 — FAQ "Which databases" -->
+      <!-- claim: docs/deployment.md §10 — FAQ distribution license: AGPL-3.0 -->
+      <!-- claim: docs/datasources.md §4 — FAQ supported dialects and their drivers -->
       <div th:replace="~{site/_layout :: faq(${faqEntries}, true, 'Questions people ask before they run it')}"></div>
       <p class="features-pointer">More on the <a th:href="@{/faq}">full FAQ</a>; the engineer's version of this page is <a th:href="@{/how-it-works}">how it works</a>.</p>
     </div>

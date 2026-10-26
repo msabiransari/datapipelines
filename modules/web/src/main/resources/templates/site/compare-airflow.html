@@ -31,7 +31,7 @@
       <p class="kicker">Read this first</p>
       <h2 id="use-airflow-title" class="ds-headline">Use Airflow instead when…</h2>
       <ul class="fact-list fact-list-plain">
-        <!-- claim: docs/scheduler.md §1, §4 and §9 (one pipeline per schedule; skip or latest for missed runs; no retry of an unknown run) -->
+        <!-- claim: docs/scheduler.md §1, §4 and §5.2 (one pipeline per schedule; skip or latest for missed runs; an unknown outcome blocks the schedule) -->
         <li><strong>Orchestration is the problem.</strong> Dependencies between jobs, range backfills, retries with policies, SLAs, sensors that wait on external state. A schedule here runs one pipeline at a cron pattern's times in a time zone and records the run. It has none of the rest.</li>
         <!-- claim: docs/pipeline-contract.md §4.12 (SCRIPT nodes run over staged tables) -->
         <li><strong>The work is not all SQL.</strong> Airflow orchestrates anything you can put in a Python operator: file transfers, ML training, API calls, container jobs. We execute SQL against JDBC datasources, plus JSONata or JavaScript <code>SCRIPT</code> nodes over the staged rows, and nothing else.</li>
@@ -52,7 +52,7 @@
           <p>Reading Postgres, MySQL and SQLite in one query is the case this was built for. Each source is read in place. The join runs in a per-execution in-memory staging database, and nothing lands. In Airflow that is an extract job, a load job and a warehouse to keep.</p>
         </article>
         <article class="card">
-          <!-- claim: docs/mcp-server.md §6.1 -->
+          <!-- claim: docs/mcp-server.md §6.2 -->
           <h3>An agent should be able to author, not just trigger</h3>
           <p>The full lifecycle is on the MCP surface: introspect schemas, create a template, create a pipeline, execute it, read the rows back. There is no equivalent shape where the authoring surface is a Python repository.</p>
         </article>
@@ -100,10 +100,10 @@
   <section class="section band" aria-labelledby="faq-title">
     <div class="container">
       <p class="kicker">Asked before</p>
-      <!-- claim: docs/scheduler.md §1, docs/scheduler.md §4 — does this replace Airflow's scheduler -->
+      <!-- claim: docs/scheduler.md §1 — one pipeline run per schedule, not an orchestration graph -->
       <!-- claim: docs/rest-api.md §6 — can Airflow trigger these pipelines -->
-      <!-- claim: docs/mcp-server.md §6.1 — can an agent author the work -->
-      <!-- claim: docs/versioning.md §3.1 — are reruns reproducible -->
+      <!-- claim: docs/mcp-server.md §6.2 — tools create templates and pipelines, execute and read results -->
+      <!-- claim: docs/versioning.md §3.1 — released versions are immutable; edits open a draft -->
       <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'The Airflow comparison, in questions')}"></div>
     </div>
   </section>

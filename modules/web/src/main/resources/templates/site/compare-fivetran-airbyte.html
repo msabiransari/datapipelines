@@ -21,7 +21,7 @@
   <!-- claim: docs/pipeline-contract.md §8 — write-back is a table, not a warehouse -->
   <!-- claim: docs/datasources.md §7 — the server holds the credentials, not the agent -->
   <!-- claim: docs/versioning.md §3 — a person releases what the agent drafted -->
-  <!-- claim: docs/ROADMAP.md §3 — scheduled extracts to your lake are later, not now -->
+  <!-- claim: docs/ROADMAP.md §3 — planned S3 output targets; scheduled extracts still need that write path -->
 
   <section class="section page-hero" aria-labelledby="fa-title">
     <div class="container">
@@ -114,7 +114,7 @@
           if the source overwrites yesterday, yesterday is gone, and no query at the source will bring it back.
           History is the ELT tools' home ground; that is one of the reasons they exist.
         </p>
-        <!-- claim: docs/pipeline-contract.md §8 (write-back), docs/scheduler.md §1 (schedules), docs/pipeline-contract.md §4.12 (SCRIPT nodes), docs/ROADMAP.md §3 (extracts later) -->
+        <!-- claim: docs/pipeline-contract.md §8 (write-back), docs/scheduler.md §1 (schedule), docs/pipeline-contract.md §4.12 (SCRIPT nodes), docs/ROADMAP.md §3 (planned S3 output targets) -->
         <p>
           Second, the warehouse itself. Write-back here means a pipeline node can land its result in a table of a
           datasource you already run. Useful for feeding a BI tool, and explicitly not a columnar warehouse with a
@@ -194,8 +194,8 @@
     <div class="container">
       <p class="kicker">Asked before</p>
       <!-- claim: docs/staging.md §3 — does datapipelines copy my data -->
-      <!-- claim: docs/rest-api.md §19 — can it replace a nightly sync / can I use both -->
-      <!-- claim: docs/ROADMAP.md §3 — history the source overwrites -->
+      <!-- claim: docs/rest-api.md §19 — a released pipeline served as a GET endpoint alongside an ELT copy -->
+      <!-- claim: docs/ROADMAP.md §3 — planned S3 output targets for persistent extracts -->
       <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Fivetran and Airbyte questions, answered plainly')}"></div>
     </div>
   </section>

@@ -9,7 +9,7 @@ import java.io.File
  * The 024b rule as a GUARD, extended from the homepage to every page the site serves (073 §B),
  * and from file existence to section existence (674).
  *
- * Four obligations, all mechanical:
+ * Five obligations, all mechanical:
  *  1. every feature card on every site template carries a `<!-- claim: docs/… -->` comment
  *     BEFORE its heading — a card asserts something, so it names where that is written down;
  *  2. every `docs/<file>.md` any claim on any site template cites EXISTS in the tree — a
@@ -20,14 +20,12 @@ import java.io.File
  *  4. where a citation carries prose (the parenthetical or em-dash tail naming what the
  *     section is supposed to say), at least one content word of that prose occurs in the
  *     cited section's text — the cheap probe for "the section still says it"; the semantic
- *     question stays out of scope (674's brief).
+ *     question stays editorial;
+ *  5. exemptions name existing citations that still miss the probe; repaired or deleted
+ *     citations must leave the list, whose ceiling only goes down (722).
  *
- * The round that introduced the rule was held because the claim table was missing; a reminder
- * is not a mechanism. This reads TEMPLATE SOURCE, not the render, because the comments are the
- * audit trail for a human reading view-source and the source is where a missing one is a defect.
- *
- * Scoped to cards rather than to every heading, deliberately: section headings and group labels
- * are headings too and cite nothing, because they assert nothing.
+ * Reads TEMPLATE SOURCE: the comments are the audit trail for a human reading view-source.
+ * Card headings assert claims; section headings and group labels do not need citations.
  */
 class SiteClaimCitationTest {
     private val templates: Map<String, String> =
@@ -38,9 +36,7 @@ class SiteClaimCitationTest {
 
     @Test
     fun `the sweep sees every site template`() {
-        // Non-vacuity: the homepage plus the cluster templates and the two 133 demo
-        // partials. A resolver that stopped matching would pass every check below by
-        // having nothing to check.
+        // Non-vacuity: a resolver that stopped matching must not pass by checking nothing.
         templates.keys.sorted() shouldBe
             listOf(
                 "_demo-api.html",
@@ -115,9 +111,7 @@ class SiteClaimCitationTest {
                 }.distinct()
                 .sorted()
 
-        // Non-vacuity on both axes: the site carries dozens of claim comments naming a
-        // dozen-plus distinct specs. A changed comment shape empties one or both, and the
-        // "missing" check below would then pass by looking at nothing.
+        // A changed comment shape must not empty the sweep and silently pass.
         check(comments >= MIN_COMMENTS) { "the claim sweep found only $comments claim comments" }
         check(cited.size >= MIN_DISTINCT_DOCS) { "the claim sweep found only ${cited.size} distinct cited docs" }
 
@@ -127,20 +121,23 @@ class SiteClaimCitationTest {
 
     @Test
     fun `the parser reads every citation grammar shape`() {
-        // One literal comment carrying every shape the grammar accepts (674 A.1): plain and
-        // dotted and lettered numbers, Appendix and Part with and without the § glyph, all
-        // three range spellings, a file-only citation, and two citations of different docs.
+        // One literal covers numeric/Appendix/Part anchors, ranges, chains, prose boundaries,
+        // a file-only citation and different documents; glyphs are optional throughout.
         val comment =
-            "docs/auth.md §3, docs/rest-api.md §6.2.14 (the row), docs/auth.md §5A.2 and §11A, " +
+            "§99 is prose before a path; docs/auth.md §3, docs/rest-api.md §6.2.14 (the row), docs/auth.md §5A.2 and §11A, " +
                 "docs/datasources.md §8C.1, docs/rest-api.md §9.7A, docs/deployment.md §Appendix B, " +
                 "docs/deployment.md Appendix B (no glyph), docs/semantic-layer-research.md Part five, " +
                 "docs/auth.md §7.1–7.6 (the walk), docs/scheduler.md §4.2–§6, docs/enums.md §4-§5, " +
-                "docs/mcp-server.md (no anchor at all), docs/auth.md §10.1"
+                "docs/mcp-server.md (no anchor at all), docs/auth.md §10.1, " +
+                "docs/scheduler.md §1, §4 and §9 (schedule runs), " +
+                "docs/auth.md §3; 4 or §5 plus 7.1–§7.6 — prose with §99, " +
+                "docs/auth.md §3, 4, and 5, docs/rest-api.md §6 (stream), " +
+                "docs/auth.md §3 (prose), §99 and 100, docs/auth.md §4 — prose, §99"
         val expected =
             listOf(
                 ClaimCitations.Citation("docs/auth.md", listOf("3"), ""),
                 ClaimCitations.Citation("docs/rest-api.md", listOf("6.2.14"), "(the row)"),
-                ClaimCitations.Citation("docs/auth.md", listOf("5A.2"), "and §11A"),
+                ClaimCitations.Citation("docs/auth.md", listOf("5A.2", "11A"), ""),
                 ClaimCitations.Citation("docs/datasources.md", listOf("8C.1"), ""),
                 ClaimCitations.Citation("docs/rest-api.md", listOf("9.7A"), ""),
                 ClaimCitations.Citation("docs/deployment.md", listOf("Appendix B"), ""),
@@ -151,6 +148,12 @@ class SiteClaimCitationTest {
                 ClaimCitations.Citation("docs/enums.md", listOf("4", "5"), ""),
                 ClaimCitations.Citation("docs/mcp-server.md", emptyList(), "(no anchor at all)"),
                 ClaimCitations.Citation("docs/auth.md", listOf("10.1"), ""),
+                ClaimCitations.Citation("docs/scheduler.md", listOf("1", "4", "9"), "(schedule runs)"),
+                ClaimCitations.Citation("docs/auth.md", listOf("3", "4", "5", "7.1", "7.6"), "prose with §99"),
+                ClaimCitations.Citation("docs/auth.md", listOf("3", "4", "5"), ""),
+                ClaimCitations.Citation("docs/rest-api.md", listOf("6"), "(stream)"),
+                ClaimCitations.Citation("docs/auth.md", listOf("3"), "(prose), §99 and 100"),
+                ClaimCitations.Citation("docs/auth.md", listOf("4"), "prose, §99"),
             )
         ClaimCitations.parse(comment) shouldBe expected
     }
@@ -158,7 +161,8 @@ class SiteClaimCitationTest {
     @Test
     fun `every cited section exists`() {
         val refs = citedSectionRefs()
-        // Non-vacuity: 834 anchored citations (838 ends with ranges flattened). A parser that stopped seeing anchors
+        // Non-vacuity at 9d63e2d88: 843 anchored citations, 847 range ends; chains expose 904 ends.
+        // After 722's repairs: 861 anchored citations, 922 ends. A parser that stops seeing anchors
         // (an ANCHOR regex regression, a comment-shape change) must fail loudly here, as
         // MIN_COMMENTS does above — not pass by looking at nothing.
         check(refs.size >= MIN_ANCHORED) { "the citation sweep found only ${refs.size} anchored citations" }
@@ -184,16 +188,15 @@ class SiteClaimCitationTest {
         // The 674 A.3 probe: where a citation carries prose naming what the section says, at
         // least one content word of the prose must occur in the cited section's text (the
         // section = its heading line through the line before the next same-or-higher heading;
-        // for a range, the upper end — the end nearest the prose). Assertions cover what
-        // passes today; the misses at promotion time carry one reason each in KNOWN_UNPROBED
-        // and the follow-up work. The report that filled that list is in the lane evidence.
+        // for a range or chain, the last anchor — the end nearest the prose). The editorial
+        // inventory and falsifications are in 722's evidence; no exemptions remain.
         val docSections = mutableMapOf<Pair<String, String>, String?>()
         val root = repoRoot()
         val misses =
             templates.flatMap { (template, source) ->
                 CLAIM_COMMENT.findAll(source).map { it.value }.flatMap { comment ->
                     ClaimCitations.parse(comment).mapNotNull { citation ->
-                        probeMiss(template, citation, root, docSections)
+                        if (citationKey(template, citation) in KNOWN_UNPROBED) null else probeMiss(template, citation, root, docSections)
                     }
                 }
             }
@@ -202,7 +205,34 @@ class SiteClaimCitationTest {
         }
     }
 
-    /** The probe's miss line for one citation, or null when the citation passes (or is excused). */
+    @Test
+    fun `every probe exemption names a current citation that still misses`() {
+        check(KNOWN_UNPROBED.size <= MAX_UNPROBED) { "exemption ceiling exceeded: ${KNOWN_UNPROBED.size} > $MAX_UNPROBED" }
+        val root = repoRoot()
+        val docSections = mutableMapOf<Pair<String, String>, String?>()
+        val citations =
+            templates
+                .flatMap { (template, source) ->
+                    CLAIM_COMMENT.findAll(source).flatMap { comment ->
+                        ClaimCitations.parse(comment.value).map { citation ->
+                            citationKey(template, citation) to probeMiss(template, citation, root, docSections)
+                        }
+                    }
+                }.groupBy({ it.first }, { it.second })
+        val absent = KNOWN_UNPROBED.keys.filter { it !in citations }
+        val passing = KNOWN_UNPROBED.keys.filter { key -> citations[key]?.any { it == null } == true }
+        check(absent.isEmpty() && passing.isEmpty()) {
+            "stale exemptions naming no citation:\n${absent.joinToString("\n")}\n" +
+                "stale exemptions naming passing citations:\n${passing.joinToString("\n")}"
+        }
+    }
+
+    private fun citationKey(
+        template: String,
+        citation: ClaimCitations.Citation,
+    ): String = "$template|${citation.doc}|${citation.anchors.joinToString("–")}"
+
+    /** The raw probe's miss line, without consulting exemptions, or null when it passes. */
     private fun probeMiss(
         template: String,
         citation: ClaimCitations.Citation,
@@ -213,8 +243,6 @@ class SiteClaimCitationTest {
         val tokens = ClaimCitations.probeTokens(citation.prose)
         if (tokens.isEmpty()) return null
         val anchor = citation.anchors.last()
-        val key = "$template|${citation.doc}|${citation.anchors.joinToString("–")}"
-        if (KNOWN_UNPROBED.containsKey(key)) return null
         val sectionKey = citation.doc to anchor
         if (!docSections.containsKey(sectionKey)) {
             val lines = File(root, citation.doc).takeIf { it.isFile }?.readLines()
@@ -222,10 +250,10 @@ class SiteClaimCitationTest {
         }
         val section = docSections[sectionKey]
         val hit = section != null && tokens.any { ClaimCitations.sectionMentions(section.lowercase(), it) }
-        return if (hit) null else "$template: ${citation.doc} §$anchor — tokens $tokens in ${citation.prose.take(80)}"
+        return if (hit) null else "${citationKey(template, citation)} — tokens $tokens in ${citation.prose.take(80)}"
     }
 
-    /** Every anchored citation as `(template, doc, anchor)`, ranges flattened to both ends. */
+    /** Every anchored citation as `(template, doc, anchor)`, chains and range endpoints flattened. */
     private fun citedSectionRefs(): List<Triple<String, String, String>> =
         templates.flatMap { (name, source) ->
             CLAIM_COMMENT.findAll(source).flatMap { comment ->
@@ -236,9 +264,7 @@ class SiteClaimCitationTest {
         }
 
     /**
-     * The repo root: walk up from the test JVM's working directory until the `docs` tree the
-     * claims cite is there. Derived, not assumed — a module move must not silently make this
-     * guard check nothing (it would then find every doc "missing", which is the loud direction).
+     * Find the ancestor holding the cited docs; a moved module must fail loudly if absent.
      */
     private fun repoRoot(): File {
         var dir: File? = File("").absoluteFile
@@ -252,9 +278,8 @@ class SiteClaimCitationTest {
         const val MIN_DISTINCT_DOCS = 12
 
         /**
-         * Anchored citations at the 674 base (92003a21f): 834. The floor is the brief's 600 —
-         * deliberately coarser than the count, because the sharper parser guard is the grammar
-         * test above; this one only has to catch catastrophic parser blindness.
+         * Anchored citations at the 722 base (9d63e2d88): 843; 922 ends after repairs. The floor is 600 —
+         * deliberately coarse: the grammar fixture catches subtler parser regressions.
          */
         const val MIN_ANCHORED = 600
 
@@ -265,104 +290,11 @@ class SiteClaimCitationTest {
         val HEADING = Regex("""<h3>(.*?)</h3>""", RegexOption.DOT_MATCHES_ALL)
 
         /**
-         * Citations whose prose shares no word with their section, promoted with the probe
-         * rather than repaired (674 A.3's branch 2: 45 misses at promotion time, over the
-         * ~15 threshold; 43 keys — some cover two or three comments in one template). One
-         * reason each, named by kind — precision (the prose describes a different section
-         * than the anchor names), vague (the prose is a marketing question the section never
-         * answers literally), synonym (the section says it in other words), chain (further
-         * bare `§n` citations ride in the prose). The follow-up issue owns the sharpening; a
-         * comment fixed here leaves this list. Sharpening and the bare-section chain boundary
-         * are tracked in #722. Key: `template|doc|anchor(s)`.
+         * Page rewrites still needed after 722's editorial review. Empty: all 43 former keys
+         * were repaired. New exemptions require a page-rewrite reason and a tracked defect.
+         * Key: `template|doc|anchor(s)`. The ceiling is a ratchet: it only goes down.
          */
-        val KNOWN_UNPROBED: Map<String, String> =
-            mapOf(
-                "add-mcp-server.html|docs/mcp-server.md|4.2" to
-                    "precision: prose names the transport (§3); §4.2 is unauthorized behavior",
-                "ai-data-pipeline.html|docs/mcp-server.md|6.1" to
-                    "precision: the agent-authoring claims belong at §2/§6.2; §6.1 is the naming convention (two comments)",
-                "compare-airflow.html|docs/scheduler.md|4" to
-                    "vague: 'replace Airflow's scheduler' is the §1/§2 pitch; §4 is missed occurrences and Run now",
-                "compare-airflow.html|docs/mcp-server.md|6.1" to
-                    "precision: agent-authoring is §2/§6.2; §6.1 is the naming convention",
-                "compare-airflow.html|docs/versioning.md|3.1" to
-                    "precision: reruns/reproducibility is §3 lifecycle; §3.1 is statuses and verbs",
-                "compare-dagster-vs-airflow.html|docs/dag-executor.md|5" to
-                    "vague: 'need an orchestrator' is the §1 pitch; §5 is the execution lifecycle",
-                "compare-dagster-vs-airflow.html|docs/rest-api.md|6" to
-                    "precision: the three triggers are §4/§5; §6 is SSE streaming of a run",
-                "compare-dagster-vs-airflow.html|docs/mcp-server.md|6.1" to
-                    "precision: the MCP-or-REST comparison is §2; §6.1 is the naming convention",
-                "compare-dbt.html|docs/staging.md|1" to
-                    "vague: 'need a warehouse' is answered by the whole doc; §1 Purpose never says warehouse",
-                "compare-dbt.html|docs/datasources.md|4.1" to
-                    "synonym: 'sources' vs §4.1's dialect catalog vocabulary",
-                "compare-dbt.html|docs/mcp-server.md|6.1" to
-                    "precision: agent-authoring is §2/§6.2; §6.1 is the naming convention",
-                "compare-fivetran-airbyte.html|docs/scheduler.md|1" to
-                    "vague: '(schedules)' restates §1's own title words in different form",
-                "compare-fivetran-airbyte.html|docs/ROADMAP.md|3" to
-                    "vague: '(extracts later)' is a roadmap promise §3 does not word that way",
-                "compare-fivetran-airbyte.html|docs/rest-api.md|19" to
-                    "vague: 'replace a nightly sync' is the pitch; §19 is the published-endpoint contract",
-                "compare-postgres-only.html|docs/rest-api.md|19" to
-                    "vague: 'API partners' is the audience; §19 is the published-endpoint contract",
-                "faq.html|docs/staging.md|3" to
-                    "vague: 'no warehouse' is the §1 pitch; §3 is the staging lifecycle",
-                "faq.html|docs/dag-executor.md|5" to
-                    "precision: timeouts are §4's limits; §5 is the execution lifecycle",
-                "for-agencies.html|docs/auth.md|7.5" to
-                    "vague: 'each client separate' is workspace scoping; §7.5 is key roles",
-                "for-agencies.html|docs/versioning.md|3" to
-                    "vague: 'who signs it off' is promotion governance §3 never words that way",
-                "for-saas-teams.html|docs/rest-api.md|19" to
-                    "vague: 'embedded analytics' is the pitch; §19 is the published-endpoint contract",
-                "for-saas-teams.html|docs/templates.md|4.5" to
-                    "precision: per-customer row scoping is parameter binding only indirectly; §4.5 is the binding rule",
-                "for-saas-teams.html|docs/versioning.md|3" to
-                    "vague: 'who controls what customers see' is governance; §3 is the version lifecycle",
-                "how-it-works.html|docs/mcp-server.md|6.1" to
-                    "precision: the catalogue size renders from §6.2's definitions; §6.1 is the naming convention",
-                "how-it-works.html|docs/datasources.md|4.1" to
-                    "synonym: 'engines' vs §4.1's dialect-catalog vocabulary",
-                "index.html|docs/datasources.md|4" to
-                    "synonym: 'engines/databases' vs §4's supported-dialects vocabulary (three comments)",
-                "index.html|docs/deployment.md|10" to
-                    "vague: '(free, AGPL-3.0, self-hosted)' is license + hosting; §10 is the license only",
-                "index.html|docs/scheduler.md|1" to
-                    "vague: '(schedules)' restates §1's own title words in different form",
-                "index.html|docs/versioning.md|3" to
-                    "vague: the data-engineer FAQ is the §1 pitch; §3 is the version lifecycle",
-                "index.html|docs/pipeline-contract.md|12.12" to
-                    "vague: 'numbers are right' is the release-check FAQ; §12.12 words it as checks, not numbers",
-                "index.html|docs/auth.md|7.7" to
-                    "precision: per-customer row scoping is §6 workspaces; §7.7 is key kinds and bindings",
-                "pillar.html|docs/auth.md|11.4" to
-                    "precision: revoking an agent key is §7.3/§7.4; §11.4 is the validation cache",
-                "pricing.html|docs/deployment.md|4" to
-                    "chain: prose targets §7/§8 (what you operate); the anchor is §4 required infrastructure",
-                "pricing.html|docs/deployment.md|10" to
-                    "vague: 'every feature, no seat count' is the license pitch; §10 words the license only",
-                "pricing.html|docs/datasources.md|4" to
-                    "synonym: 'engines' vs §4's supported-dialects vocabulary",
-                "tableau-extracts-alerts-dashboards.html|docs/scheduler.md|1" to
-                    "chain: prose targets §9 (not in slice 1); the anchor is §1 purpose",
-                "tableau-extracts-alerts-dashboards.html|docs/templates.md|4.5" to
-                    "precision: per-viewer filtering is parameter binding only indirectly; §4.5 is the binding rule",
-                "tableau.html|docs/staging.md|3" to
-                    "vague: 'no warehouse' is the §1 pitch; §3 is the staging lifecycle",
-                "tableau.html|docs/auth.md|7.7" to
-                    "precision: 'path-scoped keys' is §7.7's bindings, but the section never uses the word 'scoped'",
-                "tableau.html|docs/scheduler.md|1" to
-                    "vague: 'schedules that run pipelines' paraphrases §1's purpose sentence",
-                "text-to-sql-agent.html|docs/mcp-server.md|6.1" to
-                    "precision: SQL generation is the §6.2 tool surface; §6.1 is the naming convention",
-                "text-to-sql-agent.html|docs/pipeline-contract.md|3.1" to
-                    "vague: 'what happens to the query' is the §1/§2 story; §3.1 is the JSON structure",
-                "text-to-sql-agent.html|docs/staging.md|1" to
-                    "vague: the join-across-databases FAQ is the §1 pitch, which never says join",
-                "use-cases.html|docs/ROADMAP.md|3" to
-                    "vague: '(no hosted plan)' is the hosting stance; §3 is the v2 feature list",
-            )
+        const val MAX_UNPROBED = 0
+        val KNOWN_UNPROBED: Map<String, String> = emptyMap()
     }
 }

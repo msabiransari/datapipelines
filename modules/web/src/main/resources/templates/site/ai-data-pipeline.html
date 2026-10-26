@@ -12,7 +12,7 @@
 
   <section class="section page-hero" aria-labelledby="ai-title">
     <div class="container">
-      <!-- claim: docs/mcp-server.md §6.1 -->
+      <!-- claim: docs/mcp-server.md §6.2 -->
       <p class="eyebrow">Agent-authored · person-released · every call audited</p>
       <p class="kicker">Agentic data engineering</p>
       <h1 id="ai-title" class="ds-display">An AI data pipeline you would let someone else run</h1>
@@ -28,7 +28,7 @@
     <div class="container">
       <p class="kicker">One</p>
       <h2 id="schema-title" class="ds-headline">The agent reads your real schema before it writes SQL</h2>
-      <!-- claim: docs/mcp-server.md §6.1 -->
+      <!-- claim: docs/mcp-server.md §6.2 -->
       <p class="section-lede">
         Of the <span th:text="${facts.toolCount}">30</span> tools, the introspection reads exist for exactly this:
         <code>datasources_get_schemas</code>, <code>datasources_get_tables</code>,
@@ -144,7 +144,7 @@
     <div class="container">
       <p class="kicker">The category, honestly</p>
       <h2 id="tools-title" class="ds-headline">Where this sits among data pipeline tools</h2>
-      <!-- claim: docs/pipeline-contract.md §4.12 — SCRIPT nodes; docs/scheduler.md §1 — a schedule runs a pipeline, not a workflow; docs/staging.md §1 — the per-run join; docs/mcp-server.md §6.1 — the agent's authoring surface -->
+      <!-- claim: docs/pipeline-contract.md §4.12 — SCRIPT nodes; docs/scheduler.md §1 — a schedule runs a pipeline, not a workflow; docs/staging.md §1 — the per-run join; docs/mcp-server.md §6.2 — the agent's authoring surface -->
       <p class="section-lede">
         Most data pipeline tools were built for a person at a keyboard and gained an AI feature later. This one is
         agent-native: the authoring surface is the MCP tool set, the person's job is review and release, and the
@@ -163,7 +163,7 @@
   <section class="section band" aria-labelledby="faq-title">
     <div class="container">
       <p class="kicker">Asked before</p>
-      <!-- claim: docs/mcp-server.md §6.1 — what the agent reads before it writes SQL -->
+      <!-- claim: docs/mcp-server.md §6.2 — schema introspection tools before authoring SQL -->
       <!-- claim: docs/templates.md §8.4 — how parameter values reach the SQL -->
       <!-- claim: docs/versioning.md §3.1 — can an agent change a released pipeline -->
       <!-- claim: docs/auth.md §10.1 — what the audit log records for agent runs -->
