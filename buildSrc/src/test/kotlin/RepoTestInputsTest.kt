@@ -126,6 +126,10 @@ class RepoTestInputsTest {
         val inputs = declared(read + secret)
 
         assertEquals(emptyList<String>(), read.filterNot { it in inputs }, "repo files tests read dropped from the inputs")
-        assertEquals(emptyList<String>(), secret.filter { it in inputs }, "secrets, build output, gate logs or local data leaked into the inputs")
+        assertEquals(
+            emptyList<String>(),
+            secret.filter { it in inputs },
+            "secrets, build output, gate logs or local data leaked into the inputs",
+        )
     }
 }
