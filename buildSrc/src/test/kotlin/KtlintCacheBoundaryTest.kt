@@ -55,20 +55,24 @@ import java.io.File
  * probe project, so the absolute path is written in explicitly.
  */
 class KtlintCacheBoundaryTest {
-
     @TempDir
     lateinit var laneDir: File
 
     private val catalogPath: String
-        get() = System.getProperty("repo.catalog")
-            ?: error("repo.catalog system property not set — run via buildSrc's test task")
+        get() =
+            System.getProperty("repo.catalog")
+                ?: error("repo.catalog system property not set — run via buildSrc's test task")
 
     private val jdk21Home: String
-        get() = System.getProperty("probe.jdk21")
-            ?: error("probe.jdk21 system property not set — run via buildSrc's test task")
+        get() =
+            System.getProperty("probe.jdk21")
+                ?: error("probe.jdk21 system property not set — run via buildSrc's test task")
 
     /** A probe directory with the conventions plugin and the SHARED cache wired. */
-    private fun newProbe(name: String, sharedCacheDir: File): File {
+    private fun newProbe(
+        name: String,
+        sharedCacheDir: File,
+    ): File {
         val probeDir = laneDir.resolve(name).apply { mkdirs() }
         probeDir.resolve("settings.gradle.kts").writeText(
             """
@@ -125,7 +129,11 @@ class KtlintCacheBoundaryTest {
         )
     }
 
-    private fun runner(probeDir: File, vararg args: String) = GradleRunner.create()
+    private fun runner(
+        probeDir: File,
+        vararg args: String,
+    ) = GradleRunner
+        .create()
         .withPluginClasspath()
         .withProjectDir(probeDir)
         .withArguments(
@@ -156,9 +164,10 @@ class KtlintCacheBoundaryTest {
         // Probe A, run 2: a violating file. The failure must name it — the
         // non-vacuity floor: this guard proves nothing if the probe cannot go red.
         writeViolatingSource(probeA)
-        val a2 = runCatching {
-            runner(probeA, ":modules:web:ktlintMainSourceSetCheck").build()
-        }.exceptionOrNull()
+        val a2 =
+            runCatching {
+                runner(probeA, ":modules:web:ktlintMainSourceSetCheck").build()
+            }.exceptionOrNull()
         assertTrue(a2 is UnexpectedBuildFailure, "expected ktlint to fail on the violating file, got: $a2")
         val a2Output = (a2 as UnexpectedBuildFailure).message.orEmpty()
         assertTrue(
@@ -173,14 +182,15 @@ class KtlintCacheBoundaryTest {
         // The worker must nevertheless complete: swallowing a setup/worker failure here
         // could leave the clean cache key unoccupied and make probe B a false green.
         assertTrue(probeA.resolve("modules/web/src/main/kotlin/Violation.kt").delete())
-        val a3 = try {
-            runner(probeA, ":modules:web:ktlintMainSourceSetCheck").build()
-        } catch (failure: UnexpectedBuildFailure) {
-            val result = failure.buildResult
-            assertEquals(TaskOutcome.FAILED, result.task(":modules:web:ktlintMainSourceSetCheck")?.outcome, result.output)
-            assertTrue("Violation.kt" in result.output, "only the retained deleted-file finding is expected:\n${result.output}")
-            result
-        }
+        val a3 =
+            try {
+                runner(probeA, ":modules:web:ktlintMainSourceSetCheck").build()
+            } catch (failure: UnexpectedBuildFailure) {
+                val result = failure.buildResult
+                assertEquals(TaskOutcome.FAILED, result.task(":modules:web:ktlintMainSourceSetCheck")?.outcome, result.output)
+                assertTrue("Violation.kt" in result.output, "only the retained deleted-file finding is expected:\n${result.output}")
+                result
+            }
         val deletedLint = a3.task(":modules:web:runKtlintCheckOverMainSourceSet")
         assertTrue(
             deletedLint?.outcome in listOf(TaskOutcome.SUCCESS, TaskOutcome.UP_TO_DATE),

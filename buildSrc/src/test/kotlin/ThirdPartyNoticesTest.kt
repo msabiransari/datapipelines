@@ -44,9 +44,10 @@ class ThirdPartyNoticesTest {
     @Test
     fun `an unused mapping fails as STALE`() {
         pom("example:licensed:1", license("Apache License, Version 2.0"))
-        val failure = assertThrows(IllegalStateException::class.java) {
-            renderer().render(listOf("example:licensed:1"), mapping + ("Unused" to "MIT")) { "Text" }
-        }
+        val failure =
+            assertThrows(IllegalStateException::class.java) {
+                renderer().render(listOf("example:licensed:1"), mapping + ("Unused" to "MIT")) { "Text" }
+            }
         assertTrue(failure.message.orEmpty().contains("STALE"))
         assertTrue(failure.message.orEmpty().contains("Unused"))
     }
@@ -95,14 +96,18 @@ class ThirdPartyNoticesTest {
 
     @Test
     fun `declared alternatives and exceptions retain every text section`() {
-        pom("example:dual:1", """
+        pom(
+            "example:dual:1",
+            """
             <licenses><license><name>Apache License, Version 2.0</name></license>
             <license><name>GPL2 w/ CPE</name></license></licenses>
-        """.trimIndent())
-        val output = renderer().render(
-            listOf("example:dual:1"),
-            mapping + ("GPL2 w/ CPE" to "GPL-2.0-only WITH Classpath-exception-2.0"),
-        ) { "Text for $it" }
+            """.trimIndent(),
+        )
+        val output =
+            renderer().render(
+                listOf("example:dual:1"),
+                mapping + ("GPL2 w/ CPE" to "GPL-2.0-only WITH Classpath-exception-2.0"),
+            ) { "Text for $it" }
         listOf("Apache-2.0", "GPL-2.0-only", "Classpath-exception-2.0").forEach {
             assertTrue(output.contains("===== $it =====\n"))
             assertTrue(output.contains("Text for $it"))
@@ -115,7 +120,10 @@ class ThirdPartyNoticesTest {
         val root = catalog.parentFile.parentFile
         val version = requireNotNull(Regex("""(?m)^graalvm = "([^"]+)"""").find(catalog.readText())).groupValues[1]
         assertEquals(
-            listOf("org.graalvm.js:js-isolate-linux-amd64-community:$version", "org.graalvm.js:js-isolate-linux-aarch64-community:$version"),
+            listOf(
+                "org.graalvm.js:js-isolate-linux-amd64-community:$version",
+                "org.graalvm.js:js-isolate-linux-aarch64-community:$version",
+            ),
             ThirdPartyNotices.isolates(root.resolve("Dockerfile").readText()),
         )
         assertEquals(
@@ -137,24 +145,38 @@ class ThirdPartyNoticesTest {
         val oracle = "Oracle Free Use Terms and Conditions (FUTC)"
         assertFalse(ThirdPartyLicenseAllowlist.mappings(mysql = false, oracle = false).containsKey(mysql))
         assertFalse(ThirdPartyLicenseAllowlist.mappings(mysql = false, oracle = false).containsKey(oracle))
-        assertEquals("GPL-2.0-only WITH Universal-FOSS-exception-1.0", ThirdPartyLicenseAllowlist.mappings(mysql = true, oracle = false)[mysql])
+        assertEquals(
+            "GPL-2.0-only WITH Universal-FOSS-exception-1.0",
+            ThirdPartyLicenseAllowlist.mappings(mysql = true, oracle = false)[mysql],
+        )
         assertEquals("LicenseRef-Oracle-FUTC", ThirdPartyLicenseAllowlist.mappings(mysql = false, oracle = true)[oracle])
     }
 
     private fun render(coordinate: String): String = renderer().render(listOf(coordinate), mapping) { "Licence text" }
 
-    private fun renderer(): ThirdPartyNotices = ThirdPartyNotices { coordinate ->
-        directory.resolve(coordinate.replace(':', '_') + ".pom").also { check(it.isFile) { "Missing fixture $coordinate" } }
-    }
+    private fun renderer(): ThirdPartyNotices =
+        ThirdPartyNotices { coordinate ->
+            directory.resolve(coordinate.replace(':', '_') + ".pom").also { check(it.isFile) { "Missing fixture $coordinate" } }
+        }
 
-    private fun pom(coordinate: String, body: String, namespace: Boolean = true) {
+    private fun pom(
+        coordinate: String,
+        body: String,
+        namespace: Boolean = true,
+    ) {
         val ns = if (namespace) " xmlns=\"http://maven.apache.org/POM/4.0.0\"" else ""
         directory.resolve(coordinate.replace(':', '_') + ".pom").writeText("<project$ns><url>https://example.test</url>$body</project>")
     }
 
-    private fun license(name: String, url: String = "https://example.test/license", comments: String = ""): String =
-        "<licenses><license><name>$name</name><url>$url</url><comments>$comments</comments></license></licenses>"
+    private fun license(
+        name: String,
+        url: String = "https://example.test/license",
+        comments: String = "",
+    ): String = "<licenses><license><name>$name</name><url>$url</url><comments>$comments</comments></license></licenses>"
 
-    private fun parent(group: String, name: String, version: String): String =
-        "<parent><groupId>$group</groupId><artifactId>$name</artifactId><version>$version</version></parent>"
+    private fun parent(
+        group: String,
+        name: String,
+        version: String,
+    ): String = "<parent><groupId>$group</groupId><artifactId>$name</artifactId><version>$version</version></parent>"
 }

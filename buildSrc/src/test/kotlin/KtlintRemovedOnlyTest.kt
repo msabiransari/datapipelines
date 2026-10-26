@@ -22,9 +22,15 @@ class KtlintRemovedOnlyTest {
         get() = File(requireNotNull(System.getProperty("repo.catalog")))
 
     private val evidence: File
-        get() = catalog.parentFile.parentFile.resolve("build/703-probes/evidence").apply { mkdirs() }
+        get() =
+            catalog.parentFile.parentFile
+                .resolve("build/703-probes/evidence")
+                .apply { mkdirs() }
 
-    private fun source(name: String, violating: Boolean): File {
+    private fun source(
+        name: String,
+        violating: Boolean,
+    ): File {
         val value = if (violating) "x".repeat(160) else "clean"
         return probeDir.resolve("modules/web/src/main/kotlin/$name.kt").apply {
             parentFile.mkdirs()
@@ -32,20 +38,25 @@ class KtlintRemovedOnlyTest {
         }
     }
 
-    private fun run(name: String, fails: Boolean): BuildResult {
+    private fun run(
+        name: String,
+        fails: Boolean,
+    ): BuildResult {
         val home = catalog.parentFile.parentFile.resolve("build/703-probes/gradle-user-home")
-        val runner = GradleRunner.create()
-            .withPluginClasspath()
-            .withTestKitDir(home)
-            .withProjectDir(probeDir)
-            .withArguments(
-                ":modules:web:ktlintMainSourceSetCheck",
-                "--info",
-                "--build-cache",
-                "--no-parallel",
-                "--max-workers=1",
-                "-Porg.gradle.java.installations.paths=${System.getProperty("probe.jdk21")}",
-            )
+        val runner =
+            GradleRunner
+                .create()
+                .withPluginClasspath()
+                .withTestKitDir(home)
+                .withProjectDir(probeDir)
+                .withArguments(
+                    ":modules:web:ktlintMainSourceSetCheck",
+                    "--info",
+                    "--build-cache",
+                    "--no-parallel",
+                    "--max-workers=1",
+                    "-Porg.gradle.java.installations.paths=${System.getProperty("probe.jdk21")}",
+                )
         val result = if (fails) runner.buildAndFail() else runner.build()
         evidence.resolve("$name.log").writeText(result.output)
         return result

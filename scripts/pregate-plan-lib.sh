@@ -27,7 +27,9 @@ pgplan::build() {
     fi
   fi
   PG_MODULES=(); PG_TEST_MODULES=(); PG_DEFERRED=(); PG_ROOTS2=(); PG_ROOTS2B=()
-  PG_1=(ktlintCheck detekt composeEnvAudit composeArgvSecretsAudit verifyModuleDependencies verifyVerificationMetadataDocs --continue)
+  # buildSrc is its own build, which the bare ktlintCheck/detekt never reach (#724): its lint
+  # rides this invocation by task path, under the root's dependency verification.
+  PG_1=(ktlintCheck detekt :buildSrc:ktlintCheck :buildSrc:detekt composeEnvAudit composeArgvSecretsAudit verifyModuleDependencies verifyVerificationMetadataDocs --continue)
   PG_2=(); PG_2B=(); PG_4=(compileTestKotlin --continue)
   # The sequences knob bounds VersionLifecycleModelTest's random sweep in the pregate
   # only (#483, DEVELOPMENT.md §9.5); Gate A and CI keep the 2000 default and stay the bank.

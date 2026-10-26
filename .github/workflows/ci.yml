@@ -161,6 +161,10 @@ jobs:
       # their own cache dir, no JVM; ~45 s on the dev box. flock ships in util-linux.
       - name: pregate and verification-lock self-test (fixtures, no JVM)
         run: ./scripts/pregate.sh --self-test
+      # #724: buildSrc is its own build, which the root ktlintCheck/detekt below never reach.
+      # Lint first (DEVELOPMENT.md §9.4); by task path, so the root's dependency verification applies.
+      - name: buildSrc ktlint and detekt
+        run: ./gradlew :buildSrc:ktlintCheck :buildSrc:detekt
       - name: build, ktlint, detekt (full unit suite incl. Testcontainers — Docker required, see header)
         id: build
         # --continue: one red module must not stop the others — every module's tests and

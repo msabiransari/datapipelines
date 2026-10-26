@@ -23,10 +23,19 @@ import javax.xml.parsers.DocumentBuilderFactory
 /** Generates distribution notices from the exact resolved production component versions. */
 abstract class ThirdPartyNoticesTask : DefaultTask() {
     @get:Input abstract val coordinates: ListProperty<String>
+
     @get:Input abstract val mysql: Property<Boolean>
+
     @get:Input abstract val oracle: Property<Boolean>
-    @get:InputFile @get:PathSensitive(PathSensitivity.NONE) abstract val dockerfile: RegularFileProperty
-    @get:InputDirectory @get:PathSensitive(PathSensitivity.RELATIVE) abstract val licenseTexts: DirectoryProperty
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val dockerfile: RegularFileProperty
+
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val licenseTexts: DirectoryProperty
+
     @get:OutputDirectory abstract val outputDirectory: DirectoryProperty
 
     init {
@@ -42,11 +51,12 @@ abstract class ThirdPartyNoticesTask : DefaultTask() {
     fun generate() {
         val graph = coordinates.get() + ThirdPartyNotices.isolates(dockerfile.get().asFile.readText())
         val renderer = ThirdPartyNotices(::resolvePom)
-        val report = renderer.render(graph, ThirdPartyLicenseAllowlist.mappings(mysql.get(), oracle.get())) { id ->
-            val text = licenseTexts.file("$id.txt").get().asFile
-            check(text.isFile && text.readText().isNotBlank()) { "Missing vendored licence text: $id at $text" }
-            text.readText().replace("\r\n", "\n").trimEnd()
-        }
+        val report =
+            renderer.render(graph, ThirdPartyLicenseAllowlist.mappings(mysql.get(), oracle.get())) { id ->
+                val text = licenseTexts.file("$id.txt").get().asFile
+                check(text.isFile && text.readText().isNotBlank()) { "Missing vendored licence text: $id at $text" }
+                text.readText().replace("\r\n", "\n").trimEnd()
+            }
         val output = outputDirectory.file("THIRD-PARTY-NOTICES").get().asFile
         output.parentFile.mkdirs()
         output.writeText(report, Charsets.UTF_8)
@@ -55,10 +65,19 @@ abstract class ThirdPartyNoticesTask : DefaultTask() {
 
     private fun resolvePom(coordinate: String): File {
         val (group, name, version) = coordinate.split(':')
-        val result = project.dependencies.createArtifactResolutionQuery()
-            .forModule(group, name, version).withArtifacts(MavenModule::class.java, MavenPomArtifact::class.java).execute()
-        val component = result.resolvedComponents.singleOrNull()
-            ?: throw GradleException("Cannot resolve POM for $coordinate: ${result.components.filterIsInstance<UnresolvedComponentResult>().map { it.failure.message }}")
+        val result =
+            project.dependencies
+                .createArtifactResolutionQuery()
+                .forModule(group, name, version)
+                .withArtifacts(MavenModule::class.java, MavenPomArtifact::class.java)
+                .execute()
+        val component =
+            result.resolvedComponents.singleOrNull()
+                ?: throw GradleException(
+                    "Cannot resolve POM for $coordinate: ${result.components.filterIsInstance<UnresolvedComponentResult>().map {
+                        it.failure.message
+                    }}",
+                )
         val artifact = component.getArtifacts(MavenPomArtifact::class.java).singleOrNull()
         return (artifact as? ResolvedArtifactResult)?.file
             ?: throw GradleException("Cannot resolve POM artifact for $coordinate: $artifact")
@@ -66,31 +85,52 @@ abstract class ThirdPartyNoticesTask : DefaultTask() {
 }
 
 /** POM inheritance and rendering shared by the Gradle task and offline fixture tests. */
-class ThirdPartyNotices(private val pomFile: (String) -> File) {
-    private data class License(val name: String, val raw: String)
-    private data class Pom(val licenses: List<License>, val url: String, val parent: String?)
+class ThirdPartyNotices(
+    private val pomFile: (String) -> File,
+) {
+    private data class License(
+        val name: String,
+        val raw: String,
+    )
+
+    private data class Pom(
+        val licenses: List<License>,
+        val url: String,
+        val parent: String?,
+    )
+
     private val poms = mutableMapOf<String, Pom>()
     var parentWalks: Int = 0
         private set
 
     /** Missing, unknown and unused licence mappings all fail closed. All declared alternatives are retained. */
-    fun render(coordinates: List<String>, mappings: Map<String, String>, text: (String) -> String): String {
+    fun render(
+        coordinates: List<String>,
+        mappings: Map<String, String>,
+        text: (String) -> String,
+    ): String {
         val used = mutableSetOf<String>()
         val ids = sortedSetOf<String>()
-        val rows = coordinates.distinct().sorted().map { coordinate ->
-            val pom = readPom(coordinate)
-            val licenses = licenses(coordinate, coordinate, emptySet())
-            check(licenses.isNotEmpty()) { "Unresolved licence for $coordinate: raw POM licenses=<none> (including parents)" }
-            val labels = licenses.map { license ->
-                val expression = mappings[license.name]
-                    ?: error("Unresolved licence for $coordinate: raw POM license=${license.raw}")
-                used.add(license.name)
-                ids.addAll(expression.split(" WITH "))
-                "$expression (${license.name})"
-            }.distinct().sorted().joinToString("; ")
-            val copyright = if (coordinate.startsWith("org.graalvm.")) " — Copyright (c) Oracle and/or its affiliates." else ""
-            "$coordinate — $labels — ${pom.url}$copyright"
-        }
+        val rows =
+            coordinates.distinct().sorted().map { coordinate ->
+                val pom = readPom(coordinate)
+                val licenses = licenses(coordinate, coordinate, emptySet())
+                check(licenses.isNotEmpty()) { "Unresolved licence for $coordinate: raw POM licenses=<none> (including parents)" }
+                val labels =
+                    licenses
+                        .map { license ->
+                            val expression =
+                                mappings[license.name]
+                                    ?: error("Unresolved licence for $coordinate: raw POM license=${license.raw}")
+                            used.add(license.name)
+                            ids.addAll(expression.split(" WITH "))
+                            "$expression (${license.name})"
+                        }.distinct()
+                        .sorted()
+                        .joinToString("; ")
+                val copyright = if (coordinate.startsWith("org.graalvm.")) " — Copyright (c) Oracle and/or its affiliates." else ""
+                "$coordinate — $labels — ${pom.url}$copyright"
+            }
         val stale = mappings.keys - used
         check(stale.isEmpty()) { "STALE licence allowlist entries (matched no POM): ${stale.sorted()}" }
         return buildString {
@@ -106,7 +146,11 @@ class ThirdPartyNotices(private val pomFile: (String) -> File) {
         }
     }
 
-    private fun licenses(root: String, coordinate: String, seen: Set<String>): List<License> {
+    private fun licenses(
+        root: String,
+        coordinate: String,
+        seen: Set<String>,
+    ): List<License> {
         check(coordinate !in seen) { "Cyclic POM parents for $root: ${seen + coordinate}" }
         val pom = readPom(coordinate)
         if (pom.licenses.isNotEmpty()) return pom.licenses
@@ -115,25 +159,28 @@ class ThirdPartyNotices(private val pomFile: (String) -> File) {
         return licenses(root, parent, seen + coordinate)
     }
 
-    private fun readPom(coordinate: String): Pom = poms.getOrPut(coordinate) {
-        val factory = DocumentBuilderFactory.newInstance()
-        factory.isNamespaceAware = true
-        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-        factory.setFeature("http://xml.org/sax/features/external-general-entities", false)
-        factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false)
-        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")
-        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
-        val project = factory.newDocumentBuilder().parse(pomFile(coordinate)).documentElement
-        val parent = project.child("parent")?.let {
-            listOf("groupId", "artifactId", "version").joinToString(":") { key ->
-                it.value(key).also { value -> check(value.isNotEmpty()) { "Invalid parent $key for $coordinate" } }
-            }
+    private fun readPom(coordinate: String): Pom =
+        poms.getOrPut(coordinate) {
+            val factory = DocumentBuilderFactory.newInstance()
+            factory.isNamespaceAware = true
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+            factory.setFeature("http://xml.org/sax/features/external-general-entities", false)
+            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false)
+            factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")
+            factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
+            val project = factory.newDocumentBuilder().parse(pomFile(coordinate)).documentElement
+            val parent =
+                project.child("parent")?.let {
+                    listOf("groupId", "artifactId", "version").joinToString(":") { key ->
+                        it.value(key).also { value -> check(value.isNotEmpty()) { "Invalid parent $key for $coordinate" } }
+                    }
+                }
+            val licenses =
+                project.child("licenses")?.children("license").orEmpty().map {
+                    License(it.value("name"), it.textContent.trim().replace(Regex("\\s+"), " "))
+                }
+            Pom(licenses, project.value("url").ifBlank { project.child("scm")?.value("url").orEmpty() }, parent)
         }
-        val licenses = project.child("licenses")?.children("license").orEmpty().map {
-            License(it.value("name"), it.textContent.trim().replace(Regex("\\s+"), " "))
-        }
-        Pom(licenses, project.value("url").ifBlank { project.child("scm")?.value("url").orEmpty() }, parent)
-    }
 
     companion object {
         /** Both architectures travel in the notice; the image redistributes one, selected by TARGETARCH. */
@@ -151,4 +198,5 @@ private fun Element.children(name: String): List<Element> =
     (0 until childNodes.length).mapNotNull { childNodes.item(it) as? Element }.filter { (it.localName ?: it.tagName) == name }
 
 private fun Element.child(name: String): Element? = children(name).singleOrNull()
+
 private fun Element.value(name: String): String = child(name)?.textContent?.trim().orEmpty()
