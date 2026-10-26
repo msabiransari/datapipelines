@@ -37,4 +37,3 @@ internal object ChildVersionProbeTemplates : TemplateDryRenderer {
         ref: TemplateRef,
     ): ScriptContractView? = error("the parent save must not read a script contract (${ref.id})")
 }
-

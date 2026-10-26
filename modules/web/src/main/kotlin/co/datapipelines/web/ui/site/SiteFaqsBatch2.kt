@@ -135,8 +135,8 @@ object SiteFaqsBatch2 {
             ),
             FaqEntry(
                 "Will there be Slack alerts?",
-                "No. The roadmap names email alerts and nothing beyond them: a scheduled pipeline, a condition, " +
-                    "an email. Later, not dated, and deliberately no Slack. The roadmap item is docs/ROADMAP.md §3.",
+                "No. The roadmap names email alerts and nothing beyond them: a scheduled pipeline, a condition, an " +
+                    "email. Later, not dated, and deliberately no Slack. The planned alerts are docs/ROADMAP.md §3.",
                 "docs/ROADMAP.md §3",
             ),
             FaqEntry(
@@ -154,10 +154,11 @@ object SiteFaqsBatch2 {
         listOf(
             FaqEntry(
                 "Can each client be kept separate from the others?",
-                "Yes, one workspace per client. A key is pinned to one workspace at issuance, so an agent or a " +
-                    "colleague working client A sees nothing of client B: the other workspace's pipelines, " +
-                    "datasources and executions are absent, not hidden. Key roles and pinning are docs/auth.md §7.5.",
-                "docs/auth.md §7.5",
+                "Yes, one workspace per client. A key is pinned to one workspace at issuance, so an agent " +
+                    "working for client A cannot switch that key to client B. A colleague's session can switch " +
+                    "only to workspaces they belong to; other workspaces' pipelines, datasources and executions " +
+                    "are absent, not hidden. Workspace resolution is docs/auth.md §5.6.",
+                "docs/auth.md §5.6",
             ),
             FaqEntry(
                 "Can a client's key reach only that client's numbers?",
@@ -197,10 +198,12 @@ object SiteFaqsBatch2 {
             ),
             FaqEntry(
                 "How does each customer see only their own rows?",
-                "Every viewer's request carries a value, from the query string or the path, that binds to a " +
-                    "declared parameter of the released pipeline, and the released SQL filters on it. The value is " +
-                    "a bound scalar on a prepared statement, never pasted SQL. Binding is docs/templates.md §4.5.",
-                "docs/templates.md §4.5",
+                "Row-level authorisation stays your backend's job: it authorises the viewer and derives or limits " +
+                    "the customer value that viewer may submit. The published endpoint accepts declared parameters " +
+                    "from its path or query string (docs/rest-api.md §19.3), and the released SQL filters rows using " +
+                    "that value bound as a scalar on a prepared statement (docs/templates.md §4.5), never pasted SQL. " +
+                    "An endpoint key restricts published paths, not result rows (docs/auth.md §7.7).",
+                "docs/rest-api.md §19.3, docs/templates.md §4.5, docs/auth.md §7.7",
             ),
             FaqEntry(
                 "What can a customer-facing key reach?",
