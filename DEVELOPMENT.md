@@ -271,11 +271,13 @@ lock-state or dependency-verification failures.
 change:
 
 ```bash
-./gradlew resolveAndLockAll --write-locks
+./gradlew resolveAndLockAll :buildSrc:resolveAndLockAll --write-locks
 ```
 
 This resolves every resolvable configuration in every module and rewrites all
-`gradle.lockfile` files (plus `buildSrc/gradle.lockfile`). Read the resulting
+`gradle.lockfile` files (plus `buildSrc/gradle.lockfile`). The bare `resolveAndLockAll`
+selects the root build's projects only; without `:buildSrc:resolveAndLockAll`, buildSrc's
+ktlint and detekt tool configurations (#724) keep their old lock state. Read the resulting
 diff like any dependency review — it shows exactly which versions moved — and
 commit it in the same commit as the catalog/build-file change that caused it.
 A lockfile diff with no corresponding dependency change means something drifted
@@ -315,7 +317,7 @@ deliberate, in the same commit as the lockfile update:
 
 ```bash
 GRADLE_USER_HOME=$(mktemp -d) ./gradlew --write-verification-metadata sha256 --write-locks \
-  resolveAndLockAll help :modules:app:bootJar resolveDependencyVerificationSurface
+  resolveAndLockAll :buildSrc:resolveAndLockAll help :modules:app:bootJar resolveDependencyVerificationSurface
 ```
 
 This resolves every configuration (the point of `resolveAndLockAll`) and
@@ -1148,6 +1150,13 @@ in-checkout finding after a deletion (#703), use the forced affected-task check 
 
 CI runs all three. No code merges with violations.
 
+`buildSrc` is linted too, since #724, with the same ktlint engine and the repo's
+`config/detekt/detekt.yml` (no baseline). It is a separate build that the root
+`ktlintCheck`/`detekt` never reach, so it is run by task path:
+`./gradlew :buildSrc:ktlintCheck :buildSrc:detekt` (`:buildSrc:ktlintFormat` to fix). The
+pre-gate's stage 1 and a CI step run that; `scripts/gate.sh`'s buildSrc stage runs it as
+`-p buildSrc … ktlintCheck detekt`.
+
 ### 10.1 Documentation audit
 
 Any change under `docs/` (or to this file) must pass the documentation audit:
@@ -1235,7 +1244,8 @@ The floors guard itself is tested (`buildSrc/src/test`, Gradle TestKit — a
 project missing from the maps fails configuration; `-Pkover.off` drops the
 floor rule). A main build only builds buildSrc through its jar, so its tests
 never run automatically: `./gradlew -p buildSrc test` runs them, and
-`scripts/gate.sh` runs that as a stage — forced to execute (`cleanTest`;
+`scripts/gate.sh` runs that as a stage, with buildSrc's `ktlintCheck` and `detekt`
+in the same invocation (`--continue`, since #724) — forced to execute (`cleanTest`;
 the catalog file's content is a declared test input, so a
 `gradle/libs.versions.toml` edit re-runs the guards even without the gate).
 The stage is attempted even when the network preflight says offline (a warm

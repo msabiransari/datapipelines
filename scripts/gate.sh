@@ -215,13 +215,23 @@ done
 # skips). A PASS line therefore never hides an unrun guard; skips are
 # counted and named. The branches live in gate_classify_buildsrc
 # (scripts/lib/gate-stages.sh) and are fixture-driven per release round.
+#
+# Lint (#724): the root `build` never lints buildSrc, so the same invocation runs
+# its ktlintCheck and detekt, with --continue so a lint finding and a test
+# failure both report. A lint finding is never a resolution failure: when the
+# log carries ktlint's or detekt's finding line, the offline skip does not apply.
 source "$ROOT/scripts/lib/scan-tools.sh"
 echo
 bnet="$(scan_tools_classify_network gate https://repo.maven.apache.org/maven2/)"
-btest=$(run "$LOGDIR/buildsrc-test.log" -p buildSrc cleanTest test)
-case "$(gate_classify_buildsrc "$btest" "$LOGDIR/buildsrc-test.log" "$ROOT/buildSrc/build/test-results/test" "$bnet")" in
+btest=$(run "$LOGDIR/buildsrc-test.log" -p buildSrc cleanTest test ktlintCheck detekt --continue)
+bverdict="$(gate_classify_buildsrc "$btest" "$LOGDIR/buildsrc-test.log" "$ROOT/buildSrc/build/test-results/test" "$bnet")"
+if [ "$bverdict" = skip ] \
+  && grep -qE 'KtLint found code style violations|Analysis failed with [0-9]+ weighted issues' "$LOGDIR/buildsrc-test.log"; then
+  bverdict=fail
+fi
+case "$bverdict" in
   pass)
-    echo "  buildSrc tests  PASS — COVERAGE_FLOORS / -Pkover.off guards able to fail and to pass"
+    echo "  buildSrc tests  PASS — COVERAGE_FLOORS / -Pkover.off guards able to fail and to pass; ktlintCheck + detekt clean"
     ;;
   crash)
     fails=$((fails + 1)); crashes=$((crashes + 1))
@@ -234,7 +244,7 @@ case "$(gate_classify_buildsrc "$btest" "$LOGDIR/buildsrc-test.log" "$ROOT/build
     ;;
   fail)
     fails=$((fails + 1))
-    echo "  buildSrc tests  EXIT=$btest  (genuine failure; log: $LOGDIR/buildsrc-test.log)"
+    echo "  buildSrc tests  EXIT=$btest  (genuine failure — a test, ktlintCheck or detekt; log: $LOGDIR/buildsrc-test.log)"
     ;;
 esac
 
