@@ -1,9 +1,17 @@
+import io.gitlab.arturbosch.detekt.Detekt
 import org.gradle.api.artifacts.dsl.LockMode
 import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.gradle.jvm.toolchain.JavaToolchainService
+import org.jlleitschuh.gradle.ktlint.tasks.BaseKtLintCheckTask
 
 plugins {
     `kotlin-dsl`
+    // buildSrc is linted like every module (#724): the same plugin versions, from the
+    // catalog, on buildSrc's OWN build-script classpath. The `implementation` entries below
+    // put the same jars on the plugin's compile classpath, so it can apply them to modules;
+    // that never lints buildSrc itself.
+    alias(libs.plugins.ktlint)
+    alias(libs.plugins.detekt)
 }
 
 repositories {
@@ -77,6 +85,59 @@ tasks.test {
     // The test JVM itself may be any JDK the daemon picked (26 here), so
     // java.home is NOT a valid substitute.
     systemProperty("probe.jdk21", probeJdk21.get())
+}
+
+// The lint CommonConventionsPlugin applies to every module, mirrored for buildSrc (#724),
+// which cannot apply its own plugin. The engine version is read from the plugin's
+// KTLINT_VERSION constant, so the modules and buildSrc share one source; a missing
+// constant fails configuration instead of falling back to the plugin's default engine.
+val conventionPluginSource = layout.projectDirectory.file("src/main/kotlin/CommonConventionsPlugin.kt")
+val houseKtlintVersion = providers.fileContents(conventionPluginSource).asText.map { text ->
+    Regex("""const val KTLINT_VERSION = "([^"]+)"""").find(text)?.groupValues?.get(1)
+        ?: throw GradleException("${conventionPluginSource.asFile} declares no KTLINT_VERSION; buildSrc's ktlint reads it (#724)")
+}
+
+ktlint {
+    version.set(houseKtlintVersion)
+    // kotlin-dsl generates accessors under build/; only checked-in sources are linted.
+    filter {
+        exclude { it.file.path.contains("${layout.buildDirectory.get()}") }
+    }
+}
+
+// The module-side #689 / #703 boundary, for the same reasons: the pregate's stage 1 runs
+// this build's ktlint with --build-cache, and a worker's stored findings are its last
+// incremental execution's, not a function of its inputs. The source inventory makes a
+// removed file re-lint the whole source set.
+tasks.withType<BaseKtLintCheckTask>().configureEach {
+    outputs.cacheIf("ktlint worker outputs stay out of the build cache; stored findings reflect incremental history, not only the inputs (#689)") {
+        false
+    }
+    val projectDirectory = layout.projectDirectory.asFile
+    inputs.property(
+        "ktlintSourceInventory",
+        provider { source.files.map { it.relativeTo(projectDirectory).invariantSeparatorsPath }.sorted() },
+    )
+}
+
+// The repo's detekt config, as the modules get it. No baseline, deliberately: buildSrc's
+// findings are fixed, not baselined (#724), so a future config/detekt/baseline.xml does
+// not reach this build.
+detekt {
+    buildUponDefaultConfig = true
+    allRules = false
+    config.setFrom(rootProject.file("../config/detekt/detekt.yml"))
+}
+
+tasks.withType<Detekt>().configureEach {
+    jvmTarget = "21"
+    reports {
+        html.required.set(true)
+        xml.required.set(false)
+        txt.required.set(false)
+        sarif.required.set(false)
+        md.required.set(false)
+    }
 }
 
 gradlePlugin {
