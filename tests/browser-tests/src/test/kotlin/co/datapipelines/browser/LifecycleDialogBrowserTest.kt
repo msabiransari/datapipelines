@@ -3,6 +3,7 @@ package co.datapipelines.browser
 import com.microsoft.playwright.Locator
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.options.LoadState
+import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -80,8 +81,8 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
         val (gs, gbody) = send("GET", "/api/v1/pipelines/$id")
         gs shouldBe 200
         val hash = Regex(""""body_hash"\s*:\s*"([0-9a-f]+)"""").find(gbody!!)!!.groupValues[1]
-        val (rs) = send("POST", "/api/v1/pipelines/$id/release", ifMatch = hash)
-        rs shouldBe 200
+        val (rs, responseBody) = send("POST", "/api/v1/pipelines/$id/release", ifMatch = hash)
+        withClue("Release response: $responseBody") { rs shouldBe 200 }
     }
 
     /**

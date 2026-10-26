@@ -11,9 +11,11 @@ import java.util.UUID
  * The pipeline family's read of the release graph (record §4.2): a pipeline version's exact template pins and child
  * pipeline pins, its status, body hash and the entity's current pointer.
  *
- * Pipelines and templates are identified by NAME (`entityId`): every pin addresses its target by name and exact version
- * (`nodes[i].template`, `nodes[i].pipeline`), names are never renamed (versioning §2), and a MISSING pin keeps the
- * identity it spelled. Lives with the aggregate rather than in `web` because it reads nothing but this module's
+ * Pins identify pipelines and templates by registry NAME (`entityId`) and exact version (`nodes[i].template`,
+ * `nodes[i].pipeline`); a MISSING pin keeps the identity it spelled. A pipeline draft may propose a new name,
+ * so the coordinator resolves the root by its registry name until the release flip adopts the draft's metadata.
+ *
+ * Lives with the aggregate rather than in `web` because it reads nothing but this module's
  * repository; the template source needs `templates` and is assembled in `web`.
  */
 class PipelineDependencySource(

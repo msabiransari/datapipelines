@@ -16,6 +16,8 @@ import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.api.TestMethodOrder
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.test.context.DynamicPropertyRegistry
@@ -668,6 +670,86 @@ class ReleaseCascadeE2eTest {
             target shouldBe "DISCARDED"
             restores shouldBe 0
         }
+    }
+
+    /** #517 CI follow-up: a draft's proposed name is not its registry lookup name until release commits. */
+    @ParameterizedTest
+    @ValueSource(booleans = [false, true])
+    @Order(10)
+    fun `compatibility release resolves a renamed draft by its registry identity and keeps native hash refusals`(hadRelease: Boolean) {
+        val originalName = "test/rename_517_$hadRelease"
+        val renamed = "test/renamed_517_$hadRelease"
+        val body =
+            mapOf(
+                "name" to originalName,
+                "description" to "Before the draft rename",
+                "nodes" to
+                    listOf(
+                        mapOf(
+                            "id" to "fq",
+                            "type" to "CALCULATOR",
+                            "kind" to "fiscal_quarter",
+                            "context_key" to "run_fiscal_quarter",
+                            "inputs" to mapOf("date" to "2026-08-14", "fiscal_start" to "09-15"),
+                        ),
+                    ),
+            )
+        val created =
+            given()
+                .port(port)
+                .asSession(ADMIN_SESSION)
+                .contentType(ContentType.JSON)
+                .body(body)
+                .post("/api/v1/pipelines")
+                .then()
+                .statusCode(201)
+                .extract()
+                .response()
+                .jsonPath()
+        val id = created.getString("data.id")
+        val oldHash = created.getString("data.body_hash")
+        if (hadRelease) release(id, oldHash, cascade = false).statusCode(200)
+        val edited =
+            given()
+                .port(port)
+                .asSession(ADMIN_SESSION)
+                .contentType(ContentType.JSON)
+                .header("If-Match", oldHash)
+                .body(body + mapOf("name" to renamed, "description" to "After the draft rename"))
+                .put("/api/v1/pipelines/$id")
+                .then()
+                .statusCode(200)
+                .extract()
+                .response()
+                .jsonPath()
+        val newHash = edited.getString("data.body_hash")
+        (newHash == oldHash) shouldBe false
+        val auditBefore = auditRows("pipeline.version.released", id).size
+
+        release(id, oldHash, cascade = false)
+            .statusCode(409)
+            .body("error.code", equalTo("pipeline.version.conflict"))
+            .body("error.details.current_body_hash", equalTo(newHash))
+        auditRows("pipeline.version.released", id).size shouldBe auditBefore
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .get("/api/v1/pipelines/$id")
+            .then()
+            .statusCode(200)
+            .body("data.draft.body_hash", equalTo(newHash))
+            .body("data.current_version", equalTo(if (hadRelease) 1 else null))
+
+        release(id, newHash, cascade = false).statusCode(200).body("data.status", equalTo("RELEASED"))
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .get("/api/v1/pipelines/$id")
+            .then()
+            .statusCode(200)
+            .body("data.name", equalTo(renamed))
+            .body("data.current_version", equalTo(if (hadRelease) 2 else 1))
+        auditRows("pipeline.version.released", id).size shouldBe auditBefore + 1
     }
 
     /** The parent's v1 status and the template's v1 status, read at the TABLES (the parent is wholly discarded). */

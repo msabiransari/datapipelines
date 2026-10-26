@@ -93,12 +93,15 @@ class ReleaseCoordinator(
     /** The compatibility path (record §6): native preparation, then the legacy closure check and flips under the guard. */
     private fun compatible(request: PipelineReleaseRequest): PipelineReleaseService.Released {
         val prepared = releases.prepare(request.workspaceId, request.pipelineId, request.actor, request.overrideChecksReason)
-        val rootIdentity = PipelineDependencySource.identity(request.workspaceId, prepared.pipeline.name, prepared.draft.version)
         val principal = authorization.principal()
         val releaseId = releaseIds()
         val released =
             inTransaction { status ->
                 guard.acquire(request.workspaceId, ROOT)
+                // A draft may propose a rename; only the flip changes the registry's lookup name.
+                val rootRecord =
+                    pipelines.findById(request.workspaceId, request.pipelineId) ?: throw ReleaseRefusals.planConflict(ROOT)
+                val rootIdentity = PipelineDependencySource.identity(request.workspaceId, rootRecord.name, prepared.draft.version)
                 val closure = walk(rootIdentity)
                 val included = if (request.releasePinnedTemplates) LegacyReleaseAlias.selection(closure) else emptySet()
                 refuseBlockers(closure, included)
