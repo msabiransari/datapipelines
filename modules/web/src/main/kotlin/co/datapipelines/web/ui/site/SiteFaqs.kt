@@ -111,12 +111,12 @@ object SiteFaqs {
             ),
             FaqEntry(
                 "From data to an API in a day: is that real?",
-                "For the API half, today: an agent authors the pipeline against your databases, runs it, fixes " +
-                    "what fails, you review and release, and the endpoint exists. No deployment, no service to write, " +
-                    "no gateway to configure. The same released pipeline can also feed a dashboard your agent drafts " +
-                    "and a person releases, embedded in your product through your own backend. Publishing is " +
-                    "docs/rest-api.md §19.",
-                "docs/rest-api.md §19",
+                "For the API half, today: an agent authors the pipeline against your databases, runs it, fixes what " +
+                    "fails, you review and release, and the endpoint exists. No deployment, no service to write, no " +
+                    "gateway to configure. The same released pipeline can also feed a dashboard your agent drafts and a " +
+                    "person releases, embedded in your product through your own backend (docs/dashboards.md §6.5). " +
+                    "Publishing is docs/rest-api.md §19.",
+                "docs/dashboards.md §6.5, docs/rest-api.md §19",
             ),
             FaqEntry(
                 "Where does it run?",
@@ -135,11 +135,12 @@ object SiteFaqs {
             FaqEntry(
                 "Is it a Tableau or dbt replacement?",
                 "Not today. It sits beside them: it can feed Tableau a governed dataset through an API or a " +
-                    "datasource table Tableau connects to, and it replaces the warehouse-plus-dbt step for teams that never " +
-                    "wanted one. It has SQL dashboards over released pipelines and schedules that run pipelines, " +
-                    "without a BI tool's drag-and-drop authoring; alerts are not built. The comparison pages cite " +
-                    "docs/versioning.md §3 for what is versioned.",
-                "docs/versioning.md §3",
+                    "datasource table Tableau connects to, and it replaces the warehouse-plus-dbt step for teams that " +
+                    "never wanted one (docs/pipeline-contract.md §8). It has SQL dashboards over released pipelines " +
+                    "(docs/dashboards.md §1) and schedules that run pipelines (docs/scheduler.md §1), without a BI " +
+                    "tool's drag-and-drop authoring; alerts are not built. The draft and release lifecycle is " +
+                    "docs/versioning.md §3.",
+                "docs/pipeline-contract.md §8, docs/dashboards.md §1, docs/scheduler.md §1, docs/versioning.md §3",
             ),
         )
 
@@ -187,17 +188,18 @@ object SiteFaqs {
                 "Not today, and the page does not claim it. Tableau draws; datapipelines gets the data there, " +
                     "across Postgres, MySQL, SQL Server, Oracle, SQLite and S3, without a warehouse, authored by an " +
                     "agent and released by a person. Its own SQL dashboards are drafted by an agent and laid out in a " +
-                    "document, with no drag-and-drop editor. What is versioned today is docs/versioning.md §3.",
-                "docs/versioning.md §3",
+                    "document, with no drag-and-drop editor (docs/dashboards.md §2.2). What is versioned today is " +
+                    "docs/versioning.md §3.",
+                "docs/dashboards.md §2.2, docs/versioning.md §3",
             ),
             FaqEntry(
                 "Why not just build the dashboard in Tableau?",
-                "Because the dashboard usually is not the expensive part. Getting a trustworthy, joined, " +
-                    "refreshed dataset into it is, and embedding the result in your own product is a second project. " +
+                "Because the dashboard usually is not the expensive part. Getting a trustworthy, joined, refreshed " +
+                    "dataset into it is, and embedding the result in your own product is a second project. " +
                     "datapipelines makes the dataset a versioned pipeline an agent can author and an API you can call " +
-                    "from your app, and a dashboard over it can be embedded through your own backend. Publishing is " +
-                    "docs/rest-api.md §19.",
-                "docs/rest-api.md §19",
+                    "from your app, and a dashboard over it can be embedded through your own backend " +
+                    "(docs/dashboards.md §6.5). Publishing is docs/rest-api.md §19.",
+                "docs/dashboards.md §6.5, docs/rest-api.md §19",
             ),
             FaqEntry(
                 "Does datapipelines replace Tableau Prep?",

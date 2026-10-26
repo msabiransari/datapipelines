@@ -135,8 +135,8 @@ object SiteFaqsBatch2 {
             ),
             FaqEntry(
                 "Will there be Slack alerts?",
-                "No. The roadmap names email alerts and nothing beyond them: a scheduled pipeline, a condition, " +
-                    "an email. Later, not dated, and deliberately no Slack. The roadmap item is docs/ROADMAP.md §3.",
+                "No. The roadmap names email alerts and nothing beyond them: a scheduled pipeline, a condition, an " +
+                    "email. Later, not dated, and deliberately no Slack. The planned alerts are docs/ROADMAP.md §3.",
                 "docs/ROADMAP.md §3",
             ),
             FaqEntry(

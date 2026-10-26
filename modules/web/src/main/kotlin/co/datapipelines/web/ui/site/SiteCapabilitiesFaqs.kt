@@ -31,10 +31,10 @@ object SiteCapabilitiesFaqs {
             FaqEntry(
                 "Can an AI agent create or change a schedule?",
                 "No. Nothing about a schedule is exposed over MCP. Authors, workspace admins and super admins " +
-                    "create, edit, pause, resume, unblock, delete and run schedules in the application or over the " +
-                    "REST API with a signed-in session; every workspace member can read schedules, with promoters " +
-                    "limited to pipelines they can see. The contracts " +
-                    "are docs/scheduler.md §1 and docs/scheduler.md §6.",
+                    "create, edit, pause, resume, unblock, delete and run schedules in the application or over the REST " +
+                    "API with a signed-in session; every workspace member can read schedules, with promoters limited to " +
+                    "pipelines they can see. The schedule job is docs/scheduler.md §1; its execution identity is " +
+                    "docs/scheduler.md §6.",
                 "docs/scheduler.md §1, docs/scheduler.md §6",
             ),
         )
@@ -63,10 +63,11 @@ object SiteCapabilitiesFaqs {
             FaqEntry(
                 "Who builds a dashboard, and how is it reviewed?",
                 "An AI agent authors visualizations and dashboards over MCP, and everything it writes lands as a " +
-                    "draft. A person reviews it in the application and releases it; a visualization releases only " +
-                    "with passing test evidence for its exact content. There is no drag-and-drop editor: the layout " +
-                    "is a 12-column grid in the dashboard document. The contract is docs/dashboards.md §3.1.",
-                "docs/dashboards.md §3.1",
+                    "draft. A person reviews it in the application and releases it; a visualization releases only with " +
+                    "passing test evidence for its exact content. There is no drag-and-drop editor: the layout is a " +
+                    "12-column grid in the dashboard document (docs/dashboards.md §2.2). The contract is " +
+                    "docs/dashboards.md §3.1.",
+                "docs/dashboards.md §2.2, docs/dashboards.md §3.1",
             ),
         )
 

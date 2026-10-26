@@ -159,12 +159,12 @@ object SiteFaqsCluster {
         listOf(
             FaqEntry(
                 "Does this replace Airflow's scheduler?",
-                "Not as an orchestrator. A schedule here runs one SQL pipeline at a cron pattern's times in an " +
-                    "IANA time zone, records every run and blocks when an outcome is unknown. It has no dependencies " +
-                    "between schedules, no range backfills, no sensors and no task fan-out across other systems. If " +
-                    "orchestrating many systems is the problem, Airflow is the answer. The contract is " +
-                    "docs/scheduler.md §1.",
-                "docs/scheduler.md §1",
+                "Not as an orchestrator. A schedule here runs one SQL pipeline at a cron pattern's times in an IANA " +
+                    "time zone (docs/scheduler.md §1), records every run and blocks when an outcome is unknown " +
+                    "(docs/scheduler.md §5.2). It has no dependencies between schedules, no range backfills, no sensors " +
+                    "and no task fan-out across other systems. If orchestrating many systems is the problem, Airflow is " +
+                    "the answer.",
+                "docs/scheduler.md §1, docs/scheduler.md §5.2",
             ),
             FaqEntry(
                 "Can Airflow trigger these pipelines?",
@@ -217,10 +217,11 @@ object SiteFaqsCluster {
             FaqEntry(
                 "What is the credential story?",
                 "Read-only datasources whose write-shaped uses are refused at save time and again at execution, " +
-                    "revocable agent keys that are identities of their own, each holding the role its creator chose " +
-                    "and never more than the creator's own, and an audit log entry for every tool call. Those are the " +
-                    "checks an agent-facing warehouse pipeline needs. The read-only flag is docs/datasources.md §5.7.",
-                "docs/datasources.md §5.7",
+                    "revocable agent keys that are identities of their own, each holding the role its creator chose and " +
+                    "never more than the creator's own (docs/auth.md §7.5), and an audit log entry for every tool call. " +
+                    "Those are the checks an agent-facing warehouse pipeline needs. The read-only flag is " +
+                    "docs/datasources.md §5.7.",
+                "docs/auth.md §7.5, docs/datasources.md §5.7",
             ),
         )
 
@@ -236,10 +237,10 @@ object SiteFaqsCluster {
                 "Do I need Dagster or Airflow to run pipelines here?",
                 "No. Pipelines execute on demand, by an agent over MCP, by a REST call or by a person, and a " +
                     "built-in schedule can run one pipeline on a cron pattern. There are no dependencies between " +
-                    "schedules, no range backfills and no sensors. If the work needs those, that is the " +
-                    "orchestrator's job, and the page says which one fits which team. The execution lifecycle is " +
+                    "schedules, no range backfills and no sensors (docs/scheduler.md §1). If the work needs those, that " +
+                    "is the orchestrator's job, and the page says which one fits which team. The execution lifecycle is " +
                     "docs/dag-executor.md §5.",
-                "docs/dag-executor.md §5",
+                "docs/scheduler.md §1, docs/dag-executor.md §5",
             ),
             FaqEntry(
                 "Can Dagster, Airflow or Prefect trigger a pipeline here?",
@@ -282,7 +283,7 @@ object SiteFaqsCluster {
                 "Is anything copied between the engines?",
                 "Nothing permanent: results are staged into the scratch database for the duration of the one " +
                     "execution, and the staging database is destroyed when the execution ends. That is by design, not " +
-                    "as a limitation. The design is docs/staging.md §1.",
+                    "as a limitation. The per-execution staging design is docs/staging.md §1.",
                 "docs/staging.md §1",
             ),
             FaqEntry(
