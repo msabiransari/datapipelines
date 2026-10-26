@@ -640,8 +640,10 @@ start() {
     cat <<EOM
 ==> demo data loaded (${DEMO_FAMILIES}). The example pipelines are seeded into the
     shipped 'demo' workspace — the one every login lands in (auth.md §4.2 step 4).
-    To point an agent at it: log in -> copy your MCP key from the top bar -> give the agent
-    ${APP_URL}/mcp with that key. See docs/deployment.md Appendix B.
+    To point an agent at it: sign in as the admin printed above -> open ${APP_URL}/api-keys
+    (API keys) -> create an 'mcp' key with the role the agent should hold -> copy the key
+    when it is shown (it is shown once) -> give the agent ${APP_URL}/mcp with that key.
+    See docs/deployment.md Appendix B and docs/auth.md §7.4.
 EOM
   fi
 }

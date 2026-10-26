@@ -468,15 +468,15 @@
            children with its search row and scroll region on first show). The ids and
            `data-nav-tree` are the contract the catalogs' Browse folders buttons
            (`aria-controls`) and the explorer keyboard's nav context (template-explorer.js) read. -->
-      <div class="app-nav-tree app-browser-tree" id="nav-tree-pipelines" data-nav-tree="pipelines" data-browser-family="pipelines" data-browser-label="Pipelines"
+      <div class="app-nav-tree app-browser-tree" id="nav-tree-pipelines" data-nav-tree="pipelines" data-browser-family="pipelines" data-browser-label="Pipelines" data-browser-glyph="workflow"
            th:attr="data-nav-workspace=${activeWorkspace},hidden=${browserFamily != 'pipelines'} ? 'hidden' : null"></div>
-      <div class="app-nav-tree app-browser-tree" id="nav-tree-templates" data-nav-tree="templates" data-browser-family="templates" data-browser-label="Templates"
+      <div class="app-nav-tree app-browser-tree" id="nav-tree-templates" data-nav-tree="templates" data-browser-family="templates" data-browser-label="Templates" data-browser-glyph="code"
            th:attr="data-nav-workspace=${activeWorkspace},hidden=${browserFamily != 'templates'} ? 'hidden' : null"></div>
-      <div class="app-nav-tree app-browser-tree" id="nav-tree-dashboards" data-nav-tree="dashboards" data-browser-family="dashboards" data-browser-label="Dashboards"
+      <div class="app-nav-tree app-browser-tree" id="nav-tree-dashboards" data-nav-tree="dashboards" data-browser-family="dashboards" data-browser-label="Dashboards" data-browser-glyph="boxes"
            th:attr="data-nav-workspace=${activeWorkspace},hidden=${browserFamily != 'dashboards'} ? 'hidden' : null"></div>
-      <div class="app-nav-tree app-browser-tree" id="nav-tree-visualizations" data-nav-tree="visualizations" data-browser-family="visualizations" data-browser-label="Visualizations"
+      <div class="app-nav-tree app-browser-tree" id="nav-tree-visualizations" data-nav-tree="visualizations" data-browser-family="visualizations" data-browser-label="Visualizations" data-browser-glyph="chart-line"
            th:attr="data-nav-workspace=${activeWorkspace},hidden=${browserFamily != 'visualizations'} ? 'hidden' : null"></div>
-      <div class="app-nav-tree app-browser-tree" id="nav-tree-parameter-sets" data-nav-tree="parameter-sets" data-browser-family="parameter-sets" data-browser-label="Parameter Sets"
+      <div class="app-nav-tree app-browser-tree" id="nav-tree-parameter-sets" data-nav-tree="parameter-sets" data-browser-family="parameter-sets" data-browser-label="Parameter Sets" data-browser-glyph="sliders-horizontal"
            th:attr="data-nav-workspace=${activeWorkspace},hidden=${browserFamily != 'parameter-sets'} ? 'hidden' : null"></div>
       <!-- View all is the explicit catalog action (record §3 rule 1). Refresh is the tree's own,
            beside its search (tree/component.mjs), so the column carries one control of that name. -->

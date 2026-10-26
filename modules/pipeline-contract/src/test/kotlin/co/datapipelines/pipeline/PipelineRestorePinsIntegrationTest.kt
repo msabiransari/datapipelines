@@ -39,6 +39,9 @@ class PipelineRestorePinsIntegrationTest {
     private val templateStatuses = mutableMapOf<Pair<String, Int>, PipelineVersionStatus>()
     private val statusesPort = TemplateVersionStatuses { _, id, version -> templateStatuses[id to version] }
 
+    /** The entity row: a template is registered when the registry holds ANY version of it, version 1 or not (#733). */
+    private val idsPort = TemplateIds { _, id -> templateStatuses.keys.any { it.first == id } }
+
     @BeforeAll
     fun connect() {
         jdbc = NamedParameterJdbcTemplate(SharedPostgres.dataSource())
@@ -77,6 +80,7 @@ class PipelineRestorePinsIntegrationTest {
             draftTemplates = NoDraftTemplates,
             dashboards = NoDashboards,
             templateStatuses = statusesPort,
+            templateIds = idsPort,
             maxBlockers = maxBlockers,
         )
 
@@ -183,6 +187,19 @@ class PipelineRestorePinsIntegrationTest {
         val missingTemplate = refusedWithoutWrite(versionGone)
         missingTemplate.code shouldBe Validation.TEMPLATE_NOT_FOUND
         missingTemplate.failures().single().details shouldBe mapOf("template" to ORDERS)
+    }
+
+    @Test
+    fun `a template that holds no version 1 is still told from a vanished one - the entity row, not a version-1 probe`() {
+        // A preserved-number import or a draft purge leaves a registered template at version 3 alone (versioning §9.2, §5.4).
+        templateStatuses.clear()
+        templateStatuses[ORDERS to 3] = PipelineVersionStatus.RELEASED
+        val parent = discardedParent(templateNode("fetch_orders", TemplateRef(ORDERS, 2)))
+
+        val error = refusedWithoutWrite(parent)
+
+        error.code shouldBe Validation.TEMPLATE_VERSION_NOT_FOUND
+        error.failures().single().details shouldBe mapOf("template" to ORDERS, "version" to 2)
     }
 
     @Test

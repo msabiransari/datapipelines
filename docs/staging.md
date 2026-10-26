@@ -1,9 +1,9 @@
 # Staging (H2) Specification
 
-**Status:** v1.20 (frozen contract — additive-only changes after this point)
+**Status:** v1.21 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Configuration spec](configuration.md)
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-26
 
 ---
 
@@ -517,12 +517,12 @@ Accounting is a direct measurement of JVM heap, read **in-process** — not via 
 ```kotlin
 fun usedHeapKb(): Long {
     System.gc()   // match MEMORY_USED()'s post-GC semantics; coarse guard, not per-poll hot path
-    val rt = Runtime.getRuntime()
-    return (rt.totalMemory() - rt.freeMemory()) / 1024
+    return ManagementFactory.getMemoryMXBean().heapMemoryUsage.used / 1024
 }
 ```
 
-- **Why not `SELECT MEMORY_USED()`:** in H2 2.3.232, `MEMORY_USED()` requires **admin rights** (SQLState 90040) — and the staging connection is deliberately a *non-admin* user so author SQL cannot reach the host (§9.5). Empirically, `MEMORY_USED()` and `(totalMemory − freeMemory)` return the **same number** (both ~14271 KB after a 50k-row fill in the same instant): H2's `MEMORY_USED()` is itself "run a GC, then return used heap", not a measure of the database's own allocation. So the in-process reading is the identical quantity with no admin dependency.
+- **Why not `SELECT MEMORY_USED()`:** in H2 2.3.232, `MEMORY_USED()` requires **admin rights** (SQLState 90040) — and the staging connection is deliberately a *non-admin* user so author SQL cannot reach the host (§9.5). H2's function is itself "run a GC, then return used heap", not a measure of the database's own allocation. The historical comparison with `(totalMemory − freeMemory)` returned the same ~14271 KB after a 50k-row fill; the in-process reading measures that quantity with no admin dependency.
+- **One coherent sample (#361):** both the cheap and post-GC readings use `MemoryMXBean.heapMemoryUsage.used`. Separate `Runtime.totalMemory()` and `freeMemory()` calls can straddle a heap resize: subtracting free space from the later, larger heap from the earlier committed size can produce a negative value and bypass the budget. A single `MemoryUsage` snapshot avoids that mixed reading. The collection cadence and whole-JVM accounting limit below are unchanged.
 - Polled **on the first batch of a drain, then at most once per second, and unconditionally when the drain completes** (108 §B), plus after each `execute(sql)` that writes to staging. Mid-drain polling is new: with the drain reading outside the lock, a per-table-only check meant a runaway node could put its whole result in the heap before anything looked. Mid-drain checks are **two-tier**: a cheap reading WITHOUT a collection (garbage included, so only ever an over-estimate — a false alarm, never a miss) runs on the cadence, and the accurate GC-forcing reading above decides only when the cheap one exceeds the budget — at the default batch size a 2M-row stage is 2 000 batches, and several drains run concurrently, so paying a `System.gc()` per batch would cost more than the inserts it guards. The first batch is always checked, so a budget already blown when the stage began is refused immediately.
 - Reading is in kilobytes; budget in megabytes. Compare as `usedHeapKb > maxMemoryMb * 1024`.
 - Exceeding the budget fails the current staging operation with `pipeline.staging.memory_limit_exceeded`, carrying the measured value and the budget in the error details.
@@ -756,6 +756,7 @@ Out of scope for v1:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-26 | v1.21 | #361 landing follow-up | §8.2: use one JVM heap snapshot for cheap and post-GC samples, preventing a heap resize between separate committed/free reads from yielding a negative budget measurement. Whole-JVM accounting and collection cadence are unchanged. |
 | 2026-10-21 | v1.20 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **§ atomicity, one clause**: a writer of two tables is "the SCRIPT node" (was TRANSFORM). Status moves from v1.18 to v1.20 — it had not followed v1.19's row. A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-09-17 | v1.19 | 155 / #122 §8.2 cadence correction | §8.2: the mid-drain budget re-measurement is at most once per **second** (`BUDGET_CHECK_INTERVAL_MS`), not 250 ms — the doc kept the pre-108 §B number. The two-tier reading is now documented: a cheap non-collecting sample on the cadence (garbage included, over-estimate only), the accurate GC-forcing check deciding only when the cheap one exceeds the budget. No behaviour change. |
 | 2026-09-17 | v1.18 | 149 correction / #125 review | §4.3: `StageObserver.partialTableDropped()` — a failed stage reports its confirmed undo after the drop's lease returned. |

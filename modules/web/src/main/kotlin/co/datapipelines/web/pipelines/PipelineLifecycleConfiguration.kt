@@ -12,6 +12,7 @@ import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineValidator
 import co.datapipelines.pipeline.PipelineVersionConsumers
 import co.datapipelines.pipeline.ReleaseCheckGate
+import co.datapipelines.pipeline.TemplateIds
 import co.datapipelines.pipeline.TemplateReleaser
 import co.datapipelines.pipeline.TemplateReviewMarks
 import co.datapipelines.pipeline.TemplateVersionStatuses
@@ -55,6 +56,16 @@ class PipelineLifecycleConfiguration {
     fun templateVersionStatuses(templates: TemplateRepository): TemplateVersionStatuses =
         TemplateVersionStatuses { workspaceId, templateId, version ->
             templates.findVersionStatus(workspaceId, templateId, version)
+        }
+
+    /**
+     * #733 — a restore tells a missing template from a missing version by the ENTITY row, as the port
+     * `pipeline-contract` declares: the [templateVersionStatuses] arrangement, over `templates.existsId`.
+     */
+    @Bean
+    fun templateIds(templates: TemplateRepository): TemplateIds =
+        TemplateIds { workspaceId, templateId ->
+            templates.existsId(workspaceId, templateId)
         }
 
     /**
@@ -207,6 +218,8 @@ class PipelineLifecycleConfiguration {
         guard: ReleaseMutationGuard,
         // #517 round three — a restore rechecks its outbound pins under the guard: template statuses uncached, the bound.
         templateStatuses: TemplateVersionStatuses,
+        // #733 — the entity row, to tell a missing template from a missing version.
+        templateIds: TemplateIds,
         bounds: ReleaseBounds,
     ): PipelineService =
         PipelineService(
@@ -220,6 +233,7 @@ class PipelineLifecycleConfiguration {
             coordination = coordination,
             guard = guard,
             templateStatuses = templateStatuses,
+            templateIds = templateIds,
             maxBlockers = bounds.maxBlockers,
         )
 }
