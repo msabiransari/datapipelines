@@ -4,8 +4,9 @@ import java.util.UUID
 
 /**
  * The ONE liveness predicate (D15, roles design §3.5; #215 A2): a principal is live when the user
- * it ACTS AS is `is_active` — the person for a session and an MCP key, the key's own `service`
- * identity for an `endpoint` or `server` key — AND, when the credential
+ * it ACTS AS is `is_active` — the identity row the credential itself names: the member's row for
+ * a session, the key's own `userId` row for every key kind (auth.md §7.5 "Key roles") — AND, when
+ * the credential
  * pins a workspace, that workspace is active. The principal is never the key's creator; since
  * keys v2 A20 (owner ruling 2026-09-25) an `mcp` key ADDITIONALLY requires its creator's user
  * liveness — the [check] with a null pin, from `ApiKeyService.liveActor` — while `endpoint` and
