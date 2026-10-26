@@ -4268,6 +4268,7 @@ pre.tf-pane-input {
 }
 .app-overview-task-icon[data-tone="draft"] { background: var(--accent-warning-bg); color: var(--app-warning-ink); }
 .app-overview-task-icon[data-tone="released"] { background: var(--accent-success-bg); color: var(--app-success-ink); }
+.app-overview-task-icon[data-tone="danger"] { background: var(--accent-danger-bg); color: var(--app-danger-ink); }
 .app-overview-task-text { display: grid; gap: var(--space-1); min-width: 0; }
 .app-overview-task-text b { font-weight: var(--weight-medium); }
 .app-overview-task-text small { color: var(--text-muted); font-size: var(--app-text-support); }

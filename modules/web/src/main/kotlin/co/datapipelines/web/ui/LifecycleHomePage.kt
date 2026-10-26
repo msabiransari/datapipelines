@@ -58,7 +58,7 @@ internal object LifecycleHomePage {
                     "Review your drafts",
                     OverviewWords.drafts(family, inventory?.draftOnly),
                     href,
-                    "draft",
+                    OverviewPage.TaskTone.DRAFT,
                 )
             },
             family.filtered(LifecycleBucket.RELEASED_ONLY)?.let { href ->
@@ -68,7 +68,7 @@ internal object LifecycleHomePage {
                     "Explore live ${family.plural}",
                     "Run a released ${family.singular} with your own inputs.",
                     href,
-                    "released",
+                    OverviewPage.TaskTone.RELEASED,
                 )
             },
         )
