@@ -13,7 +13,7 @@
   <!--/* #699: the scheduler capability page (design record §5). Every behaviour named here is
        docs/scheduler.md's; the request sample is rest-api.md §20.2's create body. The limits
        section is the record's §3 list for scheduling, kept visible on purpose. */-->
-  <!-- claim: docs/scheduler.md §1 — a schedule runs a pipeline at a cron pattern's occurrences -->
+  <!-- claim: docs/scheduler.md §1 — a schedule runs a job at a cron pattern's occurrences; in v1 the one job is a pipeline run -->
   <!-- claim: docs/rest-api.md §20 — the schedule routes -->
 
   <section class="section page-hero" aria-labelledby="ps-title">
@@ -21,7 +21,7 @@
       <p class="kicker">Pipeline scheduling</p>
       <h1 id="ps-title" class="ds-display">Run your pipelines on a schedule.</h1>
       <p class="section-lede">
-        The built-in SQL scheduler runs one pipeline at the times a cron pattern names, in the time zone you choose. You see
+        The built-in job scheduler runs one pipeline at the times a cron pattern names, in the time zone you choose. You see
         the next runs before you save, every run keeps a history of what happened to it, and a run whose outcome
         nobody can confirm stops the schedule until a person looks. Recurring work stops being somebody's
         calendar reminder.
@@ -124,10 +124,10 @@
     <div class="container">
       <p class="kicker">Current limits</p>
       <h2 id="ps-limits" class="ds-headline">What a schedule does not do yet</h2>
-      <!-- claim: docs/scheduler.md §2.3, docs/scheduler.md §9, docs/scheduler.md §2.1 -->
+      <!-- claim: docs/scheduler.md §1 (the pipeline is v1's one job), docs/scheduler.md §2.3, docs/scheduler.md §9, docs/scheduler.md §2.1 -->
       <ul class="fact-list fact-list-plain">
         <li><strong>Mail is optional.</strong> Notices are queued only when scheduler mail is enabled and the schedule has recipients; failure, unknown and blocked events default on.</li>
-        <li><strong>It runs pipelines only.</strong> No report delivery, no SQL-condition alerts, no PDF exports and no scheduled dashboard refresh.</li>
+        <li><strong>It runs pipelines only.</strong> The pipeline is the job type the scheduler runs today; a report or AI job would arrive as a new job type, with no date announced. No report delivery, no SQL-condition alerts, no PDF exports and no scheduled dashboard refresh.</li>
         <li><strong>It follows the current pointer.</strong> A schedule runs the version the pipeline's pointer names, which can be a draft in development. Each run records the exact version it ran.</li>
         <li><strong>People manage it, agents do not.</strong> No MCP tool reads or writes a schedule, and the routes need a signed-in session; a management credential for your own backend is a later slice.</li>
       </ul>
@@ -160,7 +160,7 @@
   <section class="section" aria-labelledby="faq-title">
     <div class="container">
       <p class="kicker">Asked before</p>
-      <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Scheduling, in three questions')}"></div>
+      <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Scheduling, in four questions')}"></div>
     </div>
   </section>
 

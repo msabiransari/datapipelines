@@ -343,7 +343,7 @@ object SitePages {
             title = "Roadmap: shipped, planned, and later | datapipelines.co",
             description =
                 "Shipped: MCP server, ${facts.engineCountWord} engines, APIs, scheduler, dashboards, JSONata " +
-                    "and JavaScript nodes. Planned: schedule mail, reports. Later: extracts, alerts.",
+                    "and JavaScript nodes. Planned: reports. Later: extracts and alerts.",
             view = "site/roadmap",
         )
     val SECURITY =
@@ -588,18 +588,21 @@ object SitePages {
     // from the protected application pages /schedules, /dashboards and /parameter-sets.
 
     /**
-     * The scheduler as docs/scheduler.md states it. #700: "sql scheduler" (20/mo) is the one
-     * numeric scheduler phrase in the 2026-10-24 measurement ("data pipeline scheduling" and
-     * "schedule sql queries" returned no estimate), so it leads the title; the description is
-     * the #700 design record's suggestion.
+     * The scheduler as docs/scheduler.md states it. #735 (owner correction, 2026-10-25): the
+     * product is a generic job scheduler and the pipeline is the job type it runs today, so the
+     * title leads with the category, not with a pipeline dialect. The earlier rationale — that
+     * "sql scheduler" (20/mo) was the one numeric scheduler phrase in the 2026-10-24
+     * measurement — was wrong: "workflow scheduler" (40/mo) was measured too, and product truth
+     * overrides keyword volume, so the SQL-only title is retired. The phrase survives only where
+     * the page answers it and corrects it.
      */
     val PIPELINE_SCHEDULING =
         SitePage(
             path = "/pipeline-scheduling",
-            title = "SQL scheduler for pipelines: cron, time zones and run history",
+            title = "Job scheduler for pipelines: cron, time zones and run history",
             description =
-                "Schedule SQL pipelines with cron and time zones. Preview upcoming runs, pause schedules and " +
-                    "review execution history in your own environment.",
+                "A built-in job scheduler: today it runs SQL pipelines on cron patterns with time zones. " +
+                    "Preview runs, pause schedules and review run history.",
             view = "site/pipeline-scheduling",
         )
 
