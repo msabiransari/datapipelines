@@ -1,7 +1,6 @@
 package co.datapipelines.web.pipelines
 
 import co.datapipelines.pipeline.CreateLifecycle
-import co.datapipelines.pipeline.DryRenderOutcome
 import co.datapipelines.pipeline.NewPipeline
 import co.datapipelines.pipeline.Node
 import co.datapipelines.pipeline.NodeOutput
@@ -17,9 +16,6 @@ import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineSettings
 import co.datapipelines.pipeline.PipelineValidationException
 import co.datapipelines.pipeline.PipelineValidator
-import co.datapipelines.pipeline.ScriptContractView
-import co.datapipelines.pipeline.TemplateDryRenderer
-import co.datapipelines.pipeline.TemplateLookup
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.ValidationResult
 import co.datapipelines.pipeline.WriteSurface
@@ -98,7 +94,7 @@ class ChildVersionProbeIntegrationTest {
                 validator =
                     PipelineValidator(
                         datasources = { _, _ -> null },
-                        templates = UntouchableTemplates,
+                        templates = ChildVersionProbeTemplates,
                         pipelines = repositoryPipelineResolver(repository),
                         // The production bean's answer (DomainConfiguration.pipelineValidator).
                         pipelineNames = PipelineNames.of(repository),
@@ -289,37 +285,6 @@ class ChildVersionProbeIntegrationTest {
         parameters = emptyMap(),
         nodes = nodes,
     )
-
-    /** A parent of one PIPELINE node renders nothing; a touch here is a defect, not a case. */
-    private object UntouchableTemplates : TemplateDryRenderer {
-        override fun lookup(
-            workspaceId: UUID,
-            ref: TemplateRef,
-        ): TemplateLookup = error("the parent save must not look up a template (${ref.id})")
-
-        override fun dryRender(
-            workspaceId: UUID,
-            ref: TemplateRef,
-            context: Map<String, Any?>,
-        ): DryRenderOutcome = error("the parent save must not render (${ref.id})")
-
-        override fun interpolatedParameters(
-            workspaceId: UUID,
-            ref: TemplateRef,
-            declared: Set<String>,
-            guarded: Set<String>,
-        ): List<String> = error("the parent save must not scan template bodies (${ref.id})")
-
-        override fun boundParameters(
-            workspaceId: UUID,
-            ref: TemplateRef,
-        ): List<String> = error("the parent save must not scan template bodies (${ref.id})")
-
-        override fun scriptContract(
-            workspaceId: UUID,
-            ref: TemplateRef,
-        ): ScriptContractView? = error("the parent save must not read a script contract (${ref.id})")
-    }
 
     private companion object {
         val WORKSPACE: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
