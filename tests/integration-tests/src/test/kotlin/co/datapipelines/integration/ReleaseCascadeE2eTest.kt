@@ -677,6 +677,45 @@ class ReleaseCascadeE2eTest {
     @ValueSource(booleans = [false, true])
     @Order(10)
     fun `compatibility release resolves a renamed draft by its registry identity and keeps native hash refusals`(hadRelease: Boolean) {
+        val (id, renamed, oldHash, newHash) = renamedDraft(hadRelease)
+        (newHash == oldHash) shouldBe false
+        val auditBefore = auditRows("pipeline.version.released", id).size
+
+        release(id, oldHash, cascade = false)
+            .statusCode(409)
+            .body("error.code", equalTo("pipeline.version.conflict"))
+            .body("error.details.current_body_hash", equalTo(newHash))
+        auditRows("pipeline.version.released", id).size shouldBe auditBefore
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .get("/api/v1/pipelines/$id")
+            .then()
+            .statusCode(200)
+            .body("data.draft.body_hash", equalTo(newHash))
+            .body("data.current_version", equalTo(if (hadRelease) 1 else null))
+
+        release(id, newHash, cascade = false).statusCode(200).body("data.status", equalTo("RELEASED"))
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .get("/api/v1/pipelines/$id")
+            .then()
+            .statusCode(200)
+            .body("data.name", equalTo(renamed))
+            .body("data.current_version", equalTo(if (hadRelease) 2 else 1))
+        auditRows("pipeline.version.released", id).size shouldBe auditBefore + 1
+    }
+
+    private data class RenamedDraft(
+        val id: String,
+        val name: String,
+        val oldHash: String,
+        val newHash: String,
+    )
+
+    /** A sole draft or a draft over a release, with proposed metadata that differs from the registry row. */
+    private fun renamedDraft(hadRelease: Boolean): RenamedDraft {
         val originalName = "test/rename_517_$hadRelease"
         val renamed = "test/renamed_517_$hadRelease"
         val body =
@@ -723,33 +762,7 @@ class ReleaseCascadeE2eTest {
                 .response()
                 .jsonPath()
         val newHash = edited.getString("data.body_hash")
-        (newHash == oldHash) shouldBe false
-        val auditBefore = auditRows("pipeline.version.released", id).size
-
-        release(id, oldHash, cascade = false)
-            .statusCode(409)
-            .body("error.code", equalTo("pipeline.version.conflict"))
-            .body("error.details.current_body_hash", equalTo(newHash))
-        auditRows("pipeline.version.released", id).size shouldBe auditBefore
-        given()
-            .port(port)
-            .asSession(ADMIN_SESSION)
-            .get("/api/v1/pipelines/$id")
-            .then()
-            .statusCode(200)
-            .body("data.draft.body_hash", equalTo(newHash))
-            .body("data.current_version", equalTo(if (hadRelease) 1 else null))
-
-        release(id, newHash, cascade = false).statusCode(200).body("data.status", equalTo("RELEASED"))
-        given()
-            .port(port)
-            .asSession(ADMIN_SESSION)
-            .get("/api/v1/pipelines/$id")
-            .then()
-            .statusCode(200)
-            .body("data.name", equalTo(renamed))
-            .body("data.current_version", equalTo(if (hadRelease) 2 else 1))
-        auditRows("pipeline.version.released", id).size shouldBe auditBefore + 1
+        return RenamedDraft(id, renamed, oldHash, newHash)
     }
 
     /** The parent's v1 status and the template's v1 status, read at the TABLES (the parent is wholly discarded). */
