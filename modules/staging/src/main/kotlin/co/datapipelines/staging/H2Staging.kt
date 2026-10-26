@@ -12,6 +12,8 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.slf4j.LoggerFactory
+import java.lang.management.ManagementFactory
+import java.lang.management.MemoryMXBean
 import java.sql.Connection
 import java.sql.ResultSet
 import java.sql.ResultSetMetaData
@@ -57,6 +59,7 @@ class H2Staging internal constructor(
     override val executionId: UUID,
     private val pool: H2ConnectionPool,
     private val config: H2StagingProperties,
+    private val heap: MemoryMXBean = ManagementFactory.getMemoryMXBean(),
 ) : Staging {
     private val bookkeeping = Any()
 
@@ -391,11 +394,11 @@ class H2Staging internal constructor(
         return now
     }
 
-    /** Used heap as the JVM reports it right now — garbage included, so only ever an over-estimate. */
-    private fun usedHeapKbWithoutCollecting(): Long {
-        val runtime = Runtime.getRuntime()
-        return (runtime.totalMemory() - runtime.freeMemory()) / BYTES_PER_KB
-    }
+    /**
+     * One coherent heap snapshot, including garbage. Separate committed/free readings can
+     * straddle a heap resize and subtract into a negative value, bypassing the budget (#361).
+     */
+    private fun usedHeapKbWithoutCollecting(): Long = heap.heapMemoryUsage.used / BYTES_PER_KB
 
     /**
      * Compares the **measured** footprint against the budget (§8.2) with the accurate,
@@ -427,8 +430,7 @@ class H2Staging internal constructor(
     private fun measureUsedHeapKb(): Long {
         @Suppress("ExplicitGarbageCollectionCall")
         System.gc()
-        val runtime = Runtime.getRuntime()
-        return (runtime.totalMemory() - runtime.freeMemory()) / BYTES_PER_KB
+        return usedHeapKbWithoutCollecting()
     }
 
     // ------------------------------------------------------------ mapping

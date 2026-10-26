@@ -414,3 +414,39 @@ test("a folder's glyph follows its expansion between folder and folder-open; a l
   assert.equal(glyphHref(controlOf("folder:glyph")).endsWith("#folder"), true, "collapsing returns the closed folder glyph");
   renderer.dispose();
 });
+
+// #739: host-only family glyphs, never a tree response's arbitrary href fragment.
+for (const [option, expected] of [[undefined, "file"], ["file", "file"],
+  ...["workflow", "code", "boxes", "chart-line", "sliders-horizontal"].map(id => [id, id]),
+  ["unknown", "file"], ["folder-open", "file"], ["workflow#bad", "file"]]) {
+  test(`leaf glyph ${String(option)} resolves to ${expected}, without changing folders`, async () => {
+    const document = fakeDocument(); const host = document.createElement("div"); document.body.append(host);
+    const source = { async loadChildren(parent) { return page(parent === null ? [folder("glyph")] :
+      [{ ...leaf("glyph/row", "folder:glyph"), leafGlyph: "unknown", icon: "unknown" }]); } };
+    const state = createTreeState({ source });
+    const renderer = createTreeRenderer(host, state, { leafGlyph: option });
+    const href = key => host.querySelectorAll(`[data-tree-key="${key}"]`)[0].children[0].children[0].children[0].children[0].getAttribute("href");
+    await state.initialize(); renderer.render();
+    assert.equal(href("folder:glyph"), "/vendor/icons/lucide-sprite.svg#folder");
+    await state.expand("folder:glyph"); renderer.render();
+    assert.equal(href("folder:glyph"), "/vendor/icons/lucide-sprite.svg#folder-open");
+    assert.equal(href("artifact:glyph/row"), `/vendor/icons/lucide-sprite.svg#${expected}`);
+    state.collapse("folder:glyph"); renderer.render();
+    assert.equal(href("folder:glyph"), "/vendor/icons/lucide-sprite.svg#folder");
+    renderer.dispose();
+  });
+}
+
+test("the renderer marks search mode before reconciling and restores browse mode on clear", async () => {
+  const document = fakeDocument(); const host = document.createElement("div"); document.body.append(host);
+  const source = { async loadChildren() { return page([folder("root")]); }, async search() { return page([folder("match")]); } };
+  const state = createTreeState({ source });
+  const renderer = createTreeRenderer(host, state, {});
+  await state.initialize(); renderer.render();
+  assert.equal(host.children[0].getAttribute("data-tree-searching"), "false");
+  await state.setQuery("match"); renderer.render();
+  assert.equal(host.children[0].getAttribute("data-tree-searching"), "true");
+  await state.clear(); renderer.render();
+  assert.equal(host.children[0].getAttribute("data-tree-searching"), "false");
+  renderer.dispose();
+});

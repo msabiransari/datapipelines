@@ -19,11 +19,11 @@ import java.util.UUID
 /**
  * #701 — the resource row re-cut to ONE line (owner ruling 2026-10-24; the record §5/§7
  * as amended in 4cf4f91d), MEASURED in the browser (ui-screens §3.4): the browser surface
- * is the overlay token, a row is 12px padding and an 8px radius and ONE text line — the
+ * is the overlay token, a row is 12px vertical / 8px horizontal padding and an 8px radius and ONE text line — the
  * 12px title truncates with an ellipsis (the control's `title` carries the full canonical
  * name) and yields width to the badges, which share the line after it and never leave the
  * rail (#541); the glyph is centred on the line, a folder's following its expansion
- * (`folder` closed / `folder-open` open) and a leaf's staying `file`, and neither ever
+ * (`folder` closed / `folder-open` open) and a leaf's carrying its family glyph, and neither ever
  * rotates. Rows sit 4px apart, hover tints the row, and selection is primary ink over the
  * selected surface (never the link blue).
  *
@@ -203,7 +203,7 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
     }
 
     /** The resting state (#701): one line per row — a truncating title, its badges beside
-     *  it, the glyph centred, 12px padding, an 8px radius, the 4px rhythm, the overlay
+     *  it, the glyph centred, 12px vertical / 8px horizontal padding, an 8px radius, the 4px rhythm, the overlay
      *  surface, hover on a sibling, the folder glyph following its expansion. */
     @Suppress("LongMethod") // one document carries the ruling's geometry, truncation, glyph and badge measurements
     @Test
@@ -244,9 +244,9 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
             isTransparent("row.alpha.controlBg")
             isTransparent("row.alpha.lineBg")
             near("row.alpha.padTop", 12.0, 0.05)
-            near("row.alpha.padRight", 12.0, 0.05)
+            near("row.alpha.padRight", 8.0, 0.05)
             near("row.alpha.padBottom", 12.0, 0.05)
-            near("row.alpha.padLeft", 12.0, 0.05)
+            near("row.alpha.padLeft", 8.0, 0.05)
             near("row.alpha.radius", 8.0, 0.05)
             near("row.alpha.titleFontSize", 12.0, 0.05)
             near("row.alpha.titleLineHeight", 18.6, 0.1)
@@ -281,9 +281,9 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
             withClue("row.long.titleTextOverflow") { readings["row.long.titleTextOverflow"] shouldBe "ellipsis" }
             withClue("row.long.controlTitle") { readings["row.long.controlTitle"] shouldBe longPath }
             withClue("row.long.labelTitle") { readings["row.long.labelTitle"] shouldBe longPath }
-            // glyphs: the expanded folder is folder-open, a leaf stays file
+            // glyphs: the expanded folder is folder-open, a pipeline leaf carries workflow
             withClue("row.folder.iconHref") { (readings["row.folder.iconHref"] as String).endsWith("#folder-open") shouldBe true }
-            withClue("row.alpha.iconHref") { (readings["row.alpha.iconHref"] as String).endsWith("#file") shouldBe true }
+            withClue("row.alpha.iconHref") { (readings["row.alpha.iconHref"] as String).endsWith("#workflow") shouldBe true }
             near("row.beta.itemTop", num("row.alpha.itemBottom") + 4.0, 0.5)
             matchesToken("row.beta.hover.controlBg", "row.beta.surfaceHover")
         }
@@ -356,6 +356,118 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
         }
     }
 
+    /** #739: guide geometry comes from the real row and its pseudo-elements, including an expanded last child. */
+    @Suppress("LongMethod") // one fixture compares connected guides in both themes, then search and clear
+    @Test
+    fun `guides join parent to last child centre across gaps and ignore the last child's expanded subtree`() {
+        startTrace()
+        readyTree()
+        listOf("guide/a/leaf", "guide/b/leaf", "guide/c/leaf").forEach { seedPipeline(it) }
+        openTree()
+        expand("guide")
+        expand("guide/a")
+        expand("guide/c")
+        for (theme in listOf("light", "dark")) {
+            ensureTheme(theme)
+            record("guide.parent", guideMetrics("guide"))
+            for (path in listOf("guide/a", "guide/b", "guide/c", "guide/a/leaf", "guide/c/leaf")) {
+                record(path, guideMetrics(path))
+            }
+            printReadings("guides-$theme")
+            page.screenshot(Page.ScreenshotOptions().setPath(evidence("739-guides-$theme.png")))
+            assertSoftly {
+                withClue("root has no vertical guide") { readings["guide.parent.beforeContent"] shouldBe "none" }
+                withClue("root has no tick") { readings["guide.parent.afterContent"] shouldBe "none" }
+                for (path in listOf("guide/a", "guide/b", "guide/c", "guide/a/leaf", "guide/c/leaf")) {
+                    withClue("$path guide exists") { readings["$path.beforeContent"] shouldBe "\"\"" }
+                    near("$path.indent", 8.0)
+                    near("$path.guideX", num("$path.parentIconCenterX"))
+                    near("$path.tickY", num("$path.rowCenterY"))
+                    near("$path.tickEndX", num("$path.iconLeft"))
+                    near("$path.tickLength", 2.0, 0.1)
+                    near("$path.rowHeight", 42.6, 0.1)
+                    near("$path.guideWidth", 1.0, 0.1)
+                    near("$path.tickHeight", 1.0, 0.1)
+                    matchesToken("$path.guideColor", "$path.borderSubtle")
+                    matchesToken("$path.tickColor", "$path.borderSubtle")
+                }
+                withClue("the fixture has three direct children") { (readings["guide/a.siblingItems"] as Number).toInt() shouldBe 3 }
+                withClue("the first child is not last") { readings["guide/a.lastItem"] shouldBe false }
+                withClue("the middle child is not last") { readings["guide/b.lastItem"] shouldBe false }
+                withClue("the expanded third child is last") { readings["guide/c.lastItem"] shouldBe true }
+                near("guide/a.guideTop", num("guide.parent.rowCenterY"))
+                near("guide/a.guideBottom", num("guide/b.itemTop"))
+                near("guide/b.guideBottom", num("guide/c.itemTop"))
+                near("guide/c.guideBottom", num("guide/c.rowCenterY"))
+                withClue("last child's expanded subtree extends below its guide") {
+                    num("guide/c.itemBottom").shouldBeGreaterThan(num("guide/c.guideBottom") + num("guide/c.rowHeight"))
+                }
+                // A single child's guide reaches UP into its parent and stops at its own row centre.
+                near("guide/c/leaf.guideTop", num("guide/c.rowCenterY"))
+                near("guide/c/leaf.guideBottom", num("guide/c/leaf.rowCenterY"))
+            }
+            // A trailing status/Load more row must not make the last RESOURCE's guide span its subtree.
+            page.evaluate(
+                """panel => {
+                  const group = document.querySelector(panel + ' [data-tree-key="folder:guide"] > .dp-tree-group');
+                  const notice = document.createElement('div'); notice.className = 'dp-tree-status';
+                  notice.textContent = 'More results'; group.append(notice);
+                }""",
+                panel,
+            )
+            record("notice.last", guideMetrics("guide/c"))
+            near("notice.last.guideBottom", num("guide/c.rowCenterY"))
+            page.evaluate("panel => document.querySelector(panel + ' .dp-tree-status').remove()", panel)
+        }
+        search("leaf")
+        // Search contains server-provided ancestor folders too: every level must be guide-free.
+        val searchGuides =
+            page.evaluate(
+                """panel => [...document.querySelectorAll(panel + ' .dp-tree-item')].every(item =>
+                  getComputedStyle(item, '::before').content === 'none' && getComputedStyle(item, '::after').content === 'none')""",
+                panel,
+            )
+        searchGuides shouldBe true
+        page.click("$panel button[aria-label='Clear search']")
+        expand("guide")
+        record("cleared.first", guideMetrics("guide/a"))
+        withClue("clearing search restores browse guides") { readings["cleared.first.beforeContent"] shouldBe "\"\"" }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun guideMetrics(path: String): Map<String, Any?>? =
+        page.evaluate(
+            """([panel, path]) => {
+              const control = document.querySelector(panel + ' .dp-tree-activate[title="' + path + '"]');
+              if (!control) return null;
+              const item = control.closest('.dp-tree-item'), group = item.parentElement;
+              const parent = group.closest('.dp-tree-item');
+              const ir = item.getBoundingClientRect(), cr = control.getBoundingClientRect();
+              const icon = control.querySelector('svg').getBoundingClientRect();
+              const parentIcon = parent?.querySelector(':scope > .dp-tree-line svg').getBoundingClientRect();
+              const before = getComputedStyle(item, '::before'), after = getComputedStyle(item, '::after');
+              const probe = document.createElement('span'); document.body.append(probe);
+              probe.style.color = 'var(--border-subtle)';
+              const out = {
+                beforeContent: before.content, afterContent: after.content,
+                siblingItems: group.querySelectorAll(':scope > .dp-tree-item').length,
+                lastItem: item.matches(':not(:has(~ .dp-tree-item))'),
+                itemTop: ir.top, itemBottom: ir.bottom, rowCenterY: cr.top + cr.height / 2, rowHeight: cr.height,
+                parentIconCenterX: parentIcon ? parentIcon.left + parentIcon.width / 2 : null,
+                iconLeft: icon.left, guideX: ir.left + parseFloat(before.left),
+                guideTop: ir.top + parseFloat(before.top),
+                guideBottom: ir.top + parseFloat(before.top) + parseFloat(before.height),
+                guideWidth: parseFloat(before.width), guideColor: before.backgroundColor,
+                tickY: ir.top + parseFloat(after.top), tickLength: parseFloat(after.width),
+                tickEndX: ir.left + parseFloat(after.left) + parseFloat(after.width),
+                tickHeight: parseFloat(after.height), tickColor: after.backgroundColor,
+                indent: parseFloat(getComputedStyle(group).paddingInlineStart), borderSubtle: getComputedStyle(probe).color,
+              };
+              probe.remove(); return out;
+            }""",
+            listOf(panel, path),
+        ) as Map<String, Any?>?
+
     // ---------------------------------------------------------------- #701 round two (owner ruling 2026-10-25)
 
     /** F1: the supported minimum — the compact row keeps every badge inside the rail at depth 3 and 10. */
@@ -412,11 +524,15 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
         }
     }
 
-    /** The templates rows (dark, the theme the loop ends on) at the browser's 480px maximum. */
+    /** The templates rows and PNG evidence in both themes at the browser's 480px maximum. */
     private fun widestSide(scripts: List<String>): List<Map<String, Any?>> {
         setBrowserWidth(MAX_WIDTH)
-        return scripts.map {
-            requireNotNull(narrowMetrics("templates", it)).plus(listOf("theme" to "dark", "family" to "templates", "width" to MAX_WIDTH))
+        return listOf("light", "dark").flatMap { theme ->
+            ensureTheme(theme)
+            val metadata = listOf("theme" to theme, "family" to "templates", "width" to MAX_WIDTH)
+            val rows = scripts.map { requireNotNull(narrowMetrics("templates", it)).plus(metadata) }
+            page.screenshot(Page.ScreenshotOptions().setPath(evidence("739-$MAX_WIDTH-templates-$theme.png")))
+            rows
         }
     }
 
@@ -434,8 +550,8 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
         withClue("$label — badges inside the browser's content edge") { n("badgeRight").shouldBeLessThanOrEqual(n("contentRight") + 0.5) }
         withClue("$label — no sideways scroll (#541)") { n("treeScrollWidth").shouldBeLessThanOrEqual(n("treeClientWidth")) }
         if (width == MIN_WIDTH && n("depth") > SHALLOW_DEPTH && row["family"] == "templates") {
-            // owner ruling 2026-10-25 (amended): at the minimum a three-badge leaf deeper than 7 levels may
-            // let its badges reach into the row's right padding — inside the rail, never clipped
+            // #739 spacing amendment: a deep three-badge leaf at the minimum may use the trailing
+            // row/scroll inset — inside the rail, never clipped
             withClue("$label — the accepted residue stays inside the rail") {
                 n("metaRight").shouldBeLessThanOrEqual(n("contentRight") + 0.5)
             }
@@ -449,9 +565,15 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
         } else {
             withClue("$label — the ruling accepts a 0px name here") { n("titleClientWidth").shouldBeGreaterThanOrEqual(0.0) }
         }
-        // the compact rows (every width): the indent and the badge sides are --space-1
-        withClue("$label — compact indent") { n("indent") shouldBe n("space1") }
-        withClue("$label — compact badge side padding") { n("badgePadLeft") shouldBe n("space1") }
+        // the compact rows (every width): the indent and row insets are --space-2, row gaps --space-1, badge gaps/sides --space-0-5
+        withClue("$label — compact indent") { n("indent") shouldBe n("space2") }
+        withClue("$label — family leaf glyph") {
+            (row["iconHref"] as String).endsWith(if (row["family"] == "templates") "#code" else "#workflow") shouldBe true
+        }
+        withClue("$label — horizontal row inset") { n("rowInset") shouldBe n("space2") }
+        withClue("$label — horizontal row gap") { n("rowGap") shouldBe n("space1") }
+        withClue("$label — badge gap") { n("badgeGap") shouldBe n("spaceHalf") }
+        withClue("$label — compact badge side padding") { n("badgePadLeft") shouldBe n("spaceHalf") }
     }
 
     /** The preference browser-resize.mjs writes; the box must report it before any reading counts. */
@@ -505,7 +627,10 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
             titleClientWidth: title.clientWidth, titleScrollWidth: title.scrollWidth, titleTextOverflow: getComputedStyle(title).textOverflow,
             controlTitle: control.getAttribute('title'), labelTitle: title.getAttribute('title'),
             indent: group ? parseFloat(getComputedStyle(group).paddingInlineStart) : null,
-            space1: tok('--space-1') };
+            iconHref: control.querySelector('use').getAttribute('href'),
+            rowInset: parseFloat(cs.paddingLeft), rowGap: parseFloat(cs.columnGap),
+            badgeGap: parseFloat(getComputedStyle(meta).columnGap),
+            spaceHalf: tok('--space-0-5'), space1: tok('--space-1'), space2: tok('--space-2') };
           probe.remove();
           return out;
         }""",

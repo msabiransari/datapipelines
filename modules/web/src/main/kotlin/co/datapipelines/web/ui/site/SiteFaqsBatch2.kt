@@ -155,8 +155,9 @@ object SiteFaqsBatch2 {
             FaqEntry(
                 "Can each client be kept separate from the others?",
                 "Yes, one workspace per client. A key is pinned to one workspace at issuance, so an agent " +
-                    "working for client A cannot switch that key to client B. A colleague's session can switch " +
-                    "only to workspaces they belong to; other workspaces' pipelines, datasources and executions " +
+                    "working for client A cannot switch that key to client B. A colleague without the super admin " +
+                    "role can switch their session only to workspaces they belong to; other workspaces' pipelines, " +
+                    "datasources and executions " +
                     "are absent, not hidden. Workspace resolution is docs/auth.md §5.6.",
                 "docs/auth.md §5.6",
             ),

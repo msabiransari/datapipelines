@@ -164,6 +164,12 @@ out=$(run_start_demo nyc,trade) || fail "a demo start whose loaders all exited 0
 $out"
 grep -q "demo data loaded (nyc,trade)" <<<"$out" || fail "expected the demo line, got:
 $out"
+grep -q "http://localhost:18976/api-keys" <<<"$out" || fail "the demo message must send the person to the Keys page (/api-keys), got:
+$out"
+if grep -qi "top bar" <<<"$out"; then
+  fail "the demo message still names the retired top-bar MCP key (keys v2, auth.md §7.4), got:
+$out"
+fi
 for svc in sample-data sample-data-mysql sample-data-trade sample-data-trade-mysql; do
   grep -q "ps -a --format json $svc\$" "$ARGV_LOG" \
     || fail "the loader check never asked compose about $svc (with -a; exited one-shots are hidden without it)"
