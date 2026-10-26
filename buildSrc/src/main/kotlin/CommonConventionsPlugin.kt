@@ -69,6 +69,10 @@ import java.util.zip.ZipFile
  *    platform lets the Kotlin plugin's newer stdlib win over the BOM's 1.9.25.
  */
 class CommonConventionsPlugin : Plugin<Project> {
+    // The convention script: one block per convention, in the order the plugins it configures are
+    // applied. Its length and branch count are the number of conventions; #724 lints buildSrc
+    // without restructuring it.
+    @Suppress("LongMethod", "CyclomaticComplexMethod")
     override fun apply(project: Project) {
         project.plugins.apply("org.jetbrains.kotlin.jvm")
         // kotlin-spring (allopen): opens @Component/@Configuration/@Transactional
@@ -719,21 +723,29 @@ private fun declaredTestEngines(classpath: FileCollection): Map<String, String> 
         .forEach { found.putIfAbsent(it, source) }
 
     classpath.files.forEach { entry ->
-        when {
-            entry.isDirectory -> {
-                File(entry, TEST_ENGINE_SERVICE)
-                    .takeIf { it.isFile }
-                    ?.let { record(it.readLines(), entry.name) }
-            }
-
-            entry.isFile && entry.name.endsWith(".jar") -> {
-                ZipFile(entry).use { jar ->
-                    jar.getEntry(TEST_ENGINE_SERVICE)?.let { service ->
-                        record(jar.getInputStream(service).bufferedReader().readLines(), entry.name)
-                    }
-                }
-            }
-        }
+        testEngineServiceLines(entry)?.let { record(it, entry.name) }
     }
     return found
 }
+
+/** The engine service file's lines in a classpath directory or jar; null when the entry has none. */
+private fun testEngineServiceLines(entry: File): List<String>? =
+    when {
+        entry.isDirectory -> {
+            File(entry, TEST_ENGINE_SERVICE)
+                .takeIf { it.isFile }
+                ?.readLines()
+        }
+
+        entry.isFile && entry.name.endsWith(".jar") -> {
+            ZipFile(entry).use { jar ->
+                jar.getEntry(TEST_ENGINE_SERVICE)?.let { service ->
+                    jar.getInputStream(service).bufferedReader().readLines()
+                }
+            }
+        }
+
+        else -> {
+            null
+        }
+    }
