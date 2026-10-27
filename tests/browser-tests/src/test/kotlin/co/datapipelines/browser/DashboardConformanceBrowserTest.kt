@@ -5,6 +5,7 @@ import com.microsoft.playwright.PlaywrightException
 import com.microsoft.playwright.TimeoutError
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
@@ -34,6 +35,12 @@ import java.util.UUID
 // for no reader's benefit.
 @Suppress("LargeClass")
 class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
+    @BeforeEach
+    fun traceSetupAndCase() {
+        // #696: capture ready() too; a shell-init failure happens before the board is seeded.
+        startTrace()
+    }
+
     @Test
     @Order(1)
     fun `bootstrap mounts the board and the initial action renders chart, table and kpi`() {
