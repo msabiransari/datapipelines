@@ -1,6 +1,6 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.57
+**Status:** v1.58
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-10-27

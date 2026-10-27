@@ -18,7 +18,8 @@ RUN groupadd --system datapipelines && useradd --system --gid datapipelines data
 # `v<ver>` directory with it; the binaries are valid for exactly one core version.
 # `avro` is bundled because `LOAD iceberg` auto-loads it from the directory. The four add
 # ~108 MB uncompressed to the image (~39 MB downloaded at build). The extension repository
-# publishes no checksums for these artifacts, so the pin is the versioned URL itself.
+# publishes no checksums for these artifacts; deploy/duckdb-extensions.sha256 pins
+# the decompressed bytes for both platforms, and the extension RUN verifies them.
 # The platform directory follows the build's TARGETARCH (BuildKit fills it): `docker build`
 # on Apple Silicon produces a linux/arm64 image, whose DuckDB looks for linux_arm64
 # extensions — hard-coding linux_amd64 here made the runtime LOAD-only against an EMPTY
