@@ -311,6 +311,21 @@ Invoke buildSrc's tests by root task path (`./gradlew :buildSrc:cleanTest :build
 so their classpath is verified; `-p buildSrc` makes buildSrc its own root build with
 no verification metadata and verifies nothing — never use it where verification matters.
 
+buildSrc's Gradle TestKit probes are root builds of their own too, so each probe copies this
+file into its root (`gradle/verification-metadata.xml`, via `ProbeVerification.kt`, #742):
+everything a probe downloads from Maven Central verifies against the same committed
+checksums as the modules, and a mismatch fails the probe naming the artifact.
+`ProbeVerificationTest` plants one wrong checksum to prove it. Gradle re-verifies
+artifacts already in a warm TestKit cache, so a laptop run checks them too. CI's
+`cold-verify` job runs the probes on a cold TestKit cache every time. A probe that needs an
+artifact the modules never resolve fails on the MISSING entry. To add it, delete
+`buildSrc/build/tmp/test/work/.gradle-test-kit` (the writer, like the one below, needs a cold
+cache), add `"--write-verification-metadata", "sha256"` to that probe's runner arguments for
+one local run, and copy the probe root's
+`gradle/verification-metadata.xml` out before the test ends. Diff it against this file, copy ONLY
+the new `<component>` blocks in at the writer's sorted position, and revert the test edit. Name
+each block in the commit, with its sha256 and why the probe resolves it.
+
 PGP/signature verification is deliberately NOT enabled (deferred — key
 management for ~500 artifacts is its own project; checksums already close the
 "artifact changed upstream / MITM mirror" hole against a trusted first
@@ -1260,6 +1275,8 @@ the catalog file's content is a declared test input, so a
 `gradle/libs.versions.toml` edit re-runs the guards even without the gate).
 CI's `cold-verify` job runs the same test command with its fresh `GRADLE_USER_HOME`
 after the root dependency-verification surface, covering buildSrc's test classpath (§6.3).
+The TestKit probes those tests drive verify their own downloads against
+`gradle/verification-metadata.xml` too (#742, §6.3).
 The stage is attempted even when the network preflight says offline (a warm
 TestKit cache passes offline). The fail-soft offline skip is earned only by
 a dependency-resolution failure — evidenced in the stage log **or the JUnit

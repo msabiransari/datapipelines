@@ -66,6 +66,7 @@ class KtlintRemovedOnlyTest {
     fun `removed sources refresh findings without losing live violations or incrementality`() {
         assertTrue(!probeDir.exists() || probeDir.deleteRecursively(), "cannot reset this test's own probe")
         assertTrue(probeDir.mkdirs())
+        installRepoVerification(probeDir)
         probeDir.resolve("settings.gradle.kts").writeText(
             """
             dependencyResolutionManagement {
