@@ -1,6 +1,6 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.58
+**Status:** v1.59
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-10-27
@@ -32,12 +32,12 @@ This is **lighter than the core specs** — most operational concerns are the op
 
 Published to `ghcr.io/datapipelines/datapipelines:{version}` and `docker.io/datapipelines/datapipelines:{version}` (mirror).
 
-- **Base image**: `eclipse-temurin:21-jre-jammy` (LTS JDK 21, Ubuntu Jammy).
-- **Layers**: multi-stage build (`gradle:8.7-jdk21` builder → `eclipse-temurin:21-jre-jammy` runtime).
+- **Base image**: `eclipse-temurin:21-jre` (the Ubuntu glibc JRE 21 image, chosen over a smaller alpine base because argon2-jvm loads its native library through JNA, which ships glibc binaries).
+- **Layers**: single stage: the boot jar is built on the host (`./gradlew :modules:app:bootJar`) and copied in; the image adds the DuckDB extension bundle, the GraalJS isolate with its pre-installed resource cache, and the third-party notices file.
 - **Bundled DuckDB extensions (dp-lake)**: `httpfs`, `aws`, `iceberg` and `avro` for DuckDB core v1.5.5, pre-populated under `/opt/duckdb/extensions/v1.5.5/<platform>/` (`<platform>` = `linux_amd64` or `linux_arm64`, following the build's `TARGETARCH`) and activated by the image's `ENV DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY` — a LAKE datasource `LOAD`s them from disk and never `INSTALL`s at runtime, so no egress to `extensions.duckdb.org` is needed ([Configuration §3.25](configuration.md)). Adds ~108 MB uncompressed (~39 MB downloaded at build). The eight decompressed binaries (four per platform) are pinned in `deploy/duckdb-extensions.sha256`; the extension build layer runs `sha256sum -c --ignore-missing --strict` before `USER` and refuses a mismatch. `/app/THIRD-PARTY-NOTICES` includes the extensions at their footer commits, their copyrights and licences, and their direct statically linked vcpkg manifest dependencies (transitive ports are tracked in [#747](https://github.com/msabiransari/datapipelines/issues/747)).
 - **Size target**: < 250 MB compressed.
-- **User**: non-root (`datapipelines` user, UID 1000).
-- **Entrypoint**: `java $JAVA_OPTS -Duser.timezone=UTC -jar /app/app.jar`.
+- **User**: non-root (`datapipelines`, a system account created with `useradd --system`; no fixed UID — a chart or compose `runAsUser` must not assume 1000).
+- **Entrypoint**: `["java", "-Dpolyglot.engine.userResourceCache=/opt/graaljs/resources", "-jar", "/app/datapipelines.jar"]` (exec form). The image defines no JVM-flags hook: a JVM option variable (`JAVA_TOOL_OPTIONS` and friends) would reach the JVM without one, which is why the shipped deploy files refuse those names (§6.4, §9).
 
 To re-pin on a `DUCKDB_CORE_VERSION` bump, update **three inputs together**: the
 Dockerfile core ARG, `deploy/duckdb-extensions.sha256` (eight sums plus the four
@@ -55,7 +55,7 @@ allowlist. Run `:modules:app:generateThirdPartyNotices`, the buildSrc licence
 fixtures and `DockerfileDuckDbExtensionPinTest`, rebuild the jar, and prove one
 bad sum refuses the image build before building the restored pins successfully.
 
-**`-Duser.timezone=UTC` is normative, not a suggestion.** The type system assumes a UTC JVM: ingest normalizes timezone-aware source values to UTC and treats naive source timestamps as already-UTC ([Type System §8.4](type-system.md#84-timestamp-timezone-normalization)), and every internal `TIMESTAMPTZ` is stored and rendered in UTC. A container whose JVM default zone is anything else silently shifts rendered timestamps. The flag is baked into the image entrypoint; bare-JVM and JAR deployments (§3.2, §6.5) MUST pass it themselves.
+**`-Duser.timezone=UTC` is normative, not a suggestion.** The type system assumes a UTC JVM: ingest normalizes timezone-aware source values to UTC and treats naive source timestamps as already-UTC ([Type System §8.4](type-system.md#84-timestamp-timezone-normalization)), and every internal `TIMESTAMPTZ` is stored and rendered in UTC. A container whose JVM default zone is anything else silently shifts rendered timestamps. No image entrypoint sets it: every deployment — container, bare JVM or JAR (§3.2, §6.5) — MUST pass `-Duser.timezone=UTC` itself.
 
 Heap and container-memory sizing: §6.6.
 
@@ -1359,6 +1359,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-27 | v1.59 | #743 — renumbered at merge after #692’s v1.58 | **§3.1:** the four image bullets state what the Dockerfile builds — base image `eclipse-temurin:21-jre` (Ubuntu glibc; argon2-jvm loads its native library through JNA), a single-stage build (the boot jar is built on the host and copied in; the image adds the DuckDB extension bundle, the GraalJS isolate + resource cache and the third-party notices file), the `useradd --system` account with no fixed UID, and the exec-form entrypoint naming the GraalJS resource cache and `/app/datapipelines.jar`; the timezone paragraph no longer claims the entrypoint bakes the UTC flag in — every deployment passes `-Duser.timezone=UTC` itself. `DeploymentImageBulletsSpecDriftTest` pins the bullets to the Dockerfile (one `FROM` tag, the `ENTRYPOINT` array verbatim, the `USER`/`useradd --system` account) and refuses the retired claims — the base tag, the builder-stage build, the builder-image pin, the JVM-flags variable, the fixed UID, the wrong jar path and the baked-in-UTC claim — described here rather than quoted, so the retired-words grep over this file stays empty. The Dockerfile's healthcheck comment now names the Ubuntu base, not alpine. |
 | 2026-10-26 | v1.58 | #692 | §3.1: checksum-pin all eight decompressed DuckDB extension binaries, include commit-bound extension and direct vcpkg component notices, and document the three-input re-pin procedure. |
 | 2026-10-26 | v1.57 | #693 — renumbered at merge after #570’s v1.56 vendored browser-asset notices | **§6.2A:** the offline `:modules:web:generateVendoredAssetNotices` task renders the vendor manifest and upstream licence files to `/vendor/THIRD-PARTY-NOTICES.txt`, packaged in the web jar and website export. Missing coverage, unknown or mismatched licences and stale allowances fail the build. |
 | 2026-10-26 | v1.56 | #570 unused MapLibre CSS | **§6.2A:** patch 0004 drops the unreachable maplibre-gl stylesheet require from the non-map custom bundles; both bundles rebuilt and hashes and sizes re-pinned, with the rule to drop the patch when a `map` trace joins a trace list. |

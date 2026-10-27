@@ -122,7 +122,7 @@ EXPOSE 8080
 # unhealthy short of a dead listener. /ready maps not-ready (startup, draining,
 # or a DOWN component) to 503 — that is the signal `service_healthy` dependants
 # need. Root-level, no auth (rest-api.md §11.1); actuator itself is confined to
-# the separate management port. busybox wget ships with the alpine base image.
+# the separate management port. wget ships in the Ubuntu base image (see the header comment).
 #
 # ACCEPTED TRADEOFF (012/F7): /ready couples CONTAINER health to DEPENDENCY
 # health (accepting && aggregated UP — db, redis, h2_factory). A dependency
