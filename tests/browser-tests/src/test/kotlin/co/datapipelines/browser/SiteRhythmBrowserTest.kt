@@ -68,9 +68,10 @@ class SiteRhythmBrowserTest : BrowserSuite() {
      * every one at 0px, because the reset zeroes margins and the stylesheet spaced blocks one
      * selector at a time. The pages are DISCOVERED from the header and footer of `/`, so a
      * page added to the site is measured the day it is linked. The walk: every block-level
-     * element's block-level children in RENDERED order (a phone hero puts the strip above the
-     * figure with `order`; row-flex and grid parents skipped — their gap is the gap property),
-     * adjacent pairs where at least one is a text block, rendered gap < 8px.
+     * element's painted block-child fragments (row-flex and grid parents are skipped — their
+     * gap is the gap property), comparing distinct children's fragments when at least one is
+     * a text block, with a minimum separation of 8px regardless of their visual order.
+     * CSS columns use their actual fragments: a union box would falsely cross the gutter (#698).
      */
     @Test
     fun `no two blocks of text touch on any linked page at both widths`() {
@@ -274,15 +275,22 @@ class SiteRhythmBrowserTest : BrowserSuite() {
                    const cs = getComputedStyle(el);
                    if (cs.display === 'flex' && cs.flexDirection.startsWith('row')) continue;
                    if (cs.display === 'grid') continue;
-                   const kids = Array.from(el.children).filter(k => { const c = getComputedStyle(k); return c.position !== 'absolute' && c.position !== 'fixed' && isBlock(k); }).sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
-                   for (let i = 1; i < kids.length; i++) {
-                     const a = kids[i - 1], b = kids[i];
-                     if (!(TEXTY.has(a.tagName) || TEXTY.has(b.tagName))) continue;
-                     pairs++;
-                     const gap = b.getBoundingClientRect().top - a.getBoundingClientRect().bottom;
-                     if (gap < 8) {
-                       const name = x => x.tagName + (x.className ? '.' + String(x.className).trim().split(/\s+/)[0] : '');
-                       tight.push(name(el) + ' :: ' + name(a) + ' > ' + name(b) + ' gap=' + gap.toFixed(2) + 'px "' + (b.textContent || '').trim().slice(0, 40) + '"');
+                   // A block split across CSS columns has several painted boxes. Its union
+                   // bounding box crosses the gutter and cannot measure sibling separation.
+                   const boxes = Array.from(el.children).filter(k => { const c = getComputedStyle(k); return c.position !== 'absolute' && c.position !== 'fixed' && isBlock(k); })
+                     .flatMap(child => Array.from(child.getClientRects()).filter(r => r.width > 0 && r.height > 0).map(rect => ({ child, rect })));
+                   for (let i = 0; i < boxes.length; i++) {
+                     for (let j = i + 1; j < boxes.length; j++) {
+                       const { child: a, rect: ar } = boxes[i], { child: b, rect: br } = boxes[j];
+                       if (a === b || !(TEXTY.has(a.tagName) || TEXTY.has(b.tagName))) continue;
+                       pairs++;
+                       const dx = Math.max(0, ar.left - br.right, br.left - ar.right);
+                       const dy = Math.max(0, ar.top - br.bottom, br.top - ar.bottom);
+                       const gap = Math.hypot(dx, dy);
+                       if (gap < 8) {
+                         const name = x => x.tagName + (x.className ? '.' + String(x.className).trim().split(/\\s+/)[0] : '');
+                         tight.push(name(el) + ' :: ' + name(a) + ' > ' + name(b) + ' gap=' + gap.toFixed(2) + 'px "' + (b.textContent || '').trim().slice(0, 40) + '"');
+                       }
                      }
                    }
                  }
