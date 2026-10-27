@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.104 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.105 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-10-27
@@ -2096,7 +2096,7 @@ What this deployment already holds in `{name}` — the sender's whole delta inpu
 
 **The sender caches this answer (178).** The promoter lens evaluates §10.2 on every read a promoter makes, so the sender reads this endpoint through a per-workspace cache (`datapipelines.deployment.promotion.inventory-cache-ttl-seconds`, default 60 s — [Configuration §3.19](configuration.md#319-deployment)); an unreachable answer is remembered for the same window, a successful push invalidates the entry, and the push path itself always reads fresh (§10.3).
 
-`current_version` needs no status filter: by the version lifecycle's invariant it IS the latest RELEASED version (a draft never moves it), so its hash is the hash of what this deployment serves. `authoring_enabled` lets a sender refuse a misconfigured target before building a batch instead of after pushing one.
+All five inventory arms carry only objects whose current pointer names a RELEASED version. The pointer may name a draft after a development-posture discard fallback or manual switch (versioning §3.4, §10.2); such an object is not promotable and its version and hash are omitted, as are never-released objects. `authoring_enabled` lets a sender refuse a misconfigured target before building a batch instead of after pushing one.
 
 Workspaces are addressed by **name**, because names are a global namespace and ids are not — a name is the one identifier that means the same thing on both deployments. An unknown name is `404 workspace.not_found`, not the no-oracle `403` an ordinary caller gets (§17): the peer is a trusted deployment, and "you do not have that workspace" is the answer its operator needs.
 
@@ -2874,6 +2874,7 @@ browser persistence. Clients must reject foreign/stale responses even after abor
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-27 | v2.105 | 575 (#575) | §18.1: all five wire inventory arms require a RELEASED current pointer; pipeline and template draft pointers and never-released templates are omitted, matching the promotability rule. |
 | 2026-10-27 | v2.104 | 725 (#725) | Additive. §20.1: optional `outcome` (`succeeded`, `failed`, `in-progress`, `did-not-run`, `never-ran`) filters the schedule list by each schedule's newest run, in the database read before the promoter lens, composing with `condition` and `prefix`; any other value is `400 schedule.validation.request_invalid`, `details.field = outcome`. |
 | 2026-10-25 | v2.103 | 641 (#641) | Additive. §20.1: optional `condition` (`enabled`, `paused`, `blocked`) filters the schedule list in the database read, before the promoter lens; any other value is `400 schedule.validation.request_invalid`, `details.field = condition`. |
 | 2026-10-24 | v2.102 | #517 release dependencies, core (S1) | **§5.10:** the release takes the draft's whole release closure (templates and child pipelines, bounded); an optional JSON plan body (`tree_hash`, `include_dependencies`, `check_overrides`) flips the selected dependency drafts in the same transaction and appends `dependencies_released`; the plan refusals `428 plan_required`, `400 plan_invalid`, `422 dependency_limit`, `409 plan_conflict` / `dependency_cycle` / `busy`. **Deliberate break (record §14, ruled 2026-10-18, no deprecation window):** the template-only refusal code (record §14) is `pipeline.release.dependency_not_released`, and its details are the shared blockers shape `{root, blockers, blockers_truncated}` (the old `template_id` / `template_version` / `template_status` / `pins_not_released` are gone). A request without a plan answers a success with release 142's bytes. Every release is one transaction with strict in-transaction audit rows. **§8.9:** `template.release.busy`; the template flip runs in a guarded transaction. **§21:** the parameter set's template-only refusal code is `parameter.release.dependency_not_released` (details unchanged until #519). Round three (#719): **§5.13 / §21** a restore re-judges its outbound pins (400 validation code; 409 `dependency_not_released`), **§5.10** the blockers' `reason` gains `not_released`. |
