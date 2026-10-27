@@ -135,6 +135,13 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3
+      # #696: Docker veth IPv6 address churn can abort Chromium's in-flight script loads.
+      # Change only the default for NEW interfaces, then prove it on a fresh veth pair.
+      # Existing runner interfaces (including loopback) keep their current settings.
+      - name: keep new Docker interfaces from interrupting Chromium
+        run: |
+          sudo sysctl -w net.ipv6.conf.default.disable_ipv6=1
+          sudo ./scripts/ci-browser-network-check.sh
       # Size Gradle for THIS runner (2 vCPU / 7 GB), not for the repo's defaults, which
       # gradle.properties sizes for a 96-thread dev box (DEVELOPMENT.md §9.5). A per-machine
       # gradle.properties in the Gradle user home wins over the repo's — the documented

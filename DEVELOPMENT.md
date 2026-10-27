@@ -1154,6 +1154,12 @@ in-checkout finding after a deletion (#703), use the forced affected-task check 
   sudo sysctl --system
   ```
 
+  The CI gate job applies this new-interface default before its build and browser suite
+  (#696). `scripts/ci-browser-network-check.sh` brings up a temporary veth pair, checks that
+  both peers inherit `disable_ipv6=1` and have no IPv6 addresses, then removes the pair.
+  A missing setting or failed probe fails the job. The runner's existing interfaces,
+  including loopback, keep their settings; no browser assertion, timeout or retry changes.
+
 - **`--profile`** on any gate writes `build/reports/profile/` with per-task times — that
   report, plus `scripts/test-recount.sh`, is how to tell whether a knob helped; never the feel
   of it.
