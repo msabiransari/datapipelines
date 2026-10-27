@@ -1,9 +1,11 @@
 package co.datapipelines.web
 
+import io.kotest.assertions.withClue
 import io.kotest.matchers.longs.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.longs.shouldBeLessThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.lettuce.core.AbstractRedisAsyncCommands
 import io.lettuce.core.RedisCommandTimeoutException
 import org.junit.jupiter.api.Test
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration
@@ -34,7 +36,9 @@ import java.util.concurrent.TimeUnit
  *
  * Both clients in the first case connect BEFORE the server stops, the production shape: the outage
  * hits a live connection, Lettuce reconnects in the background and buffers the command, and only
- * the command timeout decides when the caller hears. The zero-timeout factories deliberately pass
+ * the command timeout decides when the caller hears. The measured commands are issued only after
+ * the shipped client has observed the outage (#594, see `awaitObservedOutage`), and a red names
+ * what the bounded call produced. The zero-timeout factories deliberately pass
  * their own client configuration — `TestRedisDefaultsTest`'s sweep requires one on every
  * factory, and these are the counterexample the shipped bounds exist to rule out.
  */
@@ -49,20 +53,32 @@ class RedisZeroCommandTimeoutIntegrationTest {
             val zero = StringRedisTemplate(unbounded).apply { afterPropertiesSet() }
             connectDespiteTheHandshakeRace(zero)
             disposable.template.opsForValue().get(KEY) shouldBe null
+            val stopCalledAt = System.nanoTime()
             disposable.stopServer()
+            val stopMs = elapsedMs(stopCalledAt)
+            val outageMs = awaitObservedOutage(shipped, stopCalledAt)
 
             val startedAt = System.nanoTime()
             val bounded =
                 callers.submit(
                     Callable {
-                        val failure = runCatching { disposable.template.opsForValue().get(KEY) }.exceptionOrNull()
-                        failure to elapsedMs(startedAt)
+                        val outcome = runCatching { disposable.template.opsForValue().get(KEY) }
+                        outcome to elapsedMs(startedAt)
                     },
                 )
             val waiting = callers.submit(Callable { zero.opsForValue().get(KEY) })
 
-            val (failure, boundedMs) = bounded.get(OUTER_DEADLINE_MS, TimeUnit.MILLISECONDS)
-            generateSequence(failure) { it.cause }.any { it is RedisCommandTimeoutException } shouldBe true
+            val (outcome, boundedMs) = bounded.get(OUTER_DEADLINE_MS, TimeUnit.MILLISECONDS)
+            val chain = generateSequence(outcome.exceptionOrNull()) { it.cause }.toList()
+            val described =
+                if (outcome.isSuccess) {
+                    "returned without failure (value: ${outcome.getOrNull()})"
+                } else {
+                    chain.map { "${it::class.qualifiedName}: ${it.message}" }.toString()
+                }
+            withClue("bounded GET outcome after ${boundedMs}ms: $described") {
+                chain.any { it is RedisCommandTimeoutException } shouldBe true
+            }
             boundedMs shouldBeGreaterThanOrEqual TestRedis.COMMAND_TIMEOUT.toMillis()
             boundedMs shouldBeLessThan OUTER_DEADLINE_MS
 
@@ -70,7 +86,8 @@ class RedisZeroCommandTimeoutIntegrationTest {
             val zeroMs = elapsedMs(startedAt)
             waiting.isDone shouldBe false
             println(
-                "#488: stopped Redis — 2 s client failed in ${boundedMs}ms; 0 s client still pending at ${zeroMs}ms " +
+                "#488/#594: stopped Redis — stop returned in ${stopMs}ms, shipped connection observed closed at " +
+                    "${outageMs}ms; 2 s client failed in ${boundedMs}ms; 0 s client still pending at ${zeroMs}ms " +
                     "(outer deadline $OUTER_DEADLINE_MS ms)",
             )
         } finally {
@@ -122,6 +139,34 @@ class RedisZeroCommandTimeoutIntegrationTest {
         error("no zero-timeout handshake succeeded in $HANDSHAKE_ATTEMPTS attempts: $lost")
     }
 
+    /**
+     * Waits until the SHIPPED client has observed the outage, so the measured `GET` is about the
+     * command bound and not about the stop's timing (#594): a `GET` written while the channel is
+     * still being torn down fails on that connection path in well under the bound (CI run
+     * 39086323275, 0.65 s, no command timeout), while one issued after the client saw the channel
+     * close waits in Lettuce's disconnected buffer, where only the command timeout ends it.
+     *
+     * Spring's `LettuceConnection.nativeConnection` is the async command API over the shared
+     * connection; Lettuce 6.6 deprecates both `isOpen` and `getStatefulConnection` on that
+     * interface (and the build treats warnings as errors), so the `StatefulConnection` is read
+     * through `AbstractRedisAsyncCommands.getConnection`. Returns milliseconds since [stopCalledAt].
+     */
+    private fun awaitObservedOutage(
+        factory: LettuceConnectionFactory,
+        stopCalledAt: Long,
+    ): Long {
+        val connection = factory.connection.use { (it.nativeConnection as AbstractRedisAsyncCommands<*, *>).connection }
+        val waitStartedAt = System.nanoTime()
+        while (connection.isOpen) {
+            val waitedMs = elapsedMs(waitStartedAt)
+            if (waitedMs >= OUTER_DEADLINE_MS) {
+                error("the shipped connection still reports isOpen=true ${waitedMs}ms after stopServer() returned")
+            }
+            TimeUnit.MILLISECONDS.sleep(OUTAGE_POLL_MS)
+        }
+        return elapsedMs(stopCalledAt)
+    }
+
     private fun elapsedMs(startedAt: Long) = (System.nanoTime() - startedAt) / 1_000_000
 
     private companion object {
@@ -132,5 +177,8 @@ class RedisZeroCommandTimeoutIntegrationTest {
 
         /** Each lost handshake costs at most one timer tick (100 ms); ten is a second, not a wait. */
         const val HANDSHAKE_ATTEMPTS = 10
+
+        /** The outage poll's step: fine enough to report the observation latency, well under 50 ms. */
+        const val OUTAGE_POLL_MS = 10L
     }
 }
