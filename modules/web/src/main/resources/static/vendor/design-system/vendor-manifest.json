@@ -42,6 +42,8 @@
     "file": "vendor/cytoscape/cytoscape.min.js",
     "sha256": "9c2a3bf2592e0b14a1f7bec07c03a54f16dedf32af9cd0af155c716aa6c87bc3",
     "source": "https://unpkg.com/cytoscape@3.34.0/dist/cytoscape.min.js",
+    "license_file": "vendor/cytoscape/LICENSE.cytoscape",
+    "license_file_source": "https://unpkg.com/cytoscape@3.34.0/LICENSE",
     "license": "MIT"
   },
   "cytoscape-dagre": {
@@ -49,6 +51,8 @@
     "file": "vendor/cytoscape/cytoscape-dagre.js",
     "sha256": "bf70fe402991dcbff33e05a7a4a5271c78020bb75e85d1c80ab7538e4157112e",
     "source": "https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js",
+    "license_file": "vendor/cytoscape/LICENSE.cytoscape-dagre",
+    "license_file_source": "https://unpkg.com/cytoscape-dagre@2.5.0/LICENSE",
     "license": "MIT"
   },
   "cytoscape-node-html-label": {
@@ -56,6 +60,8 @@
     "file": "vendor/cytoscape/cytoscape-node-html-label.js",
     "sha256": "ea4b3acc5c0ab4d4429707b62a7b3eb3ff99cf683f6212265962683b877d951e",
     "source": "https://unpkg.com/cytoscape-node-html-label@1.2.2/dist/cytoscape-node-html-label.js",
+    "license_file": "vendor/cytoscape/LICENSE.cytoscape-node-html-label",
+    "license_file_source": "https://unpkg.com/cytoscape-node-html-label@1.2.2/LICENSE",
     "license": "MIT",
     "note": "059 — HTML node cards overlaid on Cytoscape nodes (pointer-events:none container, scales with pan/zoom via container transform)."
   },
@@ -230,6 +236,8 @@
     "file": "vendor/dagre/dagre.min.js",
     "sha256": "62eb9787ccfdbdf4148d4d99d31dbf9ee4770eafee81e637d759b52aac22cd51",
     "source": "https://unpkg.com/dagre@0.8.5/dist/dagre.min.js",
+    "license_file": "vendor/dagre/LICENSE",
+    "license_file_source": "https://unpkg.com/dagre@0.8.5/LICENSE",
     "license": "MIT"
   },
   "alpinejs": {
@@ -238,6 +246,8 @@
     "sha256": "40f00d7aaa543eabd17c3a0f79ce2ac62e6be17caa9564527c20ec39152bb157",
     "package": "@alpinejs/csp",
     "source": "https://registry.npmjs.org/@alpinejs/csp/-/csp-3.14.1.tgz (the CSP build's dist/cdn.min.js; tarball sha256 ab76984420bcc7e30d96b39338b4715bf514275de4d8b466c36bca5b178ca46a)",
+    "license_file": "vendor/alpinejs/LICENSE",
+    "license_file_source": "https://raw.githubusercontent.com/alpinejs/alpine/v3.14.1/LICENSE.md",
     "license": "MIT"
   },
   "noto-sans": {
@@ -258,6 +268,7 @@
       "vendor/fonts/noto-sans/OFL.txt": "54ec7b5a35310ad66f9f3091426f7028484cbf9ae1ab5da30122ee412a3009e1"
     },
     "source": "https://registry.npmjs.org/@fontsource-variable/noto-sans/-/noto-sans-5.3.0.tgz",
+    "license_file": "vendor/fonts/noto-sans/OFL.txt",
     "license": "OFL-1.1",
     "license_file_upstream": "LICENSE",
     "note": "551 — the app's sans face is Noto Sans, the bundled family the owner chose against the prototype (record 2026-10-16 \u00a75, decision also on #547). The woff2 subsets (variable wght axis 100-900, normal + italic, latin + latin-ext) come from the pinned fontsource package, whose metadata names upstream v42 of google/fonts; the tarball was fetched once, its sha512 checked against the registry integrity before extraction, and the computed tarball sha256 is 2cd97f3573b6e8ceaaa54ddf5df3f8e64d89a5bb31954013700d36a7ec01dcd6. Upstream notofonts releases ship TTF only, so the npm package is the pinned, hash-recorded source, as for Manrope. Upstream ships the OFL text as LICENSE; it is vendored verbatim as OFL.txt. Italic faces are declared because the app has sans-italic rules (template/pipeline editors) but are not preloaded. No Google Fonts, no CDN."
@@ -280,6 +291,7 @@
       "vendor/fonts/jetbrains-mono/JetBrainsMonoSite-Medium.woff2": "4a752d6e3a3edb4615952b4a813cae005c600fd17f810fec2217fd81cd34db43"
     },
     "source": "https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip",
+    "license_file": "vendor/fonts/jetbrains-mono/OFL.txt",
     "license": "OFL-1.1",
     "note": "079 §G — weights 400/500 only (the two the app renders: mono cells and the key prefix chips). Static woff2 from the release zip's fonts/webfonts/. 133: JetBrainsMonoSite-* are site-only latin subsets (39 KB total vs 184) — the marketing pages render authored English code only, and the full 184 KB pair in the late sheet cost ~1.05s of FCP under the throttled Lighthouse harness. The app keeps the full faces."
   },
@@ -297,6 +309,7 @@
       "vendor/fonts/manrope/OFL.txt": "d826ab6583b12c26807d8716a545bdbbb672df04f48608a364ba9efdbe501c30"
     },
     "source": "https://registry.npmjs.org/@fontsource-variable/manrope/-/manrope-5.3.0.tgz",
+    "license_file": "vendor/fonts/manrope/OFL.txt",
     "license": "OFL-1.1",
     "license_file_upstream": "LICENSE",
     "note": "Site v2 (2026-09-09) — the marketing site's display/body face (direction B). Variable weight axis, latin + latin-ext subsets from the pinned fontsource package (upstream sharanda/manrope's GitHub API answered 404 on 2026-09-09, so the npm package is the pinned, hash-recorded source). Vendored verbatim; the app keeps Inter. No Google Fonts, no CDN."
@@ -323,6 +336,7 @@
       "vendor/fonts/ibm-plex-mono/OFL.txt": "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da"
     },
     "source": "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700 (woff2 UA), licence https://github.com/google/fonts/raw/main/ofl/ibmplexmono/OFL.txt",
+    "license_file": "vendor/fonts/ibm-plex-mono/OFL.txt",
     "license": "OFL-1.1",
     "note": "133 — the marketing site display face (owner ruling 2026-09-14, the mock's plexmono preset): h1-h3, kickers, proof-strip values. Weights 500/600/700, latin + latin-ext subsets. font-display: swap per the 133 ruling (the h1 is the LCP element)."
   }
