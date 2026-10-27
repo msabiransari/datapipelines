@@ -21,7 +21,7 @@ function fixture() {
   }
   const root = element();
   const schedules = {
-    state: { root, all: null, query: "", condition: "", selectedId: null },
+    state: { root, all: null, query: "", condition: "", outcome: "", selectedId: null },
     live: () => true,
     remember() {},
     url: id => `/schedules?id=${id}`,
@@ -35,11 +35,12 @@ function fixture() {
     DpSchedules: schedules,
     DpSchedulesModel: {
       conditionFilter: word => ["enabled", "paused", "blocked"].includes(word) ? word : "",
-      filteredEmptyTitle: word => `No ${word} schedules.`,
+      outcomeFilter: word => ["succeeded", "failed", "in-progress", "did-not-run", "never-ran"].includes(word) ? word : "",
+      filteredEmptyTitle: (word, query, outcome) => `No ${[word, outcome].filter(Boolean).join("/")} schedules.`,
     },
     DpSchedulesApi: {
-      listAll(prefix, condition) {
-        return new Promise((resolve, reject) => pending.push({ prefix, condition, resolve, reject }));
+      listAll(prefix, condition, outcome) {
+        return new Promise((resolve, reject) => pending.push({ prefix, condition, outcome, resolve, reject }));
       },
     },
   };
@@ -94,4 +95,39 @@ test("a current request failure still renders its error", async () => {
   await load;
   assert.equal(root.children[0].template, "sch-tpl-error");
   assert.equal(root.children[0].message, "current request failed");
+});
+
+// #725 — the two filters compose: each select's change re-reads §20.1 with BOTH words, an outcome
+// alone flattens the list into the filtered empty state, and Clear filters drops both in ONE read.
+test("the outcome and condition filters compose in one read, and Clear filters drops both at once", async () => {
+  const { schedules, pending, root } = fixture();
+  const byCondition = schedules.explorer.setCondition("blocked");
+  pending[0].resolve([]);
+  await byCondition;
+  const both = schedules.explorer.setOutcome("failed");
+  assert.deepEqual(pending.map(request => [request.condition, request.outcome]), [["blocked", ""], ["blocked", "failed"]]);
+  pending[1].resolve([]);
+  await both;
+  assert.equal(root.children[0].template, "sch-tpl-no-match-filtered");
+  assert.equal(root.children[0].title, "No blocked/failed schedules.");
+  schedules.explorer.setOutcome("<b>x</b>");
+  assert.equal(pending[2].outcome, "", "an unknown word must not reach the request");
+  pending[2].resolve([]);
+  const cleared = schedules.explorer.clearFilters();
+  assert.equal(pending.length, 4, "Clear filters is one read");
+  assert.deepEqual([pending[3].condition, pending[3].outcome], ["", ""]);
+  pending[3].resolve([{ id: "a", name: "a", condition: "enabled" }]);
+  await cleared;
+  assert.equal(schedules.state.condition, "");
+  assert.equal(schedules.state.outcome, "");
+});
+
+test("an outcome alone flattens the list into the filtered empty state", async () => {
+  const { schedules, pending, root } = fixture();
+  const load = schedules.explorer.setOutcome("never-ran");
+  assert.deepEqual([pending[0].condition, pending[0].outcome], ["", "never-ran"]);
+  pending[0].resolve([]);
+  await load;
+  assert.equal(root.children[0].template, "sch-tpl-no-match-filtered");
+  assert.equal(root.children[0].title, "No never-ran schedules.");
 });

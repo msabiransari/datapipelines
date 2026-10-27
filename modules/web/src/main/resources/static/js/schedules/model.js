@@ -113,11 +113,39 @@
     return !condition || !!(schedule && schedule.condition === condition);
   }
 
-  /** The empty list's title: the condition named, and the search when there is one. */
-  function filteredEmptyTitle(condition, query) {
+  // ------------------------------------------------------------------ the last-run filter (#725)
+
+  /** §20.1's `outcome` words — LastRunOutcome.wire's, in the server's order (the home's Last run bars). */
+  var OUTCOMES = ["succeeded", "failed", "in-progress", "did-not-run", "never-ran"];
+
+  /**
+   * The last-run filter a raw value (the address bar's `outcome`, the page's stamp) names: one of
+   * the five words exactly, else "" — no filter. Anything else is ignored, never echoed.
+   */
+  function outcomeFilter(raw) {
+    return typeof raw === "string" && OUTCOMES.indexOf(raw) !== -1 ? raw : "";
+  }
+
+  /** How the empty state words each bucket after "No … schedules". */
+  var OUTCOME_PHRASE = {
+    succeeded: "whose last run succeeded",
+    failed: "whose last run failed",
+    "in-progress": "with a run in progress",
+    "did-not-run": "whose last run did not run",
+    "never-ran": "that never ran",
+  };
+
+  /**
+   * The empty list's title: the condition and the last run named (either or both), and the
+   * search when there is one; with neither filter it is the plain search's title.
+   */
+  function filteredEmptyTitle(condition, query, outcome) {
     var q = String(query || "").trim();
-    if (!condition) return "No schedules match “" + q + "”";
-    return q ? "No " + condition + " schedules match “" + q + "”." : "No " + condition + " schedules.";
+    var c = conditionFilter(condition);
+    var o = outcomeFilter(outcome);
+    if (!c && !o) return "No schedules match “" + q + "”";
+    var subject = "No " + (c ? c + " " : "") + "schedules" + (o ? " " + OUTCOME_PHRASE[o] : "");
+    return q ? subject + " match “" + q + "”." : subject + ".";
   }
 
   // ------------------------------------------------------------------ cron presets
@@ -708,6 +736,8 @@
     CONDITIONS: CONDITIONS,
     conditionFilter: conditionFilter,
     matchesCondition: matchesCondition,
+    OUTCOMES: OUTCOMES,
+    outcomeFilter: outcomeFilter,
     filteredEmptyTitle: filteredEmptyTitle,
     describeCron: describeCron,
     buildCron: buildCron,

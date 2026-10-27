@@ -16,6 +16,13 @@
  * After a pause, resume or unblock the detail's answer is the schedule's new truth, and a row
  * whose condition no longer matches leaves the list (model.matchesCondition) — no list re-read.
  *
+ * #725 — the last-run filter is the condition filter's twin over §20.1's `outcome` (each
+ * schedule's NEWEST run, the Schedules home's Last run buckets): either filter, or both, flattens
+ * the list, and both compose with the search. It has no client-side prune: a §20 schedule carries
+ * no run state, and the verbs that re-render a row (pause, resume, unblock) record no run, so they
+ * cannot move it between buckets. A run that starts or ends while the list is open (Run now
+ * included) does not re-sort it either — the list reflects the read; the next read reflects the run.
+ *
  * Selection, focus and the keyboard are template-explorer.js's (the pane carries
  * `data-explorer-pane`); this file re-runs its init after each render so new rows join the
  * roving tabindex. A leaf's click is what loads the detail — the keyboard layer's debounced
@@ -102,8 +109,9 @@
     busy(root, false);
     var query = S.state.query || "";
     var condition = S.state.condition || "";
-    if (query || condition) {
-      renderSearch(root, query, condition);
+    var outcome = S.state.outcome || "";
+    if (query || condition || outcome) {
+      renderSearch(root, query, condition, outcome);
     } else if (!S.state.all.length) {
       root.appendChild(S.clone("sch-tpl-empty"));
     } else {
@@ -118,12 +126,12 @@
     reinitKeyboard();
   }
 
-  /** The flat list: the search's hits, or — a condition chosen and no text — every filtered row by name. */
-  function renderSearch(root, query, condition) {
+  /** The flat list: the search's hits, or — a filter chosen and no text — every filtered row by name. */
+  function renderSearch(root, query, condition, outcome) {
     var hits = query ? M().search(S.state.all, query) : byName(S.state.all);
     if (!hits.length) {
-      var none = S.clone(condition ? "sch-tpl-no-match-filtered" : "sch-tpl-no-match");
-      S.text(none, "title", M().filteredEmptyTitle(condition, query));
+      var none = S.clone(condition || outcome ? "sch-tpl-no-match-filtered" : "sch-tpl-no-match");
+      S.text(none, "title", M().filteredEmptyTitle(condition, query, outcome));
       S.show(S.slot(none, "clear-search"), !!query);
       root.appendChild(none);
       return;
@@ -152,7 +160,8 @@
 
   /**
    * §20.1 without a prefix: every schedule the reader may see (the lens applies server-side) —
-   * in the active condition only, when one is chosen (#641).
+   * in the active condition only, when one is chosen (#641), and in the active last-run bucket
+   * only, when one is chosen (#725).
    */
   function load() {
     var state = S.state;
@@ -163,7 +172,7 @@
     var root = listRoot();
     busy(root, true);
     return API()
-      .listAll("", S.state.condition || "")
+      .listAll("", S.state.condition || "", S.state.outcome || "")
       .then(function (items) {
         if (!current()) return;
         S.state.all = items;
@@ -272,6 +281,21 @@
     return load();
   }
 
+  /** #725 — the last-run select's change: setCondition's twin over model.outcomeFilter. */
+  function setOutcome(word) {
+    S.state.outcome = M().outcomeFilter(word);
+    S.remember(S.state.selectedId);
+    return load();
+  }
+
+  /** Clear filters: both selects' words back to all, then ONE §20.1 re-read. */
+  function clearFilters() {
+    S.state.condition = "";
+    S.state.outcome = "";
+    S.remember(S.state.selectedId);
+    return load();
+  }
+
   S.explorer = {
     load: load,
     render: render,
@@ -281,5 +305,7 @@
     reveal: reveal,
     setQuery: setQuery,
     setCondition: setCondition,
+    setOutcome: setOutcome,
+    clearFilters: clearFilters,
   };
 })();

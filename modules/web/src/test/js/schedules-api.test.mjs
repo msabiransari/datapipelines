@@ -97,3 +97,26 @@ test("listAll pages §20.1 with the condition word when one is set, and without 
   await api.listAll("ops");
   assert.equal(seen[0], "/api/v1/schedules?prefix=ops&offset=0&limit=200");
 });
+
+// #725 — the last-run filter rides §20.1 as `outcome`, beside `condition` when both are set.
+test("listAll sends the outcome word, alone or with the condition, through every page", async () => {
+  const seen = [];
+  globalThis.fetch = (url) => {
+    seen.push(url);
+    const second = url.indexOf("offset=1") !== -1;
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      text: async () => JSON.stringify({ data: { items: [{ id: second ? "b" : "a" }], pagination: { has_more: !second } } }),
+    });
+  };
+  await api.listAll("", "blocked", "failed");
+  assert.deepEqual(seen, [
+    "/api/v1/schedules?offset=0&limit=200&condition=blocked&outcome=failed",
+    "/api/v1/schedules?offset=1&limit=200&condition=blocked&outcome=failed",
+  ]);
+  seen.length = 0;
+  await api.listAll("", "", "never-ran");
+  assert.equal(seen[0], "/api/v1/schedules?offset=0&limit=200&outcome=never-ran");
+});
