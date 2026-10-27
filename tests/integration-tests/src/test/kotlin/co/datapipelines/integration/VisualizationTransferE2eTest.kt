@@ -5,6 +5,7 @@ import co.datapipelines.integration.E2eSession.asSession
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.withClue
+import io.kotest.matchers.longs.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
@@ -59,6 +60,11 @@ import java.util.UUID
 @SpringBootTest(
     classes = [DatapipelinesApplication::class],
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+    // #760: two aggregate batches export 105 source payloads; rate limiting is tested separately.
+    properties = [
+        "datapipelines.rate-limit.requests-per-second=100000",
+        "datapipelines.rate-limit.requests-per-minute=1000000",
+    ],
 )
 class VisualizationTransferE2eTest {
     @LocalServerPort
@@ -85,6 +91,13 @@ class VisualizationTransferE2eTest {
                 "POST" -> sent.post(path)
                 else -> sent.get(path)
             }.then().extract()
+        withClue("source fixture needs room for $SOURCE_EXPORT_BURST exports; declare test-only request headroom") {
+            val limit =
+                requireNotNull(response.header("RateLimit-Limit")) {
+                    "source response must declare its request budget"
+                }
+            limit.toLong() shouldBeGreaterThanOrEqual SOURCE_EXPORT_BURST
+        }
         return response.statusCode() to mapper.readTree(response.asString())
     }
 
@@ -861,6 +874,10 @@ class VisualizationTransferE2eTest {
 
         /** The aggregate-bound fixtures (Orders 12–13): 51 distinct pins across three source dashboards. */
         val AGG_PINS: List<String> = (0 until 51).map { "vt$RUN/charts/agg_$it" }
+        private const val AGGREGATE_DASHBOARD_EXPORTS = 4L
+
+        /** Orders 12 and 13 export 51 + 50 visualizations and two dashboards each. */
+        private val SOURCE_EXPORT_BURST = AGG_PINS.size + AGG_PINS.dropLast(1).size + AGGREGATE_DASHBOARD_EXPORTS
         val AGG_A = "vt$RUN/dashboards/agg_a"
         val AGG_B = "vt$RUN/dashboards/agg_b"
         val AGG_C = "vt$RUN/dashboards/agg_c"
