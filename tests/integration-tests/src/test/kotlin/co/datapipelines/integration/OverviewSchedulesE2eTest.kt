@@ -28,15 +28,19 @@ import java.util.UUID
  * **The Schedules home counts what the explorer lists** (#584, ui-screens §4.20a) — over the real
  * database, through the real lens, against §20.1's own answer.
  *
- * Four schedules over two released pipelines: `ov/a_enabled_ok` (enabled, its last run succeeded),
- * `ov/b_paused_failed` (paused, its last run failed), `ov/c_blocked` (blocked, never ran) and
- * `ov/d_enabled_new` (enabled, never ran). Schedules b and d target the pipeline the higher
+ * Five schedules over two released pipelines: `ov/a_enabled_ok` (enabled, its last run succeeded),
+ * `ov/b_paused_failed` (paused, its last run failed), `ov/c_blocked` (blocked, never ran),
+ * `ov/d_enabled_new` (enabled, its last run queued) and `ov/e_enabled_skipped` (enabled, its last
+ * run skipped) — so every one of the five Last run buckets holds a schedule of the workspace.
+ * Schedules b and d target the pipeline the higher environment already holds at its released
  * environment already holds at its released version — hidden from the promoter (versioning §10.2),
  * the [SchedulePromoterPagingE2eTest] stub. A second workspace holds one more schedule the page
  * must never count or name. The schedules never fire (a yearly pattern; the scheduler is off).
  *
  * #641: each condition tile links the explorer filtered to it, so each count must equal what
- * `?condition=` walks to over §20.1 — for the viewer and through the promoter's lens.
+ * `?condition=` walks to over §20.1 — for the viewer and through the promoter's lens. #749: the
+ * five Last run bars link the explorer filtered to their bucket, so each bar's count must equal
+ * what `?outcome=` walks to, each bar's href the filtered explorer — again for both roles.
  */
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @SpringBootTest(
@@ -58,16 +62,16 @@ class OverviewSchedulesE2eTest {
 
         val page = page(VIEWER_SESSION)
         withClue("the four tiles and both charts, from the one summary") {
-            counts(page) shouldBe mapOf("schedules" to 4, "enabled" to 2, "paused" to 1, "blocked" to 1)
-            bars(page, "condition") shouldBe mapOf("enabled" to 2, "paused" to 1, "blocked" to 1)
+            counts(page) shouldBe mapOf("schedules" to 5, "enabled" to 3, "paused" to 1, "blocked" to 1)
+            bars(page, "condition") shouldBe mapOf("enabled" to 3, "paused" to 1, "blocked" to 1)
             bars(page, "last-run") shouldBe
-                mapOf("succeeded" to 1, "failed" to 1, "in-progress" to 0, "did-not-run" to 0, "never-ran" to 2)
+                mapOf("succeeded" to 1, "failed" to 1, "in-progress" to 1, "did-not-run" to 1, "never-ran" to 1)
         }
         withClue("§20.1 lists exactly the schedules the page counts") {
             listedNames(VIEWER_SESSION).size shouldBe counts(page).getValue("schedules")
         }
-        withClue("Up next is the enabled, unblocked ones; Recently changed names all four") {
-            section(page, "Up next") shouldContainExactly listOf("ov/a_enabled_ok", "ov/d_enabled_new")
+        withClue("Up next is the enabled, unblocked ones; Recently changed names all five") {
+            section(page, "Up next") shouldContainExactly listOf("ov/a_enabled_ok", "ov/d_enabled_new", "ov/e_enabled_skipped")
             section(page, "Recently changed").sorted() shouldContainExactly NAMES
         }
         withClue("the other workspace's schedule is neither counted nor named; a viewer gets no New schedule") {
@@ -81,11 +85,11 @@ class OverviewSchedulesE2eTest {
     fun `a promoter's home counts only the admitted schedules, as its list does`() {
         val page = page(PROMOTER_SESSION)
 
-        counts(page) shouldBe mapOf("schedules" to 2, "enabled" to 1, "paused" to 0, "blocked" to 1)
+        counts(page) shouldBe mapOf("schedules" to 3, "enabled" to 2, "paused" to 0, "blocked" to 1)
         bars(page, "last-run") shouldBe
-            mapOf("succeeded" to 1, "failed" to 0, "in-progress" to 0, "did-not-run" to 0, "never-ran" to 1)
-        listedNames(PROMOTER_SESSION) shouldContainExactly listOf("ov/a_enabled_ok", "ov/c_blocked")
-        section(page, "Up next") shouldContainExactly listOf("ov/a_enabled_ok")
+            mapOf("succeeded" to 1, "failed" to 0, "in-progress" to 0, "did-not-run" to 1, "never-ran" to 1)
+        listedNames(PROMOTER_SESSION) shouldContainExactly listOf("ov/a_enabled_ok", "ov/c_blocked", "ov/e_enabled_skipped")
+        section(page, "Up next") shouldContainExactly listOf("ov/a_enabled_ok", "ov/e_enabled_skipped")
         withClue("no hidden schedule's name reaches the promoter's page") {
             listOf("ov/b_paused_failed", "ov/d_enabled_new", OTHER_NAME).filter { it in page } shouldBe emptyList()
         }
@@ -112,12 +116,12 @@ class OverviewSchedulesE2eTest {
         }
         CONDITIONS.forEach { word ->
             withClue("§20.1 ?condition=$word walks to exactly the home's $word count") {
-                walk(VIEWER_SESSION, word).size shouldBe counts(page).getValue(word)
+                walk(VIEWER_SESSION, "condition", word).size shouldBe counts(page).getValue(word)
             }
         }
-        walk(VIEWER_SESSION, "blocked") shouldContainExactly listOf("ov/c_blocked")
-        walk(VIEWER_SESSION, "paused") shouldContainExactly listOf("ov/b_paused_failed")
-        walk(VIEWER_SESSION, "enabled") shouldContainExactly listOf("ov/a_enabled_ok", "ov/d_enabled_new")
+        walk(VIEWER_SESSION, "condition", "blocked") shouldContainExactly listOf("ov/c_blocked")
+        walk(VIEWER_SESSION, "condition", "paused") shouldContainExactly listOf("ov/b_paused_failed")
+        walk(VIEWER_SESSION, "condition", "enabled") shouldContainExactly listOf("ov/a_enabled_ok", "ov/d_enabled_new", "ov/e_enabled_skipped")
     }
 
     @Test
@@ -127,12 +131,12 @@ class OverviewSchedulesE2eTest {
 
         CONDITIONS.forEach { word ->
             withClue("the promoter's ?condition=$word walk equals its home's $word count") {
-                walk(PROMOTER_SESSION, word).size shouldBe counts(page).getValue(word)
+                walk(PROMOTER_SESSION, "condition", word).size shouldBe counts(page).getValue(word)
             }
         }
-        walk(PROMOTER_SESSION, "blocked") shouldContainExactly listOf("ov/c_blocked")
-        walk(PROMOTER_SESSION, "paused") shouldBe emptyList()
-        walk(PROMOTER_SESSION, "enabled") shouldContainExactly listOf("ov/a_enabled_ok")
+        walk(PROMOTER_SESSION, "condition", "blocked") shouldContainExactly listOf("ov/c_blocked")
+        walk(PROMOTER_SESSION, "condition", "paused") shouldBe emptyList()
+        walk(PROMOTER_SESSION, "condition", "enabled") shouldContainExactly listOf("ov/a_enabled_ok", "ov/e_enabled_skipped")
     }
 
     @Test
@@ -156,7 +160,80 @@ class OverviewSchedulesE2eTest {
     }
 
     @Test
-    @Order(7)
+    @Order(8)
+    fun `each Last run bar counts what the explorer's outcome filter lists, and opens it`() {
+        val page = page(VIEWER_SESSION)
+        val runBars = bars(page, "last-run")
+
+        LAST_RUN_BUCKETS.forEach { (bucket, names) ->
+            withClue("§20.1 ?outcome=$bucket walks to exactly the home's $bucket count") {
+                walk(VIEWER_SESSION, "outcome", bucket).size shouldBe runBars.getValue(bucket)
+            }
+            withClue("?outcome=$bucket lists exactly the bucket the bar counts") {
+                walk(VIEWER_SESSION, "outcome", bucket) shouldContainExactly names
+            }
+        }
+        withClue("each bar's link is the filtered explorer: 200, server-stamped with exactly that bucket") {
+            val barHrefs = hrefs(page, "last-run")
+            barHrefs shouldBe LAST_RUN_BUCKETS.keys.associateWith { "/schedules?outcome=$it" }
+            LAST_RUN_BUCKETS.forEach { (bucket, _) ->
+                val filtered =
+                    session(VIEWER_SESSION)
+                        .get(barHrefs.getValue(bucket))
+                        .then()
+                        .statusCode(200)
+                        .extract()
+                        .asString()
+                OUTCOME_STAMP.find(filtered)?.groupValues?.get(1) shouldBe bucket
+            }
+        }
+    }
+
+    @Test
+    @Order(9)
+    fun `a promoter's outcome filter reads its admitted rows only, as its home counts them`() {
+        val page = page(PROMOTER_SESSION)
+        val runBars = bars(page, "last-run")
+
+        LAST_RUN_BUCKETS.forEach { (bucket, names) ->
+            withClue("the promoter's ?outcome=$bucket walk equals its home's $bucket count") {
+                walk(PROMOTER_SESSION, "outcome", bucket).size shouldBe runBars.getValue(bucket)
+            }
+            withClue("the promoter's ?outcome=$bucket lists its admitted rows of the bucket only") {
+                walk(PROMOTER_SESSION, "outcome", bucket) shouldContainExactly names.filterNot { it in HIDDEN_NAMES }
+            }
+        }
+        withClue("no hidden schedule's name is in any walk, and each bar's page is stamped with its bucket") {
+            val barHrefs = hrefs(page, "last-run")
+            LAST_RUN_BUCKETS.forEach { (bucket, _) ->
+                HIDDEN_NAMES.forEach { hidden -> (hidden in walk(PROMOTER_SESSION, "outcome", bucket)) shouldBe false }
+                val filtered =
+                    session(PROMOTER_SESSION)
+                        .get(barHrefs.getValue(bucket))
+                        .then()
+                        .statusCode(200)
+                        .extract()
+                        .asString()
+                OUTCOME_STAMP.find(filtered)?.groupValues?.get(1) shouldBe bucket
+            }
+        }
+    }
+
+    @Test
+    @Order(10)
+    fun `the explorer page and the list refuse an outcome outside the five`() {
+        session(VIEWER_SESSION).get("/schedules?outcome=x").then().statusCode(400)
+
+        val refused = session(VIEWER_SESSION).get("/api/v1/schedules?outcome=nope")
+        refused.statusCode shouldBe 400
+        refused.jsonPath().getString("error.code") shouldBe "schedule.validation.request_invalid"
+        refused.jsonPath().getString("error.details.field") shouldBe "outcome"
+        refused.jsonPath().getString("error.details.expected") shouldBe
+            "one of succeeded, failed, in-progress, did-not-run, never-ran"
+    }
+
+    @Test
+    @Order(11)
     fun `a paused schedule that blocks counts and filters as blocked - blocked wins on both sides`() {
         // Last: it changes the fixture. b is paused; blocking it makes the row a paused clause
         // without its blocked_at term would still list.
@@ -166,13 +243,13 @@ class OverviewSchedulesE2eTest {
         )
         val page = page(VIEWER_SESSION)
 
-        counts(page) shouldBe mapOf("schedules" to 4, "enabled" to 2, "paused" to 0, "blocked" to 2)
+        counts(page) shouldBe mapOf("schedules" to 5, "enabled" to 3, "paused" to 0, "blocked" to 2)
         CONDITIONS.forEach { word ->
             withClue("?condition=$word equals the home's $word count") {
-                walk(VIEWER_SESSION, word).size shouldBe counts(page).getValue(word)
+                walk(VIEWER_SESSION, "condition", word).size shouldBe counts(page).getValue(word)
             }
         }
-        walk(VIEWER_SESSION, "blocked") shouldContainExactly listOf("ov/b_paused_failed", "ov/c_blocked")
+        walk(VIEWER_SESSION, "condition", "blocked") shouldContainExactly listOf("ov/b_paused_failed", "ov/c_blocked")
         page.substringAfter("data-task=\"unblock\"").substringBefore("</li>").contains("Unblock 2 schedules<") shouldBe true
     }
 
@@ -198,17 +275,18 @@ class OverviewSchedulesE2eTest {
         return body.getList("data.items.name")
     }
 
-    /** §20.1 with `condition`, one row a page through `has_more` — the filter must page, not only answer. */
+    /** §20.1 with a filter parameter (`condition`, #641; `outcome`, #725), one row a page through `has_more` — the filter must page, not only answer. */
     private fun walk(
         jwt: String,
-        condition: String,
+        parameter: String,
+        word: String,
     ): List<String> {
         val names = ArrayList<String>()
         var offset = 0
         do {
             val body =
                 session(jwt)
-                    .get("/api/v1/schedules?condition=$condition&offset=$offset&limit=1")
+                    .get("/api/v1/schedules?$parameter=$word&offset=$offset&limit=1")
                     .then()
                     .statusCode(200)
                     .extract()
@@ -229,6 +307,15 @@ class OverviewSchedulesE2eTest {
     ): Map<String, Int> {
         val list = html.substringAfter("data-chart=\"$chart\"", "").substringBefore("</ul>")
         return BAR.findAll(list).associate { it.groupValues[1] to it.groupValues[2].toInt() }
+    }
+
+    /** Each bar's link, by key — what the Last run bars open (the filtered explorer, or nothing). */
+    private fun hrefs(
+        html: String,
+        chart: String,
+    ): Map<String, String> {
+        val list = html.substringAfter("data-chart=\"$chart\"", "").substringBefore("</ul>")
+        return BAR_HREF.findAll(list).associate { it.groupValues[1] to it.groupValues[2] }
     }
 
     private fun section(
@@ -277,11 +364,14 @@ class OverviewSchedulesE2eTest {
                 "ov/b_paused_failed" to HIDDEN_PIPELINE,
                 "ov/c_blocked" to VISIBLE_PIPELINE,
                 "ov/d_enabled_new" to HIDDEN_PIPELINE,
+                "ov/e_enabled_skipped" to VISIBLE_PIPELINE,
             ).mapValues { (name, pipeline) -> schedule(ADMIN_SESSION, name, pipeline) }
         session(ADMIN_SESSION).post("/api/v1/schedules/${ids["ov/b_paused_failed"]}/pause").then().statusCode(200)
         sql("UPDATE schedules SET blocked_reason = 'e2e', blocked_at = NOW() WHERE id = '${ids["ov/c_blocked"]}'")
         run(ids.getValue("ov/a_enabled_ok"), "succeeded")
         run(ids.getValue("ov/b_paused_failed"), "failed")
+        run(ids.getValue("ov/d_enabled_new"), "queued")
+        run(ids.getValue("ov/e_enabled_skipped"), "skipped")
 
         release(OTHER_SESSION, OTHER_PIPELINE)
         schedule(OTHER_SESSION, OTHER_NAME, OTHER_PIPELINE)
@@ -363,7 +453,8 @@ class OverviewSchedulesE2eTest {
     }
 
     private companion object {
-        private val NAMES = listOf("ov/a_enabled_ok", "ov/b_paused_failed", "ov/c_blocked", "ov/d_enabled_new")
+        private val NAMES =
+            listOf("ov/a_enabled_ok", "ov/b_paused_failed", "ov/c_blocked", "ov/d_enabled_new", "ov/e_enabled_skipped")
         private const val VISIBLE_PIPELINE = "ov/visible_pipe"
         private const val HIDDEN_PIPELINE = "ov/hidden_pipe"
         private const val OTHER_PIPELINE = "ovo/other_pipe"
@@ -376,9 +467,30 @@ class OverviewSchedulesE2eTest {
                 """data-bar="([a-z-]+)" data-tone="[a-z]+">.*?<span class="app-overview-bar-v">(\d+)</span>""",
                 RegexOption.DOT_MATCHES_ALL,
             )
+        private val BAR_HREF = Regex("""data-bar="([a-z-]+)".*?href="([^"]+)"""", RegexOption.DOT_MATCHES_ALL)
         private val ENTRY = Regex("""href="/schedules\?id=[0-9a-f-]+"[^>]*>([^<]+)</a>""")
         private val TASK = Regex("""data-task="([a-z-]+)"""")
+
+        /**
+         * The filtered explorer's server-rendered evidence: the parsed deep-link word stamped on
+         * `data-schedules-root` (the page's rows are the script's fetch of §20.1, so the page
+         * itself names no schedule — the render pin `SchedulesPageRenderTest` reads the same stamp).
+         */
+        private val OUTCOME_STAMP = Regex("""data-schedules-root[^>]*data-schedule-outcome="([a-z-]+)"""")
         private val CONDITIONS = listOf("enabled", "paused", "blocked")
+
+        /** #749 — the fixture's schedule(s) per Last run bucket, in the bars' order: a bar counts this list. */
+        private val LAST_RUN_BUCKETS =
+            mapOf(
+                "succeeded" to listOf("ov/a_enabled_ok"),
+                "failed" to listOf("ov/b_paused_failed"),
+                "in-progress" to listOf("ov/d_enabled_new"),
+                "did-not-run" to listOf("ov/e_enabled_skipped"),
+                "never-ran" to listOf("ov/c_blocked"),
+            )
+
+        /** The HIDDEN-pipeline schedules the promoter's lens never admits (versioning §10.2). */
+        private val HIDDEN_NAMES = listOf("ov/b_paused_failed", "ov/d_enabled_new")
 
         private const val WORKSPACE = "ov-e2e"
         private const val OTHER = "ov-e2e-other"
