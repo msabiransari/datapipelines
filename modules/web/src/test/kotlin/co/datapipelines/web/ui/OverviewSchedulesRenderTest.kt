@@ -16,6 +16,7 @@ import co.datapipelines.web.ui.OverviewPage.RecentItem
 import co.datapipelines.web.ui.OverviewPage.RecentPanel
 import co.datapipelines.web.ui.OverviewPage.RecentSection
 import co.datapipelines.web.ui.site.REPORT_PROBLEM_URL
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldBeNull
@@ -141,19 +142,30 @@ class OverviewSchedulesRenderTest {
         doc.select("[data-overview-recent] a[href*=blocked]").shouldBeEmpty()
     }
 
-    /** #641 — the condition tiles and bars open the explorer filtered to their bucket; Schedules and Last run stay unlinked. */
+    /**
+     * #641 — the condition tiles and bars open the explorer filtered to their bucket; the Schedules
+     * total stays unlinked. #725 — each Last run bar opens the explorer filtered to its last run.
+     */
     @Test
-    fun `the condition tiles and bars link the filtered explorer - the total and the last-run bars do not`() {
+    fun `the condition tiles and bars and the last-run bars link the filtered explorer - the total does not`() {
         val doc = Jsoup.parse(controllerHtml(WorkspaceRole.AUTHOR, blocked = 1))
         listOf("enabled", "paused", "blocked").forEach { key ->
             doc.selectFirst("[data-overview-summary] [data-count=$key] a")!!.attr("href") shouldBe "/schedules?condition=$key"
             doc.selectFirst("[data-chart=condition] [data-bar=$key] a")!!.attr("href") shouldBe "/schedules?condition=$key"
         }
         doc.select("[data-overview-summary] [data-count=schedules] a").shouldBeEmpty()
-        doc.select("[data-chart=last-run] a").shouldBeEmpty()
-        doc.selectFirst("[data-dialog-section=condition]")!!.text() shouldContain
-            "Each bar and each condition tile opens the explorer filtered to that condition; the Last run bars are not filters."
-        doc.selectFirst("[data-dialog-section=condition]")!!.text() shouldNotContain "The bars are not filters"
+        listOf("succeeded", "failed", "in-progress", "did-not-run", "never-ran").forEach { key ->
+            withClue("the Last run bar $key") {
+                doc.select("[data-chart=last-run] [data-bar=$key] a").map { it.attr("href") } shouldContainExactly
+                    listOf("/schedules?outcome=$key")
+            }
+        }
+        doc.select("[data-chart=last-run] a").map { it.attr("href") }.distinct().size shouldBe 5
+        val dialog = doc.selectFirst("[data-dialog-section=condition]")!!.text()
+        dialog shouldContain
+            "Each bar and each condition tile opens the explorer filtered to that condition; " +
+            "each Last run bar opens it filtered to that last run."
+        dialog shouldNotContain "not filters"
     }
 
     /** The New schedule action is the canAuthor set's: a viewer and a promoter read the steps and no button. */

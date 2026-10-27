@@ -29,12 +29,14 @@
   <script th:src="@{/js/schedules/page.js}" defer></script>
 
   <!-- #641: the condition stamp below is the PARSED deep-link word (the controller refused any
-       other value with a 400), absent when the list is unfiltered; the script reads it first. -->
+       other value with a 400), absent when the list is unfiltered; the script reads it first.
+       #725: the outcome stamp is the same, for the last-run filter. -->
   <div class="tplx-page sch-page app-canvas" data-schedules-root
        th:attr="data-can-author=${canAuthor == true},
                 data-can-read-executions=${canReadExecutions == true},
                 data-can-execute=${canExecute == true}"
-       th:data-schedule-condition="${#strings.isEmpty(condition) ? null : condition}">
+       th:data-schedule-condition="${#strings.isEmpty(condition) ? null : condition}"
+       th:data-schedule-outcome="${#strings.isEmpty(outcome) ? null : outcome}">
 
     <!-- ONE grid child for the heading row (the `.tplx-page` three-row grid — pipelines/list.html). -->
     <div class="app-page-h">
@@ -59,7 +61,9 @@
          renders — the name, the pipeline, the pattern and the condition (§5.1 Search).
          #641: the condition select beside it is the pipelines catalog's lifecycle select
          without htmx — its change re-reads §20.1 with `condition` (explorer.js), and while a
-         condition is chosen the list is flat, like a search; the two include each other. -->
+         condition is chosen the list is flat, like a search; the two include each other.
+         #725: the last-run select is its twin over §20.1's `outcome` (the newest run's bucket, the
+         Schedules home's Last run bars); both filters and the search compose. -->
     <div class="u-row-md tplx-search-row">
       <input type="search" id="schedule-filter-q" name="q" placeholder="Search schedules..."
              class="ds-input app-search-input" autocomplete="off" aria-controls="schedule-list">
@@ -68,6 +72,12 @@
         <option value="" th:selected="${#strings.isEmpty(condition)}">All conditions</option>
         <option th:each="o : ${conditionOptions}" th:value="${o.value}" th:text="${o.label}"
                 th:selected="${o.value == condition}">Blocked</option>
+      </select>
+      <select id="schedule-filter-outcome" name="outcome" class="ds-input app-select-auto"
+              aria-label="Filter by last run" aria-controls="schedule-list">
+        <option value="" th:selected="${#strings.isEmpty(outcome)}">All outcomes</option>
+        <option th:each="o : ${outcomeOptions}" th:value="${o.value}" th:text="${o.label}"
+                th:selected="${o.value == outcome}">Failed</option>
       </select>
     </div>
 

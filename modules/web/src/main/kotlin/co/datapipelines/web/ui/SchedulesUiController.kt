@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
+import co.datapipelines.scheduler.LastRunOutcome
 import co.datapipelines.scheduler.ScheduleCondition
 import co.datapipelines.scheduler.ScheduleService
 import jakarta.servlet.http.HttpServletRequest
@@ -35,6 +36,8 @@ import java.time.ZoneId
  *  - **the condition deep link** (#641, [ScheduleConditionFilter]) — `?condition=` is bound and
  *    validated HERE, as the catalogs' `?lifecycle=` is (a bad word is the house 400), and the
  *    parsed word is stamped on the page root for the script; the filtered read itself is §20.1's.
+ *  - **the last-run deep link** (#725, [ScheduleOutcomeFilter]) — `?outcome=` the same way: bound,
+ *    validated, stamped; the Schedules home's Last run bars open it.
  *
  * Notification settings are saved in slice 4 part a; the deployment's computed mail state (on, or off
  * with its reason) is rendered for the form's note (#442 part b).
@@ -52,12 +55,16 @@ class SchedulesUiController(
         model: Model,
         request: HttpServletRequest,
         @RequestParam(required = false) condition: String?,
+        @RequestParam(required = false) outcome: String?,
     ): String {
         val only = ScheduleConditionFilter.parse(condition)
+        val lastRun = ScheduleOutcomeFilter.parse(outcome)
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         RoleModel.stamp(model)
         model.addAttribute("condition", only?.wire ?: "")
         model.addAttribute("conditionOptions", ScheduleConditionFilter.OPTIONS)
+        model.addAttribute("outcome", lastRun?.wire ?: "")
+        model.addAttribute("outcomeOptions", ScheduleOutcomeFilter.OPTIONS)
         model.addAttribute("timezoneGroups", ScheduleTimezones.GROUPS)
         model.addAttribute("notificationDelivery", schedules.notificationDelivery().toWire())
         return "schedules/index"
@@ -102,6 +109,45 @@ object ScheduleConditionFilter {
 
     /** The explorer filtered to [condition] — what the home's tiles, bars and Unblock row open. */
     fun href(condition: ScheduleCondition): String = "/schedules?condition=${condition.wire}"
+}
+
+/**
+ * #725 — the explorer's `outcome` query parameter: [ScheduleConditionFilter]'s twin over
+ * [LastRunOutcome] (a twin, not one object over both: the two enums share no type, and
+ * [ScheduleCondition] stays as #641 left it). Its ONE page parse, the words every surface shows
+ * for a last-run bucket — the home's Last run bars and dialog, the explorer's select — and the
+ * filtered explorer's address.
+ *
+ * Bound as a STRING by the page: an unknown value is the house 400 with the constant
+ * [BAD_OUTCOME]; the wire words are [LastRunOutcome.wire], exact and lower-case. The filtered READ
+ * is rest-api §20.1's own `outcome`, so a filtered explorer lists exactly what the home's bar counts.
+ */
+object ScheduleOutcomeFilter {
+    /** The refusal's one reason — a constant, so nothing of the input can ride it. */
+    const val BAD_OUTCOME = "The outcome parameter is not a filter the schedules explorer offers."
+
+    /** The select's options after "All last runs", in [LastRunOutcome]'s order. */
+    val OPTIONS: List<ScheduleConditionFilter.Option> =
+        LastRunOutcome.entries.map { ScheduleConditionFilter.Option(it.wire, label(it)) }
+
+    /** `null`/empty → null (the whole list); a wire word → its bucket; anything else → the 400. */
+    fun parse(raw: String?): LastRunOutcome? {
+        if (raw.isNullOrEmpty()) return null
+        return LastRunOutcome.fromWire(raw) ?: throw ResponseStatusException(HttpStatus.BAD_REQUEST, BAD_OUTCOME)
+    }
+
+    /** The bucket's name on every surface — the home's bars and dialog, the explorer's select. */
+    fun label(outcome: LastRunOutcome): String =
+        when (outcome) {
+            LastRunOutcome.SUCCEEDED -> "Succeeded"
+            LastRunOutcome.FAILED -> "Failed"
+            LastRunOutcome.IN_PROGRESS -> "In progress"
+            LastRunOutcome.DID_NOT_RUN -> "Did not run"
+            LastRunOutcome.NEVER_RAN -> "Never ran"
+        }
+
+    /** The explorer filtered to [outcome] — what the home's Last run bars open. */
+    fun href(outcome: LastRunOutcome): String = "/schedules?outcome=${outcome.wire}"
 }
 
 /**

@@ -29,6 +29,7 @@ internal object SchedulesRender {
         roles: WebContext.() -> Unit = { withRoles() },
         delivery: Map<String, String>? = null,
         condition: String = "",
+        outcome: String = "",
     ): String {
         val context =
             WebContext(
@@ -45,6 +46,8 @@ internal object SchedulesRender {
         context.setVariable("notificationDelivery", delivery)
         context.setVariable("condition", condition)
         context.setVariable("conditionOptions", ScheduleConditionFilter.OPTIONS)
+        context.setVariable("outcome", outcome)
+        context.setVariable("outcomeOptions", ScheduleOutcomeFilter.OPTIONS)
         return engine.process("schedules/index", context)
     }
 

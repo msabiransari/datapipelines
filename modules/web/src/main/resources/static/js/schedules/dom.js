@@ -123,12 +123,15 @@
   /**
    * The page's deep link for a schedule (and a run), kept in the address bar as the reader moves.
    * #641: the active condition filter rides with it (validated words only — S.state.condition is
-   * set through model.conditionFilter), and is absent when the list is unfiltered.
+   * set through model.conditionFilter), and is absent when the list is unfiltered. #725: so does
+   * the last-run filter (S.state.outcome, through model.outcomeFilter), after the condition.
    */
   S.url = function (scheduleId, runId) {
     var parts = [];
     var condition = S.state && S.state.condition;
+    var outcome = S.state && S.state.outcome;
     if (condition) parts.push("condition=" + encodeURIComponent(condition));
+    if (outcome) parts.push("outcome=" + encodeURIComponent(outcome));
     if (scheduleId) parts.push("id=" + encodeURIComponent(scheduleId));
     if (runId) parts.push("run=" + encodeURIComponent(runId));
     return "/schedules" + (parts.length ? "?" + parts.join("&") : "");
