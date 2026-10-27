@@ -377,4 +377,6 @@ jobs:
       - name: buildSrc tests under dependency verification
         env:
           GRADLE_USER_HOME: ${{ runner.temp }}/cold-gradle-home
-        run: ./gradlew :buildSrc:cleanTest :buildSrc:test
+        run: |
+          ./gradlew :buildSrc:cleanTest :buildSrc:test
+          ./scripts/test-recount.sh buildSrc/build/test-results/test
