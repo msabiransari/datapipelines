@@ -1,9 +1,9 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.55
+**Status:** v1.56
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-10-25
+**Last updated:** 2026-10-27
 
 ---
 
@@ -32,14 +32,14 @@ This is **lighter than the core specs** — most operational concerns are the op
 
 Published to `ghcr.io/datapipelines/datapipelines:{version}` and `docker.io/datapipelines/datapipelines:{version}` (mirror).
 
-- **Base image**: `eclipse-temurin:21-jre-jammy` (LTS JDK 21, Ubuntu Jammy).
-- **Layers**: multi-stage build (`gradle:8.7-jdk21` builder → `eclipse-temurin:21-jre-jammy` runtime).
+- **Base image**: `eclipse-temurin:21-jre` (the Ubuntu glibc JRE 21 image, chosen over a smaller alpine base because argon2-jvm loads its native library through JNA, which ships glibc binaries).
+- **Layers**: single stage: the boot jar is built on the host (`./gradlew :modules:app:bootJar`) and copied in; the image adds the DuckDB extension bundle, the GraalJS isolate with its pre-installed resource cache, and the third-party notices file.
 - **Bundled DuckDB extensions (dp-lake)**: `httpfs`, `aws`, `iceberg` and `avro` for DuckDB core v1.5.5, pre-populated under `/opt/duckdb/extensions/v1.5.5/<platform>/` (`<platform>` = `linux_amd64` or `linux_arm64`, following the build's `TARGETARCH`) and activated by the image's `ENV DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY` — a LAKE datasource `LOAD`s them from disk and never `INSTALL`s at runtime, so no egress to `extensions.duckdb.org` is needed ([Configuration §3.25](configuration.md)). Adds ~108 MB uncompressed (~39 MB downloaded at build).
 - **Size target**: < 250 MB compressed.
-- **User**: non-root (`datapipelines` user, UID 1000).
-- **Entrypoint**: `java $JAVA_OPTS -Duser.timezone=UTC -jar /app/app.jar`.
+- **User**: non-root (`datapipelines`, a system account created with `useradd --system`; no fixed UID — a chart or compose `runAsUser` must not assume 1000).
+- **Entrypoint**: `["java", "-Dpolyglot.engine.userResourceCache=/opt/graaljs/resources", "-jar", "/app/datapipelines.jar"]` (exec form). The image defines no JVM-flags hook: a JVM option variable (`JAVA_TOOL_OPTIONS` and friends) would reach the JVM without one, which is why the shipped deploy files refuse those names (§6.4, §9).
 
-**`-Duser.timezone=UTC` is normative, not a suggestion.** The type system assumes a UTC JVM: ingest normalizes timezone-aware source values to UTC and treats naive source timestamps as already-UTC ([Type System §8.4](type-system.md#84-timestamp-timezone-normalization)), and every internal `TIMESTAMPTZ` is stored and rendered in UTC. A container whose JVM default zone is anything else silently shifts rendered timestamps. The flag is baked into the image entrypoint; bare-JVM and JAR deployments (§3.2, §6.5) MUST pass it themselves.
+**`-Duser.timezone=UTC` is normative, not a suggestion.** The type system assumes a UTC JVM: ingest normalizes timezone-aware source values to UTC and treats naive source timestamps as already-UTC ([Type System §8.4](type-system.md#84-timestamp-timezone-normalization)), and every internal `TIMESTAMPTZ` is stored and rendered in UTC. A container whose JVM default zone is anything else silently shifts rendered timestamps. No image entrypoint sets it: every deployment — container, bare JVM or JAR (§3.2, §6.5) — MUST pass `-Duser.timezone=UTC` itself.
 
 Heap and container-memory sizing: §6.6.
 
@@ -1338,6 +1338,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-27 | v1.56 | #743 | **§3.1:** the four image bullets state what the Dockerfile builds — base image `eclipse-temurin:21-jre` (Ubuntu glibc; argon2-jvm loads its native library through JNA), a single-stage build (the boot jar is built on the host and copied in; the image adds the DuckDB extension bundle, the GraalJS isolate + resource cache and the third-party notices file), the `useradd --system` account with no fixed UID, and the exec-form entrypoint naming the GraalJS resource cache and `/app/datapipelines.jar`; the timezone paragraph no longer claims the entrypoint bakes the UTC flag in — every deployment passes `-Duser.timezone=UTC` itself. `DeploymentImageBulletsSpecDriftTest` pins the bullets to the Dockerfile (one `FROM` tag, the `ENTRYPOINT` array verbatim, the `USER`/`useradd --system` account) and refuses the retired claims — the base tag, the builder-stage build, the builder-image pin, the JVM-flags variable, the fixed UID, the wrong jar path and the baked-in-UTC claim — described here rather than quoted, so the retired-words grep over this file stays empty. The Dockerfile's healthcheck comment now names the Ubuntu base, not alpine. |
 | 2026-10-25 | v1.55 | #702 | **Appendix B step 2:** replaced the top-bar chip, login mint and `GET /api/v1/auth/api-keys/mine` flow retired by keys v2 (#233, Auth v3.5) with the Keys page / `POST /api/v1/auth/api-keys`, the role chosen under the subset rule and the one-time reveal. The v1.28 row remains as history. Prose only. |
 | 2026-10-25 | v1.54 | #712 — renumbered at merge after #442’s v1.52/v1.53 | **§6.4:** the management port's chart exposure (configuration.md §3.14) — a `management` values block, everything OFF by default (byte-identical default render): `management.expose` adds the management `containerPort` (from `management.port`), pins both `MANAGEMENT_SERVER_*` env entries (address `0.0.0.0` — the opt-open switch) and a headless `Service` (`clusterIP: None`); `management.networkPolicy.enabled` adds the chart's one ingress `NetworkPolicy` for the app pods, which carries two rules: the scraper peers on the management port, and the app-port rule from `appIngress.from` (`NetworkPolicyPeer`s, verbatim) or every source under the explicit `appIngress.allowAll: true`. Every selector is a full `LabelSelector`. The render refuses both scraper selectors empty, no app-port declaration, `allowAll` with a `from`, a bare label map, an unknown or empty peer and a quoted `allowAll`; the isolation and union semantics, and how the policy combines with operator-owned ones, are stated. `management.serviceMonitor.enabled` adds a `ServiceMonitor`. Any `extraEnv.MANAGEMENT_SERVER_*` double mapping is refused (Kubernetes honours the last duplicate env name silently). Chart 0.2.0 → 0.2.1. `helm-check.sh` grows to lint plus eighty-nine verdicts (`(h)`–`(h5h)`), with a pinned `kubeconform` validating every successful render against the Kubernetes 1.35.0 schema and a parsed NetworkPolicy contract. **§9:** the management-port sentence names the app-port rule. `HelmManagementValuesSpecDriftTest` pins the values, the expose guards, the refusals, the three templates' flag lines, the shared app port, the `matchLabels` example and the configuration.md §3.14 row. |
 | 2026-10-25 | v1.53 | 442c (#442) | §8.3: keep scheduler mail off until every instance understands V51 notification trail kinds. §8.4: disable, drain and account for old readers refusing historical notification kinds before downgrade. |
