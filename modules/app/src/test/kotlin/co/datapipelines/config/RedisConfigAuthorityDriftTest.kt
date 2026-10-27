@@ -4,24 +4,21 @@ import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 import java.io.File
 
 /** Prevents production, deployment and test configuration from restoring a second Redis authority. */
 class RedisConfigAuthorityDriftTest {
+    @TempDir
+    lateinit var scratch: File
+
     @Test
     fun `only operator Redis keys occur in production deployment and tests`() {
         var root = File(".").absoluteFile
         while (!File(root, "settings.gradle.kts").isFile) {
             root = root.parentFile ?: error("settings.gradle.kts not found")
         }
-        val files =
-            listOf("modules", "tests", "deploy").flatMap { directory ->
-                File(root, directory)
-                    .walkTopDown()
-                    .onEnter { it.name !in setOf("build", ".gradle", "node_modules", "__pycache__") }
-                    .filter { it.isFile }
-                    .toList()
-            } + root.listFiles().orEmpty().filter { it.isFile && it.name.matches(Regex("application.*\\.ya?ml")) }
+        val files = configurationFiles(root)
         val kotlinTests = files.count { it.extension == "kt" && "/src/test/" in it.invariantSeparatorsPath }
         withClue("source inventory must include at least 100 Kotlin test files; scanned $kotlinTests") {
             (kotlinTests >= MIN_TEST_FILES) shouldBe true
@@ -35,7 +32,33 @@ class RedisConfigAuthorityDriftTest {
         }
     }
 
+    @Test
+    fun `a removed JVM attach marker does not hide ordinary repository files`() {
+        val module = File(scratch, "modules/app").apply { mkdirs() }
+        File(module, "application.yaml").writeText("operator configuration")
+        File(module, ".attach_pid-notes").writeText("repository documentation")
+        val marker = File(module, ".attach_pid12345").apply { writeText("") }
+        val files = configurationFiles(scratch)
+        marker.delete() shouldBe true
+
+        files.associate { it.relativeTo(scratch).invariantSeparatorsPath to it.readText() } shouldBe
+            mapOf(
+                "modules/app/application.yaml" to "operator configuration",
+                "modules/app/.attach_pid-notes" to "repository documentation",
+            )
+    }
+
+    private fun configurationFiles(root: File): List<File> =
+        listOf("modules", "tests", "deploy").flatMap { directory ->
+            File(root, directory)
+                .walkTopDown()
+                .onEnter { it.name !in setOf("build", ".gradle", "node_modules", "__pycache__") }
+                .filter { it.isFile && !JVM_ATTACH_MARKER.matches(it.name) }
+                .toList()
+        } + root.listFiles().orEmpty().filter { it.isFile && it.name.matches(Regex("application.*\\.ya?ml")) }
+
     private companion object {
         const val MIN_TEST_FILES = 100
+        val JVM_ATTACH_MARKER = Regex("\\.attach_pid[0-9]+")
     }
 }
