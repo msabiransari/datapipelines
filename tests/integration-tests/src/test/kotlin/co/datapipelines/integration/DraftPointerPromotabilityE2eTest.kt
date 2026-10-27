@@ -61,9 +61,8 @@ private enum class Family(
  * Per family, at the draft pointer: the promotion page's plan rows carry no candidate naming
  * the object (the listing rule lives in `PromotionService.plan`, which this page renders
  * exactly); the promoter's narrowed tree omits the object while the author's tree still lists
- * it (the differential keeps the assertion non-vacuous); and the wire inventory is OBSERVED,
- * not pinned — the set and artifact arms exclude the draft pointer, while the pipeline and
- * template arms still ship its hash: the follow-up this lane files, not the rule under test.
+ * it (the differential keeps the assertion non-vacuous); and the wire inventory is pinned
+ * to the same rule: all five families exclude the draft pointer (#575).
  * After the pointer returns to the release, the page lists it, the promoter's tree lists it
  * and the wire inventory carries version 1.
  *
@@ -305,26 +304,10 @@ class DraftPointerPromotabilityE2eTest {
             treeNames(family, ADMIN_SESSION) shouldContain name
         }
 
-        // The wire inventory is OBSERVED: the set and artifact arms exclude a draft pointer,
-        // the pipeline and template arms still ship its hash — the #563 follow-up, not this rule.
+        // The wire inventory follows the same promotability rule for all five families.
         val wire = wireInventory()
-        when (family) {
-            Family.PIPELINES,
-            Family.TEMPLATES,
-            -> {
-                withClue("OBSERVED follow-up: the wire inventory still ships the draft pointer") {
-                    wireEntryVersions(wire, family, name) shouldContain 3
-                }
-            }
-
-            Family.PARAMETER_SETS,
-            Family.VISUALIZATIONS,
-            Family.DASHBOARDS,
-            -> {
-                withClue("the wire inventory's released-only arms must exclude the draft pointer") {
-                    wireEntryVersions(wire, family, name) shouldBe emptyList()
-                }
-            }
+        withClue("the wire inventory must exclude the $family draft pointer because it is not promotable") {
+            wireEntryVersions(wire, family, name) shouldBe emptyList()
         }
     }
 

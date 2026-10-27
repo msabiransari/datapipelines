@@ -1255,7 +1255,9 @@ class TemplateRepository(
                     }
                     ?: TEMPLATE_LIVE_T
             val version =
-                if (lifecycle == null) {
+                if (lifecycle == null && releasedOnly) {
+                    "v.version = t.current_version AND v.status = 'RELEASED'"
+                } else if (lifecycle == null) {
                     """
                     v.version = COALESCE(
                           t.current_version,
