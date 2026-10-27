@@ -121,7 +121,8 @@ class OverviewSchedulesE2eTest {
         }
         walk(VIEWER_SESSION, "condition", "blocked") shouldContainExactly listOf("ov/c_blocked")
         walk(VIEWER_SESSION, "condition", "paused") shouldContainExactly listOf("ov/b_paused_failed")
-        walk(VIEWER_SESSION, "condition", "enabled") shouldContainExactly listOf("ov/a_enabled_ok", "ov/d_enabled_new", "ov/e_enabled_skipped")
+        walk(VIEWER_SESSION, "condition", "enabled") shouldContainExactly
+            listOf("ov/a_enabled_ok", "ov/d_enabled_new", "ov/e_enabled_skipped")
     }
 
     @Test
@@ -275,7 +276,10 @@ class OverviewSchedulesE2eTest {
         return body.getList("data.items.name")
     }
 
-    /** §20.1 with a filter parameter (`condition`, #641; `outcome`, #725), one row a page through `has_more` — the filter must page, not only answer. */
+    /**
+     * §20.1 with a filter parameter (`condition`, #641; `outcome`, #725), one row a page through
+     * `has_more` — the filter must page, not only answer.
+     */
     private fun walk(
         jwt: String,
         parameter: String,
