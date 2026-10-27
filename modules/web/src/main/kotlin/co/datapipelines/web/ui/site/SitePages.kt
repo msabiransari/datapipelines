@@ -349,7 +349,10 @@ object SitePages {
     val SECURITY =
         SitePage(
             path = "/security",
-            title = "AI agent database access, made safe: keys by role, read-only, audited",
+            // 700b (2026-10-27): "mcp server security" (140/mo, Google Ads US window 2025-10..2026-09)
+            // leads the title; its live results ask how an MCP server is secured, which the page's
+            // first H2 answers. "AI agent database access" had no estimate (2026-09-18) and stays after it.
+            title = "MCP server security: AI agent database access, read-only, audited",
             description =
                 "How an AI agent reaches your databases without a password: keys with roles, read-only datasources, " +
                     "encrypted credentials, human release, a full audit log.",
@@ -358,8 +361,11 @@ object SitePages {
     val PUBLISHED_API =
         SitePage(
             path = "/published-api",
-            // "data api" is the measured head term (SEO addendum 4) — it leads the title and the H1.
-            title = "A data API from a SQL query: published endpoints | datapipelines.co",
+            // 700b (2026-10-27): "data api" (390/mo) no longer leads the title — its live results are
+            // directories of free public APIs, a reader after someone else's data. "rest api from
+            // database" (30/mo, same Ads window 2025-10..2026-09) returns how-to-build guides, this
+            // page's job, so it leads the title; "data API" stays in the H1 as plain description.
+            title = "Create a REST API from database queries: published SQL endpoints",
             description =
                 "A released pipeline becomes a versioned GET endpoint with bound parameters and " +
                     "path-scoped keys. Data to API in a day, nothing to deploy.",
@@ -511,8 +517,10 @@ object SitePages {
         SitePage(
             path = "/demo-data",
             // 116 §B's title is 72 chars against the 70 pin, so "and" tightens away; the
-            // search phrases (NYC taxi, rideshare, trade, weather) all stay.
-            title = "Demo data: NYC taxi, rideshare, US trade, weather | datapipelines.co",
+            // search phrases (NYC taxi, rideshare, trade, weather) all stay. 700b (2026-10-27):
+            // "sample sql database" (320/mo, Ads 2025-10..2026-09; results are sample databases to
+            // practise on) replaces the unmeasured "Demo data" lead, as the page's first H2 offers.
+            title = "Sample SQL databases: NYC taxi, rideshare, US trade, weather",
             // 116 §B's description is 159 chars against the 155 pin; the same sentence with
             // the two words its tail does not need.
             description =
@@ -546,8 +554,11 @@ object SitePages {
         SitePage(
             path = "/semantic-layer",
             // The brief's description is 174 chars against the 155 pin (SiteSeoMetaTest) —
-            // trimmed from the end as the brief sanctions; every key phrase stays.
-            title = "Semantic layer, learned by the agent: open source | datapipelines.co",
+            // trimmed from the end as the brief sanctions; every key phrase stays. 700b
+            // (2026-10-27): "semantic layer for ai" and its close variants measure 90–110/mo each
+            // (Ads 2025-10..2026-09, never summed) and their results ask why AI agents need a
+            // semantic layer, the page's subject; "for AI agents" replaces "learned by the agent".
+            title = "Semantic layer for AI agents: learned, open source | datapipelines.co",
             description =
                 "An open-source semantic layer your agent builds from your data, recording what it learned with " +
                     "the query that proved it. Drift is detected, never guessed.",
@@ -621,14 +632,19 @@ object SitePages {
             view = "site/sql-dashboards",
         )
 
-    /** "parameterized sql queries" (260) + "dashboard filters" (90): the parameter sets dashboards pin. */
+    /**
+     * "parameter sets" + "dashboard filters" (90) + "cascading filters" (320/mo, Ads 2025-10..2026-09,
+     * read 2026-10-27: BI vendors' dependent-filter docs, the country → state cascade the page shows).
+     * 700b corrected the earlier rationale: "parameterized sql queries" (260) is programming and
+     * SQL-injection guidance in its results, so it is not this page's target.
+     */
     val REUSABLE_PARAMETER_SETS =
         SitePage(
             path = "/reusable-parameter-sets",
             title = "Reusable parameter sets: typed inputs and dashboard filters",
             description =
                 "Typed inputs and dropdowns defined once: defaults, validation, SQL-fed options and cascading " +
-                    "choices, versioned like a pipeline and reused by dashboards.",
+                    "filters, versioned like a pipeline and reused by dashboards.",
             view = "site/reusable-parameter-sets",
         )
 

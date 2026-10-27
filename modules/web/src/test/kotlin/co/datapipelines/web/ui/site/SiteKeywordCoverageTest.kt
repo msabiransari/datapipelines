@@ -145,6 +145,15 @@ class SiteKeywordCoverageTest {
             Row("sql dashboard", SitePages.SQL_DASHBOARDS, TITLE),
             Row("parameter sets", SitePages.REUSABLE_PARAMETER_SETS, TITLE),
             Row("dashboard filters", SitePages.REUSABLE_PARAMETER_SETS, TITLE),
+            // ---- 700b (2026-10-27): Google Ads US, window 2025-10..2026-09, chosen by live result
+            // intent. "data api" (390) keeps its H1 but lost the title: its results are directories
+            // of other people's APIs; "rest api from database" (30) returns this page's how-to job.
+            Row("rest api from database", SitePages.PUBLISHED_API, TITLE),
+            Row("data api", SitePages.PUBLISHED_API, H1),
+            Row("mcp server security", SitePages.SECURITY, TITLE),
+            Row("sample sql database", SitePages.DEMO_DATA, TITLE),
+            Row("semantic layer for ai", SitePages.SEMANTIC_LAYER, TITLE),
+            Row("cascading filters", SitePages.REUSABLE_PARAMETER_SETS, BODY),
         )
 
     private val rendered: Map<String, String> by lazy {
