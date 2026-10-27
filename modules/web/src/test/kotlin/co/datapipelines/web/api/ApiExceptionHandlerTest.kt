@@ -3,6 +3,7 @@ package co.datapipelines.web.api
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.web.capturingLogEvents
 import com.fasterxml.jackson.databind.JsonNode
@@ -509,9 +510,8 @@ class ApiExceptionHandlerTest {
         // caller's own downstream is down" (datasource_unreachable,
         // datasource_connection_failed) earn WARN — a 502 status alone proves nothing.
         val logger = org.slf4j.LoggerFactory.getLogger(ApiExceptionHandler::class.java) as ch.qos.logback.classic.Logger
-        val appender =
-            ch.qos.logback.core.read
-                .ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
+        // raw-list-appender: synchronous — standalone MockMvc dispatches on the test thread
+        val appender = ListAppender<ILoggingEvent>()
         appender.start()
         logger.addAppender(appender)
         try {
@@ -537,9 +537,8 @@ class ApiExceptionHandlerTest {
         // produced) — keying the demotion on the status would bury it. It must log ERROR with
         // the throwable attached.
         val logger = org.slf4j.LoggerFactory.getLogger(ApiExceptionHandler::class.java) as ch.qos.logback.classic.Logger
-        val appender =
-            ch.qos.logback.core.read
-                .ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
+        // raw-list-appender: synchronous — standalone MockMvc dispatches on the test thread
+        val appender = ListAppender<ILoggingEvent>()
         appender.start()
         logger.addAppender(appender)
         try {
@@ -613,9 +612,8 @@ class ApiExceptionHandlerTest {
     @Test
     fun `neither malformed body logs ERROR or attaches a stack`() {
         val logger = org.slf4j.LoggerFactory.getLogger(ApiExceptionHandler::class.java) as ch.qos.logback.classic.Logger
-        val appender =
-            ch.qos.logback.core.read
-                .ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
+        // raw-list-appender: synchronous — standalone MockMvc dispatches on the test thread
+        val appender = ListAppender<ILoggingEvent>()
         appender.start()
         logger.addAppender(appender)
         try {
@@ -643,9 +641,8 @@ class ApiExceptionHandlerTest {
         val probe = PlainProbeController()
         val plainMvc = MockMvcBuilders.standaloneSetup(probe).setControllerAdvice(ApiExceptionHandler()).build()
         val logger = org.slf4j.LoggerFactory.getLogger(ApiExceptionHandler::class.java) as ch.qos.logback.classic.Logger
-        val appender =
-            ch.qos.logback.core.read
-                .ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
+        // raw-list-appender: synchronous — standalone MockMvc dispatches on the test thread
+        val appender = ListAppender<ILoggingEvent>()
         appender.start()
         logger.addAppender(appender)
         try {

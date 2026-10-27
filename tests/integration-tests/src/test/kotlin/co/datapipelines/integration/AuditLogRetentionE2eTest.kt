@@ -2,7 +2,6 @@ package co.datapipelines.integration
 
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.DatapipelinesApplication
 import io.kotest.assertions.withClue
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
@@ -141,15 +140,10 @@ class AuditLogRetentionE2eTest {
     private fun sweepTickLogs(): List<ILoggingEvent> {
         val sweep = applicationContext.getBean("executionEventRetentionScheduler")
         val logger = LoggerFactory.getLogger("co.datapipelines.auth.AuditLogRetention") as ch.qos.logback.classic.Logger
-        val appender = ListAppender<ILoggingEvent>().apply { start() }
-        logger.addAppender(appender)
-        try {
-            sweep.javaClass.getMethod("retain").invoke(sweep)
-        } finally {
-            logger.detachAppender(appender)
-        }
+        // A snapshot (#484): the booted application's threads log while the capture is attached.
+        val events = capturingLogEvents(logger) { sweep.javaClass.getMethod("retain").invoke(sweep) }
         val thread = Thread.currentThread().name
-        return appender.list.filter { it.threadName == thread }
+        return events.filter { it.threadName == thread }
     }
 
     /** The application registry's `datapipelines.audit.retention.purged` count (0 before the first tick). */

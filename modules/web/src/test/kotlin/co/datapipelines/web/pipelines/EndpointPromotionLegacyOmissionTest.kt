@@ -39,6 +39,8 @@ class EndpointPromotionLegacyOmissionTest {
     private val promotion = EndpointPromotion(mockk(), mockk(), endpoints, bindings, mockk(), pipelines)
 
     private val logger = LoggerFactory.getLogger(EndpointPromotion::class.java) as Logger
+
+    // raw-list-appender: synchronous — entriesFor runs on the test thread over mocks
     private val captured = ListAppender<ILoggingEvent>().also { it.start() }
 
     init {

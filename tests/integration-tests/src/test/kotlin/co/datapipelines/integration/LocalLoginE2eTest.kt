@@ -1,7 +1,5 @@
 package co.datapipelines.integration
 
-import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.DatapipelinesApplication
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
@@ -147,15 +145,12 @@ class LocalLoginE2eTest {
     fun `no line the login path logs contains the password`() {
         seedLocalUsers()
         val logger = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as ch.qos.logback.classic.Logger
-        val appender = ListAppender<ILoggingEvent>().apply { start() }
-        logger.addAppender(appender)
-        try {
-            postLogin(LOCAL_EMAIL, "a-wrong-password-attempt")
-            postLogin(LOCAL_EMAIL, LOCAL_PASSWORD)
-        } finally {
-            logger.detachAppender(appender)
-        }
-        val lines = appender.list.map { it.formattedMessage }
+        // A snapshot (#484): the booted application's threads log while the capture is attached.
+        val lines =
+            capturingLogEvents(logger) {
+                postLogin(LOCAL_EMAIL, "a-wrong-password-attempt")
+                postLogin(LOCAL_EMAIL, LOCAL_PASSWORD)
+            }.map { it.formattedMessage }
 
         // Positive control first (the 021 pattern): the capture must contain the
         // expected event lines, or the negative below proves nothing.

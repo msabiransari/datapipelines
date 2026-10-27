@@ -468,6 +468,7 @@ class ExecutionStreamLauncherTest {
             every { idempotencyStore.release(userId, "release", reserved) } throws IllegalStateException("Redis unavailable")
 
             val logger = LoggerFactory.getLogger(co.datapipelines.application.ExecutionLauncher::class.java) as Logger
+            // raw-list-appender: synchronous — the launch runs on runTest's dispatcher, on the test thread
             val warnings = ListAppender<ILoggingEvent>().apply { start() }
             logger.addAppender(warnings)
             try {

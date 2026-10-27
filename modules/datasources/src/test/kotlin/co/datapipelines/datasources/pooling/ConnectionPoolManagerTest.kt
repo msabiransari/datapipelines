@@ -2,14 +2,13 @@ package co.datapipelines.datasources.pooling
 
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
-import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.datasources.CredentialKind
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceErrorCodes
 import co.datapipelines.datasources.DatasourceFileRoots
 import co.datapipelines.datasources.DatasourceProperties
 import co.datapipelines.datasources.Fixtures
+import co.datapipelines.datasources.SnapshotListAppender
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.throwables.shouldThrow
@@ -224,7 +223,8 @@ class ConnectionPoolManagerTest {
         // its connection, so it is asserted, not assumed — observability.md §3.4A catalogues it.
         now = now.plusSeconds(1)
         val root = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
-        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        // A snapshot (#484): the ROOT capture sees every thread in the JVM while attached.
+        val appender = SnapshotListAppender()
         root.addAppender(appender)
         try {
             manager.reapRetiring() shouldBe ReapOutcome(drained = 0, hardClosed = 1)
@@ -237,7 +237,7 @@ class ConnectionPoolManagerTest {
         metrics.hardClosed shouldBe listOf("hung_ds" to 3)
         manager.retiringCount() shouldBe 0
 
-        val warnings = appender.list.filter { it.level == Level.WARN }
+        val warnings = appender.events().filter { it.level == Level.WARN }
         val line = warnings.single { it.formattedMessage.contains("datasource.pool_hard_closed") }
         line.formattedMessage shouldContain "datasource=hung_ds"
         line.formattedMessage shouldContain "active_connections=3"

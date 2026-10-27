@@ -3,7 +3,6 @@ package co.datapipelines.parameters
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
@@ -236,18 +235,9 @@ class SelectorPoolTest {
         }
     }
 
-    /** Every line [SelectorPool] logs while [block] runs. */
-    private fun capturedLog(block: () -> Unit): List<ILoggingEvent> {
-        val appender = ListAppender<ILoggingEvent>().apply { start() }
-        val logger = LoggerFactory.getLogger(SelectorPool::class.java) as Logger
-        logger.addAppender(appender)
-        try {
-            block()
-        } finally {
-            logger.detachAppender(appender)
-        }
-        return appender.list.toList()
-    }
+    /** Every line [SelectorPool] logs while [block] runs, as a snapshot (#484): the pool's workers log while attached. */
+    private fun capturedLog(block: () -> Unit): List<ILoggingEvent> =
+        capturingLogEvents(LoggerFactory.getLogger(SelectorPool::class.java) as Logger, block = block)
 
     /**
      * [task] under an evaluate-like deadline ([DEADLINE_MS]), the answer awaited at most

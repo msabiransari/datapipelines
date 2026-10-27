@@ -1,5 +1,7 @@
 package co.datapipelines.datasources
 
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.datasources.pooling.ConnectionPool
 import co.datapipelines.datasources.pooling.HikariConnectionPool
 import co.datapipelines.typesystem.Dialect
@@ -309,10 +311,8 @@ class ReadOnlyStatementLeaseTest {
 
     private fun capturedLeaseLogs(block: () -> Unit): List<ch.qos.logback.classic.spi.ILoggingEvent> {
         val logger = org.slf4j.LoggerFactory.getLogger(LeasedStatement::class.java) as ch.qos.logback.classic.Logger
-        val appender =
-            ch.qos.logback.core.read
-                .ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
-                .apply { start() }
+        // raw-list-appender: synchronous — abandon and close run on the test thread over a one-connection double
+        val appender = ListAppender<ILoggingEvent>().apply { start() }
         logger.addAppender(appender)
         return try {
             block()

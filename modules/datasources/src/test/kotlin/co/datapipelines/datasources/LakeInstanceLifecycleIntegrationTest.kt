@@ -2,7 +2,6 @@ package co.datapipelines.datasources
 
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.datasources.pooling.ConnectionPoolManager
 import co.datapipelines.datasources.pooling.HikariConnectionPool
 import co.datapipelines.datasources.pooling.LakeInstanceInitializer
@@ -20,14 +19,12 @@ import org.junit.jupiter.api.assertAll
 import org.junit.jupiter.api.io.TempDir
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import java.io.File
 import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.SQLException
 import java.time.Instant
-import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * 152 (#128) — the LIFECYCLE and ISOLATION rules of a LAKE pool generation's shared DuckDB
@@ -271,16 +268,13 @@ class LakeInstanceLifecycleIntegrationTest {
     private fun capturingRecorderLogs(block: () -> Unit): List<ILoggingEvent> {
         val logger = LoggerFactory.getLogger(LakeInstanceInitializer::class.java) as ch.qos.logback.classic.Logger
         val previousLevel = logger.level
-        val appender =
-            ListAppender<ILoggingEvent>().apply {
-                list = CopyOnWriteArrayList()
-                start()
-            }
+        // A snapshot (#484): the Hikari pool's adder thread may run the lake initializer while attached.
+        val appender = SnapshotListAppender()
         logger.level = Level.WARN
         logger.addAppender(appender)
         return try {
             block()
-            appender.list.toList()
+            appender.events()
         } finally {
             logger.detachAppender(appender)
             logger.level = previousLevel
@@ -474,19 +468,11 @@ class LakeInstanceLifecycleIntegrationTest {
 
     // ------------------------------------------------------------------ helpers
 
-    /** Formatted messages logged while [block] ran — the shape `ConnectionPoolManagerTest` uses. */
-    private fun capturingLogs(block: () -> Unit): List<String> {
-        val root = LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME) as ch.qos.logback.classic.Logger
-        val appender = ListAppender<ILoggingEvent>().apply { start() }
-        root.addAppender(appender)
-        try {
-            block()
-        } finally {
-            root.detachAppender(appender)
-            appender.stop()
-        }
-        return appender.list.map { it.formattedMessage }
-    }
+    /**
+     * Formatted messages logged while [block] ran — the shape `ConnectionPoolManagerTest` uses, read through
+     * the module's snapshot capture (#484): every thread in the JVM logs into ROOT while it is attached.
+     */
+    private fun capturingLogs(block: () -> Unit): List<String> = co.datapipelines.datasources.capturingLogs(block = block)
 
     private fun physicalId(connection: Connection): Int = System.identityHashCode(connection.unwrap(Connection::class.java))
 

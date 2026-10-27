@@ -1,5 +1,7 @@
 package co.datapipelines.web.ui
 
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.auth.AuditLogger
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthProperties
@@ -191,9 +193,8 @@ class LocalLoginControllerTest {
 
         val uiLog = org.slf4j.LoggerFactory.getLogger(UiExceptionHandler::class.java) as ch.qos.logback.classic.Logger
         val loginLog = org.slf4j.LoggerFactory.getLogger(LocalLoginController::class.java) as ch.qos.logback.classic.Logger
-        val appender =
-            ch.qos.logback.core.read
-                .ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
+        // raw-list-appender: synchronous — standalone MockMvc dispatches on the test thread
+        val appender = ListAppender<ILoggingEvent>()
         appender.start()
         uiLog.addAppender(appender)
         loginLog.addAppender(appender)

@@ -1,12 +1,11 @@
 package co.datapipelines.config
 
 import ch.qos.logback.classic.Logger
-import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.classic.spi.IThrowableProxy
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.DatapipelinesApplication
 import co.datapipelines.OidcDiscoveryStub
 import co.datapipelines.SharedPostgres
+import co.datapipelines.SnapshotListAppender
 import co.datapipelines.config.ApiKeyAuditFixture.Fixture
 import co.datapipelines.web.api.ApiExceptionHandler
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -156,7 +155,8 @@ class ApiKeyAuditRefusalIntegrationTest {
         refusal: DataAccessException,
         fx: Fixture,
     ) {
-        val lines = ListAppender<ILoggingEvent>().apply { start() }
+        // A snapshot (#484): the running context's request threads can log to this handler too.
+        val lines = SnapshotListAppender()
         val handlerLog = LoggerFactory.getLogger(ApiExceptionHandler::class.java) as Logger
         handlerLog.addAppender(lines)
         val answer =
@@ -166,7 +166,7 @@ class ApiKeyAuditRefusalIntegrationTest {
                 handlerLog.detachAppender(lines)
             }
         val body = ObjectMapper().findAndRegisterModules().writeValueAsString(answer?.body)
-        val logged = lines.list.joinToString("\n") { it.formattedMessage + " | " + it.throwableProxy.render() }
+        val logged = lines.events().joinToString("\n") { it.formattedMessage + " | " + it.throwableProxy.render() }
         println("#704 boundary answer: ${answer?.statusCode} $body")
         println("#704 boundary log: $logged")
         assertSoftly {

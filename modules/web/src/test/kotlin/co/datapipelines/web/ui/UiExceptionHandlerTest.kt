@@ -205,9 +205,8 @@ class UiExceptionHandlerTest {
     @Test
     fun `an unbindable htmx request is a 400 toast, and neither logs ERROR or a stack`() {
         val logger = org.slf4j.LoggerFactory.getLogger(UiExceptionHandler::class.java) as ch.qos.logback.classic.Logger
-        val appender =
-            ch.qos.logback.core.read
-                .ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
+        // raw-list-appender: synchronous — the handler is called directly on the test thread
+        val appender = ListAppender<ILoggingEvent>()
         appender.start()
         logger.addAppender(appender)
         try {
@@ -471,6 +470,7 @@ class UiExceptionHandlerTest {
     private fun <T> logged(block: () -> T): Pair<T, List<ILoggingEvent>> {
         val logger = LoggerFactory.getLogger(UiExceptionHandler::class.java) as Logger
         val level = logger.level
+        // raw-list-appender: synchronous — every block is a direct call or standalone MockMvc, on the test thread
         val appender = ListAppender<ILoggingEvent>().apply { start() }
         logger.level = Level.DEBUG
         logger.addAppender(appender)

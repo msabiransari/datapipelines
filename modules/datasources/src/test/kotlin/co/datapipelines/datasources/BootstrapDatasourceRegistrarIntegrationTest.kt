@@ -1,8 +1,6 @@
 package co.datapipelines.datasources
 
 import ch.qos.logback.classic.Logger
-import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.datasources.crypto.CredentialEncryptor
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
@@ -288,7 +286,8 @@ class BootstrapDatasourceRegistrarIntegrationTest {
     @Test
     fun `no line the registration path logs contains the credential`() {
         val root = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
-        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        // A snapshot (#484): the ROOT capture sees every thread in the JVM while attached.
+        val appender = SnapshotListAppender()
         root.addAppender(appender)
         try {
             registrar.register(file(TWO_ENTRIES), actor)
@@ -298,7 +297,7 @@ class BootstrapDatasourceRegistrarIntegrationTest {
             appender.stop()
         }
 
-        val lines = appender.list.map { it.formattedMessage + " " + it.argumentArray?.joinToString(" ") }
+        val lines = appender.events().map { it.formattedMessage + " " + it.argumentArray?.joinToString(" ") }
         lines.none { it.contains(PASSWORD) } shouldBe true
         // The assertion above can only fail meaningfully if the appender saw anything at all.
         lines.any { it.contains("datasource.bootstrap_registered") } shouldBe true

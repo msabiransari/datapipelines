@@ -2,7 +2,6 @@ package co.datapipelines.datasources
 
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.persistence.FailureShape
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
@@ -16,7 +15,6 @@ import org.slf4j.LoggerFactory
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import java.sql.SQLException
 import java.util.UUID
-import java.util.concurrent.CopyOnWriteArrayList
 
 /** The real registry fixture: recorder failure must neither expose data nor replace the refusal. */
 class DatasourceRefusalLogTest {
@@ -97,16 +95,13 @@ class DatasourceRefusalLogTest {
     private fun capturingFailureLogs(block: () -> Unit): List<ILoggingEvent> {
         val logger = LoggerFactory.getLogger(DefaultDatasourceRegistry::class.java) as ch.qos.logback.classic.Logger
         val previousLevel = logger.level
-        val appender =
-            ListAppender<ILoggingEvent>().apply {
-                list = CopyOnWriteArrayList()
-                start()
-            }
+        // A snapshot (#484): the Hikari pool's adder thread may run the lake initializer while attached.
+        val appender = SnapshotListAppender()
         logger.level = Level.WARN
         logger.addAppender(appender)
         return try {
             block()
-            appender.list.toList()
+            appender.events()
         } finally {
             logger.detachAppender(appender)
             logger.level = previousLevel

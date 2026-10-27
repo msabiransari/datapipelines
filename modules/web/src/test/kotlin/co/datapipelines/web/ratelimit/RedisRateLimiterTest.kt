@@ -31,6 +31,7 @@ class RedisRateLimiterTest {
     private val ops = mockk<ValueOperations<String, String>>()
     private val now = Instant.ofEpochSecond(1_000_000)
 
+    // raw-list-appender: synchronous — the limiter runs on the test thread over a mocked template
     private val appender = ListAppender<ILoggingEvent>()
     private lateinit var logger: Logger
 

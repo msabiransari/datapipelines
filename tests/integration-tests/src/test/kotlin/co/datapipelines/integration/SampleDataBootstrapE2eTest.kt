@@ -1,8 +1,6 @@
 package co.datapipelines.integration
 
 import ch.qos.logback.classic.Logger
-import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.DatapipelinesApplication
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
@@ -448,18 +446,10 @@ class SampleDataBootstrapE2eTest {
             .run(*args)
     }
 
-    private fun capturingLogs(block: () -> Unit): List<String> {
-        val root = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
-        val appender = ListAppender<ILoggingEvent>().apply { start() }
-        root.addAppender(appender)
-        try {
-            block()
-        } finally {
-            root.detachAppender(appender)
-            appender.stop()
-        }
-        return appender.list.map { it.formattedMessage + " " + it.argumentArray?.joinToString(" ") }
-    }
+    // A snapshot (#484): the booted application's threads log into ROOT while the capture is attached.
+    private fun capturingLogs(block: () -> Unit): List<String> =
+        capturingLogEvents(LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger, block = block)
+            .map { it.formattedMessage + " " + it.argumentArray?.joinToString(" ") }
 
     /** Every column a re-registration could disturb. */
     private fun datasourceSnapshot(): List<Map<String, Any?>> =

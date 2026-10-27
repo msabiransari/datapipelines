@@ -1,9 +1,7 @@
 package co.datapipelines.web
 
 import ch.qos.logback.classic.Logger
-import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.classic.spi.IThrowableProxy
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.auth.AuthErrorWriter
 import co.datapipelines.events.DataReady
 import co.datapipelines.events.ExecutionStarted
@@ -206,7 +204,8 @@ class WebPersistenceIntegrationTest {
             // exception to its WARN, and Postgres quotes a refused JSONB payload in CONTEXT. A NUL in a
             // payload value is such a row: Jackson escapes it, the jsonb cast refuses it — before any
             // foreign key is checked, so no execution row is needed.
-            val appender = ListAppender<ILoggingEvent>().apply { start() }
+            // A snapshot (#484): the recorder writes on Dispatchers.IO while the capture is attached.
+            val appender = SnapshotListAppender()
             val recorderLog = LoggerFactory.getLogger(DirectEventRecorder::class.java) as Logger
             recorderLog.addAppender(appender)
             try {
@@ -223,7 +222,7 @@ class WebPersistenceIntegrationTest {
             } finally {
                 recorderLog.detachAppender(appender)
             }
-            val rendered = appender.list.map { it.formattedMessage + " " + it.throwableProxy.render() }
+            val rendered = appender.events().map { it.formattedMessage + " " + it.throwableProxy.render() }
             withClue("every WARN, rendered whole: $rendered") {
                 rendered.none { it.contains(ROW_CONTENT) } shouldBe true
                 rendered.single() shouldContain "sql_state=22P05"

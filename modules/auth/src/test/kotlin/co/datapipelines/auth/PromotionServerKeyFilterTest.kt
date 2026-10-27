@@ -49,6 +49,7 @@ class PromotionServerKeyFilterTest {
     private val errorWriter = AuthErrorWriter(ObjectMapper())
     private val clientAddressResolver = ClientAddressResolver(emptyList())
 
+    // raw-list-appender: synchronous — the filter runs on the test thread over mocks; no executor
     private val appender = ListAppender<ILoggingEvent>()
     private lateinit var logger: Logger
 

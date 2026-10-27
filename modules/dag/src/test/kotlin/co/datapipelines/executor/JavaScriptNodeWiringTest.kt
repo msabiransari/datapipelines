@@ -46,10 +46,8 @@ class JavaScriptNodeWiringTest {
     @Test
     fun `javascript console logs every level with template version node execution and text fields`() {
         val logger = org.slf4j.LoggerFactory.getLogger("script.js.console") as ch.qos.logback.classic.Logger
-        val events =
-            ch.qos.logback.core.read
-                .ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
-                .apply { start() }
+        // A snapshot (#484): the console lines arrive from the script evaluation pool's thread.
+        val events = SnapshotListAppender()
         logger.addAppender(events)
         try {
             val javascript =
@@ -77,8 +75,8 @@ class JavaScriptNodeWiringTest {
                     ),
                 )
             }
-            events.list.size shouldBe 5
-            events.list.forEachIndexed { index, event ->
+            events.events().size shouldBe 5
+            events.events().forEachIndexed { index, event ->
                 val fields = event.keyValuePairs.associate { it.key to it.value }
                 fields["template"] shouldBe TEMPLATE
                 fields["version"] shouldBe 3

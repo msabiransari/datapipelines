@@ -2,8 +2,6 @@ package co.datapipelines.integration
 
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
-import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.DatapipelinesApplication
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -677,7 +675,8 @@ class PromoterLensSweepTest {
     @Order(7)
     fun `with the target unreachable the promoter sees nothing, is told once per window, and the counter moved`() {
         ensureSeeded()
-        val warnings = ListAppender<ILoggingEvent>().also { it.start() }
+        // A snapshot (#484): the booted application's threads log while the capture is attached.
+        val warnings = SnapshotListAppender()
         val logger = LoggerFactory.getLogger(CLIENT_CLASS) as Logger
         logger.addAppender(warnings)
         val unreachableBefore = unreachableCount()
@@ -706,7 +705,7 @@ class PromoterLensSweepTest {
             }
 
             val warns =
-                warnings.list.filter {
+                warnings.events().filter {
                     it.level == Level.WARN &&
                         it.formattedMessage.contains("event=pipeline.promotion.lens_unavailable")
                 }
