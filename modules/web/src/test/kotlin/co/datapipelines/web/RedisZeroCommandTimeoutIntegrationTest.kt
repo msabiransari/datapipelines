@@ -141,10 +141,11 @@ class RedisZeroCommandTimeoutIntegrationTest {
 
     /**
      * Waits until the SHIPPED client has observed the outage, so the measured `GET` is about the
-     * command bound and not about the stop's timing (#594): a `GET` written while the channel is
-     * still being torn down fails on that connection path in well under the bound (CI run
-     * 39086323275, 0.65 s, no command timeout), while one issued after the client saw the channel
-     * close waits in Lettuce's disconnected buffer, where only the command timeout ends it.
+     * command bound and not about the stop's timing (#594). CI run 39086323275 ended in 0.65 s
+     * without a command timeout, but did not record its exception chain. A closed-connection plant
+     * reproduced a fast connection-path failure; it does not establish that CI's cause was the
+     * same. Observing closure first exercises the disconnected-command shape seen in the green
+     * runs; the outcome clue records whether the command actually reaches its timeout.
      *
      * Spring's `LettuceConnection.nativeConnection` is the async command API over the shared
      * connection; Lettuce 6.6 deprecates both `isOpen` and `getStatefulConnection` on that
