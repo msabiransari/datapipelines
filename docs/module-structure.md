@@ -1,9 +1,9 @@
 # Module Structure Specification
 
-**Status:** v1.7 (frozen contract — additive-only changes after this point)
+**Status:** v1.8 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** (all other specs — this spec operationalizes them into code structure)
-**Last updated:** 2026-10-25
+**Last updated:** 2026-10-26
 
 ---
 
