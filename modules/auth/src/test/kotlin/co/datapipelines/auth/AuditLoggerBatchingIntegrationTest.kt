@@ -1,9 +1,7 @@
 package co.datapipelines.auth
 
 import ch.qos.logback.classic.Logger
-import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.classic.spi.IThrowableProxy
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.persistence.BatchingConfig
 import co.datapipelines.persistence.BatchingHooks
 import co.datapipelines.persistence.BatchingWriter
@@ -124,7 +122,8 @@ class AuditLoggerBatchingIntegrationTest {
         // #266b, the ruling: `datapipelines.persistence.audit.enabled` ships false, so the application's
         // wiring hands AuditLogger no writer and every row is the pre-266 INSERT. Red with the default
         // flipped (the row is batched: the writer's commit hook fires, the DEBUG line says batched).
-        val lines = ListAppender<ILoggingEvent>().apply { start() }
+        // A snapshot (#484): the audit writer's thread shares this JVM while the capture is attached.
+        val lines = SnapshotListAppender()
         val auditLog = LoggerFactory.getLogger(AuditLogger::class.java) as Logger
         val previous = auditLog.level
         auditLog.level = ch.qos.logback.classic.Level.DEBUG
@@ -144,7 +143,7 @@ class AuditLoggerBatchingIntegrationTest {
         }
         markers.forEach { rowsWith(it) shouldBe 1 }
         withClue("the audit writer committed nothing") { committed.get() shouldBe 0 }
-        lines.list.map { it.formattedMessage }.filter { it.contains("audit_event=audit.default.path") } shouldBe
+        lines.messages().filter { it.contains("audit_event=audit.default.path") } shouldBe
             List(2) { "event=audit.write audit_event=audit.default.path path=direct" }
     }
 
@@ -260,7 +259,8 @@ class AuditLoggerBatchingIntegrationTest {
             val refusal = shouldThrow<DataAccessException> { AuditRowSink(jdbc).writeOne(row("audit.leak.probe", details)) }
             generateSequence<Throwable>(refusal) { it.cause }.any { it.message.orEmpty().contains(ROW_CONTENT) } shouldBe true
         }
-        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        // A snapshot (#484): the BatchingWriter logs write_failed on its own thread.
+        val appender = SnapshotListAppender()
         val loggers = listOf(AuditLogger::class.java, BatchingWriter::class.java).map { LoggerFactory.getLogger(it) as Logger }
         loggers.forEach { it.addAppender(appender) }
         try {
@@ -274,7 +274,7 @@ class AuditLoggerBatchingIntegrationTest {
         } finally {
             loggers.forEach { it.detachAppender(appender) }
         }
-        val rendered = appender.list.map { it.formattedMessage + " " + it.throwableProxy.render() }
+        val rendered = appender.events().map { it.formattedMessage + " " + it.throwableProxy.render() }
 
         // 22P05: untranslatable_character — the jsonb refusal, named by its state, never its text.
         fun linesNamingTheState(prefix: String) = rendered.count { it.startsWith(prefix) && it.contains("sql_state=22P05") }
