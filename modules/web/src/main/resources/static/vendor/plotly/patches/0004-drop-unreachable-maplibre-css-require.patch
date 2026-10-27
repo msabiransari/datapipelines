@@ -1,0 +1,29 @@
+From 034ef5fe05d3d1d2117707d0d5b90157288aff7c Mon Sep 17 00:00:00 2001
+From: Muhammad Sabir <msabiransari@gmail.com>
+Date: Mon, 26 Oct 2026 19:54:56 -0400
+Subject: [PATCH] build: drop unreachable maplibre CSS from non-map bundles
+
+The datapipelines trace lists contain no map traces, so this CSS require is unreachable while still pulling the stylesheet into both bundles. Drop this patch when a map trace joins either trace list.
+---
+ src/registry.js | 5 -----
+ 1 file changed, 5 deletions(-)
+
+diff --git a/src/registry.js b/src/registry.js
+index 5c08378..a2d7dd2 100644
+--- a/src/registry.js
++++ b/src/registry.js
+@@ -211,11 +211,6 @@ function registerTraceModule(_module) {
+     var basePlotModule = _module.basePlotModule;
+     var bpmName = basePlotModule.name;
+ 
+-    // add maplibre-gl CSS here to avoid console warning on instantiation
+-    if(bpmName === 'map') {
+-        require('maplibre-gl/dist/maplibre-gl.css');
+-    }
+-
+     // if `plotly-geo-assets.js` is not included,
+     // add `PlotlyGeoAssets` global to stash references to all fetched
+     // topojson / geojson data
+-- 
+2.53.0
+

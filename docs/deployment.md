@@ -342,6 +342,9 @@ The build is path-independent since `patches/0003-inline-css-id-independent-of-c
 (#571): the inline-CSS plugin hashed the clone's absolute path (#530); the in-tree plugin hashes the
 root-relative CSS path under the historical directory as a constant salt, keeping the committed bytes unchanged.
 The salt is historical; the next Plotly upgrade may keep or drop it, since the pins move then anyway.
+Patch `patches/0004-drop-unreachable-maplibre-css-require.patch` removes the maplibre-gl stylesheet
+require from the registry: neither custom trace list includes a `map` trace, so the stylesheet is
+unreachable; drop this patch when a `map` trace joins a trace list.
 To rebuild any bundle — a trace added, a security fix adopted — run exactly this and commit the
 OUTPUTS with their new hashes. The #531 rebuild used Node 24.21.0 + npm 11.19.0 + `npm ci`
 (the earlier #525 build also matched Node 22.23.3 + `npm ci` and Node 24.21.0 + `npm i`).
@@ -350,7 +353,7 @@ OUTPUTS with their new hashes. The #531 rebuild used Node 24.21.0 + npm 11.19.0 
 cd "$(mktemp -d)"
 git clone --depth 1 --branch v4.1.1 https://github.com/plotly/plotly.js.git plotly.js
 cd plotly.js
-# the numbered vendor patches 0001–0003, applied in order; a new patch is a new file here
+# the numbered vendor patches, applied in order; a new patch is a new file here
 git apply <repo>/modules/web/src/main/resources/static/vendor/plotly/patches/*.patch
 npm ci --no-audit --no-fund
 # the 2D bundle (the default): scatter, bar, pie, histogram, box, heatmap
@@ -372,8 +375,8 @@ same rules the bundle would inject at runtime. It is part of the CSP DESIGN-AROU
 §6.6](dashboards.md#66-the-states-notifications-and-the-csp)): each host pre-places the empty
 `<template id="plotly.js-style-global" class="no-inline-styles">` marker Plotly checks (the runtime's
 fallback creates the same template for a host without one), the page loads this file instead, and `style-src` stays `'self'` plus Cytoscape's one hash — no policy change, no
-`'unsafe-hashes'`, no `'unsafe-eval'`. Sizes (4.1.1 with the #525 and #531 patches): 2D 1,254,487 B (418,262 gz), 3D
-1,831,532 B (588,221 gz), plotly.css 7,467 B; gzip uses zlib deflate level 9, gzip framing, mtime 0
+`'unsafe-hashes'`, no `'unsafe-eval'`. Sizes (4.1.1 with patches 0001–0004, #525, #531, #571 and #570): 2D 1,170,988 B (406,683 gz), 3D
+1,748,030 B (576,983 gz), plotly.css 7,467 B; gzip uses zlib deflate level 9, gzip framing, mtime 0
 (no filename), as reproduced by the JDK's `GZIPOutputStream` with `Deflater.BEST_COMPRESSION`; the npm tarball's sha1
 `f797e8f2d54603fd9d11b08aae8eb31147200b67` verifies the source against the tag. Node 22+ per
 Plotly's own build matrix (the manifest's `build` field records the exact versions). After ANY rebuild: update the manifest's `sha256` map, the `sizes`, and the
@@ -1338,6 +1341,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-26 | v1.56 | #570 unused MapLibre CSS | **§6.2A:** patch 0004 drops the unreachable maplibre-gl stylesheet require from the non-map custom bundles; both bundles rebuilt and hashes and sizes re-pinned, with the rule to drop the patch when a `map` trace joins a trace list. |
 | 2026-10-25 | v1.55 | #702 | **Appendix B step 2:** replaced the top-bar chip, login mint and `GET /api/v1/auth/api-keys/mine` flow retired by keys v2 (#233, Auth v3.5) with the Keys page / `POST /api/v1/auth/api-keys`, the role chosen under the subset rule and the one-time reveal. The v1.28 row remains as history. Prose only. |
 | 2026-10-25 | v1.54 | #712 — renumbered at merge after #442’s v1.52/v1.53 | **§6.4:** the management port's chart exposure (configuration.md §3.14) — a `management` values block, everything OFF by default (byte-identical default render): `management.expose` adds the management `containerPort` (from `management.port`), pins both `MANAGEMENT_SERVER_*` env entries (address `0.0.0.0` — the opt-open switch) and a headless `Service` (`clusterIP: None`); `management.networkPolicy.enabled` adds the chart's one ingress `NetworkPolicy` for the app pods, which carries two rules: the scraper peers on the management port, and the app-port rule from `appIngress.from` (`NetworkPolicyPeer`s, verbatim) or every source under the explicit `appIngress.allowAll: true`. Every selector is a full `LabelSelector`. The render refuses both scraper selectors empty, no app-port declaration, `allowAll` with a `from`, a bare label map, an unknown or empty peer and a quoted `allowAll`; the isolation and union semantics, and how the policy combines with operator-owned ones, are stated. `management.serviceMonitor.enabled` adds a `ServiceMonitor`. Any `extraEnv.MANAGEMENT_SERVER_*` double mapping is refused (Kubernetes honours the last duplicate env name silently). Chart 0.2.0 → 0.2.1. `helm-check.sh` grows to lint plus eighty-nine verdicts (`(h)`–`(h5h)`), with a pinned `kubeconform` validating every successful render against the Kubernetes 1.35.0 schema and a parsed NetworkPolicy contract. **§9:** the management-port sentence names the app-port rule. `HelmManagementValuesSpecDriftTest` pins the values, the expose guards, the refusals, the three templates' flag lines, the shared app port, the `matchLabels` example and the configuration.md §3.14 row. |
 | 2026-10-25 | v1.53 | 442c (#442) | §8.3: keep scheduler mail off until every instance understands V51 notification trail kinds. §8.4: disable, drain and account for old readers refusing historical notification kinds before downgrade. |
