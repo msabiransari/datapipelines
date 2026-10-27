@@ -157,6 +157,51 @@ class TemplateRepositoryIntegrationTest {
     }
 
     @Test
+    fun `released-only listing excludes a draft pointer even when an older release exists`() {
+        val current = repository.createReleased(workspaceId, draft(id = "test/draft-pointer.sql"), actor)
+        repository.createReleased(workspaceId, draft(id = "test/released.sql"), actor)
+        checkNotNull(
+            repository.createDraft(
+                workspaceId,
+                current.id,
+                draft(id = current.id, body = "SELECT 2"),
+                current.bodyHash,
+                actor,
+                WriteSurface.SESSION,
+            ),
+        )
+        checkNotNull(repository.switchCurrent(workspaceId, current.id, 2, draftEligible = true))
+
+        withClue("the unrestricted read still carries the draft pointer and the released sibling") {
+            repository.list(workspaceId).map { it.id to it.version } shouldContainExactly
+                listOf(current.id to 2, "test/released.sql" to 1)
+            repository.count(workspaceId) shouldBe 2
+        }
+        withClue("released-only means the pointer row itself must be RELEASED, without falling back to v1") {
+            repository.list(workspaceId, releasedOnly = true).map { it.id to it.version } shouldContainExactly
+                listOf("test/released.sql" to 1)
+            repository.count(workspaceId, releasedOnly = true) shouldBe 1
+        }
+    }
+
+    @Test
+    fun `released-only listing excludes a never-released template without the draft fallback`() {
+        repository.create(workspaceId, draft(id = "test/never-released.sql"), actor, CreateLifecycle.DRAFT, WriteSurface.SESSION)
+        repository.createReleased(workspaceId, draft(id = "test/released.sql"), actor)
+
+        withClue("the unrestricted read still carries the never-released draft and the released sibling") {
+            repository.list(workspaceId).map { it.id to it.version } shouldContainExactly
+                listOf("test/never-released.sql" to 1, "test/released.sql" to 1)
+            repository.count(workspaceId) shouldBe 2
+        }
+        withClue("the released-only read cannot advertise a template with no release") {
+            repository.list(workspaceId, releasedOnly = true).map { it.id to it.version } shouldContainExactly
+                listOf("test/released.sql" to 1)
+            repository.count(workspaceId, releasedOnly = true) shouldBe 1
+        }
+    }
+
+    @Test
     fun `an omitted id is auto-generated inside the identifier rule`() {
         val stored = repository.createReleased(workspaceId, draft(id = null), actor)
         isValidTemplateName(stored.id) shouldBe true

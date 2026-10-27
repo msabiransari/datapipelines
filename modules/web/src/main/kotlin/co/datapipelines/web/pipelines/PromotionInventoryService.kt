@@ -5,6 +5,7 @@ import co.datapipelines.auth.WorkspaceNotFoundException
 import co.datapipelines.auth.WorkspaceRepository
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.templates.TemplateRepository
 import java.util.UUID
 
@@ -15,12 +16,11 @@ import java.util.UUID
  * per-template `(name, current_version, body_hash)` triples, the datasource names §10.5's
  * pre-validation checks against, and the target's own posture.
  *
- * ## Why `current_version` needs no status filter
- * The version lifecycle's invariant is that `pipelines.current_version` IS the latest RELEASED
- * version — a draft never moves it (versioning §3.1). So the current version's body hash is
- * the hash of what this deployment SERVES, which is exactly what "same hash ⇒ nothing to push"
- * has to compare against. A draft on the receiver is a separate problem, and
- * `AuthoringStartupCheck` refuses to start a receiver that holds one.
+ * ## Why both arms filter RELEASED
+ * D63 permits the current pointer to name a draft after a development-posture discard
+ * fallback or manual switch (versioning §3.4). Under the #563 ruling (§10.2), that object is
+ * not promotable until the pointer names a release. The wire therefore ships only RELEASED
+ * pointer rows: what a promoter may promote, never a draft's version or hash.
  *
  * ## Workspace by NAME
  * Workspace names are a global namespace (§13.12 `duplicate_name`), so a name is the one
@@ -83,20 +83,21 @@ class PromotionInventoryService(
         pipelines
             .findAll(workspaceId)
             .mapNotNull { record ->
-                pipelines.findCurrentVersionDetail(workspaceId, record.id)?.let { version ->
-                    // The row the pointer names, so the entry's number comes from the row itself
-                    // (D55: `record.currentVersion` is nullable now; a pipeline with no release
-                    // has no inventory entry, which is what `mapNotNull` already says).
-                    PromotionWire.Entry(record.name, version.version, version.bodyHash)
-                }
+                pipelines
+                    .findCurrentVersionDetail(workspaceId, record.id)
+                    ?.takeIf { it.status == PipelineVersionStatus.RELEASED }
+                    ?.let { version ->
+                        // Use the released pointer row's own number, never a draft fallback.
+                        PromotionWire.Entry(record.name, version.version, version.bodyHash)
+                    }
             }.sortedBy { it.name }
 
-    /** One entry per live template — `list` already returns each template's CURRENT version. */
+    /** One entry per live template whose CURRENT version is RELEASED. */
     private fun templateEntries(workspaceId: UUID): List<PromotionWire.Entry> {
         val entries = mutableListOf<PromotionWire.Entry>()
         var offset = 0
         while (true) {
-            val page = templates.list(workspaceId = workspaceId, offset = offset, limit = PAGE)
+            val page = templates.list(workspaceId = workspaceId, offset = offset, limit = PAGE, releasedOnly = true)
             page.forEach { entries += PromotionWire.Entry(it.id, it.version, it.bodyHash) }
             if (page.size < PAGE) break
             offset += PAGE
