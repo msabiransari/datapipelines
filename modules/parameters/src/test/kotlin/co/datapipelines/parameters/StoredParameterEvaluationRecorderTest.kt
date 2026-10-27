@@ -33,6 +33,8 @@ import java.util.UUID
  */
 class StoredParameterEvaluationRecorderTest {
     private val logger = LoggerFactory.getLogger(StoredParameterEvaluationRecorder::class.java) as ch.qos.logback.classic.Logger
+
+    // raw-list-appender: synchronous — the recorder runs on the test thread over a mocked repository
     private val appender = ListAppender<ILoggingEvent>()
 
     @BeforeEach
