@@ -1,9 +1,9 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.55
+**Status:** v1.57
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-10-25
+**Last updated:** 2026-10-27
 
 ---
 
@@ -332,6 +332,8 @@ pinned by the audit tests (`VendoredAlpineAuditTest`, `VendoredHtmxAuditTest`,
 and so is a manifest entry nobody serves. The manifest also carries the FIRST-PARTY client runtime and
 its adapters (`js/datapipelines-dashboard*.js`, the same sha256 discipline — a hand edit must move the
 manifest in the same commit).
+`generateVendoredAssetNotices` (`:modules:web:generateVendoredAssetNotices`) generates the offline
+licence inventory and full texts served at `/vendor/THIRD-PARTY-NOTICES.txt` and copied beside the website export assets.
 
 **Plotly 4.1.1** ships as two custom bundles built with the package's own procedure (its
 `CUSTOM_BUNDLE.md`), from the pinned tag, plus source patches (`patches/0001-colorbar-style-reset-without-attribute.patch`:
@@ -1341,6 +1343,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-26 | v1.57 | #693 — renumbered at merge after #570’s v1.56 vendored browser-asset notices | **§6.2A:** the offline `:modules:web:generateVendoredAssetNotices` task renders the vendor manifest and upstream licence files to `/vendor/THIRD-PARTY-NOTICES.txt`, packaged in the web jar and website export. Missing coverage, unknown or mismatched licences and stale allowances fail the build. |
 | 2026-10-26 | v1.56 | #570 unused MapLibre CSS | **§6.2A:** patch 0004 drops the unreachable maplibre-gl stylesheet require from the non-map custom bundles; both bundles rebuilt and hashes and sizes re-pinned, with the rule to drop the patch when a `map` trace joins a trace list. |
 | 2026-10-25 | v1.55 | #702 | **Appendix B step 2:** replaced the top-bar chip, login mint and `GET /api/v1/auth/api-keys/mine` flow retired by keys v2 (#233, Auth v3.5) with the Keys page / `POST /api/v1/auth/api-keys`, the role chosen under the subset rule and the one-time reveal. The v1.28 row remains as history. Prose only. |
 | 2026-10-25 | v1.54 | #712 — renumbered at merge after #442’s v1.52/v1.53 | **§6.4:** the management port's chart exposure (configuration.md §3.14) — a `management` values block, everything OFF by default (byte-identical default render): `management.expose` adds the management `containerPort` (from `management.port`), pins both `MANAGEMENT_SERVER_*` env entries (address `0.0.0.0` — the opt-open switch) and a headless `Service` (`clusterIP: None`); `management.networkPolicy.enabled` adds the chart's one ingress `NetworkPolicy` for the app pods, which carries two rules: the scraper peers on the management port, and the app-port rule from `appIngress.from` (`NetworkPolicyPeer`s, verbatim) or every source under the explicit `appIngress.allowAll: true`. Every selector is a full `LabelSelector`. The render refuses both scraper selectors empty, no app-port declaration, `allowAll` with a `from`, a bare label map, an unknown or empty peer and a quoted `allowAll`; the isolation and union semantics, and how the policy combines with operator-owned ones, are stated. `management.serviceMonitor.enabled` adds a `ServiceMonitor`. Any `extraEnv.MANAGEMENT_SERVER_*` double mapping is refused (Kubernetes honours the last duplicate env name silently). Chart 0.2.0 → 0.2.1. `helm-check.sh` grows to lint plus eighty-nine verdicts (`(h)`–`(h5h)`), with a pinned `kubeconform` validating every successful render against the Kubernetes 1.35.0 schema and a parsed NetworkPolicy contract. **§9:** the management-port sentence names the app-port rule. `HelmManagementValuesSpecDriftTest` pins the values, the expose guards, the refusals, the three templates' flag lines, the shared app port, the `matchLabels` example and the configuration.md §3.14 row. |

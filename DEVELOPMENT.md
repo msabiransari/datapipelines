@@ -1319,9 +1319,56 @@ hardening, the isolate pin and deterministic output:
 
 Build-generated notices describe the graph that was packaged. Drivers
 mounted later through `lib/` require their own notices. Separately fetched
-DuckDB extensions and vendored browser assets remain tracked in
-[#692](https://github.com/msabiransari/datapipelines/issues/692) and
-[#693](https://github.com/msabiransari/datapipelines/issues/693).
+DuckDB extensions remain tracked in
+[#692](https://github.com/msabiransari/datapipelines/issues/692).
+
+#### Vendored browser-asset notices
+
+```bash
+./gradlew :modules:web:generateVendoredAssetNotices
+```
+
+The offline task reads `modules/web/src/main/resources/static/vendor/design-system/vendor-manifest.json`
+and each third-party block's `license_file`, relative to `static/`. It writes
+`modules/web/build/generated/vendored-asset-notices/THIRD-PARTY-NOTICES.txt`.
+Web `processResources` packages this at `static/vendor/THIRD-PARTY-NOTICES.txt`,
+served at `/vendor/THIRD-PARTY-NOTICES.txt` by the existing public static-resource
+handler. `websiteExportAssets` also copies it to
+`modules/web/build/website-export/vendor/THIRD-PARTY-NOTICES.txt`.
+These browser notices supplement the Maven/image notices above.
+
+The inventory and full upstream licence sections are sorted by manifest block,
+UTF-8, with no time or git stamp. Sections preserve upstream text after CRLF-to-LF
+normalisation and trimming. The owner-authored `design-system` starter and
+`datapipelines-dashboard-runtime` are listed separately as own code; their exemption
+is an explicit task input in `modules/web/build.gradle.kts`.
+
+To vendor another asset, add its manifest block and upstream licence file; the
+inventory and sections update automatically. Record the exact release source in
+`source` and, when different, the licence URL in `license_file_source`. Preserve
+copyright lines and existing bundle hashes. MIT, ISC, 0BSD and OFL-1.1 are the
+currently used allowlist; a new licence family requires an inspected phrase check
+and offline fixtures in `VendoredAssetNotices`, with no download during the build.
+
+The guard refuses these conditions (the block name identifies the input to fix):
+
+- `Missing <key> for vendored block <block>`: a required `license`, `license_file`,
+  `version` or `source` is absent or blank.
+- `Unknown licence <id> for vendored block <block>`: an unreviewed licence family.
+- `Missing or blank licence text for vendored block <block>: <path>`: no usable file.
+- `Wrong licence text for vendored block <block>: expected <id>`: the distinguishing
+  licence phrase is missing (ISC also requires its copyright condition).
+- `Invalid license_file for vendored block <block>: <path>`: the path is not under
+  `vendor/`, or has empty, dot or parent segments; filesystem escapes, including
+  symlinks, fail as `Licence path escapes vendor directory: <path>`.
+- `STALE vendored licence allowlist entries (matched no block): <ids>`: remove an
+  unused allowance deliberately rather than silently retaining it.
+- `STALE first-party blocks: <blocks>`: an own-code exemption no longer exists.
+
+Offline renderer fixtures live in `buildSrc/src/test/kotlin/VendoredAssetNoticesTest.kt`;
+`VendoredNoticesAuditTest` checks the generated classpath file against every real
+third-party manifest block and licence text. The buildSrc command above runs its
+fixtures; the web tests exercise the packaging boundary.
 
 #### Dependency vulnerabilities (OSV-Scanner)
 

@@ -91,6 +91,14 @@ dependencies {
     testImplementation(libs.jsoup)
 }
 
+// Owner-authored starter and dashboard runtime are own code, not third-party assets.
+val generateVendoredAssetNotices = tasks.register<VendoredAssetNoticesTask>("generateVendoredAssetNotices") {
+    manifest.set(layout.projectDirectory.file("src/main/resources/static/vendor/design-system/vendor-manifest.json"))
+    vendorDirectory.set(layout.projectDirectory.dir("src/main/resources/static/vendor"))
+    firstParty.set(listOf("design-system", "datapipelines-dashboard-runtime"))
+    outputDirectory.set(layout.buildDirectory.dir("generated/vendored-asset-notices"))
+}
+
 // 033 — the spec set ships IN THE JAR: docs served in-product always describe the version
 // they run on (the round's structural argument). 096 §G (review finding F4) INVERTED the
 // selection: it was `include("*.md")` minus five excludes, which is a DENYLIST — a new
@@ -116,6 +124,7 @@ dependencies {
 // documentation. template-hierarchy-design.md proposes schema and contract that does not
 // exist yet, so shipping it would describe a version nobody runs.
 tasks.named<ProcessResources>("processResources") {
+    from(generateVendoredAssetNotices) { into("static/vendor") }
     from(rootProject.layout.projectDirectory.dir("docs")) {
         into("docs")
         include(
@@ -366,6 +375,7 @@ val websiteExportAssets =
         doFirst { exportDir.get().asFile.deleteRecursively() }
         from("src/main/resources/static/site") { into("site") }
         from("src/main/resources/static/vendor/design-system") { into("vendor/design-system") }
+        from(generateVendoredAssetNotices) { into("vendor") }
         // Site v2: site.css declares its own faces (Manrope, JetBrains Mono) by relative url();
         // the export's completeness check reads href/src, not CSS url(), so this copy is the
         // only thing standing between the static site and system-font fallback.
