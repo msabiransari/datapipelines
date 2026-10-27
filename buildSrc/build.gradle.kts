@@ -73,7 +73,11 @@ tasks.test {
     // The other repo files these tests open beside the catalog (#718 — the convention's
     // repo-tree input reaches the modules' test tasks, never this one): the Dockerfile
     // (ThirdPartyNoticesTest's GraalJS pin) and .gitignore (RepoTestInputsTest's mirror).
-    inputs.files(rootProject.file("../Dockerfile"), rootProject.file("../.gitignore"))
+    inputs.files(
+        rootProject.file("../Dockerfile"),
+        rootProject.file("../.gitignore"),
+        rootProject.file("../deploy/duckdb-extensions.sha256"),
+    )
         .withPathSensitivity(PathSensitivity.NAME_ONLY)
         .withPropertyName("repoFilesReadByBuildSrcTests")
     // The module and integration test sources RepoTestInputsTest scans for absent-path assertions
