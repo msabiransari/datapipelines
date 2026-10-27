@@ -68,9 +68,11 @@ class SchedulesController(
     // ------------------------------------------------------------------------------ reads
 
     /**
-     * §20.1 — the workspace's schedules, by name; `prefix` narrows to a folder and `condition`
-     * (#641: `enabled` | `paused` | `blocked`) to one condition. The service validates the word —
-     * its refusal is the §20 `request_invalid` — and applies it in SQL before the lens.
+     * §20.1 — the workspace's schedules, by name; `prefix` narrows to a folder, `condition`
+     * (#641: `enabled` | `paused` | `blocked`) to one condition and `outcome` (#725: `succeeded` |
+     * `failed` | `in-progress` | `did-not-run` | `never-ran`) to one last-run bucket. The service
+     * validates each word — its refusal is the §20 `request_invalid` — and applies both in SQL
+     * before the lens.
      */
     @GetMapping
     @RequiredScope(Permission.SCHEDULE_READ)
@@ -79,11 +81,13 @@ class SchedulesController(
         @RequestParam(required = false) offset: Int?,
         @RequestParam(required = false) limit: Int?,
         @RequestParam(required = false) condition: String?,
+        @RequestParam(required = false) outcome: String?,
     ): ApiResponse<PagedData<Map<String, Any?>>> {
         val principal = currentPrincipal()
         val page = Pagination.clampOffset(offset)
         val size = Pagination.clampLimit(limit)
-        val found = schedules.list(workspaceOf(principal), prefix?.trim(), size + 1, page, PrincipalTargetViewer(principal), condition)
+        val viewer = PrincipalTargetViewer(principal)
+        val found = schedules.list(workspaceOf(principal), prefix?.trim(), size + 1, page, viewer, condition, outcome)
         val items = found.take(size)
         val names = namesOf(items.flatMap { listOf(it.createdBy, it.updatedBy) })
         val mayReadRecipients = principal.holds(Permission.SCHEDULE_UPDATE)

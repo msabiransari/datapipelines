@@ -59,6 +59,17 @@ class ScheduleSummaryTest {
     }
 
     @Test
+    fun `five distinct wire words that round-trip - the home's bar keys and the filter's words are one spelling`() {
+        // #725: the spelling the home's bars carried before the word moved onto the enum (ui-screens §4.20a).
+        LastRunOutcome.entries.map { it.wire } shouldContainExactly
+            listOf("succeeded", "failed", "in-progress", "did-not-run", "never-ran")
+        LastRunOutcome.entries.forEach { outcome -> LastRunOutcome.fromWire(outcome.wire) shouldBe outcome }
+        listOf("", "FAILED", "Failed", " failed", "in_progress", "never_ran", "blocked").forEach { raw ->
+            withClue("'$raw'") { LastRunOutcome.fromWire(raw) shouldBe null }
+        }
+    }
+
+    @Test
     fun `the counts are the listed set at the cap plus one and countLive is never read`() {
         val enabledOk = schedule("ops/a")
         val paused = schedule("ops/b", enabled = false)

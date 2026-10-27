@@ -103,8 +103,9 @@ class ScheduleRepository(
             .singleOrNull()
 
     /**
-     * The workspace's live schedules, by name, optionally under a folder [prefix] and in one
-     * [condition] (#641; null = every condition) — the explorer's read.
+     * The workspace's live schedules, by name, optionally under a folder [prefix], in one
+     * [condition] (#641; null = every condition) and in one last-run [outcome] (#725; null = every
+     * outcome) — the explorer's read.
      */
     fun listLive(
         workspaceId: UUID,
@@ -112,11 +113,12 @@ class ScheduleRepository(
         limit: Int,
         offset: Int,
         condition: ScheduleCondition? = null,
+        outcome: LastRunOutcome? = null,
     ): List<Schedule> {
         val params = mutableMapOf<String, Any?>("ws" to workspaceId, "limit" to limit, "offset" to offset)
         return jdbc.query(
             "SELECT * FROM schedules WHERE workspace_id = :ws AND deleted_at IS NULL${prefixClause(prefix, params)}" +
-                "${conditionClause(condition)} ORDER BY name LIMIT :limit OFFSET :offset",
+                "${conditionClause(condition)}${outcomeClause(outcome, params)} ORDER BY name LIMIT :limit OFFSET :offset",
             params,
             rowMapper,
         )
@@ -135,6 +137,7 @@ class ScheduleRepository(
         afterName: String?,
         limit: Int,
         condition: ScheduleCondition? = null,
+        outcome: LastRunOutcome? = null,
     ): List<Schedule> {
         val params = mutableMapOf<String, Any?>("ws" to workspaceId, "limit" to limit)
         val afterClause =
@@ -146,7 +149,7 @@ class ScheduleRepository(
             }
         return jdbc.query(
             "SELECT * FROM schedules WHERE workspace_id = :ws AND deleted_at IS NULL${prefixClause(prefix, params)}" +
-                "${conditionClause(condition)}$afterClause ORDER BY name LIMIT :limit",
+                "${conditionClause(condition)}${outcomeClause(outcome, params)}$afterClause ORDER BY name LIMIT :limit",
             params,
             rowMapper,
         )
@@ -179,6 +182,29 @@ class ScheduleRepository(
             ScheduleCondition.BLOCKED -> " AND blocked_at IS NOT NULL"
             ScheduleCondition.PAUSED -> " AND blocked_at IS NULL AND NOT enabled"
             ScheduleCondition.ENABLED -> " AND blocked_at IS NULL AND enabled"
+        }
+
+    /**
+     * #725 — [LastRunOutcome]'s bucket as SQL, over the SAME newest run [ScheduleRunRepository.latestStates]
+     * reads for the home's count: the run with the latest `created_at`, then `id`, inside the
+     * workspace ([LATEST_RUN_STATE], a correlated subquery over `idx_schedule_runs_schedule`). A
+     * bucket with states is that newest state `IN` the bucket's [LastRunOutcome.states], bound as a
+     * list (never interpolated); [LastRunOutcome.NEVER_RAN] is no run at all. Chosen by `when` over
+     * the enum, so no input text reaches the statement; `LastRunOutcomeFilterInvariantIntegrationTest`
+     * pins each bucket's rows to the summary's count over the same rows. Adds the bind to [params].
+     */
+    private fun outcomeClause(
+        outcome: LastRunOutcome?,
+        params: MutableMap<String, Any?>,
+    ): String =
+        when (outcome) {
+            null -> ""
+            LastRunOutcome.NEVER_RAN ->
+                " AND NOT EXISTS (SELECT 1 FROM schedule_runs r WHERE r.workspace_id = :ws AND r.schedule_id = schedules.id)"
+            else -> {
+                params["outcomeStates"] = outcome.states.map { it.wire }
+                " AND ($LATEST_RUN_STATE) IN (:outcomeStates)"
+            }
         }
 
     /** Live schedules in [workspaceId] — the B18 cap's count (L4). */
@@ -430,6 +456,16 @@ class ScheduleRepository(
     }
 
     private fun json(text: String): JsonNode = mapper.readTree(text)
+
+    internal companion object {
+        /**
+         * The state of the `schedules` row's NEWEST run — [ScheduleRunRepository.latestStates]'s
+         * ordering (`created_at DESC, id DESC`) as a correlated subquery; null when it has none.
+         */
+        const val LATEST_RUN_STATE =
+            "SELECT r.state FROM schedule_runs r WHERE r.workspace_id = :ws AND r.schedule_id = schedules.id " +
+                "ORDER BY r.created_at DESC, r.id DESC LIMIT 1"
+    }
 }
 
 /** What [ScheduleRepository.insert] writes. */

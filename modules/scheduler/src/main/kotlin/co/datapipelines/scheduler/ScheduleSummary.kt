@@ -85,21 +85,27 @@ data class ScheduleSummaryEntry(
  * How a schedule's LATEST run ended, in five buckets — THE one place a [RunState] maps to one
  * (`ScheduleSummaryTest` asserts every state sits in exactly one bucket, so a new state fails the
  * test until it is placed). [NEVER_RAN] is the absence of any run, not a state.
+ *
+ * #725 — the buckets are ALSO the explorer's last-run filter (rest-api §20.1 `outcome`): [wire] is
+ * the one spelling the home's bar keys, the filter's query word and the REST parameter share, and
+ * [states] is the one definition both the home's count ([of]) and the filter's SQL
+ * (`ScheduleRepository`, an `IN` list bound from these sets; [NEVER_RAN] as `NOT EXISTS`) read.
  */
 enum class LastRunOutcome(
+    val wire: String,
     val states: Set<RunState>,
 ) {
-    SUCCEEDED(setOf(RunState.SUCCEEDED)),
+    SUCCEEDED("succeeded", setOf(RunState.SUCCEEDED)),
 
     /** A run that ended without its result, including one whose outcome was lost ([RunState.UNKNOWN]). */
-    FAILED(setOf(RunState.FAILED, RunState.ABORTED, RunState.UNKNOWN)),
+    FAILED("failed", setOf(RunState.FAILED, RunState.ABORTED, RunState.UNKNOWN)),
 
-    IN_PROGRESS(setOf(RunState.QUEUED, RunState.STARTING, RunState.RUNNING)),
+    IN_PROGRESS("in-progress", setOf(RunState.QUEUED, RunState.STARTING, RunState.RUNNING)),
 
     /** Recorded but never executed: refused before start, skipped by policy, or cancelled. */
-    DID_NOT_RUN(setOf(RunState.NOT_STARTED, RunState.SKIPPED, RunState.CANCELLED)),
+    DID_NOT_RUN("did-not-run", setOf(RunState.NOT_STARTED, RunState.SKIPPED, RunState.CANCELLED)),
 
-    NEVER_RAN(emptySet()),
+    NEVER_RAN("never-ran", emptySet()),
     ;
 
     companion object {
@@ -110,5 +116,8 @@ enum class LastRunOutcome(
             } else {
                 requireNotNull(entries.firstOrNull { state in it.states }) { "run state ${state.wire} has no last-run bucket" }
             }
+
+        /** The exact lower-case wire word, else null. */
+        fun fromWire(value: String): LastRunOutcome? = entries.firstOrNull { it.wire == value }
     }
 }
