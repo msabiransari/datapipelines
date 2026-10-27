@@ -307,6 +307,10 @@ mode). A download whose checksum differs from the committed one fails the
 build naming the artifact: this is the supply-chain twin of the lockfiles
 (locks pin WHICH version; verification pins WHAT BYTES).
 
+Invoke buildSrc's tests by root task path (`./gradlew :buildSrc:cleanTest :buildSrc:test`)
+so their classpath is verified; `-p buildSrc` makes buildSrc its own root build with
+no verification metadata and verifies nothing — never use it where verification matters.
+
 PGP/signature verification is deliberately NOT enabled (deferred — key
 management for ~500 artifacts is its own project; checksums already close the
 "artifact changed upstream / MITM mirror" hole against a trusted first
@@ -1160,8 +1164,8 @@ CI runs all three. No code merges with violations.
 `config/detekt/detekt.yml` (no baseline). It is a separate build that the root
 `ktlintCheck`/`detekt` never reach, so it is run by task path:
 `./gradlew :buildSrc:ktlintCheck :buildSrc:detekt` (`:buildSrc:ktlintFormat` to fix). The
-pre-gate's stage 1 and a CI step run that; `scripts/gate.sh`'s buildSrc stage runs it as
-`-p buildSrc … ktlintCheck detekt`.
+pre-gate's stage 1 and a CI step run that; `scripts/gate.sh`'s buildSrc stage combines
+those task paths with `:buildSrc:cleanTest :buildSrc:test --continue` (see §6.3).
 
 ### 10.1 Documentation audit
 
@@ -1249,11 +1253,13 @@ coverage has genuinely improved, and never lower one to make a build pass.
 The floors guard itself is tested (`buildSrc/src/test`, Gradle TestKit — a
 project missing from the maps fails configuration; `-Pkover.off` drops the
 floor rule). A main build only builds buildSrc through its jar, so its tests
-never run automatically: `./gradlew -p buildSrc test` runs them, and
+never run automatically: `./gradlew :buildSrc:cleanTest :buildSrc:test` runs them, and
 `scripts/gate.sh` runs that as a stage, with buildSrc's `ktlintCheck` and `detekt`
 in the same invocation (`--continue`, since #724) — forced to execute (`cleanTest`;
 the catalog file's content is a declared test input, so a
 `gradle/libs.versions.toml` edit re-runs the guards even without the gate).
+CI's `cold-verify` job runs the same test command with its fresh `GRADLE_USER_HOME`
+after the root dependency-verification surface, covering buildSrc's test classpath (§6.3).
 The stage is attempted even when the network preflight says offline (a warm
 TestKit cache passes offline). The fail-soft offline skip is earned only by
 a dependency-resolution failure — evidenced in the stage log **or the JUnit
@@ -1308,7 +1314,7 @@ git stamp. The task always revalidates POMs and mappings; tests under
 hardening, the isolate pin and deterministic output:
 
 ```bash
-./gradlew -p buildSrc cleanTest test
+./gradlew :buildSrc:cleanTest :buildSrc:test
 ```
 
 Build-generated notices describe the graph that was packaged. Drivers
