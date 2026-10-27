@@ -1368,7 +1368,11 @@ is an explicit task input in `modules/web/build.gradle.kts`.
 
 To vendor another asset, add its manifest block and upstream licence file; the
 inventory and sections update automatically. Record the exact release source in
-`source` and, when different, the licence URL in `license_file_source`. Preserve
+`source`. Fetch the licence from the exact pinned upstream release's URL, run
+`sha256sum` on that file, and write `license_file_source` and `license_file_sha256`
+together in the same edit when adding or refreshing the licence. The checksum is
+lowercase hexadecimal SHA-256 of the raw file bytes, before CRLF normalisation or
+trimming; the build verifies it offline and never fetches the licence. Preserve
 copyright lines and existing bundle hashes. MIT, ISC, 0BSD and OFL-1.1 are the
 currently used allowlist; a new licence family requires an inspected phrase check
 and offline fixtures in `VendoredAssetNotices`, with no download during the build.
@@ -1377,6 +1381,9 @@ The guard refuses these conditions (the block name identifies the input to fix):
 
 - `Missing <key> for vendored block <block>`: a required `license`, `license_file`,
   `version` or `source` is absent or blank.
+- `Missing license_file_sha256 for vendored block <block>`: no licence checksum is declared.
+- `Licence checksum mismatch for vendored block <block>: <path> expected <declared> actual <computed>`:
+  the raw file bytes differ from the declared lowercase checksum.
 - `Unknown licence <id> for vendored block <block>`: an unreviewed licence family.
 - `Missing or blank licence text for vendored block <block>: <path>`: no usable file.
 - `Wrong licence text for vendored block <block>: expected <id>`: the distinguishing

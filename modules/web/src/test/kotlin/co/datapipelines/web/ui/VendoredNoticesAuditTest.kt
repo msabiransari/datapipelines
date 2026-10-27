@@ -4,14 +4,30 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.collections.shouldNotBeEmpty
+import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
+import java.security.MessageDigest
 
 /** Audits the generated classpath resource against the real manifest and upstream licence bytes. */
 class VendoredNoticesAuditTest {
     private val firstParty = setOf("design-system", "datapipelines-dashboard-runtime")
+
+    @Test
+    fun `every third-party block pins its raw licence file bytes`() {
+        val manifest = ObjectMapper().readTree(resource("vendor/design-system/vendor-manifest.json"))
+        val blocks = manifest.properties().filter { it.key !in firstParty }
+        blocks.size shouldBeGreaterThanOrEqual 10
+        blocks.forEach { (name, block) ->
+            val path = block.get("license_file").asText()
+            val computed = MessageDigest.getInstance("SHA-256").digest(resourceBytes(path)).joinToString("") { "%02x".format(it) }
+            withClue("$name: $path") {
+                block.get("license_file_sha256")?.asText() shouldBe computed
+            }
+        }
+    }
 
     @Test
     fun `every third-party block has one inventory row and its exact licence section`() {
@@ -48,8 +64,9 @@ class VendoredNoticesAuditTest {
         Regex("\\d{4}-\\d{2}-\\d{2}|\\d{2}:\\d{2}:\\d{2}").containsMatchIn(header) shouldBe false
     }
 
-    private fun resource(path: String): String =
+    private fun resource(path: String): String = resourceBytes(path).toString(Charsets.UTF_8)
+
+    private fun resourceBytes(path: String): ByteArray =
         requireNotNull(javaClass.classLoader.getResourceAsStream("static/$path")) { "Missing classpath asset: $path" }
-            .bufferedReader(Charsets.UTF_8)
-            .use { it.readText() }
+            .use { it.readBytes() }
 }
