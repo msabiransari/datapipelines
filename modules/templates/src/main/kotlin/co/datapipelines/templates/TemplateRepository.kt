@@ -1224,14 +1224,12 @@ class TemplateRepository(
         /**
          * The working-version page predicate of [list], shared with [count] (034 E3)
          *
-         * **The COALESCE is D55.** `current_version` is NULL until a human releases, so a plain
-         * `v.version = t.current_version` made every freshly created template INVISIBLE — absent
-         * from the explorer, from `templates_list` and from its own count. The pointer still wins
-         * whenever there IS a release (a template with a draft over a release lists its RELEASED
-         * projection, and the `drafts` badge is what says a draft exists); the draft fills the gap
-         * only where nothing has been released at all, because there it is the only version the
-         * template has.
-         * so the page and its total can never disagree. Every optional filter is CAST in the
+         * **The COALESCE is D55.** Without [lifecycle] or [releasedOnly], the pointer row wins;
+         * it may name a development-posture draft. A null pointer falls back to the newest draft,
+         * keeping a never-released template visible in authoring lists and their counts.
+         * With [releasedOnly] and no lifecycle bucket, #575 instead requires the pointer row
+         * itself to be RELEASED, with no draft fallback. Both [list] and [count] use this rule,
+         * so the page and its total cannot disagree. Every optional filter is CAST in the
          * SQL: a bare `? IS NULL` gives Postgres no type to infer and the statement will not
          * even prepare.
          *
@@ -1241,7 +1239,7 @@ class TemplateRepository(
          * versions only when [releasedOnly] (a narrowed lens). The joined row is then the
          * template's LATEST version, whatever its status — a discarded-only template has no
          * working version (D55's COALESCE is empty for it), and the bucket's semantics live
-         * entirely in the membership subquery. The unfiltered predicate is the one it always was.
+         * entirely in the membership subquery. This bucket branch retains its existing rule.
          */
         private fun listWhere(
             lifecycle: co.datapipelines.pipeline.LifecycleBucket?,
