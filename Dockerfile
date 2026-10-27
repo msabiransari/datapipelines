@@ -30,6 +30,7 @@ RUN groupadd --system datapipelines && useradd --system --gid datapipelines data
 # build, not just one iteration.
 ARG DUCKDB_CORE_VERSION=1.5.5
 ARG TARGETARCH
+COPY deploy/duckdb-extensions.sha256 /tmp/duckdb-extensions.sha256
 RUN case "$TARGETARCH" in \
       amd64) dp=linux_amd64 ;; \
       arm64) dp=linux_arm64 ;; \
@@ -39,7 +40,10 @@ RUN case "$TARGETARCH" in \
     for ext in httpfs aws iceberg avro; do \
       curl -fsSL "https://extensions.duckdb.org/v${DUCKDB_CORE_VERSION}/$dp/${ext}.duckdb_extension.gz" \
         | gunzip > "/opt/duckdb/extensions/v${DUCKDB_CORE_VERSION}/$dp/${ext}.duckdb_extension" || exit 1; \
-    done
+    done && \
+    cd /opt/duckdb/extensions && \
+    sha256sum -c --ignore-missing --strict /tmp/duckdb-extensions.sha256 && \
+    rm /tmp/duckdb-extensions.sha256
 
 # The knob the lake adapter reads (application.yml datapipelines.duckdb.extension-directory):
 # present here so a bare `docker run` of this image is LOAD-only out of the box. Compose's

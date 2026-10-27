@@ -34,10 +34,26 @@ Published to `ghcr.io/datapipelines/datapipelines:{version}` and `docker.io/data
 
 - **Base image**: `eclipse-temurin:21-jre-jammy` (LTS JDK 21, Ubuntu Jammy).
 - **Layers**: multi-stage build (`gradle:8.7-jdk21` builder → `eclipse-temurin:21-jre-jammy` runtime).
-- **Bundled DuckDB extensions (dp-lake)**: `httpfs`, `aws`, `iceberg` and `avro` for DuckDB core v1.5.5, pre-populated under `/opt/duckdb/extensions/v1.5.5/<platform>/` (`<platform>` = `linux_amd64` or `linux_arm64`, following the build's `TARGETARCH`) and activated by the image's `ENV DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY` — a LAKE datasource `LOAD`s them from disk and never `INSTALL`s at runtime, so no egress to `extensions.duckdb.org` is needed ([Configuration §3.25](configuration.md)). Adds ~108 MB uncompressed (~39 MB downloaded at build).
+- **Bundled DuckDB extensions (dp-lake)**: `httpfs`, `aws`, `iceberg` and `avro` for DuckDB core v1.5.5, pre-populated under `/opt/duckdb/extensions/v1.5.5/<platform>/` (`<platform>` = `linux_amd64` or `linux_arm64`, following the build's `TARGETARCH`) and activated by the image's `ENV DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY` — a LAKE datasource `LOAD`s them from disk and never `INSTALL`s at runtime, so no egress to `extensions.duckdb.org` is needed ([Configuration §3.25](configuration.md)). Adds ~108 MB uncompressed (~39 MB downloaded at build). The eight decompressed binaries (four per platform) are pinned in `deploy/duckdb-extensions.sha256`; the extension build layer runs `sha256sum -c --ignore-missing --strict` before `USER` and refuses a mismatch. `/app/THIRD-PARTY-NOTICES` includes the extensions at their footer commits, their copyrights and licences, and their direct statically linked vcpkg manifest dependencies (transitive ports are tracked in [#747](https://github.com/msabiransari/datapipelines/issues/747)).
 - **Size target**: < 250 MB compressed.
 - **User**: non-root (`datapipelines` user, UID 1000).
 - **Entrypoint**: `java $JAVA_OPTS -Duser.timezone=UTC -jar /app/app.jar`.
+
+To re-pin on a `DUCKDB_CORE_VERSION` bump, update **three inputs together**: the
+Dockerfile core ARG, `deploy/duckdb-extensions.sha256` (eight sums plus the four
+`# <name> commit=<hash>` annotations), and the commit-bound licence inventory in
+`buildSrc/src/main/kotlin/DuckDbExtensionLicenses.kt`. In a temporary directory,
+for each of `linux_amd64` and `linux_arm64` and each of `httpfs`, `aws`, `iceberg`,
+`avro`, fetch `https://extensions.duckdb.org/v<core>/<platform>/<name>.duckdb_extension.gz`,
+decompress with `gunzip`, and run `sha256sum` on the **decompressed** file. Write
+sorted `sha256sum -c` lines relative to `/opt/duckdb/extensions`; inspect each
+binary's final 512 bytes (`tail -c 512 <file> | strings`) for its extension
+repository commit, core and platform. Both platforms must report the same commit
+per extension. Review `LICENSE` and `vcpkg.json` at those commits, update direct
+component licences and vendor any new SPDX text from the snapshot named in the
+allowlist. Run `:modules:app:generateThirdPartyNotices`, the buildSrc licence
+fixtures and `DockerfileDuckDbExtensionPinTest`, rebuild the jar, and prove one
+bad sum refuses the image build before building the restored pins successfully.
 
 **`-Duser.timezone=UTC` is normative, not a suggestion.** The type system assumes a UTC JVM: ingest normalizes timezone-aware source values to UTC and treats naive source timestamps as already-UTC ([Type System §8.4](type-system.md#84-timestamp-timezone-normalization)), and every internal `TIMESTAMPTZ` is stored and rendered in UTC. A container whose JVM default zone is anything else silently shifts rendered timestamps. The flag is baked into the image entrypoint; bare-JVM and JAR deployments (§3.2, §6.5) MUST pass it themselves.
 
@@ -1343,6 +1359,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-26 | v1.58 | #692 | §3.1: checksum-pin all eight decompressed DuckDB extension binaries, include commit-bound extension and direct vcpkg component notices, and document the three-input re-pin procedure. |
 | 2026-10-26 | v1.57 | #693 — renumbered at merge after #570’s v1.56 vendored browser-asset notices | **§6.2A:** the offline `:modules:web:generateVendoredAssetNotices` task renders the vendor manifest and upstream licence files to `/vendor/THIRD-PARTY-NOTICES.txt`, packaged in the web jar and website export. Missing coverage, unknown or mismatched licences and stale allowances fail the build. |
 | 2026-10-26 | v1.56 | #570 unused MapLibre CSS | **§6.2A:** patch 0004 drops the unreachable maplibre-gl stylesheet require from the non-map custom bundles; both bundles rebuilt and hashes and sizes re-pinned, with the rule to drop the patch when a `map` trace joins a trace list. |
 | 2026-10-25 | v1.55 | #702 | **Appendix B step 2:** replaced the top-bar chip, login mint and `GET /api/v1/auth/api-keys/mine` flow retired by keys v2 (#233, Auth v3.5) with the Keys page / `POST /api/v1/auth/api-keys`, the role chosen under the subset rule and the one-time reveal. The v1.28 row remains as history. Prose only. |

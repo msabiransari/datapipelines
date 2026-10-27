@@ -152,6 +152,123 @@ class ThirdPartyNoticesTest {
         assertEquals("LicenseRef-Oracle-FUTC", ThirdPartyLicenseAllowlist.mappings(mysql = false, oracle = true)[oracle])
     }
 
+    @Test
+    fun `the real DuckDB pins yield four exact non-POM coordinates`() {
+        val root = File(requireNotNull(System.getProperty("repo.catalog"))).parentFile.parentFile
+        val rows =
+            ThirdPartyNotices.duckdbExtensions(
+                root.resolve("Dockerfile").readText(),
+                root.resolve("deploy/duckdb-extensions.sha256").readText(),
+            )
+        assertEquals(
+            listOf("avro:v1.5.5+f9d5902", "aws:v1.5.5+efa54a9", "httpfs:v1.5.5+827222f", "iceberg:v1.5.5+45163a28"),
+            rows.map { it.coordinate.removePrefix("duckdb-extension:") },
+        )
+    }
+
+    @Test
+    fun `missing extra and duplicate checksum entries fail naming the extension`() {
+        val line = checksums().lineSequence().single { it.contains("linux_amd64/httpfs.") }
+        listOf(checksums().replace("$line\n", ""), checksums() + "$line\n", checksums() + line.replace("httpfs.", "mystery.")).forEach {
+            val failure = assertThrows(IllegalStateException::class.java) { extensions(it) }
+            assertTrue(failure.message.orEmpty().contains("httpfs") || failure.message.orEmpty().contains("mystery"), failure.message)
+        }
+    }
+
+    @Test
+    fun `a Dockerfile name without checksum coverage and an unlisted name both fail`() {
+        listOf(fixtureDockerfile.replace("httpfs", "mystery"), fixtureDockerfile.replace("httpfs ", "")).forEach {
+            val failure = assertThrows(IllegalStateException::class.java) { ThirdPartyNotices.duckdbExtensions(it, checksums()) }
+            assertTrue(failure.message.orEmpty().contains("httpfs"), failure.message)
+        }
+    }
+
+    @Test
+    fun `missing duplicate and changed footer commit annotations fail naming the extension`() {
+        listOf(
+            checksums().replace("# httpfs commit=827222f\n", ""),
+            checksums() + "# httpfs commit=827222f\n",
+            checksums().replace("commit=827222f", "commit=aaaaaaa"),
+        ).forEach {
+            val failure = assertThrows(IllegalStateException::class.java) { extensions(it) }
+            assertTrue(failure.message.orEmpty().contains("httpfs"), failure.message)
+        }
+    }
+
+    @Test
+    fun `a missing extension licence entry fails naming the extension`() {
+        val failure =
+            assertThrows(IllegalStateException::class.java) {
+                ThirdPartyNotices.duckdbExtensions(fixtureDockerfile, checksums(), DuckDbExtensionLicenses.inventory() - "httpfs")
+            }
+        assertTrue(failure.message.orEmpty().contains("DuckDB licence inventory mismatch: missing=[httpfs]"), failure.message)
+    }
+
+    @Test
+    fun `an unknown component licence fails before rendering even with a permissive text resolver`() {
+        val inventory = DuckDbExtensionLicenses.inventory().toMutableMap()
+        inventory["httpfs"] =
+            inventory.getValue("httpfs").copy(
+                components = listOf(DuckDbComponent("unknown", "Unknown-ID", "https://example.test")),
+            )
+        val failure =
+            assertThrows(IllegalStateException::class.java) {
+                ThirdPartyNotices.duckdbExtensions(fixtureDockerfile, checksums(), inventory)
+            }
+        assertEquals("Unknown DuckDB component licence: Unknown-ID", failure.message)
+    }
+
+    @Test
+    fun `DuckDB output is byte stable with every combined and alternative licence text once`() {
+        val first = renderer().render(emptyList(), emptyMap(), extensions()) { "Text for $it" }
+        val reversed = extensions(checksums().lines().reversed().joinToString("\n"))
+        val second = renderer().render(emptyList(), emptyMap(), reversed) { "Text for $it" }
+        assertEquals(first, second)
+        listOf("Apache-2.0", "MIT", "curl", "ISC", "BSD-3-Clause", "Zlib").forEach {
+            assertEquals(1, Regex("===== $it =====").findAll(first).count())
+        }
+        assertTrue(first.contains("curl AND ISC AND BSD-3-Clause"))
+        assertTrue(first.contains("Apache-2.0 OR MIT"))
+        assertEquals(4, first.lineSequence().count { it.startsWith("duckdb-extension:") })
+        assertTrue(first.contains("Copyright 2018-2024 Stichting DuckDB Foundation"))
+    }
+
+    @Test
+    fun `malformed sums wrong core paths and absent platform pins fail closed`() {
+        listOf(
+            checksums().replace("a".repeat(64), "xyz"),
+            checksums().replace("v1.5.5/", "v9.9/"),
+            checksums().lines().filterNot { it.contains("linux_arm64") }.joinToString("\n"),
+        ).forEach {
+            assertThrows(IllegalStateException::class.java) { extensions(it) }
+        }
+    }
+
+    @Test
+    fun `missing duplicate and interpolated DuckDB core versions fail closed`() {
+        listOf(
+            "",
+            fixtureDockerfile + "ARG DUCKDB_CORE_VERSION=9.0\n",
+            fixtureDockerfile.replace("=1.5.5", "=\${OTHER}"),
+            fixtureDockerfile + "ARG DUCKDB_CORE_VERSION=\${OTHER}\n",
+        ).forEach {
+            assertThrows(IllegalStateException::class.java) { ThirdPartyNotices.duckdbExtensions(it, checksums()) }
+        }
+    }
+
+    private val fixtureDockerfile = "ARG DUCKDB_CORE_VERSION=1.5.5\nfor ext in httpfs aws iceberg avro; do\n"
+
+    private fun checksums(): String =
+        buildString {
+            mapOf("httpfs" to "827222f", "aws" to "efa54a9", "iceberg" to "45163a28", "avro" to "f9d5902").forEach { (name, commit) ->
+                append("# $name commit=$commit\n")
+                listOf("linux_amd64", "linux_arm64").forEach { append("${"a".repeat(64)}  v1.5.5/$it/$name.duckdb_extension\n") }
+            }
+        }
+
+    private fun extensions(checksums: String = checksums()): List<DuckDbExtensionNotice> =
+        ThirdPartyNotices.duckdbExtensions(fixtureDockerfile, checksums)
+
     private fun render(coordinate: String): String = renderer().render(listOf(coordinate), mapping) { "Licence text" }
 
     private fun renderer(): ThirdPartyNotices =
