@@ -1333,6 +1333,11 @@ extension, path or identifier): `DuckDB checksum coverage mismatch:`,
 `DuckDB commit annotations mismatch:`, `Invalid DuckDB commit annotation:`,
 `Duplicate DuckDB commit annotation:`, `DuckDB licence inventory mismatch:`,
 `DuckDB licence commit mismatch for <name>:` and `Unknown DuckDB component licence:`.
+Malformed Dockerfile declarations fail as
+`Dockerfile must declare exactly one DUCKDB_CORE_VERSION`,
+`Invalid DUCKDB_CORE_VERSION:`,
+`Dockerfile must declare exactly one DuckDB extension loop` or
+`Duplicate or empty DuckDB extension names:`.
 A needed text absent from `gradle/licenses` fails as `Missing vendored licence text:`.
 Re-pin the core ARG, checksum/commit manifest and reviewed licence inventory together;
 see [Deployment §3.1](docs/deployment.md#31-docker-image).
