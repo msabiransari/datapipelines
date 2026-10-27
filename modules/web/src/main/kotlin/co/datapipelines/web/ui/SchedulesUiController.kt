@@ -126,7 +126,7 @@ object ScheduleOutcomeFilter {
     /** The refusal's one reason — a constant, so nothing of the input can ride it. */
     const val BAD_OUTCOME = "The outcome parameter is not a filter the schedules explorer offers."
 
-    /** The select's options after "All last runs", in [LastRunOutcome]'s order. */
+    /** The select's options after "All outcomes", in [LastRunOutcome]'s order. */
     val OPTIONS: List<ScheduleConditionFilter.Option> =
         LastRunOutcome.entries.map { ScheduleConditionFilter.Option(it.wire, label(it)) }
 
