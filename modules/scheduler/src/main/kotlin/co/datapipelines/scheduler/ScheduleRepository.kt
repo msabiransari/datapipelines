@@ -198,9 +198,14 @@ class ScheduleRepository(
         params: MutableMap<String, Any?>,
     ): String =
         when (outcome) {
-            null -> ""
-            LastRunOutcome.NEVER_RAN ->
+            null -> {
+                ""
+            }
+
+            LastRunOutcome.NEVER_RAN -> {
                 " AND NOT EXISTS (SELECT 1 FROM schedule_runs r WHERE r.workspace_id = :ws AND r.schedule_id = schedules.id)"
+            }
+
             else -> {
                 params["outcomeStates"] = outcome.states.map { it.wire }
                 " AND ($LATEST_RUN_STATE) IN (:outcomeStates)"

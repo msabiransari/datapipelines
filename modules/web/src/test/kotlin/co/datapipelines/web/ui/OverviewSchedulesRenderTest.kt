@@ -160,7 +160,11 @@ class OverviewSchedulesRenderTest {
                     listOf("/schedules?outcome=$key")
             }
         }
-        doc.select("[data-chart=last-run] a").map { it.attr("href") }.distinct().size shouldBe 5
+        doc
+            .select("[data-chart=last-run] a")
+            .map { it.attr("href") }
+            .distinct()
+            .size shouldBe 5
         val dialog = doc.selectFirst("[data-dialog-section=condition]")!!.text()
         dialog shouldContain
             "Each bar and each condition tile opens the explorer filtered to that condition; " +

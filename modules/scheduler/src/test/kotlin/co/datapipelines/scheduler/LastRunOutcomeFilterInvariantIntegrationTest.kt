@@ -123,7 +123,10 @@ class LastRunOutcomeFilterInvariantIntegrationTest {
         val summary = h.service.summary(SchedulerTestDb.WORKSPACE, viewer)
         val filtered =
             LastRunOutcome.entries.associateWith { o ->
-                h.service.list(SchedulerTestDb.WORKSPACE, null, LIMIT, 0, viewer, outcome = o.wire).map { it.name }.toSet()
+                h.service
+                    .list(SchedulerTestDb.WORKSPACE, null, LIMIT, 0, viewer, outcome = o.wire)
+                    .map { it.name }
+                    .toSet()
             }
         LastRunOutcome.entries.forEach { o ->
             withClue("bucket ${o.wire} (${if (viewer.narrowed) "narrowed" else "unlensed"})") {

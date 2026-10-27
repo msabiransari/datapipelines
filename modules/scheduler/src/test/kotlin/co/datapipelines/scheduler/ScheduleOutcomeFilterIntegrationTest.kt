@@ -88,7 +88,7 @@ class ScheduleOutcomeFilterIntegrationTest {
             names(TargetViewer.EVERYONE, outcome = o.wire) shouldContainExactly EXPECTED.getValue(o)
         }
         h.executor.lens = setOf("job:a")
-        val admitted = h.service.list(SchedulerTestDb.WORKSPACE, null, LIMIT, 0, NarrowedViewer).map { it.name }.toSet()
+        val admitted = names(NarrowedViewer).toSet()
         LastRunOutcome.entries.forEach { o ->
             withClue(o.wire) {
                 names(NarrowedViewer, outcome = o.wire) shouldContainExactly EXPECTED.getValue(o).filter { it in admitted }
