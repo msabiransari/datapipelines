@@ -1143,6 +1143,23 @@ in-checkout finding after a deletion (#703), use the forced affected-task check 
   report, plus `scripts/test-recount.sh`, is how to tell whether a knob helped; never the feel
   of it.
 
+### 9.6 Capturing log lines in a test
+
+A test that asserts on log output captures it through its module's `SnapshotListAppender` (one
+test-source copy per module, beside its own `SnapshotListAppenderTest`; no shared test-fixtures
+module) and reads `events()` or `messages()`, detached copies taken under the list's own lock. Its
+block helper attaches, detaches and stops around a block: `capturingLogEvents(logger) { … }`, or
+`capturingLogs { … }` over the root logger in `modules/datasources`. Logback's raw
+`ListAppender.list` is a plain `ArrayList` that every logging thread appends to — a pool, a
+scheduler, a coroutine dispatcher, Hikari's housekeeper, a Spring context — so reading it while any
+of them can still log is a `ConcurrentModificationException` or a torn read on a slow runner
+(#362, #391). A raw `ListAppender` is allowed only when the test thread is
+the sole writer between attach and the last read, and it then says so on its construction line, or
+alone on the line directly above it when the construction line would pass 120 columns:
+`// raw-list-appender: synchronous — <the fact that makes it safe>`. `RawListAppenderGuardTest`
+(buildSrc, run by the gate and CI's cold job) refuses any other raw construction, naming it
+`path:line` (#484).
+
 ---
 
 ## 10. Linting and Formatting
