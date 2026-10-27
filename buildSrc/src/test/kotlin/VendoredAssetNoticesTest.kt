@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
+import java.security.MessageDigest
 
 /** Offline fixtures exercise coverage refusals without network or Gradle resolution. */
 class VendoredAssetNoticesTest {
@@ -13,7 +14,7 @@ class VendoredAssetNoticesTest {
 
     private val texts =
         mapOf(
-            "MIT" to "Copyright Example\nPermission is hereby granted, free of charge",
+            "MIT" to "Copyright 2026 Example\nPermission is hereby granted, free of charge",
             "ISC" to "Permission to use, copy, modify, and/or distribute\nprovided that the above copyright notice",
             "0BSD" to "Permission to use, copy, modify, and/or distribute",
             "OFL-1.1" to "SIL OPEN FONT LICENSE Version 1.1",
@@ -39,7 +40,7 @@ class VendoredAssetNoticesTest {
         listOf<String?>(null, " \r\n").forEach { text ->
             val error =
                 assertThrows(IllegalStateException::class.java) {
-                    VendoredAssetNotices.render("{${block("dagre", "MIT")}}", emptySet()) { text }
+                    VendoredAssetNotices.render("{${block("dagre", "MIT", text = text.orEmpty())}}", emptySet()) { text?.toByteArray() }
                 }
             assertTrue(error.message.orEmpty().contains("Missing or blank licence text for vendored block dagre"))
         }
@@ -50,7 +51,10 @@ class VendoredAssetNoticesTest {
         texts.keys.forEach { id ->
             val error =
                 assertThrows(IllegalStateException::class.java) {
-                    VendoredAssetNotices.render("{${block("dagre", id)}}", emptySet()) { "unrelated licence" }
+                    VendoredAssetNotices.render(
+                        "{${block("dagre", id, text = "unrelated licence")}}",
+                        emptySet(),
+                    ) { "unrelated licence".toByteArray() }
                 }
             assertTrue(error.message.orEmpty().contains("Wrong licence text for vendored block dagre: expected $id"))
         }
@@ -60,7 +64,9 @@ class VendoredAssetNoticesTest {
     fun `ISC additionally requires the copyright condition`() {
         val error =
             assertThrows(IllegalStateException::class.java) {
-                VendoredAssetNotices.render("{${block("icons", "ISC")}}", emptySet()) { texts.getValue("0BSD") }
+                VendoredAssetNotices.render("{${block("icons", "ISC", text = texts.getValue("0BSD"))}}", emptySet()) {
+                    texts.getValue("0BSD").toByteArray()
+                }
             }
         assertTrue(error.message.orEmpty().contains("Wrong licence text for vendored block icons"))
     }
@@ -90,10 +96,15 @@ class VendoredAssetNoticesTest {
     @Test
     fun `wrapping and upstream case do not change the reproduced text`() {
         val wrapped = "sil open font license\r\nVersion 1.1"
-        val blocks = texts.keys.mapIndexed { i, id -> block("asset-$i", id) }.joinToString(",")
+        val blocks =
+            texts.keys
+                .mapIndexed { i, id ->
+                    val text = if (id == "OFL-1.1") wrapped else texts.getValue(id)
+                    block("asset-$i", id, text = text)
+                }.joinToString(",")
         val output =
             VendoredAssetNotices.render("{$blocks}", emptySet()) {
-                if (it.endsWith("OFL-1.1")) wrapped else texts[it.removePrefix("vendor/")]
+                (if (it.endsWith("OFL-1.1")) wrapped else texts[it.removePrefix("vendor/")])?.toByteArray()
             }
         assertTrue(output.contains("sil open font license\nVersion 1.1\n"))
     }
@@ -114,6 +125,46 @@ class VendoredAssetNoticesTest {
         }
     }
 
+    @Test
+    fun `missing checksum names its block`() {
+        val original = block("dagre", "MIT")
+        val digest = sha256(directory.resolve("MIT").readBytes())
+        val blocks = original.replace("\"license_file_sha256\":\"$digest\",", "")
+        failure(blocks, "Missing license_file_sha256 for vendored block dagre")
+    }
+
+    @Test
+    fun `copyright-only edit fails with block path and both digests`() {
+        val blocks = block("dagre", "MIT")
+        val file = directory.resolve("MIT")
+        val original = file.readBytes()
+        file.writeText(file.readText().replace("2026", "2027"))
+        failure(
+            blocks,
+            "Licence checksum mismatch for vendored block dagre: vendor/MIT " +
+                "expected ${sha256(original)} actual ${sha256(file.readBytes())}",
+        )
+    }
+
+    @Test
+    fun `restoring original bytes after copyright edit passes`() {
+        val blocks = texts.keys.mapIndexed { index, id -> block("asset-$index", id) }.joinToString(",")
+        val file = directory.resolve("MIT")
+        val original = file.readBytes()
+        file.writeText(file.readText().replace("2026", "2027"))
+        failure(blocks, "Licence checksum mismatch for vendored block asset-0: vendor/MIT")
+        file.writeBytes(original)
+        assertTrue(render(blocks).contains(texts.getValue("MIT")))
+    }
+
+    @Test
+    fun `uppercase declaration of correct checksum fails`() {
+        val blocks = block("dagre", "MIT")
+        val digest = sha256(directory.resolve("MIT").readBytes())
+        assertFalse(digest == digest.uppercase())
+        failure(blocks.replace(digest, digest.uppercase()), "Licence checksum mismatch for vendored block dagre: vendor/MIT")
+    }
+
     private fun failure(
         blocks: String,
         message: String,
@@ -125,17 +176,21 @@ class VendoredAssetNoticesTest {
     private fun render(
         blocks: String,
         own: Set<String> = emptySet(),
-    ): String {
-        texts.forEach { (id, text) -> directory.resolve(id).writeText("  $text\r\n", Charsets.UTF_8) }
-        return VendoredAssetNotices.render("{$blocks}", own) { path -> directory.resolve(path.removePrefix("vendor/")).readText() }
-    }
+    ): String = VendoredAssetNotices.render("{$blocks}", own) { path -> directory.resolve(path.removePrefix("vendor/")).readBytes() }
 
     private fun block(
         name: String,
         id: String,
         file: Boolean = true,
-    ): String =
-        "\"$name\":{\"license\":\"$id\"," +
+        text: String = "  ${texts[id].orEmpty()}\r\n",
+    ): String {
+        val bytes = text.toByteArray(Charsets.UTF_8)
+        directory.resolve(id).writeBytes(bytes)
+        return "\"$name\":{\"license\":\"$id\"," +
             (if (file) "\"license_file\":\"vendor/$id\"," else "") +
+            "\"license_file_sha256\":\"${sha256(bytes)}\"," +
             "\"version\":\"1\",\"source\":\"https://example.test/$name\"}"
+    }
+
+    private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 }

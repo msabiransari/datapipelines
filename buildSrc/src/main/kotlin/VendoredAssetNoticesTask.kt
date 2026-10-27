@@ -10,6 +10,7 @@ import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
+import java.security.MessageDigest
 
 /** Generates browser-asset notices entirely from committed inputs, without dependency resolution. */
 abstract class VendoredAssetNoticesTask : DefaultTask() {
@@ -44,7 +45,7 @@ abstract class VendoredAssetNoticesTask : DefaultTask() {
                 check(file.toPath().startsWith(vendor) && (!file.exists() || file.toPath().toRealPath().startsWith(vendor))) {
                     "Licence path escapes vendor directory: $path"
                 }
-                if (file.isFile) file.readText(Charsets.UTF_8) else null
+                if (file.isFile) file.readBytes() else null
             }
         val output = outputDirectory.file("THIRD-PARTY-NOTICES.txt").get().asFile
         output.parentFile.mkdirs()
@@ -74,7 +75,7 @@ object VendoredAssetNotices {
     fun render(
         manifestJson: String,
         firstParty: Set<String>,
-        licenceText: (String) -> String?,
+        licenceBytes: (String) -> ByteArray?,
     ): String {
         val manifest = JsonSlurper().parseText(manifestJson) as? Map<*, *> ?: error("Vendor manifest must be an object")
         val staleOwn = firstParty.filterNot { manifest.containsKey(it) }
@@ -85,7 +86,7 @@ object VendoredAssetNotices {
                 .map { (key, value) ->
                     val name = key as? String ?: error("Vendor block name must be a string")
                     val block = value as? Map<*, *> ?: error("Invalid vendor block: $name")
-                    asset(name, block, licenceText)
+                    asset(name, block, licenceBytes)
                 }.sortedBy { it.name }
         val stale = phrases.keys - assets.map { it.license }.toSet()
         check(stale.isEmpty()) { "STALE vendored licence allowlist entries (matched no block): ${stale.sorted()}" }
@@ -105,7 +106,7 @@ object VendoredAssetNotices {
     private fun asset(
         name: String,
         block: Map<*, *>,
-        licenceText: (String) -> String?,
+        licenceBytes: (String) -> ByteArray?,
     ): Asset {
         fun field(key: String): String =
             (block[key] as? String)?.takeIf { it.isNotBlank() } ?: error("Missing $key for vendored block $name")
@@ -115,8 +116,15 @@ object VendoredAssetNotices {
         check(path.startsWith("vendor/") && path.split('/').none { it == ".." || it == "." || it.isEmpty() }) {
             "Invalid license_file for vendored block $name: $path"
         }
-        val text = licenceText(path)?.replace("\r\n", "\n")?.trim()
-        check(!text.isNullOrBlank()) { "Missing or blank licence text for vendored block $name: $path" }
+        val declared = field("license_file_sha256")
+        val bytes = licenceBytes(path)
+        check(bytes != null) { "Missing or blank licence text for vendored block $name: $path" }
+        val computed = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+        check(declared == computed) {
+            "Licence checksum mismatch for vendored block $name: $path expected $declared actual $computed"
+        }
+        val text = bytes.toString(Charsets.UTF_8).replace("\r\n", "\n").trim()
+        check(text.isNotBlank()) { "Missing or blank licence text for vendored block $name: $path" }
         // Upstream OFL files use both line wrapping and mixed case; preserve the original section bytes.
         val words = text.replace(Regex("\\s+"), " ")
         check(required.all { words.contains(it, ignoreCase = true) }) { "Wrong licence text for vendored block $name: expected $license" }
