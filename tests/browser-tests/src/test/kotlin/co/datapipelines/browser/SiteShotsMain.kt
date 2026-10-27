@@ -109,8 +109,8 @@ import java.nio.file.StandardCopyOption
  * photographed but has no rail link to click. The click-through itself walks the rail by
  * `data-nav-section` in the order of `AppNav.ITEMS` (modules/web, …/web/ui/AppNav.kt) and
  * waits on each anchor's own `href`, so a menu re-route cannot strand it (#602); the order
- * is mirrored in [APP_SHOT_SECTIONS] because the driver's compile classpath does not carry
- * `:modules:web` — see that table's KDoc.
+ * is held in [APP_SHOT_SECTIONS] and pinned against `AppNav.ITEMS` by `SiteShotsRailOrderTest`
+ * (#721) — see that table's KDoc.
  *
  * ## The `home` set (175, #175)
  *
@@ -274,26 +274,24 @@ object SiteShotsMain {
     /**
      * One `(section, routes…)` row of the `app` set's shot list — see [APP_SHOT_SECTIONS].
      */
-    private data class AppSectionShots(
+    internal data class AppSectionShots(
         val section: String?,
         val routes: List<String>,
     )
 
     /**
      * The `app` set's shot list (#602): one row per nav section, in rail order — the order
-     * of `AppNav.ITEMS` (modules/web, …/web/ui/AppNav.kt). The order is mirrored HERE
-     * rather than imported: `:modules:app` depends on `:modules:web` `implementation`, so
-     * the driver's compile classpath does not carry it, and the fence for #602 forbids
-     * build-file edits. `ShellRenderTest` keeps the template's rendered sections honest
-     * against `AppNav`; when the two drift, this walk says so out loud — an unmatched
-     * section prints `SKIP` and the >= MIN_CLICKED_SECTIONS floor fails the run.
+     * of `AppNav.ITEMS` (modules/web, …/web/ui/AppNav.kt). The table stays a table — it
+     * carries each section's ROUTES, which `AppNav` does not know — and `SiteShotsRailOrderTest`
+     * (#721) fails the build when its sections differ from `AppNav.ITEMS` in membership or
+     * order; `ShellRenderTest` keeps the template's rendered sections honest against `AppNav`.
      *
      * A family row photographs BOTH the overview its rail item links and the flat catalog;
      * every route below answered 200 on a `--demo nyc` instance when the table was written
      * (2026-10-25). `/settings` is off-rail (079 §B, the avatar menu): photographed by the
      * still pass, never clicked.
      */
-    private val APP_SHOT_SECTIONS: List<AppSectionShots> =
+    internal val APP_SHOT_SECTIONS: List<AppSectionShots> =
         listOf(
             AppSectionShots("/dashboard", listOf("/dashboard")),
             AppSectionShots("/pipelines", listOf("/overview/pipelines", "/pipelines")),
@@ -316,14 +314,14 @@ object SiteShotsMain {
     private val APP_PAGES: List<String> = APP_SHOT_SECTIONS.flatMap { it.routes }
 
     /** The rail sections the click-through walks, in rail order — the table's named rows. */
-    private val RAIL_SECTIONS: List<String> = APP_SHOT_SECTIONS.mapNotNull { it.section }
+    internal val RAIL_SECTIONS: List<String> = APP_SHOT_SECTIONS.mapNotNull { it.section }
 
     /**
      * Non-vacuity floor for the recorded walk (#602): a demo admin's rail draws most of the
      * sections (the `th:if` items depend on role), so a run that clicked fewer than this
      * many did not walk the menu — it skipped it.
      */
-    private const val MIN_CLICKED_SECTIONS = 10
+    internal const val MIN_CLICKED_SECTIONS = 10
 
     /** The two review widths the `app` set captures every screen at. */
     private val APP_VIEWPORTS = listOf(1440 to 900, 2560 to 1440)

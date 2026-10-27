@@ -60,21 +60,29 @@ object AuthErrorCodes {
     /**
      * 403 — the principal holds the right CREDENTIAL and the wrong ROLE (RBAC design §2,
      * D-R1). `details.required` names the capability the operation needs and `details.held`
-     * what the membership carries, because "ask a workspace admin for the author flag" is
-     * the only useful next step and it needs both halves to be stated.
+     * the role it was judged against — a session's membership role, the key's own `keyRole`,
+     * `super_admin`, or null — because "ask for the missing role" is the only useful next
+     * step and it needs both halves to be stated.
      *
-     * THE permission refusal since scopes left (#215): a session, a key role (`api_caller`,
-     * `promotion_receiver`) — every principal but the MCP key, whose refusal is
-     * [KEY_ISSUER_ROLE_LOST] because its role is its member's.
+     * THE permission refusal since scopes left (#215), for every principal: a session, and
+     * a key judged by its own `keyRole` (`api_caller`, `promotion_receiver`) — since keys v2
+     * an MCP key short of a permission refuses here exactly like a session (auth.md §7.5
+     * "Key roles"). The fix is a key created with the role the operation needs, or a role
+     * change for a session; [KEY_ISSUER_ROLE_LOST] answers only the context-judged key
+     * principal (its note below).
      */
     const val ROLE_REQUIRED = "auth.role_required"
 
     /**
-     * 403 — the KEY was valid; its issuer no longer holds the capability the operation needs
-     * (D-R12). Its own code rather than [ROLE_REQUIRED] because the recovery differs and a
-     * caller cannot guess it: retrying with this key will never work, and the fix is a new
-     * key from somebody who still holds the role. A demotion takes effect within one
-     * `AuthCache` TTL (60 s by default), so a key can start refusing mid-session.
+     * 403 — the KEY was valid, and the role it was JUDGED against does not reach this operation
+     * (D-R12). Since keys v2 (auth.md §7.5 "Key roles") every key carries its own role, chosen
+     * at creation and judged by one §7.6 column, so a key whose own `keyRole` falls short
+     * refuses [ROLE_REQUIRED] like a session; this code answers only a context-judged key
+     * principal — the promotion config-value peer and any legacy path that built a key
+     * principal without a `keyRole` (the arm comment in `ScopeMatrix` where it is raised).
+     * Its own code rather than [ROLE_REQUIRED] because the recovery differs and a caller
+     * cannot guess it: retrying with this key will never work, and the fix is a new key
+     * created with the role the operation needs.
      */
     const val KEY_ISSUER_ROLE_LOST = "auth.key_issuer_role_lost"
 
