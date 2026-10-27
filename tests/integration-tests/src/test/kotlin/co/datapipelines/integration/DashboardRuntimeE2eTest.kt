@@ -28,9 +28,12 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.context.ApplicationContext
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.annotation.DirtiesContext
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.support.TransactionTemplate
 import java.io.BufferedReader
 import java.io.InputStream
 import java.io.InputStreamReader
@@ -44,6 +47,7 @@ import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
+import javax.sql.DataSource
 
 /**
  * **The dashboard runtime over the real stack (#10 L2, rest-api §23.3; Dashboards §5).**
@@ -854,23 +858,32 @@ class DashboardRuntimeE2eTest {
     fun `the sweeper closes a RUNNING refresh an instance crash left - and only that one`() {
         val stale = uuid()
         val young = uuid()
-        insertRefresh(stale, status = "RUNNING", startedAgo = "3 hours")
-        insertRefresh(young, status = "RUNNING", startedAgo = "5 seconds")
+        val jdbc = JdbcTemplate(context.getBean(DataSource::class.java))
+        val manager = context.getBean("metadataTransactionManager", PlatformTransactionManager::class.java)
+        // #750: the real scheduled/replica tick cannot claim this test's uncommitted fixtures.
+        // The explicit bean call joins the metadata transaction and must still report exactly one.
+        TransactionTemplate(manager).executeWithoutResult {
+            insertRefresh(stale, status = "RUNNING", startedAgo = "3 hours", jdbc = jdbc)
+            insertRefresh(young, status = "RUNNING", startedAgo = "5 seconds", jdbc = jdbc)
+            val competing =
+                CompletableFuture
+                    .supplyAsync { housekeeping("dashboardRefreshSweeper", "sweepOnce") }
+                    .get(STREAM_WAIT_SECONDS, TimeUnit.SECONDS)
+            val closed = housekeeping("dashboardRefreshSweeper", "sweepOnce")
 
-        val closed = housekeeping("dashboardRefreshSweeper", "sweepOnce")
-
-        withClue("the sweeper reported the row it reaped") { closed shouldBe 1 }
-        rows(
-            "SELECT status, summary_json ->> 'reason' AS reason, (finished_at IS NOT NULL)::text AS done FROM " +
-                "dashboard_refreshes WHERE id = '$stale'",
-        ).single()
-            .let {
-                it["status"] shouldBe "TIMED_OUT"
-                it["reason"] shouldBe "deadline_passed"
-                it["done"] shouldBe "true"
-            }
-        rows("SELECT status FROM dashboard_refreshes WHERE id = '$young'").single()["status"] shouldBe "RUNNING"
-        rows("UPDATE dashboard_refreshes SET status = 'ABORTED', finished_at = NOW() WHERE id = '$young' RETURNING id").size shouldBe 1
+            withClue("the sweeper reported the row it reaped; competing tick reaped=$competing") { closed shouldBe 1 }
+            val reaped =
+                jdbc.queryForMap(
+                    "SELECT status, summary_json ->> 'reason' AS reason, (finished_at IS NOT NULL)::text AS done FROM " +
+                        "dashboard_refreshes WHERE id = '$stale'",
+                )
+            reaped["status"] shouldBe "TIMED_OUT"
+            reaped["reason"] shouldBe "deadline_passed"
+            reaped["done"] shouldBe "true"
+            jdbc.queryForObject("SELECT status FROM dashboard_refreshes WHERE id = '$young'", String::class.java) shouldBe "RUNNING"
+            jdbc.update("UPDATE dashboard_refreshes SET status = 'ABORTED', finished_at = NOW() WHERE id = '$young'") shouldBe 1
+        }
+        rows("SELECT status FROM dashboard_refreshes WHERE id = '$stale'").single()["status"] shouldBe "TIMED_OUT"
     }
 
     @Test
@@ -881,25 +894,34 @@ class DashboardRuntimeE2eTest {
         val running = uuid()
         val execution = UUID.randomUUID().toString()
         insertExecution(execution)
-        insertRefresh(old, status = "COMPLETED", startedAgo = "30 days", finishedAgo = "30 days")
-        insertRefresh(recent, status = "COMPLETED", startedAgo = "1 hour", finishedAgo = "1 hour")
-        insertRefresh(running, status = "RUNNING", startedAgo = "30 days")
-        sql(
-            "INSERT INTO dashboard_refresh_executions (refresh_id, source_name, execution_id, shared) VALUES " +
-                "('$old', 's', '$execution', FALSE)",
-        )
+        val jdbc = JdbcTemplate(context.getBean(DataSource::class.java))
+        val manager = context.getBean("metadataTransactionManager", PlatformTransactionManager::class.java)
+        TransactionTemplate(manager).executeWithoutResult {
+            insertRefresh(old, status = "COMPLETED", startedAgo = "30 days", finishedAgo = "30 days", jdbc = jdbc)
+            insertRefresh(recent, status = "COMPLETED", startedAgo = "1 hour", finishedAgo = "1 hour", jdbc = jdbc)
+            insertRefresh(running, status = "RUNNING", startedAgo = "30 days", jdbc = jdbc)
+            jdbc.execute(
+                "INSERT INTO dashboard_refresh_executions (refresh_id, source_name, execution_id, shared) VALUES " +
+                    "('$old', 's', '$execution', FALSE)",
+            )
+            val competing =
+                CompletableFuture
+                    .supplyAsync { housekeeping("dashboardRefreshRetention", "retainOnce") }
+                    .get(STREAM_WAIT_SECONDS, TimeUnit.SECONDS)
+            val purged = housekeeping("dashboardRefreshRetention", "retainOnce")
 
-        val purged = housekeeping("dashboardRefreshRetention", "retainOnce")
-
-        purged shouldBeGreaterThanOrEqual 1
-        rows("SELECT COUNT(*) AS n FROM dashboard_refreshes WHERE id = '$old'").single()["n"] shouldBe "0"
-        rows("SELECT COUNT(*) AS n FROM dashboard_refresh_executions WHERE refresh_id = '$old'").single()["n"] shouldBe "0" // the cascade
-        // never the execution
+            withClue("retention reaped its fixture; competing tick purged=$competing") { purged shouldBeGreaterThanOrEqual 1 }
+            jdbc.queryForObject("SELECT COUNT(*) FROM dashboard_refreshes WHERE id = '$old'", Long::class.java) shouldBe 0L
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM dashboard_refresh_executions WHERE refresh_id = '$old'",
+                Long::class.java,
+            ) shouldBe 0L
+            jdbc.queryForObject("SELECT COUNT(*) FROM pipeline_executions WHERE execution_id = '$execution'", Long::class.java) shouldBe 1L
+            jdbc.queryForObject("SELECT COUNT(*) FROM dashboard_refreshes WHERE id = '$recent'", Long::class.java) shouldBe 1L
+            jdbc.queryForObject("SELECT status FROM dashboard_refreshes WHERE id = '$running'", String::class.java) shouldBe "RUNNING"
+            jdbc.update("DELETE FROM dashboard_refreshes WHERE id IN ('$recent', '$running')") shouldBe 2
+        }
         rows("SELECT COUNT(*) AS n FROM pipeline_executions WHERE execution_id = '$execution'").single()["n"] shouldBe "1"
-        rows("SELECT COUNT(*) AS n FROM dashboard_refreshes WHERE id = '$recent'").single()["n"] shouldBe "1"
-        // RUNNING is never retained away
-        rows("SELECT COUNT(*) AS n FROM dashboard_refreshes WHERE id = '$running'").single()["n"] shouldBe "1"
-        sql("DELETE FROM dashboard_refreshes WHERE id IN ('$recent', '$running')")
     }
 
     @Test
@@ -1485,15 +1507,16 @@ class DashboardRuntimeE2eTest {
         status: String,
         startedAgo: String,
         finishedAgo: String? = null,
+        jdbc: JdbcTemplate? = null,
     ) {
-        sql(
+        val statement =
             "INSERT INTO dashboard_refreshes (id, dashboard_id, dashboard_version, workspace_id, instance_id, principal_user_id, scope, " +
                 "parameter_revision, status, started_at, finished_at) VALUES ('$id', '$GOLDEN', 1, '$WORKSPACE_ID', '${uuid()}'," +
                 "'$VIEWER_ID', 'ALL', 1, " +
                 "'$status', NOW() - INTERVAL '$startedAgo', ${finishedAgo?.let {
                     "NOW() - INTERVAL '$it'"
-                } ?: (if (status == "RUNNING") "NULL" else "NOW()")})",
-        )
+                } ?: (if (status == "RUNNING") "NULL" else "NOW()")})"
+        if (jdbc == null) sql(statement) else jdbc.execute(statement)
     }
 
     // ------------------------------------------------------------------------------------------------- SQL

@@ -15,6 +15,9 @@ dependencies {
     testImplementation(libs.argon2.jvm)
 
     testImplementation(libs.spring.boot.starter.test)
+    // #750: housekeeping fixtures share the real metadata transaction. These compile-time
+    // JDBC/transaction types already arrive at runtime through app, as in app's own build.
+    testImplementation(libs.spring.boot.starter.jdbc)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit.jupiter)
     // One container module per supported dialect that needs a real server.
