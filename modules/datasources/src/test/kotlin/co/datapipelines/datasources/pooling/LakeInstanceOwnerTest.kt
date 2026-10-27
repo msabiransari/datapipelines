@@ -1,7 +1,5 @@
 package co.datapipelines.datasources.pooling
 
-import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import com.zaxxer.hikari.util.DriverDataSource
@@ -11,8 +9,6 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
-import org.slf4j.Logger
-import org.slf4j.LoggerFactory
 import java.sql.Connection
 import java.sql.SQLException
 import java.sql.SQLFeatureNotSupportedException
@@ -273,19 +269,11 @@ class LakeInstanceOwnerTest {
         override fun close() = onClose()
     }
 
-    /** Formatted messages logged while [block] ran — the shape `ConnectionPoolManagerTest` uses. */
-    private fun capturingLogs(block: () -> Unit): List<String> {
-        val root = LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME) as ch.qos.logback.classic.Logger
-        val appender = ListAppender<ILoggingEvent>().apply { start() }
-        root.addAppender(appender)
-        try {
-            block()
-        } finally {
-            root.detachAppender(appender)
-            appender.stop()
-        }
-        return appender.list.map { it.formattedMessage }
-    }
+    /**
+     * Formatted messages logged while [block] ran — the shape `ConnectionPoolManagerTest` uses, read through
+     * the module's snapshot capture (#484): every thread in the JVM logs into ROOT while it is attached.
+     */
+    private fun capturingLogs(block: () -> Unit): List<String> = co.datapipelines.datasources.capturingLogs(block = block)
 
     private fun answerOn(connection: Connection): Int =
         connection.createStatement().use { st ->
