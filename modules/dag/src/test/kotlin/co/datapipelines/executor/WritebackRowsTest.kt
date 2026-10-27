@@ -304,6 +304,7 @@ class WritebackRowsTest {
         val logger = LoggerFactory.getLogger(JdbcWritebackRunner::class.java) as ch.qos.logback.classic.Logger
         val previousLevel = logger.level
         val appender =
+            // raw-list-appender: synchronous — the write-back runs on the test thread; no pool, no coroutine
             ListAppender<ILoggingEvent>().apply {
                 list = CopyOnWriteArrayList()
                 start()

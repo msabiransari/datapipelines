@@ -261,6 +261,7 @@ class ExecutionEventRetentionTest {
     /** Runs [block] with the job's logger captured; returns its value and every line it logged. */
     private fun <T> captured(block: () -> T): Pair<T, List<ILoggingEvent>> {
         val logger = LoggerFactory.getLogger(ExecutionEventRetention::class.java) as ch.qos.logback.classic.Logger
+        // raw-list-appender: synchronous — the job runs on the test thread; read after detach
         val appender = ListAppender<ILoggingEvent>().apply { start() }
         logger.addAppender(appender)
         val value =

@@ -40,6 +40,7 @@ class ExecutorMetricsTest {
             val metrics = ExecutorMetrics(registry)
             val slots = ExecutionSlots(2, 2)
             val logger = LoggerFactory.getLogger("io.micrometer.core.instrument.MeterRegistry") as Logger
+            // raw-list-appender: synchronous — the gauges bind on the test thread; no executor runs
             val logs = ListAppender<ILoggingEvent>()
             logs.start()
             val previousLevel = logger.level

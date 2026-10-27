@@ -2,7 +2,6 @@ package co.datapipelines.executor
 
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.events.ExecutionStarted
 import co.datapipelines.pipeline.NodeType
 import co.datapipelines.pipeline.TemplateRef
@@ -153,14 +152,15 @@ class LogContextPropagationTest {
         vararg loggers: Logger,
         block: () -> Unit,
     ): List<List<ILoggingEvent>> {
-        val appenders = loggers.map { logger -> logger to ListAppender<ILoggingEvent>().apply { start() } }
+        // A snapshot (#484): the propagated lines are logged on the pool's thread.
+        val appenders = loggers.map { logger -> logger to SnapshotListAppender() }
         appenders.forEach { (logger, appender) -> logger.addAppender(appender) }
         try {
             block()
         } finally {
             appenders.forEach { (logger, appender) -> logger.detachAppender(appender) }
         }
-        return appenders.map { (_, appender) -> appender.list.toList() }
+        return appenders.map { (_, appender) -> appender.events() }
     }
 
     /**
