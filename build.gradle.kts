@@ -250,7 +250,7 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
     ),
     ":modules:app" to setOf(":modules:web"),
     ":tests:integration-tests" to setOf(":modules:app"),
-    ":tests:browser-tests" to setOf(":modules:app"),
+    ":tests:browser-tests" to setOf(":modules:app", ":modules:web"),
 )
 
 // Kover wires a per-module SELF-edge through its `kover` aggregation bucket —
