@@ -3,6 +3,8 @@ package co.datapipelines.browser
 import co.datapipelines.browser.ScheduleFixtures.createSchedule
 import co.datapipelines.browser.ScheduleFixtures.releasedPipeline
 import co.datapipelines.browser.ScheduleFixtures.send
+import com.microsoft.playwright.Page
+import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
@@ -16,7 +18,10 @@ import org.junit.jupiter.api.Test
  * panel's info button opens its dialog section, the task row leads to the explorer, and a viewer
  * sees no New schedule, only who creates schedules. #641: the Unblock task row opens the explorer
  * filtered to blocked — a flat list, the select reading Blocked, the address bar carrying it — and
- * All brings the tree back with the parameter gone.
+ * All brings the tree back with the parameter gone. #725: each Last run bar opens the explorer
+ * filtered to its bucket (`?outcome=`), and the bar's count is the filtered list's row count — walked
+ * over the two buckets this suite makes for real (a Run now that succeeds; one refused for a discarded
+ * release, which the worker records `not_started`); All outcomes brings the tree back.
  */
 class OverviewSchedulesBrowserTest : SchedulesBrowserSuite() {
     private fun openOverview() {
@@ -122,6 +127,59 @@ class OverviewSchedulesBrowserTest : SchedulesBrowserSuite() {
         page.url().substringAfter(baseUrl) shouldBe "/schedules?condition=blocked"
 
         page.selectOption("#schedule-filter-condition", "")
+        page.locator("#schedule-list:not([aria-busy]) [role='tree'] details.tpl-folder[data-folder='$root']").waitFor()
+        page.locator("#schedule-list .tpl-results").count() shouldBe 0
+        page.url().substringAfter(baseUrl) shouldBe "/schedules"
+    }
+
+    @Test
+    fun `each Last run bar opens the explorer filtered to that last run - its count is the list's rows - and All brings the tree back`() {
+        startTrace()
+        val root = ready("schovo")
+        releasedPipeline(page, "$root/jobs/rows")
+        val closing = releasedPipeline(page, "$root/jobs/close")
+        val ok = createSchedule(page, "$root/nightly/rows", "$root/jobs/rows")
+        val stopped = createSchedule(page, "$root/monthly/close", "$root/jobs/close")
+        // A real succeeded run: Run now, followed to its end (SchedulesRunsBrowserTest's wait).
+        openSchedules("?id=$ok")
+        detail().waitFor()
+        page.waitForResponse({ it.url().endsWith("/api/v1/schedules/$ok/run") && it.status() == 202 }) {
+            page.locator("[data-verb='schedule-run']").click()
+        }
+        page.waitForFunction(
+            "() => (document.querySelector('#schedule-detail .sch-runrow') || {}).getAttribute && " +
+                "document.querySelector('#schedule-detail .sch-runrow').getAttribute('data-state') === 'succeeded'",
+            null,
+            Page.WaitForFunctionOptions().setTimeout(60_000.0),
+        )
+        // A real run that did not start: its release discarded, then a Run now the worker refuses.
+        send(page, "POST", "/api/v1/pipelines/$closing/versions/1/discard").status shouldBe 200
+        openSchedules("?id=$stopped")
+        detail().waitFor()
+        page.locator("[data-verb='schedule-run']").click()
+        page.locator("#schedule-detail [data-slot='blocked']:not([hidden])").waitFor()
+
+        openOverview()
+        listOf("succeeded", "failed", "in-progress", "did-not-run", "never-ran").map { bar("last-run", it) } shouldBe
+            listOf("1", "0", "0", "1", "0")
+        mapOf("succeeded" to "$root/nightly/rows", "did-not-run" to "$root/monthly/close").forEach { (outcome, name) ->
+            withClue(outcome) {
+                openOverview()
+                val counted = bar("last-run", outcome).toInt()
+                page.click("[data-chart='last-run'] [data-bar='$outcome'] .app-overview-bar-name a")
+                page.waitForURL("**/schedules?outcome=$outcome")
+                page.locator("#schedule-list:not([aria-busy]) .tpl-results").waitFor()
+                page.locator("#schedule-filter-outcome").inputValue() shouldBe outcome
+                page.locator("#schedule-filter-condition").inputValue() shouldBe ""
+                val rows = page.locator("#schedule-tree-pane [data-leaf-name]").all().map { it.getAttribute("data-leaf-name") }
+                rows shouldBe listOf(name)
+                rows.size shouldBe counted
+                page.locator("#schedule-list details.tpl-folder").count() shouldBe 0
+                page.url().substringAfter(baseUrl) shouldBe "/schedules?outcome=$outcome"
+            }
+        }
+
+        page.selectOption("#schedule-filter-outcome", "")
         page.locator("#schedule-list:not([aria-busy]) [role='tree'] details.tpl-folder[data-folder='$root']").waitFor()
         page.locator("#schedule-list .tpl-results").count() shouldBe 0
         page.url().substringAfter(baseUrl) shouldBe "/schedules"
