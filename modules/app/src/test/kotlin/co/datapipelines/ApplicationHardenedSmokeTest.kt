@@ -1,7 +1,5 @@
 package co.datapipelines
 
-import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.config.SharedRedis
 import co.datapipelines.web.config.AuthoringStartupCheck
 import io.kotest.matchers.shouldBe
@@ -91,18 +89,16 @@ class ApplicationHardenedSmokeTest {
     @Test
     fun `the boot line names the environment and the posture`() {
         val logger = LoggerFactory.getLogger(AuthoringStartupCheck::class.java) as ch.qos.logback.classic.Logger
-        val appender = ListAppender<ILoggingEvent>().apply { start() }
-        logger.addAppender(appender)
-        try {
-            environment.getProperty("datapipelines.env") shouldBe ENV_NAME
-            // Re-run the PRODUCTION bean against the booted context rather than scraping
-            // the application's own startup output, which a parallel suite may have
-            // flushed. Same object, same Environment, same line.
-            authoringStartupCheck.check()
-        } finally {
-            logger.detachAppender(appender)
-        }
-        val line = appender.list.map { it.formattedMessage }.single { it.contains("event=config.posture") }
+        // A snapshot (#484): the booted context's threads share this JVM while the capture is attached.
+        val events =
+            capturingLogEvents(logger) {
+                environment.getProperty("datapipelines.env") shouldBe ENV_NAME
+                // Re-run the PRODUCTION bean against the booted context rather than scraping
+                // the application's own startup output, which a parallel suite may have
+                // flushed. Same object, same Environment, same line.
+                authoringStartupCheck.check()
+            }
+        val line = events.map { it.formattedMessage }.single { it.contains("event=config.posture") }
         line shouldContain "env=$ENV_NAME"
         line shouldContain "posture=hardened"
         line shouldContain "authoring=off"

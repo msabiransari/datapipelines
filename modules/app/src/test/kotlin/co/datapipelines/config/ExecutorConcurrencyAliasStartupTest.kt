@@ -3,9 +3,9 @@ package co.datapipelines.config
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.DatapipelinesApplication
 import co.datapipelines.SharedPostgres
+import co.datapipelines.SnapshotListAppender
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
@@ -97,14 +97,10 @@ class ExecutorConcurrencyAliasStartupTest {
 
     /** Attaches a Logback appender around bean creation — see the class KDoc. */
     private class AliasWarnProbe : ApplicationContextInitializer<ConfigurableApplicationContext> {
-        val events = mutableListOf<ILoggingEvent>()
+        // A snapshot (#484): the booting context's threads share the JVM while the probe is attached.
+        private val appender = SnapshotListAppender()
 
-        private val appender =
-            object : ListAppender<ILoggingEvent>() {
-                override fun append(eventObject: ILoggingEvent) {
-                    events += eventObject
-                }
-            }
+        val events: List<ILoggingEvent> get() = appender.events()
 
         private val logger = LoggerFactory.getLogger(ConfigValidator::class.java) as Logger
 
