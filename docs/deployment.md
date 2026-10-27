@@ -635,7 +635,7 @@ java -Duser.timezone=UTC -jar datapipelines-app.jar \
   --datapipelines.redis.port=6381
 ```
 
-`-Duser.timezone=UTC` is required here too (§3.1) — the image sets it for you, a bare JVM does not.
+`-Duser.timezone=UTC` is required here too (§3.1): every deployment — container, bare JVM or JAR — must pass the flag explicitly.
 
 Not recommended for production.
 
