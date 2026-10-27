@@ -1,7 +1,5 @@
 package co.datapipelines.integration
 
-import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.DatapipelinesApplication
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.nulls.shouldNotBeNull
@@ -472,13 +470,14 @@ class MailNoticesE2eTest {
 
     private fun <T> capturingLogs(block: () -> T): Pair<T, List<String>> {
         val logger = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as ch.qos.logback.classic.Logger
-        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        // A snapshot (#484): the booted application's threads log while the capture is attached.
+        val appender = SnapshotListAppender()
         logger.addAppender(appender)
         return try {
             val result = block()
             // The pool task logs after the response; give it the same window the box gets.
             awaitClaimStatuses(CREATED_EMAIL, mapOf("welcome" to "sent", "new_user" to "sent"))
-            result to appender.list.map { it.formattedMessage }
+            result to appender.messages()
         } finally {
             logger.detachAppender(appender)
         }

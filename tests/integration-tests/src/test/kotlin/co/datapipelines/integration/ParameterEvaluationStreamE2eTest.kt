@@ -1,8 +1,6 @@
 package co.datapipelines.integration
 
 import ch.qos.logback.classic.Logger
-import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.DatapipelinesApplication
 import co.datapipelines.integration.E2eSession.asSession
 import com.fasterxml.jackson.databind.JsonNode
@@ -430,20 +428,18 @@ class ParameterEvaluationStreamE2eTest {
         parameter: String,
     ): JsonNode = frames.first { it.first == name && it.second.path("parameter").asText() == parameter }.second
 
-    private fun capture(): ListAppender<ILoggingEvent> {
-        val appender = ListAppender<ILoggingEvent>().apply { start() }
+    // A snapshot (#484): the evaluation streams log on their own threads while the test polls.
+    private fun capture(): SnapshotListAppender {
+        val appender = SnapshotListAppender()
         LOGGERS.forEach { (LoggerFactory.getLogger(it) as Logger).addAppender(appender) }
         return appender
     }
 
-    private fun release(appender: ListAppender<ILoggingEvent>) {
+    private fun release(appender: SnapshotListAppender) {
         LOGGERS.forEach { (LoggerFactory.getLogger(it) as Logger).detachAppender(appender) }
     }
 
-    private fun lines(appender: ListAppender<ILoggingEvent>): List<String> =
-        synchronized(appender.list) {
-            appender.list.map { it.formattedMessage }
-        }
+    private fun lines(appender: SnapshotListAppender): List<String> = appender.messages()
 
     private fun awaitNoStreams() = awaitUntil("no evaluation stream is open") { activeEvaluationStreams() == 0 }
 

@@ -1,7 +1,5 @@
 package co.datapipelines.integration
 
-import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.DatapipelinesApplication
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -120,7 +118,8 @@ class LocalAdminSeedE2eTest {
     /** (5) — the admin creates a local user, whose one-time password walks the same forced-change path. */
     private fun adminCreatesUserWhoWalksTheSamePath(adminLogin: LoginResponse) {
         val logger = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as ch.qos.logback.classic.Logger
-        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        // A snapshot (#484): the booted application's threads log while the capture is attached.
+        val appender = SnapshotListAppender()
         logger.addAppender(appender)
         val createResponse =
             try {
@@ -142,7 +141,7 @@ class LocalAdminSeedE2eTest {
         // the kind and the domain only, and no claim row exists.
         val html = createResponse.body().asString()
         html shouldNotContain "Emailed to"
-        val skipped = appender.list.filter { it.formattedMessage.contains("event=mail.skipped") }
+        val skipped = appender.events().filter { it.formattedMessage.contains("event=mail.skipped") }
         skipped.size shouldBe 1
         skipped.single().level.toString() shouldBe "INFO"
         skipped.single().formattedMessage shouldContain "kind=welcome"
@@ -152,7 +151,7 @@ class LocalAdminSeedE2eTest {
             checkNotNull(ONE_TIME_PASSWORD.find(html)) {
                 "no one-time password in the create response"
             }.groupValues[1]
-        appender.list.forEach { it.formattedMessage shouldNotContain oneTime }
+        appender.events().forEach { it.formattedMessage shouldNotContain oneTime }
 
         val userLogin = postLogin(CREATED_EMAIL, oneTime)
         userLogin.statusCode shouldBe 302
