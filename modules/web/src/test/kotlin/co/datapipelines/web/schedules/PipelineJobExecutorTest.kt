@@ -1,5 +1,7 @@
 package co.datapipelines.web.schedules
 
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.auth.PermissionResolver
 import co.datapipelines.auth.PermissionResolverInstallation
 import co.datapipelines.auth.RolePermissionsResolver
@@ -164,10 +166,8 @@ class PipelineJobExecutorTest {
             listOf(ExecutionEventRecord(executionId, 7, "execution_aborted", Instant.EPOCH, """{"reason": not-json"""))
 
         val logger = org.slf4j.LoggerFactory.getLogger(PipelineJobExecutor::class.java) as ch.qos.logback.classic.Logger
-        val appender =
-            ch.qos.logback.core.read
-                .ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
-                .apply { start() }
+        // raw-list-appender: synchronous — inspect runs on the test thread over mocks
+        val appender = ListAppender<ILoggingEvent>().apply { start() }
         logger.addAppender(appender)
         val outcome =
             try {

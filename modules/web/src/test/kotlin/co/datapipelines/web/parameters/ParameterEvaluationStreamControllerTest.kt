@@ -2,8 +2,6 @@ package co.datapipelines.web.parameters
 
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
-import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
@@ -25,6 +23,7 @@ import co.datapipelines.parameters.SelectorTasks
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.EVERYTHING_LENS
+import co.datapipelines.web.SnapshotListAppender
 import co.datapipelines.web.api.ApiErrorCatalog
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.config.SseProperties
@@ -51,7 +50,6 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.context.SecurityContextHolder
 import java.time.Instant
 import java.util.UUID
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -308,31 +306,29 @@ class ParameterEvaluationStreamControllerTest {
         coEvery { evaluator.evaluate(any(), any(), any(), any(), any()) } throws IllegalStateException("SECRET sql text")
         val logger = LoggerFactory.getLogger(ParameterEvaluationStreamController::class.java) as Logger
         val priorLevel = logger.level
-        // The DEBUG line follows the ERROR line, so its arrival proves both are in the list.
-        val causeLogged = CountDownLatch(1)
-        val appender =
-            object : ListAppender<ILoggingEvent>() {
-                override fun append(event: ILoggingEvent) {
-                    super.append(event)
-                    if (event.formattedMessage.contains("event=parameter.evaluation_failed_cause")) causeLogged.countDown()
-                }
-            }.apply { start() }
+        // The DEBUG line follows the ERROR line, so its arrival proves both are in the list. A snapshot
+        // (#484): the evaluation logs on its own coroutine, so the wait polls detached copies.
+        val appender = SnapshotListAppender()
+
+        fun causeLogged() = appender.messages().any { it.contains("event=parameter.evaluation_failed_cause") }
         logger.level = Level.DEBUG
         logger.addAppender(appender)
         try {
             controller.evaluations(setId, body())
-            causeLogged.await(5, TimeUnit.SECONDS) shouldBe true
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (!causeLogged() && System.nanoTime() < deadline) Thread.sleep(10)
+            causeLogged() shouldBe true
         } finally {
             logger.detachAppender(appender)
             logger.level = priorLevel
         }
 
-        val error = appender.list.single { it.level == Level.ERROR }
+        val error = appender.events().single { it.level == Level.ERROR }
         error.formattedMessage shouldContain
             "event=parameter.evaluation_failed evaluation_id=$evaluationId error=java.lang.IllegalStateException sql_state=none"
         error.formattedMessage shouldNotContain "SECRET"
         error.throwableProxy shouldBe null
-        val cause = appender.list.single { it.level == Level.DEBUG }
+        val cause = appender.events().single { it.level == Level.DEBUG }
         cause.formattedMessage shouldContain "event=parameter.evaluation_failed_cause evaluation_id=$evaluationId"
         cause.throwableProxy?.className shouldBe "java.lang.IllegalStateException"
     }

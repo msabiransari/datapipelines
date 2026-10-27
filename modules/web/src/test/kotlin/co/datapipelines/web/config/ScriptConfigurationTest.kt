@@ -28,6 +28,7 @@ class ScriptConfigurationTest {
     @Test
     fun `boot reports each availability state in exactly one INFO line`() {
         val logger = LoggerFactory.getLogger(JavaScriptStartupCheck::class.java) as Logger
+        // raw-list-appender: synchronous — the startup check runs on the test thread over a mock
         val appender = ListAppender<ILoggingEvent>().apply { start() }
         logger.addAppender(appender)
         try {

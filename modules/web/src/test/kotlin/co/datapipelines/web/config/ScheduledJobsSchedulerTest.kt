@@ -2,7 +2,6 @@ package co.datapipelines.web.config
 
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.auth.AuditProperties
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.pooling.ReapOutcome
@@ -16,6 +15,7 @@ import co.datapipelines.executor.InMemoryCancellationRegistry
 import co.datapipelines.persistence.BatchSink
 import co.datapipelines.persistence.BatchingConfig
 import co.datapipelines.persistence.BatchingWriter
+import co.datapipelines.web.SnapshotListAppender
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
@@ -68,7 +68,8 @@ import javax.sql.DataSource
  */
 @Timeout(value = 1, unit = TimeUnit.MINUTES)
 class ScheduledJobsSchedulerTest {
-    private val logs = ListAppender<ILoggingEvent>()
+    // A snapshot (#484): the ticking and draining threads log while this thread reads.
+    private val logs = SnapshotListAppender()
     private val watched =
         listOf(
             ExecutionDrainLifecycle::class.java,
@@ -283,11 +284,10 @@ class ScheduledJobsSchedulerTest {
     private fun logged(prefix: String): Boolean = logged().any { it.formattedMessage.startsWith(prefix) }
 
     /**
-     * A copy of what was logged so far. `ListAppender.list` is a plain `ArrayList` that the ticking and
-     * draining threads append to while this thread reads it; logback appends under the appender's own
-     * lock (`AppenderBase.doAppend` is synchronized), so the copy is taken under that lock.
+     * A copy of what was logged so far. The ticking and draining threads append while this thread
+     * reads, so the read is the module's [SnapshotListAppender] snapshot (#484), never the live list.
      */
-    private fun logged(): List<ILoggingEvent> = synchronized(logs) { logs.list.toList() }
+    private fun logged(): List<ILoggingEvent> = logs.events()
 
     private fun awaitCondition(condition: () -> Boolean) {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(AWAIT_SECONDS)

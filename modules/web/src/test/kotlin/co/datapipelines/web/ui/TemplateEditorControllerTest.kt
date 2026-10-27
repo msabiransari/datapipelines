@@ -1,5 +1,7 @@
 package co.datapipelines.web.ui
 
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
@@ -334,9 +336,8 @@ class TemplateEditorControllerTest {
         stubRenderableTemplate()
         val sentinel = "sentinelLog448"
         val logger = LoggerFactory.getLogger(TemplateEditorController::class.java) as ch.qos.logback.classic.Logger
-        val appender =
-            ch.qos.logback.core.read
-                .ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
+        // raw-list-appender: synchronous — the controller is called directly on the test thread
+        val appender = ListAppender<ILoggingEvent>()
         appender.start()
         logger.addAppender(appender)
         try {
