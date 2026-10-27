@@ -1281,9 +1281,19 @@ line — a PASS never hides an unrun guard (014/F4, 018/F1+ F2).
 Added 2026-10-24 (#677). The task writes
 `modules/app/build/generated/third-party-notices/THIRD-PARTY-NOTICES` from the
 resolved `productionRuntimeClasspath` graph, including its platform POMs,
-Spring Boot's jar-mode tools and both image isolate coordinates. It follows
+Spring Boot's jar-mode tools, both image isolate coordinates and the four
+bundled DuckDB extensions with their direct statically linked vcpkg dependencies. It follows
 POM parents when licences are inherited. The isolate version is read from
 `Dockerfile`'s `GRAALJS_VERSION` ARG. Internal project modules are excluded.
+The DuckDB core version and extension names come from the Dockerfile; checksums
+and per-name footer commits come from `deploy/duckdb-extensions.sha256`.
+`DuckDbExtensionLicenses.kt` binds each extension's MIT licence, copyright and
+direct linked components to that exact commit. The source review uses each
+repository's `LICENSE` and `vcpkg.json`; `vcpkg-cmake` is a build helper and is
+excluded from linked components. Combined terms (`AND`) and alternatives (`OR`)
+retain every declared licence text. Scope is **direct vcpkg manifest dependencies**;
+transitive ports remain tracked in [#747](https://github.com/msabiransari/datapipelines/issues/747).
+
 `processResources` puts the file at `META-INF/THIRD-PARTY-NOTICES` in the boot
 jar; the Dockerfile copies it to `/app/THIRD-PARTY-NOTICES`. Generate the jar
 before building the image, with the same optional-driver flags.
@@ -1317,10 +1327,18 @@ hardening, the isolate pin and deterministic output:
 ./gradlew :buildSrc:cleanTest :buildSrc:test
 ```
 
+DuckDB validation fails closed with these message prefixes (details name the
+extension, path or identifier): `DuckDB checksum coverage mismatch:`,
+`Invalid DuckDB checksum entry for core v<version>:`, `Duplicate DuckDB checksum entries:`,
+`DuckDB commit annotations mismatch:`, `Invalid DuckDB commit annotation:`,
+`Duplicate DuckDB commit annotation:`, `DuckDB licence inventory mismatch:`,
+`DuckDB licence commit mismatch for <name>:` and `Unknown DuckDB component licence:`.
+A needed text absent from `gradle/licenses` fails as `Missing vendored licence text:`.
+Re-pin the core ARG, checksum/commit manifest and reviewed licence inventory together;
+see [Deployment §3.1](docs/deployment.md#31-docker-image).
+
 Build-generated notices describe the graph that was packaged. Drivers
-mounted later through `lib/` require their own notices. Separately fetched
-DuckDB extensions and vendored browser assets remain tracked in
-[#692](https://github.com/msabiransari/datapipelines/issues/692) and
+mounted later through `lib/` require their own notices. Vendored browser assets remain tracked in
 [#693](https://github.com/msabiransari/datapipelines/issues/693).
 
 #### Dependency vulnerabilities (OSV-Scanner)
