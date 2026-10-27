@@ -346,6 +346,11 @@ class ScheduleService(
      * #641: [condition] (`enabled` | `paused` | `blocked`, the [Schedule.condition] words; null or
      * empty = all) narrows BOTH reads in SQL, before the lens — so a lensed reader's windows hold
      * only rows of that condition, and the filtered list is the admitted set's rows of that word.
+     *
+     * #725: [outcome] (a [LastRunOutcome] wire word — `succeeded`, `failed`, `in-progress`,
+     * `did-not-run`, `never-ran`; null or empty = all) narrows both reads the same way, by each
+     * schedule's NEWEST run — the bucket [summary] counts it in, so a filtered list is exactly the
+     * set the home's Last run bar counts. It composes with [condition] and [prefix].
      */
     fun list(
         workspaceId: UUID,
@@ -354,6 +359,7 @@ class ScheduleService(
         offset: Int,
         viewer: TargetViewer,
         condition: String? = null,
+        outcome: String? = null,
     ): List<Schedule> {
         prefix?.takeIf { it.isNotEmpty() }?.let {
             if (!PipelineNameGrammar.matchesPrefix(it)) {
@@ -364,12 +370,16 @@ class ScheduleService(
             condition?.takeIf { it.isNotEmpty() }?.let {
                 ScheduleCondition.fromWire(it) ?: throw requestInvalid("condition", CONDITION_WORDS)
             }
-        if (!viewer.narrowed) return schedules.listLive(workspaceId, prefix, limit, offset, only)
+        val lastRun =
+            outcome?.takeIf { it.isNotEmpty() }?.let {
+                LastRunOutcome.fromWire(it) ?: throw requestInvalid("outcome", OUTCOME_WORDS)
+            }
+        if (!viewer.narrowed) return schedules.listLive(workspaceId, prefix, limit, offset, only, lastRun)
         val admitted = ArrayList<Schedule>()
         var after: String? = null
         var scanned = 0
         while (admitted.size < offset + limit && scanned < LENS_SCAN_LIMIT) {
-            val window = schedules.listLiveAfter(workspaceId, prefix, after, LENS_WINDOW, only)
+            val window = schedules.listLiveAfter(workspaceId, prefix, after, LENS_WINDOW, only, lastRun)
             admitted += admittedOf(window, workspaceId, viewer)
             if (window.size < LENS_WINDOW) break
             after = window.last().name
@@ -742,6 +752,9 @@ class ScheduleService(
 
         /** #641 — the `condition` refusal's `expected`: the three wire words, in [ScheduleCondition]'s order. */
         private val CONDITION_WORDS = "one of " + ScheduleCondition.entries.joinToString(", ") { it.wire }
+
+        /** #725 — the `outcome` refusal's `expected`: the five wire words, in [LastRunOutcome]'s order. */
+        private val OUTCOME_WORDS = "one of " + LastRunOutcome.entries.joinToString(", ") { it.wire }
 
         /** The states an explicit resend may queue again (#442b): never `pending` or `accepted`. */
         private val RESENDABLE = setOf(DeliveryState.FAILED, DeliveryState.UNCERTAIN)

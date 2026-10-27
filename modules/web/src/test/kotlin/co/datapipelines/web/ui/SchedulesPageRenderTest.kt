@@ -70,6 +70,31 @@ class SchedulesPageRenderTest {
         Regex("""data-schedules-root[^>]*data-schedule-condition="blocked"""").containsMatchIn(blocked.replace("\n", " ")) shouldBe true
     }
 
+    /** #725 — the last-run select: the condition select's twin, after it in the search row. */
+    @Test
+    fun `the last-run select sits after the condition select - All outcomes first, the deep link's word selected and stamped`() {
+        val all = SchedulesRender.page()
+        val select = all.substringAfter("<select id=\"schedule-filter-outcome\"").substringBefore("</select>")
+        select shouldContain "name=\"outcome\""
+        select shouldContain "aria-label=\"Filter by last run\""
+        Regex("""<option value="([a-z-]*)"""").findAll(select).map { it.groupValues[1] }.toList() shouldBe
+            listOf("", "succeeded", "failed", "in-progress", "did-not-run", "never-ran")
+        Regex("""<option[^>]*>([^<]*)<""").findAll(select).map { it.groupValues[1] }.toList() shouldBe
+            listOf("All outcomes", "Succeeded", "Failed", "In progress", "Did not run", "Never ran")
+        Regex("""<option[^>]*selected[^>]*>([^<]*)<""").findAll(select).map { it.groupValues[1] }.toList() shouldBe
+            listOf("All outcomes")
+        all shouldNotContain "data-schedule-outcome"
+        val row = all.substringAfter("tplx-search-row").substringBefore("tplx-body")
+        (row.indexOf("schedule-filter-condition") in 0 until row.indexOf("schedule-filter-outcome")) shouldBe true
+
+        val both = SchedulesRender.page(condition = "blocked", outcome = "never-ran")
+        val chosen = both.substringAfter("<select id=\"schedule-filter-outcome\"").substringBefore("</select>")
+        Regex("""<option[^>]*selected[^>]*>([^<]*)<""").findAll(chosen).map { it.groupValues[1] }.toList() shouldBe listOf("Never ran")
+        val root = both.replace("\n", " ")
+        Regex("""data-schedules-root[^>]*data-schedule-outcome="never-ran"""").containsMatchIn(root) shouldBe true
+        Regex("""data-schedules-root[^>]*data-schedule-condition="blocked"""").containsMatchIn(root) shouldBe true
+    }
+
     @Test
     fun `a filter with no rows has its own empty state - Clear filters resets the select and the search`() {
         val skeleton = SchedulesRender.skeleton(SchedulesRender.page(), "sch-tpl-no-match-filtered")

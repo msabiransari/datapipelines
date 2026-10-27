@@ -357,3 +357,31 @@ test("the filtered empty state names the condition, and the search when there is
   assert.equal(M.filteredEmptyTitle("paused", "nightly"), "No paused schedules match “nightly”.");
   assert.equal(M.filteredEmptyTitle("", "nightly"), "No schedules match “nightly”");
 });
+
+// #725 — the last-run filter's client half: the address bar's word is trusted only when it is one
+// of the five (LastRunOutcome.wire's spellings), and the filtered empty state names the bucket,
+// alone or beside the condition, and the search. There is no matchesOutcome: a §20 schedule carries
+// no run state, and the verbs that re-render a row record no run (explorer.js's KDoc).
+test("an outcome word from the address bar is one of the five, else no filter", () => {
+  assert.deepEqual(M.OUTCOMES, ["succeeded", "failed", "in-progress", "did-not-run", "never-ran"]);
+  M.OUTCOMES.forEach((w) => assert.equal(M.outcomeFilter(w), w));
+  [null, undefined, "", "FAILED", "Failed", " failed", "in_progress", "never_ran", "failed<b>", "constructor", "__proto__", "blocked"].forEach(
+    (raw) => assert.equal(M.outcomeFilter(raw), "", String(raw)),
+  );
+});
+
+test("the condition and outcome words are disjoint - a word filters one select only", () => {
+  M.CONDITIONS.forEach((w) => assert.equal(M.outcomeFilter(w), "", w));
+  M.OUTCOMES.forEach((w) => assert.equal(M.conditionFilter(w), "", w));
+});
+
+test("the filtered empty state names the last run, beside the condition when both are set, and the search", () => {
+  assert.equal(M.filteredEmptyTitle("", "", "failed"), "No schedules whose last run failed.");
+  assert.equal(M.filteredEmptyTitle("", "", "never-ran"), "No schedules that never ran.");
+  assert.equal(M.filteredEmptyTitle("", "", "in-progress"), "No schedules with a run in progress.");
+  assert.equal(M.filteredEmptyTitle("blocked", "", "failed"), "No blocked schedules whose last run failed.");
+  assert.equal(M.filteredEmptyTitle("paused", "nightly", "did-not-run"), "No paused schedules whose last run did not run match “nightly”.");
+  assert.equal(M.filteredEmptyTitle("", "nightly", "succeeded"), "No schedules whose last run succeeded match “nightly”.");
+  // A word that is not a filter names nothing — never echoed into the title.
+  assert.equal(M.filteredEmptyTitle("", "nightly", "<b>x</b>"), "No schedules match “nightly”");
+});

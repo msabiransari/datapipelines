@@ -52,7 +52,8 @@ internal object ScheduleHomePage {
                 listOf(
                     "Each live schedule is counted once, in the condition the explorer shows on it. A schedule that " +
                         "is both paused and blocked counts as blocked: blocked wins.",
-                    "Each bar and each condition tile opens the explorer filtered to that condition; the Last run bars are not filters.",
+                    "Each bar and each condition tile opens the explorer filtered to that condition; each Last run bar opens it " +
+                        "filtered to that last run.",
                 ),
             terms =
                 listOf(
@@ -74,7 +75,8 @@ internal object ScheduleHomePage {
                 ),
             terms =
                 LastRunOutcome.entries.map { outcome ->
-                    OverviewPage.Term(outcome.label(), null, summary.lastRun.getValue(outcome).toLong(), outcome.states())
+                    val count = summary.lastRun.getValue(outcome).toLong()
+                    OverviewPage.Term(ScheduleOutcomeFilter.label(outcome), null, count, outcome.states())
                 },
         )
 
@@ -107,7 +109,11 @@ internal object ScheduleHomePage {
                 headings = listOf("Condition", "Schedules"),
             ).withWidths()
 
-    /** Each schedule's latest run, one outcome each — a snapshot, not a history. */
+    /**
+     * Each schedule's latest run, one outcome each — a snapshot, not a history. Each bar links the
+     * explorer filtered to its bucket (#725, [ScheduleOutcomeFilter]): §20.1's `outcome` reads the
+     * same newest run with the same [LastRunOutcome.states], so the bar's count is the list's rows.
+     */
     private fun lastRunChart(summary: ScheduleSummary): OverviewPage.Chart =
         OverviewPage
             .Chart(
@@ -115,8 +121,13 @@ internal object ScheduleHomePage {
                 caption = "Last run",
                 bars =
                     LastRunOutcome.entries.map {
-                        // Unlinked: the explorer has no last-run filter (a bucket is not a filter, the #583 rule).
-                        bar(it.wire(), it.label(), summary.lastRun.getValue(it).toLong(), it.tone(), href = null)
+                        bar(
+                            it.wire,
+                            ScheduleOutcomeFilter.label(it),
+                            summary.lastRun.getValue(it).toLong(),
+                            it.tone(),
+                            ScheduleOutcomeFilter.href(it),
+                        )
                     },
                 note = "Each schedule counts once, by how its most recent run ended. Not a history.",
                 headings = listOf("Last run", "Schedules"),
@@ -264,18 +275,6 @@ internal object ScheduleHomePage {
 
     /** "1 schedule", "3 schedules". */
     private fun schedules(value: Long): String = if (value == 1L) "1 schedule" else "$value schedules"
-
-    /** The bar's key — the wire spelling of the bucket. */
-    private fun LastRunOutcome.wire(): String = name.lowercase().replace('_', '-')
-
-    private fun LastRunOutcome.label(): String =
-        when (this) {
-            LastRunOutcome.SUCCEEDED -> "Succeeded"
-            LastRunOutcome.FAILED -> "Failed"
-            LastRunOutcome.IN_PROGRESS -> "In progress"
-            LastRunOutcome.DID_NOT_RUN -> "Did not run"
-            LastRunOutcome.NEVER_RAN -> "Never ran"
-        }
 
     /** The run states a bucket holds, in words (§4.20a's mapping). */
     private fun LastRunOutcome.states(): String =

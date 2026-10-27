@@ -82,7 +82,7 @@ class OverviewSchedulesControllerTest {
         lastRun.bars.map { it.name } shouldContainExactly listOf("Succeeded", "Failed", "In progress", "Did not run", "Never ran")
         lastRun.bars.first().label shouldBe "Succeeded: 1 schedule"
         condition.bars.map { it.href } shouldContainExactly condition.bars.map { "/schedules?condition=${it.key}" }
-        lastRun.bars.map { it.href }.toSet() shouldBe setOf(null)
+        lastRun.bars.map { it.href } shouldContainExactly lastRun.bars.map { "/schedules?outcome=${it.key}" }
 
         val recent = page.recent.shouldNotBeNull()
         recent.review.shouldBeNull()
