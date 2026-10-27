@@ -62,13 +62,16 @@ import java.util.UUID
  * `mavenCentral()`. Network truth (013/F6 — this KDoc previously claimed
  * "no network, no repositories", which was false): the tests need either
  * NETWORK or a warm Gradle TestKit cache. TestKit's default testKitDir
- * (`.gradle-test-kit-<user>` under the test JVM's temp dir, which Gradle
- * forks into `buildSrc/build/tmp/test/work`) is a CACHE, not a checkout
+ * (`buildSrc/build/tmp/test/work/.gradle-test-kit` under Gradle 9.7;
+ * observed 2026-10-27, lane 742) is a CACHE, not a checkout
  * artifact — a fresh worktree or a cleaned buildSrc starts COLD and
  * re-downloads the probe dependencies on first run. `gate.sh` therefore
  * preflights the network before this stage and skips it fail-soft with the
  * cause named when offline. No TOOLCHAIN download ever happens: the probes
- * run on the pre-resolved JDK 21 handed in via `probe.jdk21`.
+ * run on the pre-resolved JDK 21 handed in via `probe.jdk21`. Every probe
+ * root carries the repo's `gradle/verification-metadata.xml` (#742,
+ * [installRepoVerification]), so what the probes download is checked against
+ * the same committed checksums as the modules.
  */
 class CommonConventionsPluginTest {
     @TempDir
@@ -79,8 +82,9 @@ class CommonConventionsPluginTest {
             System.getProperty("repo.catalog")
                 ?: error("repo.catalog system property not set — run via buildSrc's test task")
 
-    /** Probe settings reusing the repo catalog; optionally including subprojects. */
+    /** Probe settings reusing the repo catalog and dependency checksums; optionally including subprojects. */
     private fun writeSettings(vararg includes: String) {
+        installRepoVerification(probeDir)
         probeDir.resolve("settings.gradle.kts").writeText(
             """
             dependencyResolutionManagement {

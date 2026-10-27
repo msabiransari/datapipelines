@@ -70,6 +70,11 @@ tasks.test {
     val repoCatalog = rootProject.file("../gradle/libs.versions.toml")
     inputs.file(repoCatalog).withPathSensitivity(PathSensitivity.NONE)
     systemProperty("repo.catalog", repoCatalog.absolutePath)
+    // #742: every TestKit probe root gets a copy of the repo's dependency checksums (ProbeVerification.kt),
+    // so a checksum change re-runs the probes that verify against them.
+    val repoVerification = rootProject.file("../gradle/verification-metadata.xml")
+    inputs.file(repoVerification).withPathSensitivity(PathSensitivity.NONE)
+    systemProperty("repo.verification", repoVerification.absolutePath)
     // The other repo files these tests open beside the catalog (#718 — the convention's
     // repo-tree input reaches the modules' test tasks, never this one): the Dockerfile
     // (ThirdPartyNoticesTest's GraalJS pin) and .gitignore (RepoTestInputsTest's mirror).

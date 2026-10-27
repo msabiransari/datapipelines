@@ -48,7 +48,8 @@ import java.io.File
  * Same TestKit mechanics as [CommonConventionsPluginTest]: the probes apply
  * THIS buildSrc's compiled plugin via withPluginClasspath(), reuse the
  * repo's version catalog, resolve compile/ktlint dependencies from Maven
- * Central (network or a warm TestKit cache — see that class's KDoc), run on
+ * Central (network or a warm TestKit cache — see that class's KDoc) against
+ * the repo's dependency checksums ([installRepoVerification], #742), run on
  * the pre-resolved JDK 21 and never download a toolchain. Each probe gets
  * its own project directory; BOTH point `buildCache.local.directory` at one
  * shared directory — `file(...)` in a settings script resolves against the
@@ -74,6 +75,7 @@ class KtlintCacheBoundaryTest {
         sharedCacheDir: File,
     ): File {
         val probeDir = laneDir.resolve(name).apply { mkdirs() }
+        installRepoVerification(probeDir)
         probeDir.resolve("settings.gradle.kts").writeText(
             """
             dependencyResolutionManagement {
