@@ -318,9 +318,9 @@ checksums as the modules, and a mismatch fails the probe naming the artifact.
 `ProbeVerificationTest` plants one wrong checksum to prove it. Gradle re-verifies
 artifacts already in a warm TestKit cache, so a laptop run checks them too. CI's
 `cold-verify` job runs the probes on a cold TestKit cache every time. A probe that needs an
-artifact the modules never resolve fails on the MISSING entry. To add it, delete
-`buildSrc/build/tmp/test/work/.gradle-test-kit` (the writer, like the one below, needs a cold
-cache), add `"--write-verification-metadata", "sha256"` to that probe's runner arguments for
+artifact the modules never resolve fails on the MISSING entry. To add it, remove the cache used by that probe: `buildSrc/build/tmp/test/work/.gradle-test-kit`
+for the default TestKit runner, or `build/703-probes/gradle-user-home` for
+`KtlintRemovedOnlyTest` (the writer, like the one below, needs a cold cache). Add `"--write-verification-metadata", "sha256"` to that probe's runner arguments for
 one local run, and copy the probe root's
 `gradle/verification-metadata.xml` out before the test ends. Diff it against this file, copy ONLY
 the new `<component>` blocks in at the writer's sorted position, and revert the test edit. Name
