@@ -100,6 +100,7 @@ if [[ "${1:-}" == "--self-test" ]]; then
     echo 'Cites `user.raed` here.'
     echo 'Reads `docs.css` here.'
     echo 'Reads `auth.css` here.'
+    echo 'Runs /app/datapipelines.jar here.'
     echo 'Raises `auth.nonexistent_code` here.'
     echo '```'
     echo 'a fenced JSON path cites `user.name`'
@@ -123,12 +124,12 @@ if [[ "${1:-}" == "--self-test" ]]; then
      echo "$out" | grep -q "user\.raed" && \
      echo "$out" | grep -q "cited test file not in tree: NoSuchThingTest\.kt" && \
      [ "$(printf '%s\n' "$out" | grep -c 'cited test file not in tree')" -eq 1 ] && \
-     ! echo "$out" | grep -E "docs\.css|auth\.css|user\.name" | grep -q "^  " && \
+     ! echo "$out" | grep -E "docs\.css|auth\.css|user\.name|datapipelines\.jar" | grep -q "^  " && \
      [ "$(printf '%s\n' "$out" | grep -c '^  [A-E] ')" -eq 14 ]; then
-    echo "self-test OK: doctored docs fail with all 14 planted defects — the permission, auth and invented test-file probes caught; the filename, fence and Change-Log-row negatives clean"
+    echo "self-test OK: doctored docs fail with all 14 planted defects — the permission, auth and invented test-file probes caught; the filename, fence, jar-path and Change-Log-row negatives clean"
     exit 0
   else
-    echo "SELF-TEST FAILED: doctored docs did not fail exactly as planted (expected 14 failures, the user.raed permission, auth.nonexistent_code and invented test-file citation caught, no docs.css/auth.css/user.name line, the Change-Log row not flagged)" >&2
+    echo "SELF-TEST FAILED: doctored docs did not fail exactly as planted (expected 14 failures, the user.raed permission, auth.nonexistent_code and invented test-file citation caught, no docs.css/auth.css/user.name/datapipelines.jar line, the Change-Log row not flagged)" >&2
     printf '%s\n' "$out" | tail -25 >&2
     exit 1
   fi
@@ -219,7 +220,10 @@ def body_lines(t):
 
 # ---- B. config-key authority ----------------------------------------------
 # (?<![.\w]) rejects package names like co.datapipelines.datasources.crypto
-KEY_RE = r"(?<![.\w])datapipelines(?:\.[a-z0-9][a-z0-9-]*)+"
+# A `/`-preceded name is a filesystem path, not a config key (#743): the image's
+# jar path is `/app/datapipelines.jar`, which the lookbehind below must not read
+# as a `datapipelines.jar` key — the §3.1 entrypoint bullet quotes it verbatim.
+KEY_RE = r"(?<![.\w/])datapipelines(?:\.[a-z0-9][a-z0-9-]*)+"
 defined = set()
 for src in ("docs/configuration.md", "docs/observability.md"):
     if src in texts:
