@@ -337,8 +337,14 @@ class ApiErrorCatalogSpecDriftTest {
          * minus the four rows they replace (the pipeline and parameter template-only refusals,
          * renamed to `dependency_not_released`, and the visualization/dashboard
          * `dependency_not_released` rows, rewritten in place). Re-derived from the document's own parse.
+         *
+         * 416 → 419 with #464: the new §13.24 gains `navigation.request.invalid` (400, the
+         * `navigation.` family default), `navigation.view.unavailable` and
+         * `navigation.metadata.too_large` (both 503, explicit catalog rows), landed in the SAME
+         * commit as their `PipelineErrorCodes.Navigation` constants. Re-derived from the document's
+         * own parse (this regex over the file: 416 at the base, 419 after).
          */
-        const val SECTION_13_ROW_COUNT = 416
+        const val SECTION_13_ROW_COUNT = 419
 
         /**
          * §12's distinct validation codes.

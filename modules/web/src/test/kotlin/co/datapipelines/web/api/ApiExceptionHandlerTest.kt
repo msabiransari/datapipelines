@@ -26,6 +26,7 @@ import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
@@ -217,6 +218,12 @@ class ApiExceptionHandlerTest {
                 details = mapOf("datasource" to "pg-prod"),
                 cause = java.sql.SQLException("Pool init failed", java.io.IOException("HTTP 403 Forbidden on listing")),
             )
+
+        /** #464 — the tree's refusals, thrown the way `TreeController` and `TreeProjection` throw them. */
+        @GetMapping("/probe/navigation/{code}")
+        fun navigation(
+            @PathVariable code: String,
+        ): Nothing = throw co.datapipelines.typesystem.DatapipelinesException(code, "Navigation refusal")
 
         /**
          * 098 §C, request shape 1 — `POST /api/v1/endpoints` with the required `path` omitted.
@@ -529,6 +536,34 @@ class ApiExceptionHandlerTest {
         } finally {
             logger.detachAppender(appender)
         }
+    }
+
+    @Test
+    fun `the navigation view 503 carries Retry-After and logs one WARN line without a stack - the 400 carries neither (#464)`() {
+        val unavailable = PipelineErrorCodes.Navigation.VIEW_UNAVAILABLE
+        val invalid = PipelineErrorCodes.Navigation.REQUEST_INVALID
+        val events =
+            loggedAtDebug {
+                mvc
+                    .perform(get("/probe/navigation/$unavailable"))
+                    .andExpect(status().isServiceUnavailable)
+                    .andExpect(header().string("Retry-After", "5"))
+                    .andExpect(jsonPath("$.error.code").value(unavailable))
+                    .andExpect(jsonPath("$.error.user_message").exists())
+                    .andExpect(jsonPath("$.error.doc_url").exists())
+                    .andExpect(jsonPath("$.correlation_id").exists())
+            }
+        withClue("log events ${events.map { "${it.level} ${it.formattedMessage}" }}") {
+            events.map { it.level } shouldBe listOf(Level.WARN)
+            events.single().throwableProxy shouldBe null
+            events.single().formattedMessage shouldBe "503 GET /probe/navigation/$unavailable: Navigation refusal"
+        }
+
+        mvc
+            .perform(get("/probe/navigation/$invalid"))
+            .andExpect(status().isBadRequest)
+            .andExpect(header().doesNotExist("Retry-After"))
+            .andExpect(jsonPath("$.error.code").value(invalid))
     }
 
     @Test

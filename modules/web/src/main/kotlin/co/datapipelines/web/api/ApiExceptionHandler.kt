@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException
 import jakarta.servlet.http.HttpServletRequest
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
+import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
@@ -46,6 +47,11 @@ import org.springframework.web.servlet.resource.NoResourceFoundException
  * rendered — and it logs at ERROR with the stack like every other 5xx. The set lives beside
  * [ApiErrorCatalog.GATEWAY_CODES] with a coupling test, so a future gateway code cannot
  * silently log ERROR+stack. Nothing is swallowed in any branch.
+ *
+ * #464 adds the second demotion, [ApiErrorCatalog.EXPECTED_UNAVAILABLE] — `navigation.view.unavailable`,
+ * the tree's refusal when the caller's promotion view cannot be computed. It is thrown deliberately
+ * with no cause, so its WARN line is the request and the message alone; its response also carries
+ * the catalog's constant `Retry-After` ([ApiErrorCatalog.retryAfterSeconds]).
  *
  * ## Spec gaps this handler stands in for
  * §13 catalogues no transport-level code ("body is not JSON", "method not allowed") and no
@@ -91,7 +97,10 @@ class ApiExceptionHandler {
     ): ResponseEntity<ApiErrorResponse> {
         val status = ApiErrorCatalog.statusFor(error.code)
         logAt(status, error.code, request, error)
-        return ResponseEntity.status(status).contentType(JSON).body(
+        val response = ResponseEntity.status(status).contentType(JSON)
+        // #464: a retryable refusal names its wait — a catalog constant, never derived from the request.
+        ApiErrorCatalog.retryAfterSeconds(error.code)?.let { response.header(HttpHeaders.RETRY_AFTER, it.toString()) }
+        return response.body(
             ApiErrorResponse.of(
                 code = error.code,
                 message = error.message ?: error.code,
@@ -352,6 +361,12 @@ class ApiExceptionHandler {
                     error.message,
                     CauseChain.summarize(error),
                 )
+            }
+
+            // #464: an expected, retryable unavailability (the tree's promotion view) — thrown
+            // deliberately with no cause, so the line is the request and the static message only.
+            code in ApiErrorCatalog.EXPECTED_UNAVAILABLE -> {
+                log.warn("{} {} {}: {}", status.value(), request.method, request.requestURI, error.message)
             }
 
             status.is5xxServerError -> {

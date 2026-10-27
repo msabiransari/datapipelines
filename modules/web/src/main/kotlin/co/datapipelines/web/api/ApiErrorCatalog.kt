@@ -136,6 +136,9 @@ object ApiErrorCatalog {
             // other status to default away from), wired explicitly so the code owns a row rather
             // than being absorbed by the catalog's unknown-code 500.
             "request." to HttpStatus.PAYLOAD_TOO_LARGE,
+            // #464 §13.24 — the navigation trees: the family's one caller refusal is the invalid
+            // request or continuation (400); the two 503s are explicit rows below.
+            "navigation." to HttpStatus.BAD_REQUEST,
         )
 
     /** Every code whose status differs from its family default (§13, rest-api §7.6). */
@@ -152,6 +155,11 @@ object ApiErrorCatalog {
             // to fix, before any read. (BODY_TOO_LARGE needs no row — the body-cap filter answers
             // 413 itself, never through the catalog.)
             PipelineErrorCodes.Request.QUERY_TOO_LONG to HttpStatus.BAD_REQUEST,
+            // #464 §13.24 — the caller's promotion view cannot be computed: retryable, so a 503 with
+            // `Retry-After` ([retryAfterSeconds]) rather than a completed empty level.
+            PipelineErrorCodes.Navigation.VIEW_UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
+            // #464 §13.24 — one node's metadata alone exceeds the page budget: no page can carry it.
+            PipelineErrorCodes.Navigation.METADATA_TOO_LARGE to HttpStatus.SERVICE_UNAVAILABLE,
             // §12's duplicate_name row documents HTTP 409 ("mapped from the UNIQUE constraint").
             PipelineErrorCodes.Validation.DUPLICATE_NAME to HttpStatus.CONFLICT,
             PipelineErrorCodes.Import.VERSION_CONFLICT to HttpStatus.CONFLICT,
@@ -488,6 +496,28 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Datasource.LAKE_TABLE_UNAVAILABLE,
         )
 
+    /**
+     * #464 — the codes whose 5xx is an EXPECTED, retryable unavailability of a view this process
+     * derives from somebody else's machine, logged at WARN without a stack. Unlike
+     * [CALLER_DOWNSTREAM_DOWN] there is no cause chain to summarize: the refusal is thrown
+     * deliberately, after the view reported why. `navigation.metadata.too_large` is deliberately
+     * NOT here — a node over the page budget is a server-side defect and keeps its stack.
+     */
+    val EXPECTED_UNAVAILABLE: Set<String> =
+        setOf(
+            PipelineErrorCodes.Navigation.VIEW_UNAVAILABLE,
+        )
+
+    /** The `Retry-After` the navigation view 503 answers (#464 §13.24): a constant, never derived from input. */
+    const val RETRY_AFTER_VIEW_UNAVAILABLE_SECONDS = 5
+
+    /** The `Retry-After` seconds [code] answers with, or null when its response carries none. */
+    fun retryAfterSeconds(code: String): Int? =
+        when (code) {
+            PipelineErrorCodes.Navigation.VIEW_UNAVAILABLE -> RETRY_AFTER_VIEW_UNAVAILABLE_SECONDS
+            else -> null
+        }
+
     private const val GENERIC_USER_MESSAGE = "Something went wrong on our side. Quote the correlation id when reporting this."
 
     /** versioning §5.5: both authoring-disabled mirrors share one actionable sentence. */
@@ -555,6 +585,9 @@ object ApiErrorCatalog {
             // #279 §13.21 — the body the caller sent is over the platform's cap; nothing about the
             // server refused them, so the sentence points at the payload.
             "request." to "That request is too large. Send less data and try again.",
+            // #464 §13.24 — the family line is the 400's: the cursor or the folder it named is stale,
+            // and reloading the tree is the remedy. The two 503s carry their own overrides.
+            "navigation." to "The navigation tree changed under you. Reload it and try again.",
         )
 
     private val USER_MESSAGE_OVERRIDES: Map<String, String> =
@@ -599,6 +632,11 @@ object ApiErrorCatalog {
             // is unchanged.
             PipelineErrorCodes.Request.QUERY_TOO_LONG to
                 "That search term is too long. Search with ${SearchNeedle.MAX_LENGTH} characters or fewer.",
+            // #464 §13.24 — the tree's two 503s: an outage to wait out, and a listing too large for one page.
+            PipelineErrorCodes.Navigation.VIEW_UNAVAILABLE to
+                "The navigation view isn't available right now. Try again in a few seconds.",
+            PipelineErrorCodes.Navigation.METADATA_TOO_LARGE to
+                "One item here has too much to list on one page. Quote the correlation id when reporting this.",
             PipelineErrorCodes.Datasource.DUPLICATE_NAME to
                 "A connection with that name already exists. Pick a different name.",
             PipelineErrorCodes.Datasource.NOT_FOUND to

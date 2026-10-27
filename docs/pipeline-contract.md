@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.66 (revised — see Change Log)
+**Status:** v1.67 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-10-25
@@ -1675,6 +1675,16 @@ The dashboard artifact's refusals (#10; the implementation spec §3.2, §8, §9,
 | `dashboard.key.kind_refused` | 403 | a `dashboard` API key presented outside the runtime and refresh routes, or on `/mcp` |
 | `dashboard.binding.path_invalid` | 400 | a dashboard binding's `name_prefix` is not a legal folder of the name grammar (1–9 segments, or the root `/`), or names no folder at or above a dashboard the CALLER's workspace has — the #191 rule: whether another workspace has dashboards at the prefix is exactly what the refusal must not reveal; `details.name_prefix`. Asked on the binding routes and the Keys page's binding editor (L5) |
 
+### 13.24 Navigation trees
+
+The session-only navigation trees' refusals (#460, #464; [REST API §24](rest-api.md#24-first-party-navigation-trees)). The ten routes — `GET /api/v1/<family>/tree` and `/tree/search` for pipelines, templates, dashboards, visualizations and parameter sets — answered every refusal through Spring's `ResponseStatusException` until #464, so a client met the stand-in `pipeline.execution.aborted` with `details.reason: response_status` and could not tell a stale continuation (retry from the beginning) from an outage of the promotion target (retry later). Each refusal now carries its own code. Every message is static: no cursor, `root`, `parent` or `q` is echoed, and the 503 for an unavailable view carries no `details` (the target's address and the transport reason stay in the server's log). That view 503 answers `Retry-After: 5` (a constant) and is logged once at WARN without a stack: since #554 mounts the tree on every family page, a promoter whose target is down meets it on every page load, and that is someone else's outage, not a defect in this process. The budget 503 stays at ERROR with the stack, because one node over 1 MiB of metadata is a server-side defect. A search term over the shared bound remains `request.query_too_long` (§13.21). Listing liveness is the §3.2 derivation, not a soft-delete column (V19 dropped `pipelines.is_deleted` and `templates.is_deleted`): an artifact is listed through `current_version`, or through its newest DRAFT when no version is current, and only while that listed version is DRAFT or RELEASED. No pointer can name a DISCARDED version. In every family the one statement that discards recomputes the pointer when it named the discarded version, and every other pointer write checks the version it names in the same statement, all under the workspace writer guard (#517). An entity whose every version is DISCARDED is therefore absent from browse and search, exactly as the legacy `ENTITY_LIVE` rule leaves it.
+
+| Code | HTTP | Description |
+|---|---|---|
+| `navigation.request.invalid` | 400 | a malformed, tampered, foreign or stale continuation (a cursor is bound to family, mode, root, parent, query, workspace, caller and admitted view, and a process restart expires it), a `parent` outside its `root`, a `root` or `parent` with a control character, an empty or dot segment, or over 512 characters, or a search term with a control character. Static message, nothing echoed. The client retries from the beginning |
+| `navigation.view.unavailable` | 503 | the caller's promotion view cannot be computed (its promotion target's inventory could not be read), so the tree refuses rather than answer a completed empty level. Retryable: `Retry-After: 5`. Logged at WARN without a stack; no `details` |
+| `navigation.metadata.too_large` | 503 | one node's serialized metadata alone exceeds the 1 MiB response budget, so no page can carry it. Logged at ERROR with the stack (a server-side defect) |
+
 
 ---
 ## 14. Pipeline Lifecycle Operations
@@ -1915,6 +1925,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-27 | v1.67 | 464 (#464) | New **§13.24 Navigation trees**: `navigation.request.invalid` (400), `navigation.view.unavailable` (503, `Retry-After: 5`, logged at WARN without a stack) and `navigation.metadata.too_large` (503) replace the stand-in `pipeline.execution.aborted` on the ten session-only tree routes ([REST API §24](rest-api.md#24-first-party-navigation-trees)); the prose states the listing liveness rule and the pointer invariant it relies on. Landed in the SAME commit as the `PipelineErrorCodes.Navigation` constants and the `ApiErrorCatalog` rows. |
 | 2026-10-25 | v1.66 | 706 (#706) | §13.7's `auth.role_required` row: `details.held` for an MCP key reads "its OWN role chosen at creation" (was "member role capped at author"); the `auth.key_issuer_role_lost` row now states the code's remaining meaning — the context-judged promotion path ([Auth §9](auth.md#9-auth-errors)) — and drops the retired PK4 cap and the TTL-demotion sentence. Catalog text only: no code added, removed or renamed, so every count stands. |
 | 2026-10-24 | v1.65 | #517 release dependencies, core (S1) | **§13:** the release-plan codes in each family's subsection (record §14: `dependency_not_released` replacing the template-only refusal code for pipeline and parameter, `plan_conflict`, `plan_required`, `plan_invalid`, `dependency_cycle`, `dependency_limit`, `busy`, `bundle_unsupported`; the families whose participant lands later carry Reserved rows). **§12.9:** a release that flips a DRAFT child validates in authoring mode outside the transaction and strictly inside it. Round three (#719): **§12.6 / §12.9 / §13 (the template, §13.13 lifecycle and parameter rows)** — a pipeline's and a parameter set's restore re-judge their outbound pins (missing/DISCARDED → the validation code, `reason: discarded` on a discarded template version; DRAFT → `dependency_not_released`, the shared shape's new reason `not_released`). |
 | 2026-10-25 | v1.64 | #711 — renumbered at merge after #442's v1.63 | §4.12 names the random-source boundary: JSONata `$random()` / `$shuffle()` and JavaScript `Math.random()` refuse with `pipeline.script.evaluation_failed`. |
