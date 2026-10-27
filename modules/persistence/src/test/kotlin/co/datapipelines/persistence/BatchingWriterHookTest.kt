@@ -2,8 +2,6 @@ package co.datapipelines.persistence
 
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
-import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.persistence.BatchingWriterTest.Item
 import co.datapipelines.persistence.BatchingWriterTest.RecordingHooks
 import co.datapipelines.persistence.BatchingWriterTest.RecordingSink
@@ -39,7 +37,9 @@ import java.util.concurrent.atomic.AtomicReference
 class BatchingWriterHookTest {
     private val closeables = mutableListOf<AutoCloseable>()
     private val writerLog = LoggerFactory.getLogger(BatchingWriter::class.java) as Logger
-    private val logs = ListAppender<ILoggingEvent>()
+
+    // A snapshot (#484): the writer's own thread logs while the test thread reads.
+    private val logs = SnapshotListAppender()
 
     @BeforeEach
     fun listen() {
@@ -121,7 +121,7 @@ class BatchingWriterHookTest {
         val w = writer(sink, ThrowingHooks(throwOnCommitted = true))
         recordWithin(w, Item("k", 0)) shouldBe Outcome.Committed
         recordWithin(w, Item("k", 1)) shouldBe Outcome.Committed
-        val events = logs.list.filter { it.formattedMessage.contains("event=persistence.hook_failed") }
+        val events = logs.events().filter { it.formattedMessage.contains("event=persistence.hook_failed") }
         events.size shouldBe 1
         val event = events.single()
         event.level shouldBe Level.WARN
@@ -146,7 +146,7 @@ class BatchingWriterHookTest {
         return outcome.get()
     }
 
-    private fun logged(): List<String> = logs.list.map { it.formattedMessage }
+    private fun logged(): List<String> = logs.messages()
 
     /**
      * A grouped batch, forced: the first item holds the sink mid-write, [count] more queue up behind

@@ -4,7 +4,6 @@ import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.classic.spi.IThrowableProxy
-import ch.qos.logback.core.read.ListAppender
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
@@ -38,7 +37,9 @@ import java.util.concurrent.TimeUnit
 @Timeout(30)
 class BatchingWriterFailureTest {
     private val writerLog = LoggerFactory.getLogger(BatchingWriter::class.java) as Logger
-    private val logs = ListAppender<ILoggingEvent>()
+
+    // A snapshot (#484): the writer's own thread logs while the test thread reads.
+    private val logs = SnapshotListAppender()
     private val closeables = mutableListOf<AutoCloseable>()
 
     @BeforeEach
@@ -158,8 +159,8 @@ class BatchingWriterFailureTest {
     private fun writer(sink: BatchSink<String>): BatchingWriter<String> =
         BatchingWriter("test", BatchingConfig(writers = 1, lingerMillis = 0), sink).also { closeables += it }
 
-    /** What the appender holds now — read under its own lock, since writer threads append to it. */
-    private fun logged(): List<ILoggingEvent> = synchronized(logs) { logs.list.toList() }
+    /** What the appender holds now — a detached snapshot, since writer threads append to it. */
+    private fun logged(): List<ILoggingEvent> = logs.events()
 
     private fun awaitLine(prefix: String) {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
