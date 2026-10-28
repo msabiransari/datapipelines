@@ -135,7 +135,7 @@ pgplan::command() {
   printf '\n'
 }
 pgplan::print() {
-  printf 'base=%s resolved-base=%s merge-base=%s head=%s\n' "$PG_BASE" "$PG_BASE_SHA" "$PG_MB" "$PG_HEAD"
+  printf 'base=%s%s resolved-base=%s merge-base=%s head=%s\n' "$PG_BASE" "${PG_BASE_SOURCE:+ ($PG_BASE_SOURCE)}" "$PG_BASE_SHA" "$PG_MB" "$PG_HEAD"
   printf 'changed files (selected base plus staged/unstaged/untracked):\n%s\n' "${PG_FILES:-none}"
   printf 'current-main comparison=%s\nselected-base-only:\n%s\ncurrent-main-only:\n%s\n' "$PG_MAIN_DIFF" "${PG_BASE_ONLY:-none}" "${PG_MAIN_ONLY:-none}"
   printf 'touched modules: %s\n' "${PG_MODULES[*]:-none}"

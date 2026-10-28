@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Developer-local handback checks. Full Gate A belongs to the lander.
-# --plan [base] is read-only. Default stops after failure; --continue-on-failure
-# explicitly collects later diagnostics. XML and logs survive each completed stage.
+# --plan [base] is read-only; base defaults to the local main, else origin/main (#757).
+# A run stops after failure by default; --continue-on-failure explicitly collects later
+# diagnostics. XML and logs survive each completed stage.
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT" || exit 2
 source "$ROOT/scripts/pregate-2b-lib.sh"
 source "$ROOT/scripts/pregate-results-lib.sh"
 source "$ROOT/scripts/pregate-plan-lib.sh"
-BASE=origin/main; preview=0; diagnostic=0; selftest=0; base_set=0; help=0
-usage() { echo 'Usage: pregate.sh [--plan | --continue-on-failure] [base-ref] | --self-test'; }
+BASE=; preview=0; diagnostic=0; selftest=0; base_set=0; help=0
+usage() { echo 'Usage: pregate.sh [--plan | --continue-on-failure] [base-ref] | --self-test  (base-ref default: main, else origin/main)'; }
 for arg in "$@"; do
   case "$arg" in
     --plan) [ "$preview" -eq 0 ] || { usage >&2; exit 2; }; preview=1 ;;
@@ -33,6 +34,22 @@ if [ "$selftest" -eq 1 ]; then
   [ "$s_sel" -eq 0 ] && [ "$s_res" -eq 0 ] && [ "$s_safe" -eq 0 ]; exit $?
 fi
 [ "$preview" -eq 0 ] || [ "$diagnostic" -eq 0 ] || { usage >&2; exit 2; }
+# Lanes are cut from the LOCAL main, which runs ahead of origin/main while a landed batch
+# waits for CI on next; an origin/main base plans that whole batch too (#757, #752). CI's
+# checkout has no local main, so origin/main stays the fallback. An explicit base wins.
+PG_BASE_SOURCE=explicit
+if [ "$base_set" -eq 0 ]; then
+  if git show-ref --verify --quiet refs/heads/main; then
+    BASE=main; PG_BASE_SOURCE=default:main
+    if git show-ref --verify --quiet refs/remotes/origin/main; then
+      read -r ahead behind < <(git rev-list --left-right --count origin/main...main) || exit 2
+      PG_BASE_SOURCE="$PG_BASE_SOURCE; origin/main is $behind behind"
+      [ "$ahead" -eq 0 ] || PG_BASE_SOURCE="$PG_BASE_SOURCE, $ahead ahead"
+    fi
+  else
+    BASE=origin/main; PG_BASE_SOURCE=default:origin/main
+  fi
+fi
 [ "$preview" -eq 1 ] || start="$(pgres::now_ms)" || exit 1
 pgplan::build "$BASE" || exit $?
 if [ "$preview" -eq 1 ]; then pgplan::print; exit $?; fi
@@ -53,7 +70,7 @@ for m in "${PG_DEFERRED[@]}"; do
   pgres::manifest_stage "$MANIFEST" "2b-${m#tests/}" deferred 0 "$(pg2b::deferral_reason "$m")" || snap=1
 done
 [ "$snap" -eq 0 ] && [ "$prune" -eq 0 ] || { failed=1; stopped_by=bookkeeping; }
-echo "Pre-gate base=$BASE merge-base=$PG_MB head=$PG_HEAD evidence=$RUN_DIR"
+echo "Pre-gate base=$BASE ($PG_BASE_SOURCE) merge-base=$PG_MB head=$PG_HEAD evidence=$RUN_DIR"
 pgplan::print
 # Numeric 125 preserves the exit-field grammar while meaning NOT RUN, never success.
 declare -A exits=([1]=125 [2]=125 [2b]=125 [3]=125 [4]=125)
