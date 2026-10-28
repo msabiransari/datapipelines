@@ -10,6 +10,7 @@ import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
+import java.net.URI
 import java.security.MessageDigest
 
 /** Generates browser-asset notices entirely from committed inputs, without dependency resolution. */
@@ -116,6 +117,10 @@ object VendoredAssetNotices {
         check(path.startsWith("vendor/") && path.split('/').none { it == ".." || it == "." || it.isEmpty() }) {
             "Invalid license_file for vendored block $name: $path"
         }
+        // Provenance is recorded, never fetched: the URL is parsed as a string only.
+        val origin = field("license_file_source")
+        val uri = runCatching { URI(origin) }.getOrNull()
+        check(uri?.scheme == "https" && !uri.host.isNullOrBlank()) { "Invalid license_file_source for vendored block $name: $origin" }
         val declared = field("license_file_sha256")
         val bytes = licenceBytes(path)
         check(bytes != null) { "Missing or blank licence text for vendored block $name: $path" }

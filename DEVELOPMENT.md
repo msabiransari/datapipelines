@@ -1417,7 +1417,8 @@ To vendor another asset, add its manifest block and upstream licence file; the
 inventory and sections update automatically. Record the exact release source in
 `source`. Fetch the licence from the exact pinned upstream release's URL, run
 `sha256sum` on that file, and write `license_file_source` and `license_file_sha256`
-together in the same edit when adding or refreshing the licence. The checksum is
+together in the same edit when adding or refreshing the licence; the build refuses a
+third-party block without it. The checksum is
 lowercase hexadecimal SHA-256 of the raw file bytes, before CRLF normalisation or
 trimming; the build verifies it offline and never fetches the licence. Preserve
 copyright lines and existing bundle hashes. MIT, ISC, 0BSD and OFL-1.1 are the
@@ -1429,6 +1430,9 @@ The guard refuses these conditions (the block name identifies the input to fix):
 - `Missing <key> for vendored block <block>`: a required `license`, `license_file`,
   `version` or `source` is absent or blank.
 - `Missing license_file_sha256 for vendored block <block>`: no licence checksum is declared.
+- `Missing license_file_source for vendored block <block>`: no upstream licence URL is recorded.
+- `Invalid license_file_source for vendored block <block>: <value>`: the value is not an
+  absolute `https://` URL with a host; the build parses it as a string and never fetches it.
 - `Licence checksum mismatch for vendored block <block>: <path> expected <declared> actual <computed>`:
   the raw file bytes differ from the declared lowercase checksum.
 - `Unknown licence <id> for vendored block <block>`: an unreviewed licence family.
