@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.39 (living document — updated as enums evolve)
+**Status:** v1.40 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -541,6 +541,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `dashboard.*` (`dashboard.validation.*`, `dashboard.version.*`, `dashboard.release.*`, `dashboard.import.*`, `dashboard.authoring.*`, `dashboard.runtime.*`, `dashboard.refresh.*`, `dashboard.key.*`, `dashboard.not_found`) | The dashboard artifact (#10): save-time validation, the lifecycle, the runtime and the `dashboard` key kind | pipeline-contract §13.23 (defined in [Dashboards](dashboards.md)) |
 | `schedule.*` (incl. `schedule.validation.*`, `schedule.run.*`, `schedule.limit.*`) | Schedule save-time validation, state conflicts and not-found (#9) — never raised while a schedule fires; a run that could not start is a `not_started` run (§24) | pipeline-contract §13.19 (defined in [Scheduler](scheduler.md)) |
 | `request.*` | The platform's transport-level request refusals (#279): the body-cap filter's 413 on `/api/v1` and `/mcp`, before any handler or parser | pipeline-contract §13.21 |
+| `navigation.*` (`navigation.request.*`, `navigation.view.*`, `navigation.metadata.*`) | The session-only navigation trees (#464): a malformed, foreign or stale tree request or continuation (400), an unavailable promotion view (503, `Retry-After`), one node over the page budget (503) | pipeline-contract §13.24 (defined in [REST API §24](rest-api.md#24-first-party-navigation-trees)) |
 
 **Removed 2026-08-07** (D5): the `auth.rate_limit.*` domain (folded into `rate_limit.exceeded`), the `template.import.*` domain (folded into `template.validation.*`), the `idempotency_key.*` spelling (now `idempotency.*`), and `result.claim_check_expired` (now `result.expired` under the D9 result model).
 
@@ -1130,6 +1131,7 @@ A resend (REST §20.13) returns a `failed` or `uncertain` delivery to `pending` 
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-27 | v1.40 | 464 (#464) | **§16:** registers the `navigation.*` domain (pipeline-contract §13.24): the three refusals of the session-only navigation trees. |
 | 2026-10-24 | v1.39 | #517 release dependencies, core (S1) | **§15:** `pipeline.version.released` and its twins: one row per actual flip, dependencies first, root last; the detail keys `scope`, `release_id`, `cascade_root` and the root's `dependencies_released`. No new event name. |
 | 2026-10-25 | v1.38 | 442c (#442) | §44: backlog_full is decided by serialized deployment admission; explicit resend at the hard cap is refused. |
 | 2026-10-24 | v1.37 | 442b (#442) | **§25 `TrailKind`** gains the four V51 notification kinds; new **§43 `NotificationOutcome`** and **§44 `DeliveryState`** with the sanitized `last_error_code` set; §42 no longer says nothing is sent; §15 gains `schedule.notification_resent`. |

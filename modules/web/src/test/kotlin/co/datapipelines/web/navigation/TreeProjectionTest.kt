@@ -3,13 +3,14 @@ package co.datapipelines.web.navigation
 import co.datapipelines.pipeline.NavigationFamily
 import co.datapipelines.pipeline.NavigationRequest
 import co.datapipelines.pipeline.NavigationRow
+import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.typesystem.DatapipelinesException
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
-import org.springframework.web.server.ResponseStatusException
 import java.util.UUID
 
 class TreeProjectionTest {
@@ -38,31 +39,32 @@ class TreeProjectionTest {
     fun `continuation refuses a different query parent root workspace caller family or admitted view before loading`() {
         val cursor = answer(query = "match") { rows }.nextCursor
         val neverLoad: (NavigationRequest) -> List<NavigationRow> = { error("Foreign continuation reached repository") }
-        shouldThrow<ResponseStatusException> { answer(query = "other", cursor = cursor, load = neverLoad) }
-        shouldThrow<ResponseStatusException> { answer(parent = "scope/other", cursor = cursor, load = neverLoad) }
-        shouldThrow<ResponseStatusException> { answer(root = "", cursor = cursor, load = neverLoad) }
-        shouldThrow<ResponseStatusException> { answer(workspaceId = UUID.randomUUID(), cursor = cursor, load = neverLoad) }
-        shouldThrow<ResponseStatusException> { answer(actorId = UUID.randomUUID(), cursor = cursor, load = neverLoad) }
-        shouldThrow<ResponseStatusException> { answer(family = NavigationFamily.TEMPLATES, cursor = cursor, load = neverLoad) }
-        shouldThrow<ResponseStatusException> { answer(lens = ReadLens.Only(setOf("different")), cursor = cursor, load = neverLoad) }
-        shouldThrow<ResponseStatusException> { answer(lens = ReadLens.Only(setOf("everything")), cursor = cursor, load = neverLoad) }
+        listOf<() -> TreePage>(
+            { answer(query = "other", cursor = cursor, load = neverLoad) },
+            { answer(parent = "scope/other", cursor = cursor, load = neverLoad) },
+            { answer(root = "", cursor = cursor, load = neverLoad) },
+            { answer(workspaceId = UUID.randomUUID(), cursor = cursor, load = neverLoad) },
+            { answer(actorId = UUID.randomUUID(), cursor = cursor, load = neverLoad) },
+            { answer(family = NavigationFamily.TEMPLATES, cursor = cursor, load = neverLoad) },
+            { answer(lens = ReadLens.Only(setOf("different")), cursor = cursor, load = neverLoad) },
+            { answer(lens = ReadLens.Only(setOf("everything")), cursor = cursor, load = neverLoad) },
+        ).forEach { call -> shouldThrow<DatapipelinesException> { call() }.code shouldBe INVALID }
     }
 
     @Test
     fun `malformed tampered cursor and escaping parent are safe bad requests`() {
         listOf("bad", "!.!", "x".repeat(5000)).forEach { cursor ->
-            shouldThrow<ResponseStatusException> {
+            shouldThrow<DatapipelinesException> {
                 answer(
                     cursor = cursor,
                 ) { error("Must refuse before loading") }
-            }.statusCode.value() shouldBe
-                400
+            }.code shouldBe INVALID
         }
         val good = answer { rows }.nextCursor.orEmpty()
-        shouldThrow<ResponseStatusException> { answer(cursor = good + "x") { error("Must refuse") } }
-        shouldThrow<ResponseStatusException> { answer(parent = "sibling") { error("Must refuse") } }
-        shouldThrow<ResponseStatusException> { answer(root = "scope/../escape") { error("Must refuse") } }
-        shouldThrow<ResponseStatusException> { answer(query = "bad\u0000query") { error("Must refuse") } }
+        shouldThrow<DatapipelinesException> { answer(cursor = good + "x") { error("Must refuse") } }.code shouldBe INVALID
+        shouldThrow<DatapipelinesException> { answer(parent = "sibling") { error("Must refuse") } }.code shouldBe INVALID
+        shouldThrow<DatapipelinesException> { answer(root = "scope/../escape") { error("Must refuse") } }.code shouldBe INVALID
+        shouldThrow<DatapipelinesException> { answer(query = "bad\u0000query") { error("Must refuse") } }.code shouldBe INVALID
     }
 
     @Test
@@ -175,6 +177,13 @@ class TreeProjectionTest {
         }
     }
 
+    @Test
+    fun `one node over the whole page budget is the catalogued metadata refusal, not a truncated page (#464)`() {
+        val huge = NavigationRow("scope/huge", "x".repeat(TreeProjection.MAX_RESPONSE_BYTES), UUID.randomUUID(), 1, null)
+        shouldThrow<DatapipelinesException> { answer { listOf(huge) } }.code shouldBe
+            PipelineErrorCodes.Navigation.METADATA_TOO_LARGE
+    }
+
     @Suppress("LongParameterList") // explicit identity substitutions are the security cases
     private fun answer(
         family: NavigationFamily = NavigationFamily.PIPELINES,
@@ -188,4 +197,8 @@ class TreeProjectionTest {
         needsReview: ((List<TreeNode>) -> Set<String>)? = null,
         load: (NavigationRequest) -> List<NavigationRow>,
     ): TreePage = projection.page(family, workspaceId, actorId, lens, root, parent, query, cursor, needsReview, load)
+
+    private companion object {
+        const val INVALID = PipelineErrorCodes.Navigation.REQUEST_INVALID
+    }
 }

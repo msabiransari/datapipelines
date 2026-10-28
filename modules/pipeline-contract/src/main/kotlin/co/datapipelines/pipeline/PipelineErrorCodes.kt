@@ -1080,6 +1080,28 @@ object PipelineErrorCodes {
         const val QUERY_TOO_LONG = "request.query_too_long"
     }
 
+    /**
+     * §13.24 (#464) — the session-only navigation trees (rest-api §24). Three segments: the
+     * refused thing is the tree request or the view it reads, never an artifact family. Raised by
+     * `web`'s tree controller and projection; the static messages echo no caller input.
+     */
+    object Navigation {
+        /**
+         * §13.24 — 400: a malformed, foreign or stale continuation, a parent outside its root, or a
+         * path or search shape the tree refuses. The client retries from the beginning.
+         */
+        const val REQUEST_INVALID = "navigation.request.invalid"
+
+        /**
+         * §13.24 — 503, retryable: the caller's promotion view cannot be computed (its promotion
+         * target's inventory could not be read). `Retry-After` names the wait; logged at WARN.
+         */
+        const val VIEW_UNAVAILABLE = "navigation.view.unavailable"
+
+        /** §13.24 — 503: one node's metadata alone exceeds the tree's 1 MiB page budget. */
+        const val METADATA_TOO_LARGE = "navigation.metadata.too_large"
+    }
+
     /** §13.11 — rate limiting / idempotency. */
     object Limits {
         /** Single code for every layer — REST, MCP, login (D5). */

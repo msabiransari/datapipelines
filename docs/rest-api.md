@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.105 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.106 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-10-27
@@ -2833,7 +2833,9 @@ window. A dashboard execution has no stored result: `GET /api/v1/executions/{id}
 reads for `pipelines`, `templates`, `dashboards`, `visualizations` and `parameter-sets`.
 Each declares its existing read permission and derives the workspace from the principal.
 Keys gain no surface. Every response uses the §4.1 envelope and `Cache-Control: no-store`.
-An unavailable promotion view returns a retryable 503, rather than a completed empty level.
+An unavailable promotion view returns a retryable `503 navigation.view.unavailable` with
+`Retry-After: 5` and no `details`, rather than a completed empty level; the server logs it once
+at WARN without a stack. Every refusal is catalogued in [pipeline-contract §13.24](pipeline-contract.md#1324-navigation-trees).
 
 Browse takes optional `root`, `parent` and `cursor`; omitted parent means root. Empty root is
 the family root. A nonempty root names a folder boundary; parent cannot escape it. A page
@@ -2848,7 +2850,8 @@ Each page includes all ancestors
 needed to connect its matches to root. Search does not crawl browse endpoints.
 
 A 1 MiB serialized response budget may shorten a page before 200 logical results; continuation
-then resumes at the last delivered result. It never drops matches or required ancestors.
+then resumes at the last delivered result. It never drops matches or required ancestors. A single
+node whose metadata alone exceeds the budget is `503 navigation.metadata.too_large`.
 
 The typed payload has `family`, `mode` (`browse` or `search`), `root`, `parent`, normalized
 `query`, server-derived `workspace_id`, `view_token`, `nodes` and nullable `next_cursor`.
@@ -2863,7 +2866,8 @@ across pages; deduplicate by key. No stored body, SQL, description, fixture or s
 
 Continuation uses signed keyset ordering, bound to family/mode/root/parent/query, workspace,
 caller and actual admitted-name membership. A changed view, foreign or malformed cursor is a
-safe 400 and must be retried from the beginning. Process restart expires outstanding cursors.
+safe `400 navigation.request.invalid` (so is a parent outside its root, or a malformed path) with
+a static message that echoes nothing, and must be retried from the beginning. Process restart expires outstanding cursors.
 Completeness applies to an unchanged dataset; Refresh revalidates external changes. There is
 no immutable snapshot promise. Personalized rows and expansions stay in memory, never in
 browser persistence. Clients must reject foreign/stale responses even after aborting fetch.
@@ -2874,6 +2878,7 @@ browser persistence. Clients must reject foreign/stale responses even after abor
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-27 | v2.106 | 464 (#464) | §24: the tree routes' refusals carry catalogued codes ([pipeline-contract §13.24](pipeline-contract.md#1324-navigation-trees)) instead of the stand-in `pipeline.execution.aborted`: `400 navigation.request.invalid`, `503 navigation.view.unavailable` (now with `Retry-After: 5`, no `details`) and `503 navigation.metadata.too_large`. Statuses are unchanged. |
 | 2026-10-27 | v2.105 | 575 (#575) | §18.1: all five wire inventory arms require a RELEASED current pointer; pipeline and template draft pointers and never-released templates are omitted, matching the promotability rule. |
 | 2026-10-27 | v2.104 | 725 (#725) | Additive. §20.1: optional `outcome` (`succeeded`, `failed`, `in-progress`, `did-not-run`, `never-ran`) filters the schedule list by each schedule's newest run, in the database read before the promoter lens, composing with `condition` and `prefix`; any other value is `400 schedule.validation.request_invalid`, `details.field = outcome`. |
 | 2026-10-25 | v2.103 | 641 (#641) | Additive. §20.1: optional `condition` (`enabled`, `paused`, `blocked`) filters the schedule list in the database read, before the promoter lens; any other value is `400 schedule.validation.request_invalid`, `details.field = condition`. |
