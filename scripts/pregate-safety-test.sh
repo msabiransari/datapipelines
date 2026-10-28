@@ -357,6 +357,49 @@ grep -q '^modules/auth/src/main/kotlin/co/x/Auth.kt$' "$T/staged" || fail 'stage
 grep -q 'current-main comparison=different' "$T/inherited" || fail 'inherited base breadth hidden'
 ok 'staged edits and inherited breadth remain visible'
 
+# #757/#752: a lane is cut from the local main, which runs ahead of origin/main while a landed
+# batch waits for CI on next. A bare run plans the lane's own diff; an explicit origin/main
+# still plans the batch (the old default), so one fixture proves both directions.
+A="$T/ahead-of-origin"; pgres::_fixture "$A"
+mkdir -p "$A/tests/browser-tests/src/test/kotlin/co/x" "$A/docs"
+printf '// fixture\n' > "$A/tests/browser-tests/build.gradle.kts"
+printf '# guide\n' > "$A/docs/guide.md"
+(cd "$A" && git add -A && git commit -qm 'fixture tree' && git branch -M main && git update-ref refs/remotes/origin/main HEAD)
+batch='tests/browser-tests/src/test/kotlin/co/x/BatchBrowserTest.kt'
+printf 'package co.x\nclass BatchBrowserTest {\n    @org.junit.jupiter.api.Test\n    fun run() {}\n}\n' > "$A/$batch"
+(cd "$A" && git add -A && git commit -qm 'landed batch, not on origin yet' && git checkout -qb lane)
+printf 'lane edit\n' >> "$A/docs/guide.md"
+(cd "$A" && git commit -qam 'lane: docs only')
+(cd "$A" && bash scripts/pregate.sh --plan) > "$T/ahead-bare" || fail 'bare plan ahead of origin'
+changed="$(sed -n '/^changed files /,/^current-main comparison=/p' "$T/ahead-bare" | sed '1d;$d')"
+[ "$changed" = docs/guide.md ] || fail "bare plan is not the lane's own diff: [$(printf '%s' "$changed" | tr '\n' ' ')]"
+! grep -q '^selection tests/browser-tests:' "$T/ahead-bare" || fail "bare plan selected the batch's browser class: $batch"
+grep -q '^base=main (default:main; origin/main is 1 behind) ' "$T/ahead-bare" || fail "bare base: $(head -1 "$T/ahead-bare")"
+(cd "$A" && bash scripts/pregate.sh --plan origin/main) > "$T/ahead-origin" || fail 'explicit origin/main plan'
+grep -q '^base=origin/main (explicit) ' "$T/ahead-origin" || fail "explicit base overridden: $(head -1 "$T/ahead-origin")"
+grep -qxF "$batch" "$T/ahead-origin" || fail 'explicit origin/main no longer plans the batch file'
+sed -n '/^selection tests\/browser-tests:$/,/^deferred=/p' "$T/ahead-origin" | grep -qx 'co.x.BatchBrowserTest' || fail 'explicit origin/main no longer selects the batch class'
+(cd "$A" && XDG_CACHE_HOME="$A/.fixture-cache" bash scripts/pregate.sh > pregate.out 2>&1) || fail "bare run: $(tail -3 "$A/pregate.out")"
+grep -q '^Pre-gate base=main (default:main; origin/main is 1 behind) ' "$A/pregate.out" || fail 'bare run console base'
+grep -q '^PRE-GATE PASS base=main ' "$A/.pregate-logs/0-verdict.log" || fail 'bare run verdict base'
+! grep -qE ':tests:browser-tests:|co\.x\.BatchBrowserTest' "$A/pregate-argv.log" || fail 'bare run launched browser work'
+ok 'bare base is the local main ahead of origin/main; explicit origin/main still plans the batch (#757)'
+
+# CI's checkout carries origin/main and no local main: the default falls back, and with neither
+# ref the run refuses before any mutation instead of guessing a base.
+O="$T/origin-only"; pgres::_fixture "$O"
+(cd "$O" && git add -A && git commit -qm 'fixture tree' && git update-ref refs/remotes/origin/main HEAD && git branch -M trunk)
+! git -C "$O" show-ref --verify --quiet refs/heads/main || fail 'origin-only fixture still has a local main'
+printf '// lane\n' >> "$O/modules/auth/src/main/kotlin/co/x/Auth.kt"
+(cd "$O" && bash scripts/pregate.sh --plan) > "$T/origin-only.plan" || fail 'bare plan without a local main'
+grep -q '^base=origin/main (default:origin/main) ' "$T/origin-only.plan" || fail "fallback base: $(head -1 "$T/origin-only.plan")"
+grep -qx 'modules/auth/src/main/kotlin/co/x/Auth.kt' "$T/origin-only.plan" || fail 'fallback plan lost the lane diff'
+grep -qx 'current-main comparison=unavailable' "$T/origin-only.plan" || fail 'fallback claimed a local-main comparison'
+git -C "$O" update-ref -d refs/remotes/origin/main
+rc=0; (cd "$O" && XDG_CACHE_HOME="$O/.fixture-cache" bash scripts/pregate.sh > "$T/no-base.out" 2>&1) || rc=$?
+[ "$rc" -eq 2 ] && [ ! -e "$O/.pregate-logs" ] && [ ! -e "$O/pregate-argv.log" ] || fail "no base ref: exit=$rc or state mutated"
+ok 'without a local main the default is origin/main; with neither ref the run refuses (#757)'
+
 for stage in 1 2 2b 3 4; do
   X="$T/failure-$stage"; pgres::_fixture "$X" "fail-$stage"
   rc=0; run_fixture "$X" || rc=$?

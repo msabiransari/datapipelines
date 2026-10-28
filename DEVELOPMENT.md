@@ -830,9 +830,12 @@ all of a module's `*Test.kt` sources. Exclude that module's exact `verifyTestsEx
 for `--tests` iteration and filtered pregate stages, as above. Gradle's refusal when a filter
 discovers no tests stays enabled. Unfiltered module checks and Gate A keep the guard.
 
-**The pre-gate (before the first full gate).** `./scripts/pregate.sh [base]` runs, in a few
-minutes, exactly what a targeted test run cannot see and the full gate keeps finding two or
-three runs late: (1) `ktlintCheck detekt` plus the four root audits (`composeEnvAudit`,
+**The pre-gate (before the first full gate).** `./scripts/pregate.sh [base]` (default: the local
+`main` when it exists, else `origin/main` — lanes are cut from local `main`, which runs ahead of
+`origin/main` while a batch waits for CI, so an `origin/main` base would plan that whole batch
+too, #757) runs, in a few minutes, exactly what a targeted test run cannot see and the full
+gate keeps finding two or three runs late: (1) `ktlintCheck detekt` plus the four root audits
+(`composeEnvAudit`,
 `composeArgvSecretsAudit`, `verifyModuleDependencies`, `verifyVerificationMetadataDocs` — they hang
 off every module's `check`, so the gate's `build` reaches them before any test); (2) `check` of
 every module the diff touched — its **unfiltered** `test` (so `verifyTestsExecuted` stays
@@ -856,7 +859,9 @@ Pregate cannot emit an unfiltered `tests/*:test` task. Deferred modules appear i
 the run manifest and the verdict's `deferred=` field; a pregate PASS does not claim those tests
 ran. Full browser/integration coverage belongs to CI on `next` (and on `main` after the fast-forward).
 `./scripts/pregate.sh --self-test` checks the selector, resource limits, evidence and overlap
-refusal using isolated fixtures and a refusing Gradle stand-in; (3) the
+refusal using isolated fixtures and a refusing Gradle stand-in, including a fixture whose local
+`main` is ahead of `origin/main` (a bare run plans only the lane's diff) and one with no local
+`main` (the default falls back to `origin/main`); (3) the
 cross-cutting guard classes still needed after stage 2, filtered, with the zero-test guard skipped for those modules — the
 spec-drift tests, the route and read floors, the coverage scans, the page-count and keyword pins,
 the served-manual guards, the config-key drift tests (the list lives in the script; a new guard that
@@ -933,6 +938,8 @@ longer needed for this cause; `modules/parameters` and `modules/templates` carri
 lists for it (049), which the convention replaced.
 
 **Preview and failure handling (#479).** `./scripts/pregate.sh --plan [base]` shows the
+base with how it was chosen — `(default:main; origin/main is N behind[, M ahead])`,
+`(default:origin/main)` or `(explicit)`, also on the run's `Pre-gate base=` console line — the
 resolved base, merge-base and HEAD, selected files (including staged, unstaged and untracked
 edits), touched modules, exact test classes, deferred coverage, guard candidates, stage order
 and intended commands. It also names files selected only by the supplied base or only by the
