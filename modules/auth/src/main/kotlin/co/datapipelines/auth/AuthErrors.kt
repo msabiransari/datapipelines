@@ -236,6 +236,7 @@ object AuthErrorCodes {
             // families so no `doc_url` falls to the catalog top (the 194b lesson).
             "visualization." to "1322-visualizations",
             "dashboard." to "1323-dashboards",
+            "navigation." to "1324-navigation-trees",
         )
 }
 
