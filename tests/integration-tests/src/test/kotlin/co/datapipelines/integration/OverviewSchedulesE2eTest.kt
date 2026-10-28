@@ -32,7 +32,7 @@ import java.util.UUID
  * `ov/b_paused_failed` (paused, its last run failed), `ov/c_blocked` (blocked, never ran),
  * `ov/d_enabled_new` (enabled, its last run queued) and `ov/e_enabled_skipped` (enabled, its last
  * run skipped) — so every one of the five Last run buckets holds a schedule of the workspace.
- * Schedules b and d target the pipeline the higher environment already holds at its released
+ * Schedules b and d target the pipeline the higher
  * environment already holds at its released version — hidden from the promoter (versioning §10.2),
  * the [SchedulePromoterPagingE2eTest] stub. A second workspace holds one more schedule the page
  * must never count or name. The schedules never fire (a yearly pattern; the scheduler is off).
