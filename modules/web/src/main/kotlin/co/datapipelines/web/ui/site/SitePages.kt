@@ -604,8 +604,10 @@ object SitePages {
      * title leads with the category, not with a pipeline dialect. The earlier rationale — that
      * "sql scheduler" (20/mo) was the one numeric scheduler phrase in the 2026-10-24
      * measurement — was wrong: "workflow scheduler" (40/mo) was measured too, and product truth
-     * overrides keyword volume, so the SQL-only title is retired. The phrase survives only where
-     * the page answers it and corrects it.
+     * overrides keyword volume, so the SQL-only title is retired. #763 (owner ruling,
+     * 2026-10-28): the phrase itself is retired from the site — the FAQ asks the question
+     * without naming it, and `SiteCapabilitiesContentTest` bans it from every rendered page and
+     * packaged doc, so no later rewrite can bring it back.
      */
     val PIPELINE_SCHEDULING =
         SitePage(

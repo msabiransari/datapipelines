@@ -136,12 +136,13 @@ class SiteKeywordCoverageTest {
             Row("sql on s3", SitePages.DP_LAKE, BODY),
             Row("iceberg sql", SitePages.DP_LAKE, BODY),
             // ---- #700: the three capability pages, from the 2026-10-24 measurement (50 phrases).
-            // #735 owner correction (2026-10-25): the "sql scheduler" TITLE row is RETIRED — the
+            // #735 owner correction (2026-10-25): the "sql scheduler" TITLE row is retired — the
             // category must be the generic "job scheduler" (pipelines are the job type it runs
             // today), and product truth overrides keyword volume; the measurement had
-            // "workflow scheduler" (40/mo) alongside "sql scheduler" (20/mo) anyway. The BODY row
-            // stays: the page answers the phrase in its FAQ and corrects the category there.
-            Row("sql scheduler", SitePages.PIPELINE_SCHEDULING, BODY),
+            // "workflow scheduler" (40/mo) alongside "sql scheduler" (20/mo) anyway. #763 owner
+            // ruling (2026-10-28): the BODY row is retired with it — the site does not name a
+            // "SQL scheduler" anywhere, not even to correct it; the phrase is banned site-wide by
+            // SiteCapabilitiesContentTest, so a row here would demand text that test refuses.
             Row("sql dashboard", SitePages.SQL_DASHBOARDS, TITLE),
             Row("parameter sets", SitePages.REUSABLE_PARAMETER_SETS, TITLE),
             Row("dashboard filters", SitePages.REUSABLE_PARAMETER_SETS, TITLE),
