@@ -352,7 +352,7 @@
       "vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-ext-700-normal.woff2": "5b9b81f54dd69635c7adcaacd4c4545a73fe4809c528e22734b238a83a74135f",
       "vendor/fonts/ibm-plex-mono/OFL.txt": "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da"
     },
-    "source": "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700 (woff2 UA), licence https://github.com/google/fonts/raw/main/ofl/ibmplexmono/OFL.txt",
+    "source": "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700 (woff2 UA), licence https://raw.githubusercontent.com/google/fonts/465b90c97b4de569e0b546bb2536900194cf7187/ofl/ibmplexmono/OFL.txt",
     "license_file": "vendor/fonts/ibm-plex-mono/OFL.txt",
     "license_file_source": "https://raw.githubusercontent.com/google/fonts/465b90c97b4de569e0b546bb2536900194cf7187/ofl/ibmplexmono/OFL.txt",
     "license_file_sha256": "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da",
