@@ -3,7 +3,7 @@
 **Status:** v1.67 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-10-25
+**Last updated:** 2026-10-28
 
 ---
 
