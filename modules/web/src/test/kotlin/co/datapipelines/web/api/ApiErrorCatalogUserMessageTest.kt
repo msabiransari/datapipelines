@@ -65,6 +65,21 @@ class ApiErrorCatalogUserMessageTest {
     }
 
     @Test
+    fun `the three navigation refusals speak about the tree - never the generic our-side line (#464)`() {
+        val generic = ApiErrorCatalog.userMessageFor("no_such_family.no_such_code_probe")
+        val navigation = co.datapipelines.pipeline.PipelineErrorCodes.Navigation
+        val messages =
+            listOf(navigation.REQUEST_INVALID, navigation.VIEW_UNAVAILABLE, navigation.METADATA_TOO_LARGE)
+                .associateWith { ApiErrorCatalog.userMessageFor(it) }
+
+        messages.forEach { (code, message) -> withClue(code) { message shouldNotBe generic } }
+        // Three refusals, three remedies: reload, wait, report — one shared line would merge two of them.
+        messages.values.toSet().size shouldBe messages.size
+        messages.getValue(navigation.REQUEST_INVALID) shouldContain "Reload"
+        messages.getValue(navigation.VIEW_UNAVAILABLE) shouldContain "Try again"
+    }
+
+    @Test
     fun `every family's release-plan refusal speaks the family's release line - never the generic our-side line`() {
         val generic = ApiErrorCatalog.userMessageFor("no_such_family.no_such_code_probe")
         val codes = ReleaseFamily.entries.flatMap { family -> ReleaseRefusal.entries.map { family.code(it) } }

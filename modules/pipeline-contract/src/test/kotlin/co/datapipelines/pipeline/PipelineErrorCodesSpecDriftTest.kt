@@ -157,6 +157,8 @@ class PipelineErrorCodesSpecDriftTest {
                 "visualization.version.",
                 "dashboard.validation.",
                 "dashboard.version.",
+                // #464 — the session-only navigation trees (§13.24).
+                "navigation.",
             )
 
         val SEGMENTATION = Regex("^[a-z0-9_]+\\.[a-z0-9_]+(\\.[a-z0-9_]+)?$")

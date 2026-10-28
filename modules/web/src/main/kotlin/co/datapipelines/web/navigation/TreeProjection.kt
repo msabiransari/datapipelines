@@ -3,13 +3,13 @@ package co.datapipelines.web.navigation
 import co.datapipelines.pipeline.NavigationFamily
 import co.datapipelines.pipeline.NavigationRequest
 import co.datapipelines.pipeline.NavigationRow
+import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.SearchNeedle
+import co.datapipelines.typesystem.DatapipelinesException
 import com.fasterxml.jackson.databind.PropertyNamingStrategies
 import com.fasterxml.jackson.databind.annotation.JsonNaming
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
-import org.springframework.http.HttpStatus
-import org.springframework.web.server.ResponseStatusException
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -147,7 +147,7 @@ class TreeProjection {
                 if (accepted ==
                     0
                 ) {
-                    throw ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Navigation metadata is too large")
+                    throw DatapipelinesException(PipelineErrorCodes.Navigation.METADATA_TOO_LARGE, "Navigation metadata is too large")
                 }
                 break
             }
@@ -280,7 +280,9 @@ class TreeProjection {
             .encode(value, StandardCharsets.UTF_8)
             .replace("+", "%20")
 
-    private fun invalid(): Nothing = throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid tree request or continuation")
+    /** #464 §13.24 — every caller refusal of the tree; the message is static and echoes no input. */
+    private fun invalid(): Nothing =
+        throw DatapipelinesException(PipelineErrorCodes.Navigation.REQUEST_INVALID, "Invalid tree request or continuation")
 
     companion object {
         const val MAX_RESPONSE_BYTES = 1048576

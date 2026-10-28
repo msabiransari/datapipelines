@@ -8,6 +8,7 @@ import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.parameters.ParameterSetService
 import co.datapipelines.pipeline.NavigationRequest
 import co.datapipelines.pipeline.NavigationRow
+import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.RetiredFactCitation
@@ -26,7 +27,6 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
-import org.springframework.web.server.ResponseStatusException
 import java.util.UUID
 
 class TreeControllerTest {
@@ -152,7 +152,10 @@ class TreeControllerTest {
     fun `unavailable lens is a refusal rather than an empty success`() {
         authenticate()
         view = LensedView(ReadLens.NOTHING, ReadLens.NOTHING, LensedView.Unavailable("private target", "unavailable"))
-        shouldThrow<ResponseStatusException> { controller.pipelinesTree("", null, null) }.statusCode.value() shouldBe 503
+        val refusal = shouldThrow<DatapipelinesException> { controller.pipelinesTree("", null, null) }
+        refusal.code shouldBe PipelineErrorCodes.Navigation.VIEW_UNAVAILABLE
+        // The view's target address and transport reason never travel to the client (#464).
+        refusal.details shouldBe emptyMap()
         verify(exactly = 0) { pipelines.navigation(any()) }
     }
 
