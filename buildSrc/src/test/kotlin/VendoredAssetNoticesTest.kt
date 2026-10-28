@@ -134,6 +134,19 @@ class VendoredAssetNoticesTest {
     }
 
     @Test
+    fun `missing licence source names its block`() {
+        failure(block("dagre", "MIT", origin = null), "Missing license_file_source for vendored block dagre")
+    }
+
+    @Test
+    fun `licence source must be an absolute https URL`() {
+        listOf("http://example.test/LICENSE", "LICENSE", "//example.test/LICENSE", "https:///LICENSE", "https://exa mple.test/LICENSE")
+            .forEach { origin ->
+                failure(block("dagre", "MIT", origin = origin), "Invalid license_file_source for vendored block dagre: $origin")
+            }
+    }
+
+    @Test
     fun `copyright-only edit fails with block path and both digests`() {
         val blocks = block("dagre", "MIT")
         val file = directory.resolve("MIT")
@@ -183,11 +196,13 @@ class VendoredAssetNoticesTest {
         id: String,
         file: Boolean = true,
         text: String = "  ${texts[id].orEmpty()}\r\n",
+        origin: String? = "https://example.test/$name/LICENSE",
     ): String {
         val bytes = text.toByteArray(Charsets.UTF_8)
         directory.resolve(id).writeBytes(bytes)
         return "\"$name\":{\"license\":\"$id\"," +
             (if (file) "\"license_file\":\"vendor/$id\"," else "") +
+            (if (origin != null) "\"license_file_source\":\"$origin\"," else "") +
             "\"license_file_sha256\":\"${sha256(bytes)}\"," +
             "\"version\":\"1\",\"source\":\"https://example.test/$name\"}"
     }
