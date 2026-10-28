@@ -1,11 +1,16 @@
 package co.datapipelines.parameters
 
 import co.datapipelines.parameters.ParametersTestDb.AUTHOR
+import co.datapipelines.parameters.ParametersTestDb.OTHER_WORKSPACE
 import co.datapipelines.parameters.ParametersTestDb.WORKSPACE
 import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateRef
+import co.datapipelines.pipeline.TemplateType
+import co.datapipelines.templates.TemplateDraft
+import co.datapipelines.templates.TemplateJson
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
@@ -129,6 +134,145 @@ class ParameterSetRestorePinsIntegrationTest {
         val error = refusedWithoutWrite(id)
 
         error.code shouldBe ParameterErrorCodes.TEMPLATE_NOT_FOUND
+    }
+
+    // ---------------------------------------------------------------- #737 a template the entity row knows without version 1
+
+    private val v1Less = "acme/sales/imported_states.sql"
+
+    /**
+     * The §9.2 preserved-number import of [id] at [version], through the repository verbs `TemplateImportService` lands it
+     * with: `importTemplateVersion` onto an absent entity, `insertReleasedVersion` beside the versions it already holds.
+     * The import and purge SERVICES live in `web`, out of this harness's reach; `TemplateVersionProbeIntegrationTest`
+     * (iii) and (iv) prove the shipped verbs leave exactly these rows.
+     */
+    private fun importPreserved(
+        id: String,
+        version: Int,
+    ) {
+        val draft =
+            TemplateDraft(
+                id = id,
+                type = TemplateType.SQL,
+                dialect = Dialect.POSTGRES,
+                displayName = id,
+                description = "",
+                body = "SELECT :country AS value, :country AS display_value",
+            )
+        val hash =
+            h.templates.computeBodyHash(
+                engine = draft.engine,
+                dialect = draft.dialect?.wire,
+                isLibrary = draft.isLibrary,
+                importsJson = TemplateJson.writeImports(draft.imports),
+                body = draft.body,
+            )
+        if (h.templates.existsId(WORKSPACE, id)) {
+            checkNotNull(h.templates.insertReleasedVersion(WORKSPACE, id, draft, version, hash, null, AUTHOR))
+        } else {
+            h.templates.importTemplateVersion(WORKSPACE, draft, version, hash, null, AUTHOR)
+        }
+    }
+
+    /**
+     * A released-then-DISCARDED set whose parameters[1] pin is rewritten BY SQL to [pin]: no shipped verb leaves a
+     * released body pinning a version the registry lacks (a release requires RELEASED pins, a RELEASED version is never
+     * purged), so the dangling state the recheck defends against is planted — the DRAFT case's precedent below.
+     */
+    private fun discardedSetPinning(pin: TemplateRef): UUID {
+        val (id, _) = discardedSet()
+        h.jdbc.update(
+            "UPDATE parameter_set_versions SET body_json = jsonb_set(body_json, '{parameters,1,source,template}', " +
+                "jsonb_build_object('id', :pin::text, 'version', :version::int)) WHERE parameter_set_id = :id AND version = 1",
+            mapOf("pin" to pin.id, "version" to pin.version, "id" to id),
+        )
+        return id
+    }
+
+    private fun shapeIsV1Less() {
+        withClue("the shape under test: the entity is registered and holds no version 1") {
+            h.templates.existsId(WORKSPACE, v1Less) shouldBe true
+            h.statuses.statusOf(WORKSPACE, v1Less, 1) shouldBe null
+        }
+    }
+
+    private fun refusedMissingVersion(pin: TemplateRef) {
+        val error = refusedWithoutWrite(discardedSetPinning(pin))
+
+        error.code shouldBe ParameterErrorCodes.TEMPLATE_VERSION_NOT_FOUND
+        error.shouldBeInstanceOf<ParameterSetValidationException>()
+        error.result.failures.map { it.path } shouldContainExactly listOf("parameters[1].source.template")
+        failureDetails(error) shouldContainExactly listOf(mapOf("template_id" to pin.id, "template_version" to pin.version))
+    }
+
+    @Test
+    fun `a pin on a missing version of a template imported without version 1 is template_version_not_found`() {
+        importPreserved(v1Less, version = 3)
+        shapeIsV1Less()
+
+        refusedMissingVersion(TemplateRef(v1Less, 2))
+    }
+
+    @Test
+    fun `the same answer for the template a draft purge left without version 1`() {
+        h.template(v1Less, "SELECT :country AS value, :country AS display_value", CreateLifecycle.DRAFT)
+        importPreserved(v1Less, version = 2)
+        h.templates.purgeDraft(WORKSPACE, v1Less, expectedHash = null, draftEligible = true) shouldBe true
+        shapeIsV1Less()
+
+        refusedMissingVersion(TemplateRef(v1Less, 5))
+    }
+
+    @Test
+    fun `a pin on version 1 itself of a v1-less template is template_version_not_found`() {
+        importPreserved(v1Less, version = 3)
+        shapeIsV1Less()
+
+        refusedMissingVersion(TemplateRef(v1Less, 1))
+    }
+
+    @Test
+    fun `a v1-less template whose every version is DISCARDED is still registered - a missing pin is a missing version`() {
+        importPreserved(v1Less, version = 3)
+        discardTemplate()
+        shapeIsV1Less()
+
+        refusedMissingVersion(TemplateRef(v1Less, 2))
+    }
+
+    @Test
+    fun `control - a template whose every version is DISCARDED, version 1 included, answers a missing pin the same way`() {
+        h.template(v1Less, "SELECT :country AS value, :country AS display_value")
+        discardTemplate()
+
+        refusedMissingVersion(TemplateRef(v1Less, 2))
+    }
+
+    @Test
+    fun `control - a template id that is not registered is template_not_found`() {
+        val error = refusedWithoutWrite(discardedSetPinning(TemplateRef(v1Less, 2)))
+
+        error.code shouldBe ParameterErrorCodes.TEMPLATE_NOT_FOUND
+        failureDetails(error) shouldContainExactly listOf(mapOf("template_id" to v1Less, "template_version" to 2))
+    }
+
+    @Test
+    fun `control - the same id registered in ANOTHER workspace only is template_not_found here`() {
+        // Version 1 RELEASED there: an unscoped probe — at version 1 or at the entity — would call the id known.
+        h.template(v1Less, "SELECT :country AS value, :country AS display_value", workspaceId = OTHER_WORKSPACE)
+
+        withClue("another workspace's registry must not make the id 'known' (workspaces design §3)") {
+            refusedWithoutWrite(discardedSetPinning(TemplateRef(v1Less, 2))).code shouldBe ParameterErrorCodes.TEMPLATE_NOT_FOUND
+        }
+    }
+
+    @Test
+    fun `control - pinning the version the v1-less template does hold restores`() {
+        importPreserved(v1Less, version = 3)
+        val id = discardedSetPinning(TemplateRef(v1Less, 3))
+
+        h.service.restoreVersion(WORKSPACE, id, 1).pointer shouldBe PointerMove(before = null, after = 1)
+        stored(id).status shouldBe PipelineVersionStatus.RELEASED
     }
 
     @Test

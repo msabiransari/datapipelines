@@ -4,6 +4,7 @@ import co.datapipelines.pipeline.DatasourceRegistry
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateDryRenderer
+import co.datapipelines.pipeline.TemplateIds
 import co.datapipelines.pipeline.TemplateLookup
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.pipeline.TemplateVersionStatuses
@@ -24,6 +25,12 @@ internal class PinRules(
     private val datasources: DatasourceRegistry,
     /** Names a selector template may bind without a dependency: the org and platform tiers, minus `execution_id` (P30). */
     private val tierKeys: Set<String>,
+    /**
+     * Whether a pinned template is registered at all (#737, the #733 port): a restore tells `template_not_found` from
+     * `template_version_not_found` by the entity row. The default answers "not registered" for every pin, so an unwired
+     * construction reports `template_not_found`, never a false "known" (fail closed).
+     */
+    private val templateIds: TemplateIds = TemplateIds { _, _ -> false },
 ) {
     fun check(
         workspaceId: UUID,
@@ -109,7 +116,9 @@ internal class PinRules(
      * A RESTORE's recheck of one selector pin (#517 round three, record §12.1 RULED 2026-10-25): existence and status
      * only, read from the uncached status port, so the registry cache cannot pass a pin discarded meanwhile. Never the
      * datasource, type or dialect: a rule that tightened since the version was released is not a dangling pin. Reports a
-     * missing or DISCARDED pin; answers the pin's live status, or null when it has none.
+     * missing or DISCARDED pin; answers the pin's live status, or null when it has none. A missing pin is told apart from a
+     * missing template by the ENTITY row ([TemplateIds]) — no version number stands in for it, since a preserved-number
+     * import or a draft purge leaves a template without version 1 (#733, #737).
      */
     fun restorePin(
         workspaceId: UUID,
@@ -132,7 +141,7 @@ internal class PinRules(
                 )
             }
 
-            status == null && ref.version != 1 && templateStatuses.statusOf(workspaceId, ref.id, 1) != null -> {
+            status == null && templateIds.isRegistered(workspaceId, ref.id) -> {
                 missingVersion(at, ref, failures)
             }
 

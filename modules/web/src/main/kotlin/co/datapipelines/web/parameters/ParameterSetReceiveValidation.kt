@@ -95,6 +95,9 @@ class ParameterSetReceiveValidation(
                     OverlayStatuses(payloads, statuses),
                     datasources,
                     OverlayProbe(payloads, engine, probe),
+                    // #737 — the entity question over the same overlay (a batch-brought id, else the receiver's row).
+                    // The receive never runs the restore recheck that asks it; wired so no construction rides the default.
+                    templateIds = { _, id -> registry.existsId(id) },
                 )
             entries.map { bound ->
                 val validation =

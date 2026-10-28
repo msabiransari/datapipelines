@@ -170,6 +170,11 @@ class ParametersConfigurationWiringTest {
         fun templateVersionStatuses(): co.datapipelines.pipeline.TemplateVersionStatuses =
             co.datapipelines.pipeline.TemplateVersionStatuses { _, _, _ -> null }
 
+        // #737 — the restore recheck's entity question the validator takes; the production bean is
+        // PipelineLifecycleConfiguration's `templateIds`.
+        @Bean
+        fun templateIds(): co.datapipelines.pipeline.TemplateIds = co.datapipelines.pipeline.TemplateIds { _, _ -> false }
+
         @Bean
         fun templateReleaser(): co.datapipelines.pipeline.TemplateReleaser =
             co.datapipelines.pipeline.TemplateReleaser { _, _, _, _ -> error("not reached in a wiring test") }
