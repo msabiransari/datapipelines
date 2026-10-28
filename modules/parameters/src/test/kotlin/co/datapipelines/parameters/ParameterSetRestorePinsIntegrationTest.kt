@@ -160,7 +160,13 @@ class ParameterSetRestorePinsIntegrationTest {
                 body = "SELECT :country AS value, :country AS display_value",
             )
         val hash =
-            h.templates.computeBodyHash(draft.engine, draft.dialect?.wire, draft.isLibrary, TemplateJson.writeImports(draft.imports), draft.body)
+            h.templates.computeBodyHash(
+                engine = draft.engine,
+                dialect = draft.dialect?.wire,
+                isLibrary = draft.isLibrary,
+                importsJson = TemplateJson.writeImports(draft.imports),
+                body = draft.body,
+            )
         if (h.templates.existsId(WORKSPACE, id)) {
             checkNotNull(h.templates.insertReleasedVersion(WORKSPACE, id, draft, version, hash, null, AUTHOR))
         } else {
