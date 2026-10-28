@@ -9,6 +9,7 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineNameGrammar
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateDryRenderer
+import co.datapipelines.pipeline.TemplateIds
 import co.datapipelines.pipeline.TemplateLookup
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.pipeline.TemplateVersionStatuses
@@ -81,6 +82,12 @@ class ParameterSetValidator(
     private val probe: SelectorProbe,
     /** The deployment's org tier — its keys are bindable without a dependency (P30). */
     private val org: OrgContext = OrgContext.DEFAULTS,
+    /**
+     * Whether a pinned template is registered at all (#737): the restore recheck's entity question. The default answers
+     * "not registered" for every pin, so an unwired construction reports `template_not_found`, never a false "known"
+     * (fail closed).
+     */
+    private val templateIds: TemplateIds = TemplateIds { _, _ -> false },
 ) {
     /** Judges an `INPUT`'s values: the engine's `max_length` default applies (P34 — the engine's, not a pipeline's). */
     private val inputValidator = ParameterValueValidator(config.valueLimits)
@@ -93,7 +100,8 @@ class ParameterSetValidator(
             expressionParser = ExpressionParser(config),
         )
 
-    private val pins = PinRules(templates, templateStatuses, datasources, org.keys + (ContextKeys.PLATFORM - ContextKeys.EXECUTION_ID))
+    private val pins =
+        PinRules(templates, templateStatuses, datasources, org.keys + (ContextKeys.PLATFORM - ContextKeys.EXECUTION_ID), templateIds)
 
     /**
      * Record §4 in order. With [dryRun] false, steps 5–6 are left to the caller — the write path skips

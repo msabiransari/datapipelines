@@ -4,6 +4,7 @@ import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.DryRenderOutcome
 import co.datapipelines.pipeline.TemplateDryRenderer
+import co.datapipelines.pipeline.TemplateIds
 import co.datapipelines.pipeline.TemplateLookup
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateReleaser
@@ -78,6 +79,9 @@ internal class ParametersHarness(
 
     val statuses = TemplateVersionStatuses { workspaceId, id, version -> templates.findVersionStatus(workspaceId, id, version) }
 
+    /** The entity question (#737) over the real tables — the web `templateIds` bean's arrangement. */
+    val templateIds = TemplateIds { workspaceId, id -> templates.existsId(workspaceId, id) }
+
     /** The cascade's releaser over the template's own statement — the pinned version at its current hash (`releasePinned`'s rule). */
     val releaser =
         TemplateReleaser { workspaceId, id, version, actor ->
@@ -93,7 +97,7 @@ internal class ParametersHarness(
     /** The real selector runtime — present when the harness is given a customer registry. */
     val runner: SelectorRunner? = customers?.let { SelectorRunner(engines, it, config) }
 
-    val validator = ParameterSetValidator(config, registry, statuses, datasources, runner ?: probe)
+    val validator = ParameterSetValidator(config, registry, statuses, datasources, runner ?: probe, templateIds = templateIds)
 
     /**
      * #320 — the dashboards that pin a set: none unless a case seeds [pinnedByDashboards]. [consumerQuestions] records

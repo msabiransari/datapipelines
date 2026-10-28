@@ -12,6 +12,7 @@ import co.datapipelines.parameters.SelectorPool
 import co.datapipelines.parameters.SelectorRunner
 import co.datapipelines.parameters.StoredParameterEvaluationRecorder
 import co.datapipelines.pipeline.TemplateDryRenderer
+import co.datapipelines.pipeline.TemplateIds
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateReleaser
 import co.datapipelines.pipeline.TemplateVersionStatuses
@@ -73,7 +74,9 @@ class ParametersConfiguration {
         statuses: TemplateVersionStatuses,
         datasources: co.datapipelines.pipeline.DatasourceRegistry,
         probe: SelectorRunner,
-    ): ParameterSetValidator = ParameterSetValidator(config, registry, statuses, datasources, probe)
+        // #737 — the restore recheck's entity question: PipelineLifecycleConfiguration's templateIds bean, by type.
+        templateIds: TemplateIds,
+    ): ParameterSetValidator = ParameterSetValidator(config, registry, statuses, datasources, probe, templateIds = templateIds)
 
     @Bean
     @Suppress("LongParameterList") // one collaborator per seam; #517 added the writer guard
