@@ -8,10 +8,13 @@ object ThirdPartyLicenseAllowlist {
 
     /** Sources of the verbatim texts in gradle/licenses; exceptions have their own text. */
     fun source(id: String): String =
-        if (id == "LicenseRef-Oracle-FUTC") {
-            "https://www.oracle.com/downloads/licenses/oracle-free-license.html"
-        } else {
-            "https://spdx.org/licenses/$id.html"
+        when (id) {
+            "LicenseRef-Oracle-FUTC" -> "https://www.oracle.com/downloads/licenses/oracle-free-license.html"
+
+            // #747: utf8proc's Unicode data notice has no SPDX text; vendored from DuckDB's copy.
+            "LicenseRef-utf8proc-Unicode-data" -> "https://github.com/duckdb/duckdb/blob/v1.5.5/third_party/utf8proc/LICENSE"
+
+            else -> "https://spdx.org/licenses/$id.html"
         }
 
     /** Optional-driver spellings are active only for the corresponding build flag. */
