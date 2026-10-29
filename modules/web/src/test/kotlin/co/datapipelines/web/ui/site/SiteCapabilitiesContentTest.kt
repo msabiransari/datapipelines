@@ -223,7 +223,7 @@ class SiteCapabilitiesContentTest {
                 "runs sql and nothing else",
                 "capped at author",
                 "its person's role",
-                "the built-in sql scheduler",
+                "the built in sql scheduler",
                 "the scheduler runs reports",
                 "the scheduler runs ai jobs",
                 // #763, owner 2026-10-28: the site never names this category, even to correct it.
