@@ -103,6 +103,7 @@ val generateThirdPartyNotices = tasks.register<ThirdPartyNoticesTask>("generateT
     dockerfile.set(rootProject.layout.projectDirectory.file("Dockerfile"))
     duckdbChecksums.set(rootProject.layout.projectDirectory.file("deploy/duckdb-extensions.sha256"))
     licenseTexts.set(rootProject.layout.projectDirectory.dir("gradle/licenses"))
+    duckdbClosures.set(rootProject.layout.projectDirectory.dir("deploy/duckdb-extension-ports"))
     outputDirectory.set(layout.buildDirectory.dir("generated/third-party-notices"))
 }
 
