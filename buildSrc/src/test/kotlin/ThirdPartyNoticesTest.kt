@@ -154,11 +154,11 @@ class ThirdPartyNoticesTest {
 
     @Test
     fun `the real DuckDB pins yield four exact non-POM coordinates`() {
-        val root = File(requireNotNull(System.getProperty("repo.catalog"))).parentFile.parentFile
         val rows =
             ThirdPartyNotices.duckdbExtensions(
-                root.resolve("Dockerfile").readText(),
-                root.resolve("deploy/duckdb-extensions.sha256").readText(),
+                root().resolve("Dockerfile").readText(),
+                root().resolve("deploy/duckdb-extensions.sha256").readText(),
+                closures(),
             )
         assertEquals(
             listOf("avro:v1.5.5+f9d5902", "aws:v1.5.5+efa54a9", "httpfs:v1.5.5+827222f", "iceberg:v1.5.5+45163a28"),
@@ -178,7 +178,8 @@ class ThirdPartyNoticesTest {
     @Test
     fun `a Dockerfile name without checksum coverage and an unlisted name both fail`() {
         listOf(fixtureDockerfile.replace("httpfs", "mystery"), fixtureDockerfile.replace("httpfs ", "")).forEach {
-            val failure = assertThrows(IllegalStateException::class.java) { ThirdPartyNotices.duckdbExtensions(it, checksums()) }
+            val failure =
+                assertThrows(IllegalStateException::class.java) { ThirdPartyNotices.duckdbExtensions(it, checksums(), closures()) }
             assertTrue(failure.message.orEmpty().contains("httpfs"), failure.message)
         }
     }
@@ -199,7 +200,12 @@ class ThirdPartyNoticesTest {
     fun `a missing extension licence entry fails naming the extension`() {
         val failure =
             assertThrows(IllegalStateException::class.java) {
-                ThirdPartyNotices.duckdbExtensions(fixtureDockerfile, checksums(), DuckDbExtensionLicenses.inventory() - "httpfs")
+                ThirdPartyNotices.duckdbExtensions(
+                    fixtureDockerfile,
+                    checksums(),
+                    closures(),
+                    DuckDbExtensionLicenses.inventory() - "httpfs",
+                )
             }
         assertTrue(failure.message.orEmpty().contains("DuckDB licence inventory mismatch: missing=[httpfs]"), failure.message)
     }
@@ -213,7 +219,7 @@ class ThirdPartyNoticesTest {
             )
         val failure =
             assertThrows(IllegalStateException::class.java) {
-                ThirdPartyNotices.duckdbExtensions(fixtureDockerfile, checksums(), inventory)
+                ThirdPartyNotices.duckdbExtensions(fixtureDockerfile, checksums(), closures(), inventory)
             }
         assertEquals("Unknown DuckDB component licence: Unknown-ID", failure.message)
     }
@@ -224,13 +230,157 @@ class ThirdPartyNoticesTest {
         val reversed = extensions(checksums().lines().reversed().joinToString("\n"))
         val second = renderer().render(emptyList(), emptyMap(), reversed) { "Text for $it" }
         assertEquals(first, second)
-        listOf("Apache-2.0", "MIT", "curl", "ISC", "BSD-3-Clause", "Zlib").forEach {
-            assertEquals(1, Regex("===== $it =====").findAll(first).count())
+        listOf(
+            "0BSD",
+            "Apache-2.0",
+            "BSD-2-Clause",
+            "BSD-3-Clause",
+            "BSL-1.0",
+            "GPL-2.0-or-later",
+            "ISC",
+            "LicenseRef-utf8proc-Unicode-data",
+            "MIT",
+            "PostgreSQL",
+            "Zlib",
+            "curl",
+            "dtoa",
+        ).forEach {
+            assertEquals(1, Regex("===== $it =====").findAll(first).count(), it)
         }
         assertTrue(first.contains("curl AND ISC AND BSD-3-Clause"))
         assertTrue(first.contains("Apache-2.0 OR MIT"))
         assertEquals(4, first.lineSequence().count { it.startsWith("duckdb-extension:") })
         assertTrue(first.contains("Copyright 2018-2024 Stichting DuckDB Foundation"))
+    }
+
+    @Test
+    fun `a closure file bound to another commit fails naming the extension`() {
+        val failure =
+            assertThrows(IllegalStateException::class.java) {
+                extensions(closures = closure("httpfs") { it.replace("commit=827222f", "commit=aaaaaaa") })
+            }
+        assertTrue(failure.message.orEmpty().startsWith("DuckDB closure commit mismatch for httpfs"), failure.message)
+    }
+
+    @Test
+    fun `a shipped closure entry without a reviewed licence fails naming the port`() {
+        val mystery = "mystery\t1.0#0\tMIT\thttps://example.test\tlinked\n"
+        val failure =
+            assertThrows(IllegalStateException::class.java) {
+                extensions(
+                    closures =
+                        closure("httpfs") {
+                            it.replace(
+                                "openssl\t",
+                                mystery + "openssl\t",
+                            )
+                        },
+                )
+            }
+        assertEquals("DuckDB closure entry without a reviewed licence for httpfs: mystery", failure.message)
+    }
+
+    @Test
+    fun `an inventory component the closure lacks fails naming the port`() {
+        val inventory = DuckDbExtensionLicenses.inventory().toMutableMap()
+        val httpfs = inventory.getValue("httpfs")
+        inventory["httpfs"] = httpfs.copy(components = httpfs.components + DuckDbComponent("mystery", "MIT", "https://example.test"))
+        val failure =
+            assertThrows(IllegalStateException::class.java) {
+                ThirdPartyNotices.duckdbExtensions(fixtureDockerfile, checksums(), closures(), inventory)
+            }
+        assertEquals("DuckDB inventory component not in closure for httpfs: mystery", failure.message)
+    }
+
+    @Test
+    fun `a closure row whose licence or source drifted from the review fails naming the port`() {
+        listOf(
+            closure("httpfs") { it.replace("\tcurl AND ISC AND BSD-3-Clause\t", "\tcurl\t") },
+            closure("httpfs") { it.replace("curl/tree/curl-8_17_0", "curl/tree/curl-8_18_0") },
+        ).forEach { closures ->
+            val failure = assertThrows(IllegalStateException::class.java) { extensions(closures = closures) }
+            assertTrue(
+                failure.message.orEmpty().startsWith("DuckDB closure entry differs from its reviewed licence for httpfs: curl"),
+                failure.message,
+            )
+        }
+    }
+
+    @Test
+    fun `malformed unsorted unjustified and missing closure files fail closed`() {
+        val row = "Invalid DuckDB closure row for httpfs"
+        val header = "Invalid DuckDB closure header for httpfs"
+        val order = "DuckDB closure rows must be sorted and unique for httpfs"
+        listOf(
+            closure("httpfs") { it.replace("\tlinked\n", "\tstatic\n") } to row,
+            closure("httpfs") { it.replace("\tlinked\n", "\textra\tlinked\n") } to row,
+            closure("httpfs") { it.replace(Regex("# why: vcpkg-cmake .*\n"), "") } to
+                "DuckDB build-only row without a why comment for httpfs: vcpkg-cmake",
+            closure("httpfs") { text ->
+                text.lines().partition { it.startsWith("zlib\t") }.let { (zlib, rest) ->
+                    (rest.take(1) + zlib + rest.drop(1)).joinToString("\n")
+                }
+            } to order,
+            closure("httpfs") { it.replace(Regex("(?m)^(zlib\t.*\n)"), "$1$1") } to order,
+            closure("httpfs") { it.replace("\n", "\r\n") } to header,
+            closure("httpfs") { it.removeSuffix("\n") } to header,
+            closures() - "httpfs" to "DuckDB closure files mismatch: missing=[httpfs]",
+        ).forEach { (closures, message) ->
+            val failure = assertThrows(IllegalStateException::class.java) { extensions(closures = closures) }
+            assertTrue(failure.message.orEmpty().startsWith(message), failure.message)
+        }
+    }
+
+    @Test
+    fun `build-only rows are reported without licence rows or texts`() {
+        val tool = "# why: mytool build helper\nmytool\t1.0#0\tLicenseRef-Never-Shipped\thttps://example.test\tbuild-only\n"
+        val notices =
+            renderer().render(
+                emptyList(),
+                emptyMap(),
+                extensions(
+                    closures =
+                        closure("httpfs") {
+                            it.replace(
+                                "openssl\t",
+                                tool + "openssl\t",
+                            )
+                        },
+                ),
+            ) { "Text for $it" }
+        assertTrue(notices.contains("Build-only (not distributed): mytool 1.0#0, vcpkg-cmake 2025-08-07#0"), notices)
+        assertFalse(notices.contains("LicenseRef-Never-Shipped"))
+        assertFalse(notices.lineSequence().any { it.startsWith("mytool") })
+    }
+
+    @Test
+    fun `component sections name the transitive path and the closure inputs`() {
+        val notices = renderer().render(emptyList(), emptyMap(), extensions()) { "Text for $it" }
+        listOf(
+            "----- duckdb-extension:httpfs:v1.5.5+827222f: statically linked components (direct and transitive) -----",
+            "zlib 1.3.1#0 — Zlib — https://github.com/madler/zlib/tree/v1.3.1 — via curl",
+            "curl 8.17.0#0 — curl AND ISC AND BSD-3-Clause — https://github.com/curl/curl/tree/curl-8_17_0\n",
+            "duckdb/re2 1.5.5 — BSD-3-Clause — https://github.com/duckdb/duckdb/tree/v1.5.5/third_party/re2 — via duckdb",
+            "zlib 1.3.1#0 — Zlib — https://github.com/madler/zlib/tree/v1.3.1 — via avro-c, aws-sdk-cpp, curl",
+            "Closure: vcpkg baseline 84bab45d415d22042bd0b9081aea57f362da3f35;",
+        ).forEach { assertTrue(notices.contains(it), it) }
+        assertFalse(notices.contains("direct vcpkg dependencies"))
+    }
+
+    @Test
+    fun `grouped licence expressions are accepted only when balanced`() {
+        assertEquals(listOf("BSD-2-Clause", "BSL-1.0", "Zlib"), DuckDbExtensionLicenses.licenseIds("(BSD-2-Clause OR BSL-1.0) AND Zlib"))
+        listOf("(MIT", "MIT)", ")MIT(", "MIT AND").forEach {
+            assertThrows(IllegalStateException::class.java) { DuckDbExtensionLicenses.licenseIds(it) }
+        }
+    }
+
+    @Test
+    fun `a closure directory with anything but tsv files fails`() {
+        directory.resolve("closures").mkdirs()
+        directory.resolve("closures/httpfs.tsv").writeText("# httpfs\n")
+        directory.resolve("closures/notes.md").writeText("stray\n")
+        assertThrows(IllegalStateException::class.java) { ThirdPartyNotices.closureFiles(directory.resolve("closures")) }
     }
 
     @Test
@@ -252,7 +402,7 @@ class ThirdPartyNoticesTest {
             fixtureDockerfile.replace("=1.5.5", "=\${OTHER}"),
             fixtureDockerfile + "ARG DUCKDB_CORE_VERSION=\${OTHER}\n",
         ).forEach {
-            assertThrows(IllegalStateException::class.java) { ThirdPartyNotices.duckdbExtensions(it, checksums()) }
+            assertThrows(IllegalStateException::class.java) { ThirdPartyNotices.duckdbExtensions(it, checksums(), closures()) }
         }
     }
 
@@ -266,8 +416,23 @@ class ThirdPartyNoticesTest {
             }
         }
 
-    private fun extensions(checksums: String = checksums()): List<DuckDbExtensionNotice> =
-        ThirdPartyNotices.duckdbExtensions(fixtureDockerfile, checksums)
+    private fun extensions(
+        checksums: String = checksums(),
+        closures: Map<String, String> = closures(),
+    ): List<DuckDbExtensionNotice> = ThirdPartyNotices.duckdbExtensions(fixtureDockerfile, checksums, closures)
+
+    private fun root(): File = File(requireNotNull(System.getProperty("repo.catalog"))).parentFile.parentFile
+
+    private fun closures(): Map<String, String> = ThirdPartyNotices.closureFiles(root().resolve("deploy/duckdb-extension-ports"))
+
+    private fun closure(
+        name: String,
+        edit: (String) -> String,
+    ): Map<String, String> =
+        closures().let {
+            it +
+                (name to edit(it.getValue(name)).also { edited -> check(edited != it[name]) { "edit missed" } })
+        }
 
     private fun render(coordinate: String): String = renderer().render(listOf(coordinate), mapping) { "Licence text" }
 

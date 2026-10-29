@@ -82,6 +82,8 @@ tasks.test {
         rootProject.file("../Dockerfile"),
         rootProject.file("../.gitignore"),
         rootProject.file("../deploy/duckdb-extensions.sha256"),
+        // #747: the extension closure files the notices test parses.
+        rootProject.file("../deploy/duckdb-extension-ports"),
     )
         .withPathSensitivity(PathSensitivity.NAME_ONLY)
         .withPropertyName("repoFilesReadByBuildSrcTests")

@@ -1329,17 +1329,53 @@ Added 2026-10-24 (#677). The task writes
 `modules/app/build/generated/third-party-notices/THIRD-PARTY-NOTICES` from the
 resolved `productionRuntimeClasspath` graph, including its platform POMs,
 Spring Boot's jar-mode tools, both image isolate coordinates and the four
-bundled DuckDB extensions with their direct statically linked vcpkg dependencies. It follows
+bundled DuckDB extensions with every component statically linked into each binary
+(#747): the full vcpkg port closure, direct and transitive, the DuckDB core
+`third_party` code each extension links through `duckdb_static`, and third-party code
+vendored inside a port. It follows
 POM parents when licences are inherited. The isolate version is read from
 `Dockerfile`'s `GRAALJS_VERSION` ARG. Internal project modules are excluded.
 The DuckDB core version and extension names come from the Dockerfile; checksums
-and per-name footer commits come from `deploy/duckdb-extensions.sha256`.
+and per-name footer commits come from `deploy/duckdb-extensions.sha256`; each
+extension's closure comes from `deploy/duckdb-extension-ports/<name>.tsv`. A closure
+file opens with `# <name> commit=<footer> baseline=<vcpkg> overlays=<repo@sha,...>
+features=<port[feature,...];...>` and lists one sorted row per component:
+`port`, version, licence expression, source URL and kind, tab-separated, LF, no
+timestamp. Kind is `linked`, `header-only` (no compilable upstream source) or
+`build-only`, and every `build-only` row follows a `# why: <port> — <reason>` line.
 `DuckDbExtensionLicenses.kt` binds each extension's MIT licence, copyright and
-direct linked components to that exact commit. The source review uses each
-repository's `LICENSE` and `vcpkg.json`; `vcpkg-cmake` is a build helper and is
-excluded from linked components. Combined terms (`AND`) and alternatives (`OR`)
-retain every declared licence text. Scope is **direct vcpkg manifest dependencies**;
-transitive ports remain tracked in [#747](https://github.com/msabiransari/datapipelines/issues/747).
+reviewed component licences to that exact commit. A closure file bound to another
+commit fails as `DuckDB closure commit mismatch for <name>`. A `linked` or
+`header-only` row with no reviewed inventory component fails as `DuckDB closure entry
+without a reviewed licence for <name>: <port>`, and one whose expression or source
+differs from the review as `DuckDB closure entry differs from its reviewed licence`.
+An inventory component the file lacks fails as `DuckDB inventory component not in
+closure for <name>: <port>`. A missing or extra closure file, an unsorted, duplicate
+or malformed row and a `build-only` row without its `# why:` line fail too. Each
+extension's section names the direct port that pulls a transitive component (`via`)
+and ends with a `Build-only (not distributed)` line; build-only ports get no licence
+row and no text. Combined terms (`AND`) and alternatives (`OR`) retain every declared
+licence text.
+
+**Re-pinning a core or extension version refreshes the closure** in the same commit
+as the sums (docs/deployment.md §3.1). For each extension, at its footer commit, merge
+the extensions' `vcpkg.json` manifests the way DuckDB's main-extensions build does, at
+the vcpkg baseline and with the extension-ci-tools and per-extension overlay ports.
+Walk every port's `vcpkg.json` at its baseline or overlay commit. Evaluate `platform`
+for `linux & x64` and `linux & arm64` separately and honour top-level
+`"default-features": false`. A port reached only through `"host": true` edges, and a
+`vcpkg-*` script port, is `build-only`: it is built for the host triplet and nothing
+of it is compiled into the binary. Everything else is `linked`. Then run `nm` on both
+platforms' binaries. Add every DuckDB core `third_party` directory whose namespaced
+symbols survive in both, and every library vendored inside a port that its symbols
+witness. Inlined header code is witnessed through its caller's symbol. A library the
+binaries witness that the closure lacks is a finding, as is a platform difference.
+Before writing a row, read the port's upstream `LICENSE` at that version. Write the
+expression and source into both the TSV and `DuckDbExtensionLicenses.kt`, and vendor
+any new SPDX text from the allowlist's snapshot. A notice SPDX does not list is a
+`LicenseRef-` text, vendored verbatim from upstream, with its own `source(id)` URL.
+Derive the closure from retained inputs: a second offline run must reproduce the four
+files byte-identically before they are committed.
 
 `processResources` puts the file at `META-INF/THIRD-PARTY-NOTICES` in the boot
 jar; the Dockerfile copies it to `/app/THIRD-PARTY-NOTICES`. Generate the jar

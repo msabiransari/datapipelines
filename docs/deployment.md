@@ -1,6 +1,6 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.59
+**Status:** v1.60
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-10-27
@@ -49,9 +49,13 @@ decompress with `gunzip`, and run `sha256sum` on the **decompressed** file. Writ
 sorted `sha256sum -c` lines relative to `/opt/duckdb/extensions`; inspect each
 binary's final 512 bytes (`tail -c 512 <file> | strings`) for its extension
 repository commit, core and platform. Both platforms must report the same commit
-per extension. Review `LICENSE` and `vcpkg.json` at those commits, update direct
-component licences and vendor any new SPDX text from the snapshot named in the
-allowlist. Run `:modules:app:generateThirdPartyNotices`, the buildSrc licence
+per extension. Refresh each extension's linked closure,
+`deploy/duckdb-extension-ports/<name>.tsv`, at those commits and the core version, as
+DEVELOPMENT.md's third-party notices section describes: the vcpkg port closure, direct
+and transitive, plus the DuckDB core `third_party` code and port-vendored code that
+both binaries' symbols witness. Review every new component's `LICENSE`, update its
+licence in `DuckDbExtensionLicenses.kt` and vendor any new SPDX text from the snapshot
+named in the allowlist. Run `:modules:app:generateThirdPartyNotices`, the buildSrc licence
 fixtures and `DockerfileDuckDbExtensionPinTest`, rebuild the jar, and prove one
 bad sum refuses the image build before building the restored pins successfully.
 
@@ -1359,6 +1363,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-10-28 | v1.60 | #747 — renumbered at merge if another lane lands first | **§3.1:** the DuckDB re-pin recipe refreshes each extension's linked closure, `deploy/duckdb-extension-ports/<name>.tsv` (the vcpkg port closure, direct and transitive, plus the DuckDB core `third_party` code and port-vendored code both binaries' symbols witness), before reviewing every new component's licence; the generator refuses a closure bound to another commit, a closure entry without a reviewed licence and a reviewed component missing from the closure. |
 | 2026-10-27 | v1.59 | #743 — renumbered at merge after #692’s v1.58 | **§3.1:** the four image bullets state what the Dockerfile builds — base image `eclipse-temurin:21-jre` (Ubuntu glibc; argon2-jvm loads its native library through JNA), a single-stage build (the boot jar is built on the host and copied in; the image adds the DuckDB extension bundle, the GraalJS isolate + resource cache and the third-party notices file), the `useradd --system` account with no fixed UID, and the exec-form entrypoint naming the GraalJS resource cache and `/app/datapipelines.jar`; the timezone paragraph no longer claims the entrypoint bakes the UTC flag in — every deployment passes `-Duser.timezone=UTC` itself. `DeploymentImageBulletsSpecDriftTest` pins the bullets to the Dockerfile (one `FROM` tag, the `ENTRYPOINT` array verbatim, the `USER`/`useradd --system` account) and refuses the retired claims — the base tag, the builder-stage build, the builder-image pin, the JVM-flags variable, the fixed UID, the wrong jar path and the baked-in-UTC claim — described here rather than quoted, so the retired-words grep over this file stays empty. The Dockerfile's healthcheck comment now names the Ubuntu base, not alpine. |
 | 2026-10-26 | v1.58 | #692 | §3.1: checksum-pin all eight decompressed DuckDB extension binaries, include commit-bound extension and direct vcpkg component notices, and document the three-input re-pin procedure. |
 | 2026-10-26 | v1.57 | #693 — renumbered at merge after #570’s v1.56 vendored browser-asset notices | **§6.2A:** the offline `:modules:web:generateVendoredAssetNotices` task renders the vendor manifest and upstream licence files to `/vendor/THIRD-PARTY-NOTICES.txt`, packaged in the web jar and website export. Missing coverage, unknown or mismatched licences and stale allowances fail the build. |
