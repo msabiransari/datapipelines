@@ -38,7 +38,7 @@ object SiteCapabilitiesFaqs {
                 "docs/scheduler.md §1, docs/scheduler.md §6",
             ),
             FaqEntry(
-                "Is this a SQL scheduler?",
+                "Does the scheduler run anything besides SQL pipelines?",
                 "The scheduler is a job scheduler; pipelines are the job type it runs today. This page's example " +
                     "schedules a SQL pipeline. The scheduler stores " +
                     "the payload without reading it, so a report or AI job would be a new job type, decided later, " +

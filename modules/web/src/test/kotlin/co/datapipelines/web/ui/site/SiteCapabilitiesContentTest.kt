@@ -17,6 +17,8 @@ import java.io.File
  *     the scheduler are planned", "no scheduler", "SQL and nothing else" and the retired PK4
  *     key cap are banned from every rendered marketing page (visible text, attributes and the
  *     FAQ JSON-LD) AND from the FAQ sources, so an answer no page renders yet cannot carry one.
+ *     #763 (owner, 2026-10-28) adds the retired category phrase "sql scheduler" — the site does
+ *     not name it even to correct it — with dash variants folded, on every rendered page.
  *  2. **The capability pages stay wired** — each of the three pages is a registry page with its
  *     record H1, links the docs and siblings the design record names, and is reachable from the
  *     home page, How it works and the shared header and footer.
@@ -51,6 +53,23 @@ class SiteCapabilitiesContentTest {
                 STALE_CLAIMS.filter { it in literals }.map { "${file.name}: \"$it\"" }
             }
         withClue("stale capability claims in FAQ answers") { offenders.shouldBeEmpty() }
+    }
+
+    @Test
+    fun `no rendered docs page carries the retired scheduler category phrase`() {
+        // #763 (owner, 2026-10-28): the docs arm bans THIS phrase only — the docs legitimately
+        // narrate history, so the whole STALE_CLAIMS list stays a marketing-pages guard.
+        val slugs = SitePageRenderer.docs.index().flatMap { group -> group.docs.map { it.slug } }
+        check(slugs.size >= DOCS_FLOOR) { "only ${slugs.size} packaged docs reached the sweep" }
+        val rendered =
+            slugs.associateWith { SitePageRenderer.renderDoc(it) } + mapOf("index" to SitePageRenderer.renderDocsIndex())
+        val offenders =
+            rendered.flatMap { (slug, html) ->
+                val copy = normalize(COMMENT.replace(html, " "))
+                val text = normalize(TAG.replace(COMMENT.replace(html, " "), " "))
+                STALE_SCHEDULER_CATEGORY.filter { it in copy || it in text }.map { "docs/$slug: \"$it\"" }
+            }
+        withClue("the retired scheduler category phrase renders in the packaged docs") { offenders.shouldBeEmpty() }
     }
 
     @Test
@@ -144,7 +163,8 @@ class SiteCapabilitiesContentTest {
     /** The page body between the header and the footer, so the shared navigation cannot satisfy a content link. */
     private fun mainContent(html: String): String = html.substringAfter("<main").substringBefore("</main>")
 
-    private fun normalize(s: String): String = WHITESPACE.replace(s, " ").lowercase()
+    /** Lower-case, dash variants folded to spaces, whitespace collapsed — the keyword table's `norm`. */
+    private fun normalize(s: String): String = WHITESPACE.replace(DASH.replace(s.lowercase(), " "), " ")
 
     /** Every string literal in a Kotlin source, joined, so `"a " +` / `"b"` continuations read as one sentence. */
     private fun stringLiterals(source: String): String = STRING_LITERAL.findAll(source).joinToString("") { it.groupValues[1] }
@@ -166,11 +186,27 @@ class SiteCapabilitiesContentTest {
         const val FAQ_SOURCE_FLOOR = 5
 
         /**
+         * DocsPublicSeoTest's floor, reused: the docs arm sweeps the whole packaged catalog,
+         * never a sample, so an empty catalog cannot pass by checking nothing.
+         */
+        const val DOCS_FLOOR = 15
+
+        /**
+         * #763 (owner, 2026-10-28): the one phrase the docs arm bans — the public site never
+         * says "SQL scheduler", dash variants included, and the packaged docs render through the
+         * same public chrome the marketing pages do. The docs' historical narration of other
+         * terms stays legitimate; this list must not grow into STALE_CLAIMS.
+         */
+        val STALE_SCHEDULER_CATEGORY = listOf("sql scheduler")
+
+        /**
          * Lower-case phrasings the pre-#699 site used for what now ships. Each is a whole claim,
          * never a word that a true sentence also uses ("planned" alone stays legitimate: mail,
          * reports, extracts and alerts are planned). The #735 correction (2026-10-25) adds the
          * old SQL-only scheduler lede and the present-tense report/AI availability claims; the
-         * category TITLE itself is pinned by the dedicated #735 test below.
+         * category TITLE itself is pinned by the dedicated #735 test below. #763 (owner,
+         * 2026-10-28) adds the bare category phrase itself: the public site never says
+         * "SQL scheduler", in any spelling the dash fold unifies.
          */
         val STALE_CLAIMS =
             listOf(
@@ -190,6 +226,8 @@ class SiteCapabilitiesContentTest {
                 "the built-in sql scheduler",
                 "the scheduler runs reports",
                 "the scheduler runs ai jobs",
+                // #763, owner 2026-10-28: the site never names this category, even to correct it.
+                "sql scheduler",
             )
 
         val CAPABILITY_H1 =
@@ -247,6 +285,7 @@ class SiteCapabilitiesContentTest {
         val TAG = Regex("<[^>]+>")
         val TITLE_TAG = Regex("<title>(.*?)</title>", RegexOption.DOT_MATCHES_ALL)
         val COMMENT = Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL)
+        val DASH = Regex("[‑–—-]")
         val WHITESPACE = Regex("\\s+")
         val STRING_LITERAL = Regex(""""((?:[^"\\\n]|\\.)*)"""")
     }
