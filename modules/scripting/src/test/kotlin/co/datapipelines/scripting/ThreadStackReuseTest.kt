@@ -16,12 +16,11 @@ import java.util.concurrent.atomic.AtomicInteger
  * #685 — **a Java thread that starts after the GraalJS isolate's threads have exited still ends a
  * runaway recursion in `StackOverflowError`, never in a SIGSEGV that kills the JVM.**
  *
- * The isolate's native threads (sandbox limit checkers, Truffle compiler threads) attach to HotSpot
- * with a one-page glibc guard, so HotSpot puts their guard zones one page higher than on a thread it
- * starts itself, and leaves them PROT_NONE at exit in a stack block glibc caches for the next thread.
- * A Java thread that reuses the block carries a stray PROT_NONE page just above its own zones: the
- * recursion faults there, the kernel cannot push the signal frame, and the process dies with exit 139
- * and no error report. That was the scripting test worker's exit 139 in `JsonataEngineNestingLimitTest`.
+ * On the measured Linux runtime, isolate threads placed their guard zones one page higher than
+ * VM-started Java threads. The syscall captures showed a protected page left inside a reused Java
+ * thread's usable stack, followed by SIGSEGV and exit 139 without a HotSpot report. This reproduced
+ * the worker loss in `JsonataEngineNestingLimitTest` without JSONata. The explanation involving an
+ * attached thread's glibc guard and failed kernel signal-frame delivery remains an inference.
  * The test conventions turn glibc's stack cache off in every test JVM (`CommonConventionsPlugin`,
  * DEVELOPMENT.md §9.4), so a fresh mapping replaces every reused block.
  *

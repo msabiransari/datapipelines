@@ -774,10 +774,11 @@ the counts, 2 for a root that is not a directory, and 3 when no result XML is fo
 rather than retyped so two lanes' numbers are comparable; a modules-only glob under-reported the
 total for four consecutive rounds before it existed. A test JVM that HotSpot's own handler kills (the
 worker ends with `exit value 134`) leaves its error report in that module's
-`build/hs_err/hs_err_pid<pid>.log` (#685), which CI's `gate-reports` artifact keeps; `exit value 139`
-is a SIGSEGV the JVM never handled, and it leaves no report — #685 traced one to a stray guard page in a
+`build/hs_err/hs_err_pid<pid>.log` (#685), which CI's `gate-reports` artifact keeps; an unhandled SIGSEGV
+(`exit value 139`) may leave no report — #685 traced the observed loss to a stray guard page in a
 thread stack reused after a GraalJS isolate thread, so every test JVM starts with glibc's stack cache off
-(`GLIBC_TUNABLES=glibc.pthread.stack_cache_size=0`, `ThreadStackReuseTest`).
+(`GLIBC_TUNABLES=glibc.pthread.stack_cache_size=0`, `ThreadStackReuseTest`; see the
+[GNU libc tunable documentation](https://sourceware.org/glibc/manual/2.35/html_node/POSIX-Thread-Tunables.html)).
 
 **The breach suite is a task of its own (#289).** `JsonataBreachTest` and, since #8,
 `JavaScriptBreachTest` (with `JavaScriptMeasurementsTest`, the JavaScript engine's costs) live in

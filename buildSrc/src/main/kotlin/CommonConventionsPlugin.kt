@@ -291,13 +291,11 @@ class CommonConventionsPlugin : Plugin<Project> {
             )
             doFirst { crashFileDirectory.get().asFile.mkdirs() }
             // glibc's thread-stack cache is OFF in every test JVM (#685, DEVELOPMENT.md §9.4).
-            // The GraalJS isolate's native threads (sandbox limit checkers, Truffle compiler
-            // threads) attach to HotSpot with a one-page glibc guard, so HotSpot puts their
-            // guard zones one page higher than on a thread it starts itself; at exit it leaves
-            // those zones PROT_NONE in a stack block glibc then hands to the next thread. A Java
-            // thread reusing that block carries a stray PROT_NONE page just above its own zones,
-            // and a deep recursion that should end in StackOverflowError kills the JVM by SIGSEGV
-            // instead (exit 139, no hs_err). Uncached, every thread gets a fresh mapping. Set at
+            // Syscall captures showed isolate threads leaving a protected page inside a stack
+            // later reused by a Java thread; recursion faulted there with exit 139 and no
+            // HotSpot report. Disabling reuse removed the measured failure without JSONata
+            // changes. The attached-thread layout and signal-frame explanation is inferred.
+            // Uncached, every thread gets a fresh mapping. Set at
             // execution, keeping any other tunable the environment already carries.
             doFirst {
                 val stackCache = "glibc.pthread.stack_cache_size="
