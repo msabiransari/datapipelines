@@ -261,7 +261,8 @@ class AuthoringStartupCheckTest {
         every { dashboards.findAllListed() } returns listOf(ListedDashboard("acme", "acme/dashboards/shared", 1, body))
 
         val warning = boot(ExecutionSlots(4, 1)).single { it.level == Level.WARN }.formattedMessage
-        warning shouldContain "all-source invocation upper bound"
+        warning shouldContain "have an all-source invocation upper bound above this instance's ceiling"
+        warning shouldContain "a refresh exceeding it is refused as never_admissible"
         warning shouldContain "Equal evaluated bindings or fewer targets"
         warning shouldNotContain "every refresh"
         val one = com.fasterxml.jackson.databind.node.IntNode.valueOf(1)
