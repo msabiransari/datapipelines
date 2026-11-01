@@ -59,6 +59,10 @@ import java.util.UUID
  * the task stays UP-TO-DATE under a reused configuration cache entry, and a JVM the probe crashes
  * leaves its HotSpot error report in that directory — not in the module directory, the default.
  *
+ * Case (l) proves the stack-cache tunable (#685): the probe test JVM's `GLIBC_TUNABLES` turns
+ * glibc's thread-stack cache off, and a tunable the build's environment already carries survives
+ * while a conflicting stack-cache value is replaced.
+ *
  * The probe projects reuse the repo's real version catalog — the plugin
  * resolves catalog aliases at apply time. Tests (a) and (b) stop at
  * configuration ("help"), but test (c) writes real sources and runs
@@ -610,6 +614,34 @@ class CommonConventionsPluginTest {
         assertTrue("SIGSEGV" in report, report.take(2_000))
         val moduleDirectory = probeDir.resolve("modules/web")
         assertTrue(moduleDirectory.list().orEmpty().none { it.startsWith("hs_err_pid") }, "a report landed in the JVM's cwd")
+    }
+
+    @Test
+    fun `every test JVM starts with glibc's thread-stack cache off and keeps the environment's other tunables`() {
+        writeSettings(":modules:web")
+        writeBuild("modules/web/build.gradle.kts")
+        probeDir.resolve("modules/web/src/test/kotlin/ProbeTest.kt").apply { parentFile.mkdirs() }.writeText(
+            """
+            import org.junit.jupiter.api.Test
+            class ProbeTest {
+                @Test fun recordsTheTunables() { println("glibc-tunables=" + System.getenv("GLIBC_TUNABLES")) }
+            }
+            """.trimIndent(),
+        )
+        val test = ":modules:web:test"
+
+        val plain = runner(test, "--rerun-tasks").build()
+        assertEquals(TaskOutcome.SUCCESS, plain.task(test)?.outcome, plain.output)
+        assertEquals("glibc.pthread.stack_cache_size=0", probeLineSeen("glibc-tunables="))
+
+        val inherited = System.getenv() + ("GLIBC_TUNABLES" to "glibc.malloc.tcache_count=0:glibc.pthread.stack_cache_size=40960")
+        val merged = runner(test, "--rerun-tasks").withEnvironment(inherited).build()
+        assertEquals(TaskOutcome.SUCCESS, merged.task(test)?.outcome, merged.output)
+        assertEquals(
+            "glibc.malloc.tcache_count=0:glibc.pthread.stack_cache_size=0",
+            probeLineSeen("glibc-tunables="),
+            "the environment's other tunable must survive and its stack-cache value must be replaced",
+        )
     }
 
     private companion object {
