@@ -389,8 +389,8 @@ class SubPipelineExecutionRunner(
      * calculator output written upstream, an org or platform key — and is re-encoded to the
      * child target's §6.3 wire form.
      *
-     * The target is a child declared parameter OR one of the pinned child's CALCULATOR
-     * `context_key`s (078 A5-composition): supplying the key skips the child's node exactly as
+     * The target is a child declared parameter OR one of the pinned child's CALCULATOR or
+     * value-mode SCRIPT `context_key`s (078 A5-composition): supplying the key skips the child's node exactly as
      * a direct execute-time supply does. An ANY-output target takes the referenced value as any
      * JSON scalar ([encodeScalar]). Nothing else crosses: only the keys the node explicitly
      * maps are passed — a parent and child calculator key spelled the same are NOT forwarded
@@ -402,12 +402,12 @@ class SubPipelineExecutionRunner(
         child: Pipeline,
         ctx: NodeExecutionContext,
     ): Map<String, JsonNode> {
-        val childCalculatorKeys = child.calculatorOutputs()
+        val childOutputKeys = child.calculatorOutputs() + child.scriptOutputKeys().associateWith { null }
         return node.parameters.orEmpty().mapValues { (key, value) ->
             val reference =
                 value.takeIf { it.isTextual }?.asText()?.let(PARAMETER_REFERENCE::matchEntire)
                     ?: return@mapValues value
-            val targetType = targetType(node, child, key, childCalculatorKeys)
+            val targetType = targetType(node, child, key, childOutputKeys)
             val resolved = ctx.values[reference.groupValues[1]]
             if (targetType == null) {
                 encodeScalar(node, key, resolved)
@@ -437,24 +437,25 @@ class SubPipelineExecutionRunner(
     }
 
     /**
-     * The target's wire type: the child parameter's, or the child calculator key's kind output
-     * — null for an ANY-output kind, which takes any scalar. An unknown key is unreachable per
-     * §12.9; the guard fails with the catalogued code rather than an NPE, as [requireRef] does.
+     * The target's wire type: the child parameter's, or the child calculator key's kind output.
+     * An ANY-output calculator or value-mode SCRIPT key takes any scalar (null type here);
+     * the child's pinned script contract gates a supplied SCRIPT value. Unknown targets are
+     * refused by §12.9; this runtime backstop uses the catalogued code, as [requireRef] does.
      */
     private fun targetType(
         node: ExecutableNode,
         child: Pipeline,
         key: String,
-        childCalculatorKeys: Map<String, LogicalType?>,
+        childOutputKeys: Map<String, LogicalType?>,
     ): LogicalType? {
         child.parameters[key]?.let { return it.type }
-        if (key in childCalculatorKeys) return childCalculatorKeys.getValue(key)
+        if (key in childOutputKeys) return childOutputKeys.getValue(key)
         throw childFailure(
             node,
             childExecutionId = null,
             message =
                 "Node '${node.id}' supplies parameter '$key', which the pinned child pipeline " +
-                    "neither declares nor computes as a calculator context_key; save-time validation " +
+                    "neither declares nor computes as a calculator or value-mode script context_key; save-time validation " +
                     "should have rejected this (§12.9).",
             cause = null,
         )
@@ -462,9 +463,10 @@ class SubPipelineExecutionRunner(
 
     /**
      * The §6.3 reading of a bound Context value whose target declares no type (an ANY-output
-     * child calculator key — 078 A5-composition). The child's binder reads an ANY-output key
-     * through `CalculatorInputResolver.natural` — String, Boolean, BigDecimal for every number —
-     * so every bound scalar is encoded by its own type's wire form and re-read canonically.
+     * child calculator or value-mode SCRIPT key — 078 A5-composition). Each scalar is encoded
+     * by its own type's wire form. The child's binder re-reads it canonically, and a SCRIPT's
+     * caller-supplied skip gates it against the pinned output contract. Objects and lists have
+     * no scalar wire form and remain refused here.
      */
     private fun encodeScalar(
         node: ExecutableNode,
@@ -518,7 +520,7 @@ class SubPipelineExecutionRunner(
                     childExecutionId = null,
                     message =
                         "Node '${node.id}' maps a Context value of type ${value.javaClass.simpleName} onto " +
-                            "child calculator input '$key', which takes any JSON scalar; this value has no " +
+                            "child calculator or script input '$key', which takes any JSON scalar; this value has no " +
                             "canonical reading.",
                     cause = null,
                 )

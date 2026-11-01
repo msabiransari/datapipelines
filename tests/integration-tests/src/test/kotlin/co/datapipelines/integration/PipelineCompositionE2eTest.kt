@@ -456,6 +456,161 @@ class PipelineCompositionE2eTest {
             QUARTER_ONE_ROWS.size.toLong()
     }
 
+    @Test
+    @Order(11)
+    fun `a parent scalar reference skips the child SCRIPT`() {
+        val childName = createReleasedScriptChild()
+        val parentId =
+            createPipeline(
+                "test/comp_script_parent",
+                "Composition script parent",
+                listOf(
+                    calculatorNode("parent_q", "parent_score", "07-01"),
+                    mapOf(
+                        "id" to "run_child",
+                        "description" to "Supply the parent score",
+                        "type" to "PIPELINE",
+                        "pipeline" to mapOf("name" to childName, "version" to 1),
+                        "parameters" to mapOf("child_score" to "\${parent_score}"),
+                        "output" to mapOf("target" to "caller"),
+                        "depends_on" to listOf("parent_q"),
+                    ),
+                ),
+            )
+        val events =
+            assertTimeoutPreemptively(Duration.ofMinutes(SSE_BUDGET_MINUTES)) {
+                consumeExecutionStream(port, ADMIN_SESSION, mapper, parentId, UUID.randomUUID().toString())
+            }
+        // Keep the failure payload in the assertion so the base red names the resolver defect.
+        check(events.last().first == "data_ready") { events.last().toString() }
+        val parentExecutionId = events.last().second["execution_id"].asText()
+        val childExecutionId =
+            queryExecutions(
+                "SELECT execution_id::text FROM pipeline_executions WHERE parent_execution_id = '$parentExecutionId'",
+            ) { it.getString(1) }.single()
+        val skipped = nodeStats(childExecutionId).single { it["node_id"].asText() == "score" }
+        skipped["status"].asText() shouldBe "SUCCESS"
+        skipped["provided_by"].asText() shouldBe "caller"
+        skipped["context_value"].asText() shouldBe "1"
+    }
+
+    @Test
+    @Order(12)
+    fun `a child SCRIPT still refuses a mapped scalar that violates its output contract`() {
+        val childName = "test/comp_script_child"
+        // Save admits an ANY parent output; the child's pinned INTEGER gate still refuses it.
+        val invalidParentId =
+            createPipeline(
+                "test/comp_script_wrong_type_parent",
+                "Composition wrong type parent",
+                listOf(
+                    mapOf(
+                        "id" to "parent_value",
+                        "description" to "An untyped string output",
+                        "type" to "CALCULATOR",
+                        "kind" to "coalesce",
+                        "inputs" to mapOf("values" to listOf("not-an-integer")),
+                        "context_key" to "parent_score",
+                    ),
+                    mapOf(
+                        "id" to "run_child",
+                        "description" to "Supply the wrong type",
+                        "type" to "PIPELINE",
+                        "pipeline" to mapOf("name" to childName, "version" to 1),
+                        "parameters" to mapOf("child_score" to "\${parent_score}"),
+                        "output" to mapOf("target" to "caller"),
+                        "depends_on" to listOf("parent_value"),
+                    ),
+                ),
+            )
+        val refused =
+            assertTimeoutPreemptively(Duration.ofMinutes(SSE_BUDGET_MINUTES)) {
+                consumeExecutionStream(port, ADMIN_SESSION, mapper, invalidParentId, UUID.randomUUID().toString())
+            }
+        refused.last().first shouldBe "pipeline_failed"
+        refused.last().second["error"]["code"].asText() shouldBe "pipeline.node.child_execution_failed"
+        refused.last().second["error"]["details"]["child_error_code"].asText() shouldBe
+            "pipeline.script.input_contract_violation"
+    }
+
+    private fun createReleasedScriptChild(): String {
+        val template = createReleasedScoreTemplate()
+        val childName = "test/comp_script_child"
+        createReleasedPipeline(
+            childName,
+            "Composition script child",
+            listOf(
+                mapOf(
+                    "id" to "score",
+                    "description" to "Sentinel score",
+                    "type" to "SCRIPT",
+                    "template" to mapOf("id" to template, "version" to 1),
+                    "inputs" to mapOf("tz" to "\$org_timezone"),
+                    "context_key" to "child_score",
+                ),
+                mapOf(
+                    "id" to "fetch",
+                    "description" to "Child caller",
+                    "type" to "DQL",
+                    "source" to H2_DATASOURCE,
+                    "template" to mapOf("id" to "test/comp_users.sql", "version" to 1),
+                    "output" to mapOf("target" to "caller"),
+                    "depends_on" to listOf("score"),
+                ),
+            ),
+        )
+        return childName
+    }
+
+    private fun createReleasedScoreTemplate(): String {
+        val template = "test/comp_score.jsonata"
+        val created =
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .asSession(ADMIN_SESSION)
+                .body(
+                    mapOf(
+                        "id" to template,
+                        "display_name" to "Composition score sentinel",
+                        "description" to "The sentinel must never replace a mapped score",
+                        "type" to "jsonata",
+                        "body" to "-999",
+                        "invariants" to emptyList<Any>(),
+                        "contract" to
+                            mapOf(
+                                "mode" to "value",
+                                "inputs" to mapOf("tz" to mapOf("kind" to "value", "type" to "STRING")),
+                                "output" to mapOf("kind" to "value", "type" to "INTEGER"),
+                            ),
+                        "tests" to
+                            listOf(
+                                mapOf(
+                                    "name" to "sentinel",
+                                    "input" to mapOf("inputs" to mapOf("tz" to "UTC")),
+                                    "expect" to mapOf("output" to -999),
+                                ),
+                            ),
+                    ),
+                ).post("/api/v1/templates")
+                .then()
+                .log()
+                .ifValidationFails()
+                .statusCode(201)
+                .extract()
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .header("If-Match", created.jsonPath().getString("data.body_hash"))
+            .contentType(ContentType.JSON)
+            .body(mapOf("name" to template))
+            .post("/api/v1/templates/release")
+            .then()
+            .statusCode(200)
+
+        return template
+    }
+
     /** Leg (c): the SAME child, run standalone with no mapping, computes the value itself. */
     @Test
     @Order(6)

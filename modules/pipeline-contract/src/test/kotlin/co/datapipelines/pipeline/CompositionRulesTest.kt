@@ -503,7 +503,7 @@ class CompositionRulesTest {
         val failure = result.withCode(Validation.PIPELINE_PARAMETER_TYPE_MISMATCH).single()
         result.codes shouldContainExactly listOf(Validation.PIPELINE_PARAMETER_TYPE_MISMATCH)
         failure.message shouldContain "org key 'org_currency_name'"
-        failure.message shouldContain "child calculator output 'child_quarter'"
+        failure.message shouldContain "child calculator or script output 'child_quarter'"
     }
 
     @Test
@@ -528,6 +528,53 @@ class CompositionRulesTest {
             .validate(parent(parameters = supplied), workspaceId)
             .failures shouldContainExactly emptyList()
     }
+
+    @Test
+    fun `a literal mapped onto a child SCRIPT key is admitted`() {
+        validatorWith(resolver(childWithScript()))
+            .validate(parent(parameters = mapOf("child_score" to Fixtures.json("7"))), workspaceId)
+            .failures shouldContainExactly emptyList()
+    }
+
+    @Test
+    fun `a reference mapped onto a child SCRIPT key has an ANY target at save`() {
+        validatorWith(resolver(childWithScript()))
+            .validate(
+                parent(
+                    parameters = mapOf("child_score" to Fixtures.json("\"\${run_fiscal_quarter}\"")),
+                    parentNodes = listOf(Fixtures.calculatorNode()),
+                ),
+                workspaceId,
+            ).failures shouldContainExactly emptyList()
+    }
+
+    @Test
+    fun `an unknown parent reference mapped onto a child SCRIPT key names the target`() {
+        val result =
+            validatorWith(resolver(childWithScript()))
+                .validate(parent(parameters = mapOf("child_score" to Fixtures.json("\"\${missing}\""))), workspaceId)
+
+        result.codes shouldContainExactly listOf(Validation.PIPELINE_PARAMETER_TYPE_MISMATCH)
+        val failure = result.withCode(Validation.PIPELINE_PARAMETER_TYPE_MISMATCH).single()
+        failure.message shouldContain "child calculator or script output 'child_score' (ANY)"
+        failure.message shouldContain "names no parent parameter"
+    }
+
+    private fun childWithScript(): Pipeline =
+        Fixtures.pipeline(
+            name = CHILD,
+            nodes =
+                listOf(
+                    ScriptRulesFixtures.scriptNode(
+                        id = "score",
+                        inputs = emptyMap(),
+                        output = null,
+                        dependsOn = emptyList(),
+                        contextKey = "child_score",
+                    ),
+                    Fixtures.node(output = NodeOutput.Caller),
+                ),
+        )
 
     /** A child whose only input is the calculator `context_key` `child_quarter` (INTEGER output). */
     private fun childWithCalculator(): Pipeline =
