@@ -21,6 +21,7 @@ import co.datapipelines.visualization.ListedDashboard
 import co.datapipelines.visualization.ParameterBinding
 import co.datapipelines.visualization.VisualizationOccurrence
 import co.datapipelines.web.capturingLogEvents
+import com.fasterxml.jackson.databind.node.IntNode
 import io.kotest.assertions.throwables.shouldNotThrow
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -265,8 +266,8 @@ class AuthoringStartupCheckTest {
         warning shouldContain "a refresh exceeding it is refused as never_admissible"
         warning shouldContain "Equal evaluated bindings or fewer targets"
         warning shouldNotContain "every refresh"
-        val one = com.fasterxml.jackson.databind.node.IntNode.valueOf(1)
-        val two = com.fasterxml.jackson.databind.node.IntNode.valueOf(2)
+        val one = IntNode.valueOf(1)
+        val two = IntNode.valueOf(2)
         val planner = RefreshPlanner()
         planner.plan(body, ActionScope.ALL, emptyList(), mapOf("a" to one, "b" to one)).invocations.size shouldBe 1
         planner.plan(body, ActionScope.TARGETS, listOf("v_s1"), mapOf("a" to one, "b" to two)).invocations.size shouldBe 1
