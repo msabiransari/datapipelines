@@ -309,7 +309,14 @@ class DashboardValidatorTest {
         val occurrence = tree.obj("visualizations[0]").deepCopy().put("name", chart)
         occurrence.obj("inputs.revenue").put("source", source)
         (tree.get("visualizations") as ArrayNode).add(occurrence)
-        grid(tree).addObject().put("name", chart).put("x", 6).put("y", grid(tree).size() * 4).put("w", 6).put("h", 4)
+        val row = grid(tree).size() * 4
+        grid(tree)
+            .addObject()
+            .put("name", chart)
+            .put("x", 6)
+            .put("y", row)
+            .put("w", 6)
+            .put("h", 4)
     }
 
     private fun grid(tree: ObjectNode): ArrayNode = tree.obj("layout").get("grid") as ArrayNode

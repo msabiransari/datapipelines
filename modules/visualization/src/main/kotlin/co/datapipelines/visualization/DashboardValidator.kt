@@ -488,11 +488,13 @@ class DashboardValidator(
         private fun canonical(node: com.fasterxml.jackson.databind.JsonNode?): String =
             when {
                 node == null -> "null"
-                node.isObject ->
-                    node.properties().sortedBy { it.key }.joinToString(",", "{", "}") { "\"${it.key}\":" + canonical(it.value) }
+                node.isObject -> canonicalObject(node)
                 node.isArray -> node.joinToString(",", "[", "]") { canonical(it) }
                 else -> node.toString()
             }
+
+        private fun canonicalObject(node: com.fasterxml.jackson.databind.JsonNode): String =
+            node.properties().sortedBy { it.key }.joinToString(",", "{", "}") { "\"${it.key}\":" + canonical(it.value) }
     }
 }
 
