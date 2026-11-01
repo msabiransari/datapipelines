@@ -96,6 +96,10 @@ COPY modules/app/build/generated/third-party-notices/THIRD-PARTY-NOTICES /app/TH
 RUN mkdir -p /app/lib && chmod 0555 /app/lib
 ENV LOADER_PATH=/app/lib,/opt/graaljs
 
+# Keep fresh native thread stacks for JVMs hosting the script isolate (#685).
+# Runtime overrides that add other glibc tunables must retain this entry.
+ENV GLIBC_TUNABLES=glibc.pthread.stack_cache_size=0
+
 # Pre-install the isolate's native resources (D5) as root, at build time: on its first Engine,
 # polyglot unpacks the isolate library and libtruffleattach into a resource cache, by default
 # under the user's home, which a read-only root refuses. JavaScriptResourcesMain points that
