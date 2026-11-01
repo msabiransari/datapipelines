@@ -54,6 +54,11 @@ import java.util.UUID
  * probe in (i) only records whether it exists, so it passes while the content is edited. Case (j)
  * repeats the creation under `--configuration-cache`, where an input frozen at store time would stay stale.
  *
+ * Case (k) proves the crash-file path (#685): the probe test JVM receives exactly one
+ * `-XX:ErrorFile=` under its module's `build/hs_err/`, the directory exists before the JVM starts,
+ * the task stays UP-TO-DATE under a reused configuration cache entry, and a JVM the probe crashes
+ * leaves its HotSpot error report in that directory — not in the module directory, the default.
+ *
  * The probe projects reuse the repo's real version catalog — the plugin
  * resolves catalog aliases at apply time. Tests (a) and (b) stop at
  * configuration ("help"), but test (c) writes real sources and runs
@@ -549,6 +554,62 @@ class CommonConventionsPluginTest {
         val created = runner(*args).build()
         assertEquals(TaskOutcome.SUCCESS, created.task(test)?.outcome, "a path created between builds was not seen\n${created.output}")
         assertEquals("true", probeLineSeen("retired-exists="), "the re-run did not see the created path")
+    }
+
+    @Test
+    fun `a test JVM HotSpot kills leaves its error report in the task's build hs_err directory`() {
+        writeSettings(":modules:web")
+        writeBuild("modules/web/build.gradle.kts")
+        // The probe records the ErrorFile argument its own JVM received, then — only when the
+        // marker file exists — crashes that JVM with a write to address 0, a fault HotSpot does
+        // not survive (it writes the error report and aborts: exit 134, never 139).
+        probeDir.resolve("modules/web/src/test/kotlin/ProbeTest.kt").apply { parentFile.mkdirs() }.writeText(
+            """
+            import java.lang.management.ManagementFactory
+            import org.junit.jupiter.api.Test
+            class ProbeTest {
+                @Test fun recordsTheErrorFileThenCrashesOnRequest() {
+                    val args = ManagementFactory.getRuntimeMXBean().inputArguments.filter { it.startsWith("-XX:ErrorFile=") }
+                    println("error-file-args=" + args.joinToString("|"))
+                    if (java.io.File("crash-now").exists()) {
+                        val field = sun.misc.Unsafe::class.java.getDeclaredField("theUnsafe")
+                        field.isAccessible = true
+                        (field.get(null) as sun.misc.Unsafe).putAddress(0L, 0L)
+                    }
+                }
+            }
+            """.trimIndent(),
+        )
+        val test = ":modules:web:test"
+        val args = arrayOf(test, "--configuration-cache")
+        val crashDirectory = probeDir.resolve("modules/web/build/hs_err")
+
+        val stored = runner(*args).build()
+        assertEquals(TaskOutcome.SUCCESS, stored.task(test)?.outcome, stored.output)
+        val received = probeLineSeen("error-file-args=")
+        assertTrue(received.startsWith("-XX:ErrorFile=") && "|" !in received, "expected exactly one ErrorFile argument: $received")
+        assertEquals(
+            crashDirectory.resolve("hs_err_pid%p.log").canonicalPath,
+            File(received.removePrefix("-XX:ErrorFile=")).canonicalPath,
+            "the test JVM's ErrorFile is not under the module's build/hs_err",
+        )
+        assertTrue(crashDirectory.isDirectory, "HotSpot does not create the directory; the task must, before the JVM starts")
+
+        // The provider is CC-safe and keeps the task fingerprintable: reused entry, UP-TO-DATE.
+        val reused = runner(*args).build()
+        assertTrue("Reusing configuration cache" in reused.output, "the entry was not reused\n${reused.output}")
+        assertEquals(TaskOutcome.UP_TO_DATE, reused.task(test)?.outcome, reused.output)
+
+        probeDir.resolve("modules/web/crash-now").writeText("crash\n")
+        val crashed = runner(*args, "--rerun-tasks").buildAndFail()
+        assertTrue("exit value 134" in crashed.output, "the probe JVM did not die through HotSpot's handler\n${crashed.output}")
+        val reports = crashDirectory.listFiles { file -> file.name.matches(Regex("hs_err_pid\\d+\\.log")) }.orEmpty()
+        assertEquals(1, reports.size, "expected one error report in ${crashDirectory.path}: ${crashDirectory.list()?.toList()}")
+        val report = reports.single().readText()
+        assertTrue("A fatal error has been detected by the Java Runtime Environment" in report, report.take(2_000))
+        assertTrue("SIGSEGV" in report, report.take(2_000))
+        val moduleDirectory = probeDir.resolve("modules/web")
+        assertTrue(moduleDirectory.list().orEmpty().none { it.startsWith("hs_err_pid") }, "a report landed in the JVM's cwd")
     }
 
     private companion object {

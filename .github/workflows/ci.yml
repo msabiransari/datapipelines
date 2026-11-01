@@ -283,6 +283,7 @@ jobs:
             modules/*/build/reports/kover/report.xml
             modules/*/build/reports/kover/verify.err
             modules/*/build/test-results/*/*.xml
+            modules/*/build/hs_err/*.log
             modules/scripting/build/reports/jsonata-breach.md
             tests/browser-tests/build/test-results/test/*.xml
             tests/browser-tests/build/reports/site-section-alignment/*

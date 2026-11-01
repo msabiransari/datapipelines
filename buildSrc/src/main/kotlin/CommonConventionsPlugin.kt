@@ -269,6 +269,21 @@ class CommonConventionsPlugin : Plugin<Project> {
                     .orNull
                     ?.let { value -> systemProperty(key, value) }
             }
+            // A test JVM that HotSpot itself kills writes its error report into this task's
+            // build/hs_err/ (#685, DEVELOPMENT.md §9.4), where CI's gate-reports artifact keeps
+            // it; HotSpot's default is the JVM's cwd (the module directory), which nothing
+            // collects. ErrorFile ALONE: -XX:+ErrorFileToStderr would send the report to stderr
+            // INSTEAD of the file (measured on 21.0.12, #685 evidence 01). A provider with no
+            // annotated property: the absolute path is resolved at execution and is not a task
+            // input. HotSpot does not create a missing directory, so doFirst does.
+            val crashFileDirectory = project.layout.buildDirectory.dir("hs_err")
+            jvmArgumentProviders.add(
+                object : org.gradle.process.CommandLineArgumentProvider {
+                    override fun asArguments(): Iterable<String> =
+                        listOf("-XX:ErrorFile=" + crashFileDirectory.get().asFile.resolve("hs_err_pid%p.log").path)
+                },
+            )
+            doFirst { crashFileDirectory.get().asFile.mkdirs() }
             // If the platform discovers no tests at all, that is a broken test setup,
             // not a pass. Guards the "engine found nothing" half of the false-green.
             failOnNoDiscoveredTests.set(true)
