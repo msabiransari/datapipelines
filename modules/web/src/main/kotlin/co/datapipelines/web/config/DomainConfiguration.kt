@@ -165,8 +165,13 @@ class DomainConfiguration {
         // #10 L1b: so do visualization and dashboard drafts (VisualizationConfiguration's repositories).
         visualizations: co.datapipelines.visualization.VisualizationRepository,
         dashboards: co.datapipelines.visualization.DashboardRepository,
+        // #762: the saved-dashboards WARN reads the refresh admission's own two ceilings.
+        slots: co.datapipelines.executor.ExecutionSlots,
+        dashboardRuntime: co.datapipelines.visualization.DashboardRuntimeConfig,
     ): AuthoringStartupCheck =
-        AuthoringStartupCheck(environment, pipelines, templates, parameterSets, visualizations, dashboards) { promotionProperties.receives }
+        AuthoringStartupCheck(environment, pipelines, templates, parameterSets, visualizations, dashboards, slots, dashboardRuntime) {
+            promotionProperties.receives
+        }
 
     /**
      * The system service account (auth.md §4.5, R7), provisioned at boot. Unconditional: it

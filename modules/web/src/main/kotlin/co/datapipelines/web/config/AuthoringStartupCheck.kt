@@ -1,8 +1,12 @@
 package co.datapipelines.web.config
 
+import co.datapipelines.executor.ExecutionSlots
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.visualization.DashboardRuntimeConfig
+import co.datapipelines.visualization.DashboardRuntimeKey
+import co.datapipelines.visualization.DashboardValidator
 import jakarta.annotation.PostConstruct
 import org.slf4j.LoggerFactory
 import org.springframework.core.env.Environment
@@ -25,6 +29,13 @@ import org.springframework.core.env.Environment
  *   wires it to `PromotionProperties.receives`, and the default `{ false }` survives only for
  *   the unit tests that drive the check directly. It does not fail startup — a one-box
  *   deployment may legitimately be both.
+ * - **WARN — saved dashboards this instance can never refresh** (#762): a dashboard whose
+ *   DISTINCT executions exceed the smaller of `max-executions-per-refresh` and the executor's
+ *   instance ceiling is refused on every refresh (`never_admissible`). The validator holds new
+ *   saves to the first; a document saved under an older, larger bound, or promoted from an
+ *   instance with larger ones, is only found here — named once at boot instead of by a viewer.
+ *   A warning, not a refusal: the rest of the deployment works, and the operator decides which
+ *   number moves.
  * - **Refusal — drafts on an authoring-disabled deployment** (C8): a receiver holding
  *   drafts means someone authored there, and version alignment may already be broken
  *   (§9.3: local numbers collide with future dev releases). Better found at boot, naming
@@ -43,6 +54,11 @@ class AuthoringStartupCheck(
     /** #10 L1b: visualization and dashboard drafts join the refusal — the same lifecycle, the same alignment risk. Required. */
     private val visualizations: co.datapipelines.visualization.VisualizationRepository,
     private val dashboards: co.datapipelines.visualization.DashboardRepository,
+    /** #762: the instance's executor slots — the refresh admission's own ceiling, read here so the two cannot disagree. */
+    private val slots: ExecutionSlots,
+    /** #762: the dashboard runtime's numbers — `max-executions-per-refresh` is the other ceiling. */
+    private val dashboardRuntime: DashboardRuntimeConfig,
+    /** Kept LAST: the wiring passes it as a trailing lambda, which binds to the last function-typed parameter. */
     private val promotionServerKeyPresent: () -> Boolean = { false },
 ) {
     private val log = LoggerFactory.getLogger(AuthoringStartupCheck::class.java)
@@ -78,9 +94,49 @@ class AuthoringStartupCheck(
             )
         }
 
+        warnNeverAdmissibleDashboards()
+
         if (!authoringEnabled) {
             refuseDrafts()
         }
+    }
+
+    /**
+     * #762 — every dashboard at its listed version whose distinct executions ([DashboardValidator.distinctInvocations],
+     * the validator's own count) exceed the smaller ceiling, in ONE line naming each (`workspace/name@version`, its
+     * count) and the ceiling with its key. The count is of DISTINCT executions — two sources sharing a pipeline release
+     * and bindings are one — not raw sources. Silent when none does.
+     */
+    private fun warnNeverAdmissibleDashboards() {
+        val (ceiling, key) =
+            listOf(
+                dashboardRuntime.maxExecutionsPerRefresh to DashboardRuntimeKey.MAX_EXECUTIONS_PER_REFRESH.path,
+                slots.instanceCeiling to ExecutionSlots.INSTANCE_CEILING_KEY,
+            ).minBy { it.first }
+        val over =
+            dashboards
+                .findAllListed()
+                .mapNotNull { listed ->
+                    val body = listed.body ?: return@mapNotNull null
+                    val count = DashboardValidator.distinctInvocations(body)
+                    if (count > ceiling) "${listed.workspaceName}/${listed.name}@${listed.version} ($count)" else null
+                }
+        if (over.isEmpty()) return
+        val named = over.take(MAX_NAMED) + if (over.size > MAX_NAMED) listOf("… and ${over.size - MAX_NAMED} more") else emptyList()
+        log.warn(
+            "event=config.dashboards_never_admissible count={} ceiling={} key={} " +
+                "message=\"{} saved dashboard(s) need more distinct executions per refresh than this instance can ever admit " +
+                "({}={}); every refresh of them is refused as never_admissible. Raise that key to at least the largest count " +
+                "below (max-executions-per-refresh may not exceed the executor's max-concurrent-executions-per-instance), or " +
+                "reduce the dashboard's distinct executions (configuration.md §3.34). Dashboards (distinct executions): {}\"",
+            over.size,
+            ceiling,
+            key,
+            over.size,
+            key,
+            ceiling,
+            named.joinToString(", "),
+        )
     }
 
     /**
