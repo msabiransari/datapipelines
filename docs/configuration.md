@@ -979,7 +979,7 @@ datapipelines:
       retry-backoff-seconds: ${DATAPIPELINES_SCHEDULER_NOTIFICATIONS_RETRY_BACKOFF_SECONDS:30,120,600}
       batch-size: ${DATAPIPELINES_SCHEDULER_NOTIFICATIONS_BATCH_SIZE:20}
       backlog-max: ${DATAPIPELINES_SCHEDULER_NOTIFICATIONS_BACKLOG_MAX:1000}
-  parameters:
+  parameters:                      # §3.30 — the parameter engine (#194)
     max-parameters-per-set: ${DATAPIPELINES_PARAMETERS_MAX_PARAMETERS_PER_SET:64}
     max-options-per-selector: ${DATAPIPELINES_PARAMETERS_MAX_OPTIONS_PER_SELECTOR:200}
     max-multi-bind-values: ${DATAPIPELINES_PARAMETERS_MAX_MULTI_BIND_VALUES:1000}
@@ -1011,7 +1011,7 @@ datapipelines:
     shutdown-drain-ms: ${DATAPIPELINES_PERSISTENCE_SHUTDOWN_DRAIN_MS:10000}
     audit:
       enabled: ${DATAPIPELINES_PERSISTENCE_AUDIT_ENABLED:false}
-  visualization:
+  visualization:                   # §3.33 — the dashboard documents' bounds (#10)
     max-visualizations-per-dashboard: ${DATAPIPELINES_VISUALIZATION_MAX_VISUALIZATIONS_PER_DASHBOARD:50}
     max-cases-per-visualization: ${DATAPIPELINES_VISUALIZATION_MAX_CASES_PER_VISUALIZATION:20}
     max-fixture-rows-per-case: ${DATAPIPELINES_VISUALIZATION_MAX_FIXTURE_ROWS_PER_CASE:1000}
@@ -1020,7 +1020,8 @@ datapipelines:
     max-inputs-per-visualization: ${DATAPIPELINES_VISUALIZATION_MAX_INPUTS_PER_VISUALIZATION:8}
     max-columns-per-input: ${DATAPIPELINES_VISUALIZATION_MAX_COLUMNS_PER_INPUT:256}
     session-ttl-minutes: ${DATAPIPELINES_VISUALIZATION_SESSION_TTL_MINUTES:60}
-  dashboards:
+
+  dashboards:                      # §3.34 — the dashboard runtime (#10 L2)
     admission:
       max-concurrent-refreshes-per-workspace: ${DATAPIPELINES_DASHBOARDS_MAX_CONCURRENT_REFRESHES_PER_WORKSPACE:4}
       max-executions-per-refresh: ${DATAPIPELINES_DASHBOARDS_MAX_EXECUTIONS_PER_REFRESH:16}
@@ -1034,6 +1035,7 @@ datapipelines:
       max-refresh-seconds: ${DATAPIPELINES_DASHBOARDS_MAX_REFRESH_SECONDS:900}
       parameter-lock-seconds: ${DATAPIPELINES_DASHBOARDS_PARAMETER_LOCK_SECONDS:30}
       render-seconds: ${DATAPIPELINES_DASHBOARDS_RENDER_SECONDS:20}
+
   release:
     dependencies:
       max-depth: ${DATAPIPELINES_RELEASE_DEPENDENCIES_MAX_DEPTH:32}
