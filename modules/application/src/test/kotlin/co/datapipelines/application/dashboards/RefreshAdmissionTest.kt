@@ -105,12 +105,13 @@ class RefreshAdmissionTest {
             val slots = ExecutionSlots(maxPerUser = 1, maxPerInstance = 2)
             val admission = RefreshAdmission(slots, config(perRefresh = 2, perInstance = 3))
             admission.admit(workspace, executions = 2).admitted().use { first ->
-                first.reservation.shouldNotBeNull().next().close()
+                val reservation = first.reservation.shouldNotBeNull()
+                reservation.next().close()
                 slots.inFlight shouldBe 1
                 admission.admit(workspace, executions = 1).admitted().use {
                     admission.executionsReserved shouldBe 3
                     slots.inFlight shouldBe 2
-                    first.reservation.shouldNotBeNull().next().close()
+                    reservation.next().close()
                     slots.inFlight shouldBe 1
                     admission.admit(workspace, executions = 1) shouldBe AdmissionResult.Busy
                 }
