@@ -69,8 +69,9 @@ class ConfigValidator(
          * 37 since #655 added `AuthProviderRules.checkProviderProtocols` (§3.4).
          * 38 since #682 added `AuthProviderRules.checkProviderReadTimeout` (§3.4).
          * 39 since #442b added `SchedulerNotificationRules.checkSchedulerNotifications` (§3.29).
+         * 40 since #762 added `DashboardRuntimeRules.checkExecutorCeiling` (§3.34 — the executor's instance ceiling).
          */
-        internal const val CHECK_COUNT = 39
+        internal const val CHECK_COUNT = 40
 
         /**
          * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
@@ -156,6 +157,8 @@ class ConfigValidator(
             VisualizationRules.checkVisualizationBounds(snapshot, violations)
             // §3.34 (#10 L2) — the dashboard runtime's admission, byte and deadline numbers, their own file too.
             DashboardRuntimeRules.checkDashboardRuntimeBounds(snapshot, violations)
+            // §3.34 (#762) — and against the executor's instance ceiling, which a refresh reserves its slots from.
+            DashboardRuntimeRules.checkExecutorCeiling(snapshot, DEFAULT_MAX_CONCURRENT_PER_INSTANCE, violations, warnings)
             // §3.27 (137) — the mail rules live in their own file (MailRules), like the posture ones.
             MailRules.checkMailShape(snapshot, violations)
             MailRules.checkMailHardened(snapshot, violations)
