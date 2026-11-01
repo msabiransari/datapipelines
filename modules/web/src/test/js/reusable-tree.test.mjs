@@ -1,7 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createTreeState, PAGE_CEILING } from "../../main/resources/static/js/tree/state.mjs";
+import { createTreeState, normalizeQuery, PAGE_CEILING } from "../../main/resources/static/js/tree/state.mjs";
 import { createTreeRenderer } from "../../main/resources/static/js/tree/render.mjs";
+
+// #758: the same vectors are asserted through TreeProjectionTest's answer(query).
+for (const [input, expected] of [
+  ["\uFEFFa\u3000\u3000b\u00A0", "a b"],
+  ["\u00A0 x\t\ny ", "x y"],
+  ["\u2028only", "only"],
+  ["\t\n\v\f\r \u00A0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF", ""],
+]) {
+  test(`tree query whitespace vector ${JSON.stringify(input)}`, () => {
+    assert.equal(normalizeQuery(input), expected);
+  });
+}
 
 const folder = (path, parentKey = null) => ({ key: `folder:${path}`, parentKey, kind: "folder", path, name: path, hasChildren: true });
 const leaf = (path, parentKey = null) => ({ key: `artifact:${path}`, parentKey, kind: "artifact", path, name: path, hasChildren: false });

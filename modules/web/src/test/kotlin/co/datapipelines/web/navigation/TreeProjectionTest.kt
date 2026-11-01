@@ -19,6 +19,54 @@ class TreeProjectionTest {
     private val actor = UUID.randomUUID()
     private val rows = List(201) { index -> NavigationRow("scope/a/match_$index", "Display $index", UUID.randomUUID(), 1, null) }
 
+    /** #758: identical input/expected vectors live in reusable-tree.test.mjs. */
+    @Test
+    fun `tree query whitespace vectors reach the loader and query echo normalized`() {
+        listOf(
+            "\uFEFFa\u3000\u3000b\u00A0" to "a b",
+            "\u00A0 x\t\ny " to "x y",
+            "\u2028only" to "only",
+            "\t\n\u000B\u000C\r \u00A0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006" +
+                "\u2007\u2008\u2009\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF" to "",
+        ).forEach { (input, expected) ->
+            val term = expected.ifEmpty { null }
+            val row = NavigationRow("scope/a/${expected.ifEmpty { "browse" }}", "Display", UUID.randomUUID(), 1, null)
+            val page =
+                answer(query = input) { request ->
+                    request.query shouldBe term
+                    listOf(row).filter { request.query == null || it.path.contains(request.query.orEmpty()) }
+                }
+            page.query shouldBe term
+            page.mode shouldBe if (term == null) "browse" else "search"
+            page.nodes.count { it.match } shouldBe if (term == null) 0 else 1
+        }
+    }
+
+    @Test
+    fun `unicode whitespace runs share the normalized continuation identity`() {
+        val cursor = answer(query = "a\u3000\u3000b") { rows }.nextCursor
+        answer(query = "a b", cursor = cursor) { request ->
+            request.query shouldBe "a b"
+            request.after shouldBe rows[199].orderKey
+            emptyList()
+        }.query shouldBe "a b"
+    }
+
+    @Test
+    fun `controls outside the tree whitespace alphabet are refused before loading`() {
+        shouldThrow<DatapipelinesException> {
+            answer(query = "\u0085x") { error("Control must be refused before loading") }
+        }.code shouldBe INVALID
+    }
+
+    @Test
+    fun `shared length bound runs before the tree collapse`() {
+        val over = "a" + "\u3000".repeat(co.datapipelines.pipeline.SearchNeedle.MAX_LENGTH) + "b"
+        shouldThrow<co.datapipelines.pipeline.SearchQueryTooLongException> {
+            answer(query = over) { error("The shared raw term bound must run before collapse") }
+        }
+    }
+
     @Test
     fun `search includes all ancestors of each delivered match inside the root`() {
         val page = answer(query = "match") { rows }
