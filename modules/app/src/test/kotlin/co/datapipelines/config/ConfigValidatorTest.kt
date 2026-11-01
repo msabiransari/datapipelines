@@ -317,6 +317,19 @@ class ConfigValidatorTest {
     )
 
     @Test
+    fun `omitted dashboard reservation limits still use the binding defaults against the executor ceiling`() {
+        listOf(emptyMap(), dashboards().mapValues { null }).forEach { absent ->
+            val report = ConfigValidator.validate(validSnapshot().copy(executorMaxConcurrentPerInstance = "3", dashboards = absent))
+
+            report.violations.single().shouldContain("max-executions-per-refresh (16)")
+            report.warnings.single().shouldContain("max-concurrent-dashboard-executions-per-instance (40)")
+        }
+        val allowed = ConfigValidator.validate(validSnapshot().copy(executorMaxConcurrentPerInstance = "20"))
+        allowed.violations.shouldBeEmpty()
+        allowed.warnings.single().shouldContain("max-concurrent-dashboard-executions-per-instance (40)")
+    }
+
+    @Test
     fun `an executor ceiling below max-executions-per-refresh is refused - both keys and both values named`() {
         // Production from 2026-09-18 to 2026-10-28: cap 3 against the default 16, and every 7-source refresh was a 429.
         val report = ConfigValidator.validate(validSnapshot().copy(executorMaxConcurrentPerInstance = "3", dashboards = dashboards()))

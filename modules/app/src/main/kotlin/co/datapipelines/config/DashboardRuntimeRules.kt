@@ -93,13 +93,27 @@ internal object DashboardRuntimeRules {
     ) {
         val (executorKey, ceiling) = executorCeiling(snapshot, defaultExecutorCeiling) ?: return
         val parsed = parsed(snapshot, violations = null)
-        parsed[MAX_EXECUTIONS_PER_REFRESH]?.takeIf { it > ceiling }?.let { perRefresh ->
+        // A replacement external config may omit these leaves; the binding still supplies its defaults.
+        // Only absent values default here: malformed explicit values remain the bounds check's violation.
+        val perRefresh =
+            if (snapshot.dashboards[MAX_EXECUTIONS_PER_REFRESH] == null) {
+                DEFAULT_MAX_EXECUTIONS_PER_REFRESH
+            } else {
+                parsed[MAX_EXECUTIONS_PER_REFRESH]
+            }
+        val perInstance =
+            if (snapshot.dashboards[MAX_DASHBOARD_EXECUTIONS_PER_INSTANCE] == null) {
+                DEFAULT_MAX_DASHBOARD_EXECUTIONS_PER_INSTANCE
+            } else {
+                parsed[MAX_DASHBOARD_EXECUTIONS_PER_INSTANCE]
+            }
+        if (perRefresh != null && perRefresh > ceiling) {
             violations +=
                 "$MAX_EXECUTIONS_PER_REFRESH ($perRefresh) must not exceed $executorKey ($ceiling) (§3.34): a refresh " +
                 "reserves one executor slot per distinct execution, all at once, so a dashboard at the per-refresh bound " +
                 "could never be admitted. Raise $executorKey to at least $perRefresh, or lower $MAX_EXECUTIONS_PER_REFRESH."
         }
-        parsed[MAX_DASHBOARD_EXECUTIONS_PER_INSTANCE]?.takeIf { it > ceiling }?.let { perInstance ->
+        if (perInstance != null && perInstance > ceiling) {
             warnings +=
                 "event=config.dashboard_executions_above_executor_ceiling " +
                 "message=\"$MAX_DASHBOARD_EXECUTIONS_PER_INSTANCE ($perInstance) exceeds $executorKey ($ceiling): dashboard " +
@@ -146,4 +160,6 @@ internal object DashboardRuntimeRules {
     private const val MAX_EXECUTIONS_PER_REFRESH = "datapipelines.dashboards.admission.max-executions-per-refresh"
     private const val MAX_DASHBOARD_EXECUTIONS_PER_INSTANCE =
         "datapipelines.dashboards.admission.max-concurrent-dashboard-executions-per-instance"
+    private const val DEFAULT_MAX_EXECUTIONS_PER_REFRESH = 16L
+    private const val DEFAULT_MAX_DASHBOARD_EXECUTIONS_PER_INSTANCE = 40L
 }
