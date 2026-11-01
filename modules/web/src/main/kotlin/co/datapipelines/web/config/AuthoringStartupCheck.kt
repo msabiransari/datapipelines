@@ -29,12 +29,11 @@ import org.springframework.core.env.Environment
  *   wires it to `PromotionProperties.receives`, and the default `{ false }` survives only for
  *   the unit tests that drive the check directly. It does not fail startup — a one-box
  *   deployment may legitimately be both.
- * - **WARN — saved dashboards this instance can never refresh** (#762): a dashboard whose
- *   DISTINCT executions exceed the smaller of `max-executions-per-refresh` and the executor's
- *   instance ceiling is refused on every refresh (`never_admissible`). The validator holds new
- *   saves AND promotion imports to the first, and `ConfigValidator` holds the first to the
- *   second, so only a document saved or imported before a bound was lowered gets here — found
- *   once at boot instead of by a viewer.
+ * - **WARN — saved dashboards may exceed a refresh ceiling** (#762): their static all-source
+ *   invocation upper bounds exceed the smaller of `max-executions-per-refresh` and the executor's
+ *   instance ceiling. Equal evaluated bindings or a subset of targets can use fewer executions.
+ *   Saves and promotion imports check the static bound, so the warning finds documents retained
+ *   from before a bound was lowered.
  *   A warning, not a refusal: the rest of the deployment works, and the operator decides which
  *   number moves.
  * - **Refusal — drafts on an authoring-disabled deployment** (C8): a receiver holding
@@ -95,7 +94,7 @@ class AuthoringStartupCheck(
             )
         }
 
-        warnNeverAdmissibleDashboards()
+        warnDashboardRefreshBounds()
 
         if (!authoringEnabled) {
             refuseDrafts()
@@ -103,12 +102,12 @@ class AuthoringStartupCheck(
     }
 
     /**
-     * #762 — every dashboard at its listed version whose distinct executions ([DashboardValidator.distinctInvocations],
-     * the validator's own count) exceed the smaller ceiling, in ONE line naming each (`workspace/name@version`, its
-     * count) and the ceiling with its key. The count is of DISTINCT executions — two sources sharing a pipeline release
-     * and bindings are one — not raw sources. Silent when none does.
+     * #762 — dashboards whose static all-source invocation upper bound exceeds the smaller ceiling, in ONE line
+     * naming each (`workspace/name@version`, its bound) and the ceiling with its key. Uses the validator's own count
+     * ([DashboardValidator.distinctInvocations]). Evaluated bindings can collapse together and targeted refreshes can
+     * use fewer sources, so this warns of possible refusal rather than proving every refresh impossible.
      */
-    private fun warnNeverAdmissibleDashboards() {
+    private fun warnDashboardRefreshBounds() {
         val (ceiling, key) =
             listOf(
                 dashboardRuntime.maxExecutionsPerRefresh to DashboardRuntimeKey.MAX_EXECUTIONS_PER_REFRESH.path,
@@ -125,11 +124,11 @@ class AuthoringStartupCheck(
         if (over.isEmpty()) return
         val named = over.take(MAX_NAMED) + if (over.size > MAX_NAMED) listOf("… and ${over.size - MAX_NAMED} more") else emptyList()
         log.warn(
-            "event=config.dashboards_never_admissible count={} ceiling={} key={} " +
-                "message=\"{} saved dashboard(s) need more distinct executions per refresh than this instance can ever admit " +
-                "({}={}); every refresh of them is refused as never_admissible. Raise that key to at least the largest count " +
-                "below (max-executions-per-refresh may not exceed the executor's max-concurrent-executions-per-instance), or " +
-                "reduce the dashboard's distinct executions (configuration.md §3.34). Dashboards (distinct executions): {}\"",
+            "event=config.dashboards_above_refresh_ceiling count={} ceiling={} key={} " +
+                "message=\"{} saved dashboard(s) have an all-source invocation upper bound above this instance's ceiling " +
+                "({}={}); a refresh exceeding it is refused as never_admissible. Equal evaluated bindings or fewer targets " +
+                "can require fewer executions. Review the dashboard and ceiling before raising the key or reducing sources " +
+                "(configuration.md §3.34). Dashboards (all-source invocation upper bounds): {}\"",
             over.size,
             ceiling,
             key,

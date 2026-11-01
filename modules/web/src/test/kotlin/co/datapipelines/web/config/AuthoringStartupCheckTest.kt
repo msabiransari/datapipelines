@@ -3,10 +3,12 @@ package co.datapipelines.web.config
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
+import co.datapipelines.application.dashboards.RefreshPlanner
 import co.datapipelines.executor.ExecutionSlots
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.visualization.ActionScope
 import co.datapipelines.visualization.ArtifactRef
 import co.datapipelines.visualization.DashboardBody
 import co.datapipelines.visualization.DashboardLayout
@@ -16,6 +18,7 @@ import co.datapipelines.visualization.DashboardRuntimeKey
 import co.datapipelines.visualization.DashboardSource
 import co.datapipelines.visualization.InputMapping
 import co.datapipelines.visualization.ListedDashboard
+import co.datapipelines.visualization.ParameterBinding
 import co.datapipelines.visualization.VisualizationOccurrence
 import co.datapipelines.web.capturingLogEvents
 import io.kotest.assertions.throwables.shouldNotThrow
@@ -37,7 +40,7 @@ import org.springframework.core.env.StandardEnvironment
  * the receiver-also-authors WARN (driven through the seam — the promotion half of the
  * combination is reserved config, so the check is currently ONE-SIDED and the seam answers
  * "no key" in production until promotion ships), and the refusal when an authoring-disabled
- * deployment holds existing drafts, naming them. #762 adds the WARN naming saved dashboards whose distinct executions
+ * deployment holds existing drafts, naming them. #762 adds the WARN naming saved dashboards whose static invocation upper bounds
  * exceed the smaller refresh ceiling.
  */
 class AuthoringStartupCheckTest {
@@ -221,7 +224,7 @@ class AuthoringStartupCheckTest {
         }
     }
 
-    // ---- #762: saved dashboards this instance can never refresh are named at boot ---------
+    // ---- #762: saved dashboards with possible refresh refusals are named at boot ---------
 
     @Test
     fun `a saved dashboard needing more distinct executions than the smaller ceiling is named once, with its numbers`() {
@@ -237,11 +240,35 @@ class AuthoringStartupCheckTest {
             boot(ExecutionSlots(maxPerUser = 4, maxPerInstance = 4)).filter { it.level == Level.WARN }.map { it.formattedMessage }
 
         warnings.size shouldBe 1
-        warnings.single() shouldContain "event=config.dashboards_never_admissible count=1 ceiling=4 " +
+        warnings.single() shouldContain "event=config.dashboards_above_refresh_ceiling count=1 ceiling=4 " +
             "key=${ExecutionSlots.INSTANCE_CEILING_KEY}"
         warnings.single() shouldContain "acme/acme/dashboards/explorer@3 (5)"
         warnings.single() shouldNotContain "pulse"
         warnings.single() shouldNotContain "broken"
+    }
+
+    @Test
+    fun `the boot warning is an upper bound - equal evaluated bindings and target subsets can still fit`() {
+        val pipeline = ArtifactRef("acme/pipelines/shared", 1)
+        val body =
+            board(distinct = 2).copy(
+                sources =
+                    listOf(
+                        DashboardSource("s1", pipeline, mapOf("x" to ParameterBinding(parameter = "a"))),
+                        DashboardSource("s2", pipeline, mapOf("x" to ParameterBinding(parameter = "b"))),
+                    ),
+            )
+        every { dashboards.findAllListed() } returns listOf(ListedDashboard("acme", "acme/dashboards/shared", 1, body))
+
+        val warning = boot(ExecutionSlots(4, 1)).single { it.level == Level.WARN }.formattedMessage
+        warning shouldContain "all-source invocation upper bound"
+        warning shouldContain "Equal evaluated bindings or fewer targets"
+        warning shouldNotContain "every refresh"
+        val one = com.fasterxml.jackson.databind.node.IntNode.valueOf(1)
+        val two = com.fasterxml.jackson.databind.node.IntNode.valueOf(2)
+        val planner = RefreshPlanner()
+        planner.plan(body, ActionScope.ALL, emptyList(), mapOf("a" to one, "b" to one)).invocations.size shouldBe 1
+        planner.plan(body, ActionScope.TARGETS, listOf("v_s1"), mapOf("a" to one, "b" to two)).invocations.size shouldBe 1
     }
 
     @Test
