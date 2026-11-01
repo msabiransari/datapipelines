@@ -305,6 +305,73 @@ class ConfigValidatorTest {
             .none { it.contains("tempdb budget") } shouldBe true
     }
 
+    // ------------------------------------------------------------------ §3.34 the executor's instance ceiling (#762)
+
+    /** The two dashboards keys a refresh's reservation is sized by, as the environment hands them over. */
+    private fun dashboards(
+        perRefresh: String = "16",
+        perInstance: String = "40",
+    ) = mapOf(
+        "datapipelines.dashboards.admission.max-executions-per-refresh" to perRefresh,
+        "datapipelines.dashboards.admission.max-concurrent-dashboard-executions-per-instance" to perInstance,
+    )
+
+    @Test
+    fun `an executor ceiling below max-executions-per-refresh is refused - both keys and both values named`() {
+        // Production from 2026-09-18 to 2026-10-28: cap 3 against the default 16, and every 7-source refresh was a 429.
+        val report = ConfigValidator.validate(validSnapshot().copy(executorMaxConcurrentPerInstance = "3", dashboards = dashboards()))
+
+        val refusal = report.violations.single()
+        refusal.shouldContain("datapipelines.dashboards.admission.max-executions-per-refresh (16)")
+        refusal.shouldContain("datapipelines.executor.max-concurrent-executions-per-instance (3)")
+        refusal.shouldContain("could never be admitted")
+    }
+
+    @Test
+    fun `a dashboards execution cap above the executor ceiling boots with ONE warning naming both - production's 40 against 20`() {
+        val report = ConfigValidator.validate(validSnapshot().copy(executorMaxConcurrentPerInstance = "20", dashboards = dashboards()))
+
+        report.violations.shouldBeEmpty()
+        val warning = report.warnings.single()
+        warning.shouldContain("event=config.dashboard_executions_above_executor_ceiling")
+        warning.shouldContain("datapipelines.dashboards.admission.max-concurrent-dashboard-executions-per-instance (40)")
+        warning.shouldContain("datapipelines.executor.max-concurrent-executions-per-instance (20)")
+    }
+
+    @Test
+    fun `the shipped defaults - 100, 16 and 40 - and an unset executor key are silent, and the bound is inclusive`() {
+        listOf(
+            validSnapshot().copy(executorMaxConcurrentPerInstance = "100", dashboards = dashboards()),
+            validSnapshot().copy(dashboards = dashboards()), // unset: the documented default (100) is what runs
+            validSnapshot().copy(executorMaxConcurrentPerInstance = "16", dashboards = dashboards(perInstance = "16")),
+        ).forEach { snapshot ->
+            val report = ConfigValidator.validate(snapshot)
+            report.violations.shouldBeEmpty()
+            report.warnings.shouldBeEmpty()
+        }
+    }
+
+    @Test
+    fun `the deprecated alias's value is the ceiling in effect - and the refusal names the alias`() {
+        val report = ConfigValidator.validate(validSnapshot().copy(executorMaxConcurrentGlobal = "10", dashboards = dashboards()))
+
+        report.violations.single().shouldContain("datapipelines.executor.max-concurrent-executions-global (10)")
+    }
+
+    @Test
+    fun `a dashboards key that does not parse is named once - by its bounds check, never judged against the ceiling`() {
+        val report =
+            ConfigValidator.validate(
+                validSnapshot().copy(
+                    executorMaxConcurrentPerInstance = "3",
+                    dashboards = dashboards(perRefresh = "lots", perInstance = "2"),
+                ),
+            )
+
+        report.violations.single().shouldContain("is 'lots'") // and no second line judging 'lots' against the ceiling of 3
+        report.warnings.shouldBeEmpty() // 2 is within the ceiling
+    }
+
     @Test
     fun `ConfigSnapshot toString redacts secret fields`() {
         val snapshot =

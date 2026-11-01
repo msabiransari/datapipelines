@@ -812,6 +812,36 @@ class DashboardRepository(
             )
         }
 
+    /**
+     * Every dashboard of every workspace not deleted (a deactivated one may come back) at its LISTED version (the
+     * pointer, else — never released — the draft), with its body — the boot scan's evidence (#762:
+     * `AuthoringStartupCheck` warns of a saved dashboard needing more distinct executions than this instance can ever
+     * admit). Cross-workspace by design, like [findAllDraftNames]: it feeds a SERVER log line, never a response. A
+     * stored body the codec cannot read is listed with a null body.
+     */
+    fun findAllListed(): List<ListedDashboard> =
+        jdbc.query(
+            """
+            SELECT w.name AS workspace_name, s.name, v.version, v.body_json::TEXT AS body_json
+              FROM dashboards s
+              JOIN workspaces w ON w.id = s.workspace_id
+              JOIN dashboard_versions v ON v.dashboard_id = s.id
+               AND v.version = COALESCE(
+                       s.current_version,
+                       (SELECT MAX(d.version) FROM dashboard_versions d WHERE d.dashboard_id = s.id AND d.status = 'DRAFT'))
+             WHERE w.is_deleted = FALSE
+             ORDER BY w.name, s.name
+            """.trimIndent(),
+            emptyMap<String, Any>(),
+        ) { rs, _ ->
+            ListedDashboard(
+                workspaceName = rs.getString("workspace_name"),
+                name = rs.getString("name"),
+                version = rs.getInt("version"),
+                body = runCatching { BodyCodec.Dashboard.read(rs.getString("body_json")) }.getOrNull(),
+            )
+        }
+
     /** The `name` strings of [json]'s array elements, read at [at]; a malformed stored array reads as none. */
     private fun namesOf(
         json: String,
@@ -830,6 +860,15 @@ class DashboardRepository(
         val pinnedName: String,
     )
 }
+
+/** One [DashboardRepository.findAllListed] row: a dashboard by workspace and name, at its listed version. */
+data class ListedDashboard(
+    val workspaceName: String,
+    val name: String,
+    val version: Int,
+    /** Null when the stored body no longer reads — the scan skips it rather than refusing to boot. */
+    val body: DashboardBody?,
+)
 
 /**
  * One current RELEASED dashboard's promotion projection (#330) — the identity fields of

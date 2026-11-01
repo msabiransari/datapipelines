@@ -70,6 +70,7 @@ class ExecutionSlotsInstanceOnlyTest {
 
             ((System.nanoTime() - started) / NANOS_PER_MILLI) shouldBeLessThan 1_000L
             slots.inFlight shouldBe 0
+            slots.instanceCeiling shouldBe 4 // what a refresh asks before it waits (#762)
         }
 
     @Test

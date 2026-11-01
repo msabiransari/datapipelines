@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.46 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.47 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-01
@@ -281,6 +281,7 @@ The dashboard runtime ([Dashboards §5](dashboards.md#5-the-runtime)) logs at th
 | Level | `event=` | When | Fields |
 |---|---|---|---|
 | INFO | `dashboard.refresh_finished` | A refresh ended (any status) | `refresh_id`, `status`, `targets` |
+| WARN | `dashboard.refresh_never_admissible` | A refresh was refused at once because its distinct executions exceed the smaller of `max-executions-per-refresh` and the executor's instance ceiling, so it can never be admitted here (#762): the 429 `dashboard.refresh.saturated` carries `details.reason=never_admissible`, no refresh row is written, and the refusal counts under `reason=saturated` (§4.1). One line per refused attempt; `key` is the configuration key to raise ([Configuration §3.34](configuration.md#334-the-dashboard-runtime-10-l2)) | `workspace_id`, `dashboard_id`, `invocations`, `ceiling`, `key` |
 | ERROR | `dashboard.refresh_work_failed` | The refresh's work threw unexpectedly; the row is still closed `FAILED` | `refresh_id`, `error` |
 | ERROR | `dashboard.refresh_end_failed` | A terminal step (`finish` — the row write — or `audit`) threw; the remaining steps and the last frame still ran | `refresh_id`, `step`, `error` |
 | ERROR | `dashboard.refresh_link_failed` | The `dashboard_refresh_executions` link could not be written for a started source; the execution carries on unlinked | `refresh_id`, `error` |
@@ -670,6 +671,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-01 | v1.47 | 762 (#762) never-admissible dashboard refresh | **§3.4J** gains `dashboard.refresh_never_admissible`: the WARN a refresh logs when it is refused at once because it can never be admitted on this instance (`workspace_id`, `dashboard_id`, `invocations`, `ceiling`, `key`). |
 | 2026-10-24 | v1.46 | 442b (#442) schedule notification delivery | **§3.4E** gains the nine `scheduler.notification.*` events (`enqueued`, `backlog_full`, `sent`, `retry`, `failed`, `uncertain`, `render_failed`, `port_failed`, `settle_lost`) and the rule that they carry the recipient's domain, never an address; **§4.1** gains `datapipelines.scheduler.notifications.{sent,failed,uncertain}`. |
 | 2026-10-21 | v1.45 | #637 retention event-catalogue parity | **§3.4's namespace sentence** now lists thirteen namespaces, including `retention`; `ObservabilityEventCatalogParityTest` enforces the existing `retention.step_failed` row with a non-vacuity floor of one. No event added or renamed. |
 | 2026-10-21 | v1.44 | 636 (#636) the housekeeping statements' bounds | **§3.4J** `dashboard.refresh_sweep_failed` and `dashboard.refresh_retention_failed`, and **§3.4M** `parameter.evaluation_sweep_failed` and `parameter.evaluation_retention_failed`, gain "or was cancelled at its bound (`sql_state=57014`)" with their bound (the refresh sweep's 10 s, the retention tick's 25 s) and their `tick_failed` job; **§4.1** `tick_failed` lists eight `job` values; **§3.4I** `retention.step_failed` counts every step under its job, only what escaped the step's own catch; **§3.4H** names the dashboard refresh sweep among the `dp-scheduled` jobs and the four bounds in `shutdown.scheduled_jobs_incomplete` (the pool reaper is the one unbounded job left). No event added or renamed. |

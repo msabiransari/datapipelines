@@ -274,6 +274,51 @@ class DashboardValidatorTest {
         failures.last().details["reason"] shouldBe "too_many_failures"
     }
 
+    /**
+     * #762 — the count the save refusal and the boot WARN share: DISTINCT executions, not raw sources. A second source
+     * repeating the first's pipeline and bindings is the same execution; a different literal is another; a source no
+     * visualization reads runs nothing. The validator's refusal reads [DashboardValidator.distinctInvocations], so the two
+     * cannot disagree — this pins both on the same documents.
+     */
+    @Test
+    fun `distinct executions - a repeated source is one, a different literal is another, an unread source is none`() {
+        val shared = DocumentFixtures.dashboard().also { readBy(it, source = "revenue_again", chart = "again_chart", currency = "USD") }
+        val twoWays = shared.deepCopy().also { readBy(it, source = "revenue_eur", chart = "eur_chart", currency = "EUR") }
+        val unread =
+            DocumentFixtures.dashboard().also { (it.get("sources") as ArrayNode).add(it.obj("sources[0]").deepCopy().put("name", "idle")) }
+
+        listOf(DocumentFixtures.dashboard(), shared, twoWays, unread).map {
+            DashboardValidator.distinctInvocations(ValidatorFakes.dashboardDocument(it).body)
+        } shouldBe listOf(1, 1, 2, 1)
+        valid(shared) { it.maxExecutionsPerRefresh = 1 }
+        valid(twoWays) { it.maxExecutionsPerRefresh = 2 }
+        failures(twoWays) { it.maxExecutionsPerRefresh = 1 }.map { it.code to it.details } shouldBe
+            listOf(DashboardErrorCodes.TOO_MANY_INVOCATIONS to mapOf("invocations" to 2, "max" to 1))
+    }
+
+    /** Adds [source] (the worked source with its currency literal set to [currency]) and a gridded [chart] reading it. */
+    private fun readBy(
+        tree: ObjectNode,
+        source: String,
+        chart: String,
+        currency: String,
+    ) {
+        val copy = tree.obj("sources[0]").deepCopy().put("name", source)
+        copy.obj("parameters.currency").put("value", currency)
+        (tree.get("sources") as ArrayNode).add(copy)
+        val occurrence = tree.obj("visualizations[0]").deepCopy().put("name", chart)
+        occurrence.obj("inputs.revenue").put("source", source)
+        (tree.get("visualizations") as ArrayNode).add(occurrence)
+        val row = grid(tree).size() * 4
+        grid(tree)
+            .addObject()
+            .put("name", chart)
+            .put("x", 6)
+            .put("y", row)
+            .put("w", 6)
+            .put("h", 4)
+    }
+
     private fun grid(tree: ObjectNode): ArrayNode = tree.obj("layout").get("grid") as ArrayNode
 
     private fun valid(
