@@ -1,6 +1,11 @@
 package co.datapipelines.browser
 
 import com.microsoft.playwright.Page
+import com.sun.net.httpserver.HttpServer
+import java.net.InetSocketAddress
+import java.net.URLDecoder
+import java.sql.DriverManager
+import java.util.UUID
 
 /**
  * #9 slice 2 — REST-seeded fixtures for the Schedules suites, through the browser's OWN session
@@ -14,6 +19,83 @@ import com.microsoft.playwright.Page
  * the binder has something to refuse.
  */
 internal object ScheduleFixtures {
+    const val HIDDEN_PIPELINE = "schedules764/hidden"
+
+    /** #764: no existing controlled blocking executor; seed state words just like OverviewSchedulesE2eTest. */
+    fun seedLastRun(
+        scheduleId: String,
+        state: String,
+    ) {
+        require(state in setOf("failed", "queued"))
+        DriverManager.getConnection(SharedBrowserE2e.jdbcUrl, SharedBrowserE2e.username, SharedBrowserE2e.password).use { connection ->
+            connection
+                .prepareStatement(
+                    """
+                    INSERT INTO schedule_runs (id, schedule_id, workspace_id, origin, scheduled_at, reference_at,
+                        reference_timezone, admit_by, executor_id, payload_schema_version, payload_json, actor_user_id, state)
+                    SELECT ?, id, workspace_id, 'cron', NOW(), NOW(), 'UTC', NOW(), 'pipeline', 1, '{}'::jsonb, created_by, ?
+                      FROM schedules WHERE id = ?
+                    """.trimIndent(),
+                ).use { statement ->
+                    statement.setObject(1, UUID.randomUUID())
+                    statement.setString(2, state)
+                    statement.setObject(3, UUID.fromString(scheduleId))
+                    check(statement.executeUpdate() == 1) { "missing schedule $scheduleId for $state fixture" }
+                }
+        }
+    }
+
+    /** Membership in the walk's isolated workspace, granted before the member's first login. */
+    fun seedMembership(
+        workspace: String,
+        email: String,
+        role: String,
+    ) {
+        DriverManager.getConnection(SharedBrowserE2e.jdbcUrl, SharedBrowserE2e.username, SharedBrowserE2e.password).use { connection ->
+            connection
+                .prepareStatement(
+                    """
+                    INSERT INTO workspace_members (workspace_id, user_id, role)
+                    SELECT w.id, u.id, ? FROM workspaces w, users u WHERE w.name = ? AND u.email = ?
+                    """.trimIndent(),
+                ).use { statement ->
+                    statement.setString(1, role)
+                    statement.setString(2, workspace)
+                    statement.setString(3, email)
+                    check(statement.executeUpdate() == 1) { "missing workspace/member for $role fixture" }
+                }
+        }
+    }
+
+    /** Loopback higher environment already holding [HIDDEN_PIPELINE] at its released version. */
+    fun promotionTarget(key: String): HttpServer =
+        HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).also { server ->
+            server.createContext("/api/v1/promotion/inventory") { exchange ->
+                val workspace =
+                    exchange.requestURI.rawQuery
+                        .orEmpty()
+                        .split('&')
+                        .firstOrNull { it.startsWith("workspace=") }
+                        ?.substringAfter('=')
+                        ?.let { URLDecoder.decode(it, Charsets.UTF_8) }
+                        .orEmpty()
+                val admitted = exchange.requestHeaders.getFirst("DP-Promotion-Key") == key
+                val body =
+                    if (admitted) {
+                        """{"schema_version":1,"correlation_id":"stub","data":{"deployment":"uat",""" +
+                            """"authoring_enabled":false,"workspace":"$workspace","pipelines":[{"name":"$HIDDEN_PIPELINE",""" +
+                            """"current_version":1,"body_hash":"hash-on-target"}],"templates":[],"datasources":[],"parameter_sets":[]}}"""
+                    } else {
+                        """{"error":{"code":"promotion.key_invalid","message":"bad key"}}"""
+                    }
+                val bytes = body.toByteArray(Charsets.UTF_8)
+                exchange.responseHeaders.add("Content-Type", "application/json")
+                exchange.sendResponseHeaders(if (admitted) 200 else 401, bytes.size.toLong())
+                exchange.responseBody.use { it.write(bytes) }
+            }
+            server.start()
+        }
+
     /** Once a year, 03:00 UTC on 1 January — never due while a suite runs. */
     const val YEARLY = "0 3 1 1 *"
 
