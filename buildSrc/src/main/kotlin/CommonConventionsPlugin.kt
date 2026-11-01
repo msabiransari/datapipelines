@@ -269,6 +269,46 @@ class CommonConventionsPlugin : Plugin<Project> {
                     .orNull
                     ?.let { value -> systemProperty(key, value) }
             }
+            // A test JVM that HotSpot itself kills writes its error report into this task's
+            // build/hs_err/ (#685, DEVELOPMENT.md §9.4), where CI's gate-reports artifact keeps
+            // it; HotSpot's default is the JVM's cwd (the module directory), which nothing
+            // collects. ErrorFile ALONE: -XX:+ErrorFileToStderr would send the report to stderr
+            // INSTEAD of the file (measured on 21.0.12, #685 evidence 01). A provider with no
+            // annotated property: the absolute path is resolved at execution and is not a task
+            // input. HotSpot does not create a missing directory, so doFirst does.
+            val crashFileDirectory = project.layout.buildDirectory.dir("hs_err")
+            jvmArgumentProviders.add(
+                object : org.gradle.process.CommandLineArgumentProvider {
+                    override fun asArguments(): Iterable<String> {
+                        val report =
+                            crashFileDirectory
+                                .get()
+                                .asFile
+                                .resolve("hs_err_pid%p.log")
+                        return listOf("-XX:ErrorFile=" + report.path)
+                    }
+                },
+            )
+            doFirst { crashFileDirectory.get().asFile.mkdirs() }
+            // glibc's thread-stack cache is OFF in every test JVM (#685, DEVELOPMENT.md §9.4).
+            // The GraalJS isolate's native threads (sandbox limit checkers, Truffle compiler
+            // threads) attach to HotSpot with a one-page glibc guard, so HotSpot puts their
+            // guard zones one page higher than on a thread it starts itself; at exit it leaves
+            // those zones PROT_NONE in a stack block glibc then hands to the next thread. A Java
+            // thread reusing that block carries a stray PROT_NONE page just above its own zones,
+            // and a deep recursion that should end in StackOverflowError kills the JVM by SIGSEGV
+            // instead (exit 139, no hs_err). Uncached, every thread gets a fresh mapping. Set at
+            // execution, keeping any other tunable the environment already carries.
+            doFirst {
+                val stackCache = "glibc.pthread.stack_cache_size="
+                val kept =
+                    environment["GLIBC_TUNABLES"]
+                        ?.toString()
+                        .orEmpty()
+                        .split(':')
+                        .filter { it.isNotBlank() && !it.startsWith(stackCache) }
+                environment("GLIBC_TUNABLES", (kept + (stackCache + "0")).joinToString(":"))
+            }
             // If the platform discovers no tests at all, that is a broken test setup,
             // not a pass. Guards the "engine found nothing" half of the false-green.
             failOnNoDiscoveredTests.set(true)
