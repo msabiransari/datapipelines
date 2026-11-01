@@ -38,10 +38,19 @@ class ExecutionSlots(
     private val instanceWide = AtomicInteger()
     private val perUser = ConcurrentHashMap<UUID, Int>()
 
-    private companion object {
+    companion object {
         /** How often a bounded wait re-tries: a slot frees on an execution's end, so tens of milliseconds is prompt and cheap. */
-        const val POLL_INTERVAL_MILLIS = 25L
+        private const val POLL_INTERVAL_MILLIS = 25L
+
+        /** The configuration key [instanceCeiling] comes from — what a "never admissible" refusal names (#762). */
+        const val INSTANCE_CEILING_KEY = "datapipelines.executor.max-concurrent-executions-per-instance"
     }
+
+    /**
+     * The most executions THIS instance ever runs at once ([INSTANCE_CEILING_KEY]), read-only: a dashboard refresh
+     * asks it before waiting, because a reservation larger than it can never be admitted (#762).
+     */
+    val instanceCeiling: Int get() = maxPerInstance
 
     /** Live executions across all users on THIS instance — observability and the §15.3 gauge. */
     val inFlight: Int get() = instanceWide.get()
