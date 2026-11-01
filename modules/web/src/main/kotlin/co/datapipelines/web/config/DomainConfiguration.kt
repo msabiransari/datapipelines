@@ -152,9 +152,11 @@ class DomainConfiguration {
      * posture line (the `name` label's ONLY consumer — no code branches on it, pinned by
      * [DeploymentNameBranchingGuardTest]), the receiver-also-authors WARN — currently
      * now BOTH-SIDED (055 wired the promotion half through [PromotionProperties]) — and the refusal
-     * when an authoring-disabled deployment still holds drafts, naming them.
+     * when an authoring-disabled deployment still holds drafts, naming them. #762 adds the WARN
+     * naming saved dashboards this instance can never refresh.
      */
     @Bean
+    @Suppress("LongParameterList") // one collaborator per check; #762 added the two refresh ceilings
     fun authoringStartupCheck(
         environment: Environment,
         pipelines: PipelineRepository,
