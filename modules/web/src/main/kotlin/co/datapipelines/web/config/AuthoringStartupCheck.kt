@@ -32,8 +32,9 @@ import org.springframework.core.env.Environment
  * - **WARN — saved dashboards this instance can never refresh** (#762): a dashboard whose
  *   DISTINCT executions exceed the smaller of `max-executions-per-refresh` and the executor's
  *   instance ceiling is refused on every refresh (`never_admissible`). The validator holds new
- *   saves to the first; a document saved under an older, larger bound, or promoted from an
- *   instance with larger ones, is only found here — named once at boot instead of by a viewer.
+ *   saves AND promotion imports to the first, and `ConfigValidator` holds the first to the
+ *   second, so only a document saved or imported before a bound was lowered gets here — found
+ *   once at boot instead of by a viewer.
  *   A warning, not a refusal: the rest of the deployment works, and the operator decides which
  *   number moves.
  * - **Refusal — drafts on an authoring-disabled deployment** (C8): a receiver holding

@@ -558,10 +558,10 @@ evaluated — an invalid selection is a 400 before anything is held; then the pl
   A dashboard needing more distinct executions than one refresh may run is refused at SAVE
   (`dashboard.validation.too_many_invocations`), and startup refuses a `max-executions-per-refresh` above the executor's
   `max-concurrent-executions-per-instance` (#762), so no valid document is permanently saturated on an instance that
-  booted. A document saved under larger bounds — or promoted from an instance with larger ones — still can be: such a
-  refresh is refused at once, without waiting, and the 429's `details.reason` is `never_admissible` (with the count, the
-  ceiling and the key to raise) rather than `busy` (the instance was full for the whole wait); every such saved dashboard
-  is also named once in a boot WARN. The count is of DISTINCT executions (the sharing rule above), never raw sources.
+  booted; a promotion import is validated by the same rule on the receiver. A document saved or imported before a bound
+  was lowered still can be: such a refresh is refused at once, without waiting, and the 429's `details.reason` is
+  `never_admissible` (with the count, the ceiling and the key to raise) rather than `busy` (the instance was full for
+  the whole wait); every such saved dashboard is also named once in a boot WARN. The count is of DISTINCT executions (the sharing rule above), never raw sources.
 - **Caps (D54).** A source's rows are held in a bounded collector counted with the result store's own byte accounting;
   at the first row over `max-bytes-per-source` that source fails `dashboard.refresh.result_too_large` and its dependents
   error; over `max-bytes-per-refresh` the refresh ends PARTIAL. A dashboard run writes NO result store entry and no
