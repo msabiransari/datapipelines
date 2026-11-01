@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.67 (revised — see Change Log)
+**Status:** v1.68 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-10-28
+**Last updated:** 2026-11-01
 
 ---
 
@@ -1669,7 +1669,7 @@ The dashboard artifact's refusals (#10; the implementation spec §3.2, §8, §9,
 | `dashboard.authoring.disabled` | 403 | `datapipelines.deployment.authoring-enabled=false` refuses every authoring write |
 | `dashboard.runtime.configuration_stale` | 409 | a runtime operation's `configuration_id` is not the current one — the client reloads (the spec's §8.1) |
 | `dashboard.runtime.dependency_missing` | 409 | a pinned dependency of the served version no longer resolves at config time (a purged or discarded source release) — never a 500 |
-| `dashboard.refresh.saturated` | 429 | a refresh could not reserve its execution slots within `admission.max-wait-seconds`; `Retry-After` set (D53) |
+| `dashboard.refresh.saturated` | 429 | a refresh could not reserve its execution slots within `admission.max-wait-seconds`; `Retry-After` set (D53). `details.reason` says which (#762): `busy` — the instance was full for the whole wait, retrying later may succeed; `never_admissible` — the refresh needs more distinct executions than this instance can ever admit, refused at once without waiting, with `details.invocations` (the count), `details.ceiling` and `details.key` (the smaller of `dashboards.admission.max-executions-per-refresh` and `executor.max-concurrent-executions-per-instance`, the configuration key to raise) — retrying cannot succeed until an operator raises it |
 | `dashboard.refresh.result_too_large` | 422 | a source's result exceeded `results.max-bytes-per-source` (or the refresh's budget); inside the stream it is a `visualization_status` reason (D54) |
 | `dashboard.refresh.not_found` | 404 | an abort or read of a refresh that does not exist, is not the caller's, or already finished |
 | `dashboard.key.kind_refused` | 403 | a `dashboard` API key presented outside the runtime and refresh routes, or on `/mcp` |
@@ -1925,6 +1925,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-01 | v1.68 | 762 (#762) | §13.23's `dashboard.refresh.saturated` row: additive `details.reason` (`busy` / `never_admissible`) and, for `never_admissible`, `details.invocations`, `details.ceiling` and `details.key`. Code, status and `Retry-After` unchanged; the §13.23 row count is unchanged. |
 | 2026-10-27 | v1.67 | 464 (#464) | New **§13.24 Navigation trees**: `navigation.request.invalid` (400), `navigation.view.unavailable` (503, `Retry-After: 5`, logged at WARN without a stack) and `navigation.metadata.too_large` (503) replace the stand-in `pipeline.execution.aborted` on the ten session-only tree routes ([REST API §24](rest-api.md#24-first-party-navigation-trees)); the prose states the listing liveness rule and the pointer invariant it relies on. Landed in the SAME commit as the `PipelineErrorCodes.Navigation` constants and the `ApiErrorCatalog` rows. |
 | 2026-10-25 | v1.66 | 706 (#706) | §13.7's `auth.role_required` row: `details.held` for an MCP key reads "its OWN role chosen at creation" (was "member role capped at author"); the `auth.key_issuer_role_lost` row now states the code's remaining meaning — the context-judged promotion path ([Auth §9](auth.md#9-auth-errors)) — and drops the retired PK4 cap and the TTL-demotion sentence. Catalog text only: no code added, removed or renamed, so every count stands. |
 | 2026-10-24 | v1.65 | #517 release dependencies, core (S1) | **§13:** the release-plan codes in each family's subsection (record §14: `dependency_not_released` replacing the template-only refusal code for pipeline and parameter, `plan_conflict`, `plan_required`, `plan_invalid`, `dependency_cycle`, `dependency_limit`, `busy`, `bundle_unsupported`; the families whose participant lands later carry Reserved rows). **§12.9:** a release that flips a DRAFT child validates in authoring mode outside the transaction and strictly inside it. Round three (#719): **§12.6 / §12.9 / §13 (the template, §13.13 lifecycle and parameter rows)** — a pipeline's and a parameter set's restore re-judge their outbound pins (missing/DISCARDED → the validation code, `reason: discarded` on a discarded template version; DRAFT → `dependency_not_released`, the shared shape's new reason `not_released`). |
