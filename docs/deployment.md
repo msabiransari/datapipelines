@@ -169,7 +169,7 @@ The app **does not** require inbound network access beyond the HTTP/MCP ports it
 
 **[configuration.md](configuration.md) is the single authority for every configuration key** — YAML path, env var name, default, and description. This spec deliberately does **not** restate key names or defaults: a duplicated default is a default that drifts. What follows is only the operator's startup checklist and the file-mounting mechanics.
 
-Env var names are derivable, never memorized: `datapipelines.` → `DATAPIPELINES_`, remaining YAML path upper-snake-cased ([Configuration §1](configuration.md#1-purpose)).
+Use the exact environment placeholders in [Configuration §5](configuration.md#5-full-applicationyml-template). Most names use upper snake case, but provider, bootstrap, promotion and dashboard settings have explicit exceptions; deriving a name from the YAML path can leave a setting unchanged.
 
 **Before any of this, two variables:** `DATAPIPELINES_ENV` is your organisation's name for this deployment and `DATAPIPELINES_POSTURE` is `development` or `hardened`. A named environment with no posture does not start. [Environments](environments.md) is the page for that decision; [Configuration §3.23](configuration.md#323-environment-and-posture) is the key reference.
 
@@ -464,7 +464,7 @@ What each setting buys, and what goes wrong without it:
 | The datasources the promoted pipelines reference, registered on the receiver | Pre-validated before anything is pushed; a missing one fails the whole batch with `pipeline.promotion.missing_datasources` and leaves the receiver untouched. **Register them with the receiver's own credentials** — a pipeline body never carries environment-specific connection details |
 | The RECEIVER's request-body cap, `datapipelines.web.max-request-bytes` (default 2 MiB, at most 64 MiB — [Configuration §3.31](configuration.md#331-web-request-limits)) | A promotion is ONE push body (`POST /api/v1/promotion/push`); over the receiver's cap it is refused `413 request.body_too_large` (`details.limit_bytes`) before anything applies — atomic, nothing lands — and the sender reports the receiver's refusal verbatim. Measured 2026-09-28 (#291): the product's whole shipped example content — 40 templates and pipelines across the nyc, trade and lake families — is 73 KiB, 3.6% of the default; its largest document is 5.6 KiB. A single template may hold up to 256K characters (`datapipelines.templates.max-body-chars`), so a batch of several near-maximum templates can pass 2 MiB: raise the RECEIVER's key (the sender's cap is not involved) rather than splitting the promotion. |
 
-**Minting the receiver's key** (091; the page is `/api-keys` since 179): on the RECEIVER, sign in as a super admin → the avatar menu's **API keys** → New API key → kind **Server** → name it after the sender (`dev → uat`) → copy the plaintext, shown once. Paste it into the SENDER's `DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_KEY`. **Rotation** is then receiver-side and needs no restart anywhere: mint a second `server` key, set it on the sender, revoke the first. (With the deprecated config value instead: set the new value on both sides and restart both.) No user account is involved either way, so offboarding a human can never break production promotion, and revoking the key revokes nothing else.
+**Minting the receiver's key** (091; the page is `/api-keys` since 179): on the RECEIVER, sign in as a super admin → the avatar menu's **API keys** → New API key → kind **Server** → name it after the sender (`dev → uat`) → copy the plaintext, shown once. Paste it into the SENDER's `DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_KEY`. **Rotation:** mint a second `server` key on the receiver, set it in the sender configuration, restart the sender to bind the new credential, then revoke the first key. The receiver does not need a restart for stored-key issuance or revocation. (With the deprecated config value instead: set the new value on both sides and restart both.) The stored credential authenticates as its key identity rather than a human account; offboarding a human does not revoke that promotion credential.
 
 **Direction is one-way by construction.** The receiver validates; it never calls the sender. A compromised receiver cannot reach back into the authoring environment.
 
@@ -1236,8 +1236,10 @@ the same query to **~0.95 s cold / 0.09 s warm** (index-only scan, 196 buffer hi
 
 `sample-data/lake/<version>/` is different in kind from the two above and the
 difference is the point: **it is read in place**. Nothing is downloaded at demo
-start, nothing is restored into an engine, and there is no one-shot loader
-service. The query engine reads the Parquet objects over HTTPS and fetches only
+start and nothing is restored into an engine. The `sample-data-lake` one-shot
+service runs `deploy/sample-data/place-lake.sh` to place the repository's bootstrap
+and example files on the shared volume; it does not download the dataset.
+The query engine reads the Parquet objects over HTTPS and fetches only
 the ones a query's predicates name.
 
 What is published (build runbook:
