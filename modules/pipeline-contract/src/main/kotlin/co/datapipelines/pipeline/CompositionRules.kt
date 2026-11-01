@@ -220,12 +220,12 @@ internal object CompositionRules {
 
     /**
      * §12.9's parameter-mapping rules against the child's declared `parameters` **and** its
-     * calculator output keys (078 A5-composition, owner ruling 2026-09-05).
+     * calculator and value-mode SCRIPT output keys (078 A5-composition, extended by 7c).
      *
      * A supplied key names either a child declared parameter or one of the pinned child's
-     * CALCULATOR `context_key`s (`calculatorOutputs()` — a key supplied this way skips the
+     * CALCULATOR or value-mode SCRIPT `context_key`s (a key supplied this way skips the
      * child's node exactly as a direct execute-time supply does). Anything else is
-     * `pipeline_parameter_unknown`. A child calculator key is OPTIONAL, never required, so
+     * `pipeline_parameter_unknown`. A child calculator or SCRIPT key is OPTIONAL, never required, so
      * `pipeline_parameter_unmapped` keeps reading only declared parameters.
      *
      * A supplied value is either a typed literal obeying the target's §6.3 wire encoding —
@@ -247,7 +247,7 @@ internal object CompositionRules {
         // 7c (#7): a value-mode SCRIPT's `context_key` is an implicit optional input on the
         // same rule as a calculator key — suppliable here, typed by the pinned contract the
         // body does not carry, so null (ANY) in this map exactly like an ANY-output kind.
-        val childCalculatorKeys = child.calculatorOutputs() + child.scriptOutputKeys().associateWith { null }
+        val childOutputKeys = child.calculatorOutputs() + child.scriptOutputKeys().associateWith { null }
         child.parameters
             .filterValues { it.required && !it.hasDefault }
             .keys
@@ -268,14 +268,14 @@ internal object CompositionRules {
                     checkValue(pipeline, index, node, key, value, Target.parameter(declared), org, into)
                 }
 
-                key in childCalculatorKeys -> {
+                key in childOutputKeys -> {
                     checkValue(
                         pipeline,
                         index,
                         node,
                         key,
                         value,
-                        Target.calculatorOutput(childCalculatorKeys.getValue(key)),
+                        Target.contextOutput(childOutputKeys.getValue(key)),
                         org,
                         into,
                     )
@@ -287,7 +287,7 @@ internal object CompositionRules {
                         "nodes[$index].parameters.${key.truncateForError()}",
                         "Node '${node.id.truncateForError()}' supplies '${key.truncateForError()}', " +
                             "which the child pipeline neither declares as a parameter nor computes as a " +
-                            "calculator context_key.",
+                            "calculator or value-mode script context_key.",
                         mapOf("node" to node.id.truncateForError(), "parameter" to key.truncateForError()),
                     )
                 }
@@ -296,8 +296,9 @@ internal object CompositionRules {
     }
 
     /**
-     * The mapping target on the child side: a declared parameter or a CALCULATOR `context_key`
-     * (078 A5-composition). [type] is null for an ANY-output kind — the value is typed only by
+     * The mapping target on the child side: a declared parameter, CALCULATOR or value-mode SCRIPT
+     * `context_key` (078 A5-composition, extended by 7c). [type] is null for an ANY-output kind
+     * or SCRIPT key — the value is typed only by
      * the run, so the save-time check skips rather than guesses (the A6 convention). A declared
      * parameter also carries its WHOLE declaration (#264): the literal a node supplies is judged
      * by the same rules the child's binder will apply at run, not by the type alone.
@@ -313,7 +314,7 @@ internal object CompositionRules {
         companion object {
             fun parameter(declared: Parameter): Target = Target(declared.type, declared.declaration, "child parameter")
 
-            fun calculatorOutput(type: LogicalType?): Target = Target(type, null, "child calculator output")
+            fun contextOutput(type: LogicalType?): Target = Target(type, null, "child calculator or script output")
         }
     }
 

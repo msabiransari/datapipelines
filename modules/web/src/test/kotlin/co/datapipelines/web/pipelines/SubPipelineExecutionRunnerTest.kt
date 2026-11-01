@@ -73,6 +73,7 @@ import java.util.UUID
  * maps outcomes; the executor's own behavior under those requests is dag's test surface
  * (`SubPipelineCompositionTest`).
  */
+@Suppress("LargeClass") // one runner contract: child requests, delivery, refusals and scalar mappings
 class SubPipelineExecutionRunnerTest {
     private val pipelines = mockk<PipelineRepository>()
     private val resultStore = mockk<ResultStore>()
@@ -128,6 +129,22 @@ class SubPipelineExecutionRunnerTest {
             {"id": "q", "description": "q", "type": "DQL", "source": "tempdb",
              "template": {"id": "test/tq", "version": 1}, "output": {"target": "caller"},
              "depends_on": ["ca"]}
+          ]
+        }
+        """.trimIndent()
+
+    private val childBodyWithScript =
+        """
+        {
+          "schema_version": 1,
+          "name": "test/monthly_revenue",
+          "display_name": "Monthly revenue",
+          "description": "",
+          "parameters": {},
+          "nodes": [
+            {"id": "score", "description": "score", "type": "SCRIPT",
+             "template": {"id": "test/score.jsonata", "version": 1},
+             "inputs": {}, "context_key": "child_score"}
           ]
         }
         """.trimIndent()
@@ -406,6 +423,50 @@ class SubPipelineExecutionRunnerTest {
 
             stub.captured.single().parameters["child_any"] shouldBe DecimalNode(java.math.BigDecimal("4.5"))
         }
+
+    @Test
+    fun `a ref mapped onto a child SCRIPT key takes the referenced scalar`() {
+        runTest {
+            stubRegistry(childBodyWithScript)
+            val stub = ExecutorStub()
+            val node = pipelineNode(parameters = mapOf("child_score" to TextNode("\${parent_score}")))
+
+            runner(stub).run(node, context(values = mapOf("parent_score" to 7)))
+
+            stub.captured.single().parameters["child_score"] shouldBe IntNode(7)
+        }
+    }
+
+    @Test
+    fun `a literal mapped onto a child SCRIPT key passes through unchanged`() {
+        runTest {
+            stubRegistry(childBodyWithScript)
+            val stub = ExecutorStub()
+
+            runner(stub).run(pipelineNode(parameters = mapOf("child_score" to IntNode(7))), context())
+
+            stub.captured.single().parameters["child_score"] shouldBe IntNode(7)
+        }
+    }
+
+    @Test
+    fun `an object ref mapped onto a child SCRIPT key is refused as a non scalar`() {
+        runTest {
+            stubRegistry(childBodyWithScript.replace("child_score", "child_obj"))
+            val stub = ExecutorStub()
+            val node = pipelineNode(parameters = mapOf("child_obj" to TextNode("\${parent_object}")))
+            val value = linkedMapOf("score" to 7)
+
+            val thrown =
+                shouldThrow<DatapipelinesException> {
+                    runner(stub).run(node, context(values = mapOf("parent_object" to value)))
+                }
+
+            thrown.code shouldBe PipelineErrorCodes.Node.CHILD_EXECUTION_FAILED
+            thrown.message shouldContain value.javaClass.simpleName
+            stub.captured shouldBe emptyList()
+        }
+    }
 
     /**
      * 078 A5-composition's NO AUTO-PASSTHROUGH ruling (owner 2026-09-05: hidden coupling): a

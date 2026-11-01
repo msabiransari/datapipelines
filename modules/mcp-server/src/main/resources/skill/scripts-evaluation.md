@@ -53,7 +53,9 @@ tempdb-only. Per mode:
   `{ "target": "caller" }`. `rejects` is required exactly when the contract declares it.
 - **`value`** — no `output` block; the node writes `context_key` (every calculator rule: name
   shape, one writer, never shadowing a parameter, topology-ordered). The key is an implicit
-  optional execute input: supplied, the node is skipped with `provided_by: "caller"`.
+  optional execute input: supplied at execute time or mapped by a parent PIPELINE node's
+  `parameters` (literal or scalar `${name}`), the node is skipped with `provided_by: "caller"`.
+  The pinned output contract still gates the supplied value; object/list references are refused.
 - **`strict: true`** — only with a rejects contract: a non-empty rejects table then fails the
   node with `pipeline.script.rejects_strict`. Default is partition.
 
