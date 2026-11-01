@@ -630,7 +630,7 @@ class CommonConventionsPluginTest {
         )
         val test = ":modules:web:test"
 
-        val plain = runner(test, "--rerun-tasks").build()
+        val plain = runner(test, "--rerun-tasks").withEnvironment(System.getenv() - "GLIBC_TUNABLES").build()
         assertEquals(TaskOutcome.SUCCESS, plain.task(test)?.outcome, plain.output)
         assertEquals("glibc.pthread.stack_cache_size=0", probeLineSeen("glibc-tunables="))
 
