@@ -77,8 +77,9 @@ internal object DashboardRuntimeRules {
      * - `max-executions-per-refresh` above it is REFUSED — a maximal valid refresh could never be admitted, every
      *   refresh of such a dashboard would be a permanent 429 (the third relation's rationale, one level down). Production
      *   ran 3 against 16 for six weeks and nothing said so.
-     * - `max-concurrent-dashboard-executions-per-instance` above it is a WARNING — that cap can never be reached, so it
-     *   bounds nothing; wasteful, not fatal (a deployment running 40 against an executor cap of 20 must still boot).
+     * - `max-concurrent-dashboard-executions-per-instance` above it is a WARNING for operator review, not a refusal.
+     *   Dashboard reservations last for the whole refresh, while executor leases release per execution; overlapping
+     *   refreshes can therefore reach the higher dashboard cap, and both limits still apply.
      *
      * The ceiling in effect is resolved the way the executor binds it: the deprecated `…-global` alias when set (its
      * value runs, `checkExecutorConcurrencyAlias` says so), else the key, else [defaultExecutorCeiling]. A non-integer
@@ -117,8 +118,8 @@ internal object DashboardRuntimeRules {
             warnings +=
                 "event=config.dashboard_executions_above_executor_ceiling " +
                 "message=\"$MAX_DASHBOARD_EXECUTIONS_PER_INSTANCE ($perInstance) exceeds $executorKey ($ceiling): dashboard " +
-                "refreshes can never hold more than $ceiling executor slots at once on this instance, so the dashboards " +
-                "cap bounds nothing above that (§3.34). Lower it to at most $ceiling, or raise $executorKey.\""
+                "reservations last until the whole refresh ends, while executor leases release as executions finish. " +
+                "Overlapping refreshes can reach the higher dashboard cap; review both limits for the workload (§3.34).\""
         }
     }
 

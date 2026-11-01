@@ -349,6 +349,7 @@ class ConfigValidatorTest {
         warning.shouldContain("event=config.dashboard_executions_above_executor_ceiling")
         warning.shouldContain("datapipelines.dashboards.admission.max-concurrent-dashboard-executions-per-instance (40)")
         warning.shouldContain("datapipelines.executor.max-concurrent-executions-per-instance (20)")
+        warning.shouldContain("Overlapping refreshes can reach the higher dashboard cap")
     }
 
     @Test
