@@ -29,7 +29,7 @@ Four parts of it are **normative** today and binding on implementation:
 1. **Structured logs only.** Every log entry is JSON with stable field names. No `println`, no ad-hoc string formatting in logs.
 2. **Correlation IDs everywhere.** Every request carries a correlation ID (`DP-Correlation-Id`, [REST API §3.4](rest-api.md#34-correlation), registered in the `DP-` header registry [§3.6](rest-api.md#36-custom-header-registry)) through every log line, trace span, SSE event payload and MCP tool result. Pipeline executions extend this to per-node correlation. Correlation ID is *never* a metric tag (§4.3).
 3. **Metrics via Micrometer.** Spring Boot's default micrometer integration; no custom metrics framework.
-4. **Tracing via OpenTelemetry.** Vendor-neutral; instrumented into every module.
+4. **Tracing via OpenTelemetry is a design target.** Vendor-neutral instrumentation and export remain deferred (§5); the current build does not enable them.
 5. **Health endpoints for orchestrators.** Root-level `/health` and `/ready` for k8s liveness/readiness probes. The payload contract is owned by [REST API §11](rest-api.md#11-health--diagnostics); §6 here restates it only as far as needed for operators.
 6. **No sensitive data in logs — enforced at the encoder, not by convention.** Passwords, API keys, JDBC URLs with credentials, encryption keys, query result values are scrubbed by the logging pipeline itself, so no logger call site can bypass the rule (§9.2).
 
@@ -483,6 +483,8 @@ High-cardinality tags avoided:
 ## 5. Tracing
 
 ### 5.1 OpenTelemetry
+
+**Implementation status:** the tracing wiring below is a design target, not shipped behavior. The application has no OpenTelemetry SDK/exporter or consumer for the reserved tracing switches; setting them does not enable tracing. See [Configuration §3.15](configuration.md#315-observability) and the deferred export work in #270.
 
 OpenTelemetry SDK initialized in `app`. Auto-instrumentation via the `opentelemetry-spring-boot-starter`:
 

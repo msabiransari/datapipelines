@@ -41,6 +41,11 @@ class AuthPropertiesSpecDriftTest {
         val provider = AuthProperties.Provider()
         val defaults =
             mapOf(
+                "name" to provider.name,
+                "client-id" to provider.clientId,
+                "client-secret" to provider.clientSecret,
+                "issuer-uri" to provider.issuerUri,
+                "display-name" to provider.displayName,
                 "protocol" to provider.protocol,
                 "authorization-uri" to provider.authorizationUri,
                 "token-uri" to provider.tokenUri,
@@ -52,7 +57,7 @@ class AuthPropertiesSpecDriftTest {
                 "picture-hosts" to provider.pictureHosts,
             )
         val rows = documented.filterKeys { it.startsWith(PROVIDER_PREFIX) }
-        withClue("providers rows parsed from configuration.md §3.4") { rows.size shouldBeGreaterThanOrEqual 9 }
+        withClue("providers rows parsed from configuration.md §3.4") { rows.size shouldBeGreaterThanOrEqual defaults.size }
         rows.forEach { (key, value) ->
             val suffix = key.removePrefix(PROVIDER_PREFIX)
             check(defaults.containsKey(suffix)) { "Unknown documented provider row: $key" }
