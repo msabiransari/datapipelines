@@ -61,11 +61,36 @@ internal object LakeRules {
     /** Every key `ConfigValidator.snapshotFrom` reads off the environment for these rules. */
     val KEYS: List<String> =
         listOf(
-            ENABLED, NAME, MODE, STORAGE_KIND, BUCKET, PREFIX_KEY, LANDING_PREFIX, REGION, ENDPOINT, ACCESS_KEY, SECRET_KEY,
-            READER_ACCESS_KEY, READER_SECRET_KEY, MAX_CONCURRENT_INGESTIONS, MAX_CONCURRENT_MAINTENANCE, MAX_DELIVERY_BYTES,
-            STAGING_EXPANSION_FACTOR, SCRATCH_BYTES, STAGING_MEMORY_LIMIT, MAX_OPEN_PARTITIONS, JOB_TIMEOUT, LEASE_WAIT_SECONDS,
-            LOCK_TIMEOUT_SECONDS, STATEMENT_TIMEOUT_SECONDS, MAX_GENERATION_AGE_SECONDS, FRESHNESS_TICK_SECONDS,
-            MAINTENANCE_WINDOW, MAX_BYTES_REWRITTEN, PROTECTION_DAYS, ORPHAN_GRACE_HOURS,
+            ENABLED,
+            NAME,
+            MODE,
+            STORAGE_KIND,
+            BUCKET,
+            PREFIX_KEY,
+            LANDING_PREFIX,
+            REGION,
+            ENDPOINT,
+            ACCESS_KEY,
+            SECRET_KEY,
+            READER_ACCESS_KEY,
+            READER_SECRET_KEY,
+            MAX_CONCURRENT_INGESTIONS,
+            MAX_CONCURRENT_MAINTENANCE,
+            MAX_DELIVERY_BYTES,
+            STAGING_EXPANSION_FACTOR,
+            SCRATCH_BYTES,
+            STAGING_MEMORY_LIMIT,
+            MAX_OPEN_PARTITIONS,
+            JOB_TIMEOUT,
+            LEASE_WAIT_SECONDS,
+            LOCK_TIMEOUT_SECONDS,
+            STATEMENT_TIMEOUT_SECONDS,
+            MAX_GENERATION_AGE_SECONDS,
+            FRESHNESS_TICK_SECONDS,
+            MAINTENANCE_WINDOW,
+            MAX_BYTES_REWRITTEN,
+            PROTECTION_DAYS,
+            ORPHAN_GRACE_HOURS,
         )
 
     /** The credential keys: a rule needs only whether each is set, so the snapshot never holds their values. */
@@ -159,9 +184,8 @@ internal object LakeRules {
         val delivery = dataSize(snapshot, MAX_DELIVERY_BYTES, violations)
         val factor = positiveLong(snapshot, STAGING_EXPANSION_FACTOR, violations)
         val scratch = dataSize(snapshot, SCRATCH_BYTES, violations)
-        if (delivery != null && factor != null && scratch != null &&
-            (delivery.toBytes() > scratch.toBytes() / factor)
-        ) {
+        if (delivery == null || factor == null || scratch == null) return
+        if (delivery.toBytes() > scratch.toBytes() / factor) {
             violations += "$MAX_DELIVERY_BYTES × $STAGING_EXPANSION_FACTOR must not exceed $SCRATCH_BYTES (§3.36)."
         }
     }

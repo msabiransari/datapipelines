@@ -75,7 +75,8 @@ internal object LakeTestDb {
     val host: String get() = postgres.host
 
     /** An autocommit connection of its own on [database] — for fence probes and for polling `pg_stat_activity`. */
-    fun connect(database: String = DATABASE): Connection = DriverManager.getConnection(urlFor(database), postgres.username, postgres.password)
+    fun connect(database: String = DATABASE): Connection =
+        DriverManager.getConnection(urlFor(database), postgres.username, postgres.password)
 
     /** Empties every table the lake writes and puts the catalog back in `normal` mode. TRUNCATE fires no row trigger. */
     fun reset() {

@@ -102,7 +102,13 @@ class LakeBootCheckTest {
         override fun close() = Unit
 
         private fun answer(status: Int) {
-            if (status != OK) throw S3Exception.builder().statusCode(status).message("stub $status").build()
+            if (status != OK) {
+                throw S3Exception
+                    .builder()
+                    .statusCode(status)
+                    .message("stub $status")
+                    .build()
+            }
         }
     }
 

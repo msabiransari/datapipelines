@@ -73,7 +73,7 @@ class LakeBootCheck(
                         " JOIN pg_proc p ON p.oid = t.tgfoid JOIN pg_namespace n ON n.oid = c.relnamespace" +
                         " WHERE n.nspname = current_schema() AND NOT t.tgisinternal AND t.tgenabled IN ('O', 'A')" +
                         " AND c.relname IN ('iceberg_tables', 'iceberg_namespace_properties')",
-                ) { rs, _ -> Triple(rs.getString(1), rs.getString(2), rs.getString(3)) }
+                ) { rs, _ -> Triple(rs.getString("relname"), rs.getString("tgname"), rs.getString("proname")) }
                 .toSet()
         val missing = REQUIRED_TRIGGERS - present
         if (missing.isNotEmpty()) {
@@ -94,7 +94,16 @@ class LakeBootCheck(
         val bucket = head { s3.headBucket(HeadBucketRequest.builder().bucket(storage.bucket).build()) }
         if (bucket != HTTP_OK) refuse(Refusal.STORAGE_UNREACHABLE, "HEAD on the bucket answered HTTP $bucket")
         if (storage.normalisedPrefix.isEmpty()) return
-        val prefix = head { s3.headObject(HeadObjectRequest.builder().bucket(storage.bucket).key(storage.normalisedPrefix).build()) }
+        val prefix =
+            head {
+                s3.headObject(
+                    HeadObjectRequest
+                        .builder()
+                        .bucket(storage.bucket)
+                        .key(storage.normalisedPrefix)
+                        .build(),
+                )
+            }
         if (prefix != HTTP_OK && prefix != HTTP_NOT_FOUND) {
             refuse(Refusal.STORAGE_UNREACHABLE, "HEAD on the prefix answered HTTP $prefix")
         }
@@ -142,7 +151,7 @@ class LakeBootCheck(
     private fun refuse(
         refusal: Refusal,
         detail: String,
-    ): Nothing = throw IllegalStateException("${refusal.id}: ${refusal.summary} — $detail")
+    ): Nothing = error("${refusal.id}: ${refusal.summary} — $detail")
 
     /** The catalogued boot refusals (configuration.md §7). The id leads the message. */
     enum class Refusal(

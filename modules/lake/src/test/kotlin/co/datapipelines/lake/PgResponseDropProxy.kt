@@ -2,6 +2,8 @@ package co.datapipelines.lake
 
 import java.io.DataInputStream
 import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
@@ -47,8 +49,7 @@ internal class PgResponseDropProxy(
     val port: Int get() = server.localPort
 
     /** A JDBC URL to [database] through this proxy. `prepareThreshold=0`: every statement resends its text. */
-    fun url(database: String): String =
-        "jdbc:postgresql://127.0.0.1:$port/$database?sslmode=disable&gssEncMode=disable&prepareThreshold=0"
+    fun url(database: String): String = "jdbc:postgresql://127.0.0.1:$port/$database?sslmode=disable&gssEncMode=disable&prepareThreshold=0"
 
     fun arm() {
         everArmed = true
@@ -83,24 +84,30 @@ internal class PgResponseDropProxy(
         fun clientToServer() {
             try {
                 client.getInputStream().use { input ->
-                    upstream.getOutputStream().use { output ->
-                        val buffer = ByteArray(BUFFER)
-                        while (true) {
-                            val n = input.read(buffer)
-                            if (n <= 0) break
-                            if (contains(buffer, n)) {
-                                casSent.incrementAndGet()
-                                if (armed) commitSent = true
-                            }
-                            output.write(buffer, 0, n)
-                            output.flush()
-                        }
-                    }
+                    upstream.getOutputStream().use { output -> pumpClientBytes(input, output) }
                 }
             } catch (_: IOException) {
                 // closed
             } finally {
                 closeBoth()
+            }
+        }
+
+        /** Forwards the client's bytes verbatim, marking the connection once it has sent the CAS. */
+        private fun pumpClientBytes(
+            input: InputStream,
+            output: OutputStream,
+        ) {
+            val buffer = ByteArray(BUFFER)
+            while (true) {
+                val n = input.read(buffer)
+                if (n <= 0) return
+                if (contains(buffer, n)) {
+                    casSent.incrementAndGet()
+                    if (armed) commitSent = true
+                }
+                output.write(buffer, 0, n)
+                output.flush()
             }
         }
 
@@ -122,35 +129,64 @@ internal class PgResponseDropProxy(
         fun serverToClient() {
             try {
                 DataInputStream(upstream.getInputStream()).use { input ->
-                    client.getOutputStream().use { output ->
-                        while (true) {
-                            val type = input.read()
-                            if (type < 0) return
-                            val length = input.readInt()
-                            val body = ByteArray(length - Int.SIZE_BYTES)
-                            input.readFully(body)
-                            if (commitSent && armed) {
-                                withheld += describe(type, body)
-                                if (type == READY_FOR_QUERY) {
-                                    armed = false
-                                    dropped.countDown()
-                                    closeBoth()
-                                    return
-                                }
-                                continue
-                            }
-                            output.write(type)
-                            output.write(byteArrayOf((length ushr 24).toByte(), (length ushr 16).toByte(), (length ushr 8).toByte(), length.toByte()))
-                            output.write(body)
-                            output.flush()
-                        }
-                    }
+                    client.getOutputStream().use { output -> pumpServerMessages(input, output) }
                 }
             } catch (_: IOException) {
                 // closed
             } finally {
                 closeBoth()
             }
+        }
+
+        /** Reads typed backend messages; forwards each, or withholds every one after the CAS while armed. */
+        private fun pumpServerMessages(
+            input: DataInputStream,
+            output: OutputStream,
+        ) {
+            while (true) {
+                val type = input.read()
+                if (type < 0) return
+                val length = input.readInt()
+                val body = ByteArray(length - Int.SIZE_BYTES)
+                input.readFully(body)
+                if (commitSent && armed) {
+                    if (withhold(type, body)) return
+                } else {
+                    forward(output, type, length, body)
+                }
+            }
+        }
+
+        /** Withholds one message; true once the statement's `ReadyForQuery` is withheld and both sockets are cut. */
+        private fun withhold(
+            type: Int,
+            body: ByteArray,
+        ): Boolean {
+            withheld += describe(type, body)
+            if (type != READY_FOR_QUERY) return false
+            armed = false
+            dropped.countDown()
+            closeBoth()
+            return true
+        }
+
+        private fun forward(
+            output: OutputStream,
+            type: Int,
+            length: Int,
+            body: ByteArray,
+        ) {
+            output.write(type)
+            output.write(
+                byteArrayOf(
+                    (length ushr 24).toByte(),
+                    (length ushr 16).toByte(),
+                    (length ushr 8).toByte(),
+                    length.toByte(),
+                ),
+            )
+            output.write(body)
+            output.flush()
         }
 
         private fun describe(

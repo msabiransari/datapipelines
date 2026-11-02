@@ -43,10 +43,9 @@ class FencedJdbcClientPool(
             }
         try {
             connection.prepareStatement(SESSION_SQL).use { statement ->
-                statement.setString(1, lease.token.toString())
-                statement.setString(2, lease.operationId.toString())
-                statement.setString(3, "${lockTimeoutSeconds}s")
-                statement.setString(4, "${statementTimeoutSeconds}s")
+                // In SESSION_SQL's order: the token, the operation id, then the two timeouts.
+                listOf(lease.token.toString(), lease.operationId.toString(), "${lockTimeoutSeconds}s", "${statementTimeoutSeconds}s")
+                    .forEachIndexed { index, value -> statement.setString(index + 1, value) }
                 statement.executeQuery().use { it.next() }
             }
         } catch (e: SQLException) {

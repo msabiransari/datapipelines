@@ -20,7 +20,11 @@ class LakeAutoConfigurationTest {
     private val runner =
         ApplicationContextRunner()
             .withConfiguration(
-                AutoConfigurations.of(DataSourceAutoConfiguration::class.java, JdbcTemplateAutoConfiguration::class.java, LakeAutoConfiguration::class.java),
+                AutoConfigurations.of(
+                    DataSourceAutoConfiguration::class.java,
+                    JdbcTemplateAutoConfiguration::class.java,
+                    LakeAutoConfiguration::class.java,
+                ),
             ).withPropertyValues(
                 // Never connected to while the context starts: Hikari opens lazily, nothing here queries it.
                 "spring.datasource.url=jdbc:postgresql://127.0.0.1:1/never",
@@ -69,6 +73,12 @@ class LakeAutoConfigurationTest {
 
     private companion object {
         val LAKE_BEANS =
-            listOf(LakeProperties::class.java, LakeLeases::class.java, LakeCatalogs::class.java, S3Client::class.java, LakeBootCheck::class.java)
+            listOf(
+                LakeProperties::class.java,
+                LakeLeases::class.java,
+                LakeCatalogs::class.java,
+                S3Client::class.java,
+                LakeBootCheck::class.java,
+            )
     }
 }

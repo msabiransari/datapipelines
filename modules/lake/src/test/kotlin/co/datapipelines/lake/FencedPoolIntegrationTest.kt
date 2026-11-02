@@ -73,8 +73,8 @@ class FencedPoolIntegrationTest {
                 borrowed.forEach { connection ->
                     val (token, operation, application) =
                         connection.single(
-                            "SELECT coalesce(current_setting('dp.lease_token', true), ''), coalesce(current_setting('dp.operation_id', true), '')," +
-                                " current_setting('application_name')",
+                            "SELECT coalesce(current_setting('dp.lease_token', true), '')," +
+                                " coalesce(current_setting('dp.operation_id', true), ''), current_setting('application_name')",
                         )
                     token shouldBe ""
                     operation shouldBe ""
@@ -208,7 +208,14 @@ class FencedPoolIntegrationTest {
             JdbcCatalog(
                 { _ -> InMemoryFileIO() },
                 { _ ->
-                    object : JdbcClientPool(2, url, mapOf("jdbc.user" to props.getProperty("user"), "jdbc.password" to props.getProperty("password"))) {
+                    object : JdbcClientPool(
+                        2,
+                        url,
+                        mapOf(
+                            "jdbc.user" to props.getProperty("user"),
+                            "jdbc.password" to props.getProperty("password"),
+                        ),
+                    ) {
                         override fun newClient(): Connection =
                             super.newClient().also { connection ->
                                 connection.prepareStatement(FencedJdbcClientPool.SESSION_SQL).use { s ->
@@ -244,7 +251,11 @@ class FencedPoolIntegrationTest {
 
     private fun catalogConnections(): Int =
         LakeTestDb.connect().use {
-            it.single("SELECT count(*) FROM pg_stat_activity WHERE application_name = '${CatalogDatabase.APPLICATION_NAME}'").single().toInt()
+            it
+                .single(
+                    "SELECT count(*) FROM pg_stat_activity WHERE application_name = '${CatalogDatabase.APPLICATION_NAME}'",
+                ).single()
+                .toInt()
         }
 
     private companion object {

@@ -68,7 +68,11 @@ class LakeCatalogs(
             )
         try {
             catalog.initialize(properties.name, catalogProperties())
-        } catch (e: RuntimeException) {
+        } catch (
+            // Iceberg wraps the SQLSTATE the fence raises in several RuntimeException types; classify() reads the cause
+            // chain, and anything it does not recognise is rethrown unchanged.
+            @Suppress("TooGenericExceptionCaught") e: RuntimeException,
+        ) {
             runCatching { catalog.close() }
             throw LakeCatalogException.classify(e) ?: e
         }
@@ -142,7 +146,10 @@ class LakeCatalogSession internal constructor(
         check(!outcomeUnknown.get()) { "this lake catalog session saw an unknown outcome; settle before any further write" }
         try {
             return block(catalog)
-        } catch (e: RuntimeException) {
+        } catch (
+            // As in open(): the library's exception types vary, the cause chain's SQLSTATE decides; unknown ones rethrow.
+            @Suppress("TooGenericExceptionCaught") e: RuntimeException,
+        ) {
             val classified = LakeCatalogException.classify(e) ?: throw e
             if (classified is LakeCatalogException.OutcomeUnknown) outcomeUnknown.set(true)
             throw classified

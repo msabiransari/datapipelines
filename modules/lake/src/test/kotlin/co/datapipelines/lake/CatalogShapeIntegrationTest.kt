@@ -80,7 +80,8 @@ class CatalogShapeIntegrationTest {
         ddl(green).shouldBeEmpty()
 
         val red = database("a0_empty_init", ddl = "")
-        val props = catalogs(LakeTestDb.catalogDatabase(LakeTestDb.urlFor(red))).catalogProperties() + (LakeCatalogs.INIT_CATALOG_TABLES to "true")
+        val props =
+            catalogs(LakeTestDb.catalogDatabase(LakeTestDb.urlFor(red))).catalogProperties() + (LakeCatalogs.INIT_CATALOG_TABLES to "true")
         open(red, props).close()
         ddl(red) shouldContain "CREATE TABLE"
     }

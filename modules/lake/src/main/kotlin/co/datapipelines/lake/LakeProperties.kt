@@ -90,7 +90,8 @@ class LakeProperties(
         val lockTimeoutSeconds: Long = DEFAULT_LOCK_TIMEOUT_SECONDS,
         val statementTimeoutSeconds: Long = DEFAULT_STATEMENT_TIMEOUT_SECONDS,
     ) {
-        override fun toString(): String = "Catalog(lockTimeoutSeconds=$lockTimeoutSeconds, statementTimeoutSeconds=$statementTimeoutSeconds)"
+        override fun toString(): String =
+            "Catalog(lockTimeoutSeconds=$lockTimeoutSeconds, statementTimeoutSeconds=$statementTimeoutSeconds)"
     }
 
     /** §6 `reads.*` (§10, P5) — bound, unused by P2. */
@@ -98,7 +99,8 @@ class LakeProperties(
         val maxGenerationAgeSeconds: Long = DEFAULT_MAX_GENERATION_AGE_SECONDS,
         val freshnessTickSeconds: Long = DEFAULT_FRESHNESS_TICK_SECONDS,
     ) {
-        override fun toString(): String = "Reads(maxGenerationAgeSeconds=$maxGenerationAgeSeconds, freshnessTickSeconds=$freshnessTickSeconds)"
+        override fun toString(): String =
+            "Reads(maxGenerationAgeSeconds=$maxGenerationAgeSeconds, freshnessTickSeconds=$freshnessTickSeconds)"
     }
 
     /** §6 `maintenance.*` (§11, P6) — bound, unused by P2. The window is UTC (call 8). */

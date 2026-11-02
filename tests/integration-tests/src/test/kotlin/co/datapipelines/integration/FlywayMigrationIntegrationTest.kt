@@ -44,6 +44,8 @@ class FlywayMigrationIntegrationTest {
     @Autowired
     private lateinit var dataSource: DataSource
 
+    // One row per shipped migration: the list grows with every migration by design (#785 took it past 60 lines).
+    @Suppress("LongMethod")
     @Test
     fun `every shipped migration is recorded as applied and successful`() {
         val rows =
