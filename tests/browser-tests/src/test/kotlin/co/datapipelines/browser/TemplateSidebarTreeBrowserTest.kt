@@ -119,7 +119,7 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
     }
 
     /**
-     * The browser at one of the photographed widths: "narrow" its 240 floor (Home), "wide"
+     * The browser at one of the photographed widths: "narrow" its 280 floor (#784; Home), "wide"
      * its 480 ceiling (End, at 1440 the cap wins over 1440 - 202 - 320); a phone opens the
      * drawer instead. Each key's layout write is waited for before the next step.
      */
@@ -132,7 +132,7 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         page.keyboard().press(if (width == "wide") "End" else "Home")
         page.waitForFunction(
             "expected => Math.round(document.getElementById('app-browser').getBoundingClientRect().width) === expected",
-            if (width == "wide") 480 else 240,
+            if (width == "wide") 480 else 280,
         )
     }
 
@@ -269,7 +269,7 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         page.waitForFunction("() => document.documentElement.classList.contains('rail-collapsed')")
         width("app-rail") shouldBe 64.0
         page.locator("#nav-tree-pipelines input").isVisible shouldBe true
-        browserWidth() shouldBe 300.0
+        browserWidth() shouldBe 320.0
         page.click("#rail-collapse")
         page.waitForFunction("() => !document.documentElement.classList.contains('rail-collapsed')")
         assertOpen("pipelines")
@@ -365,26 +365,26 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         seedTemplate("acme/short/s1.sql")
         openTree()
         page.locator("$panel a").count() shouldBe 0
-        browserWidth() shouldBe 300.0
+        browserWidth() shouldBe 320.0
         page.locator("#browser-boundary").focus()
         repeat(6) { page.keyboard().press("ArrowRight") }
-        browserWidth() shouldBe 396.0
+        browserWidth() shouldBe 416.0
         deepFolders.forEach { expand(it) }
         page.waitForSelector(leaf(deepLeaf))
         page.locator("${leaf(deepLeaf)} span").first().innerText() shouldBe deepLeaf.substringAfterLast('/')
-        browserWidth() shouldBe 396.0
+        browserWidth() shouldBe 416.0
         width("app-rail") shouldBe 202.0
         // Record §7: long names wrap inside the column — the tree never scrolls sideways.
         val noSideways =
             "() => { const s = document.querySelector('#nav-tree-templates .dp-tree-scroll'); return s.scrollWidth <= s.clientWidth; }"
         page.evaluate(noSideways) shouldBe true
         page.click("${folder(deepFolders[1])} > .dp-tree-line button")
-        browserWidth() shouldBe 396.0
+        browserWidth() shouldBe 416.0
         // Hide returns the browser's width to the content: main grows by exactly the column.
         val main = width("app-main")
         page.click("#browser-hide")
         assertOpen(null)
-        width("app-main") shouldBe main + 396.0
+        width("app-main") shouldBe main + 416.0
         consoleErrors shouldBe emptyList()
     }
 
@@ -546,7 +546,7 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
                 browserWidth() shouldBe
                     when (width) {
                         "wide" -> 480.0
-                        "narrow" -> 240.0
+                        "narrow" -> 280.0
                         else -> 360.0
                     }
                 assertOpen("templates")

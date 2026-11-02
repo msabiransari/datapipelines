@@ -380,11 +380,11 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
                 withClue("root has no tick") { readings["guide.parent.afterContent"] shouldBe "none" }
                 for (path in listOf("guide/a", "guide/b", "guide/c", "guide/a/leaf", "guide/c/leaf")) {
                     withClue("$path guide exists") { readings["$path.beforeContent"] shouldBe "\"\"" }
-                    near("$path.indent", 8.0)
+                    near("$path.indent", 12.0)
                     near("$path.guideX", num("$path.parentIconCenterX"))
                     near("$path.tickY", num("$path.rowCenterY"))
                     near("$path.tickEndX", num("$path.iconLeft"))
-                    near("$path.tickLength", 2.0, 0.1)
+                    near("$path.tickLength", 6.0, 0.1)
                     near("$path.rowHeight", 42.6, 0.1)
                     near("$path.guideWidth", 1.0, 0.1)
                     near("$path.tickHeight", 1.0, 0.1)
@@ -472,13 +472,13 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
 
     /** F1: the supported minimum — the compact row keeps every badge inside the rail at depth 3 and 10. */
     @Test
-    fun `at the 240px minimum every badge stays inside the rail at depth three and ten in both themes`() {
+    fun `at the 280px minimum every badge stays inside the rail at depth three and ten in both themes`() {
         narrowRows(MIN_WIDTH)
     }
 
     /** F1, widened: the default — a depth-10 leaf overflowed by ~62px before the compact mode. */
     @Test
-    fun `at the 300px default every badge stays inside the rail and every name keeps width at depth three and ten`() {
+    fun `at the 320px default every badge stays inside the rail and every name keeps width at depth three and ten`() {
         narrowRows(DEFAULT_WIDTH)
     }
 
@@ -565,8 +565,9 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
         } else {
             withClue("$label — the ruling accepts a 0px name here") { n("titleClientWidth").shouldBeGreaterThanOrEqual(0.0) }
         }
-        // the compact rows (every width): the indent and row insets are --space-2, row gaps --space-1, badge gaps/sides --space-0-5
-        withClue("$label — compact indent") { n("indent") shouldBe n("space2") }
+        // the compact rows (every width): the indent is --space-3 (#784), the row insets --space-2,
+        // row gaps --space-1, badge gaps/sides --space-0-5
+        withClue("$label — compact indent") { n("indent") shouldBe n("space3") }
         withClue("$label — family leaf glyph") {
             (row["iconHref"] as String).endsWith(if (row["family"] == "templates") "#code" else "#workflow") shouldBe true
         }
@@ -630,7 +631,7 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
             iconHref: control.querySelector('use').getAttribute('href'),
             rowInset: parseFloat(cs.paddingLeft), rowGap: parseFloat(cs.columnGap),
             badgeGap: parseFloat(getComputedStyle(meta).columnGap),
-            spaceHalf: tok('--space-0-5'), space1: tok('--space-1'), space2: tok('--space-2') };
+            spaceHalf: tok('--space-0-5'), space1: tok('--space-1'), space2: tok('--space-2'), space3: tok('--space-3') };
           probe.remove();
           return out;
         }""",
@@ -694,8 +695,8 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
     private fun evidence(name: String) = Paths.get("build", "browser-evidence").also { Files.createDirectories(it) }.resolve(name)
 
     private companion object {
-        const val MIN_WIDTH = 240
-        const val DEFAULT_WIDTH = 300
+        const val MIN_WIDTH = 280
+        const val DEFAULT_WIDTH = 320
 
         /** The browser's maximum column (`--app-browser-max`). */
         const val MAX_WIDTH = 480

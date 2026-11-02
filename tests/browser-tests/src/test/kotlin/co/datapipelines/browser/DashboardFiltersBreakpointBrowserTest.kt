@@ -6,9 +6,10 @@ import org.junit.jupiter.api.Test
 
 /**
  * #492 — the filters presentation follows the board region while the viewport stays fixed. #554: the
- * region is narrowed by the resource browser's separator (240–480 in 16 px steps) at a 1470 px
- * viewport, where 202 + 384 leaves main 884 and, less `--app-main-pad` (32 px in this band since
- * #573) on both sides, the region exactly 820.
+ * region is narrowed by the resource browser's separator (280–480 since #784, in 16 px steps) at a
+ * 1470 px viewport, where 202 + 392 leaves main 876 and, less `--app-main-pad` (32 px in this band
+ * since #573) on both sides, the region 812 — the first reachable step at or under the 820 container
+ * query (384, the step that would measure exactly 820, is not 16 px from the 280 floor).
  */
 class DashboardFiltersBreakpointBrowserTest : DashboardBrowserSuite() {
     @Test
@@ -61,10 +62,10 @@ class DashboardFiltersBreakpointBrowserTest : DashboardBrowserSuite() {
         page.waitForFunction("() => window.__dpPage && window.__dpPage.ready")
         resizeBrowser("Home")
         repeat(TO_820) { resizeBrowser("ArrowRight") }
-        regionWidth() shouldBe 820.0
+        regionWidth() shouldBe 812.0
         assertPresentation("drawer")
         resizeBrowser("ArrowLeft")
-        regionWidth() shouldBe 836.0
+        regionWidth() shouldBe 828.0
         assertPresentation("column")
     }
 
@@ -112,7 +113,8 @@ class DashboardFiltersBreakpointBrowserTest : DashboardBrowserSuite() {
     private companion object {
         const val VIEWPORT = 1470
 
-        /** Nine 16 px steps from the 240 floor: a 384 px browser, main 1470 - 202 - 384 = 884, the region 884 - 2 × 32 = 820 (#573). */
-        const val TO_820 = 9
+        /** Seven 16 px steps from the 280 floor (#784): a 392 px browser, main 1470 - 202 - 392 = 876,
+         *  the region 876 - 2 × 32 = 812 — under #573's 820 drawer query (384, exactly 820, is not a step from 280). */
+        const val TO_820 = 7
     }
 }

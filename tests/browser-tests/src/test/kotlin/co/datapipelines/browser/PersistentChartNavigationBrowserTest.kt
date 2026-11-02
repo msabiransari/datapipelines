@@ -29,7 +29,7 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         preview()
         page.evaluate("() => {window.__plotly=window.Plotly;window.__runtime=window.DatapipelinesDashboard}")
         sameShell()
-        // #554: the browser's End (480 at 1440) leaves main 1440 - 202 - 480; Home (240) gives the chart room back.
+        // #554: the browser's End (480 at 1440) leaves main 1440 - 202 - 480; Home (280 since #784) gives the chart room back.
         page.locator("#browser-boundary").focus()
         page.keyboard().press("End")
         page.waitForFunction("() => document.getElementById('app-main').getBoundingClientRect().width === 758")

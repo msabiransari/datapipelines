@@ -26,7 +26,8 @@ try {
 
 /*
  * #554 — the resource browser, per workspace (record §4 "Browser resizing"): the PREFERRED
- * width (240–480; anything else is not a preference and is removed) and the user's Hide
+ * width (280–480 since #784's raised floor; anything else is not a preference
+ * and is removed) and the user's Hide
  * ("1"; anything else is removed). Both are presentation only — a width and a boolean, never
  * a query, a path or a name. The retired keys go on sight and are never reinterpreted:
  * `dp-rail-width:<ws>` measured the rail+tree composition, not this column.
@@ -40,7 +41,7 @@ try {
     var dpWidthKey = "dp-browser-width:" + dpWorkspace;
     var dpWidthRaw = localStorage.getItem(dpWidthKey);
     var dpWidth = Number(dpWidthRaw);
-    if (dpWidthRaw !== null && /^\d+$/.test(dpWidthRaw) && dpWidth >= 240 && dpWidth <= 480) {
+    if (dpWidthRaw !== null && /^\d+$/.test(dpWidthRaw) && dpWidth >= 280 && dpWidth <= 480) {
       dpRoot.style.setProperty("--app-browser-preferred", dpWidth + "px");
     } else if (dpWidthRaw !== null) {
       localStorage.removeItem(dpWidthKey);

@@ -30,8 +30,8 @@ import java.nio.file.StandardOpenOption
  * Plotly's own `_fullLayout._size.h` (the `nsewdrag` rect beside it in the record).
  *
  * The 640 px breakpoint is measured on the board: the 728 px board at the 760 px phone viewport holds
- * its 6/6/3/9 grid, while the ~730 px board at 1280 px beside the 202 px menu and the 300 px resource
- * browser (#554; the History lives in the bottom dock since #473) holds it under the default and
+ * its 6/6/3/9 grid, while the ~710 px board at 1280 px beside the 202 px menu and the 320 px resource
+ * browser (#554; #784 lifts the default from 300; the History lives in the bottom dock since #473) holds it under the default and
  * collapses under an explicit 1024 px threshold. A live host-width
  * crossing proves the slots re-place AND the figure re-measures to its new width.
  */
@@ -141,7 +141,7 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
         // The reader's browser width is the board host's narrowing cause (#554: the separator on the
         // browser/content boundary; #460's rail separator before it). End takes the browser to its
         // 480 px maximum, main to 1280 - 202 - 480 = 598 and the board below the 640 default; Home
-        // takes it to its 240 px floor, main to 838.
+        // takes it to its 280 px floor (#784), main to 798.
         val separator = page.locator("#browser-boundary")
         separator.focus()
         page.keyboard().press("End")

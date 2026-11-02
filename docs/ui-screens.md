@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.222
+**Status:** v1.223
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-10-27 (#725); 2026-10-26 (#726; #739 merge follow-up; #739); 2026-10-25 (#641; #714; #701; #670; #632; #632 merge follow-up); 2026-10-24 (#701; #668; #684); 2026-10-23 (#623 merge follow-up); 2026-10-22 (#681; #623; #652; #660; #644); 2026-10-21 (#642; #654; #591; #659; #589; #640); 2026-10-20 (#574; #595; #588; #541; #634; #635; #622 merge follow-up; #622; #599; #604; #639; #638; #610; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
+**Last updated:** 2026-11-02 (#784); 2026-10-27 (#725); 2026-10-26 (#726; #739 merge follow-up; #739); 2026-10-25 (#641; #714; #701; #670; #632; #632 merge follow-up); 2026-10-24 (#701; #668; #684); 2026-10-23 (#623 merge follow-up); 2026-10-22 (#681; #623; #652; #660; #644); 2026-10-21 (#642; #654; #591; #659; #589; #640); 2026-10-20 (#574; #595; #588; #541; #634; #635; #622 merge follow-up; #622; #599; #604; #639; #638; #610; #618; #627; #625; #598b); 2026-10-19 (#598a merge follow-up; #617; #609; #598a; #605; #619; #585; #584; #613; #509; #608; #614 + #611; #612; #615); 2026-10-18 (#583; #573; #607; #606; #565; #582; #581; #580; #579); 2026-10-17 (#556; #578; #554); 2026-10-16 (#551 merge follow-up; #551; #555; #552; #553; #544; #536; #535; #533; #537); 2026-10-15 (#433; #528; #471; #466); 2026-10-14 (#510; #514; #516; #513); 2026-10-14 (#524, #512 merge follow-up); 2026-10-13 (#512); 2026-10-11 (#494; #478); 2026-10-11 (#432); 2026-10-10 (#503); 2026-10-10 (#502); 2026-10-10 (#473 merge follow-up); 2026-10-09 (#491; #465; #412; #462; #460; #459; #416; #442a; #398; #392; #426; #420; #408; #422; #402; #401, #407; #399; #415; #383; #376; #400, #409; #374; #386, #387; #364; #350, #395; #371; #349; L4b, #353; 348-c, #358; L3b, #10)
 ---
 
 ## 1. Purpose
@@ -80,8 +80,8 @@ All authenticated pages use a shared layout:
 │  ORGANISAT…  │ View all pipelines ⟲ │                                      │
 │ ◀ Collapse   │                      ┆ ← #browser-boundary (resize)         │
 └──────────────┴──────────────────────┴──────────────────────────────────────┘
- menu: 202px       browser: 320 / 300 / 270 by band,   main: minmax(0, 1fr),
- (64px compact)    240–480 by the user; hidden off a    never under 320px
+ menu: 202px       browser: 340 / 320 / 270 by band,   main: minmax(0, 1fr),
+ (64px compact)    280–480 by the user; hidden off a    never under 320px
                    family page (its width goes to main)
 ```
 
@@ -274,23 +274,25 @@ the control's `title` attribute carries the full canonical name, and the label's
 badges — version, lifecycle state, needs-review, and the optional pin indication — live in a trailing
 `span.dp-tree-meta` on the SAME line, after the title, `flex: none`: the label yields width to them,
 never the reverse, so every indicator stays inside the rail at any browser width and the panel never
-scrolls sideways for a name (#541). The browser's rows are COMPACT at every width: 8px
-(`--space-2`) indent per level with guide lines (owner ruling 2026-10-26, #739). The same day's
+scrolls sideways for a name (#541). The browser's rows are COMPACT at every width: the indent per
+level is 12px (`--space-3`) since #784, guide lines unchanged (#739's owner ruling 2026-10-26 set
+8px, `--space-2`). The same day's
 approved spacing reduction keeps that indent and reduces horizontal row insets to 8px (`--space-2`),
 row gaps to 4px (`--space-1`), and badge gaps and side padding to 2px (`--space-0-5`). Vertical row
 and badge padding, type sizes and the 4px row rhythm stay. Earlier spacing put a depth-ten
 three-badge row 26px outside the 240px rail after its name had already shrunk to 0px; these
 horizontal savings preserve the badges and the hierarchy. #701's withdrawn width threshold hid a
 name on widening (131px at 381px compact, 0px at 382px full), so there is none — a wider browser
-only gives a name more room. At the 240px minimum a deep three-badge leaf may show no name at
-all — the tooltip carries it — and its badges may use the trailing row/scroll inset, still inside
+only gives a name more room. #739 measured a deep three-badge leaf with no name at all at the
+then-240px minimum; at #784's 280px floor a sliver of the name remains — the tooltip still carries
+it — and a badge may use the trailing row/scroll inset, still inside
 the rail. When no badge is visible the region stays in the DOM and its box does not — no dead
 gap after the title. The glyph occupies the former chevron slot: a folder shows `folder` closed
 and `folder-open` expanded, following `aria-expanded`; leaves carry the family's menu glyph:
 Pipelines `workflow`, Templates `code`, Dashboards `boxes`, Visualizations `chart-line`, Parameter
 Sets `sliders-horizontal`. Both are vertically centred and neither rotates. A nested row draws a
 1px `--border-subtle` vertical from its parent's glyph centre to the LAST child's own row centre,
-plus a horizontal tick into each child's glyph (2px at this indent), continuous across the 4px
+plus a horizontal tick into each child's glyph (6px since #784's 12px indent), continuous across the 4px
 row rhythm. An expanded last child's subtree never extends that parent's guide; a single child's
 guide spans parent centre to child centre. Root rows and all search results have no guides.
 Hover/selection tints paint over the guide inside the control, as in the 085 §A exemplar.
@@ -303,20 +305,20 @@ radius while focused on the browser's rows.
 `BrowserResourceRowBrowserTest` measures the row — surface token, padding, radius, title role, the
 one-line height (a control is padding plus one 18.6px line, folder and leaf alike), the centred glyph,
 the same-line badge bounds, the ellipsis and the truncation of a long unbroken name, the folder/leaf
-glyph references, the 4px rhythm, and hover and selection colours — off the real page; at the 240px
-minimum and the 300px default it measures a depth-three and a depth-ten row on the pipelines tree
+glyph references, the 4px rhythm, and hover and selection colours — off the real page; at the 280px
+minimum and the 320px default it measures a depth-three and a depth-ten row on the pipelines tree
 (`v13` and `draft`) and on the templates tree (`v13`, `draft` and `needs review`) in both themes:
 every badge inside the rail, no sideways scroll, the full name in the tooltip, and the compact indent
 and badge padding; at the 480px maximum the rows are still compact and every name is wider than at
-300px. The #739 guide case measures parent/child centres, ticks, gap continuity, an expanded
+320px. The #739 guide case measures parent/child centres, ticks, gap continuity, an expanded
 last child and a single child in both themes, with a trailing status row and guide-free search;
-`TreeIndentAndVersionMenuBrowserTest` pins the 8px label/icon step. The renderer accepts only the
+`TreeIndentAndVersionMenuBrowserTest` pins the 12px label/icon step. The renderer accepts only the
 five family glyph ids plus its `file` default and falls back to `file` for unknown options.
 
 **Width (#554).** The menu's two widths are fixed; the browser's is the reader's. Its default follows the
-band — 320px at 1600px and wider, 300px from 1101 to 1599px, 270px from 761 to 1100px — and the
-`#browser-boundary` separator (`role="separator"`, pointer drag, arrows ±16px, Home 240, End to the
-maximum, `aria-valuemin/max/now` kept current) sets a preference from 240 to 480px, clamped to leave main
+band — 340px at 1600px and wider, 320px from 1101 to 1599px, 270px from 761 to 1100px — and the
+`#browser-boundary` separator (`role="separator"`, pointer drag, arrows ±16px, Home 280, End to the
+maximum, `aria-valuemin/max/now` kept current) sets a preference from 280 to 480px, clamped to leave main
 `--app-main-min-width` (320px): `--app-browser-width` is `clamp()` over the preference, so a narrow window
 changes the effective width and never the preference, and an arrow pressed at the clamp writes nothing.
 Opening a folder never changes the width. **Storage** holds widths and booleans only, per user and
@@ -326,7 +328,7 @@ its defaults:
 | Key | Holds | Written by | Status |
 |---|---|---|---|
 | `dp-rail` | `"1"` compact / `"0"` explicitly expanded (the menu) | `shell.js`; read pre-paint by `rail.js` | kept, same semantics |
-| `dp-browser-width:<workspace>` | the preferred browser width, 240–480 | `browser-resize.mjs`; read pre-paint by `rail.js` | new; any other value is removed |
+| `dp-browser-width:<workspace>` | the preferred browser width, 280–480 | `browser-resize.mjs`; read pre-paint by `rail.js` | new; any other value is removed |
 | `dp-browser-hidden:<workspace>` | `"1"` when the reader hid the browser | `shell.js`; read pre-paint by `rail.js` | new; removed by a desktop family menu click; any other value is removed |
 | `dp-rail-width:<workspace>` | the old rail+tree width | — | retired: removed on sight by `rail.js`, never reinterpreted (it measured a different composition) |
 | `dp-tree-open:<workspace>`, `dp-tree-panel:<workspace>:<family>` | the old accordion's open family | — | retired: removed on sight by `tree/sidebar.mjs` |
@@ -662,9 +664,9 @@ One breakpoint table for the whole shell — the menu, the resource browser, the
 
 | Width | Menu (`#app-rail`) | Resource browser (`#app-browser`) | Topbar | Main gutter |
 |---|---|---|---|---|
-| ≥ 1600 px | 202px expanded; 64px compact on the user's choice (`rail-collapsed`, remembered in `dp-rail`) | 320px default; the user's 240–480px preference, clamped to leave main 320px | as today | `--app-main-pad` = 40px (`--space-10`) |
-| 1101–1599 px | as above | 300px default, same range and clamp | as today | `--app-main-pad` = 32px (`--space-8`) |
-| 761–1100 px | **starts compact** (64px, icons + named tooltips) unless the user expanded it — same class, same key: a stored `"0"` (`rail-expanded`) opts out of the band default | 270px default, same range; with the menu expanded the clamp tightens (378px at a 900px viewport) | search text hidden and the search ICON BUTTON stands in (#159: it reveals the topbar copy in place; ⌘K drives it too), crumbs truncate to the LEAF with the full path in `title` (106's pattern on `h2.tplx-detail-title`) | `--app-main-pad` = 24px (`--space-6`) |
+| ≥ 1600 px | 202px expanded; 64px compact on the user's choice (`rail-collapsed`, remembered in `dp-rail`) | 340px default; the user's 280–480px preference, clamped to leave main 320px | as today | `--app-main-pad` = 40px (`--space-10`) |
+| 1101–1599 px | as above | 320px default, same range and clamp | as today | `--app-main-pad` = 32px (`--space-8`) |
+| 761–1100 px | **starts compact** (64px, icons + named tooltips) unless the user expanded it — same class, same key: a stored `"0"` (`rail-expanded`) opts out of the band default | 270px default, same range — under the clamp the 280px floor wins over it (280px at a 900px viewport); with the menu expanded the clamp tightens (378px at a 900px viewport) | search text hidden and the search ICON BUTTON stands in (#159: it reveals the topbar copy in place; ⌘K drives it too), crumbs truncate to the LEAF with the full path in `title` (106's pattern on `h2.tplx-detail-title`) | `--app-main-pad` = 24px (`--space-6`) |
 | ≤ 760 px | **off-canvas Navigation drawer** (`rail-open`): not in the grid (`grid-template-columns: 1fr`), `position: fixed`, `z-index: var(--z-drawer)`, translated off-screen, 232px (`--app-menu-drawer`, the drawer width before #554: its brand row also seats the 48px close control) with its labels whatever `dp-rail` says | **off-canvas Browse resources drawer** (`browser-open`), at most 360px and never wider than the viewport | `#rail-open` (Navigation) first, `#browser-open` (Browse resources, folder glyph) on a family page, **no breadcrumb** (#610 — the frozen prototype's ≤760 rule: `.app-crumbs` is `display:none` in app.css's phone block, the element stays in the DOM for shell.js's boosted-swap writes, and `#mode-toggle` inherits the crumbs' `margin-right: auto` right-edge pin), workspace switcher as its avatar only, user menu; **nothing wraps**; the search moves INTO the menu drawer's head — side padding `--app-main-pad` (20px, #613 — the bar and `<main>` share a left edge) | `--app-main-pad` = 20px (`--space-5`); the top bar pads the same token (#613) |
 
 The main gutter is one token (#573): every rule whose geometry assumes it reads `--app-main-pad`, never a spacing token directly, so a band change moves them together — the full-height calcs of `.pe-root` (`pipeline-editor.css`), `.dp-workspace` on its board tab (`dashboards.css`), `.tplx-page` (`template-tree.css`), `.tw-root` (`template-workspace.css`) and the page-flow table's `--dt-flow-max-h` (`data-table.css`), and the status pill's three offsets (`app.css`: desktop, anonymous shell, phone). The desktop and anonymous offsets also add `--app-frame-inset`, the 1500px frame's centring offset in its track (0 on a canvas page and wherever the track is 1500 or less), so on a wider framed page the pill starts at the content's edge rather than the track's (#614; `MainFrameBrowserTest` reads it at 2200 framed, on the editor and signed out, and at 1512). `.tplx-splitter`'s `--gap-lg` is `.tplx-body`'s own column gap, not the gutter. `MainFrameBrowserTest` reads `<main>`'s vertical overflow on the editor, the template workspace and the board at 1512: a calc left on the old token overflows by twice the difference. The desktop top bar is NOT banded (owner rulings 2026-10-19, ruling 1's second half): above 760px it keeps its own 24px `--gap-lg` at every width, measured identical at the 1512 and 1600 bands while `<main>` moves 32 → 40 (`MainFrameBrowserTest` reads the bar at both bands; #613).
@@ -3146,6 +3148,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-02 | v1.223 | #784 — the browser tree's guides read at the floor | **§3.4, §3.6:** the indent per level 8→12px (`--space-3`), the guides' tick 2→6px (#739's guide geometry otherwise unchanged); band defaults 300→320px (1101–1599) and 320→340px (≥1600), 270px stays; the browser's minimum 240→280px — Home, `--app-browser-min`, and `rail.js`'s pre-paint gate, so a stored value from the old range (e.g. 256) is removed on sight, not applied, and under the clamp the floor wins over the band default (280px at a 900px viewport; `BrowserMaximumBrowserTest` pins it, including the removal). Guards re-measured off the real page: `BrowserResourceRowBrowserTest` (indent 12, tick 6, badge containment at 280/320/480, both families and themes), `TreeIndentAndVersionMenuBrowserTest` (the 12px step), `PipelineSidebarTreeBrowserTest` and `TemplateSidebarTreeBrowserTest` (band defaults, the 280 floor, tablet band), `ReusableRestTreeBrowserTest`, `DashboardFiltersBreakpointBrowserTest`, `DashboardGridRowUnitBrowserTest`, `PersistentChartNavigationBrowserTest`; node guard `browser-resize.test.mjs` (the 280 floor and parse bounds). Code: `static/css/app.css` (the indent token, band defaults, floor), `static/js/browser-resize.mjs` (`BROWSER_MIN`), `static/js/rail.js` (the pre-paint gate). |
 | 2026-10-27 | v1.222 | #725 — the Schedules explorer's last-run filter | **§4.20:** `?outcome=succeeded\|failed\|in-progress\|did-not-run\|never-ran` and a second select filter the explorer through REST §20.1's new `outcome` (each schedule's newest run, the home's Last run buckets), composing with the condition and the search; Clear filters clears both; no client-side prune. **§4.20a:** the Last run bars link the filtered explorer and the condition note says so. |
 | 2026-10-26 | v1.221 | #726 — task danger tone | **§4.25, §4.20a:** name the closed task-tone set (draft, released, danger); the Schedules Unblock task icon uses danger. |
 | 2026-10-26 | v1.220 | #739 merge follow-up | **§3.6:** reconcile the resource-row baseline and resource-name role with §3.4’s approved spacing, family glyphs, guides and one-line tooltip-backed truncation. No behavior change. |
