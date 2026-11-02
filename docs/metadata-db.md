@@ -1,6 +1,6 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.50 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.51 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
 **Last updated:** 2026-11-02
