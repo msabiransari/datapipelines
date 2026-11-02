@@ -138,9 +138,15 @@ class RegistryTemplateLoaderTest {
         val draftLoader = RegistryTemplateLoader(registry)
 
         registry.put(TemplateFixtures.version("test/wip.sql", body = "SELECT 1", updatedAt = written))
-        val first = draftLoader.withDeclaredClosure("test/wip.sql@1") { draftLoader.getLastModified(draftLoader.findTemplateSource("test/wip.sql@1")) }
+        val first =
+            draftLoader.withDeclaredClosure("test/wip.sql@1") {
+                draftLoader.getLastModified(draftLoader.findTemplateSource("test/wip.sql@1"))
+            }
         registry.put(TemplateFixtures.version("test/wip.sql", body = "SELECT 2", updatedAt = overwritten))
-        val second = draftLoader.withDeclaredClosure("test/wip.sql@1") { draftLoader.getLastModified(draftLoader.findTemplateSource("test/wip.sql@1")) }
+        val second =
+            draftLoader.withDeclaredClosure("test/wip.sql@1") {
+                draftLoader.getLastModified(draftLoader.findTemplateSource("test/wip.sql@1"))
+            }
 
         first shouldBe written.toEpochMilli()
         second shouldBe overwritten.toEpochMilli()

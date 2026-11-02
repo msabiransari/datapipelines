@@ -25,7 +25,8 @@ import org.junit.jupiter.api.Test
  * row's width and wraps as prose (the first child's client rects grouped by top give the line
  * count: at most two on the board's panel, three in the 390 px drawer), and the code chip's right
  * edge never passes the boundary's content-box right edge. Measured at both board widths
- * (1440x900, 1420x800 — 1400 from #554, +20 for #784's wider default browser) and in the drawer (390x844), light and dark; the parameter-set page's
+ * (1440x900, 1420x800 — 1400 from #554, +20 for #784's wider default browser) and in the drawer
+ * (390x844), light and dark; the parameter-set page's
  * wider row carries the same chip-inside bound (green there before and after - it guards the
  * shared class).
  *
