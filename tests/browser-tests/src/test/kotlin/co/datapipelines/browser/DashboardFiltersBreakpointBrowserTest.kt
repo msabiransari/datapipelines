@@ -113,7 +113,8 @@ class DashboardFiltersBreakpointBrowserTest : DashboardBrowserSuite() {
     private companion object {
         const val VIEWPORT = 1470
 
-        /** Seven 16 px steps from the 280 floor (#784): a 392 px browser, main 1470 - 202 - 392 = 876, the region 876 - 2 × 32 = 812 — under #573's 820 drawer query (384, exactly 820, is not a step from 280). */
+        /** Seven 16 px steps from the 280 floor (#784): a 392 px browser, main 1470 - 202 - 392 = 876,
+         *  the region 876 - 2 × 32 = 812 — under #573's 820 drawer query (384, exactly 820, is not a step from 280). */
         const val TO_820 = 7
     }
 }
