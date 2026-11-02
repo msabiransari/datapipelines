@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.106 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.107 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-10-28
@@ -2846,6 +2846,12 @@ matches of canonical or display NAME, never descriptions. The shared search-need
 gates `q` before any read: it is trimmed, a blank (whitespace-only) `q` answers the browse level
 instead of a refusal, and a term over 200 characters after the trim is refused `400
 request.query_too_long` with `details.limit` and `details.length` ([pipeline-contract §13.21](pipeline-contract.md)).
+The tree then strips leading/trailing runs and collapses interior runs to one U+0020 using
+one fixed whitespace class on both client and server: U+0009–U+000D, U+0020, U+00A0, U+1680,
+U+2000–U+200A, U+2028, U+2029, U+202F, U+205F, U+3000 and U+FEFF. This is applied **after**
+the shared 200-after-trim rule (whose Kotlin trim includes U+00A0 and U+3000 but excludes
+U+FEFF); the first-party client sends `q` already collapsed. An empty collapsed term answers
+the browse level. Any control characters remaining after normalization, including U+0085, are refused.
 Each page includes all ancestors
 needed to connect its matches to root. Search does not crawl browse endpoints.
 
@@ -2878,6 +2884,7 @@ browser persistence. Clients must reject foreign/stale responses even after abor
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-01 | v2.107 | 758 (#758) | **§24:** fixes the tree search whitespace alphabet on both client and server, after the shared raw-term bound; names the code points and empty-term browse behavior. |
 | 2026-10-27 | v2.106 | 464 (#464) | §24: the tree routes' refusals carry catalogued codes ([pipeline-contract §13.24](pipeline-contract.md#1324-navigation-trees)) instead of the stand-in `pipeline.execution.aborted`: `400 navigation.request.invalid`, `503 navigation.view.unavailable` (now with `Retry-After: 5`, no `details`) and `503 navigation.metadata.too_large`. Statuses are unchanged. |
 | 2026-10-27 | v2.105 | 575 (#575) | §18.1: all five wire inventory arms require a RELEASED current pointer; pipeline and template draft pointers and never-released templates are omitted, matching the promotability rule. |
 | 2026-10-27 | v2.104 | 725 (#725) | Additive. §20.1: optional `outcome` (`succeeded`, `failed`, `in-progress`, `did-not-run`, `never-ran`) filters the schedule list by each schedule's newest run, in the database read before the promoter lens, composing with `condition` and `prefix`; any other value is `400 schedule.validation.request_invalid`, `details.field = outcome`. |

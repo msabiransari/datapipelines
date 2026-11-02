@@ -86,7 +86,7 @@ class TreeProjection {
         // search, and a trimmed term over the shared bound is refused with the catalogued
         // request.query_too_long — not the path-shaped 400 the length check below owns.
         val needle = SearchNeedle.of(query)
-        val normalized = needle?.replace(Regex("\\s+"), " ")
+        val normalized = needle?.let(TreeSearchTerm::collapse)
         if (normalized != null) {
             if (normalized.length > MAX_PATH) invalid()
             if (normalized.any { it.isISOControl() }) invalid()

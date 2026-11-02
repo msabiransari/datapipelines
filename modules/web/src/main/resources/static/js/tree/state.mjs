@@ -1,8 +1,11 @@
 /** Pages one load fetches before a level stops and offers "Load more" (#465): 10 x 200 rows. */
 export const PAGE_CEILING = 10;
 
+// Fixed ECMAScript WhiteSpace + LineTerminator alphabet; keep identical to TreeSearchTerm.
+const TREE_SEARCH_WHITESPACE = /[\u0009-\u000D\u0020\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF]+/g;
+
 /** Normalize once for both request identity and admission. */
-export function normalizeQuery(value) { return String(value || "").trim().replace(/\s+/g, " "); }
+export function normalizeQuery(value) { return String(value || "").replace(TREE_SEARCH_WHITESPACE, " ").replace(/^ | $/g, ""); }
 
 /**
  * Per-instance shallow tree state. The supplied source owns transport and authorization;
