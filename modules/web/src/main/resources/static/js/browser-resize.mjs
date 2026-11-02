@@ -5,11 +5,11 @@
  * composition, so it is removed on sight (rail.js), never reinterpreted.
  *
  * Two numbers, kept apart: the PREFERENCE (`--app-browser-preferred` on <html>, persisted as
- * `dp-browser-width:<ws>`, always within 240–480) and the EFFECTIVE width the stylesheet
+ * `dp-browser-width:<ws>`, always within 280–480 since #784) and the EFFECTIVE width the stylesheet
  * derives from it (`--app-browser-width`: clamped to what leaves main its 320px). A narrow
  * window changes the effective width only; the preference survives for the wider screen.
  */
-export const BROWSER_MIN = 240;
+export const BROWSER_MIN = 280;
 export const BROWSER_MAX = 480;
 export const KEY_STEP = 16;
 
@@ -23,7 +23,7 @@ export function effectiveWidth(preferred, maximum) {
   return Math.max(BROWSER_MIN, Math.min(preferred, maximum));
 }
 
-/** A stored or written preference, or null when it is not one (anything outside 240–480). */
+/** A stored or written preference, or null when it is not one (anything outside 280–480). */
 export function parsePreference(raw) {
   if (raw === null || raw === undefined) return null;
   const text = String(raw).trim().replace(/px$/, "");

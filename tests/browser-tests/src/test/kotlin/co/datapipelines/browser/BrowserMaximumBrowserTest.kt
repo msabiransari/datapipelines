@@ -48,10 +48,18 @@ class BrowserMaximumBrowserTest : DashboardBrowserSuite() {
         page.click("#rail-collapse")
         assertGeometry(480, maximum = 480)
         resizeBrowser("Home")
-        assertGeometry(240, maximum = 480)
+        assertGeometry(280, maximum = 480)
 
-        // A value outside 240–480 is not a preference: removed before the first paint, the band default shows.
+        // A value outside 280–480 (#784's raised floor: 256 was a preference under the old
+        // 240 floor and must now be removed) is not a preference: removed before the first
+        // paint, the band default shows.
         page.evaluate("() => localStorage.setItem('dp-browser-width:' + document.documentElement.dataset.dpWorkspace, '2000')")
+        page.reload()
+        awaitBoard()
+        assertGeometry(BAND_DEFAULT, maximum = 480)
+        preference() shouldBe ""
+        stored() shouldBe null
+        page.evaluate("() => localStorage.setItem('dp-browser-width:' + document.documentElement.dataset.dpWorkspace, '256')")
         page.reload()
         awaitBoard()
         assertGeometry(BAND_DEFAULT, maximum = 480)
@@ -60,8 +68,8 @@ class BrowserMaximumBrowserTest : DashboardBrowserSuite() {
 
         // A wider window moves the range, never the preference; a drag past the maximum stops there.
         page.setViewportSize(1440, 800)
-        page.waitForFunction("() => document.getElementById('browser-boundary').getAttribute('aria-valuenow') === '300'")
-        assertGeometry(300, maximum = 480)
+        page.waitForFunction("() => document.getElementById('browser-boundary').getAttribute('aria-valuenow') === '320'")
+        assertGeometry(320, maximum = 480)
         val handle = checkNotNull(page.locator("#browser-boundary").boundingBox())
         page.mouse().move(handle.x + handle.width / 2, handle.y + handle.height / 2)
         page.mouse().down()
@@ -69,7 +77,7 @@ class BrowserMaximumBrowserTest : DashboardBrowserSuite() {
         page.mouse().up()
         assertGeometry(480, maximum = 480)
         resizeBrowser("Home")
-        assertGeometry(240, maximum = 480)
+        assertGeometry(280, maximum = 480)
     }
 
     private fun awaitBoard() {
@@ -109,9 +117,12 @@ class BrowserMaximumBrowserTest : DashboardBrowserSuite() {
     }
 
     private companion object {
-        /** In the 761–1100 band: the menu compact (64) by default, the browser 270. */
+        /**
+         * In the 761–1100 band the menu is compact (64) and the band default is 270; #784's raised
+         * floor (280) clamps that default up, so the effective width at 900 px is the floor itself.
+         */
         const val BAND_VIEWPORT = 900
-        const val BAND_DEFAULT = 270
+        const val BAND_DEFAULT = 280
 
         /** 900 - 202 - 320: the widest browser beside the expanded menu. */
         const val EXPANDED_MAXIMUM = 378

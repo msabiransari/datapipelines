@@ -939,9 +939,9 @@ button.app-busy::after {
   /* The menu's width right now: compact under `rail-collapsed` (below) and by default
      from 761 to 1100px (the 110 table at the foot of this file). */
   --app-menu-width: var(--app-menu-expanded);
-  /* The browser's band default (300 here, 320 from 1600, 270 from 761 to 1100), the
-     user's range, and the at-most-360 phone drawer. */
-  --app-browser-default: 300px;
+  /* The browser's band default (320 here — #784, up from 300; 340 from 1600; 270 from
+     761 to 1100), the user's range, and the at-most-360 phone drawer. */
+  --app-browser-default: 320px;
   /* <main>'s padding on all four sides, by the record §4 table's bands: 40 from 1600,
      32 from 1101 to 1599 (here), 24 from 761 to 1100, 20 at 760 and below. Every
      full-height canvas's calc and the status pill's offset read it (ui-screens §3.6). */
@@ -952,13 +952,13 @@ button.app-busy::after {
      less, half the rest beyond it; a canvas page zeroes it, the anonymous shell's track is the
      window. A fixed element that lines up with the content edge (the status pill) adds it. */
   --app-frame-inset: max(0px, (100vw - var(--app-menu-width) - var(--app-browser-col) - var(--app-frame-max)) / 2);
-  --app-browser-min: 240px;
+  --app-browser-min: 280px;
   --app-browser-max: 480px;
   --app-drawer-max: 360px;
   /* Record §4: the PREFERRED width (`--app-browser-preferred`, stamped by rail.js and
      written by browser-resize.mjs) clamped to the range and to what leaves <main> its
      320px. clamp() lets the minimum win, so a viewport too narrow for both still gets a
-     240px browser rather than a negative one. The preference itself is never rewritten
+     280px browser rather than a negative one. The preference itself is never rewritten
      by the clamp: a narrow window does not overwrite a wide screen's choice. */
   --app-browser-width: clamp(
     var(--app-browser-min),
@@ -990,7 +990,7 @@ button.app-busy::after {
 
 @media (min-width: 1600px) {
   :root {
-    --app-browser-default: 320px;
+    --app-browser-default: 340px;
     --app-main-pad: var(--space-10);
   }
 }
@@ -3438,9 +3438,9 @@ button.app-busy::after {
 
    | Width        | Menu                               | Resource browser                    | Topbar                                  | Main gutter |
    |--------------|------------------------------------|-------------------------------------|-----------------------------------------|-------------|
-   | ≥ 1600 px    | 202 expanded / 64 compact (the     | 320 default; the user's 240–480,    | as today                                | --gap-lg    |
+   | ≥ 1600 px    | 202 expanded / 64 compact (the     | 340 default; the user's 280–480,    | as today                                | --gap-lg    |
    |              | user's `dp-rail`, remembered)      | clamped to leave main 320           |                                         |             |
-   | 1101–1599    | 202 / 64, as above                 | 300 default, same range             | as today                                | --gap-lg    |
+   | 1101–1599    | 202 / 64, as above                 | 320 default, same range             | as today                                | --gap-lg    |
    | 761–1100     | starts compact (64) unless the     | 270 default, same range             | search hidden; crumbs truncate to the   | --gap-lg    |
    |              | user expanded it — same class,     |                                     | LEAF with the full path in title        |             |
    |              | same key; the DEFAULT flips here   |                                     |                                         |             |
