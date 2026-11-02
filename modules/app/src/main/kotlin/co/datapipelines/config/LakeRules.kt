@@ -137,7 +137,8 @@ internal object LakeRules {
             violations += "$REGION or $ENDPOINT is required when $ENABLED=true (§3.36)."
         }
         if (endpoint.isNotEmpty() && !usableEndpoint(endpoint)) {
-            violations += "$ENDPOINT must be an http:// or https:// URL with a host (§3.36); its scheme decides TLS."
+            violations += "$ENDPOINT must be an http:// or https:// URL with a host and no credentials, query or fragment " +
+                "(§3.36); its scheme decides TLS."
         }
         if (value(snapshot, MODE) !in MODES) violations += "$MODE must be one of $MODES (§3.36)."
         if (!LAKE_NAME.matches(value(snapshot, NAME))) violations += "$NAME must match [a-z0-9_]{1,63} (§3.36)."
@@ -208,7 +209,10 @@ internal object LakeRules {
     private fun usableEndpoint(endpoint: String): Boolean =
         runCatching { URI(endpoint) }
             .getOrNull()
-            ?.let { it.scheme?.lowercase() in ENDPOINT_SCHEMES && !it.host.isNullOrBlank() } == true
+            ?.let {
+                it.scheme?.lowercase() in ENDPOINT_SCHEMES && !it.host.isNullOrBlank() &&
+                    it.userInfo == null && it.query == null && it.fragment == null
+            } == true
 
     private fun requirePair(
         snapshot: ConfigSnapshot,

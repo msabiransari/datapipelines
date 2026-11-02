@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Status:** v1.72 (operator reference; source-traced configuration authority)
+**Status:** v1.73 (operator reference; source-traced configuration authority)
 **Owner:** datapipelines.co core
 **Last updated:** 2026-11-02
 
@@ -718,7 +718,7 @@ the lanes named in their rows, so that one key set is documented and validated f
 | `datapipelines.lake.storage.prefix` | `lake/` | Key prefix of the managed lake under the bucket; every table's location is `s3://<bucket>/<prefix><namespace>/<table id>`. Normalised to one trailing `/`; empty = the bucket root. The boot check sends a HEAD on it and writes one marker, `<prefix>dp/conditional-put-probe` |
 | `datapipelines.lake.storage.landing-prefix` | `landing/` | Where deliveries land before ingestion. Consumed by delivery (P4) |
 | `datapipelines.lake.storage.region` | (empty) | The bucket's region. A region or an `endpoint` is required when enabled; with only an endpoint, requests are signed for `us-east-1` |
-| `datapipelines.lake.storage.endpoint` | (empty) | An S3-compatible endpoint, `http://` or `https://` with a host; empty = AWS for `region`. The scheme decides TLS for both the Java client and DuckDB's secret (`USE_SSL`) |
+| `datapipelines.lake.storage.endpoint` | (empty) | An S3-compatible endpoint, `http://` or `https://` with a host and no credentials, query or fragment (startup refuses them); empty = AWS for `region`. The scheme decides TLS for both the Java client and DuckDB's secret (`USE_SSL`) |
 | `datapipelines.lake.storage.path-style` | `false` | Path-style addressing (`<endpoint>/<bucket>/<key>`), which most S3-compatible stores need |
 | `datapipelines.lake.storage.access-key` | (empty) | **Secret.** The writer's access key (the Java side). Set with `secret-key` or not at all; both empty = the SDK's default credential chain (instance or pod credentials) |
 | `datapipelines.lake.storage.secret-key` | (empty) | **Secret.** The writer's secret key; see `access-key` |
@@ -1438,6 +1438,7 @@ The Helm input reference already lives in the commented `deploy/helm/datapipelin
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-02 | v1.73 | #785 landing, security pass F2 | §3.36 `storage.endpoint`: a URL carrying userinfo, a query or a fragment is refused at startup (only scheme + host were checked); the row says so. |
 | 2026-11-02 | v1.72 | #785 dp-lake P2 catalog core | New **§3.36 Managed lake**: the thirty-one `datapipelines.lake.*` keys of the design record §6 (enabled, name, mode, `storage.*` with the two secret credential pairs, `admission.*`, `catalog.*`, `reads.*`, `maintenance.*`, `retention.*`), inert unless enabled. §5 template gains the `lake:` block. §7 gains the lake rules (judged only when enabled) and the after-Flyway `lake.boot.*` refusals. §8 traces the binding. |
 | 2026-11-01 | v1.71 | #762 never-admissible refresh | §3.34: `max-executions-per-refresh` must not exceed the executor's `max-concurrent-executions-per-instance` (startup refuses) and the dashboard execution cap above it WARNs; the count is distinct executions; a refresh over the smaller ceiling is refused at once with `details.reason = never_admissible`; saved dashboards whose static all-source upper bound exceeds the ceiling are named at boot as possible refusals. §7 likewise. |
 | 2026-10-31 | v1.70 | #769 | Source-traced operator reference: corrected behavioral scope, provider fields, environment aliases, reserved tracing controls and precedence; synchronized the full YAML template; added source index, launch inputs and whole-reference build guards. |

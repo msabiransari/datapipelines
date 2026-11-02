@@ -50,6 +50,11 @@ class LakeRulesTest {
         enabled(LakeRules.NAME to "My-Lake").single() shouldStartWith LakeRules.NAME
         enabled(LakeRules.ENDPOINT to "minio:9000").single() shouldStartWith LakeRules.ENDPOINT
         enabled(LakeRules.ENDPOINT to "ftp://minio:9000").single() shouldStartWith LakeRules.ENDPOINT
+        // A credential, query or fragment in the URL is refused: the endpoint is a host, never a place for a secret.
+        enabled(LakeRules.ENDPOINT to "https://user:pw@minio:9000").single() shouldStartWith LakeRules.ENDPOINT
+        enabled(LakeRules.ENDPOINT to "http://minio:9000/?x=1").single() shouldStartWith LakeRules.ENDPOINT
+        enabled(LakeRules.ENDPOINT to "http://minio:9000/#frag").single() shouldStartWith LakeRules.ENDPOINT
+        enabled(LakeRules.ENDPOINT to "https://s3.example.net/") shouldContainExactly emptyList()
     }
 
     @Test
