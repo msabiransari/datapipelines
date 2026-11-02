@@ -34,8 +34,8 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
 
     /**
      * #554: the shell's desktop reference width for a case that asserts the filters COLUMN.
-     * Playwright's default 1280 leaves main 1280 - 202 (menu) - 300 (browser) = 778 px, a board
-     * region under the filters' 820 px drawer threshold (dashboards.css); 1440 leaves main 938.
+     * Playwright's default 1280 leaves main 1280 - 202 (menu) - 320 (browser, #784) = 758 px, a board
+     * region under the filters' 820 px drawer threshold (dashboards.css); 1440 leaves main 918.
      */
     protected fun desktopBoard(height: Int = DEFAULT_VIEWPORT_HEIGHT) {
         page.setViewportSize(DESKTOP_BOARD_WIDTH, height)
@@ -1033,8 +1033,11 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
     protected companion object {
         const val DESKTOP_BOARD_WIDTH = 1440
 
-        /** #554: the narrower desktop the column still holds at: main 1400 - 202 - 300 = 898, the region 850. */
-        const val NARROW_DESKTOP_BOARD_WIDTH = 1400
+        /**
+         * #554: the narrower desktop the column still holds at — main 1420 - 202 - 320 = 898, the region 834
+         * (#784 grew the band default 300 -> 320; at #554's 1400 the region is now 814, under the 820 drawer threshold).
+         */
+        const val NARROW_DESKTOP_BOARD_WIDTH = 1420
 
         /** Playwright's default viewport height, kept so a case's vertical geometry is unchanged. */
         const val DEFAULT_VIEWPORT_HEIGHT = 720

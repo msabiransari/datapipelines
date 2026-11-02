@@ -18,7 +18,7 @@ import java.nio.file.Paths
  * #573 — <main>'s padding by the viewport's band and its 1500px frame, MEASURED in Chromium (the
  * application-shell record §4, ui-screens §3.1/§3.6). The bands: 40px from 1600, 32 from 1101 to
  * 1599, 24 from 761 to 1100, 20 at 760 and below, on all four sides, through `--app-main-pad`. The
- * 1512 reference: 202 menu + 300 browser leave a 1010px frame and 946px inside its padding. The
+ * 1512 reference: 202 menu + 320 browser (#784) leave a 990px frame and 926px inside its padding. The
  * frame: at most 1500px outer width, centred in the content track — except on a page whose root
  * carries `app-canvas` (the editors, the explorer, the board, the execution result), which keeps
  * the whole track. And no full-height canvas overflows <main>: their height calcs subtract the
@@ -471,7 +471,7 @@ class MainFrameBrowserTest : DashboardBrowserSuite() {
     }
 
     @Test
-    fun `the 1512 reference - a 1010 frame and 946 inside its padding`() {
+    fun `the 1512 reference - a 990 frame and 926 inside its padding`() {
         ready("mfref")
         page.setViewportSize(REFERENCE_W, REFERENCE_H)
         openBrowserTree("pipelines")
@@ -485,9 +485,9 @@ class MainFrameBrowserTest : DashboardBrowserSuite() {
         shot("pipelines-1512")
         assertSoftly {
             near("main.rail", 202.0)
-            near("browser.width", 300.0)
-            near("main.width", 1010.0)
-            near("main.content", 946.0)
+            near("browser.width", 320.0)
+            near("main.width", 990.0)
+            near("main.content", 926.0)
         }
     }
 
