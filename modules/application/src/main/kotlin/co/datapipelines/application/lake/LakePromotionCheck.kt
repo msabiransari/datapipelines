@@ -14,7 +14,7 @@ import com.fasterxml.jackson.databind.JsonNode
  *
  * What it cannot see it admits (slice D-F, the owner's 2026-11-02 ratification): an unresolved position, a PARTIAL
  * version's unrendered branches and an UNSCANNABLE site write no resolved row, and the runtime gate
- * (`lake.table.unavailable`) stays the defence for them.
+ * (`datasource.lake.table_unavailable`) stays the defence for them.
  *
  * The refusal names only what the promoter already sees: their own content's names, versions and node or selector ids,
  * the datasource NAME and the table's dotted name. `target` is not set here — the sender's relay supplies it
