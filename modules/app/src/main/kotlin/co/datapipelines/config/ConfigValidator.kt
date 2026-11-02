@@ -70,8 +70,10 @@ class ConfigValidator(
          * 38 since #682 added `AuthProviderRules.checkProviderReadTimeout` (§3.4).
          * 39 since #442b added `SchedulerNotificationRules.checkSchedulerNotifications` (§3.29).
          * 40 since #762 added `DashboardRuntimeRules.checkExecutorCeiling` (§3.34 — the executor's instance ceiling).
+         * 44 since #785 added `LakeRules.checkLakeStorage`, `checkLakeRetention`, `checkLakeAdmission` and
+         * `checkLakeBounds` (§3.36 — the managed lake, judged only when it is enabled).
          */
-        internal const val CHECK_COUNT = 40
+        internal const val CHECK_COUNT = 44
 
         /**
          * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
@@ -164,6 +166,11 @@ class ConfigValidator(
             MailRules.checkMailHardened(snapshot, violations)
             // §3.29 (#442b) — scheduler mail needs the transport and the base URL; its own file too.
             SchedulerNotificationRules.checkSchedulerNotifications(snapshot, violations)
+            // §3.36 (#785) — the managed lake's keys, judged only when the lake is enabled; their own file too.
+            LakeRules.checkLakeStorage(snapshot, violations)
+            LakeRules.checkLakeRetention(snapshot, violations)
+            LakeRules.checkLakeAdmission(snapshot, violations)
+            LakeRules.checkLakeBounds(snapshot, violations)
             return ValidationReport(violations, warnings)
         }
 
@@ -950,6 +957,8 @@ class ConfigValidator(
                 visualization = VisualizationRules.KEYS.associateWith { environment.getProperty(it) },
                 // §3.34 (#10 L2) — the dashboard runtime's numbers, raw strings likewise.
                 dashboards = DashboardRuntimeRules.KEYS.associateWith { environment.getProperty(it) },
+                // §3.36 (#785) — raw strings, but the four S3 credentials as PRESENCE only (LakeRules.carried).
+                lake = LakeRules.KEYS.associateWith { LakeRules.carried(it, environment.getProperty(it)) },
                 // §3.31 (#279) — the request-body cap, raw (a malformed value is a named violation).
                 webMaxRequestBytes = environment.getProperty("datapipelines.web.max-request-bytes"),
                 activeProfiles = environment.activeProfiles.toSet(),
@@ -1178,6 +1187,8 @@ internal data class ConfigSnapshot(
     val visualization: Map<String, String?> = emptyMap(),
     /** §3.34 (#10 L2) — every `datapipelines.dashboards.*` key as its raw string (`DashboardRuntimeRules.KEYS`). */
     val dashboards: Map<String, String?> = emptyMap(),
+    /** §3.36 (#785) — every `datapipelines.lake.*` key as its raw string (`LakeRules.KEYS`); the S3 credentials as presence only. */
+    val lake: Map<String, String?> = emptyMap(),
     /** §3.31 (#279) — `datapipelines.web.max-request-bytes`, raw so a bad value is a NAMED violation. */
     val webMaxRequestBytes: String? = null,
     val activeProfiles: Set<String>,
@@ -1250,6 +1261,7 @@ internal data class ConfigSnapshot(
             "scriptMaxDepth=$scriptMaxDepth, " +
             "scriptJs=$scriptJs, scriptJsLoaderPath=$scriptJsLoaderPath, " +
             "parameters=$parameters, " +
+            "lake=$lake, " +
             "webMaxRequestBytes=$webMaxRequestBytes, " +
             "orgTimezone=$orgTimezone, " +
             "activeProfiles=$activeProfiles, " +

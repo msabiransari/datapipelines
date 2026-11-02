@@ -1,9 +1,9 @@
 # Observability Specification
 
-**Status:** v1.47 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.48 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-02
 
 ---
 
@@ -372,6 +372,16 @@ These lines occur once per execution-drain stop, after scheduler admission close
 | INFO | `shutdown.drain_complete` | The bounded wait ended with no local executions registered; their deregistration follows terminal bookkeeping attempts, not a guarantee every store write succeeded | — |
 | WARN | `shutdown.drain_incomplete` | Executions remain registered at the flush deadline; their rows may remain RUNNING after exit and need the stale sweep. One alternative outcome to `drain_complete` | `live`, `flush_timeout_ms`, `message` (static explanation) |
 
+#### 3.4P The managed lake boot check (#785)
+
+When `datapipelines.lake.enabled=true`, `LakeBootCheck` runs once after Flyway ([Configuration §7](configuration.md#7-config-validation), [Module structure §5.21](module-structure.md#521-lake)). A passing check logs one line; a failing one logs nothing of its own and refuses startup.
+
+| Level | `event=` | When | Fields |
+|---|---|---|---|
+| INFO | `lake.boot.ok` | Every check passed: the catalog shape, the four V53 triggers, the control row, the store reachable and honouring `If-None-Match: *` | `bucket`, `prefix` |
+
+**The refusals are startup failures, not log events.** Each is an `IllegalStateException` whose message starts with its id, so the operator greps the boot failure for it: `lake.boot.catalog_shape`, `lake.boot.trigger_missing`, `lake.boot.control_row`, `lake.boot.storage_unreachable`, `lake.boot.conditional_put` (what each means: Configuration §7). No credential, key, or object body appears in any of them.
+
 ### 3.5 Log destination
 
 - **Stdout** by default — collected by container runtime (Docker / k8s) and shipped to the operator's log aggregator (CloudWatch, Stackdriver, Loki, ELK, etc.).
@@ -671,6 +681,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-02 | v1.48 | 785 (#785) managed lake boot check | New **§3.4P**: the `lake.boot.ok` INFO line and the five `lake.boot.*` refusal ids the after-Flyway boot check leads its startup failure with (defined here so a citation of one is checked; they are not log events). |
 | 2026-11-01 | v1.47 | 762 (#762) never-admissible dashboard refresh | **§3.4J** gains `dashboard.refresh_never_admissible`: the WARN a refresh logs when it is refused at once because it can never be admitted on this instance (`workspace_id`, `dashboard_id`, `invocations`, `ceiling`, `key`). |
 | 2026-10-24 | v1.46 | 442b (#442) schedule notification delivery | **§3.4E** gains the nine `scheduler.notification.*` events (`enqueued`, `backlog_full`, `sent`, `retry`, `failed`, `uncertain`, `render_failed`, `port_failed`, `settle_lost`) and the rule that they carry the recipient's domain, never an address; **§4.1** gains `datapipelines.scheduler.notifications.{sent,failed,uncertain}`. |
 | 2026-10-21 | v1.45 | #637 retention event-catalogue parity | **§3.4's namespace sentence** now lists thirteen namespaces, including `retention`; `ObservabilityEventCatalogParityTest` enforces the existing `retention.step_failed` row with a non-vacuity floor of one. No event added or renamed. |

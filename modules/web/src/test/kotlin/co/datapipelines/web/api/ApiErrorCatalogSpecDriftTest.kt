@@ -343,8 +343,13 @@ class ApiErrorCatalogSpecDriftTest {
          * `navigation.metadata.too_large` (both 503, explicit catalog rows), landed in the SAME
          * commit as their `PipelineErrorCodes.Navigation` constants. Re-derived from the document's
          * own parse (this regex over the file: 416 at the base, 419 after).
+         *
+         * 419 → 422 with #785: the new §13.25 gains `lake.catalog.fenced`,
+         * `lake.catalog.restoring` and `lake.catalog.outcome_unknown`, all `—` rows
+         * (NEVER_RETURNED_LIVE: they arise inside DP's own catalog writes and no route reaches them
+         * before P8), landed in the SAME commit as their `PipelineErrorCodes.Lake` constants.
          */
-        const val SECTION_13_ROW_COUNT = 419
+        const val SECTION_13_ROW_COUNT = 422
 
         /**
          * §12's distinct validation codes.

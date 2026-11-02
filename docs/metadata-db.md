@@ -1,9 +1,9 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.49 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.50 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
-**Last updated:** 2026-10-25
+**Last updated:** 2026-11-02
 
 ---
 
@@ -31,7 +31,7 @@ This spec defines the **complete physical schema** for the app's own metadata Po
 - **Encryption** uses `BYTEA` for ciphertext (AES-256-GCM, see [Datasources spec](datasources.md#7-credential-storage)).
 - **Naming**: `snake_case` for all identifiers. Table names are plural (`users`, `pipelines`). Column names are singular (`email`, `created_at`).
 - **Foreign keys** use `ON DELETE CASCADE` for child tables that don't make sense without their parent (e.g., `pipeline_versions` without `pipelines`). Use `ON DELETE RESTRICT` (default) for reference columns (e.g., `owner_id` in `pipelines` — don't delete a user who owns pipelines).
-- **`updated_at` maintenance:** every table that has an `updated_at` column gets it set **by the application, in the `SET` clause of every `UPDATE` statement** (`updated_at = NOW()`). There are **no triggers** in this schema — no `BEFORE UPDATE` trigger, no `moddatetime` extension. Rationale: a trigger hides a write from the statement that caused it, and this schema is small enough that the discipline is a code-review item, not an operational risk. The `DEFAULT NOW()` on the column covers INSERT only. An UPDATE that forgets `updated_at` is a bug in the repository method.
+- **`updated_at` maintenance:** every table that has an `updated_at` column gets it set **by the application, in the `SET` clause of every `UPDATE` statement** (`updated_at = NOW()`). There are **no triggers** in this schema — no `BEFORE UPDATE` trigger, no `moddatetime` extension — with ONE named exception: V53's four on the Iceberg catalog tables ([§4.41](#441-iceberg_tables), [§4.42](#442-iceberg_namespace_properties)), the lake's lease fence and revision log, which guard writes made by a library DP does not control. Rationale: a trigger hides a write from the statement that caused it, and this schema is small enough that the discipline is a code-review item, not an operational risk. The `DEFAULT NOW()` on the column covers INSERT only. An UPDATE that forgets `updated_at` is a bug in the repository method.
 - **Immutable tables carry no `updated_at`** (`execution_events`, `audit_log`) — see the per-table notes. Since V6 the version tables carry one **narrowly**: `pipeline_versions` / `template_versions` record the last DRAFT write in `updated_at`/`updated_by` (the 409 conflict details of [versioning §4.2](versioning.md)); a release or discard does not restamp it, and RELEASED/DISCARDED rows are never UPDATEd otherwise (versioning §3.1's amended immutability discipline).
 
 ---
@@ -1027,7 +1027,7 @@ CREATE TABLE schedule_run_events (
 ```
 
 **Notes:**
-- **Append-only by construction**, not by a trigger (§2: this schema has none): the one INSERT in `ScheduleRunRepository.appendTrail` draws `seq` from `schedule_runs.trail_seq` in the same statement, and no code path updates or deletes a row — `ScheduleTrailAppendOnlyTest` scans the sources. Like §2's other immutable tables it carries no `updated_at`.
+- **Append-only by construction**, not by a trigger (§2: the application schema has none): the one INSERT in `ScheduleRunRepository.appendTrail` draws `seq` from `schedule_runs.trail_seq` in the same statement, and no code path updates or deletes a row — `ScheduleTrailAppendOnlyTest` scans the sources. Like §2's other immutable tables it carries no `updated_at`.
 - **No copy of the pipeline's events.** The execution's own events stay in [`execution_events`](#47-execution_events); `schedule_runs.execution_id` is the join a merged Messages read uses (record §5.4).
 - **Retention** follows the run's history: slice 1 deletes neither (a retention policy for runs and their trail is a later slice's; the notification outbox, [§4.39](#439-schedule_notification_events)–[§4.40](#440-schedule_notification_deliveries), is kept with them).
 - **The notification kinds** (V51, #442b): `notification_enqueued` is written in the transition's own transaction when the outbox queued a notice (details: the notice id, its event and outcome, the queued and refused counts — never an address); `notification_sent` / `notification_failed` / `notification_uncertain` when the sender settles a delivery, or recovers a claim a stopped instance left (details: the delivery id, the notice id, the attempt count and the code — no part of the address, not even its domain: the trail is read by every `schedule.read` holder). A retry that returns a delivery to `pending` writes no row.
@@ -1566,6 +1566,125 @@ CREATE INDEX idx_schedule_notification_deliveries_event ON schedule_notification
 
 **Strict deployment backlog admission (#442 round two).** Enqueue and explicit resend take transaction-scoped `pg_advisory_xact_lock(442004001)` (`NotificationRepository.ADMISSION_LOCK_KEY`) before counting pending rows, in the same READ COMMITTED transaction as insert/requeue. Lock order: enqueue takes the run row, then the advisory lock; resend takes the delivery row, then the advisory lock. The sender claims delivery rows with `FOR UPDATE SKIP LOCKED` and never takes the advisory lock, so there is no cycle. The advisory statement has a five-second query timeout on a dedicated template. This serializes admission across schedules and instances; at the hard cap, new deliveries become `failed/backlog_full` and resend is refused (`409 schedule.notification.backlog_full`, `details.pending`, `details.backlog_max`) without changing the row. Lowering the configured cap does not discard existing pending mail.
 
+### 4.41 `iceberg_tables`
+
+**Iceberg's `JdbcCatalog` pointer table — one row per managed lake table, naming its current metadata file** (V53; #785, the dp-lake design record §5.1, §8a). Created by Flyway, not by the library: the catalog runs with `jdbc.init-catalog-tables=false`, so Iceberg issues no DDL at start-up, and the `iceberg_type` column makes `JdbcCatalog` select its V1 schema version from the column itself and alter nothing (`CatalogShapeIntegrationTest` pins it against Iceberg 1.12.0). Written ONLY by the library, inside a commit the lake's lease fences.
+
+```sql
+CREATE TABLE iceberg_tables (
+    catalog_name               VARCHAR(255) NOT NULL,
+    table_namespace            VARCHAR(255) NOT NULL,
+    table_name                 VARCHAR(255) NOT NULL,
+    metadata_location          VARCHAR(1000),
+    previous_metadata_location VARCHAR(1000),
+    iceberg_type               VARCHAR(5),
+    PRIMARY KEY (catalog_name, table_namespace, table_name)
+);
+CREATE TRIGGER dp_fence BEFORE INSERT OR UPDATE OR DELETE ON iceberg_tables
+    FOR EACH ROW EXECUTE FUNCTION dp_fence();
+CREATE TRIGGER dp_revlog AFTER INSERT OR UPDATE OF metadata_location ON iceberg_tables
+    FOR EACH ROW EXECUTE FUNCTION dp_revlog();
+CREATE TRIGGER dp_revlog_drop AFTER DELETE ON iceberg_tables FOR EACH ROW EXECUTE FUNCTION dp_revlog_drop();
+```
+
+**Notes:**
+- **The library's shape, byte for byte** — `VARCHAR(n)` against §2's `TEXT` rule, no `created_at`, no surrogate id — because the library reads and writes these columns and a drift is a catalog the library rejects or silently re-shapes. The boot check (`LakeBootCheck`, configuration.md §7) refuses a column list that is not this one.
+- **The fence (`dp_fence`, record §8a).** A write needs the session's `dp.lease_token` and `dp.operation_id` (else SQLSTATE `DP001`), a catalog whose `lake_control.mode` is not `restoring` (else `DP002`), and a live, undeadlined lease of THAT operation on `<namespace>.<table>`, read `FOR SHARE` in the same statement — the lock a takeover's UPDATE of the lease row waits on. A rename needs the lease on the OLD name too. The two session settings are set by `FencedJdbcClientPool` on connections it opens for one lease holder and closes at release (owner ruling 2026-11-02, record form); DP's own pool never carries them.
+- **The revision log (`dp_revlog`, `dp_revlog_drop`)** writes [§4.45](#445-lake_table_revisions) inside the commit's own transaction, so the log is complete by construction.
+- These are the schema's only triggers besides [§4.42](#442-iceberg_namespace_properties)'s fence (§2): they guard writes made by a library DP does not control, which no repository method can reach.
+
+### 4.42 `iceberg_namespace_properties`
+
+**Iceberg's `JdbcCatalog` namespace properties** (V53; #785, record §5.1). Library-shaped and library-written like [§4.41](#441-iceberg_tables); a namespace exists in the catalog as its `exists = true` property row.
+
+```sql
+CREATE TABLE iceberg_namespace_properties (
+    catalog_name   VARCHAR(255) NOT NULL,
+    namespace      VARCHAR(255) NOT NULL,
+    property_key   VARCHAR(255),
+    property_value VARCHAR(1000),
+    PRIMARY KEY (catalog_name, namespace, property_key)
+);
+CREATE TRIGGER dp_fence BEFORE INSERT OR UPDATE OR DELETE ON iceberg_namespace_properties
+    FOR EACH ROW EXECUTE FUNCTION dp_fence();
+```
+
+**Notes:**
+- **Fenced by the namespace lease** (`lake_leases.kind = 'namespace'`, name = the namespace) — the same `dp_fence` function as §4.41, keyed on the table it fires for.
+
+### 4.43 `lake_control`
+
+**The managed lake catalog's mode — exactly one row, inserted by V53** (#785, record §5.2, §9).
+
+```sql
+CREATE TABLE lake_control (
+    id                  INT         PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    mode                TEXT        NOT NULL DEFAULT 'normal' CHECK (mode IN ('normal', 'restoring', 'replaying')),
+    protection_interval INTERVAL    NOT NULL DEFAULT INTERVAL '7 days',
+    last_sweep_at       TIMESTAMPTZ,
+    restored_marker_at  TIMESTAMPTZ,
+    restore_epoch       UUID        NOT NULL DEFAULT gen_random_uuid()
+);
+INSERT INTO lake_control (id, mode) VALUES (1, 'normal');
+```
+
+**Notes:**
+- **`restoring` refuses every catalog write** at the fence (`DP002`). No code path in P2 changes the mode; the restore and replay flows that set it, and the sweep that stamps `last_sweep_at`, are later phases' (record §9, P6).
+- The boot check refuses a table that does not hold exactly its one row.
+
+### 4.44 `lake_leases`
+
+**The §8a lease rows: one per (kind, name), held by one operation** (V53; #785, record §8a). `LakeLeases` writes them — acquire is one `INSERT … SELECT … WHERE deadline > now() ON CONFLICT (kind, name) DO UPDATE … RETURNING token`, heartbeat extends `expires_at` up to `deadline_at`, release deletes by `operation_id`. Every comparison is PostgreSQL's `now()`.
+
+```sql
+CREATE TABLE lake_leases (
+    kind            TEXT        NOT NULL CHECK (kind IN ('table', 'namespace')),
+    name            TEXT        NOT NULL,
+    operation_id    UUID        NOT NULL,
+    token           UUID        NOT NULL,
+    acquired_at     TIMESTAMPTZ NOT NULL,
+    expires_at      TIMESTAMPTZ NOT NULL,
+    deadline_at     TIMESTAMPTZ NOT NULL,
+    operation       TEXT        NOT NULL,
+    holder_instance TEXT        NOT NULL,
+    PRIMARY KEY (kind, name)
+);
+CREATE INDEX idx_lake_leases_operation ON lake_leases (operation_id);
+```
+
+**Notes:**
+- **Tokens are random** (`gen_random_uuid()`), drawn anew on every takeover, so a restore cannot rewind them and a dead holder's token stops matching. `deadline_at` is never extended.
+- **V53's CHECKs are inline and unnamed** (Postgres names them `lake_leases_kind_check`, `lake_control_id_check` and `lake_control_mode_check`), verbatim from the E1 harness where every statement was falsified; `FlywayMigrationIntegrationTest`'s named-CHECK inventory covers only `chk_`-named constraints.
+- `holder_instance` (`<host>/<pid>`) is diagnostic only, never compared.
+
+### 4.45 `lake_table_revisions`
+
+**The revision log: one row per pointer move of a managed table, written ONLY by the [§4.41](#441-iceberg_tables) triggers, never pruned** (V53; #785, record §5.2, §8a).
+
+```sql
+CREATE TABLE lake_table_revisions (
+    seq                        BIGSERIAL   PRIMARY KEY,
+    namespace                  TEXT        NOT NULL,
+    table_name                 TEXT        NOT NULL,
+    metadata_location          TEXT        NOT NULL,
+    previous_metadata_location TEXT,
+    became_current_at          TIMESTAMPTZ NOT NULL,
+    superseded_at              TIMESTAMPTZ,
+    protected_until            TIMESTAMPTZ,
+    operation_id               UUID,
+    dropped_at                 TIMESTAMPTZ
+);
+CREATE INDEX idx_lake_table_revisions_table ON lake_table_revisions (namespace, table_name, seq);
+CREATE INDEX idx_lake_table_revisions_operation ON lake_table_revisions (operation_id);
+CREATE UNIQUE INDEX uq_lake_table_revisions_current ON lake_table_revisions (namespace, table_name)
+    WHERE superseded_at IS NULL;
+```
+
+**Notes:**
+- **At most one current revision per table:** `dp_revlog` supersedes the current row before inserting the next, and the partial unique index refuses a second. A drop stamps the final row `superseded_at` and `dropped_at`.
+- **`protected_until` is left NULL (= protected)** by the trigger; a later statement finalises it (record §8a, P6's orphan sweep reads it). `operation_id` is the writing session's `dp.operation_id`.
+- No application code inserts, updates or deletes a row; the triggers are the only writers.
+
 ## 5. Index Strategy Summary
 
 **This table is generated from §4 and must contain nothing §4 does not create.** Two kinds of entry appear:
@@ -1692,6 +1811,15 @@ CREATE INDEX idx_schedule_notification_deliveries_event ON schedule_notification
 | `schedule_notification_deliveries` | `uq_schedule_notification_deliveries_message_id` | via UNIQUE | V51: a Message-ID is never reused across deliveries |
 | `schedule_notification_deliveries` | `idx_schedule_notification_deliveries_due` | explicit | V51: the sender's claim — pending rows by `next_attempt_at` — and the backlog count |
 | `schedule_notification_deliveries` | `idx_schedule_notification_deliveries_event` | explicit | V51: a notice's deliveries — the run detail |
+| `iceberg_tables` | `iceberg_tables_pkey` | via PK | The library's own key `(catalog_name, table_namespace, table_name)`: every load and every pointer CAS ([§4.41](#441-iceberg_tables)) |
+| `iceberg_namespace_properties` | `iceberg_namespace_properties_pkey` | via PK | The library's own key `(catalog_name, namespace, property_key)` ([§4.42](#442-iceberg_namespace_properties)) |
+| `lake_control` | `lake_control_pkey` | via PK | The one row (`CHECK (id = 1)`) the fence reads on every catalog write ([§4.43](#443-lake_control)) |
+| `lake_leases` | `lake_leases_pkey` | via PK | One lease per `(kind, name)` — the acquire's `ON CONFLICT` arbiter and the fence's `FOR SHARE` lookup ([§4.44](#444-lake_leases)) |
+| `lake_leases` | `idx_lake_leases_operation` | explicit | V53: release by operation — `DELETE … WHERE operation_id = ?` drops every lease of the operation at once |
+| `lake_table_revisions` | `lake_table_revisions_pkey` | via PK | Surrogate `BIGSERIAL` `seq` ([§4.45](#445-lake_table_revisions)) |
+| `lake_table_revisions` | `idx_lake_table_revisions_table` | explicit | V53: a table's revisions in order — the orphan sweep's and the history's walk |
+| `lake_table_revisions` | `idx_lake_table_revisions_operation` | explicit | V53: an operation's pointer moves — what one attempt committed |
+| `lake_table_revisions` | `uq_lake_table_revisions_current` | explicit (partial, unique) | V53: at most one CURRENT revision (`superseded_at IS NULL`) per table — the trigger supersedes before it inserts |
 
 **Deliberately absent:**
 - `uq_users_email` — this name never existed. The uniqueness rule is a `UNIQUE` *constraint* declared inline in §4, so Postgres names its index `users_email_key`. The old entry would have sent a migration author looking for a `CREATE UNIQUE INDEX` statement that was not there. (`uq_pipelines_name`/`pipelines_name_key` are gone too — V4 replaced the global rule with the explicitly named `uq_pipelines_workspace_name`.)
@@ -1760,6 +1888,11 @@ table and the test's expected-table list in the same commit.
 | `schedule_notification_events` | derived | ScheduleNotification | — | — | Notices THIS deployment's scheduler queued for its own runs (#442b); produced, never authored |
 | `schedule_notification_deliveries` | derived | ScheduleNotification | — | — | The per-recipient sends of those notices — the event's classification; addresses never leave the environment |
 | `template_implements` | promotable | Template | — (follows `template_versions`) | `(name, version)` + the fact ids | The citations ride the template version's payload (export, import, the promotion batch) outside its `body_hash` (R9). Their targets are [`learned_facts`](#418-learned_facts) rows, which are environment-local: the importing workspace stores the ids that resolve there and drops the rest without refusing (owner ruling 2026-09-25), so a cross-deployment promotion lands with none ([§4.21](#421-template_implements)) |
+| `iceberg_tables` | environment-local | LakeCatalog | — | — | The managed lake's pointer rows: each names a metadata file in THIS environment's bucket, and an Iceberg snapshot is an environment-local data state that never promotes (dp-lake design record, one lake per environment) |
+| `iceberg_namespace_properties` | environment-local | LakeCatalog | — | — | The same catalog's namespaces — the catalog's classification |
+| `lake_control` | environment-local | LakeCatalog | — | — | This lake's mode and restore epoch; meaningless beside another environment's catalog |
+| `lake_leases` | environment-local | LakeCatalog | — | — | Live write leases of this deployment's operations; runtime coordination, never authored |
+| `lake_table_revisions` | environment-local | LakeCatalog | — | — | This catalog's pointer history, written by its triggers; it protects THIS bucket's files from the orphan sweep |
 
 ---
 
@@ -1912,7 +2045,7 @@ Three things the generator must respect:
 
 - **Only explicit indexes get a `CREATE INDEX`.** Constraint-backed indexes (§5, "via PK"/"via UNIQUE") are created by Postgres from the constraint. Emitting a `CREATE INDEX` for one of those is a duplicate index, not a safety net.
 - **Table order follows the FK graph:** `users` → `api_keys`/`audit_log` → `pipelines` → `pipeline_versions` → `pipeline_executions` → `execution_events`, and `templates` → `template_versions`; `datasources` depends only on `users`. `pipeline_executions` cannot be created before `pipeline_versions` — its composite FK targets that table's primary key.
-- **No triggers are emitted.** `updated_at` is application-maintained (§2). A generator that "helpfully" adds a `BEFORE UPDATE` trigger contradicts this spec.
+- **No triggers are emitted** but V53's four lake catalog triggers (§2, [§4.41](#441-iceberg_tables)). `updated_at` is application-maintained (§2). A generator that "helpfully" adds a `BEFORE UPDATE` trigger contradicts this spec; `FlywayMigrationIntegrationTest` lists the four by name and refuses any other.
 
 The §8 jobs are **not** migrations — they are scheduled statements against the live schema and never appear in a versioned migration file.
 
@@ -2075,6 +2208,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-02 | v1.50 | 785 (#785, dp-lake P2) | **V53 — the managed lake's catalog core.** New **§4.41 `iceberg_tables`** and **§4.42 `iceberg_namespace_properties`** (Iceberg 1.12.0's `JdbcCatalog` V1 shape, byte for byte, created by Flyway so the library runs with `init-catalog-tables=false` and issues no DDL), **§4.43 `lake_control`** (one row, the catalog mode), **§4.44 `lake_leases`** (the design record §8a's lease rows) and **§4.45 `lake_table_revisions`** (the trigger-written revision log). **§2's no-trigger rule gains its one named exception:** `dp_fence` on both catalog tables and `dp_revlog` / `dp_revlog_drop` on `iceberg_tables` (§7 and `FlywayMigrationIntegrationTest` list exactly these four). §5 gains nine indexes; §5A classifies all five tables environment-local. V52 is #778's. Down path documented in the migration header, not shipped. |
 | 2026-10-25 | v1.49 | 442c (#442) | §4.23: nullable target_ref frozen at run creation (V51). §4.40: strict pending cap, shared advisory key, bounded acquisition, lock order and resend refusal. |
 | 2026-10-24 | v1.48 | 442b (#442) | **V51 — the schedule notification outbox.** New **§4.39 `schedule_notification_events`** (one row per selected transition or block, `run_id` NOT NULL, UNIQUE `(run_id, outcome)` so a replayed transition writes none) and **§4.40 `schedule_notification_deliveries`** (one row per notice and recipient, the address snapshotted, a fixed `message_id`, `pending` / `accepted` / `failed` / `uncertain` with the due/claim CHECKs, `resend_count`); §4.24's trail CHECK gains the four `notification_*` kinds (details carry ids, counts and codes — no address, no domain; retries write no trail row); §5 lists the five new indexes. Down path documented in the migration header, not shipped. |
 | 2026-10-22 | v1.47 | 8b (#8) | The existing V33 CHECK admits JavaScript rows; the pooled save gate and availability control writes without a schema change. |

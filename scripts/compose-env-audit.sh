@@ -225,6 +225,11 @@ SECRET_VARS = {
     # 137 — the SMTP credentials (for Postmark both are the server token).
     "DATAPIPELINES_MAIL_USERNAME",
     "DATAPIPELINES_MAIL_PASSWORD",
+    # #785 — the managed lake's writer pair and DuckDB's read-only pair (configuration.md §3.36).
+    "DATAPIPELINES_LAKE_S3_ACCESS_KEY",
+    "DATAPIPELINES_LAKE_S3_SECRET_KEY",
+    "DATAPIPELINES_LAKE_S3_READER_ACCESS_KEY",
+    "DATAPIPELINES_LAKE_S3_READER_SECRET_KEY",
 }
 # THIS DEPLOYMENT'S OWN VALUES: not secret, but the product cannot pick them, so they
 # have no tracked default either. They sit beside the secrets in secrets.env.example.
@@ -238,6 +243,10 @@ IDENTITY_VARS = {
     "DATAPIPELINES_MAIL_REPLY_TO",
     "DATAPIPELINES_MAIL_OPS_TO",
     "DATAPIPELINES_MAIL_MESSAGE_STREAM",
+    # #785 — the managed lake's bucket, region and S3-compatible endpoint (configuration.md §3.36).
+    "DATAPIPELINES_LAKE_S3_BUCKET",
+    "DATAPIPELINES_LAKE_S3_REGION",
+    "DATAPIPELINES_LAKE_S3_ENDPOINT",
 }
 
 # defaults.env values that deliberately differ from application.yml's shipped default,

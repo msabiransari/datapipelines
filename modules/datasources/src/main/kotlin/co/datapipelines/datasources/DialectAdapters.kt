@@ -845,7 +845,7 @@ class LakeDialectAdapter(
         // which is exactly what a public object needs. `unsigned` beats every credential kind.
         if (properties["unsigned"]?.toString()?.lowercase() == "true") return null
         val region = properties["region"]?.toString()
-        val endpoint = properties["endpoint"]?.toString()
+        val endpoint = properties["endpoint"]?.toString()?.let(::s3Endpoint)
         val urlStyle = properties["url_style"]?.toString()
         val options =
             buildList {
@@ -862,13 +862,30 @@ class LakeDialectAdapter(
                     }
                 }
                 region?.let { add("REGION ${quoted(it)}") }
-                endpoint?.let { add("ENDPOINT ${quoted(it)}") }
+                endpoint?.let { add("ENDPOINT ${quoted(it.hostAndPort)}") }
                 urlStyle?.let { add("URL_STYLE ${quoted(it)}") }
-                // MinIO and most on-prem S3 endpoints are plain HTTP; a declared endpoint is a
-                // deliberate non-AWS target, so TLS is not assumed for it.
-                if (endpoint != null) add("USE_SSL false")
+                // dp-lake call 24 (#785): the endpoint's SCHEME decides TLS — `https://` → USE_SSL true,
+                // `http://` → false. A scheme-less endpoint keeps the pre-#785 reading: a declared
+                // endpoint is a deliberate non-AWS target (MinIO, on-prem), plain HTTP wherever it was
+                // registered without one. DuckDB's ENDPOINT takes host[:port], so the scheme is stripped.
+                endpoint?.let { add("USE_SSL ${it.tls}") }
             }
         return "CREATE OR REPLACE SECRET dp_lake (${options.joinToString(", ")})"
+    }
+
+    /** A LAKE `endpoint` as DuckDB's secret wants it: host[:port] plus whether TLS is on (call 24). */
+    private class S3Endpoint(
+        val hostAndPort: String,
+        val tls: Boolean,
+    )
+
+    private fun s3Endpoint(raw: String): S3Endpoint {
+        val trimmed = raw.trim()
+        return when {
+            trimmed.startsWith("https://", ignoreCase = true) -> S3Endpoint(trimmed.substring("https://".length).trimEnd('/'), tls = true)
+            trimmed.startsWith("http://", ignoreCase = true) -> S3Endpoint(trimmed.substring("http://".length).trimEnd('/'), tls = false)
+            else -> S3Endpoint(trimmed, tls = false)
+        }
     }
 
     /**

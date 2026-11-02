@@ -25,6 +25,8 @@ object ThirdPartyLicenseAllowlist {
         buildMap {
             // Spring, Jackson, Kotlin, Netty and the other Apache-licensed runtime components.
             listOf(
+                "Apache 2", // RoaringBitmap (#785).
+                "Apache 2.0", // error_prone_annotations (#785).
                 "Apache License 2.0",
                 "Apache License Version 2.0",
                 "Apache License, Version 2.0",
@@ -35,12 +37,14 @@ object ThirdPartyLicenseAllowlist {
             ).forEach { put(it, "Apache-2.0") }
             // CommonMark and PostgreSQL declare this spelling in their POMs.
             put("BSD-2-Clause", "BSD-2-Clause")
+            put("BSD 2-Clause License", "BSD-2-Clause") // zstd-jni, via parquet-hadoop (#785).
             put("BSD-3-Clause", "BSD-3-Clause") // ASM.
             // SPDX explicitly identifies EDL 1.0 as BSD-3-Clause; Jakarta's two spellings.
             put("EDL 1.0", "BSD-3-Clause")
             put("Eclipse Distribution License - v 1.0", "BSD-3-Clause")
             put("EPL 1.0", "EPL-1.0") // H2's second declared licence.
             put("EPL 2.0", "EPL-2.0") // Jakarta.
+            put("Eclipse Public License, Version 2.0", "EPL-2.0") // jts-core (with EDL 1.0), via parquet-column (#785).
             put("EPL-2.0", "EPL-2.0") // Logback.
             put("GNU Lesser General Public License, Version 3", "LGPL-3.0-only") // Argon2.
             put("GPL2 w/ CPE", "GPL-2.0-only WITH Classpath-exception-2.0") // Jakarta.

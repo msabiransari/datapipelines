@@ -587,6 +587,8 @@ class CommonConventionsPlugin : Plugin<Project> {
                 // #10 L1a (dashboard implementation spec §1, §17): 90 until the first measured baseline; the
                 // orchestrator sets baseline minus 2 at the merge (the house rule).
                 ":modules:visualization" to 94,
+                // #785 dp-lake P2: 90 until the first measured baseline; the lane sets baseline minus 2 (the house rule).
+                ":modules:lake" to 90,
                 ":modules:mcp-server" to 94,
                 ":modules:web" to 72,
                 ":modules:app" to 90,

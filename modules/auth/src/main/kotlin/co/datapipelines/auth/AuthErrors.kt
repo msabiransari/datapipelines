@@ -237,6 +237,8 @@ object AuthErrorCodes {
             "visualization." to "1322-visualizations",
             "dashboard." to "1323-dashboards",
             "navigation." to "1324-navigation-trees",
+            // #785 — the managed lake's catalog fence (§13.25), anchored with the family (the 194b lesson).
+            "lake." to "1325-managed-lake",
         )
 }
 

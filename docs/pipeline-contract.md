@@ -1685,6 +1685,16 @@ The session-only navigation trees' refusals (#460, #464; [REST API §24](rest-ap
 | `navigation.view.unavailable` | 503 | the caller's promotion view cannot be computed (its promotion target's inventory could not be read), so the tree refuses rather than answer a completed empty level. Retryable: `Retry-After: 5`. Logged at WARN without a stack; no `details` |
 | `navigation.metadata.too_large` | 503 | one node's serialized metadata alone exceeds the 1 MiB response budget, so no page can carry it. Logged at ERROR with the stack (a server-side defect) |
 
+### 13.25 Managed lake
+
+The managed lake's catalog outcomes (#785, dp-lake P2; [module structure §5.21](module-structure.md#521-lake)). The Iceberg catalog tables `iceberg_tables` and `iceberg_namespace_properties` live in DP's own Postgres (V53), and a Flyway-owned trigger fences every write to them: the writing connection must carry the session settings `dp.lease_token` and `dp.operation_id` of a live, undeadlined `lake_leases` row on the row's name (a rename needs the old name's lease too), and the catalog must not be in `restoring` mode. The trigger raises SQLSTATE `DP001` or `DP002`; `modules/lake` maps them, and a connection lost mid-write, to these codes. Only DP's own code paths write the catalog, so no route returns any of them before P8 adds the lake surfaces (HTTP `—`). A refused write changed nothing: the trigger runs before the row is written, in the same transaction.
+
+| Code | HTTP | Description |
+|---|---|---|
+| `lake.catalog.fenced` | — | SQLSTATE `DP001`: a catalog write without a lease token, with a token or operation that is not the live lease's, against a name the operation holds no lease on, or a rename without the source name's lease. Another operation holds the table, or this operation's lease expired or reached its deadline |
+| `lake.catalog.restoring` | — | SQLSTATE `DP002`: a catalog write while `lake_control.mode = 'restoring'` (the recovery procedure has the catalog) |
+| `lake.catalog.outcome_unknown` | — | the catalog connection failed (SQLSTATE class `08`) while a write was in flight, so the write may or may not have committed. DP never replays the statement (a replay can report a committed write as failed and let the library delete its files); the operation's settle step decides from the revision log. The catalog session that saw it refuses further work |
+
 
 ---
 ## 14. Pipeline Lifecycle Operations
