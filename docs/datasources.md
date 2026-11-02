@@ -1,6 +1,6 @@
 # Datasources Specification
 
-**Status:** v2.54 (frozen contract — additive-only changes after this point)
+**Status:** v2.55 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
 **Last updated:** 2026-10-25
@@ -1507,6 +1507,42 @@ row must be re-registered to follow the table.
 - **Athena / Glue as engines.** Out by thesis — paid services; DuckDB on the app's box is the
   engine.
 
+### 8C.9 Which versions read which table — the lake reference index
+
+#778 (dp-lake design record §7): every RELEASED pipeline and parameter-set version is scanned
+for the lake tables it reads, and the answer is stored (metadata-db §4.41
+`lake_reference_scans`, §4.42 `lake_table_references`). The scan runs in the SAME transaction
+as the release or import that made the version RELEASED, so a failed scan rolls the write back.
+On boot, a backfill scans each released version that has no row, or a row from an older scanner.
+
+- **A site** is a pipeline node whose `source` is a LAKE datasource, or a parameter-set
+  selector whose `source.datasource` is LAKE. Each one is rendered the way the editor renders
+  it: the §12.6 sample values, and for a selector the org tier plus a type sample per parent.
+  The rendered SQL is then handed to the engine's OWN parser (`json_serialize_sql`, on a
+  parse-only in-memory connection with `enable_external_access = false`). Regex never decides
+  what a table is: the parser sees CTE names, quoted identifiers, comments and table functions
+  correctly where a pattern does not.
+- **Resolution** follows the LAKE connection's view naming (§8C.2): `a.b.t` is namespace
+  `[a, b]`, and in the default catalog it is `[b]`; `s.t` is `[s]`. A bare `t` resolves only
+  when the datasource's registry holds exactly ONE namespace. CTE names, system catalogs and
+  schemas, and the engine's internal views are not table positions.
+- **The status is honest about its reach.** `exact` means the body's output depends on no
+  value: literal text, comments, and directives that print nothing (an `<#assign>`, or a macro
+  definition that is never called), with no library imported. `partial` covers everything else:
+  a `${…}` interpolation, an `<#if>` or `<#switch>`, a `<#list>`, an `<#include>`, a macro call,
+  an imported library, any other directive, or a body the classifier cannot parse. In those
+  cases one sample render may not show every table the body can produce. The rule is
+  deliberately conservative, so an `<#if>` around a WHERE clause is `partial` too.
+  `unscannable` means the site could not be rendered or parsed. Each reason names the construct
+  and the site, never the rendered SQL. That SQL may embed sample values, so it is neither stored
+  nor logged.
+- **Who reads it.** A promotion receiver refuses a batch that reads a table its own registry
+  does not hold ([Versioning §10.5](versioning.md#105-datasource-pre-validation),
+  `pipeline.promotion.lake_table_unavailable`). It admits what the index cannot see, a
+  partial branch, an unscannable site or an unresolved name, and leaves those to the runtime
+  gate `datasource.lake.table_unavailable` (§8C.2). The by-table lookup (datasource, namespace,
+  table) is the read dp-lake's table lifecycle uses next.
+
 ---
 
 ## 9. Validation Rules
@@ -1736,6 +1772,7 @@ fixture) get their Testcontainers twin.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-02 | v2.55 | #778 | **§8C.9 (new):** the lake reference index. Each released pipeline and parameter-set version's LAKE sites are scanned in the releasing transaction by the engine's own parser, resolved against the registry (status `exact`, `partial` or `unscannable`), and backfilled at boot. The promotion receiver reads the index to refuse a batch that names an unregistered table. Additive. |
 | 2026-10-25 | v2.54 | #709 | **§8C.8:** the scheduler/dashboards bullet was false since #9/#10 shipped — restated as general features over LAKE sources; the v2.20 row stays as history. A correction of prose under the additive-only rule; no field, code or route change. |
 | 2026-10-21 | v2.53 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **§ WORKSPACE rules, one sentence**: "A WORKSPACE rule can be implemented by a script" (was "a transform"); the cited design record keeps its filename. A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-03 | v2.52 | 405 (#405) a datasource's own timeout tightens the probe | **§7D's clamps paragraph:** `timeout_seconds` clamps to `min(dialect ceiling, the datasource's own query_timeout_seconds)` — a tightening only, never a loosening; v2.51's "not consulted (its `0` means no limit)" was false for a stored datasource, whose value the V1 CHECK and the validator hold at ≥ 1. A datasource set to 20 s gave its nodes 20 s and its probe up to the dialect ceiling; the probe now gets 20 s too, and the payload's `timeout_seconds` reports it. The `tempdb` scratch check (no datasource) keeps the H2 ceiling. Code: `SqlProbe.probe`'s bound (`timeoutBoundFor`); the MCP argument bound (`maxTimeoutSeconds`) is unchanged. |

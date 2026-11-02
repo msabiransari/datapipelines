@@ -538,6 +538,8 @@ class DomainConfiguration {
         // #517 — the import's metadata transaction and the workspace writer guard it acquires first.
         metadataTransactionManager: org.springframework.transaction.PlatformTransactionManager,
         guard: co.datapipelines.pipeline.release.ReleaseMutationGuard,
+        // #778 — the lake reference scanner, told of the RELEASED version each import lands (seam ruling 2026-11-02).
+        observer: co.datapipelines.pipeline.release.ReleasedVersionObserver,
     ): PipelineImportService =
         PipelineImportService(
             pipelines = pipelines,
@@ -551,6 +553,7 @@ class DomainConfiguration {
                 org.springframework.transaction.support
                     .TransactionTemplate(metadataTransactionManager),
             guard = guard,
+            observer = observer,
         )
 
     @Bean

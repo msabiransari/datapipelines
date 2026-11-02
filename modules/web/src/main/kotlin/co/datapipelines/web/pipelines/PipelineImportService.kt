@@ -22,6 +22,8 @@ import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.pipeline.release.GuardedTransaction
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseMutationGuard
+import co.datapipelines.pipeline.release.ReleasedVersion
+import co.datapipelines.pipeline.release.ReleasedVersionObserver
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
@@ -77,12 +79,23 @@ class PipelineImportService(
      */
     private val transactions: TransactionOperations = GuardedTransaction.DIRECT,
     private val guard: ReleaseMutationGuard = ReleaseMutationGuard.NONE,
+    /**
+     * #778 — told of the RELEASED version every import lands or re-confirms, inside the import's transaction: the lake
+     * reference scanner indexes it against THIS deployment's registry, and a scanner that throws rolls the import back
+     * (the owner's 2026-11-02 seam ruling). [ReleasedVersionObserver.NONE] for a directly constructed test.
+     */
+    private val observer: ReleasedVersionObserver = ReleasedVersionObserver.NONE,
 ) {
-    /** What the import stored, plus whether the pipeline row was created (`201`) or gained a version (`200`). */
+    /**
+     * What the import stored, plus whether the pipeline row was created (`201`) or gained a version (`200`). [version]
+     * (#778) is the RELEASED version number the import landed or found identical — the preserved number when the
+     * payload carried one, which need not be [PipelineRecord.currentVersion].
+     */
     data class Imported(
         val record: PipelineRecord,
         val canonical: String,
         val created: Boolean,
+        val version: Int,
     )
 
     /**
@@ -133,11 +146,14 @@ class PipelineImportService(
         importValidation(pipeline.name, validator.validate(pipeline, workspaceId)).orThrow()
         val canonical = serializer.write(pipeline)
 
-        return if (preserved != null) {
-            importPreserved(workspaceId, requestedId, pipeline, canonical, preserved, actorId)
-        } else {
-            importNextLocal(workspaceId, requestedId, pipeline, canonical, actorId)
-        }
+        val imported =
+            if (preserved != null) {
+                importPreserved(workspaceId, requestedId, pipeline, canonical, preserved, actorId)
+            } else {
+                importNextLocal(workspaceId, requestedId, pipeline, canonical, actorId)
+            }
+        observer.released(ReleasedVersion(workspaceId, ReleaseFamily.PIPELINE, imported.record.id, imported.version))
+        return imported
     }
 
     /** The §9.2 payload: `version` plus the `body_hash` / `released_at` / `caller_output` (#328) that ride with it. */
@@ -277,7 +293,8 @@ class PipelineImportService(
                     throw idAlreadyTaken(requestedId, e)
                 }
             }
-        return Imported(record = record, canonical = canonical, created = existing == null)
+        val version = checkNotNull(record.currentVersion) { "an import's pipeline row carries its RELEASED version" }
+        return Imported(record = record, canonical = canonical, created = existing == null, version = version)
     }
 
     /**
@@ -332,7 +349,7 @@ class PipelineImportService(
                         actorId,
                         preserved.callerOutputJson,
                     )
-                return Imported(record, canonical, created = true)
+                return Imported(record, canonical, created = true, version = preserved.version)
             } catch (e: DuplicateKeyException) {
                 throw idAlreadyTaken(requestedId, e)
             }
@@ -351,12 +368,12 @@ class PipelineImportService(
                         null,
                     )
                 }
-                Imported(existing, canonical, created = false)
+                Imported(existing, canonical, created = false, version = preserved.version)
             }
 
             target.status == PipelineVersionStatus.RELEASED && target.bodyHash == declared -> {
                 // Idempotent no-op: re-importing an old export is safe (§9.2).
-                Imported(existing, canonical, created = false)
+                Imported(existing, canonical, created = false, version = preserved.version)
             }
 
             else -> {

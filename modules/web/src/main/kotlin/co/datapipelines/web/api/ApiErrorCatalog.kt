@@ -268,6 +268,8 @@ object ApiErrorCatalog {
             // §13.13 (055) — 409 like the pipeline.promotion family default, wired explicitly
             // so each code owns a row rather than being absorbed by the default (025 A2).
             PipelineErrorCodes.Versioning.PROMOTION_MISSING_DATASOURCES to HttpStatus.CONFLICT,
+            // §13.13 (#778) — the receiver's lake-table check: 409 like its sibling, its own row (025 A2).
+            PipelineErrorCodes.Versioning.PROMOTION_LAKE_TABLE_UNAVAILABLE to HttpStatus.CONFLICT,
             PipelineErrorCodes.Versioning.PROMOTION_TARGET_IS_AUTHORING to HttpStatus.CONFLICT,
             // §13.13 (055) — a transport failure reaching the target: 502, against the
             // promotion family's 409. It is the one promotion code that is not a refusal.

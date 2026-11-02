@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.41 (living document — updated as enums evolve)
+**Status:** v1.42 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -1127,10 +1127,25 @@ A resend (REST §20.13) returns a `failed` or `uncertain` delivery to `pending` 
 
 ---
 
+## 45. `LakeScanStatus` — what the lake reference index can say about one version (#778)
+
+Stored in `lake_reference_scans.status` ([Metadata DB §4.41](metadata-db.md#441-lake_reference_scans)). The scan's verdict for one RELEASED pipeline or parameter-set version is that of its weakest LAKE site ([Datasources §8C.9](datasources.md#8c9-which-versions-read-which-table--the-lake-reference-index)).
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `EXACT` | `exact` | Every LAKE site's template body prints the same text whatever the values, so the one render shows every table position it can produce. A version with no LAKE site is `exact`, with no references |
+| `PARTIAL` | `partial` | At least one site's body has a construct that can change its text: an interpolation, `if`, `switch`, `list`, `include`, macro call, imported library or other directive. The stored references are those of the sample render; other branches are not seen |
+| `UNSCANNABLE` | `unscannable` | At least one site could not be rendered, its template version is missing, or the engine's parser refused the rendered SQL. That site has no references |
+
+`reasons_json` names each site's findings `{site, kind, detail}`: `site` is `node:<id>` or `selector:<name>`. `kind` is a classifier word (`interpolation`, `if`, `switch`, `list`, `include`, `macro_call`, `import`, `syntax_error`, `directive:<type>`) or a scanner word (`render_failed`, `template_missing`, `unparseable`). `detail` is a bounded construct spelling, a template reference or the parser's error TYPE, never the rendered SQL. A promotion receiver refuses on a resolved reference to an unregistered table, whatever the status, and admits what the status says it could not see (pipeline-contract §13.13 `pipeline.promotion.lake_table_unavailable`).
+
+---
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-02 | v1.42 | 778 (#778) | New **§45 `LakeScanStatus`** (`exact` / `partial` / `unscannable`, `lake_reference_scans.status`, V52) with the `reasons_json` kind words. |
 | 2026-11-01 | v1.41 | 759 (#759) | **§16:** the `request.*` domain names both the 413 body-cap refusal and the 400 search-term length refusal. |
 | 2026-10-27 | v1.40 | 464 (#464) | **§16:** registers the `navigation.*` domain (pipeline-contract §13.24): the three refusals of the session-only navigation trees. |
 | 2026-10-24 | v1.39 | #517 release dependencies, core (S1) | **§15:** `pipeline.version.released` and its twins: one row per actual flip, dependencies first, root last; the detail keys `scope`, `release_id`, `cascade_root` and the root's `dependencies_released`. No new event name. |

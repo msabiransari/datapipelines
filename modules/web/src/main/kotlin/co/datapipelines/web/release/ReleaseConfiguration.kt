@@ -8,6 +8,7 @@ import co.datapipelines.pipeline.release.ReleaseAuditSink
 import co.datapipelines.pipeline.release.ReleaseBounds
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseMutationGuard
+import co.datapipelines.pipeline.release.ReleasedVersionObserver
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.web.config.ReleaseDependencyProperties
 import co.datapipelines.web.templates.TemplateReleaseService
@@ -59,6 +60,8 @@ class ReleaseConfiguration {
         audit: ReleaseAuditSink,
         metadataTransactionManager: PlatformTransactionManager,
         bounds: ReleaseBounds,
+        /** #778 — the lake reference scanner, told of every pipeline version the coordinator flips. */
+        observer: ReleasedVersionObserver,
     ): PipelineReleaseCoordination =
         ReleaseCoordinator(
             releases = releases,
@@ -76,5 +79,6 @@ class ReleaseConfiguration {
             // auto-configured `transactionTemplate` for every other consumer.
             transactions = TransactionTemplate(metadataTransactionManager),
             bounds = bounds,
+            observer = observer,
         )
 }

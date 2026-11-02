@@ -1283,6 +1283,13 @@ object PipelineErrorCodes {
         const val PROMOTION_MISSING_DATASOURCES = "pipeline.promotion.missing_datasources"
 
         /**
+         * §13.13 / versioning §10.5 (#778, dp-lake §7) — a promoted pipeline or parameter-set version reads a lake table
+         * the RECEIVER's registry does not hold. Checked by the receiver inside the batch transaction against the
+         * versions the batch landed, collected across the whole batch and reported once; the batch rolls back whole.
+         */
+        const val PROMOTION_LAKE_TABLE_UNAVAILABLE = "pipeline.promotion.lake_table_unavailable"
+
+        /**
          * §13.13 / versioning §10.1 (D7) — promotion into a deployment whose authoring
          * capability is ON. Dev is where drafts live; a receiver never authors. Raised by the
          * RECEIVER, so a misconfigured sender cannot push into an authoring deployment.

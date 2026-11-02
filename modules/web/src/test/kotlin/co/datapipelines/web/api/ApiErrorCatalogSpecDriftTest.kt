@@ -343,8 +343,12 @@ class ApiErrorCatalogSpecDriftTest {
          * `navigation.metadata.too_large` (both 503, explicit catalog rows), landed in the SAME
          * commit as their `PipelineErrorCodes.Navigation` constants. Re-derived from the document's
          * own parse (this regex over the file: 416 at the base, 419 after).
+         *
+         * 419 → 420 with #778: §13.13's `pipeline.promotion.lake_table_unavailable` (409, an
+         * explicit catalog row), landed in the SAME commit as its `PipelineErrorCodes.Versioning`
+         * constant. Re-derived from the document's own parse (419 at the base, 420 after).
          */
-        const val SECTION_13_ROW_COUNT = 419
+        const val SECTION_13_ROW_COUNT = 420
 
         /**
          * §12's distinct validation codes.

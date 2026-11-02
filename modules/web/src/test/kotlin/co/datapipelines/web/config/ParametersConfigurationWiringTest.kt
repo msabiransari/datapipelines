@@ -116,6 +116,11 @@ class ParametersConfigurationWiringTest {
             co.datapipelines.pipeline.release
                 .ReleaseBounds()
 
+        /** #778 — the lake reference scanner's release seam; the graph, not the index, is under test here. */
+        @Bean
+        fun releasedVersionObserver(): co.datapipelines.pipeline.release.ReleasedVersionObserver =
+            co.datapipelines.pipeline.release.ReleasedVersionObserver.NONE
+
         private fun dataSource(): javax.sql.DataSource = io.mockk.mockk(relaxed = true)
 
         @Bean

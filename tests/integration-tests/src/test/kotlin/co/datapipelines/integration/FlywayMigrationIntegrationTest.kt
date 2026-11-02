@@ -45,6 +45,7 @@ class FlywayMigrationIntegrationTest {
     private lateinit var dataSource: DataSource
 
     @Test
+    @Suppress("LongMethod") // the inventory IS the assertion: one line per shipped migration, in order
     fun `every shipped migration is recorded as applied and successful`() {
         val rows =
             query(
@@ -169,6 +170,9 @@ class FlywayMigrationIntegrationTest {
                 // #442b (V51) — the schedule notification outbox: one event per selected run transition
                 // (or schedule block), one delivery per recipient, and the trail's four notification kinds.
                 "51|schedule notification outbox|true",
+                // #778 (V52) — the lake reference index: one scan row per released pipeline / parameter-set
+                // version, one row per table position its renderings name (metadata-db §4.41–§4.42).
+                "52|lake reference index|true",
             )
     }
 
@@ -922,6 +926,57 @@ class FlywayMigrationIntegrationTest {
     }
 
     /**
+     * #778 (V52) — the lake reference index, read from the SHIPPED database: the scan's closed lists, the reference's
+     * resolved-identity pairing, the cascade from the scan row (a re-scan replaces a version's rows) and the by-table
+     * lookup. Behaviour is `LakeReferenceIndexRepositoryTest`'s; this pins that production Flyway builds what it runs on.
+     */
+    @Test
+    fun `V52 creates the lake reference index with its closed lists, the cascade and the by-table lookup`() {
+        query(
+            "SELECT conname || '|' || pg_get_constraintdef(oid) FROM pg_constraint WHERE conname IN " +
+                "('chk_lake_reference_scans_family', 'chk_lake_reference_scans_status', 'chk_lake_table_references_site', " +
+                "'fk_lake_table_references_scan') ORDER BY conname COLLATE \"C\"",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "chk_lake_reference_scans_family|CHECK ((family = ANY (ARRAY['pipeline'::text, 'parameter_set'::text])))",
+                "chk_lake_reference_scans_status|CHECK ((status = ANY (ARRAY['exact'::text, 'partial'::text, 'unscannable'::text])))",
+                "chk_lake_table_references_site|CHECK (((node_id IS NULL) <> (selector IS NULL)))",
+                "fk_lake_table_references_scan|FOREIGN KEY (workspace_id, family, entity_id, version) REFERENCES " +
+                    "lake_reference_scans(workspace_id, family, entity_id, version) ON DELETE CASCADE",
+            )
+        query(
+            "SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'idx_lake_table_references_table'",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "CREATE INDEX idx_lake_table_references_table ON public.lake_table_references USING btree " +
+                    "(datasource_name, namespace, table_name)",
+            )
+        columnsOf("lake_reference_scans") shouldContainExactlyInAnyOrder
+            listOf("entity_id", "family", "name", "reasons_json", "scanned_at", "scanner_version", "status", "version", "workspace_id")
+        columnsOf("lake_table_references") shouldContainExactlyInAnyOrder
+            listOf(
+                "datasource_name",
+                "entity_id",
+                "family",
+                "namespace",
+                "node_id",
+                "ordinal",
+                "resolved",
+                "selector",
+                "statement_index",
+                "table_name",
+                "template_id",
+                "template_version",
+                "time_travel",
+                "version",
+                "workspace_id",
+                "written_catalog",
+                "written_schema",
+                "written_table",
+            )
+    }
+
+    /**
      * #9 (V38) — the scheduler's schema, read from the SHIPPED database: the CHECK lists that R6's
      * table and the trail kinds live in, the partial one-active index (the durable overlap guard) and
      * SCHEDULE joining the trigger CHECK. The trail is append-only by construction, not by a
@@ -1422,7 +1477,7 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    fun `creates exactly the forty tables of metadata-db §4`() {
+    fun `creates exactly the forty-two tables of metadata-db §4`() {
         val tables =
             query(
                 """
@@ -1444,6 +1499,9 @@ class FlywayMigrationIntegrationTest {
                 // L5 (#367, V45) — the `dashboard` key's folder bindings (§4.36).
                 "dashboard_key_bindings",
                 "execution_events",
+                // #778 (V52) — the lake reference index (metadata-db §4.41–§4.42).
+                "lake_reference_scans",
+                "lake_table_references",
                 // 089 §A (V15) — the dp-lake catalog.
                 "lake_tables",
                 // 118 (V25) — the learned semantic layer.
@@ -1542,6 +1600,10 @@ class FlywayMigrationIntegrationTest {
                 "endpoint_key_bindings.idx_endpoint_key_bindings_key",
                 "execution_events.execution_events_pkey",
                 "execution_events.uq_events_execution_event",
+                // #778 (V52) — a scan's PK; a reference's PK and the by-table lookup (datasource, namespace, table).
+                "lake_reference_scans.lake_reference_scans_pkey",
+                "lake_table_references.idx_lake_table_references_table",
+                "lake_table_references.lake_table_references_pkey",
                 "lake_tables.lake_tables_pkey",
                 "lake_tables.uq_lake_tables_datasource_namespace_name",
                 // 118 (V25) — every read is per datasource; the workspace half is partial.
@@ -1725,9 +1787,20 @@ class FlywayMigrationIntegrationTest {
                 "chk_dialect",
                 // V30 (177, D11): the credential kind behind an execution — 'user' | 'endpoint' | 'server' | NULL.
                 "chk_executions_executed_by_key_kind",
+                // #778 (V52) — the scan's family/status lists, version floors and reasons shape (§4.41), sorted before
+                // `chk_lake_table_format` (`r` < `t`); the reference's counters, resolved-identity pairing and site
+                // (§4.42), sorted after it (`f` < `r`).
+                "chk_lake_reference_scans_family",
+                "chk_lake_reference_scans_reasons",
+                "chk_lake_reference_scans_scanner_version",
+                "chk_lake_reference_scans_status",
+                "chk_lake_reference_scans_version",
                 // 089 §A (V15) — lake_tables.format is parquet|iceberg; a third value would
                 // generate bad view SQL later, and the database is the last place to catch it.
                 "chk_lake_table_format",
+                "chk_lake_table_references_counters",
+                "chk_lake_table_references_resolved",
+                "chk_lake_table_references_site",
                 // 118 (V25) — learned_facts: the closed kind list, the kind↔scope rule, the
                 // fact/summary length windows, refs ≥ 1 (V26: for a DATASOURCE fact; a WORKSPACE
                 // rule may carry none), the trust set, the write surface, the scope↔workspace
