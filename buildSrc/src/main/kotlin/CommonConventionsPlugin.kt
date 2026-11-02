@@ -155,6 +155,16 @@ class CommonConventionsPlugin : Plugin<Project> {
                     }
                 }
             }
+            // SECURITY OVERRIDE (2026-11-02, GHSA-gwq9-9ffj-mvrv / GHSA-q233-g92q-qxp6 /
+            // GHSA-xqrx-qh46-34m7): snappy-java < 1.1.10.9 arrives through the lake graph
+            // (parquet-hadoop, avro, hadoop-client-*) with no BOM of its own; held by the
+            // same constraint mechanism. Rationale + retirement condition on the `snappy`
+            // entry in libs.versions.toml.
+            for (configuration in listOf("implementation", "testImplementation")) {
+                constraints.add(configuration, lib("snappy-java")) {
+                    because("GHSA-gwq9-9ffj-mvrv / GHSA-q233-g92q-qxp6 / GHSA-xqrx-qh46-34m7: snappy-java < 1.1.10.9")
+                }
+            }
 
             add("testImplementation", lib("junit-jupiter"))
             add("testImplementation", lib("mockk"))
