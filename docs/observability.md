@@ -1,9 +1,9 @@
 # Observability Specification
 
-**Status:** v1.47 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.48 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-02
 
 ---
 
@@ -372,6 +372,15 @@ These lines occur once per execution-drain stop, after scheduler admission close
 | INFO | `shutdown.drain_complete` | The bounded wait ended with no local executions registered; their deregistration follows terminal bookkeeping attempts, not a guarantee every store write succeeded | — |
 | WARN | `shutdown.drain_incomplete` | Executions remain registered at the flush deadline; their rows may remain RUNNING after exit and need the stale sweep. One alternative outcome to `drain_complete` | `live`, `flush_timeout_ms`, `message` (static explanation) |
 
+#### 3.4P The lake reference index backfill events (#778)
+
+At boot the index backfill scans each RELEASED pipeline and parameter-set version that has no scan row at the current scanner version ([Datasources §8C.9](datasources.md#8c9-which-versions-read-which-table--the-lake-reference-index)). It scans one version per transaction, a page at a time, and stops when a page scans nothing. A version whose scan throws gets no row: it is logged once by identity, and the next boot tries it again. The rendered SQL and the parser's message are never logged. The promotion check is not affected by a failure here: it reads only the versions a batch lands, and those are scanned inside the batch's own transaction.
+
+| Level | `event=` | When | Fields |
+|---|---|---|---|
+| INFO | `lake.reference_index.backfill` | Once per boot, after the pass ends; `scanned` counts the scan rows written, `failed` the versions whose scan threw | `scanned`, `failed`, `scanner_version` |
+| WARN | `lake.reference_index.backfill_failed` | One version's scan threw. Its transaction rolled back, it was left unscanned, and the pass went on to the next version | `family`, `entity_id`, `version`, `error_type` (exception class only) |
+
 ### 3.5 Log destination
 
 - **Stdout** by default — collected by container runtime (Docker / k8s) and shipped to the operator's log aggregator (CloudWatch, Stackdriver, Loki, ELK, etc.).
@@ -671,6 +680,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-02 | v1.48 | 778 (#778) the lake reference index backfill | New **§3.4P**: the boot backfill's `lake.reference_index.backfill` (INFO, counts) and `lake.reference_index.backfill_failed` (WARN, version identity and exception class; no SQL, no parser message). |
 | 2026-11-01 | v1.47 | 762 (#762) never-admissible dashboard refresh | **§3.4J** gains `dashboard.refresh_never_admissible`: the WARN a refresh logs when it is refused at once because it can never be admitted on this instance (`workspace_id`, `dashboard_id`, `invocations`, `ceiling`, `key`). |
 | 2026-10-24 | v1.46 | 442b (#442) schedule notification delivery | **§3.4E** gains the nine `scheduler.notification.*` events (`enqueued`, `backlog_full`, `sent`, `retry`, `failed`, `uncertain`, `render_failed`, `port_failed`, `settle_lost`) and the rule that they carry the recipient's domain, never an address; **§4.1** gains `datapipelines.scheduler.notifications.{sent,failed,uncertain}`. |
 | 2026-10-21 | v1.45 | #637 retention event-catalogue parity | **§3.4's namespace sentence** now lists thirteen namespaces, including `retention`; `ObservabilityEventCatalogParityTest` enforces the existing `retention.step_failed` row with a non-vacuity floor of one. No event added or renamed. |
