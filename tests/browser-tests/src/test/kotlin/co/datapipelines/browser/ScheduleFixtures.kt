@@ -8,9 +8,10 @@ import java.sql.DriverManager
 import java.util.UUID
 
 /**
- * #9 slice 2 — REST-seeded fixtures for the Schedules suites, through the browser's OWN session
- * and CSRF cookie (the in-page fetch [EditorRunFixtures] and `LifecycleDialogBrowserTest` use),
- * so nothing here bypasses the product's authorization.
+ * #9 slice 2 — fixtures for the Schedules suites. REST helpers use the browser's own session
+ * and CSRF cookie (the in-page fetch [EditorRunFixtures] and `LifecycleDialogBrowserTest` use).
+ * #764's membership and latest-run helpers seed the isolated [SharedBrowserE2e] database
+ * directly; their callers then sign in fresh members and exercise the page.
  *
  * The pipeline a schedule runs is ONE `CALCULATOR` node with literal inputs: it needs no
  * datasource and no credential, finishes in milliseconds and still emits the full durable event
