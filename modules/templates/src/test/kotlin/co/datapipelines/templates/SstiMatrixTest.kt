@@ -227,9 +227,10 @@ class SstiMatrixTest {
         // #787. `.get_optional_template` / `.getOptionalTemplate` loads a template BY KEY at
         // render time — outside the declared `imports` closure (§6.3). The library below is
         // declared by NOTHING; the body imports it through the special variable in both
-        // spellings and calls its macro. The loader resolves the key (it is a well-formed
-        // registry key), so today the undeclared content ships in the SQL. Whatever the outcome
-        // flavour, the library's text must never reach the output.
+        // spellings and calls its macro. Since #787 the render opens the declared closure
+        // (RegistryTemplateLoader), so the load refuses: the outcome is exactly the closure
+        // refusal (its fixed message quotes no author-controlled string), and the library's
+        // text never reaches the output.
         listOf(".get_optional_template", ".getOptionalTemplate").forEach { spelling ->
             val lib =
                 TemplateFixtures.version(
@@ -241,6 +242,7 @@ class SstiMatrixTest {
             val outcome = engineForVersions(lib, main).execute(TemplateRef("test/main.sql", 1), emptyMap())
 
             withClue("the undeclared library must not render ($spelling): $outcome") {
+                outcome shouldBe RenderOutcome.Failed(UndeclaredTemplateLoadException.MESSAGE)
                 outputOf(outcome) shouldNotContain "LIB-BODY-TEXT"
                 outputOf(outcome) shouldNotContain "HELLO-FROM-UNDECLARED-LIB"
             }

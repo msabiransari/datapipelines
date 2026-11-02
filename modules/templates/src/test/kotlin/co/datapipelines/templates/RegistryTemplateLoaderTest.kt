@@ -28,13 +28,56 @@ class RegistryTemplateLoaderTest {
 
     @Test
     fun `resolves an exact id@version key`() {
-        loader.findTemplateSource("test/lib.sql@1").shouldNotBeNull()
+        loader.withDeclaredClosure("test/lib.sql@1") {
+            loader.findTemplateSource("test/lib.sql@1").shouldNotBeNull()
+        }
     }
 
     @Test
     fun `refuses every name that is not an exact id@version key`() {
+        // Shape refusal happens before closure logic (#787): parseKey returns null first, so
+        // these stay null with no scope in the thread at all — no wrap needed, and the
+        // absence of one is part of the assertion.
         NON_KEYS.forEach { name ->
             withClue("loader must not resolve: '$name'") { loader.findTemplateSource(name).shouldBeNull() }
+        }
+    }
+
+    @Test
+    fun `a well-formed key with no declared closure in scope is refused`() {
+        val thrown = shouldThrow<IOException> { loader.findTemplateSource("test/lib.sql@1") }
+
+        thrown.message shouldBe UndeclaredTemplateLoadException.MESSAGE
+    }
+
+    @Test
+    fun `a key outside the declared closure is refused and its name is not echoed`() {
+        loader.withDeclaredClosure("test/lib.sql@1") {
+            val thrown = shouldThrow<IOException> { loader.findTemplateSource("test/other.sql@1") }
+
+            thrown.message shouldBe UndeclaredTemplateLoadException.MESSAGE
+            (thrown.message ?: "") shouldNotContain "other.sql"
+        }
+    }
+
+    @Test
+    fun `a declared import resolves once its importer does, and the closure grows along the imports only`() {
+        val main =
+            TemplateFixtures.version(
+                "test/main.sql",
+                imports = listOf(TemplateImport("test/lib.sql", 1, "d")),
+                body = "SELECT 1",
+            )
+        val scopedLoader = RegistryTemplateLoader(InMemoryTemplateRegistry(listOf(library, main)))
+
+        scopedLoader.withDeclaredClosure("test/main.sql@1") {
+            // Before main resolves, its declared edge to the library is not open yet.
+            shouldThrow<IOException> { scopedLoader.findTemplateSource("test/lib.sql@1") }
+            scopedLoader.findTemplateSource("test/main.sql@1").shouldNotBeNull()
+            // main's row declares test/lib.sql@1; resolving it opened that edge.
+            scopedLoader.findTemplateSource("test/lib.sql@1").shouldNotBeNull()
+            // A well-formed key the closure never declared refuses even with edges open.
+            shouldThrow<IOException> { scopedLoader.findTemplateSource("test/other.sql@1") }
         }
     }
 
@@ -54,7 +97,9 @@ class RegistryTemplateLoaderTest {
                 imports = listOf(TemplateImport("test/lib.sql", 1, "d")),
                 body = "SELECT 1",
             )
-        val source = RegistryTemplateLoader(InMemoryTemplateRegistry(listOf(library, main))).findTemplateSource("test/main.sql@1")
+        val source =
+            RegistryTemplateLoader(InMemoryTemplateRegistry(listOf(library, main)))
+                .let { l -> l.withDeclaredClosure("test/main.sql@1") { l.findTemplateSource("test/main.sql@1") } }
         val text = readerText(source)
 
         // §4.4: the prologue emits root-based names so Freemarker's relative resolution can
@@ -73,7 +118,10 @@ class RegistryTemplateLoaderTest {
             )
         val unsafeLoader = RegistryTemplateLoader(InMemoryTemplateRegistry(listOf(library, main)))
 
-        val thrown = shouldThrow<IOException> { unsafeLoader.findTemplateSource("test/main.sql@1") }
+        val thrown =
+            unsafeLoader.withDeclaredClosure("test/main.sql@1") {
+                shouldThrow<IOException> { unsafeLoader.findTemplateSource("test/main.sql@1") }
+            }
 
         withClue("the refusal must not echo the attacker's alias back into logs") {
             (thrown.message ?: "") shouldNotContain "PWNED"
@@ -90,9 +138,9 @@ class RegistryTemplateLoaderTest {
         val draftLoader = RegistryTemplateLoader(registry)
 
         registry.put(TemplateFixtures.version("test/wip.sql", body = "SELECT 1", updatedAt = written))
-        val first = draftLoader.getLastModified(draftLoader.findTemplateSource("test/wip.sql@1"))
+        val first = draftLoader.withDeclaredClosure("test/wip.sql@1") { draftLoader.getLastModified(draftLoader.findTemplateSource("test/wip.sql@1")) }
         registry.put(TemplateFixtures.version("test/wip.sql", body = "SELECT 2", updatedAt = overwritten))
-        val second = draftLoader.getLastModified(draftLoader.findTemplateSource("test/wip.sql@1"))
+        val second = draftLoader.withDeclaredClosure("test/wip.sql@1") { draftLoader.getLastModified(draftLoader.findTemplateSource("test/wip.sql@1")) }
 
         first shouldBe written.toEpochMilli()
         second shouldBe overwritten.toEpochMilli()
@@ -100,7 +148,7 @@ class RegistryTemplateLoaderTest {
 
     @Test
     fun `lastModified falls back to created_at on a row that was never a draft`() {
-        val source = loader.findTemplateSource("test/lib.sql@1")
+        val source = loader.withDeclaredClosure("test/lib.sql@1") { loader.findTemplateSource("test/lib.sql@1") }
 
         loader.getLastModified(source) shouldBe library.createdAt.toEpochMilli()
     }
@@ -108,6 +156,9 @@ class RegistryTemplateLoaderTest {
     private fun readerText(source: Any?): String = loader.getReader(source, "UTF-8").readText()
 
     private companion object {
+        // #787: "test/lib.sql@999" moved out of this list — it is a well-formed key, so since
+        // the declared-closure gate it now throws instead of resolving null; its refusal is
+        // asserted in `a key outside the declared closure is refused and its name is not echoed`.
         val NON_KEYS =
             listOf(
                 "test/lib.sql", // unversioned
@@ -118,7 +169,6 @@ class RegistryTemplateLoaderTest {
                 "file:///etc/passwd",
                 "classpath:/lib.sql@1",
                 "test/lib.sql@1@2",
-                "test/lib.sql@999",
                 "",
             )
     }
