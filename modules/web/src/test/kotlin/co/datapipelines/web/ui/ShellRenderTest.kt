@@ -522,7 +522,7 @@ class ShellRenderTest {
         browser shouldContain "id=\"browser-width-reset\""
         browser shouldContain
             "<div id=\"browser-boundary\" class=\"app-browser-boundary\" role=\"separator\" tabindex=\"0\""
-        browser shouldContain "aria-valuemin=\"240\" aria-valuemax=\"480\""
+        browser shouldContain "aria-valuemin=\"280\" aria-valuemax=\"480\""
 
         // The engine, the browser lifecycle and the width control load once, from the footer.
         html shouldContain "<script src=\"/js/template-explorer.js\"></script>"
