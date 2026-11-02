@@ -141,12 +141,12 @@ class TreeIndentAndVersionMenuBrowserTest : BrowserSuite() {
                       const sibling = level.querySelector(':scope > [aria-expanded] > .dp-tree-line > button');
                       const left = (el, sel) => el.querySelector(sel).getBoundingClientRect().left;
                       const probe = document.createElement('div');
-                      probe.style.width = 'var(--space-2)';
+                      probe.style.width = 'var(--space-3)';
                       level.appendChild(probe);
-                      const space2 = parseFloat(getComputedStyle(probe).width);
+                      const space3 = parseFloat(getComputedStyle(probe).width);
                       probe.remove();
                       return {
-                        space2,
+                        space3,
                         indent: parseFloat(getComputedStyle(level).paddingLeft),
                         parentLabel: left(parent, 'span[title]'),
                         leafLabel: left(leaf, 'span[title]'),
@@ -157,10 +157,10 @@ class TreeIndentAndVersionMenuBrowserTest : BrowserSuite() {
                     }""",
                 )
 
-            // #739: the browser stays compact at every width, with an 8px (--space-2) step.
+            // #784: the browser stays compact at every width, with a 12px (--space-3) step.
             withClue("$screen: the level's indent must be a real, positive step") {
-                m.px("space2") shouldBe 8.0
-                m.px("indent") shouldBe m.px("space2")
+                m.px("space3") shouldBe 12.0
+                m.px("indent") shouldBe m.px("space3")
             }
             (m.px("leafLabel") - m.px("parentLabel"))
                 .shouldBeWithinOnePxOf(m.px("indent"), "$screen: leaf label sits one indent right of its PARENT's label")
