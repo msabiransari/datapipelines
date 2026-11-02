@@ -462,6 +462,11 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Parameters.EVALUATE_INPUT_SOURCE_MULTIPLE_ROWS,
             PipelineErrorCodes.Parameters.EVALUATE_SELECTOR_VALUE_TYPE_MISMATCH,
             PipelineErrorCodes.Parameters.EVALUATE_SELECTORS_SATURATED,
+            // §13.25 (#785) — the managed lake's fence codes: raised inside DP's own catalog writes, which no
+            // route reaches before P8. They have no family default, so `statusFor` answers 500 for them.
+            PipelineErrorCodes.Lake.CATALOG_FENCED,
+            PipelineErrorCodes.Lake.CATALOG_RESTORING,
+            PipelineErrorCodes.Lake.CATALOG_OUTCOME_UNKNOWN,
         )
 
     /**
@@ -590,6 +595,9 @@ object ApiErrorCatalog {
             // #464 §13.24 — the family line is the 400's: the cursor or the folder it named is stale,
             // and reloading the tree is the remedy. The two 503s carry their own overrides.
             "navigation." to "The navigation tree changed under you. Reload it and try again.",
+            // #785 §13.25 — the managed lake's fence: another operation holds the table, or the catalog is
+            // being restored. Never returned live in P2 (NEVER_RETURNED_LIVE); the line is the manual's.
+            "lake." to "The lake is busy with another change to this table. Try again shortly.",
         )
 
     private val USER_MESSAGE_OVERRIDES: Map<String, String> =

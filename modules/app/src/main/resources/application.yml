@@ -644,6 +644,49 @@ datapipelines:
       max-blockers: ${DATAPIPELINES_RELEASE_DEPENDENCIES_MAX_BLOCKERS:100}
       max-wire-bytes: ${DATAPIPELINES_RELEASE_DEPENDENCIES_MAX_WIRE_BYTES:1048576}
       lock-wait-seconds: ${DATAPIPELINES_RELEASE_DEPENDENCIES_LOCK_WAIT_SECONDS:5}
+  # The managed lake (configuration.md §3.36, #785 dp-lake P2; design record §6). Server configuration,
+  # never UI. Inert unless enabled. Appended after the whole datapipelines: tree (the reparenting lesson —
+  # MISTAKES.md); LakeConfigKeysSpecDriftTest pins every key, its default and its neighbours. Sizes use
+  # Spring's DataSize units, where GB is 1024³ bytes (the record's GiB). The four S3 credential values
+  # are secrets: environment only (deploy/secrets.env.example), never a committed value.
+  lake:
+    enabled: ${DATAPIPELINES_LAKE_ENABLED:false}
+    name: ${DATAPIPELINES_LAKE_NAME:lake}
+    mode: ${DATAPIPELINES_LAKE_MODE:normal}
+    storage:
+      kind: ${DATAPIPELINES_LAKE_STORAGE_KIND:s3}
+      bucket: ${DATAPIPELINES_LAKE_S3_BUCKET:}
+      prefix: ${DATAPIPELINES_LAKE_S3_PREFIX:lake/}
+      landing-prefix: ${DATAPIPELINES_LAKE_S3_LANDING_PREFIX:landing/}
+      region: ${DATAPIPELINES_LAKE_S3_REGION:}
+      endpoint: ${DATAPIPELINES_LAKE_S3_ENDPOINT:}
+      path-style: ${DATAPIPELINES_LAKE_S3_PATH_STYLE:false}
+      access-key: ${DATAPIPELINES_LAKE_S3_ACCESS_KEY:}
+      secret-key: ${DATAPIPELINES_LAKE_S3_SECRET_KEY:}
+      reader-access-key: ${DATAPIPELINES_LAKE_S3_READER_ACCESS_KEY:}
+      reader-secret-key: ${DATAPIPELINES_LAKE_S3_READER_SECRET_KEY:}
+    admission:
+      max-concurrent-ingestions: ${DATAPIPELINES_LAKE_ADMISSION_MAX_CONCURRENT_INGESTIONS:2}
+      max-concurrent-maintenance: ${DATAPIPELINES_LAKE_ADMISSION_MAX_CONCURRENT_MAINTENANCE:1}
+      max-delivery-bytes: ${DATAPIPELINES_LAKE_ADMISSION_MAX_DELIVERY_BYTES:2GB}
+      staging-expansion-factor: ${DATAPIPELINES_LAKE_ADMISSION_STAGING_EXPANSION_FACTOR:3}
+      scratch-bytes: ${DATAPIPELINES_LAKE_ADMISSION_SCRATCH_BYTES:20GB}
+      staging-memory-limit: ${DATAPIPELINES_LAKE_ADMISSION_STAGING_MEMORY_LIMIT:1GB}
+      max-open-partitions-per-append: ${DATAPIPELINES_LAKE_ADMISSION_MAX_OPEN_PARTITIONS_PER_APPEND:64}
+      job-timeout: ${DATAPIPELINES_LAKE_ADMISSION_JOB_TIMEOUT:2h}
+      lease-wait-seconds: ${DATAPIPELINES_LAKE_ADMISSION_LEASE_WAIT_SECONDS:60}
+    catalog:
+      lock-timeout-seconds: ${DATAPIPELINES_LAKE_CATALOG_LOCK_TIMEOUT_SECONDS:5}
+      statement-timeout-seconds: ${DATAPIPELINES_LAKE_CATALOG_STATEMENT_TIMEOUT_SECONDS:30}
+    reads:
+      max-generation-age-seconds: ${DATAPIPELINES_LAKE_READS_MAX_GENERATION_AGE_SECONDS:900}
+      freshness-tick-seconds: ${DATAPIPELINES_LAKE_READS_FRESHNESS_TICK_SECONDS:60}
+    maintenance:
+      window: ${DATAPIPELINES_LAKE_MAINTENANCE_WINDOW:02:00-05:00}
+      max-bytes-rewritten-per-run: ${DATAPIPELINES_LAKE_MAINTENANCE_MAX_BYTES_REWRITTEN_PER_RUN:50GB}
+    retention:
+      protection-days: ${DATAPIPELINES_LAKE_RETENTION_PROTECTION_DAYS:7}
+      orphan-grace-hours: ${DATAPIPELINES_LAKE_RETENTION_ORPHAN_GRACE_HOURS:72}
 
 # db-scheduler's starter reads its OWN prefix; every value is a datapipelines.scheduler.* key above
 # (configuration.md §3.29 is the one definition — D8), so the library's defaults (10 threads, a

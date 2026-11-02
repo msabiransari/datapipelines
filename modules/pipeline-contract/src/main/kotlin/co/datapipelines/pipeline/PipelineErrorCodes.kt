@@ -2018,6 +2018,26 @@ object PipelineErrorCodes {
          */
         const val BINDING_PATH_INVALID = "dashboard.binding.path_invalid"
     }
+
+    /**
+     * §13.25 — the managed lake's catalog outcomes (#785, dp-lake P2). The two refusals are raised by
+     * the Flyway-owned fence trigger as SQLSTATEs `DP001` / `DP002`; the third is a lost connection
+     * mid-write. `modules/lake` surfaces each as a `LakeCatalogException` carrying its code. No route returns them in P2 (§13.25's HTTP
+     * column is `—`, `ApiErrorCatalog.NEVER_RETURNED_LIVE`); P8 brings the surfaces and their statuses.
+     */
+    object Lake {
+        /** `DP001`: a catalog write without a live lease of its operation on the row's name (§8a). */
+        const val CATALOG_FENCED = "lake.catalog.fenced"
+
+        /** `DP002`: a catalog write while `lake_control.mode = 'restoring'` (§9). */
+        const val CATALOG_RESTORING = "lake.catalog.restoring"
+
+        /**
+         * The catalog connection failed while a write was in flight (SQLSTATE class `08`): the write may have
+         * committed. Never retried (E1 #774 F3); settle decides (P4).
+         */
+        const val CATALOG_OUTCOME_UNKNOWN = "lake.catalog.outcome_unknown"
+    }
 }
 
 /** One availability refusal shared by save, evaluate and node runs (D-T16); not an error code. */

@@ -44,6 +44,7 @@ class FlywayMigrationIntegrationTest {
     @Autowired
     private lateinit var dataSource: DataSource
 
+    // One row per shipped migration: the list grows with every migration by design (#785 took it past 60 lines).
     @Test
     @Suppress("LongMethod") // the inventory IS the assertion: one line per shipped migration, in order
     fun `every shipped migration is recorded as applied and successful`() {
@@ -173,6 +174,9 @@ class FlywayMigrationIntegrationTest {
                 // #778 (V52) — the lake reference index: one scan row per released pipeline / parameter-set
                 // version, one row per table position its renderings name (metadata-db §4.41–§4.42).
                 "52|lake reference index|true",
+                // #785 (V53) — the managed lake's catalog core: Iceberg's two catalog tables in the V1 shape,
+                // lake_control / lake_leases / lake_table_revisions, the dp_fence and revision triggers.
+                "53|lake catalog core|true",
             )
     }
 
@@ -980,8 +984,9 @@ class FlywayMigrationIntegrationTest {
      * #9 (V38) — the scheduler's schema, read from the SHIPPED database: the CHECK lists that R6's
      * table and the trail kinds live in, the partial one-active index (the durable overlap guard) and
      * SCHEDULE joining the trigger CHECK. The trail is append-only by construction, not by a
-     * trigger (this schema has none — `emits no triggers` below). Behaviour is the scheduler
-     * module's own suites; this pins that production Flyway builds the same thing they run on.
+     * trigger (this schema has none outside the lake catalog — `emits no triggers but the four of the
+     * lake catalog` below). Behaviour is the scheduler module's own suites; this pins that production
+     * Flyway builds the same thing they run on.
      */
     @Test
     fun `V38 creates the scheduler's tables with R6's states, the overlap guard and SCHEDULE`() {
@@ -1477,7 +1482,8 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    fun `creates exactly the forty-two tables of metadata-db §4`() {
+    @Suppress("LongMethod") // the inventory IS the assertion: one line per table of metadata-db §4 (47 after #778 + #785)
+    fun `creates exactly the forty-seven tables of metadata-db §4`() {
         val tables =
             query(
                 """
@@ -1499,11 +1505,18 @@ class FlywayMigrationIntegrationTest {
                 // L5 (#367, V45) — the `dashboard` key's folder bindings (§4.36).
                 "dashboard_key_bindings",
                 "execution_events",
+                // #785 (V53) — Iceberg's JdbcCatalog tables, owned by Flyway (metadata-db §4.43–§4.44).
+                "iceberg_namespace_properties",
+                "iceberg_tables",
                 // #778 (V52) — the lake reference index (metadata-db §4.41–§4.42).
                 "lake_reference_scans",
                 "lake_table_references",
                 // 089 §A (V15) — the dp-lake catalog.
                 "lake_tables",
+                // #785 (V53) — the managed lake's mode row, leases and revision log (metadata-db §4.45–§4.47).
+                "lake_control",
+                "lake_leases",
+                "lake_table_revisions",
                 // 118 (V25) — the learned semantic layer.
                 "learned_facts",
                 // 137 (V27) — the mail claim rows.
@@ -1600,6 +1613,17 @@ class FlywayMigrationIntegrationTest {
                 "endpoint_key_bindings.idx_endpoint_key_bindings_key",
                 "execution_events.execution_events_pkey",
                 "execution_events.uq_events_execution_event",
+                // #785 (V53) — the two catalog tables' library PKs; the control row's PK; a lease per (kind, name) and
+                // release by operation; the revision log's per-table walk, per-operation lookup, one current row.
+                "iceberg_namespace_properties.iceberg_namespace_properties_pkey",
+                "iceberg_tables.iceberg_tables_pkey",
+                "lake_control.lake_control_pkey",
+                "lake_leases.idx_lake_leases_operation",
+                "lake_leases.lake_leases_pkey",
+                "lake_table_revisions.idx_lake_table_revisions_operation",
+                "lake_table_revisions.idx_lake_table_revisions_table",
+                "lake_table_revisions.lake_table_revisions_pkey",
+                "lake_table_revisions.uq_lake_table_revisions_current",
                 // #778 (V52) — a scan's PK; a reference's PK and the by-table lookup (datasource, namespace, table).
                 "lake_reference_scans.lake_reference_scans_pkey",
                 "lake_table_references.idx_lake_table_references_table",
@@ -2029,9 +2053,12 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    fun `emits no triggers`() {
+    fun `emits no triggers but the four of the lake catalog`() {
         // metadata-db.md §2/§7.2: updated_at is application-maintained. A generator
         // that "helpfully" adds a BEFORE UPDATE trigger contradicts the spec.
+        // The ONE exception is V53's (#785, dp-lake design record §8a): the lease fence on both Iceberg catalog
+        // tables and the revision log on iceberg_tables. They guard writes made by a library DP does not control,
+        // which no application-side check can reach. Exactly these four, named; any other trigger stays red.
         val triggers =
             query(
                 """
@@ -2043,7 +2070,13 @@ class FlywayMigrationIntegrationTest {
                 """.trimIndent(),
             ) { it.getString(1) }
 
-        triggers shouldBe emptyList()
+        triggers shouldContainExactlyInAnyOrder
+            listOf(
+                "iceberg_namespace_properties.dp_fence",
+                "iceberg_tables.dp_fence",
+                "iceberg_tables.dp_revlog",
+                "iceberg_tables.dp_revlog_drop",
+            )
     }
 
     @Test

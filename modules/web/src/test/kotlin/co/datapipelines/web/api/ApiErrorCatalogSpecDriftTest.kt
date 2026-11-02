@@ -347,8 +347,12 @@ class ApiErrorCatalogSpecDriftTest {
          * 419 → 420 with #778: §13.13's `pipeline.promotion.lake_table_unavailable` (409, an
          * explicit catalog row), landed in the SAME commit as its `PipelineErrorCodes.Versioning`
          * constant. Re-derived from the document's own parse (419 at the base, 420 after).
+         * 420 → 423 with #785 (re-derived at the merge after #778): the new §13.25 gains `lake.catalog.fenced`,
+         * `lake.catalog.restoring` and `lake.catalog.outcome_unknown`, all `—` rows
+         * (NEVER_RETURNED_LIVE: they arise inside DP's own catalog writes and no route reaches them
+         * before P8), landed in the SAME commit as their `PipelineErrorCodes.Lake` constants.
          */
-        const val SECTION_13_ROW_COUNT = 420
+        const val SECTION_13_ROW_COUNT = 423
 
         /**
          * §12's distinct validation codes.

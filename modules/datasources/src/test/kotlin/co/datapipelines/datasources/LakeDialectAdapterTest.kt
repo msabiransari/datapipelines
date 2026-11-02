@@ -358,6 +358,36 @@ class LakeDialectAdapterTest {
     }
 
     @Test
+    fun `the endpoint's scheme decides USE_SSL and DuckDB receives host and port only (dp-lake call 24)`() {
+        fun secretFor(endpoint: String): String =
+            lake
+                .connectionInit(
+                    lakeDatasource(
+                        credentialKind = CredentialKind.PASSWORD,
+                        username = "AKIAEXAMPLE",
+                        secret = "s3cr3t",
+                        dialectProperties = mapOf("catalog.kind" to "s3", "endpoint" to endpoint),
+                    ),
+                ).single { it.startsWith("CREATE OR REPLACE SECRET") }
+
+        val https = secretFor("https://s3.eu-central-1.example.com/")
+        val http = secretFor("http://minio:9000")
+        val bare = secretFor("minio:9000")
+        assertAll(
+            { https shouldContain "ENDPOINT 's3.eu-central-1.example.com'" },
+            { https shouldContain "USE_SSL true" },
+            { https shouldNotContain "USE_SSL false" },
+            { https shouldNotContain "https://" },
+            { http shouldContain "ENDPOINT 'minio:9000'" },
+            { http shouldContain "USE_SSL false" },
+            { http shouldNotContain "http://" },
+            // Scheme-less keeps the pre-#785 reading: a declared non-AWS endpoint is plain HTTP.
+            { bare shouldContain "ENDPOINT 'minio:9000'" },
+            { bare shouldContain "USE_SSL false" },
+        )
+    }
+
+    @Test
     fun `the pool config carries the init statements joined into HikariCP's single slot`() {
         val config = lakeFixed.buildHikariConfig(attachLake())
 

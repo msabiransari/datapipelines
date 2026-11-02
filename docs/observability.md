@@ -381,6 +381,16 @@ At boot the index backfill scans each RELEASED pipeline and parameter-set versio
 | INFO | `lake.reference_index.backfill` | Once per boot, after the pass ends; `scanned` counts the scan rows written, `failed` the versions whose scan threw | `scanned`, `failed`, `scanner_version` |
 | WARN | `lake.reference_index.backfill_failed` | One version's scan threw. Its transaction rolled back, it was left unscanned, and the pass went on to the next version | `family`, `entity_id`, `version`, `error_type` (exception class only) |
 
+#### 3.4Q The managed lake boot check (#785)
+
+When `datapipelines.lake.enabled=true`, `LakeBootCheck` runs once after Flyway ([Configuration §7](configuration.md#7-config-validation), [Module structure §5.21](module-structure.md#521-lake)). A passing check logs one line; a failing one logs nothing of its own and refuses startup.
+
+| Level | `event=` | When | Fields |
+|---|---|---|---|
+| INFO | `lake.boot.ok` | Every check passed: the catalog shape, the four V53 triggers, the control row, the store reachable and honouring `If-None-Match: *` | `bucket`, `prefix` |
+
+**The refusals are startup failures, not log events.** Each is an `IllegalStateException` whose message starts with its id, so the operator greps the boot failure for it: `lake.boot.catalog_shape`, `lake.boot.trigger_missing`, `lake.boot.control_row`, `lake.boot.storage_unreachable`, `lake.boot.conditional_put` (what each means: Configuration §7). No credential, key, or object body appears in any of them.
+
 ### 3.5 Log destination
 
 - **Stdout** by default — collected by container runtime (Docker / k8s) and shipped to the operator's log aggregator (CloudWatch, Stackdriver, Loki, ELK, etc.).
@@ -681,6 +691,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 | Date | Version | Author | Change |
 |---|---|---|---|
 | 2026-11-02 | v1.48 | 778 (#778) the lake reference index backfill | New **§3.4P**: the boot backfill's `lake.reference_index.backfill` (INFO, counts) and `lake.reference_index.backfill_failed` (WARN, version identity and exception class; no SQL, no parser message). |
+| 2026-11-02 | v1.49 | 785 (#785) managed lake boot check | New **§3.4Q** (numbered at merge after #778's §3.4P / v1.48): the `lake.boot.ok` INFO line and the five `lake.boot.*` refusal ids the after-Flyway boot check leads its startup failure with (defined here so a citation of one is checked; they are not log events). |
 | 2026-11-01 | v1.47 | 762 (#762) never-admissible dashboard refresh | **§3.4J** gains `dashboard.refresh_never_admissible`: the WARN a refresh logs when it is refused at once because it can never be admitted on this instance (`workspace_id`, `dashboard_id`, `invocations`, `ceiling`, `key`). |
 | 2026-10-24 | v1.46 | 442b (#442) schedule notification delivery | **§3.4E** gains the nine `scheduler.notification.*` events (`enqueued`, `backlog_full`, `sent`, `retry`, `failed`, `uncertain`, `render_failed`, `port_failed`, `settle_lost`) and the rule that they carry the recipient's domain, never an address; **§4.1** gains `datapipelines.scheduler.notifications.{sent,failed,uncertain}`. |
 | 2026-10-21 | v1.45 | #637 retention event-catalogue parity | **§3.4's namespace sentence** now lists thirteen namespaces, including `retention`; `ObservabilityEventCatalogParityTest` enforces the existing `retention.step_failed` row with a non-vacuity floor of one. No event added or renamed. |

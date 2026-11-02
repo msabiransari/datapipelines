@@ -157,6 +157,20 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
     // or `application` edge: the executor, the capacity lease and the system principal sit on the
     // adapter's side of the port, in `web`.
     ":modules:scheduler" to setOf(":modules:typesystem", ":modules:pipeline-contract"),
+    // #785 dp-lake P2 (design record §3a, call 12) — the managed lake: Iceberg's JdbcCatalog on DP's own
+    // Postgres, the lease/fence/revision-log layer, and (later lanes) staging hand-off, definitions,
+    // delivery, reads, maintenance and recovery. P2 compiles against typesystem, persistence and
+    // pipeline-contract (the §13.25 codes); the other four are the record's set, allowed ahead for
+    // P1/P3–P7 and undeclared until used.
+    ":modules:lake" to setOf(
+        ":modules:typesystem",
+        ":modules:persistence",
+        ":modules:datasources",
+        ":modules:staging",
+        ":modules:pipeline-contract",
+        ":modules:scheduler",
+        ":modules:auth",
+    ),
     ":modules:dag" to setOf(
         ":modules:typesystem",
         ":modules:calculators",
@@ -247,6 +261,8 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         ":modules:persistence",
         // #10 — the visualization/dashboard REST routes, the runtime routes and the wiring (L1b/L2); allowed ahead, undeclared.
         ":modules:visualization",
+        // #785 — the managed lake's after-Flyway boot check (LakeCatalogStartupCheck, web/config).
+        ":modules:lake",
     ),
     ":modules:app" to setOf(":modules:web"),
     ":tests:integration-tests" to setOf(":modules:app"),

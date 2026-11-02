@@ -1,9 +1,9 @@
 # Module Structure Specification
 
-**Status:** v1.8 (frozen contract — additive-only changes after this point)
+**Status:** v1.9 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** (all other specs — this spec operationalizes them into code structure)
-**Last updated:** 2026-10-26
+**Last updated:** 2026-11-02
 
 ---
 
@@ -55,6 +55,7 @@ datapipelines/
 │   ├── dag/                             # [DAG Executor spec]
 │   ├── parameters/                      # the parameter engine — parameter sets, #194 (§5.18)
 │   ├── visualization/                   # visualizations and dashboards — the two documents and their lifecycle, #10 (§5.20)
+│   ├── lake/                            # the managed lake — Iceberg catalog on DP's Postgres, leases, fence, #785 (§5.21)
 │   ├── auth/                            # [Auth spec]
 │   ├── scheduler/                       # [Scheduler reference] — durable occurrences, #9 (§5.16)
 │   ├── application/                     # cross-aggregate use cases (§5.13)
@@ -84,6 +85,7 @@ datapipelines/
 | `scheduler` | [scheduler.md](scheduler.md) | The pipeline-agnostic scheduler (#9): schedules, their occurrence function, the one dispatcher over db-scheduler, runs and their append-only trail, the generic executor port, capacity admission and reconciliation. Knows no pipeline semantics — the executor adapter lives in `web` (§5.16). | `ScheduleRepository` → `schedules`; `ScheduleRunRepository` → `schedule_runs`, `schedule_run_events`; db-scheduler owns `scheduled_tasks` (created by `app`'s V38) |
 | `parameters` | [parameter-engine design record](superpowers/specs/2026-09-21-parameter-engine-design.md) (this spec, §5.18) | The parameter engine (#194): the parameter-set definition model and its strict binding, the save-time validator (the record's §4), the expression AST, the set's dependency graph (over `graph`'s `Dag<T>`), the versioned lifecycle, the `parameter.*` codes and `datapipelines.parameters.*`. A single-aggregate module: the selector runtime arrives in lane C, the surfaces and the templates reverse arrow in lane D (`application`). | `ParameterSetRepository` → `parameter_sets`, `parameter_set_versions` (created by `app`'s V39) |
 | `visualization` | [dashboards.md](dashboards.md), the [dashboard implementation spec](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) (this spec, §5.20) | Visualizations and dashboards (#10): the two documents and their strict binding, the save-time validators, the name grammars, the versioned lifecycle (draft/release with the two cascades, discard, restore, purge, switch, import), the transfer service (export/import envelopes), the `visualization.*`/`dashboard.*` codes and `datapipelines.visualization.*`. A two-aggregate module whose cross-aggregate facts — a pinned pipeline release, a pinned set's parameters, a script's contract, the release evidence — arrive through ports it declares. | `VisualizationRepository` → `visualizations`, `visualization_versions`; `DashboardRepository` → `dashboards`, `dashboard_versions` (created by `app`'s V42, with the two test-evidence tables L4 writes) |
+| `lake` | the dp-lake design record, [configuration.md §3.36](configuration.md#336-managed-lake-dp-lake-785) (this spec, §5.21) | The managed lake (#785, dp-lake P2 onward): Iceberg's `JdbcCatalog` on DP's own metadata Postgres behind a per-lease fenced connection pool, the §8a lease protocol, deferred file deletes, the S3 client and the after-Flyway boot check. Off unless `datapipelines.lake.enabled=true`. | `LakeLeases` → `lake_leases`; Iceberg's `JdbcCatalog` (through `LakeCatalogs`) → `iceberg_tables`, `iceberg_namespace_properties`; the V53 triggers → `lake_table_revisions`; reads `lake_control` |
 | `application` | (this spec, §5.13) | **Cross-aggregate use cases** — the ones that need more than one domain module and so belong to none of them. Sits below `web` and `mcp-server` so both surfaces share one implementation (ARCH-AUDIT-2026-08 S4, ruling R6). | — (delegates to the owning modules' repositories) |
 | `mcp-server` | [mcp-server.md](mcp-server.md) | MCP transport (Streamable HTTP), tool/resource/prompt definitions. Thin adapter over the same services the REST layer uses. | — (delegates to the owning modules' repositories) |
 | `web` | [rest-api.md](rest-api.md) | Spring Boot REST controllers, SSE endpoints, Thymeleaf UI, error handling, CORS. | — (delegates); Redis keys for the post-completion SSE event log and per-user rate-limit counters |
@@ -128,10 +130,12 @@ layer 3
 └──────────────┘ └─────────────┘  scheduler ← typesystem, pipeline-contract (the name grammar only)
 
 layer 4
-┌──────────────┐ ┌──────────────┐
-│     dag      │ │  parameters  │  dag ← typesystem, calculators, pipeline-contract, templates,
-│  (executor)  │ │              │        datasources, staging, scripting, graph, persistence
-└──────────────┘ └──────────────┘  parameters ← typesystem, graph, pipeline-contract, templates, datasources
+┌──────────────┐ ┌──────────────┐ ┌────────┐
+│     dag      │ │  parameters  │ │  lake  │  dag ← typesystem, calculators, pipeline-contract, templates,
+│  (executor)  │ │              │ │        │        datasources, staging, scripting, graph, persistence
+└──────────────┘ └──────────────┘ └────────┘  parameters ← typesystem, graph, pipeline-contract, templates, datasources
+                                              lake ← typesystem, persistence, pipeline-contract
+                                                     (allowed ahead: datasources, staging, scheduler, auth)
 
 layer 5
 ┌─────────────────┐
@@ -154,7 +158,7 @@ layer 8
 ┌──────────────┐
 │     web      │  ← typesystem, calculators, scripting, pipeline-contract, templates,
 │              │    datasources, staging, dag, auth, application, mcp-server, scheduler,
-│              │    parameters, persistence, visualization
+│              │    parameters, persistence, visualization, lake
 │              │    (declared explicitly, not transitively)
 └──────────────┘
 
@@ -191,9 +195,10 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 | `dag` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `staging`, `scripting`, `graph`, `persistence` |
 | `parameters` | `typesystem`, `graph`, `pipeline-contract`, `templates`, `datasources` |
 | `visualization` | `typesystem`, `pipeline-contract`, `templates`, `parameters` |
+| `lake` | `typesystem`, `persistence`, `datasources`, `staging`, `pipeline-contract`, `scheduler`, `auth` |
 | `application` | `typesystem`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `parameters`, `visualization` |
 | `mcp-server` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `application`, `parameters`, `visualization` |
-| `web` | `typesystem`, `calculators`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server`, `scheduler`, `parameters`, `persistence`, `visualization` |
+| `web` | `typesystem`, `calculators`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server`, `scheduler`, `parameters`, `persistence`, `visualization`, `lake` |
 | `app` | `web` |
 | `tests/integration-tests` | `app` |
 | `tests/browser-tests` | `app`, `web` |
@@ -207,6 +212,7 @@ Notes on the shape (explanatory, not additional rules):
 - `parameters` (#194) declares all five of its edges — `typesystem` (the shared value validator, `LogicalType`), `graph` (`Dag<T>`), `pipeline-contract` (`TemplateRef`, the name grammars, the `TemplateDryRenderer` / `DatasourceRegistry` / `TemplateVersionStatuses` / `TemplateReleaser` ports it validates and releases through, `ReadLens`, `AuthoringGuard`), and since lane C `templates` (the selector runtime renders a pinned template through `WorkspaceTemplateEngines`) and `datasources` (it runs through the registry's pools, `ReadOnlyStatementLease` and `ResultRowReader`). Since lane D the `parameters` edges of `application`, `mcp-server` and `web` are DECLARED (the record's §2.4): the surfaces compile against the engine, the reverse-arrow composition in `application`, the six tools in `mcp-server`, the routes and the wiring in `web`.
 - `persistence` (#266) is the second empty row beside `graph`, for the same reason: it is a primitive every store-owning module can sit on. `auth` lists it for the audit log's writer and `web` for the execution-event record's and the replay log's; `dag` does NOT — its repository offers the batch statement (`ExecutionEventRepository.appendAll`) and knows nothing of the queue in front of it, which is `web`'s wiring.
 - `visualization` (#10) sits above `parameters` and below `application`: it declares `typesystem`, `pipeline-contract` (the name grammar, `ReadLens`, `AuthoringGuard`, the template ports it validates and releases through) and `parameters` (the production `ParameterSetFacts` reads a pinned set release through `ParameterSetRepository`). `templates` is allowed and NOT declared — every template fact reaches it through `pipeline-contract`'s ports. The pipeline facts a dashboard needs (released? read-only? the caller output columns) arrive through its `PipelineReleaseFacts` port, which `application` implements over `ReadOnlyPipelineRule` (L1b), so no `dag` edge exists. Since L1b the `visualization` edges of `application` (`PipelineReleaseFactsReader`, that port's implementation), `mcp-server` (the eleven `visualizations_*` / `dashboards_*` tools) and `web` (the two controllers and `VisualizationConfiguration`, the module's only Spring wiring) are DECLARED.
+- `lake` (#785) is the dp-lake design record's module (§3a, call 12) with the record's full edge set: `typesystem`, `persistence` (`FailureShape`, the SQLState walk a catalog failure is classified by) and `pipeline-contract` (`PipelineErrorCodes.Lake`) are declared by P2; `datasources`, `staging`, `scheduler` and `auth` are allowed ahead for the later phases (staging hand-off, deliveries, maintenance) and stay undeclared until something compiles against them. `web` lists `lake` for the after-Flyway boot check (`LakeCatalogStartupCheck`).
 - `dag` does **not** list `auth`: the executor is handed an already-authenticated principal by its caller. `mcp-server` **does** list `auth` (it authenticates its own transport, [MCP Server §3.2](mcp-server.md)) and `dag` (the `pipelines_execute` / `executions_*` tools drive the executor directly rather than looping back through HTTP).
 - `web` lists everything it touches **explicitly**. It could reach most of these transitively through `mcp-server`; declaring them is what makes the table checkable.
 - `application` is where a use case goes when it needs MORE THAN ONE aggregate. The rule, in one sentence: **cross-aggregate use cases live in `application`; single-aggregate ones live with the aggregate that owns them.** `PipelineService` is therefore in `pipeline-contract`, and `ExecutionLauncher` — which needs the pipeline aggregate AND `dag`'s reservation store — is in `application`. Nothing in `application` may import a `web` or `mcp` type; `ArchitectureGuardTest` fails the build on one.
@@ -757,6 +763,20 @@ build's `allowedInternalDependencies` map carries the same closed set).
 
 **Tests:** the readers' key tables pinned against the models' properties by reflection, every reason and bound; the validators — one case per code, the count of codes covered asserted equal to the family's catalogued validation set, the spec's two worked documents accepted unchanged; the two repositories and every lifecycle verb against the module's own Postgres container (`VisualizationTestDb`, the shipped migrations through plain JDBC), one suite over both families — workspace scoping, the DB-projection hash, the one-draft index and the draft race FORCED; the release cascades rolled back by a stale hash; the transfer strip and order; the spec-drift suites (§13.22/§13.23 both directions, configuration §3.33, enums §31–§37).
 
+### 5.21 `lake`
+
+**Dependencies (internal):** `typesystem`, `persistence`, `pipeline-contract` — declared; `datasources`, `staging`, `scheduler`, `auth` allowed and not declared (§4.2 note). **Dependencies (external):** Iceberg 1.12.0 (`iceberg-api`, `iceberg-core` — `JdbcCatalog` ships in it — `iceberg-aws`, `iceberg-parquet`), the AWS SDK v2 `s3` with `url-connection-client` as its only HTTP client (`kms` and `sts` runtime-only, TEMPORARY: apache/iceberg#18744), Hadoop 3.5.0 `hadoop-client-api` + `hadoop-client-runtime` (runtime-only: every Parquet write builds a Hadoop `Configuration`), `parquet-column` compile-only, the PostgreSQL driver, `spring-boot-starter-jdbc`, and Jackson held at the product's pin by `enforcedPlatform` in THIS module only (Iceberg's POMs import a newer Jackson BOM). `iceberg-data` is deliberately not declared. Tests: Testcontainers Postgres and MinIO.
+
+**Public API (#785, P2 — the catalog core; P3–P7 build on it):**
+- `LakeLeases` — the record's §8a lease protocol over `lake_leases`: `acquire` (one `INSERT … SELECT … ON CONFLICT … RETURNING token` → `LeaseOutcome.Acquired` / `Busy` / `DeadlinePassed`), `heartbeat`, `release` (by operation id), `catalogNowPlus`; every comparison is the database's `now()`, and a call inside a Spring transaction is refused. `LeaseHandle` / `LeaseKind`.
+- `LakeCatalogs` — `open(lease)` → `LakeCatalogSession`: an Iceberg `JdbcCatalog` per lease whose connections come from a `FencedJdbcClientPool` (session-level `dp.lease_token` / `dp.operation_id` / `lock_timeout` / `statement_timeout`, closed at release — owner ruling 2026-11-02), `jdbc.init-catalog-tables=false` (no DDL), `S3FileIO` wrapped in `DeferringFileIO` (deletes deferred to the orphan sweep). The session's `createNamespace`, `createTable` (at `<root>/<ns>/<table-id>`, the closed `LakeTableProperties` list), `loadTable` and `write`, which classifies a failure by SQLSTATE into `LakeCatalogException.Fenced` (`DP001`), `Restoring` (`DP002`) or `OutcomeUnknown` (a commit whose outcome the connection lost — never retried blind). `LakeNames`, `CatalogDatabase`.
+- `LakeBootCheck` — the after-Flyway check `web`'s `LakeCatalogStartupCheck` runs when the lake is enabled: catalog shape, the four V53 triggers enabled and pointing at their functions, the one control row, a HEAD on the bucket and prefix, and a conditional PUT probe; each failure refuses boot with a catalogued `lake.boot.*` id ([Configuration §7](configuration.md)).
+- `LakeProperties` (the `datapipelines.lake.*` keys, [Configuration §3.36](configuration.md#336-managed-lake-dp-lake-785); credentials redacted from every `toString`), `LakeS3Clients`, `LakeAutoConfiguration` (every bean `@ConditionalOnProperty(enabled=true)`; with `false` no lake bean exists).
+
+**Why it is its own module.** The record's §3a: the lake is a storage product with its own catalog, lease protocol and object-store client, and its library stack (Iceberg, Hadoop, Parquet, the AWS SDK) must not leak onto the class path of modules that do not use it.
+
+**Tests:** the lease statements against Postgres with the shipped migrations applied (`LakeLeasesIntegrationTest`, incl. the past-deadline insert-path refusal); the fence (`LakeFenceIntegrationTest` — DP001/DP002, the rename OLD-name check, the takeover waiting on the `FOR SHARE` lock); the fenced pool (`FencedPoolIntegrationTest` — session settings, DP's Hikari pool carries none, no connection outlives the pool, a stock pool's lost-acknowledgement replay red beside the fenced pool's `OutcomeUnknown`); Iceberg's own schema check finding V53's shape and altering nothing (`CatalogShapeIntegrationTest`, A0); namespace, table and a Parquet append end to end on MinIO (`LakeCatalogBootstrapIntegrationTest`); the boot check's refusals (`LakeBootCheckIntegrationTest`, `LakeBootCheckTest`); the configuration keys pinned across the doc, `application.yml` and the binding (`LakeConfigKeysSpecDriftTest`).
+
 ## 6. Version Catalog
 
 `gradle/libs.versions.toml` — single source of truth for third-party versions.
@@ -1287,6 +1307,7 @@ Before considering the module structure "ready":
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-02 | v1.9 | 785 (#785, dp-lake P2) | New module **`lake`** (§3, §3.1, §4.1 layer 4, §4.2 row, new **§5.21**): the managed lake's catalog core. Its §4.2 row is the dp-lake design record's edge set (`typesystem`, `persistence`, `datasources`, `staging`, `pipeline-contract`, `scheduler`, `auth`); P2 declares three. `web` gains the edge `lake` for the after-Flyway boot check. The root `allowedInternalDependencies` map moves with the table (`verifyModuleDependencies`). |
 | 2026-10-26 | v1.8 | 721 (#721) | §4.1/§4.2/§5.12: `tests/browser-tests` gains the internal edge `web` (`testImplementation`, a direct edge per the §4.2 rule — not `api` leakage through `app`) so `SiteShotsRailOrderTest` can pin the screenshot driver's rail table against `AppNav.ITEMS`. The root `allowedInternalDependencies` map and the §4.2 row move together (`verifyModuleDependencies`). Test-scope only: no production edge, public API or runtime change. |
 | 2026-10-24 | v1.7 | 442b (#442) | §5.16: `scheduler` gains `thymeleaf-spring6` (BOM-managed, already on `auth`'s and `web`'s class paths — the scheduler's lock gains its four lines) for the notice templates; its public API gains the `NotificationMailer` port and the `ScheduleNotifier` job (B5). `web` implements the port over `auth`'s `MailSender`. No internal dependency edge changes. |
 | 2026-10-22 | JavaScript product wiring | 8b (#8) | One availability-aware engine map supplies templates, the pool runner and node support; §3.1/§5.15 name the two engines and their responsibilities. |

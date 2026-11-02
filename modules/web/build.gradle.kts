@@ -30,6 +30,8 @@ dependencies {
     // #10 L1b: the visualization/dashboard REST routes and the module's wiring (web/config/VisualizationConfiguration)
     // — the edge the root map allowed ahead, declared now that `web` compiles against it.
     implementation(project(":modules:visualization"))
+    // #785 — the managed lake: LakeCatalogStartupCheck calls its after-Flyway boot check (web/config).
+    implementation(project(":modules:lake"))
 
     implementation(libs.spring.boot.starter.web)
     implementation(libs.spring.boot.starter.actuator)

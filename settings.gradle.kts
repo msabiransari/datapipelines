@@ -37,6 +37,7 @@ include(
     ":modules:visualization",
     ":modules:auth",
     ":modules:scheduler",
+    ":modules:lake",
     ":modules:application",
     ":modules:mcp-server",
     ":modules:web",

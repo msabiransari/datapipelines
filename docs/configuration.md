@@ -1,8 +1,8 @@
 # Configuration Reference
 
-**Status:** v1.71 (operator reference; source-traced configuration authority)
+**Status:** v1.72 (operator reference; source-traced configuration authority)
 **Owner:** datapipelines.co core
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-02
 
 ---
 
@@ -696,6 +696,52 @@ other family lifecycle paths that receive `ReleaseBounds`.
 | `datapipelines.release.dependencies.max-wire-bytes` | `1048576` | Bytes of one release-plan request, and of a plan's canonical serialisation, 1 MiB (`limit: wire_bytes`). 1024..16777216 |
 | `datapipelines.release.dependencies.lock-wait-seconds` | `5` | How long a pin-affecting write or a release waits for its workspace's mutation guard (a row lock on the workspace, `SET LOCAL lock_timeout`) before it is refused `<family>.release.busy` with nothing written. 1..60 |
 
+### 3.36 Managed lake (dp-lake, #785)
+
+The managed lake ([Module structure §5.21](module-structure.md#521-lake), the dp-lake design record §6): Iceberg tables
+whose catalog is DP's own metadata Postgres and whose files live under one S3 bucket prefix. It is server configuration,
+never UI, and it is **off unless `enabled` is `true`**: with `false` no lake bean exists and none of these keys is judged
+or used. With `true`, startup validates the keys (§7) and the after-Flyway boot check verifies the catalog and the store
+(§7, the `lake.boot.*` refusals). The four credential values are secrets: environment only
+(`deploy/secrets.env.example`), redacted wherever the binding is printed, never in a log line. Sizes use Spring's
+`DataSize` units, where `GB` means 1024³ bytes (the record writes GiB). P2 (#785) consumes `enabled`, `name`, `storage.*`
+(except `landing-prefix` and the reader pair) and `catalog.*`; the other keys bind with their defaults and are consumed by
+the lanes named in their rows, so that one key set is documented and validated from the module's first release.
+
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.lake.enabled` | `false` | The lake exists on this server. `false`: the module is inert, with no catalog, no S3 client and no boot check |
+| `datapipelines.lake.name` | `lake` | The lake's logical name: `catalog_name` in the Iceberg catalog tables and the first segment of `<lake>.<namespace>.<table>`. `[a-z0-9_]{1,63}` |
+| `datapipelines.lake.mode` | `normal` | `normal`, `restoring` or `replaying` (design record §9). The catalog's operative mode is the `lake_control` row, which the fence reads; this key is validated now and consumed by the recovery procedure (P7) |
+| `datapipelines.lake.storage.kind` | `s3` | The object store. Only `s3` exists |
+| `datapipelines.lake.storage.bucket` | (empty) | The bucket. Required when enabled |
+| `datapipelines.lake.storage.prefix` | `lake/` | Key prefix of the managed lake under the bucket; every table's location is `s3://<bucket>/<prefix><namespace>/<table id>`. Normalised to one trailing `/`; empty = the bucket root. The boot check sends a HEAD on it and writes one marker, `<prefix>dp/conditional-put-probe` |
+| `datapipelines.lake.storage.landing-prefix` | `landing/` | Where deliveries land before ingestion. Consumed by delivery (P4) |
+| `datapipelines.lake.storage.region` | (empty) | The bucket's region. A region or an `endpoint` is required when enabled; with only an endpoint, requests are signed for `us-east-1` |
+| `datapipelines.lake.storage.endpoint` | (empty) | An S3-compatible endpoint, `http://` or `https://` with a host; empty = AWS for `region`. The scheme decides TLS for both the Java client and DuckDB's secret (`USE_SSL`) |
+| `datapipelines.lake.storage.path-style` | `false` | Path-style addressing (`<endpoint>/<bucket>/<key>`), which most S3-compatible stores need |
+| `datapipelines.lake.storage.access-key` | (empty) | **Secret.** The writer's access key (the Java side). Set with `secret-key` or not at all; both empty = the SDK's default credential chain (instance or pod credentials) |
+| `datapipelines.lake.storage.secret-key` | (empty) | **Secret.** The writer's secret key; see `access-key` |
+| `datapipelines.lake.storage.reader-access-key` | (empty) | **Secret.** An optional read-only pair for DuckDB's managed reads (P5). Set with `reader-secret-key` or not at all |
+| `datapipelines.lake.storage.reader-secret-key` | (empty) | **Secret.** See `reader-access-key` |
+| `datapipelines.lake.admission.max-concurrent-ingestions` | `2` | Executions holding a delivery at once, from landing to the last append (P1/P4). ≥ 1 |
+| `datapipelines.lake.admission.max-concurrent-maintenance` | `1` | Maintenance runs at once (P6). ≥ 1 |
+| `datapipelines.lake.admission.max-delivery-bytes` | `2GB` | The largest delivery, summed over its objects (P4). `max-delivery-bytes × staging-expansion-factor` must not exceed `scratch-bytes` |
+| `datapipelines.lake.admission.staging-expansion-factor` | `3` | Scratch reserved per ingestion = delivery bytes × this factor (P1). ≥ 1 |
+| `datapipelines.lake.admission.scratch-bytes` | `20GB` | Scratch space across every staging database, writer and compaction (P1/P6) |
+| `datapipelines.lake.admission.staging-memory-limit` | `1GB` | DuckDB `memory_limit` per staging database (P1; provisional until E10b measures the profile) |
+| `datapipelines.lake.admission.max-open-partitions-per-append` | `64` | Partitions one append may write at once (P4). ≥ 1 |
+| `datapipelines.lake.admission.job-timeout` | `2h` | Every attempt's absolute deadline, fixed at admission and inherited by its leases (P4/P6). Enters the `orphan-grace-hours` rule |
+| `datapipelines.lake.admission.lease-wait-seconds` | `60` | How long an operation waits for a busy lease (P4/P6). Must be below `datapipelines.executor.node-query-timeout-max-seconds` (§3.2) |
+| `datapipelines.lake.catalog.lock-timeout-seconds` | `5` | `lock_timeout` on every catalog connection the lake opens (design record §8a). ≥ 1 |
+| `datapipelines.lake.catalog.statement-timeout-seconds` | `30` | `statement_timeout` on every catalog connection the lake opens. ≥ 1; enters the `orphan-grace-hours` rule |
+| `datapipelines.lake.reads.max-generation-age-seconds` | `900` | A managed reader generation is retired at this age (P5). ≥ 1 |
+| `datapipelines.lake.reads.freshness-tick-seconds` | `60` | How often live reader generations are compared with the catalog rows (P5). ≥ 1 |
+| `datapipelines.lake.maintenance.window` | `02:00-05:00` | When maintenance may run, `HH:MM-HH:MM` in **UTC** (P6) |
+| `datapipelines.lake.maintenance.max-bytes-rewritten-per-run` | `50GB` | The data one maintenance run may rewrite (P6) |
+| `datapipelines.lake.retention.protection-days` | `7` | How long a superseded catalog revision stays protected, which is also the replay horizon (P6/P7). ≥ 1 |
+| `datapipelines.lake.retention.orphan-grace-hours` | `72` | The age past which an unreferenced file may be removed (P6). A safety premise: `orphan-grace-hours × 3600` must exceed `job-timeout` + `statement-timeout-seconds` + 3600, or startup is refused |
+
 ---
 
 ## 4. Precedence
@@ -1044,6 +1090,45 @@ datapipelines:
       max-blockers: ${DATAPIPELINES_RELEASE_DEPENDENCIES_MAX_BLOCKERS:100}
       max-wire-bytes: ${DATAPIPELINES_RELEASE_DEPENDENCIES_MAX_WIRE_BYTES:1048576}
       lock-wait-seconds: ${DATAPIPELINES_RELEASE_DEPENDENCIES_LOCK_WAIT_SECONDS:5}
+  # §3.36 — the managed lake; inert unless enabled. The four S3 credentials are secrets (environment only).
+  lake:
+    enabled: ${DATAPIPELINES_LAKE_ENABLED:false}
+    name: ${DATAPIPELINES_LAKE_NAME:lake}
+    mode: ${DATAPIPELINES_LAKE_MODE:normal}
+    storage:
+      kind: ${DATAPIPELINES_LAKE_STORAGE_KIND:s3}
+      bucket: ${DATAPIPELINES_LAKE_S3_BUCKET:}
+      prefix: ${DATAPIPELINES_LAKE_S3_PREFIX:lake/}
+      landing-prefix: ${DATAPIPELINES_LAKE_S3_LANDING_PREFIX:landing/}
+      region: ${DATAPIPELINES_LAKE_S3_REGION:}
+      endpoint: ${DATAPIPELINES_LAKE_S3_ENDPOINT:}
+      path-style: ${DATAPIPELINES_LAKE_S3_PATH_STYLE:false}
+      access-key: ${DATAPIPELINES_LAKE_S3_ACCESS_KEY:}
+      secret-key: ${DATAPIPELINES_LAKE_S3_SECRET_KEY:}
+      reader-access-key: ${DATAPIPELINES_LAKE_S3_READER_ACCESS_KEY:}
+      reader-secret-key: ${DATAPIPELINES_LAKE_S3_READER_SECRET_KEY:}
+    admission:
+      max-concurrent-ingestions: ${DATAPIPELINES_LAKE_ADMISSION_MAX_CONCURRENT_INGESTIONS:2}
+      max-concurrent-maintenance: ${DATAPIPELINES_LAKE_ADMISSION_MAX_CONCURRENT_MAINTENANCE:1}
+      max-delivery-bytes: ${DATAPIPELINES_LAKE_ADMISSION_MAX_DELIVERY_BYTES:2GB}
+      staging-expansion-factor: ${DATAPIPELINES_LAKE_ADMISSION_STAGING_EXPANSION_FACTOR:3}
+      scratch-bytes: ${DATAPIPELINES_LAKE_ADMISSION_SCRATCH_BYTES:20GB}
+      staging-memory-limit: ${DATAPIPELINES_LAKE_ADMISSION_STAGING_MEMORY_LIMIT:1GB}
+      max-open-partitions-per-append: ${DATAPIPELINES_LAKE_ADMISSION_MAX_OPEN_PARTITIONS_PER_APPEND:64}
+      job-timeout: ${DATAPIPELINES_LAKE_ADMISSION_JOB_TIMEOUT:2h}
+      lease-wait-seconds: ${DATAPIPELINES_LAKE_ADMISSION_LEASE_WAIT_SECONDS:60}
+    catalog:
+      lock-timeout-seconds: ${DATAPIPELINES_LAKE_CATALOG_LOCK_TIMEOUT_SECONDS:5}
+      statement-timeout-seconds: ${DATAPIPELINES_LAKE_CATALOG_STATEMENT_TIMEOUT_SECONDS:30}
+    reads:
+      max-generation-age-seconds: ${DATAPIPELINES_LAKE_READS_MAX_GENERATION_AGE_SECONDS:900}
+      freshness-tick-seconds: ${DATAPIPELINES_LAKE_READS_FRESHNESS_TICK_SECONDS:60}
+    maintenance:
+      window: ${DATAPIPELINES_LAKE_MAINTENANCE_WINDOW:02:00-05:00}
+      max-bytes-rewritten-per-run: ${DATAPIPELINES_LAKE_MAINTENANCE_MAX_BYTES_REWRITTEN_PER_RUN:50GB}
+    retention:
+      protection-days: ${DATAPIPELINES_LAKE_RETENTION_PROTECTION_DAYS:7}
+      orphan-grace-hours: ${DATAPIPELINES_LAKE_RETENTION_ORPHAN_GRACE_HOURS:72}
 
 db-scheduler:
   threads: ${datapipelines.scheduler.threads}
@@ -1151,6 +1236,8 @@ On startup, the app validates:
 - `datapipelines.deployment.promotion.server-key` set ⇒ **WARN** (091): the value is deprecated in favour of a `server`-kind API key and is removed next release. Presence only — the warning never carries the secret.
 - `datapipelines.deployment.promotion.target.base-url` is not set without `datapipelines.deployment.promotion.target.server-key` (§3.19) — the violation names both keys. The target's pre-shared key is what authenticates the push, so a target without one would have every promotion refused at the far end, at the end of a UI action a human took. The reverse is not a violation: a `server-key` with no target is an ordinary receiver.
 - **Mail (§3.27, 137):** `datapipelines.mail.host` and `datapipelines.mail.from` are set together or not at all — one without the other refuses startup naming the missing one; `datapipelines.mail.ops-to` without `host` is refused (a sink nobody can reach); mail on (both set) without `datapipelines.auth.base-url` is refused (the welcome mail's login URL); `port` is a port in `1..65535`; `from` is an address (a bare address or `Display Name <address>`). Under the **`hardened` posture**, with mail on: `starttls` must be `true`, and `username` set requires `password` set — each refusal naming the variable and the posture. The SMTP password is carried as PRESENCE only; no violation ever prints it.
+- **Managed lake (§3.36, #785)**, judged only when `datapipelines.lake.enabled=true`, every refusal naming the key(s) and never a credential's value: `storage.kind` is `s3`; a `bucket`, and a `region` or an `endpoint`; an `endpoint` is an `http://` or `https://` URL with a host; `mode` is `normal`, `restoring` or `replaying`; `name` matches `[a-z0-9_]{1,63}`; each credential pair (`access-key`/`secret-key`, `reader-access-key`/`reader-secret-key`) is set together or not at all; `protection-days` ≥ 1; **`orphan-grace-hours × 3600 > job-timeout + statement-timeout-seconds + 3600`** (the remover's safety premise, design record §8a part (b)); `lease-wait-seconds` < `datapipelines.executor.node-query-timeout-max-seconds`; `max-delivery-bytes × staging-expansion-factor ≤ scratch-bytes`; every other count, size and timeout positive; `maintenance.window` is `HH:MM-HH:MM`. Deferred to the lanes that own their inputs: the reader-generation bound against `protection-days` (P5), and `scratch-bytes` against the pod's `/tmp` limit and the cgroup memory sum (P1/P6; E10b is their acceptance).
+- **Managed lake boot check (§3.36, #785)** — after Flyway, when the lake is enabled, startup is REFUSED with the catalogued id leading the message: `lake.boot.catalog_shape` (the two Iceberg catalog tables are not V53's six- and four-column shape); `lake.boot.trigger_missing` (the fence trigger on either catalog table, or either revision trigger, is missing, disabled or calls another function — the catalog would be unfenced); `lake.boot.control_row` (`lake_control` does not hold exactly one row); `lake.boot.storage_unreachable` (HEAD on the bucket does not answer 200, a HEAD on the prefix answers other than 200 or 404, or the store does not answer); `lake.boot.conditional_put` (two PUTs of `<prefix>dp/conditional-put-probe` with `If-None-Match: *` — the second must answer 412). Those HEADs and PUTs are the only requests the check sends; the marker is never deleted. The catalog itself runs with `jdbc.init-catalog-tables=false` and issues no DDL.
 - **The boot line (§3.23):** `event=config.posture env=<env> posture=<posture> authoring=<on|off> demo=<families>` is logged once (the label's only consumer — no code branches on it, pinned by a guard test). When a promotion receiver key is configured AND `datapipelines.deployment.authoring-enabled=true`, log a structured WARN — a promotion receiver should not author (Versioning D7), though a one-box deployment may legitimately be both. And when authoring is DISABLED while draft pipeline/template versions still exist, startup FAILS naming them: someone authored on a receiver and version alignment may already be broken (Versioning §5.5/§9.3).
 
 The validator's own test suite must assert that the documented laptop setup (`deploy/env/defaults.env` + `deploy/secrets.env`, §6) passes the **production** rules — so a broken local value gets fixed at the data, never by weakening the check.
@@ -1217,6 +1304,7 @@ The following index records the bindings, wiring and effect-producing consumers 
 | §3.27 all nine `datapipelines.mail.*` keys: `host`, `port`, `username`, `password`, `starttls`, `from`, `reply-to`, `ops-to`, `message-stream` | `modules/auth/src/main/kotlin/co/datapipelines/auth/MailProperties.kt` — enabled iff host/from non-blank, reply-to fallback, ops comma list; `modules/app/src/main/kotlin/co/datapipelines/config/MailRules.kt` — half-configured, port, base URL, hardened TLS/credential checks | `modules/auth/src/main/kotlin/co/datapipelines/auth/MailConfiguration.kt` chooses real/no-op sender; `SpringMailSender.kt` configures SMTP/auth/TLS and From/Reply-To; `MailNotifier.kt` selects ops recipients and adds stream header; `modules/web/src/main/kotlin/co/datapipelines/web/schedules/SmtpNotificationMailer.kt` uses the same transport/stream header. |
 | §3.35 `datapipelines.release.dependencies.max-depth`, `max-versions`, `max-edges` | `modules/web/src/main/kotlin/co/datapipelines/web/config/ReleaseDependencyProperties.kt` validates ranges and converts to `ReleaseBounds`; `modules/web/src/main/kotlin/co/datapipelines/web/release/ReleaseConfiguration.kt` wires bounds | `modules/pipeline-contract/src/main/kotlin/co/datapipelines/pipeline/release/ReleaseGraph.kt` checks longest depth, unique versions and each pin edge during traversal; `modules/web/src/main/kotlin/co/datapipelines/web/release/ReleaseCoordinator.kt` also bounds included-dependency/override entries with max-versions. |
 | §3.35 `datapipelines.release.dependencies.max-blockers`, `max-wire-bytes`, `lock-wait-seconds` | `modules/web/src/main/kotlin/co/datapipelines/web/config/ReleaseDependencyProperties.kt` — ranges/defaults; `ReleaseConfiguration.kt` passes lock timeout | `modules/pipeline-contract/src/main/kotlin/co/datapipelines/pipeline/release/ReleaseBlockers.kt` caps details; `TreeHash.kt` checks canonical bytes; `modules/web/src/main/kotlin/co/datapipelines/web/release/ReleasePlanBody.kt` checks request UTF-8 bytes; `JdbcReleaseMutationGuard.kt` sets local PostgreSQL lock_timeout and maps timeout to release.busy. |
+| §3.36 every `datapipelines.lake.*` key | `modules/lake/src/main/kotlin/co/datapipelines/lake/LakeProperties.kt` (`LakeProperties`, bound by `LakeAutoConfiguration` only when `enabled=true`); app `LakeRules.kt` (§7 rules, credentials carried as presence only) | `LakeAutoConfiguration.kt` builds `LakeCatalogs` (catalog name, storage root, S3FileIO keys, `catalog.*` timeouts set on every connection by `FencedJdbcClientPool`), the boot check's S3 client (`LakeS3Clients`) and `LakeBootCheck`, run after Flyway by `modules/web/src/main/kotlin/co/datapipelines/web/config/LakeCatalogStartupCheck.kt`. `admission.*`, `reads.*`, `maintenance.*`, `retention.*`, `mode`, `landing-prefix` and the reader pair have no consumer in P2 beyond validation. |
 | `datapipelines.scheduler`: `enabled` | `modules/scheduler/src/main/kotlin/co/datapipelines/scheduler/SchedulerProperties.kt` (`SchedulerProperties`) | `modules/scheduler/src/main/kotlin/co/datapipelines/scheduler/SchedulerTasks.kt` (`SchedulerStartGate.doStart`) starts the shared scheduler only when enabled; the scheduler bean remains available as the API enqueue client. |
 | `datapipelines.scheduler`: `threads`, `polling-interval-seconds`, `heartbeat-interval-seconds`, `shutdown-wait-seconds` | `modules/scheduler/src/main/kotlin/co/datapipelines/scheduler/SchedulerProperties.kt` validates the values; `modules/app/src/main/resources/application.yml` bridges them to the db-scheduler starter's `threads`, `polling-interval`, `heartbeat-interval`, `shutdown-max-wait`. | `modules/scheduler/src/main/kotlin/co/datapipelines/scheduler/SchedulerAutoConfiguration.kt` (`schedulerAdmission`) also passes shutdown wait to `SchedulerAdmission`; `modules/scheduler/src/main/kotlin/co/datapipelines/scheduler/RunReconciler.kt` uses `startGrace` (six heartbeat intervals) to settle unconfirmed starts. `modules/scheduler/src/main/kotlin/co/datapipelines/scheduler/SchedulerNotificationConfiguration.kt` passes the same grace to `ScheduleNotifier` for interrupted deliveries. |
 | `datapipelines.scheduler`: `tick-interval-seconds` | `modules/scheduler/src/main/kotlin/co/datapipelines/scheduler/SchedulerProperties.kt` (`tickInterval`) | `modules/scheduler/src/main/kotlin/co/datapipelines/scheduler/SchedulerTasks.kt` gives dispatcher, reconciler and notifier recurring tasks this `FixedDelay`. It is a delay after task completion, not a worst-case lateness bound. |
@@ -1350,6 +1438,7 @@ The Helm input reference already lives in the commented `deploy/helm/datapipelin
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-02 | v1.72 | #785 dp-lake P2 catalog core | New **§3.36 Managed lake**: the thirty-one `datapipelines.lake.*` keys of the design record §6 (enabled, name, mode, `storage.*` with the two secret credential pairs, `admission.*`, `catalog.*`, `reads.*`, `maintenance.*`, `retention.*`), inert unless enabled. §5 template gains the `lake:` block. §7 gains the lake rules (judged only when enabled) and the after-Flyway `lake.boot.*` refusals. §8 traces the binding. |
 | 2026-11-01 | v1.71 | #762 never-admissible refresh | §3.34: `max-executions-per-refresh` must not exceed the executor's `max-concurrent-executions-per-instance` (startup refuses) and the dashboard execution cap above it WARNs; the count is distinct executions; a refresh over the smaller ceiling is refused at once with `details.reason = never_admissible`; saved dashboards whose static all-source upper bound exceeds the ceiling are named at boot as possible refusals. §7 likewise. |
 | 2026-10-31 | v1.70 | #769 | Source-traced operator reference: corrected behavioral scope, provider fields, environment aliases, reserved tracing controls and precedence; synchronized the full YAML template; added source index, launch inputs and whole-reference build guards. |
 | 2026-10-24 | v1.69 | #517 release dependencies, core (S1) | **§3.35 Release dependencies:** `datapipelines.release.dependencies.*` — the closure bounds (depth, versions, edges, wire bytes), the blocker cap and the writer guard's lock wait; §5's template gains the block. |

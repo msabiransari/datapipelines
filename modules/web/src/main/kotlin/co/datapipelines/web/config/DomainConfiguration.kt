@@ -176,6 +176,16 @@ class DomainConfiguration {
         }
 
     /**
+     * #785 — the managed lake's boot check (catalog shape, fence triggers, control row, the object store's HEAD and
+     * conditional PUT). A no-op unless `datapipelines.lake.enabled=true`, when `lake`'s auto-configuration
+     * declares the [co.datapipelines.lake.LakeBootCheck] it calls.
+     */
+    @Bean
+    fun lakeCatalogStartupCheck(
+        bootCheck: org.springframework.beans.factory.ObjectProvider<co.datapipelines.lake.LakeBootCheck>,
+    ): LakeCatalogStartupCheck = LakeCatalogStartupCheck(bootCheck)
+
+    /**
      * The system service account (auth.md §4.5, R7), provisioned at boot. Unconditional: it
      * is a referential precondition of the schema — `created_by` / `executed_by` are NOT NULL
      * — not a feature an operator opts into, and its absence would surface as a foreign-key
