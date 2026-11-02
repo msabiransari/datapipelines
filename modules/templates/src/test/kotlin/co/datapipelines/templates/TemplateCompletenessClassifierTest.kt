@@ -4,9 +4,9 @@ import co.datapipelines.templates.TemplateCompletenessClassifier.Kind
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.shouldBe
+import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.MethodSource
-import org.junit.jupiter.api.Test
 
 /**
  * The completeness classifier of the reference scanner (#778, slice D-A): an EXACT body's one render is every table

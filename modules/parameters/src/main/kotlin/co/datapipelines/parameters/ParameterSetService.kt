@@ -18,6 +18,8 @@ import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import co.datapipelines.pipeline.release.ReleaseNodeIdentity
 import co.datapipelines.pipeline.release.ReleaseRefusals
+import co.datapipelines.pipeline.release.ReleasedVersion
+import co.datapipelines.pipeline.release.ReleasedVersionObserver
 import co.datapipelines.pipeline.through
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.transaction.support.SimpleTransactionStatus
@@ -120,6 +122,12 @@ class ParameterSetService(
     private val guard: ReleaseMutationGuard = ReleaseMutationGuard.NONE,
     /** Blockers one restore refusal lists (`datapipelines.release.dependencies.max-blockers`, record §14). */
     private val maxBlockers: Int = ReleaseBounds.DEFAULT_MAX_BLOCKERS,
+    /**
+     * #778 — told of every version this service makes RELEASED (a release, an import that lands or re-confirms one),
+     * inside that transaction: the lake reference scanner indexes it, and a scanner that throws rolls the write back
+     * (the owner's 2026-11-02 seam ruling). [ReleasedVersionObserver.NONE] in a directly constructed test.
+     */
+    private val observer: ReleasedVersionObserver = ReleasedVersionObserver.NONE,
 ) {
     /** [block] in one metadata transaction with the workspace writer guard acquired first (#517). */
     private fun <T> guarded(
@@ -216,6 +224,7 @@ class ParameterSetService(
                     guard.acquire(workspaceId, ReleaseFamily.PARAMETER_SET)
                     val cascaded = toCascade.map { templateReleaser.release(workspaceId, it.id, it.version, actor) }
                     val flipped = repository.releaseDraft(workspaceId, id, expectedHash, actor) ?: throw staleBase(workspaceId, id)
+                    observeReleased(workspaceId, id, flipped.version)
                     flipped to cascaded
                 },
             )
@@ -423,12 +432,15 @@ class ParameterSetService(
                         actor,
                     )
                 }
-            return ParameterSetImported(checkNotNull(detail), created = true, unchanged = false)
+            observeReleased(workspaceId, export.id, checkNotNull(detail).version)
+            return ParameterSetImported(detail, created = true, unchanged = false)
         }
         if (existing.name != export.name) throw renamed(existing.name, export.name)
         val occupant = export.version?.let { repository.findVersionDetail(workspaceId, export.id, it) }
         if (occupant != null) {
             if (occupant.status == PipelineVersionStatus.RELEASED && occupant.bodyHash == repository.computeBodyHash(canonical)) {
+                // Re-indexed against THIS deployment's registry as it is now — what a promotion check then reads.
+                observeReleased(workspaceId, export.id, occupant.version)
                 return ParameterSetImported(occupant, created = false, unchanged = true)
             }
             throw DatapipelinesException(
@@ -441,8 +453,16 @@ class ParameterSetService(
         val detail =
             transactions.execute { repository.insertReleased(workspaceId, export.id, canonical, export.version, export.releasedAt, actor) }
                 ?: throw staleBase(workspaceId, export.id)
+        observeReleased(workspaceId, export.id, detail.version)
         return ParameterSetImported(detail, created = false, unchanged = false)
     }
+
+    /** #778 — [observer] told that version [version] of set [id] is RELEASED here, inside the caller's transaction. */
+    private fun observeReleased(
+        workspaceId: UUID,
+        id: UUID,
+        version: Int,
+    ) = observer.released(ReleasedVersion(workspaceId, ReleaseFamily.PARAMETER_SET, id, version))
 
     // ---- reads (the working-version rule; the lens) ----------------------------------------------------
 

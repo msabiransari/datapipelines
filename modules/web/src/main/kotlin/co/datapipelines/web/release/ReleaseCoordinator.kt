@@ -27,6 +27,8 @@ import co.datapipelines.pipeline.release.ReleaseParticipant
 import co.datapipelines.pipeline.release.ReleasePlanRequest
 import co.datapipelines.pipeline.release.ReleaseRefusals
 import co.datapipelines.pipeline.release.ReleasedDependency
+import co.datapipelines.pipeline.release.ReleasedVersion
+import co.datapipelines.pipeline.release.ReleasedVersionObserver
 import co.datapipelines.pipeline.release.TreeHash
 import co.datapipelines.web.pipelines.LifecycleVerbs
 import co.datapipelines.web.templates.TemplateReleaseService
@@ -65,6 +67,12 @@ class ReleaseCoordinator(
     private val audit: ReleaseAuditSink,
     private val transactions: TransactionOperations,
     private val bounds: ReleaseBounds,
+    /**
+     * #778 — told of every PIPELINE version this transaction makes RELEASED (dependencies and root, both paths), inside
+     * it, after the flips and before the audit: the lake reference scanner indexes each, and a scanner that throws rolls
+     * the release back (the owner's 2026-11-02 seam ruling). [ReleasedVersionObserver.NONE] in a directly built test.
+     */
+    private val observer: ReleasedVersionObserver = ReleasedVersionObserver.NONE,
     private val releaseIds: () -> UUID = UUID::randomUUID,
     /** [LegacyReleaseAlias.LEGACY_ALIAS_WITHOUT_PLAN_ADMITTED]; a parameter so both arms are testable (#522 flips it). */
     private val legacyAliasAdmitted: Boolean = LegacyReleaseAlias.LEGACY_ALIAS_WITHOUT_PLAN_ADMITTED,
@@ -114,6 +122,7 @@ class ReleaseCoordinator(
                         dependency to participant(node).commitPrepared(dependency, status)
                     }
                 val flipped = releases.flip(prepared, request.expectedHash, request.actor)
+                observeFlips(request, flipped, dependencies)
                 val result = complete(prepared, flipped, dependencies)
                 writeAudit(principal, closure, releaseId, request.pipelineId, dependencies, result)
                 result
@@ -159,6 +168,7 @@ class ReleaseCoordinator(
                 // Step 6: dependencies first, root last; each CAS at its consented hash.
                 val dependencies = prepared.map { it to participant(it.node).commitPrepared(it, status) }
                 val flipped = rootParticipant().commitPrepared(root, status).result as PipelineRepository.Released
+                observeFlips(request, flipped, dependencies)
                 val result = complete(root.native, flipped, dependencies)
                 // Step 7: one strict row per flip, in release order, in this transaction.
                 writeAudit(principal, closure, releaseId, request.pipelineId, dependencies, result)
@@ -236,6 +246,22 @@ class ReleaseCoordinator(
             }
         }
         return reasons
+    }
+
+    /** #778 — the PIPELINE versions this transaction flipped (a template has no datasource, slice D-D), root last. */
+    private fun observeFlips(
+        request: PipelineReleaseRequest,
+        root: PipelineRepository.Released,
+        dependencies: List<Pair<PreparedRelease, ReleaseFlip>>,
+    ) {
+        dependencies
+            .map { (prepared, _) -> prepared.node }
+            .filter { it.identity.family == ReleaseFamily.PIPELINE }
+            .forEach { node ->
+                val entityId = checkNotNull(node.entityUuid) { "a flipped pipeline ${node.name} has no id" }
+                observer.released(ReleasedVersion(request.workspaceId, ReleaseFamily.PIPELINE, entityId, node.identity.version))
+            }
+        observer.released(ReleasedVersion(request.workspaceId, ReleaseFamily.PIPELINE, request.pipelineId, root.version.version))
     }
 
     private fun participant(node: ClosureNode): ReleaseParticipant =

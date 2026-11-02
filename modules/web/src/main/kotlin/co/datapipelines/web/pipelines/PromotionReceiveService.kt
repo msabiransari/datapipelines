@@ -1,9 +1,13 @@
 package co.datapipelines.web.pipelines
 
+import co.datapipelines.application.lake.LakePromotionCheck
+import co.datapipelines.application.lake.PromotionRoutes
+import co.datapipelines.application.lake.ScannedVersion
 import co.datapipelines.auth.AuditLogger
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineJson
+import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.templates.TemplateImportService
 import com.fasterxml.jackson.databind.node.ObjectNode
@@ -74,6 +78,14 @@ class PromotionReceiveService(
      */
     private val guard: co.datapipelines.pipeline.release.ReleaseMutationGuard =
         co.datapipelines.pipeline.release.ReleaseMutationGuard.NONE,
+    /**
+     * #778 (slice D-E, versioning §10.5) — the promotion-time lake check, run LAST inside the batch's transaction: the
+     * import writers have just indexed every landed pipeline and set against THIS deployment's lake registry, and a
+     * reference to a table not registered here refuses the whole batch (`pipeline.promotion.lake_table_unavailable`),
+     * rolling it back. Production always wires it (`PromotionConfiguration`); null only in a directly built unit test
+     * that drives no lake content.
+     */
+    private val lakeCheck: LakePromotionCheck? = null,
 ) {
     private val log = LoggerFactory.getLogger(PromotionReceiveService::class.java)
 
@@ -147,7 +159,7 @@ class PromotionReceiveService(
         boundTransferArms(batch)
 
         transactionTemplate.executeWithoutResult {
-            guard.acquire(workspace.id, co.datapipelines.pipeline.release.ReleaseFamily.PIPELINE)
+            guard.acquire(workspace.id, ReleaseFamily.PIPELINE)
             if (batch.templates.isNotEmpty()) {
                 templateImportService.import(templatesPayload(batch), workspace.id, actor)
             }
@@ -156,11 +168,20 @@ class PromotionReceiveService(
             // the released templates. The entries were VALIDATED above (#302, C36); what can
             // still refuse here (a hash mismatch on a brought template's landing, C29's
             // id_taken) rolls the whole batch back.
+            val landed = ArrayList<LakePromotionCheck.Landed>()
             validatedSets.forEach { validated ->
-                parameterSetPromotion.land(validated, workspace.id, actor)
+                val set = parameterSetPromotion.land(validated, workspace.id, actor)
+                if (lakeCheck != null) {
+                    val detail = set.detail
+                    landed +=
+                        landedEntry(workspace.id, ReleaseFamily.PARAMETER_SET, detail.parameterSetId, detail.version, validated.bound.name)
+                }
             }
             batch.pipelines.forEach { pipeline ->
-                pipelineImportService.import(pipeline.toString(), workspace.id, actor)
+                val imported = pipelineImportService.import(pipeline.toString(), workspace.id, actor)
+                if (lakeCheck != null) {
+                    landed += landedEntry(workspace.id, ReleaseFamily.PIPELINE, imported.record.id, imported.version, imported.record.name)
+                }
             }
             // AFTER the pipelines: an endpoint over a pipeline this same batch is bringing
             // must find it already stored. Republishing an unchanged endpoint is a no-op
@@ -169,6 +190,8 @@ class PromotionReceiveService(
             // #10 L1c — the two transfer families LAST (D61's order), bound AND landed inside the
             // transaction: [landTransferFamilies] states the rule and its reasons.
             landTransferFamilies(batch, workspace.id, actor)
+            // #778 — LAST, so a refusal names every unavailable table of the batch at once and rolls all of it back.
+            lakeCheck?.refuseUnavailable(landed, promotionRoutes(batch))
         }
 
         // C4: the promoted rows are stamped with the peer's identity (the System actor for the
@@ -176,6 +199,29 @@ class PromotionReceiveService(
         // fingerprint of the key that authorised the push. Never the key.
         return reportApplied(batch, actor)
     }
+
+    /** #778 — one landed version, as the lake check names it. */
+    private fun landedEntry(
+        workspaceId: java.util.UUID,
+        family: ReleaseFamily,
+        entityId: java.util.UUID,
+        version: Int,
+        name: String,
+    ) = LakePromotionCheck.Landed(
+        ScannedVersion(workspaceId, family, entityId, version),
+        name,
+    )
+
+    /** #778 — who in the batch pins whom: the `via` chains of a lake refusal, from the batch's own members. */
+    private fun promotionRoutes(batch: PromotionWire.Batch) =
+        PromotionRoutes.of(
+            mapOf(
+                ReleaseFamily.PIPELINE.wire to batch.pipelines,
+                ReleaseFamily.PARAMETER_SET.wire to batch.parameterSets,
+                ReleaseFamily.VISUALIZATION.wire to batch.visualizations,
+                ReleaseFamily.DASHBOARD.wire to batch.dashboards,
+            ),
+        )
 
     /** The applied report, the audit row and the log line — one spelling of the counts, per kind. */
     private fun reportApplied(

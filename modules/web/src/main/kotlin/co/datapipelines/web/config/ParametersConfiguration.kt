@@ -93,6 +93,8 @@ class ParametersConfiguration {
         guard: co.datapipelines.pipeline.release.ReleaseMutationGuard,
         // #517 round three — the blockers one restore refusal lists.
         bounds: co.datapipelines.pipeline.release.ReleaseBounds,
+        // #778 — the lake reference scanner, told of each RELEASED version inside its transaction (seam ruling 2026-11-02).
+        observer: co.datapipelines.pipeline.release.ReleasedVersionObserver,
     ): ParameterSetService =
         ParameterSetService(
             repository,
@@ -107,6 +109,7 @@ class ParametersConfiguration {
             transactions = TransactionTemplate(transactionManager) as TransactionOperations,
             guard = guard,
             maxBlockers = bounds.maxBlockers,
+            observer = observer,
         )
 
     /** #376 — the durable evaluation history's tables (V48), read by the History tab and the hourly housekeeping. */

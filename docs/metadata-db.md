@@ -1,9 +1,9 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.49 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.50 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
-**Last updated:** 2026-10-25
+**Last updated:** 2026-11-02
 
 ---
 
@@ -75,6 +75,9 @@ learned_facts ──1:N── template_implements (fact_id, NO cascade — a cit
 users ──1:N── mail_sends (the claim row behind every notice sent about or to the user, ON DELETE CASCADE — §4.19)
 
 pipelines ──1:N── pipeline_check_runs (the server-run release-check history of the pipeline's versions — §4.20)
+
+workspaces ──1:N── lake_reference_scans (one per scanned released pipeline / parameter-set version, ON DELETE CASCADE — §4.41)
+lake_reference_scans ──1:N── lake_table_references (the version's table positions, ON DELETE CASCADE — §4.42)
 ```
 
 Not shown, because they are not foreign keys: `audit_log.key_id` names an `api_keys` row without referencing it (the audit trail outlives the key), and `template_versions.imports_json` references other template versions inside a JSONB array (validated at save time, D2 — a JSONB array cannot carry an FK). The `{id, version}` entries in that array — and the `template` refs inside `pipeline_versions.body_json` — name a template by its human id (`templates.name` since V4), never by the surrogate `templates.id`.
@@ -1566,6 +1569,77 @@ CREATE INDEX idx_schedule_notification_deliveries_event ON schedule_notification
 
 **Strict deployment backlog admission (#442 round two).** Enqueue and explicit resend take transaction-scoped `pg_advisory_xact_lock(442004001)` (`NotificationRepository.ADMISSION_LOCK_KEY`) before counting pending rows, in the same READ COMMITTED transaction as insert/requeue. Lock order: enqueue takes the run row, then the advisory lock; resend takes the delivery row, then the advisory lock. The sender claims delivery rows with `FOR UPDATE SKIP LOCKED` and never takes the advisory lock, so there is no cycle. The advisory statement has a five-second query timeout on a dedicated template. This serializes admission across schedules and instances; at the hard cap, new deliveries become `failed/backlog_full` and resend is refused (`409 schedule.notification.backlog_full`, `details.pending`, `details.backlog_max`) without changing the row. Lowering the configured cap does not discard existing pending mail.
 
+### 4.41 `lake_reference_scans`
+
+**One row per scanned RELEASED version of a pipeline or a parameter set** (V52; #778, dp-lake design record §7 "Pipeline-to-table check", the reference-scanner slice D-C). Written by `LakeReferenceScanService` alone, in the SAME transaction that makes the version released — a release (`ReleaseCoordinator`, `ParameterSetService.release`) or an import (promotion, the bootstrap seeder) — and by the boot backfill for released versions that have no row or an older `scanner_version`. RELEASED version rows are never UPDATEd (§4.5), which is why the scan is its own table.
+
+```sql
+CREATE TABLE lake_reference_scans (
+    workspace_id    UUID        NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    family          TEXT        NOT NULL,                -- 'pipeline' | 'parameter_set'
+    entity_id       UUID        NOT NULL,                -- pipelines.id / parameter_sets.id (no FK: one column, two parents)
+    version         INTEGER     NOT NULL,
+    name            TEXT        NOT NULL,                -- the entity's name at the scanned version, for display
+    status          TEXT        NOT NULL,                -- 'exact' | 'partial' | 'unscannable'
+    reasons_json    JSONB       NOT NULL DEFAULT '[]'::jsonb,  -- the classifier's / serializer's findings: [{site, kind, detail}]
+    scanner_version INTEGER     NOT NULL,                -- LakeReferenceScanService.SCANNER_VERSION at the time of the scan
+    scanned_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT lake_reference_scans_pkey PRIMARY KEY (workspace_id, family, entity_id, version),
+    CONSTRAINT chk_lake_reference_scans_family CHECK (family IN ('pipeline', 'parameter_set')),
+    CONSTRAINT chk_lake_reference_scans_status CHECK (status IN ('exact', 'partial', 'unscannable')),
+    CONSTRAINT chk_lake_reference_scans_version CHECK (version >= 1),
+    CONSTRAINT chk_lake_reference_scans_scanner_version CHECK (scanner_version >= 1),
+    CONSTRAINT chk_lake_reference_scans_reasons CHECK (jsonb_typeof(reasons_json) = 'array')
+);
+```
+
+**Notes:**
+- **A version with no LAKE site still gets a row** (`exact`, no references): the row says "scanned", so the backfill does not pick it again and a missing row always means "never scanned".
+- **`status` is the weakest site's**: `unscannable` when any LAKE rendering the parser refused (DML, DDL, `PIVOT`, a syntax error — one such statement makes that rendering's whole text unscannable) or any render failed; else `partial` when any LAKE template's body depends on a value (an interpolation, a branch, a loop, a macro call, an imported library — the classifier's kinds); else `exact`. `partial` and `unscannable` versions are ADMITTED everywhere (the owner's 2026-11-02 ratification): the check reads what the index holds and says nothing about what it cannot see.
+- **Keyed by id, not by name** (a deviation from the slice's D-C sketch, recorded in the lane's handback): pipeline and set names are unique per workspace only, and a release may carry a rename; `name` is display.
+- `reasons_json` never carries rendered SQL — a finding names the site and the construct (bounded), never the text, which may embed §12.6 sample values.
+
+### 4.42 `lake_table_references`
+
+**One row per table position a scanned version's LAKE renderings name** (V52; #778, slice D-C) — a pipeline node's rendered SQL or a parameter-set selector's rendered query, parsed by DuckDB's own serializer (`json_serialize_sql`, on a parse-only in-memory connection with external access off). Re-scanning a version replaces its rows (the cascade from §4.41).
+
+```sql
+CREATE TABLE lake_table_references (
+    workspace_id     UUID     NOT NULL,
+    family           TEXT     NOT NULL,
+    entity_id        UUID     NOT NULL,
+    version          INTEGER  NOT NULL,
+    ordinal          INTEGER  NOT NULL,                 -- document order within the version
+    node_id          TEXT,                              -- the pipeline node, or
+    selector         TEXT,                              -- the parameter-set selector (exactly one of the two)
+    template_id      TEXT     NOT NULL,                 -- the template name and version that rendered it
+    template_version INTEGER  NOT NULL,
+    datasource_name  TEXT     NOT NULL,                 -- the LAKE datasource BY NAME (names map between environments)
+    written_catalog  TEXT,                              -- the triple as written, NULL where the text did not spell it
+    written_schema   TEXT,
+    written_table    TEXT     NOT NULL,
+    resolved         BOOLEAN  NOT NULL,                 -- the position names a registry identity
+    namespace        TEXT[],                            -- that identity (lake_tables.namespace / name), or NULL
+    table_name       TEXT,
+    time_travel      BOOLEAN  NOT NULL DEFAULT FALSE,   -- AT (VERSION => n)
+    statement_index  INTEGER  NOT NULL,
+    CONSTRAINT lake_table_references_pkey PRIMARY KEY (workspace_id, family, entity_id, version, ordinal),
+    CONSTRAINT fk_lake_table_references_scan FOREIGN KEY (workspace_id, family, entity_id, version)
+        REFERENCES lake_reference_scans (workspace_id, family, entity_id, version) ON DELETE CASCADE,
+    CONSTRAINT chk_lake_table_references_site CHECK ((node_id IS NULL) <> (selector IS NULL)),
+    CONSTRAINT chk_lake_table_references_resolved CHECK (
+        (resolved AND namespace IS NOT NULL AND cardinality(namespace) >= 1 AND table_name IS NOT NULL)
+        OR (NOT resolved AND namespace IS NULL AND table_name IS NULL)),
+    CONSTRAINT chk_lake_table_references_counters CHECK (ordinal >= 0 AND statement_index >= 0 AND template_version >= 1)
+);
+CREATE INDEX idx_lake_table_references_table ON lake_table_references (datasource_name, namespace, table_name);
+```
+
+**Notes:**
+- **Resolution is the connection's own naming** (datasources.md's lake section): a two-segment namespace is a catalog and a schema, a one-segment namespace is a schema of the default catalog, so `cat.sch.t` resolves to `[cat, sch]`, `sch.t` to `[sch]`, and a bare `t` only when the datasource registers exactly one namespace (the connection's `search_path` rule). CTE names, the engine's system catalogs and schemas (`system`, `temp`, `information_schema`, `pg_catalog`) and its internal views are not table positions and write no row; a bare name under several namespaces writes an UNRESOLVED row.
+- **Table functions write no row** (`read_parquet(...)`, `query_table(...)`): they name a location or a string, not a registered table.
+- **No rendered SQL is stored** — only the written identifiers the parser returned.
+
 ## 5. Index Strategy Summary
 
 **This table is generated from §4 and must contain nothing §4 does not create.** Two kinds of entry appear:
@@ -1692,6 +1766,9 @@ CREATE INDEX idx_schedule_notification_deliveries_event ON schedule_notification
 | `schedule_notification_deliveries` | `uq_schedule_notification_deliveries_message_id` | via UNIQUE | V51: a Message-ID is never reused across deliveries |
 | `schedule_notification_deliveries` | `idx_schedule_notification_deliveries_due` | explicit | V51: the sender's claim — pending rows by `next_attempt_at` — and the backlog count |
 | `schedule_notification_deliveries` | `idx_schedule_notification_deliveries_event` | explicit | V51: a notice's deliveries — the run detail |
+| `lake_reference_scans` | `lake_reference_scans_pkey` | via PK | One scan per released version; the backfill's "no row or older scanner" probe ([§4.41](#441-lake_reference_scans)) |
+| `lake_table_references` | `lake_table_references_pkey` | via PK | A version's references in document order; its prefix serves the cascade and the receiver's per-version read ([§4.42](#442-lake_table_references)) |
+| `lake_table_references` | `idx_lake_table_references_table` | explicit | V52 (#778): the readers of one lake table — by datasource name, namespace and table |
 
 **Deliberately absent:**
 - `uq_users_email` — this name never existed. The uniqueness rule is a `UNIQUE` *constraint* declared inline in §4, so Postgres names its index `users_email_key`. The old entry would have sent a migration author looking for a `CREATE UNIQUE INDEX` statement that was not there. (`uq_pipelines_name`/`pipelines_name_key` are gone too — V4 replaced the global rule with the explicitly named `uq_pipelines_workspace_name`.)
@@ -1759,6 +1836,8 @@ table and the test's expected-table list in the same commit.
 | `parameter_evaluation_queries` | derived | ParameterEvaluation | — | — | The evaluation's statement attempts — the record's classification |
 | `schedule_notification_events` | derived | ScheduleNotification | — | — | Notices THIS deployment's scheduler queued for its own runs (#442b); produced, never authored |
 | `schedule_notification_deliveries` | derived | ScheduleNotification | — | — | The per-recipient sends of those notices — the event's classification; addresses never leave the environment |
+| `lake_reference_scans` | derived | LakeReferenceScan | — | — | THIS deployment's scan of its own released versions (#778): computed from the version body, the template versions it pins and this environment's lake registry, so a promoted version is re-scanned by the receiver's import, never transferred |
+| `lake_table_references` | derived | LakeReferenceScan | — | — | The scan's table positions, resolved against THIS environment's [`lake_tables`](#415-lake_tables); the receiver re-derives them at import |
 | `template_implements` | promotable | Template | — (follows `template_versions`) | `(name, version)` + the fact ids | The citations ride the template version's payload (export, import, the promotion batch) outside its `body_hash` (R9). Their targets are [`learned_facts`](#418-learned_facts) rows, which are environment-local: the importing workspace stores the ids that resolve there and drops the rest without refusing (owner ruling 2026-09-25), so a cross-deployment promotion lands with none ([§4.21](#421-template_implements)) |
 
 ---
@@ -2075,6 +2154,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-02 | v1.50 | 778 (#778) | **V52 — the lake reference index.** New **§4.41 `lake_reference_scans`** (one row per scanned released pipeline or parameter-set version — `exact` / `partial` / `unscannable`, the findings in `reasons_json`, `scanner_version` for re-scans; keyed by workspace, family, entity id and version) and **§4.42 `lake_table_references`** (one row per table position, the written triple and the resolved registry identity, cascading from the scan); §3 ERD, §5 (three indexes) and §5A (both **derived**) updated. Down path documented in the migration header, not shipped. |
 | 2026-10-25 | v1.49 | 442c (#442) | §4.23: nullable target_ref frozen at run creation (V51). §4.40: strict pending cap, shared advisory key, bounded acquisition, lock order and resend refusal. |
 | 2026-10-24 | v1.48 | 442b (#442) | **V51 — the schedule notification outbox.** New **§4.39 `schedule_notification_events`** (one row per selected transition or block, `run_id` NOT NULL, UNIQUE `(run_id, outcome)` so a replayed transition writes none) and **§4.40 `schedule_notification_deliveries`** (one row per notice and recipient, the address snapshotted, a fixed `message_id`, `pending` / `accepted` / `failed` / `uncertain` with the due/claim CHECKs, `resend_count`); §4.24's trail CHECK gains the four `notification_*` kinds (details carry ids, counts and codes — no address, no domain; retries write no trail row); §5 lists the five new indexes. Down path documented in the migration header, not shipped. |
 | 2026-10-22 | v1.47 | 8b (#8) | The existing V33 CHECK admits JavaScript rows; the pooled save gate and availability control writes without a schema change. |

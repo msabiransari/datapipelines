@@ -101,6 +101,8 @@ class PromotionConfiguration {
         visualizationConfig: co.datapipelines.visualization.VisualizationConfig,
         // #517 — the workspace writer guard the batch's transaction acquires first.
         guard: co.datapipelines.pipeline.release.ReleaseMutationGuard,
+        // #778 — the promotion-time lake check, run last inside the batch's transaction (slice D-E).
+        lakeCheck: co.datapipelines.application.lake.LakePromotionCheck,
     ): PromotionReceiveService =
         PromotionReceiveService(
             inventory,
@@ -116,6 +118,7 @@ class PromotionConfiguration {
             dashboardPromotion,
             visualizationConfig,
             guard,
+            lakeCheck = lakeCheck,
         )
 
     /**
