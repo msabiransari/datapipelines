@@ -74,6 +74,26 @@ internal object ForbiddenConstructScanner {
         Regex("""\?\s*(eval_json|evaljson|eval|interpret|api|new)(?![a-z0-9_])""", RegexOption.IGNORE_CASE)
 
     /**
+     * The `.get_optional_template` / `.getOptionalTemplate` special variable (templates.md
+     * §4.2, §6.3 — since #787). It loads a template BY KEY at render time, outside the
+     * declared `imports` closure — the one loading route that did not funnel through
+     * [RegistryTemplateLoader]'s declared-closure refusal, so a body could pull an undeclared
+     * library's macros into the SQL. §4.2 forbids the construct outright; the loader's
+     * refusal (the render layer) is the independent second one, exactly as for `?eval`.
+     *
+     * Both spellings, because Freemarker's canonical rendering preserves the alias the author
+     * wrote rather than collapsing it to the snake-case key (verified against 2.3.35, same
+     * behaviour as `?eval_json` — see [FORBIDDEN_BUILTIN]). Matched case-SENSITIVELY, and that
+     * is complete, not an omission: any other casing is a **parse error** (verified against
+     * the pinned jar — `.Get_Optional_Template`, `.getoptionaltemplate`,
+     * `.GET_OPTIONAL_TEMPLATE` all fail at parse), so no spelling the parser accepts can slip
+     * past an exact-two-spelling match. The trailing word boundary keeps a hypothetical longer
+     * variable sharing the prefix from being flagged.
+     */
+    private val FORBIDDEN_SPECIAL_VARIABLE =
+        Regex("""\.\s*(get_optional_template|getOptionalTemplate)\b""")
+
+    /**
      * The `freemarker.template.utility` package — home of `Execute`, `ObjectConstructor`,
      * `JythonRuntime`. Referenced only by fully-qualified name in an SSTI payload, so matching
      * the package prefix catches all three (and any gadget the package gains) without the false
@@ -174,6 +194,9 @@ internal object ForbiddenConstructScanner {
         FORBIDDEN_BUILTIN.findAll(text).forEach {
             findings += Finding("?${it.groupValues[1].lowercase().replace("evaljson", "eval_json")}", it.value.truncateForError())
         }
+        FORBIDDEN_SPECIAL_VARIABLE.findAll(text).forEach {
+            findings += Finding(SPECIAL_VARIABLE_CONSTRUCT, it.value.truncateForError())
+        }
         UTILITY_PACKAGE.findAll(text).forEach {
             findings += Finding("freemarker.template.utility", it.value.truncateForError())
         }
@@ -184,4 +207,10 @@ internal object ForbiddenConstructScanner {
 
     /** The construct name reported for a leading `<#ftl …>` header. */
     const val FTL_HEADER_CONSTRUCT = "<#ftl> header"
+
+    /**
+     * The construct name reported for the `.get_optional_template` special-variable load —
+     * the canonical (snake-case) key, whichever spelling the author used.
+     */
+    const val SPECIAL_VARIABLE_CONSTRUCT = ".get_optional_template"
 }
