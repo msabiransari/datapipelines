@@ -1690,11 +1690,25 @@ The session-only navigation trees' refusals (#460, #464; [REST API §24](rest-ap
 
 The managed lake's catalog outcomes (#785, dp-lake P2; [module structure §5.21](module-structure.md#521-lake)). The Iceberg catalog tables `iceberg_tables` and `iceberg_namespace_properties` live in DP's own Postgres (V53), and a Flyway-owned trigger fences every write to them: the writing connection must carry the session settings `dp.lease_token` and `dp.operation_id` of a live, undeadlined `lake_leases` row on the row's name (a rename needs the old name's lease too), and the catalog must not be in `restoring` mode. The trigger raises SQLSTATE `DP001` or `DP002`; `modules/lake` maps them, and a connection lost mid-write, to these codes. Only DP's own code paths write the catalog, so no route returns any of them before P8 adds the lake surfaces (HTTP `—`). A refused write changed nothing: the trigger runs before the row is written, in the same transaction.
 
+The `lake.definition.*` rows (#798, dp-lake P3; [lake.md](lake.md)) are the managed table definitions' lifecycle refusals and apply outcomes. `modules/lake`'s `LakeDefinitionService` and `LakeDefinitionApplier` raise them; an apply outcome (`reviewed_change`, `breaking_change`, `drift`, `invalid_body`) is also stored on the table as `apply_state = failed` with `apply_error_json = {code, message, details}`. No route returns them before P8 (HTTP `—`).
+
 | Code | HTTP | Description |
 |---|---|---|
 | `lake.catalog.fenced` | — | SQLSTATE `DP001`: a catalog write without a lease token, with a token or operation that is not the live lease's, against a name the operation holds no lease on, or a rename without the source name's lease. Another operation holds the table, or this operation's lease expired or reached its deadline |
 | `lake.catalog.restoring` | — | SQLSTATE `DP002`: a catalog write while `lake_control.mode = 'restoring'` (the recovery procedure has the catalog) |
 | `lake.catalog.outcome_unknown` | — | the catalog connection failed (SQLSTATE class `08`) while a write was in flight, so the write may or may not have committed. DP never replays the statement (a replay can report a committed write as failed and let the library delete its files); the operation's settle step decides from the revision log. The catalog session that saw it refuses further work |
+| `lake.definition.not_found` | — | No managed table (or no such definition version of it) by that id or (namespace, table). |
+| `lake.definition.not_draft` | — | The version named is not a DRAFT (release), or the table has no draft (purge-draft). |
+| `lake.definition.not_released` | — | Discard names a version that is not RELEASED. |
+| `lake.definition.version_conflict` | — | The caller's `expected_body_hash` is not the hash of the version it builds on (the DRAFT it overwrites or releases, or the RELEASED version a new draft copies), or a draft already exists: someone else wrote first. |
+| `lake.definition.invalid_body` | — | The body breaks a rule of lake.md §1; `details.path` names the offending element. |
+| `lake.definition.name_taken` | — | A managed table of that name already exists in the namespace. |
+| `lake.definition.applied_version` | — | Discard names the version this environment has applied. |
+| `lake.definition.reviewed_change` | — | The change from the applied definition is in the policy's reviewed class (lake.md §4); recorded on the table as `failed`. |
+| `lake.definition.breaking_change` | — | The change from the applied definition is in the policy's breaking class (lake.md §4); recorded on the table as `failed`. |
+| `lake.definition.drift` | — | The Iceberg table holds neither the target definition nor the last applied one (it was changed outside DP); recorded on the table as `failed` with the field diff. |
+| `lake.definition.table_busy` | — | Another operation holds the table (its lease, or an apply in flight); nothing changed. |
+| `lake.definition.authoring_disabled` | — | This deployment has authoring disabled: definitions are written where authoring is enabled and promoted. |
 
 
 ---

@@ -351,8 +351,10 @@ class ApiErrorCatalogSpecDriftTest {
          * `lake.catalog.restoring` and `lake.catalog.outcome_unknown`, all `—` rows
          * (NEVER_RETURNED_LIVE: they arise inside DP's own catalog writes and no route reaches them
          * before P8), landed in the SAME commit as their `PipelineErrorCodes.Lake` constants.
+         * 423 → 435 with #798: §13.25 gains the twelve `lake.definition.*` rows, all `—`, landed in the SAME
+         * commit as their `PipelineErrorCodes.Lake` constants. Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 423
+        const val SECTION_13_ROW_COUNT = 435
 
         /**
          * §12's distinct validation codes.
