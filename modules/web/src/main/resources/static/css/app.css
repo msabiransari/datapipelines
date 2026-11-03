@@ -133,6 +133,11 @@
   --app-radius-badge: var(--radius-sm);   /* 4px — a status badge */
   --app-dialog-max: 560px;             /* an ordinary dialog; it also never exceeds 90vw */
   --app-target-min: 44px;              /* a coarse pointer's smallest target */
+  /* #783 — ONE pane-splitter grip (104 §B / 141 §C), read by the editor dock's and the board
+     dock's handles: the strip straddling the pane's edge, and the pill drawn at its centre. */
+  --app-splitter-strip: 9px;
+  --app-splitter-grip-w: 40px;
+  --app-splitter-grip-h: 3px;
 }
 
 /* Application-level semantic tokens — derive from design system, never hardcoded hex */
