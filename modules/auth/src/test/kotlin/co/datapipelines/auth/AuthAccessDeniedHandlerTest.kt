@@ -70,7 +70,8 @@ class AuthAccessDeniedHandlerTest {
         request.addParameter(CSRF_PARAMETER, "a-presented-token")
         val response = MockHttpServletResponse()
 
-        handler.handle(request, response, InvalidCsrfTokenException(DefaultCsrfToken("DP-CSRF-Token", CSRF_PARAMETER, "expected"), "a-presented-token"))
+        val expected = DefaultCsrfToken("DP-CSRF-Token", CSRF_PARAMETER, "expected")
+        handler.handle(request, response, InvalidCsrfTokenException(expected, "a-presented-token"))
 
         response.status shouldBe HTTP_FORBIDDEN
         response.contentAsString shouldBe ""
