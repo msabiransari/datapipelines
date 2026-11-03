@@ -68,17 +68,19 @@ class ReusableRestTreeBrowserTest : BrowserSuite() {
             }""",
         )
         page.evaluate("() => window.__idleTreeMutations") shouldBe 0
-        // #554 at 1440 (band 1101–1599): menu 202, browser 320 by default (#784); End takes the browser to
-        // its 480 ceiling (1440 - 202 - 480 = 758 of content), Home to its 280 floor (958).
+        // #554 at 1440 (band 1101–1599): menu 202, the browser at its band default (#784). End takes
+        // it to the clamp's ceiling, Home to its `--app-browser-min` floor. #788: every width derives
+        // from the range the page reports — app.css is the range's one source.
+        val range = browserRange(page)
         width("app-rail") shouldBe 202
-        width("app-browser") shouldBe 320
+        width("app-browser") shouldBe range.effectiveDefault
         page.locator("#browser-boundary").focus()
         page.keyboard().press("End")
-        page.waitForFunction("() => document.getElementById('app-main').getBoundingClientRect().width === 758")
-        width("app-browser") shouldBe 480
+        page.waitForFunction("expected => document.getElementById('app-main').getBoundingClientRect().width === expected", 1440 - 202 - range.maximumAt(1440, 202))
+        width("app-browser") shouldBe range.maximumAt(1440, 202)
         page.keyboard().press("Home")
-        page.waitForFunction("() => document.getElementById('app-main').getBoundingClientRect().width === 958")
-        width("app-browser") shouldBe 280
+        page.waitForFunction("expected => document.getElementById('app-main').getBoundingClientRect().width === expected", 1440 - 202 - range.min)
+        width("app-browser") shouldBe range.min
         page.evaluate(
             "() => window.__rowWitness === document.querySelector('#nav-tree-pipelines [data-tree-key=\"folder:scope\"]')",
         ) shouldBe
@@ -374,7 +376,7 @@ class ReusableRestTreeBrowserTest : BrowserSuite() {
             workspace,
         ) shouldBe mapOf("rail" to null, "open" to null, "preferred" to "", "browser" to "")
         width("app-rail") shouldBe 202
-        width("app-browser") shouldBe 320
+        width("app-browser") shouldBe browserRange(page).effectiveDefault
         page.setViewportSize(390, 844)
         page.reload()
         page.waitForSelector("#app-main")

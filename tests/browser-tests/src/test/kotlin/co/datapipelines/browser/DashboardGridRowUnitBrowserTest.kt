@@ -30,8 +30,9 @@ import java.nio.file.StandardOpenOption
  * Plotly's own `_fullLayout._size.h` (the `nsewdrag` rect beside it in the record).
  *
  * The 640 px breakpoint is measured on the board: the 728 px board at the 760 px phone viewport holds
- * its 6/6/3/9 grid, while the ~710 px board at 1280 px beside the 202 px menu and the 320 px resource
- * browser (#554; #784 lifts the default from 300; the History lives in the bottom dock since #473) holds it under the default and
+ * its 6/6/3/9 grid, while the ~710 px board at 1280 px beside the 202 px menu and the resource browser
+ * at its band default (#554; app.css's `--app-browser-default`; the History lives in the bottom dock
+ * since #473) holds it under the default and
  * collapses under an explicit 1024 px threshold. A live host-width
  * crossing proves the slots re-place AND the figure re-measures to its new width.
  */
@@ -43,7 +44,8 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
         val board = seedBoardWithGrid(root)
         for (width in listOf(DESKTOP_WIDTH_PX, TABLET_WIDTH_PX, INVERTED_VIEWPORT_PX)) {
             page.setViewportSize(width, VIEWPORT_HEIGHT_PX)
-            // #554: at 768 (the 761–1100 band) the 64 px menu and the 270 px browser leave a board below
+            // #554: at 768 (the 761–1100 band) the 64 px menu and the band's narrower browser
+            // default (app.css's `--app-browser-default` override) leave a board below
             // 640; the reader's Hide (a per-workspace preference, applied before the first paint)
             // returns the browser's width, and the board (768 - 64 less padding) holds the grid again.
             page.evaluate(
@@ -139,9 +141,10 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
         openBoard(board, THEMES.first())
 
         // The reader's browser width is the board host's narrowing cause (#554: the separator on the
-        // browser/content boundary; #460's rail separator before it). End takes the browser to its
-        // 480 px maximum, main to 1280 - 202 - 480 = 598 and the board below the 640 default; Home
-        // takes it to its 280 px floor (#784), main to 798.
+        // browser/content boundary; #460's rail separator before it). End takes the browser to the
+        // range's ceiling (`--app-browser-max`), main to `1280 - 202 - ceiling` — 598 today — and the
+        // board below the 640 default; Home takes it to the range's floor (`--app-browser-min`, #784),
+        // main to 798. #788: the ceiling and floor live in app.css and are read computed.
         val separator = page.locator("#browser-boundary")
         separator.focus()
         page.keyboard().press("End")

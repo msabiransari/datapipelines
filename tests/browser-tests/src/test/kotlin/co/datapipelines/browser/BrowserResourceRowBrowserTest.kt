@@ -472,27 +472,33 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
 
     /** F1: the supported minimum — the compact row keeps every badge inside the rail at depth 3 and 10. */
     @Test
-    fun `at the 280px minimum every badge stays inside the rail at depth three and ten in both themes`() {
-        narrowRows(MIN_WIDTH)
+    fun `at the range's minimum every badge stays inside the rail at depth three and ten in both themes`() {
+        narrowRows { it.min }
     }
 
     /** F1, widened: the default — a depth-10 leaf overflowed by ~62px before the compact mode. */
     @Test
-    fun `at the 320px default every badge stays inside the rail and every name keeps width at depth three and ten`() {
-        narrowRows(DEFAULT_WIDTH)
+    fun `at the band default every badge stays inside the rail and every name keeps width at depth three and ten`() {
+        narrowRows(widestToo = true) { it.effectiveDefault }
     }
 
     /**
      * One width's matrix (brief 701b A.2), set the way the product sets it — the preference on
      * `html` that browser-resize.mjs writes — and proven taken before anything is read: the
      * pipelines tree's depth-3 and depth-10 leaves (v13 and draft) and the templates tree's
-     * (v13, draft and #533's needs review), light and dark.
+     * (v13, draft and #533's needs review), light and dark. #788: the width under test derives
+     * from the range the page reports ([browserRange]) — app.css is the range's one source.
      */
-    private fun narrowRows(width: Int) {
+    private fun narrowRows(
+        widestToo: Boolean = false,
+        pick: (BrowserRange) -> Int,
+    ) {
         startTrace()
         readyTree()
         PIPELINE_ROWS.forEach { releaseTimes(it, RELEASES) }
         val workspace = UUID.fromString(field(api("GET", "/api/v1/pipelines/tree", null), "workspace_id"))
+        val range = browserRange(page)
+        val width = pick(range)
         val scripts = scriptRows(width)
         seedReviewedScripts(workspace, scripts)
         val rows = mutableListOf<Map<String, Any?>>()
@@ -506,32 +512,36 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
                 page.screenshot(Page.ScreenshotOptions().setPath(evidence("701b-$width-$family-$theme.png")))
             }
         }
-        // the other end, from the default case: at the 480px maximum the rows are still compact (no
-        // threshold, owner ruling 2026-10-25 amended), and widening never takes width from a name
-        val widest = if (width == DEFAULT_WIDTH) widestSide(scripts) else emptyList()
+        // the other end, from the default case: at the `--app-browser-max` ceiling the rows are
+        // still compact (no threshold, owner ruling 2026-10-25 amended), and widening never takes
+        // width from a name
+        val widest = if (widestToo) widestSide(range, scripts) else emptyList()
         (rows + widest).forEach { row ->
             println("701b-measure|${row["width"] ?: width}|${row["depth"]}|${row["theme"]}|${row["family"]}|$row")
         }
         assertSoftly {
-            rows.forEach { assertNarrowRow(width, it) }
+            rows.forEach { assertNarrowRow(width, it, range) }
             widest.forEach { row ->
-                assertNarrowRow(MAX_WIDTH, row)
+                assertNarrowRow(range.max, row, range)
                 val narrower = rows.single { it["path"] == row["path"] && it["theme"] == row["theme"] }
-                withClue("$MAX_WIDTH the name only grows: $row vs $narrower") {
+                withClue("at ${range.max} the name only grows: $row vs $narrower") {
                     (row["titleClientWidth"] as Number).toDouble().shouldBeGreaterThan((narrower["titleClientWidth"] as Number).toDouble())
                 }
             }
         }
     }
 
-    /** The templates rows and PNG evidence in both themes at the browser's 480px maximum. */
-    private fun widestSide(scripts: List<String>): List<Map<String, Any?>> {
-        setBrowserWidth(MAX_WIDTH)
+    /** The templates rows and PNG evidence in both themes at the browser's maximum width. */
+    private fun widestSide(
+        range: BrowserRange,
+        scripts: List<String>,
+    ): List<Map<String, Any?>> {
+        setBrowserWidth(range.max)
         return listOf("light", "dark").flatMap { theme ->
             ensureTheme(theme)
-            val metadata = listOf("theme" to theme, "family" to "templates", "width" to MAX_WIDTH)
+            val metadata = listOf("theme" to theme, "family" to "templates", "width" to range.max)
             val rows = scripts.map { requireNotNull(narrowMetrics("templates", it)).plus(metadata) }
-            page.screenshot(Page.ScreenshotOptions().setPath(evidence("739-$MAX_WIDTH-templates-$theme.png")))
+            page.screenshot(Page.ScreenshotOptions().setPath(evidence("739-${range.max}-templates-$theme.png")))
             rows
         }
     }
@@ -539,6 +549,7 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
     private fun assertNarrowRow(
         width: Int,
         row: Map<String, Any?>,
+        range: BrowserRange,
     ) {
         val label = "$width ${row["theme"]} ${row["path"]}: $row"
 
@@ -549,7 +560,7 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
         }
         withClue("$label — badges inside the browser's content edge") { n("badgeRight").shouldBeLessThanOrEqual(n("contentRight") + 0.5) }
         withClue("$label — no sideways scroll (#541)") { n("treeScrollWidth").shouldBeLessThanOrEqual(n("treeClientWidth")) }
-        if (width == MIN_WIDTH && n("depth") > SHALLOW_DEPTH && row["family"] == "templates") {
+        if (width == range.min && n("depth") > SHALLOW_DEPTH && row["family"] == "templates") {
             // #739 spacing amendment: a deep three-badge leaf at the minimum may use the trailing
             // row/scroll inset — inside the rail, never clipped
             withClue("$label — the accepted residue stays inside the rail") {
@@ -560,7 +571,7 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
         }
         withClue("$label — tooltip") { listOf(row["controlTitle"], row["labelTitle"]) shouldBe listOf(row["path"], row["path"]) }
         withClue("$label — ellipsis") { row["titleTextOverflow"] shouldBe "ellipsis" }
-        if (width >= DEFAULT_WIDTH || n("depth") <= SHALLOW_DEPTH) {
+        if (width >= range.effectiveDefault || n("depth") <= SHALLOW_DEPTH) {
             withClue("$label — the name keeps width") { n("titleClientWidth").shouldBeGreaterThan(0.0) }
         } else {
             withClue("$label — the ruling accepts a 0px name here") { n("titleClientWidth").shouldBeGreaterThanOrEqual(0.0) }
@@ -695,11 +706,6 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
     private fun evidence(name: String) = Paths.get("build", "browser-evidence").also { Files.createDirectories(it) }.resolve(name)
 
     private companion object {
-        const val MIN_WIDTH = 280
-        const val DEFAULT_WIDTH = 320
-
-        /** The browser's maximum column (`--app-browser-max`). */
-        const val MAX_WIDTH = 480
         const val SHALLOW_DEPTH = 3.0
 
         /** Twelve releases, then a draft: the row reads `v13` and `draft` — a two-digit version. */
