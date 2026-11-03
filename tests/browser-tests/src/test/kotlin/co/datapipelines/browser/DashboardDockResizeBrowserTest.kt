@@ -188,6 +188,15 @@ class DashboardDockResizeBrowserTest : DashboardBrowserSuite() {
             atCeiling.d("layoutH") shouldBeGreaterThanOrEqual BOARD_FLOOR - 1.0
             near(atCeiling.d("paneH"), total - BOARD_FLOOR) shouldBe true
         }
+        // The CSS row floor (`minmax(--dp-board-floor, 1fr)`) clamps the RENDERED pane on its own, so the
+        // pane's height alone cannot see the splitter's ceiling: a JS bound above the board floor writes,
+        // stores and announces a size the person never sees (prop 670 over a 510 pane: steps move
+        // nothing). The written property and aria-valuenow are the splitter's own statement.
+        withClue("the splitter wrote a size past the ceiling the page shows: $atCeiling (layout+pane was $total)") {
+            near(atCeiling.d("prop"), total - BOARD_FLOOR) shouldBe true
+            near(atCeiling.d("valueNow"), atCeiling.d("paneH")) shouldBe true
+            near(atCeiling.d("valueMax"), total - BOARD_FLOOR) shouldBe true
+        }
         withClue("a cap at the retired 480 still holds the pane: $atCeiling") {
             atCeiling.d("paneH") shouldBeGreaterThan RETIRED_MAX + 1.0
         }
