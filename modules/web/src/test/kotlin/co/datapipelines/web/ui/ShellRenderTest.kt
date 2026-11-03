@@ -2,12 +2,14 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.pipeline.SearchNeedle
 import co.datapipelines.web.ui.site.REPORT_PROBLEM_URL
+import io.kotest.assertions.withClue
 import io.kotest.matchers.comparables.shouldBeLessThan
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver
 import org.thymeleaf.context.WebContext
 
 /**
@@ -522,7 +524,17 @@ class ShellRenderTest {
         browser shouldContain "id=\"browser-width-reset\""
         browser shouldContain
             "<div id=\"browser-boundary\" class=\"app-browser-boundary\" role=\"separator\" tabindex=\"0\""
-        browser shouldContain "aria-valuemin=\"280\" aria-valuemax=\"480\""
+        // #788: the separator's server-rendered ARIA is the one copy that cannot read the
+        // stylesheet (the CSP refuses inline style), so it is pinned AGAINST app.css: a range
+        // edit that misses this template line is red here at build, never silently stale.
+        val (cssMin, cssMax, cssDefault) = cssBrowserRange()
+        withClue(
+            "the separator's ARIA must equal app.css's --app-browser-min/--app-browser-max/" +
+                "--app-browser-default (read $cssMin/$cssMax/$cssDefault)",
+        ) {
+            browser shouldContain
+                "aria-valuemin=\"$cssMin\" aria-valuemax=\"$cssMax\" aria-valuenow=\"$cssDefault\""
+        }
 
         // The engine, the browser lifecycle and the width control load once, from the footer.
         html shouldContain "<script src=\"/js/template-explorer.js\"></script>"
@@ -773,6 +785,34 @@ class ShellRenderTest {
 
         /** One resource-browser tree panel: its #350 id suffix and its `data-nav-tree`. */
         val PANEL = Regex("""<div class="app-nav-tree app-browser-tree" id="nav-tree-([a-z-]+)" data-nav-tree="([a-z-]+)"[^>]*>""")
+
+        /**
+         * #788 — the browser's width range as app.css's shell `:root` block declares it:
+         * `--app-browser-min`, `--app-browser-max` and the base `--app-browser-default`.
+         * The sheet is the range's one source (the scripts read it computed); this parse is
+         * what pins the template's server-rendered ARIA to it. Several `:root` blocks exist
+         * and the width bands re-declare the default inside media rules, so the block is
+         * anchored on the one that declares the range itself.
+         */
+        fun cssBrowserRange(): Triple<Int, Int, Int> {
+            val css =
+                PathMatchingResourcePatternResolver(ShellRenderTest::class.java.classLoader)
+                    .getResource("classpath:static/css/app.css")
+                    .inputStream
+                    .use { it.readBytes().decodeToString() }
+            val rootBlock =
+                Regex(""":root\s*\{([^}]+)}""")
+                    .findAll(css)
+                    .map { it.groupValues[1] }
+                    .firstOrNull { it.contains("--app-browser-min:") }
+                    ?: throw AssertionError("app.css must declare --app-browser-min in a :root block")
+
+            fun bound(name: String): Int {
+                val value = Regex("""$name:\s*(\d+)px""").find(rootBlock)?.groupValues?.get(1)
+                return requireNotNull(value?.toInt()) { "app.css's :root must declare $name in px" }
+            }
+            return Triple(bound("--app-browser-min"), bound("--app-browser-max"), bound("--app-browser-default"))
+        }
     }
 
     private fun webContext(): WebContext = ShellRenderFixture.context()

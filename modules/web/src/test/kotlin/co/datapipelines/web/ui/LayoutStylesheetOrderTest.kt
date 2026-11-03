@@ -99,4 +99,21 @@ class LayoutStylesheetOrderTest {
         appCss.replace(Regex("/\\*.*?\\*/", RegexOption.DOT_MATCHES_ALL), "") shouldContain
             "background-color: var(--surface-page)"
     }
+
+    /**
+     * #788 — the pre-paint rail script reads the browser's width range from app.css as a
+     * computed style (`--app-browser-min` / `--app-browser-max`): a parser-blocking script
+     * only sees a stylesheet that precedes it in the head. Moving the script above the
+     * link would make every bound unreadable and silently skip the width stamping, so the
+     * order is pinned like the sheets' order above.
+     */
+    @Test
+    fun `app css precedes the pre-paint rail script`() {
+        val html = renderedHead()
+        val appCss = html.indexOf("/css/app.css")
+        val rail = html.indexOf("/js/rail.js")
+        appCss shouldBeGreaterThan -1
+        rail shouldBeGreaterThan -1
+        appCss shouldBeLessThan rail
+    }
 }

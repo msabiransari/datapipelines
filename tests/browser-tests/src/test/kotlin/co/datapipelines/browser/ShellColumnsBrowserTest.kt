@@ -95,7 +95,7 @@ class ShellColumnsBrowserTest : RestTreeBrowserFixture() {
         page.focus("#browser-open")
         page.keyboard().press("Enter")
         page.locator("#app-browser").isVisible shouldBe true
-        width() shouldBe 320
+        width() shouldBe browserRange(page).effectiveDefault
         page.evaluate("() => document.activeElement.matches('#nav-tree-pipelines input[type=search]')") shouldBe true
         page.evaluate("() => window.__hideWitness === window.DatapipelinesSidebarTrees.get('pipelines')") shouldBe true
         page.locator("${folder("acme")}[aria-expanded=true]").count() shouldBe 1
@@ -125,8 +125,9 @@ class ShellColumnsBrowserTest : RestTreeBrowserFixture() {
         settle()
         page.locator("#app-browser").isVisible shouldBe true
         page.locator("#app-browser-title [data-browser-family=templates]").innerText() shouldBe "Templates"
-        width() shouldBe 320
-        mainWidth() shouldBe 1440 - 202 - 320
+        val range = browserRange(page)
+        width() shouldBe range.effectiveDefault
+        mainWidth() shouldBe 1440 - 202 - range.effectiveDefault
         page.evaluate("ws => localStorage.getItem('dp-browser-hidden:' + ws)", workspace) shouldBe null
         boosted.size shouldBe 1
         boosted.single().substringBefore('?').endsWith("/templates") shouldBe true
@@ -184,13 +185,16 @@ class ShellColumnsBrowserTest : RestTreeBrowserFixture() {
         page.setViewportSize(1512, 900)
         openTree()
         settle()
+        val range = browserRange(page)
         menuWidth() shouldBe 202
-        width() shouldBe 320
-        mainWidth() shouldBe 1010 - 20 // #784: the band default grew 300 -> 320
+        width() shouldBe range.effectiveDefault
+        // 1512 - 202 - the band default = the 990 content frame (#784 grew it from 970).
+        mainWidth() shouldBe 1512 - 202 - range.effectiveDefault
         page.click("#rail-collapse")
         settle()
         menuWidth() shouldBe 64
-        mainWidth() shouldBe 1010 - 20 + 138
+        // Icon mode returns exactly the menu's 138 px to main.
+        mainWidth() shouldBe 1512 - 64 - range.effectiveDefault
     }
 
     @Test

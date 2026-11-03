@@ -26,7 +26,9 @@ try {
 
 /*
  * #554 — the resource browser, per workspace (record §4 "Browser resizing"): the PREFERRED
- * width (280–480 since #784's raised floor; anything else is not a preference
+ * width (a value within the range app.css's `:root` declares as `--app-browser-min`–
+ * `--app-browser-max`, read as a computed style below — #788 made that sheet the range's
+ * one source, so no literal is repeated here; anything else is not a preference
  * and is removed) and the user's Hide
  * ("1"; anything else is removed). Both are presentation only — a width and a boolean, never
  * a query, a path or a name. The retired keys go on sight and are never reinterpreted:
@@ -40,10 +42,18 @@ try {
     localStorage.removeItem("dp-rail-width:" + dpWorkspace);
     var dpWidthKey = "dp-browser-width:" + dpWorkspace;
     var dpWidthRaw = localStorage.getItem(dpWidthKey);
+    // The bounds come off the applied stylesheet: this parser-blocking script sits after the
+    // app.css link, so the sheet has applied by the time it runs. If either bound fails to
+    // resolve, the stored key is left exactly as it is — a missing stylesheet must not
+    // erase a preference it could not judge.
+    var dpBounds = getComputedStyle(dpRoot);
+    var dpMin = Number.parseFloat(dpBounds.getPropertyValue("--app-browser-min"));
+    var dpMax = Number.parseFloat(dpBounds.getPropertyValue("--app-browser-max"));
+    var dpRanged = Number.isInteger(dpMin) && dpMin > 0 && Number.isInteger(dpMax) && dpMax > 0 && dpMin <= dpMax;
     var dpWidth = Number(dpWidthRaw);
-    if (dpWidthRaw !== null && /^\d+$/.test(dpWidthRaw) && dpWidth >= 280 && dpWidth <= 480) {
+    if (dpRanged && dpWidthRaw !== null && /^\d+$/.test(dpWidthRaw) && dpWidth >= dpMin && dpWidth <= dpMax) {
       dpRoot.style.setProperty("--app-browser-preferred", dpWidth + "px");
-    } else if (dpWidthRaw !== null) {
+    } else if (dpRanged && dpWidthRaw !== null) {
       localStorage.removeItem(dpWidthKey);
     }
     var dpHiddenKey = "dp-browser-hidden:" + dpWorkspace;
