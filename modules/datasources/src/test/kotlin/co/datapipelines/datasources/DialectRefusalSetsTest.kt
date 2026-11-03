@@ -99,6 +99,8 @@ class DialectRefusalSetsTest {
                 "autoload_known_extensions",
                 "autoinstall_known_extensions",
                 "enable_external_access",
+                // #816: the configuration lock the adapter sets at open.
+                "lock_configuration",
                 "allow_unredacted_secrets",
                 "extension_directory",
                 "extension_directories",

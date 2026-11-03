@@ -419,6 +419,10 @@ class DuckdbDialectAdapter : AbstractDialectAdapter(Dialect.DUCKDB, "duckdb") {
             // THE load-bearing lock: no filesystem, no network — so nothing external can be
             // fetched, loaded, attached, read or written, whatever the two toggles above say.
             "enable_external_access" to "false",
+            // #816 (§5.8, defense in depth beside the author-SQL guard): freezes every
+            // configuration option at open, so author SQL cannot SET the toggles above back.
+            // Session state (`SET search_path`, `USE`) stays settable — measured on 1.5.5.1.
+            "lock_configuration" to "true",
         )
 
     /** The DuckDB driver throws from `Connection.setReadOnly` — see the declaration's KDoc. */

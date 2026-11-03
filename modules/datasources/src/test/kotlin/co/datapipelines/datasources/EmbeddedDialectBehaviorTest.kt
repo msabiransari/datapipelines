@@ -191,9 +191,31 @@ class EmbeddedDialectBehaviorTest {
                 readSetting(key, jdbc = emptyMap()) shouldBe "false"
             }
         }
+        // #816 (§5.8): the configuration lock, read back from the engine the adapter opened.
+        readSetting(CONFIGURATION_LOCK, jdbc = emptyMap()) shouldBe "true"
         // The exact set, pinned: an addition or removal is a security change and must be reviewed.
         DialectAdapters.forDialect(Dialect.DUCKDB).defaultProperties shouldBe
-            HARDENED_SETTINGS.associateWith { "false" }
+            HARDENED_SETTINGS.associateWith { "false" } + (CONFIGURATION_LOCK to "true")
+    }
+
+    @Test
+    fun `DS-SEC-20 - the configuration lock freezes every hardened setting and leaves session state settable`() {
+        // #816: with `lock_configuration` at open, even the two toggles the external-access lock
+        // left runtime-settable are refused, and so is the lock itself. Session state is not
+        // configuration: `SET search_path`, `SET schema` and `USE` still run (measured, 1.5.5.1).
+        onHardenedDuckdb { connection ->
+            (HARDENED_SETTINGS + CONFIGURATION_LOCK).forEach { key ->
+                val value = if (key == CONFIGURATION_LOCK) "false" else "true"
+                withClue("author SQL must not be able to change $key") {
+                    val thrown = shouldThrow<SQLException> { connection.createStatement().use { it.execute("SET $key = $value") } }
+                    thrown.message.orEmpty() shouldContain "the configuration has been locked"
+                }
+            }
+            listOf("SET search_path = 'main'", "SET schema = 'main'", "USE memory.main").forEach { sql ->
+                withClue(sql) { connection.createStatement().use { it.execute(sql) } }
+            }
+            connection.readSingleString("SELECT current_setting('$CONFIGURATION_LOCK')") shouldBe "true"
+        }
     }
 
     @Test
@@ -214,11 +236,14 @@ class EmbeddedDialectBehaviorTest {
 
     @Test
     fun `DS-SEC-20 - the two runtime-settable toggles are inert - no load path survives the external-access lock`() {
-        // autoload_known_extensions and autoinstall_known_extensions ARE settable at runtime, which
-        // is why this test exists: it proves they buy an attacker nothing. `enable_external_access`
-        // is the runtime-locked control, and with the filesystem and network off there is no
-        // INSTALL / LOAD / ATTACH path left regardless of what the toggles say.
-        onHardenedDuckdb { connection ->
+        // Without the configuration lock, autoload_known_extensions and autoinstall_known_extensions
+        // ARE settable at runtime, which is why this test exists: it proves they buy an attacker
+        // nothing. `enable_external_access` is the runtime-locked control, and with the filesystem
+        // and network off there is no INSTALL / LOAD / ATTACH path left regardless of what the
+        // toggles say. #816's `lock_configuration` now refuses the flips too (the test above), so
+        // this one opens WITHOUT it (`properties.jdbc` reaches the engine here because the pool
+        // build does not run the validator) — each layer is proven on its own.
+        onUnlockedDuckdb { connection ->
             connection.createStatement().use { it.execute("SET autoload_known_extensions = true") }
             connection.createStatement().use { it.execute("SET autoinstall_known_extensions = true") }
             // The flip really did take effect — otherwise this test would prove nothing.
@@ -238,7 +263,7 @@ class EmbeddedDialectBehaviorTest {
             "LOAD httpfs",
             "ATTACH '/tmp/dp-should-not-open.db' AS other",
         ).forEach { sql ->
-            onHardenedDuckdb { connection ->
+            onUnlockedDuckdb { connection ->
                 connection.createStatement().use { it.execute("SET autoload_known_extensions = true") }
                 connection.createStatement().use { it.execute("SET autoinstall_known_extensions = true") }
                 withClue("must be blocked BY CONFIGURATION, not incidentally: $sql") {
@@ -290,7 +315,8 @@ class EmbeddedDialectBehaviorTest {
         // properties.jdbc is applied AFTER defaultProperties (§4.2), so before v1.8 a saved
         // datasource carrying `enable_external_access=true` silently reverted the whole defense.
         // Verified live at the time: the override reached the engine and read back `true`.
-        HARDENED_SETTINGS.forEach { key ->
+        // #816: the configuration lock is refused in both carriers on the same terms.
+        (HARDENED_SETTINGS + CONFIGURATION_LOCK).forEach { key ->
             withClue("properties.jdbc.$key must be refused for DUCKDB") {
                 DatasourceValidator(driverAvailable = { true })
                     .validate(
@@ -402,6 +428,17 @@ class EmbeddedDialectBehaviorTest {
     /** Runs [block] against an in-memory connection built through the real, hardened DuckDB adapter. */
     private fun onHardenedDuckdb(block: (Connection) -> Unit) =
         onDuckdb(embedded(Dialect.DUCKDB, "duckdb_hardened", "jdbc:duckdb::memory:"), block)
+
+    /**
+     * The hardened adapter minus #816's configuration lock — the engine as it was before the lock,
+     * for the test that proves the external-access lock holds on its own.
+     */
+    private fun onUnlockedDuckdb(block: (Connection) -> Unit) =
+        onDuckdb(
+            embedded(Dialect.DUCKDB, "duckdb_unlocked", "jdbc:duckdb::memory:")
+                .copy(properties = DatasourceProperties(jdbc = mapOf(CONFIGURATION_LOCK to "false"))),
+            block,
+        )
 
     /** Runs [block] against a fresh pooled connection for [datasource]. */
     private fun onDuckdb(
@@ -518,6 +555,9 @@ class EmbeddedDialectBehaviorTest {
                 "autoinstall_known_extensions",
                 "enable_external_access",
             )
+
+        /** #816's open property: freezes every configuration option (§5.6, §5.8). */
+        const val CONFIGURATION_LOCK = "lock_configuration"
 
         /**
          * The three of [HARDENED_SETTINGS] DuckDB refuses to change while the database is running.

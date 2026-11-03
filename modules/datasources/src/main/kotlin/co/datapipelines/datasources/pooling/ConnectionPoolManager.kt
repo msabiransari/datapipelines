@@ -10,6 +10,7 @@ import co.datapipelines.datasources.LakeViewOutcomeRecorder
 import co.datapipelines.datasources.LakeViewPlan
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
+import co.datapipelines.typesystem.jdbc.guardedForAuthorSql
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import com.zaxxer.hikari.util.DriverDataSource
@@ -18,6 +19,8 @@ import java.sql.Connection
 import java.sql.SQLException
 import java.time.Duration
 import java.time.Instant
+import java.util.Collections
+import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
@@ -103,11 +106,21 @@ interface PoolInstanceOwner : AutoCloseable {
  * while the first was still draining physical connections). So the instance outlives every
  * lease Hikari could still abort and dies with the generation, never before it (§5.2
  * retirement leaves both alive until the reaper's close).
+ *
+ * [dialect] arms #816's TEMPORARY author-SQL guard (§5.8): a `DUCKDB` or `LAKE` pool hands every
+ * lease out as [guardedForAuthorSql], so every statement text a caller runs on it passes the
+ * raw-text gate first — one wrap point for every author path (`SqlRunner`, `SqlProbe`,
+ * `ReadOnlyStatementLease`, the executor's nodes), with no call site changed. `null` and every
+ * other dialect hand out Hikari's own proxy, byte-for-byte as before. DP's own connection setup
+ * (`connectionInitSql`, the lake owner's initializer, the session postlude) runs on the physical
+ * connection inside Hikari and never meets the guard.
  */
 class HikariConnectionPool(
     override val name: String,
     private val dataSource: HikariDataSource,
     private val instanceOwner: PoolInstanceOwner? = null,
+    /** The datasource's dialect; `DUCKDB` and `LAKE` arm the author-SQL guard (class KDoc). */
+    private val dialect: Dialect? = null,
     /**
      * #204 L2 — armed ONLY for the de-privileged in-process H2 pool ([H2InProcessPool.build]).
      * Invoked, exactly once per failing lease, when the acquisition failure's exception graph
@@ -125,6 +138,19 @@ class HikariConnectionPool(
     /** Won by the ONE caller that runs the whole retire → Hikari close → owner release sequence. */
     private val closing = AtomicBoolean(false)
 
+    /** Whether leases are handed out behind the author-SQL guard (class KDoc). */
+    private val guardsAuthorSql: Boolean = dialect in GUARDED_DIALECTS
+
+    /**
+     * Guarded lease → the Hikari proxy it decorates. [discard] needs the proxy: Hikari's
+     * `evictConnection` recognises only its own proxy class and is a silent no-op for anything
+     * else, so an abandoned guarded lease would otherwise stay checked out forever. Keys are
+     * weak and compared by identity (the decorator inherits `Any`'s `equals`), so a lease its
+     * borrower dropped leaves the map with it; no public route from the guard to the driver
+     * exists outside this module.
+     */
+    private val guardedLeases: MutableMap<Connection, Connection> = Collections.synchronizedMap(WeakHashMap())
+
     /**
      * HikariCP 6.3.3's `HikariPool.createTimeoutException` (pinned sources): a pool-growth
      * failure surfaces as the pool's `SQLTransientConnectionException` whose SQLState/errorCode
@@ -135,13 +161,24 @@ class HikariConnectionPool(
      * cycle-safe. Never swallows, never retries: the detection's only effect is the eviction
      * callback; the caller's exception is what it would have been without the guard.
      */
-    override fun leaseConnection(): Connection =
-        try {
-            dataSource.connection
-        } catch (e: SQLException) {
-            if (onRestrictedAuthFailure != null && carriesAuthFailure(e)) onRestrictedAuthFailure.invoke()
-            throw e
-        }
+    override fun leaseConnection(): Connection {
+        val leased =
+            try {
+                dataSource.connection
+            } catch (e: SQLException) {
+                if (onRestrictedAuthFailure != null && carriesAuthFailure(e)) onRestrictedAuthFailure.invoke()
+                throw e
+            }
+        if (!guardsAuthorSql) return leased
+        return leased.guardedForAuthorSql().also { guardedLeases[it] = leased }
+    }
+
+    /**
+     * The pool's own connection behind [lease] — Hikari's proxy for a guarded lease, [lease]
+     * itself otherwise. Module-internal on purpose: [discard] and this module's tests (a lake
+     * test's physical-identity read) are its only callers.
+     */
+    internal fun poolConnectionOf(lease: Connection): Connection = guardedLeases[lease] ?: lease
 
     private fun carriesAuthFailure(failure: Throwable): Boolean {
         val seen = HashSet<Throwable>()
@@ -187,7 +224,8 @@ class HikariConnectionPool(
      */
     override fun discard(connection: Connection) {
         if (dataSource.isClosed) return
-        runCatching { dataSource.evictConnection(connection) }
+        val pooled = guardedLeases.remove(connection) ?: connection
+        runCatching { dataSource.evictConnection(pooled) }
             .onFailure { LOG.warn("event=pool_discard_failed datasource={} error={}", name, it.javaClass.simpleName) }
     }
 
@@ -221,6 +259,9 @@ class HikariConnectionPool(
 
         /** A wrong-password failure: H2's `JdbcSQLInvalidAuthorizationSpecException` SQLState (#204 L2). */
         private const val AUTH_FAILURE_SQLSTATE = "28000"
+
+        /** The in-process DuckDB dialects whose leases pass the author-SQL guard (§5.8, TEMPORARY). */
+        private val GUARDED_DIALECTS = setOf(Dialect.DUCKDB, Dialect.LAKE)
     }
 }
 
@@ -536,13 +577,13 @@ class ConnectionPoolManager(
                 if (datasource.dialect == Dialect.H2 && form.isInProcess) {
                     return H2InProcessPool.build(datasource, config, onRestrictedAuthFailure)
                 }
-                return HikariConnectionPool(datasource.name, HikariDataSource(config))
+                return HikariConnectionPool(datasource.name, HikariDataSource(config), dialect = datasource.dialect)
             }
             if (additionalConnectionInit.isNotEmpty()) {
                 // The legacy strict composition for a lake — the views ride in the init SQL and
                 // each connection is its own instance: a plain pool with no generation owner,
                 // exactly as before the classification moved above this line.
-                return HikariConnectionPool(datasource.name, HikariDataSource(config))
+                return HikariConnectionPool(datasource.name, HikariDataSource(config), dialect = datasource.dialect)
             }
             val owner = openLakeInstance(config, adapter, datasource, lakeViews)
             val hikari =
@@ -557,7 +598,7 @@ class ConnectionPoolManager(
                     owner.close()
                     throw e
                 }
-            return HikariConnectionPool(datasource.name, hikari, owner)
+            return HikariConnectionPool(datasource.name, hikari, owner, dialect = datasource.dialect)
         }
 
         /**
@@ -578,6 +619,13 @@ class ConnectionPoolManager(
          * `connectionInitSql` is nulled, so the pool cannot re-run the joined init on the
          * duplicates (global SETs and `CREATE OR REPLACE VIEW` beside active readers are exactly
          * what the once-per-generation rule removes).
+         *
+         * #816 (§5.8): the owner is NOT configuration-locked, unlike a `DUCKDB` connection. The
+         * engine-wide lock is shared by every pool on the same named or file engine, so a second
+         * pool joining one (a rebuild beside a live generation, a second datasource on the same file)
+         * would have its own `memory_limit`/`threads`/`temp_directory` refused — measured on the
+         * pinned 1.5.5.1 (`LakeSpillIntegrationTest`'s joining pool, both URL kinds). A lake keeps
+         * external access by design, so the author-SQL guard on every lease is its control here.
          */
         private fun openLakeInstance(
             config: HikariConfig,
