@@ -42,6 +42,10 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         page.setViewportSize(DESKTOP_BOARD_WIDTH, height)
     }
 
+    /** Keeps the narrow column scenario's 834px board region as the browser default changes. */
+    protected fun narrowDesktopBoardWidth(): Int =
+        DESKTOP_MENU_WIDTH + browserRange(page).effectiveDefault + 2 * DESKTOP_MAIN_PADDING + NARROW_BOARD_REGION_WIDTH
+
     /**
      * True when the page scrolls sideways — a page must never, at any width. `<main>` is the shell's scroll container
      * (`overflow-x: auto`), so a too-wide card scrolls MAIN while the document stays put: both are read.
@@ -1034,13 +1038,11 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
     protected companion object {
         const val DESKTOP_BOARD_WIDTH = 1440
 
-        /**
-         * #554: the narrower desktop the filters COLUMN still holds at — a scenario pin, not a
-         * range value: 1420 leaves main 898 and the region 834, above the 820 drawer threshold,
-         * given the band default the stylesheet declares (#784 grew it; at #554's 1400 the region
-         * is now 814, under the threshold — #788 names app.css as the width's source).
-         */
-        const val NARROW_DESKTOP_BOARD_WIDTH = 1420
+        // Independent scenario inputs: expanded menu, this desktop band's padding, and a
+        // board region 14px above the filters' 820px drawer threshold. Browser width is read.
+        private const val DESKTOP_MENU_WIDTH = 202
+        private const val DESKTOP_MAIN_PADDING = 32
+        private const val NARROW_BOARD_REGION_WIDTH = 834
 
         /** Playwright's default viewport height, kept so a case's vertical geometry is unchanged. */
         const val DEFAULT_VIEWPORT_HEIGHT = 720
