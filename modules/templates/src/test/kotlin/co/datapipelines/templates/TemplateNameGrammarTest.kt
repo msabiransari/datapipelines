@@ -108,8 +108,11 @@ class TemplateNameGrammarTest {
 
         // The engine asks for the bare key at the top level; the §4.4 prologue asks for the
         // root-based form for every import. Both must resolve the same stored version.
-        loader.findTemplateSource("acme/finance/report@1").shouldNotBeNull()
-        loader.findTemplateSource("/acme/finance/report@1").shouldNotBeNull()
+        // #787: direct loader calls need the closure scope production's renderNow opens.
+        loader.withDeclaredClosure("acme/finance/report@1") {
+            loader.findTemplateSource("acme/finance/report@1").shouldNotBeNull()
+            loader.findTemplateSource("/acme/finance/report@1").shouldNotBeNull()
+        }
     }
 
     @Test
@@ -117,11 +120,24 @@ class TemplateNameGrammarTest {
         val report = TemplateFixtures.version("acme/finance/report", body = "SELECT 1")
         val loader = RegistryTemplateLoader(InMemoryTemplateRegistry(listOf(report)))
 
-        ILLEGAL.forEach { name ->
-            withClue("loader must not resolve: '$name@1'") { loader.findTemplateSource("$name@1").shouldBeNull() }
-        }
+        // #787: "/acme/report" is excluded here — at the LOADER the root-slash form is legal
+        // by design (parseKey strips exactly one leading slash, §4.4), so its old null was a
+        // registry miss, not a grammar refusal; the closure gate now governs its behavior and
+        // it is asserted explicitly below and in RegistryTemplateLoaderTest.
+        ILLEGAL
+            .filterNot { it == "/acme/report" }
+            .forEach { name ->
+                withClue("loader must not resolve: '$name@1'") { loader.findTemplateSource("$name@1").shouldBeNull() }
+            }
         // Exactly one leading slash is stripped; a doubled one is NOT peeled into legality.
         loader.findTemplateSource("//acme/finance/report@1").shouldBeNull()
+        // The root-slash form of a key the closure never declared refuses unscooped (#787),
+        // and a well-formed but UNREGISTERED key still resolves to null inside a scope that
+        // declares it — the registry miss must stay a null, never a refusal.
+        shouldThrow<IOException> { loader.findTemplateSource("/acme/report@1") }
+        loader.withDeclaredClosure("/acme/report@1") {
+            loader.findTemplateSource("/acme/report@1").shouldBeNull()
+        }
     }
 
     // ---- Call site 3: TemplateImport.isSafeToSynthesize (prologue synthesis) ----
@@ -137,7 +153,10 @@ class TemplateNameGrammarTest {
         val lib = TemplateFixtures.version("lib/dates", isLibrary = true, body = "<#macro m>ok</#macro>")
         val loader = RegistryTemplateLoader(InMemoryTemplateRegistry(listOf(main, lib)))
 
-        val text = loader.getReader(loader.findTemplateSource("acme/finance/report@1"), "UTF-8").readText()
+        val text =
+            loader.withDeclaredClosure("acme/finance/report@1") {
+                loader.getReader(loader.findTemplateSource("acme/finance/report@1"), "UTF-8").readText()
+            }
         text shouldContain "<#import \"/lib/dates@1\" as d>"
     }
 
@@ -152,7 +171,11 @@ class TemplateNameGrammarTest {
                 )
             val loader = RegistryTemplateLoader(InMemoryTemplateRegistry(listOf(main)))
             withClue("prologue must refuse import id: '$name'") {
-                shouldThrow<IOException> { loader.findTemplateSource("test/main.sql@1") }
+                // #787: seeded with the main key so the IOException is the PROLOGUE refusal
+                // (the intended subject), not the closure gate refusing the direct call.
+                loader.withDeclaredClosure("test/main.sql@1") {
+                    shouldThrow<IOException> { loader.findTemplateSource("test/main.sql@1") }
+                }
             }
         }
     }

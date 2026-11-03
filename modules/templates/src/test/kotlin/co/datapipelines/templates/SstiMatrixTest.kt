@@ -55,6 +55,11 @@ class SstiMatrixTest {
             .also { engines += it }
     }
 
+    /** An engine over an explicit version set — the render-arm cases that need more than one row. */
+    private fun engineForVersions(vararg versions: TemplateVersion): TemplateEngine =
+        TemplateEngine(InMemoryTemplateRegistry(versions.toList()), cacheSize = 10, renderTimeoutMs = 5_000, maxOutputChars = 1_000_000)
+            .also { engines += it }
+
     @Test
     fun `every advisory vector is rejected at save`() {
         SAVE_VECTORS.forEach { vector ->
@@ -217,9 +222,71 @@ class SstiMatrixTest {
             .sql shouldBe "SELECT '$payload'"
     }
 
+    @Test
+    fun `a library declared by nothing cannot be loaded through the get_optional_template special variable at render`() {
+        // #787. `.get_optional_template` / `.getOptionalTemplate` loads a template BY KEY at
+        // render time — outside the declared `imports` closure (§6.3). The library below is
+        // declared by NOTHING; the body imports it through the special variable in both
+        // spellings and calls its macro. Since #787 the render opens the declared closure
+        // (RegistryTemplateLoader), so the load refuses: the outcome is exactly the closure
+        // refusal (its fixed message quotes no author-controlled string), and the library's
+        // text never reaches the output.
+        listOf(".get_optional_template", ".getOptionalTemplate").forEach { spelling ->
+            val lib =
+                TemplateFixtures.version(
+                    "test/lib",
+                    isLibrary = true,
+                    body = "LIB-BODY-TEXT<#macro hello>HELLO-FROM-UNDECLARED-LIB</#macro>",
+                )
+            val main = TemplateFixtures.version("test/main.sql", body = specialVariableBody(spelling))
+            val outcome = engineForVersions(lib, main).execute(TemplateRef("test/main.sql", 1), emptyMap())
+
+            withClue("the undeclared library must not render ($spelling): $outcome") {
+                outcome shouldBe RenderOutcome.Failed(UndeclaredTemplateLoadException.MESSAGE)
+                outputOf(outcome) shouldNotContain "LIB-BODY-TEXT"
+                outputOf(outcome) shouldNotContain "HELLO-FROM-UNDECLARED-LIB"
+            }
+        }
+    }
+
+    @Test
+    fun `the get_optional_template special variable is refused at save`() {
+        // #787, save layer: the construct scan must flag the special variable in both spellings —
+        // the loader's declared-closure refusal (render layer) is the independent second one
+        // (§12.3: the two layers are tested independently, and this is the first).
+        listOf(".get_optional_template", ".getOptionalTemplate").forEach { spelling ->
+            withClue("save must reject the special-variable load: $spelling") {
+                validator
+                    .validate(TemplateFixtures.draft(body = specialVariableBody(spelling)), workspaceId)
+                    .codes shouldContain PipelineErrorCodes.Template.DANGEROUS_CONSTRUCT
+            }
+        }
+    }
+
     private companion object {
         /** The pinned artifact's own version — never a hardcoded constant that could drift from it. */
         fun pinnedVersion(): Version = Configuration.getVersion().let { Version(it.major, it.minor, it.micro) }
+
+        /**
+         * The #787 body: assign the special variable's result, then import the undeclared
+         * template and call its macro — the route that actually pulls the content into the
+         * SQL. (The `.include` route dies at its own call site for a pre-existing engine
+         * reason: the render post-processor inserts an interrupt check into every self-closing
+         * directive call, so body-refusing directives throw "supports no nested content" —
+         * observed in the base-reproduction probe; it is not the loading route.) Both spellings.
+         */
+        fun specialVariableBody(spelling: String): String =
+            "<#assign t = $spelling('/test/lib@1')>" +
+                "<#assign lib = t.import()><@lib.hello/>"
+
+        /** Whatever the render would have put into the SQL — output on success, detail otherwise. */
+        fun outputOf(outcome: RenderOutcome): String =
+            when (outcome) {
+                is RenderOutcome.Success -> outcome.sql
+                is RenderOutcome.Failed -> outcome.detail
+                is RenderOutcome.NotFound -> outcome.detail
+                is RenderOutcome.UndefinedVariable -> "${outcome.detail} ${outcome.variable ?: ""}"
+            }
 
         /**
          * The published `ObjectConstructor` gadget — the advisory vector itself, aimed at a harmless

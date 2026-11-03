@@ -197,6 +197,7 @@ Pinned via Gradle version catalog (see [Module Structure spec](module-structure.
 - `?new` — instantiates arbitrary Java classes. Hard-disabled by configuration (§4.3).
 - `Execute`, `ObjectConstructor`, `freemarker.template.utility.JythonRuntime` — the classic Freemarker SSTI vectors. Unreachable because class resolution is disabled entirely (§4.3).
 - `<#import>` and `<#include>` **inside a body**. Imports are declarative (`imports`, §6.3) and synthesized by the engine; a literal directive in a body would bypass alias/version/`is_library` validation, so it is rejected.
+- `.get_optional_template` and `.getOptionalTemplate` — FreeMarker's special variable that loads a template BY KEY at render time. The only loads a body may cause are the synthesized imports (§6.3); anything else is refused at save by the body scan, and the loader refuses any key outside the declared import closure (§4.3).
 - Any filesystem- or classpath-backed template loading (`freemarker.cache.FileTemplateLoader`, `ClassTemplateLoader`). Templates come only from the registry (§4.3).
 
 ### 4.3 Security configuration
@@ -414,7 +415,7 @@ The render engine:
 3. Resolves transitive imports the same way (a library's own `imports` array), building the full closure.
 4. Renders the main body against the pipeline's parameter map.
 
-Because the loader only ever resolves `"{id}@{version}"` keys against the registry, there is no template name a body could reference to escape the registry — which is why §4.2 forbids literal `<#import>`/`<#include>`.
+Because the loader only ever resolves `"{id}@{version}"` keys against the registry, there is no template name a body could reference to escape the registry — which is why §4.2 forbids literal `<#import>`/`<#include>`. And since #787 every render opens a **declared import closure** around the load and the process: the rendered key plus, transitively, the `imports` its row declares. The loader refuses any other load (including the §4.2 special variable's by-key load) with a fixed message that echoes no key.
 
 ### 6.4 Import resolution rules
 
@@ -451,7 +452,7 @@ All checks below run at template create/update time, before anything is written 
 | `template.render_not_applicable` | `templates_render` / `POST /api/v1/templates/render` on a script type — there is nothing to render; `details.use` points at `templates_evaluate` |
 | `template.validation.id_invalid` | `id` is a path of 2–10 segments, each `[a-z0-9][a-z0-9_.-]{0,63}`, ≤ 200 chars total — a folder is required ([Template Hierarchy §4.1](template-hierarchy-design.md)). `details.reason` is `folder_required` when a folder is the only thing missing, `grammar` otherwise |
 | `template.validation.syntax_error` | Freemarker parses the body without syntax errors — or, for a script type, the scripting engine parses it (with the engine's line/column) |
-| `template.validation.dangerous_construct` | Body uses a forbidden Freemarker construct — including a literal `<#import>`/`<#include>` (see §4.2) |
+| `template.validation.dangerous_construct` | Body uses a forbidden Freemarker construct — including a literal `<#import>`/`<#include>` and the `.get_optional_template` / `.getOptionalTemplate` special variable (see §4.2) |
 | `template.validation.duplicate_alias` | No two `imports` entries share an `alias` |
 | `template.validation.import_not_found` | Every `imports` entry resolves to an existing template at that exact version |
 | `template.validation.import_not_library` | Every imported template has `is_library: true` |
@@ -787,6 +788,7 @@ ORDER BY r.total DESC
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-02 | v1.24 | #787 | `.get_optional_template` / `.getOptionalTemplate` joins the §4.2 forbidden list (a by-key render-time load; only the synthesized imports may load) — refused at save (§7 `dangerous_construct`), and the loader now enforces the §6.3 declared import closure: a render resolves its own key and the `imports` it declares, nothing else. |
 | 2026-10-22 | v1.23 | 8b (#8) | The JavaScript statements body, immutable frame, isolate availability and pooled save verdict ship. |
 | 2026-10-21 | v1.22 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The script template types**: "script types", §"Script templates", the CHECK `chk_script_blocks`, the script face and its editor, the `script.*` codes. A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-16 | v1.21 | 533 (#533) the sidebar tree's mark | §3.4 (additive clause): the sidebar's REST tree is a read path of `needs_review` — its template leaves take the mark from the same retired-citation expression, in ONE citation read per page keyed by name and listed version (the port the pipeline release's warning uses), not from the template projection; [REST §24](rest-api.md) v2.96 carries it as the node's `needs_review`. No rule, code or status changed. |
