@@ -1,7 +1,8 @@
 // module-structure.md §5.21 — the managed lake (dp-lake design record §3a, call 12). Allowed internal
 // deps (root build.gradle.kts): typesystem, persistence, datasources, staging, pipeline-contract,
-// scheduler, auth. P2 (#785) compiles against typesystem, persistence and pipeline-contract; the rest
-// are allowed ahead for P1/P3–P7 and stay undeclared until something compiles against them (§4.2's rule).
+// scheduler, auth. P2 (#785) compiles against typesystem, persistence and pipeline-contract; P3 (#798) adds
+// auth for AuditEventSink. The rest are allowed ahead for P1/P4–P7 and stay undeclared until something
+// compiles against them (§4.2's rule).
 plugins { id("datapipelines.common-conventions") }
 
 dependencies {
@@ -10,8 +11,11 @@ dependencies {
     // FailureShape: the SQLState walk that classifies a catalog failure (design record §8b — by the
     // SQLSTATE of the cause chain, never by text) and names a store failure in a log line.
     implementation(project(":modules:persistence"))
-    // PipelineErrorCodes.Lake: the two catalogued fence codes (pipeline-contract §13.25).
+    // PipelineErrorCodes.Lake: the catalogued fence and definition codes (pipeline-contract §13.25); AuthoringGuard,
+    // WriteSurface and PipelineVersionStatus for the definition lifecycle (P3, #798).
     implementation(project(":modules:pipeline-contract"))
+    // AuditEventSink: the definitions' lake.definition.* audit events, strict inside the applied transaction (P3, #798).
+    implementation(project(":modules:auth"))
 
     // Jackson stays at the product's pin: Iceberg 1.12.0's POMs import jackson-bom 2.22.2, which wins
     // over the conventions' platform(jackson-bom 2.21.7) under default resolution (E1 #774 / E2).
