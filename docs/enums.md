@@ -1159,8 +1159,8 @@ Stored in `lake_tables_managed.status` and, without `purged`, `lake_namespaces.s
 | Enum | Wire value | Meaning |
 |---|---|---|
 | `ACTIVE` | `active` | In use: readable, open to ingestion appends, and its definition can change |
-| `DEPRECATED` | `deprecated` | Still readable; ingestion appends are refused (`lake.table.deprecated`) and maintenance continues (dp-lake record D5) |
-| `ARCHIVED` | `archived` | Off the read surface (a query naming it fails `lake.table.unavailable`); can be restored, or purged after its cooling-off window |
+| `DEPRECATED` | `deprecated` | Still readable; ingestion appends are refused and maintenance continues (dp-lake record D5; the refusal code lands with the phase that builds the refusal) |
+| `ARCHIVED` | `archived` | Off the read surface (a query naming it fails; the code lands with that phase); can be restored, or purged after its cooling-off window |
 | `PURGED` | `purged` | The Iceberg pointer was dropped; the row stays so its name and history can be explained. Tables only |
 
 ---

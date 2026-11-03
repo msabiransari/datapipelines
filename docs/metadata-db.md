@@ -1899,7 +1899,7 @@ CREATE UNIQUE INDEX uq_lake_table_definition_versions_one_draft
 ```
 
 **Notes:**
-- **The body is validated before it is stored** (`LakeDefinitionBodies.parse`, [lake.md §1](lake.md#1-the-definition-body)); an invalid body never reaches `body_hash`. `body_hash` is the house hash, computed in the same statement as the write: `encode(sha256(convert_to(CAST(:body AS jsonb)::text, 'UTF8')), 'hex')`. A draft write is conditional on the caller's hash (`lake.definition.version.conflict` otherwise).
+- **The body is validated before it is stored** (`LakeDefinitionBodies.parse`, [lake.md §1](lake.md#1-the-definition-body)); an invalid body never reaches `body_hash`. `body_hash` is the house hash, computed in the same statement as the write: `encode(sha256(convert_to(CAST(:body AS jsonb)::text, 'UTF8')), 'hex')`. A draft write is conditional on the caller's hash (`lake.definition.version_conflict` otherwise).
 - **One DRAFT per table** is the partial unique index, the `uq_pipeline_versions_one_draft` pattern ([§4.5](#45-pipeline_versions)): the physical guard behind copy-on-write.
 - The FK has no cascade: a table row is deleted only by `purgeDraft` of a never-released table, which deletes its one version first.
 - `created_via` / `updated_via` are `WriteSurface` values ([versioning §3.7](versioning.md#37-what-rides-the-draft-vs-the-release)), passed in by the caller (P8's surfaces).
