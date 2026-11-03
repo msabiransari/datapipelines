@@ -703,7 +703,7 @@ class AuthHttpBoundaryTest {
             call(HttpMethod.POST, "/workspace/switch", browserHeaders(cookies = listOf("dp_session=$session")))
 
         response.statusCode.value() shouldBe 403
-        response.headers.contentType.toString().contains("text/html") shouldBe true
+        response.headers.contentType.toString() shouldContain "text/html"
         response.body.shouldNotBeNull().shouldNotContain("auth.csrf.invalid")
         clearsSession(response) shouldBe false
     }
@@ -714,7 +714,7 @@ class AuthHttpBoundaryTest {
         val response = call(HttpMethod.POST, "/logout", browserHeaders(cookies = listOf("dp_session=$session")))
 
         response.statusCode.value() shouldBe 403
-        response.headers.contentType.toString().contains("text/html") shouldBe true
+        response.headers.contentType.toString() shouldContain "text/html"
         response.headers.location.shouldBeNull()
         clearsSession(response) shouldBe false
         response.body.shouldNotBeNull().shouldNotContain("auth.csrf.invalid")
