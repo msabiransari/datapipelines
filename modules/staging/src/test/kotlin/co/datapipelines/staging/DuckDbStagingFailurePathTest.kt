@@ -145,6 +145,17 @@ class DuckDbStagingFailurePathTest {
     }
 
     @Test
+    fun `a row whose arity differs from the columns fails the stage and rolls its partial table back`() {
+        val columns = listOf(ColumnSchema("a", LogicalType.INTEGER), ColumnSchema("b", LogicalType.INTEGER))
+        val thrown =
+            shouldThrow<IllegalArgumentException> {
+                runBlocking { staging.stageRows("stg_arity", columns, sequenceOf(listOf(1, 2), listOf(3))) }
+            }
+        thrown.message.orEmpty() shouldContain "1 values for 2 columns"
+        tableCount() shouldBe 0
+    }
+
+    @Test
     fun `stats reports tables created outside stage`() {
         runBlocking { staging.execute("CREATE TABLE \"stg_by_sql\" (\"id\" INTEGER)") }
         tableCount() shouldBe 1

@@ -79,10 +79,6 @@ class ScratchReservation internal constructor(
 ) : AutoCloseable {
     private val released = AtomicBoolean(false)
 
-    /** Whether [release] has run. */
-    val isReleased: Boolean
-        get() = released.get()
-
     /** Returns the bytes to the aggregate; idempotent. */
     fun release() {
         if (released.compareAndSet(false, true)) onRelease(bytes)

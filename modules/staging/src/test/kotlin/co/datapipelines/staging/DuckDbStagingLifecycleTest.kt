@@ -5,6 +5,7 @@ import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.typesystem.StagingEngine
+import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContain
@@ -19,11 +20,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import org.junit.jupiter.api.Assumptions.assumeFalse
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.math.BigDecimal
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.attribute.PosixFilePermissions
 import java.util.UUID
 
 /**
@@ -160,6 +163,30 @@ class DuckDbStagingLifecycleTest {
         factory.budget.reservedBytes shouldBe second.reservationBytes
         second.close()
         factory.budget.reservedBytes shouldBe 0L
+    }
+
+    @Test
+    fun `a path close cannot delete is left for the operator, close never throws, and the reservation is released`() {
+        val factory = duckFactory(scratch)
+        val staging = factory.open()
+        staging.authorExec("CREATE TABLE \"stg_k\" AS SELECT 1 AS id")
+        // An entry in the spill directory this process may not delete (an operator's chmod, a foreign
+        // file). Nothing spilled, so the engine never touches the directory; only close()'s delete does.
+        val spill = scratch.resolve("exec_${staging.executionId}.tmp")
+        val pinnedDir = Files.createDirectories(spill.resolve("pinned"))
+        Files.writeString(pinnedDir.resolve("file"), "x")
+        Files.setPosixFilePermissions(pinnedDir, PosixFilePermissions.fromString("r-x------"))
+        try {
+            assumeFalse(Files.isWritable(pinnedDir), "the process can write a r-x directory (root?): the failure cannot be constructed")
+
+            shouldNotThrowAny { staging.close() }
+
+            factory.budget.reservedBytes shouldBe 0L
+            // The file and WAL went; only the undeletable tree is left, so the failure path really ran.
+            pathsOf(scratch, staging.executionId) shouldBe listOf(spill.fileName.toString())
+        } finally {
+            Files.setPosixFilePermissions(pinnedDir, PosixFilePermissions.fromString("rwx------"))
+        }
     }
 
     @Test
