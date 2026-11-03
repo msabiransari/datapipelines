@@ -939,8 +939,10 @@ button.app-busy::after {
   /* The menu's width right now: compact under `rail-collapsed` (below) and by default
      from 761 to 1100px (the 110 table at the foot of this file). */
   --app-menu-width: var(--app-menu-expanded);
-  /* The browser's band default (320 here — #784, up from 300; 340 from 1600; 270 from
-     761 to 1100), the user's range, and the at-most-360 phone drawer. */
+  /* The browser's band default (re-declared by the width bands below; the table at the
+      foot of this file is the spec), the user's `--app-browser-min`–`--app-browser-max`
+      range, and the at-most-360 phone drawer. #788: this sheet is the range's ONE source
+      — rail.js and browser-resize.mjs read the bounds from here, never from a literal. */
   --app-browser-default: 320px;
   /* <main>'s padding on all four sides, by the record §4 table's bands: 40 from 1600,
      32 from 1101 to 1599 (here), 24 from 761 to 1100, 20 at 760 and below. Every
@@ -956,10 +958,11 @@ button.app-busy::after {
   --app-browser-max: 480px;
   --app-drawer-max: 360px;
   /* Record §4: the PREFERRED width (`--app-browser-preferred`, stamped by rail.js and
-     written by browser-resize.mjs) clamped to the range and to what leaves <main> its
-     320px. clamp() lets the minimum win, so a viewport too narrow for both still gets a
-     280px browser rather than a negative one. The preference itself is never rewritten
-     by the clamp: a narrow window does not overwrite a wide screen's choice. */
+      written by browser-resize.mjs) clamped to the `--app-browser-min`–
+      `--app-browser-max` range and to what leaves <main> its 320px. clamp() lets the
+      minimum win, so a viewport too narrow for both still gets a browser at
+      `--app-browser-min` rather than a negative one. The preference itself is never
+      rewritten by the clamp: a narrow window does not overwrite a wide screen's choice. */
   --app-browser-width: clamp(
     var(--app-browser-min),
     var(--app-browser-preferred, var(--app-browser-default)),
@@ -3438,10 +3441,11 @@ button.app-busy::after {
 
    | Width        | Menu                               | Resource browser                    | Topbar                                  | Main gutter |
    |--------------|------------------------------------|-------------------------------------|-----------------------------------------|-------------|
-   | ≥ 1600 px    | 202 expanded / 64 compact (the     | 340 default; the user's 280–480,    | as today                                | --gap-lg    |
-   |              | user's `dp-rail`, remembered)      | clamped to leave main 320           |                                         |             |
-   | 1101–1599    | 202 / 64, as above                 | 320 default, same range             | as today                                | --gap-lg    |
-   | 761–1100     | starts compact (64) unless the     | 270 default, same range             | search hidden; crumbs truncate to the   | --gap-lg    |
+   | ≥ 1600 px    | 202 expanded / 64 compact (the     | the band default; the user's        | as today                                | --gap-lg    |
+   |              | user's `dp-rail`, remembered)      | `--app-browser-min`–`--app-browser- |                                         |             |
+   |              |                                    | max`, clamped to leave main 320     |                                         |             |
+   | 1101–1599    | 202 / 64, as above                 | the band default, same range        | as today                                | --gap-lg    |
+   | 761–1100     | starts compact (64) unless the     | the band default, same range        | search hidden; crumbs truncate to the   | --gap-lg    |
    |              | user expanded it — same class,     |                                     | LEAF with the full path in title        |             |
    |              | same key; the DEFAULT flips here   |                                     |                                         |             |
    | ≤ 760 px     | the Navigation drawer: not in the  | the Browse resources drawer: not in | hamburger + folder, crumbs (leaf only), | --gap-md    |

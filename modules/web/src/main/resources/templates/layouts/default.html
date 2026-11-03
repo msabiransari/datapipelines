@@ -143,8 +143,10 @@
        760px and below neither class matters: the menu is an off-canvas drawer.
 
        #554 — the resource browser's two presentation choices, stamped here for the same
-       no-flash reason: its preferred width (`dp-browser-width:<workspace>`, 240–480 only)
-       as `--app-browser-preferred` on <html>, and the user's Hide (`dp-browser-hidden:
+       no-flash reason: its preferred width (`dp-browser-width:<workspace>`, a value within
+       `--app-browser-min`–`--app-browser-max`, which this script reads off the applied
+       app.css — #788 keeps the sheet as the range's one source) as
+       `--app-browser-preferred` on <html>, and the user's Hide (`dp-browser-hidden:
        <workspace>` = "1") as `browser-hidden`. The retired rail width key
        (`dp-rail-width:<workspace>`) is removed on sight, never reinterpreted: it measured a
        different composition (record §4).
@@ -492,9 +494,11 @@
         </button>
       </div>
       <!-- Record §4 "Browser resizing": the browser/content boundary. Pointer drag, arrows (±16px),
-           Home (240) and End (the most the viewport leaves while main keeps 320px); the reset
-           above returns to the band default. js/browser-resize.mjs keeps the preference apart
-           from the clamped width, so a narrow window never overwrites a wide screen's choice. -->
+           Home (`--app-browser-min`, the range's floor) and End (the most the viewport leaves while
+           main keeps 320px); the reset above returns to the band default. The range itself is
+           app.css's `--app-browser-min`–`--app-browser-max`; js/browser-resize.mjs keeps the
+           preference apart from the clamped width, so a narrow window never overwrites a wide
+           screen's choice. -->
       <div id="browser-boundary" class="app-browser-boundary" role="separator" tabindex="0"
            aria-orientation="vertical" aria-label="Resource browser width" aria-controls="app-browser"
            aria-valuemin="280" aria-valuemax="480" aria-valuenow="320"></div>
