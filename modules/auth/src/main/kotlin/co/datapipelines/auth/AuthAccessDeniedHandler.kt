@@ -29,24 +29,14 @@ import org.springframework.security.web.csrf.MissingCsrfTokenException
  * partial swap, not a machine surface) forwards to Boot's error rendering with the
  * refusal stashed in [AuthAttributes.CSRF_REFUSAL], so the person sees the error/403
  * page — the fixed user message, a Reload action, the correlation id — instead of raw
- * JSON. The forward is deliberate over `sendError`: the stash is REQUEST data and only
- * a FORWARD carries request attributes to the error render — under `sendError` the
- * resolver has nothing to claim and the person would get the generic
- * permission-refusal page, the wrong message for an out-of-date tab. The MDC
- * correlation id is likewise still intact mid-chain, so the page quotes the same id
- * the log line carries. The container's error status attribute is set by hand before
- * the forward.
+ * JSON. The synchronous forward renders while the correlation filter's MDC is still
+ * active, so the page quotes the same id the log line carries. The refusal and the
+ * error status are request attributes; the page uses only the fixed user message.
  *
- * Dispatch note (verified from Boot 3.5.16 bytecode, lane 782): the security chain is
- * registered for REQUEST dispatch only — `AbstractFilterRegistrationBean` grants a
- * non-[OncePerRequestFilter] (the chain's DelegatingFilterProxy) REQUEST alone, unless
- * `spring.security.filter.dispatcher-types` says otherwise. No security filter —
- * including LogoutFilter — re-runs on the ERROR or the FORWARD render, so the refusal
- * cannot be "performed" again while the error page is being answered. Falsified
- * in-lane: planting `sendError` where the forward sits left every "clears nothing"
- * boundary guard green, which is what refuted the earlier ERROR-dispatch hazard
- * claim. The page carries the refusal's FIXED user message only —
- * never request data (observability redaction rule).
+ * Boot explicitly configures the security filter's dispatcher types, including ERROR
+ * and FORWARD by default. Each filter also has its own dispatch rules. The error
+ * render targets the fixed `/error` path; the HTTP boundary and integration guards
+ * independently assert that a refused logout clears no session and sends no redirect.
  *
  * Anything else is [AccessDeniedUndeclaredException] — `auth.permission.undeclared` with honest,
  * empty details. Refusals that DO know their requirement come from [ScopeInterceptor] through

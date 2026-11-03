@@ -186,10 +186,9 @@ class LocalLoginE2eTest {
 
     /**
      * A logout whose attestation says the page was NOT the app's own (same-site subdomain,
-     * cross-site) keeps the refusal — and the refusal must clear NOTHING. The forward-based
-     * error render carries no security filter (the chain is registered for REQUEST dispatch
-     * only, lane 782 dispatch note), and this guard pins that outcome whatever the wiring
-     * becomes: a refusal of a logout must never expire dp_session.
+     * cross-site) keeps the refusal — and the refusal must clear NOTHING. This guard pins
+     * the HTTP outcome independently of filter dispatch registration: a refusal of a logout
+     * must never expire dp_session.
      */
     @Test
     fun `a logout that is not from the app's own page is refused and clears nothing`() {
@@ -226,7 +225,33 @@ class LocalLoginE2eTest {
                 .`when`()
                 .get("/logout")
 
-        // /logout has no GET handler: the answer is the 404 page — and no cookie op at all.
+        // GET is navigation only; it must not expire the session cookie.
+        clearsSession(response) shouldBe false
+    }
+
+    @Test
+    fun `a stale workspace switch renders the refusal with the response correlation id`() {
+        seedLocalUsers()
+        val dashboard = renderDashboard(postLogin(LOCAL_EMAIL, LOCAL_PASSWORD).sessionCookie())
+        val response =
+            given()
+                .port(port)
+                .cookies(dashboard.cookies + ("dp_csrf" to "stale-${java.util.UUID.randomUUID()}"))
+                .contentType(ContentType.URLENC)
+                .formParam("_csrf", dashboard.csrf)
+                .header("Accept", "text/html")
+                .redirects()
+                .follow(false)
+                .`when`()
+                .post("/workspace/switch")
+
+        response.statusCode shouldBe 403
+        response.contentType() shouldContain "text/html"
+        response.asString() shouldContain "Your page is out of date. Reload it and try again."
+        val correlation = checkNotNull(response.getHeader("DP-Correlation-Id"))
+        java.util.UUID.fromString(correlation)
+        response.asString() shouldContain correlation
+        response.getHeader("Location") shouldBe null
         clearsSession(response) shouldBe false
     }
 
