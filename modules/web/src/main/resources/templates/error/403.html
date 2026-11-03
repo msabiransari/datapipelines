@@ -1,15 +1,34 @@
 <!DOCTYPE html>
+<!-- The 403 page in two shapes. Without `detail` it is the permission refusal the UI advice
+     renders for an authorized person hitting a surface their role lacks (UiExceptionHandler).
+     WITH `detail` it is the #782 CSRF refusal of a plain browser form navigation: the auth
+     module's access-denied handler forwards here with the refusal's FIXED user message (the
+     exception's user_message, th:text-rendered — never request data) and the request's
+     correlation id. The actions carry hx-boost="false" like every other route outside the
+     shell (layouts/default §B): the persistent-navigation guard blocks a boosted navigation
+     whose destination has no #app-main (/login, or the empty self-reload) with a
+     "Session or workspace changed" notice, so these must be REAL page loads. This comment
+     ships to the browser and says nothing it would be wrong to serve. -->
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
   <div class="app-center u-modal-tall">
     <div class="ds-card app-card-auth u-center">
       <h2 class="ds-headline u-mb-sm">403</h2>
-      <h3 class="u-text-lg u-mb-md">Access Denied</h3>
-      <p class="u-secondary u-text-sm u-mb-lg">
+      <h3 class="u-text-lg u-mb-md" th:unless="${detail}">Access Denied</h3>
+      <h3 class="u-text-lg u-mb-md" th:if="${detail}">That action could not be taken</h3>
+      <p class="u-secondary u-text-sm u-mb-md" th:if="${detail}" th:text="${detail}"></p>
+      <p class="u-secondary u-text-sm u-mb-md" th:unless="${detail}">
         You do not have permission to access this page.
       </p>
-      <a th:href="@{/dashboard}" class="ds-button ds-button-secondary">Go to Dashboard</a>
+      <p th:if="${correlationId}" class="u-mono u-text-sm u-muted u-mb-md">
+        Correlation ID: <th:block th:text="${correlationId}"/>
+      </p>
+      <div class="u-flex u-gap-sm u-center-x u-mb-lg">
+        <a href="" hx-boost="false" class="ds-button ds-button-secondary">Reload</a>
+        <a th:href="@{/login}" hx-boost="false" class="ds-button ds-button-secondary">Log in</a>
+        <a th:href="@{/dashboard}" hx-boost="false" class="ds-button ds-button-secondary">Go to Dashboard</a>
+      </div>
     </div>
   </div>
 </th:block>

@@ -6,6 +6,8 @@ import co.datapipelines.web.ui.site.SiteDemoData
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.core.Ordered
+import org.springframework.core.annotation.Order
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository
 
 /**
@@ -25,6 +27,15 @@ import org.springframework.security.oauth2.client.registration.ClientRegistratio
 class UiConfig {
     @Bean
     fun oidcRegistrations(repository: ClientRegistrationRepository): OidcRegistrations = OidcRegistrations(repository)
+
+    /**
+     * #782: the browser-shaped CSRF refusal's resolver — first claimant of error renderings
+     * carrying the stash (see [CsrfErrorPageResolver]); method-level `@Order` is what Boot's
+     * `errorViewResolvers.orderedStream()` sorts on.
+     */
+    @Bean
+    @Order(Ordered.HIGHEST_PRECEDENCE)
+    fun csrfErrorPageResolver(): CsrfErrorPageResolver = CsrfErrorPageResolver()
 
     /** Bean name pinned: it is the name the scanned stereotype carried (see [ThemeResolver]). */
     @Bean(name = ["uiThemeResolver"])

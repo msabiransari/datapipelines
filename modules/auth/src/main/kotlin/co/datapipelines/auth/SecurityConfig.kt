@@ -44,6 +44,9 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
  *   [PromotionServerKeyFilter] refuses without a valid server key.
  * - [UploadCapabilityRouteMatcher] (#353): the screenshot upload's single-use `DP-Upload-Token`
  *   is its one credential; no cookie authenticates there.
+ * - [LogoutSameOriginMatcher] (#782): the logout posted from the app's own page — the browser's
+ *   own `Sec-Fetch-Site: same-origin` attestation is that request's control, so a stale token
+ *   there still clears the session and lands on /login (a refusal must not strand the person).
  * Cookie-authenticated state-changing requests need the `dp_csrf` double-submit token
  * **everywhere**, the `/api/v1` prefix included — `SameSite=Lax` (§5.5: Strict breaks the
  * cross-site login redirect) is defence-in-depth, not the control, because it stops neither a
@@ -92,7 +95,15 @@ class SecurityConfig(
                 // 353: the visualization test screenshot upload joins on the same grounds — its one
                 // credential is the `DP-Upload-Token` header and no cookie authenticates there
                 // (UploadCapabilityRouteMatcher's KDoc; the route's PublicPaths entry).
-                csrf.ignoringRequestMatchers(ApiKeyCredentialMatcher(), PromotionRouteMatcher(), UploadCapabilityRouteMatcher())
+                csrf.ignoringRequestMatchers(
+                    ApiKeyCredentialMatcher(),
+                    PromotionRouteMatcher(),
+                    UploadCapabilityRouteMatcher(),
+                    // 782: a logout posted from the app's own page (the browser's Sec-Fetch-Site:
+                    // same-origin) logs out on any token state — a stale tab's Log out must clear
+                    // the session, not answer the raw JSON 403 (LogoutSameOriginMatcher's KDoc).
+                    LogoutSameOriginMatcher(),
+                )
                 // 027 (024 T41's browser family): Spring's default composite includes
                 // CsrfAuthenticationStrategy, written for server-side session
                 // repositories — it ROTATES the token, and DELETES the cookie when
