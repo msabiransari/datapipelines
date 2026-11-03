@@ -1,7 +1,7 @@
 package co.datapipelines.web.health
 
-import co.datapipelines.staging.StagingEngine
 import co.datapipelines.staging.StagingFactory
+import co.datapipelines.typesystem.StagingEngine
 import kotlinx.coroutines.runBlocking
 import org.springframework.boot.actuate.health.Health
 import org.springframework.boot.actuate.health.HealthIndicator

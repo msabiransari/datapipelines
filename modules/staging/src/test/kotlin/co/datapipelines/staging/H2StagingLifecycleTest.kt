@@ -2,6 +2,7 @@ package co.datapipelines.staging
 
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
+import co.datapipelines.typesystem.StagingEngine
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -219,5 +220,18 @@ class H2StagingLifecycleTest {
         val staging = H2StagingFactory(props).create(UUID.randomUUID())
         staging.close()
         staging.close()
+    }
+
+    @Test
+    fun `the H2 factory refuses a DUCKDB request as engine_unavailable instead of staging on H2`() {
+        // #795: DUCKDB is a StagingEngine value now. Dispatch is the wiring's job; an H2-only
+        // factory that silently built an H2 database for it would run DuckDB-dialect SQL on H2.
+        val executionId = UUID.randomUUID()
+
+        val refused = shouldThrow<DatapipelinesException> { H2StagingFactory(props).create(executionId, StagingEngine.DUCKDB) }
+
+        refused.code shouldBe StagingErrorCodes.ENGINE_UNAVAILABLE
+        refused.details["engine"] shouldBe "DUCKDB"
+        refused.details["execution_id"] shouldBe executionId.toString()
     }
 }

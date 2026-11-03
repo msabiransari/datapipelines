@@ -4,8 +4,8 @@ import co.datapipelines.datasources.Datasource
 import co.datapipelines.staging.H2StagingFactory
 import co.datapipelines.staging.H2StagingProperties
 import co.datapipelines.staging.StageObserver
-import co.datapipelines.staging.StagingEngine
 import co.datapipelines.typesystem.Dialect
+import co.datapipelines.typesystem.StagingEngine
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.runBlocking

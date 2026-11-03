@@ -6,11 +6,8 @@ import co.datapipelines.pipeline.PipelineErrorCodes.Validation
  * pipeline-contract §12.8 — `settings.tempdb` validation.
  *
  * `tempdb_engine_unsupported` is raised by [PipelineDeserializer]'s pre-scan, for the same
- * reason as the other wire-value codes: [StagingEngine] has exactly one constant in v1, so a
- * payload declaring `DUCKDB` cannot be bound at all and the verdict has to be reached on the
- * JSON tree. enums.md is explicit that reserved values "MUST NOT appear in generated code or
- * be accepted by validators in v1" — hence one constant, not a rejected-at-validation second
- * one.
+ * reason as the other wire-value codes: an engine value outside `StagingEngine` (enums.md §7)
+ * cannot be bound at all, so the verdict has to be reached on the JSON tree.
  *
  * What remains for the typed model is the engine-specific `config` map — and, since 108, each
  * node's own `settings.timeout_seconds` (§6.4), whose ceiling is an operator setting the caller

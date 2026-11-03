@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.43 (living document — updated as enums evolve)
+**Status:** v1.44 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -177,15 +177,15 @@ Fixed at template **create** and identical on every version of a template (`temp
 ## 7. `StagingEngine` — tempdb engine
 
 **Source:** [Pipeline Contract §5](pipeline-contract.md#5-settings)
+**Declared in:** `typesystem` (`co.datapipelines.typesystem.StagingEngine`) — the one declaration all three users import.
 **Used by:** pipeline-contract (`settings.tempdb.engine`), staging (factory dispatch), dag-executor (instantiation).
 
 | Value | Description |
 |---|---|
-| `H2` | In-memory H2 database. Default. Only supported engine in v1. |
+| `H2` | In-memory H2 database. Default when `settings.tempdb` is omitted ([Staging §3](staging.md#3-lifecycle)). |
+| `DUCKDB` | A file-backed DuckDB database per execution — bounded by DuckDB's `memory_limit`, its spill bounded by a scratch reservation, its configuration locked before author SQL runs ([Staging §8.5](staging.md#85-the-duckdb-engine); dp-lake P1, #795). Templates on `source: tempdb` are then written in the `DUCKDB` dialect. |
 
-**Reserved for future:** `DUCKDB` (in-memory DuckDB — better for analytical workloads; see [ROADMAP](ROADMAP.md)).
-
-> **Declaration reality (2026-08-08).** The frozen module dependency graph ([module-structure §4.2](module-structure.md#42-the-dependency-rule-machine-checkable)) makes the "pipeline-contract authors, staging consumes" line above impossible: `staging` depends only on `typesystem`, so it cannot see a type declared in `pipeline-contract`. In v1 the enum has a single value (`H2`), so `pipeline-contract` declares it (for the `settings.tempdb.engine` wire value, with `@JsonValue`) and `staging` declares an identical local `enum class StagingEngine { H2 }` for `StagingFactory` dispatch; `dag` (which depends on both) maps between them — trivial while there is one value. **Consolidation is a P4/dag decision:** when a second engine (`DUCKDB`) lands, move `StagingEngine` into `typesystem` (the shared lower layer, exactly as `Dialect` resolved the same class of problem) so there is one authority. Until then the duplication is bounded to a single constant and dag owns the mapping.
+> **Declaration (2026-11-03, #795).** Until the second engine, `pipeline-contract` declared this enum for the wire value and `staging` declared an identical local copy, because the frozen dependency graph ([module-structure §4.2](module-structure.md#42-the-dependency-rule-machine-checkable)) forbids `staging` from depending on `pipeline-contract`; `dag` mapped between the two. This section's earlier rule — when `DUCKDB` lands, move the enum into `typesystem`, the shared lower layer, exactly as `Dialect` resolved the same problem — is now done: one declaration in `typesystem`, no mapping. `StagingEngine.dialect` derives the tempdb dialect (`H2 → H2`, `DUCKDB → DUCKDB`); `StagingEngineSpecDriftTest` (typesystem) holds this table and the enum together.
 
 ---
 
@@ -1148,6 +1148,7 @@ Stored in `lake_reference_scans.status` ([Metadata DB §4.41](metadata-db.md#441
 |---|---|---|---|
 | 2026-11-02 | v1.42 | 778 (#778) | New **§45 `LakeScanStatus`** (`exact` / `partial` / `unscannable`, `lake_reference_scans.status`, V52) with the `reasons_json` kind words. |
 | 2026-11-02 | v1.43 | 785 (#785) | **§16** (row renumbered at merge after #778's v1.42): registers the `lake.catalog.*` domain (pipeline-contract §13.25), the managed lake's three catalog refusals. |
+| 2026-11-03 | v1.44 | 795 (#795) | **§7 `StagingEngine`** gains `DUCKDB` (dp-lake P1: a file-backed, memory-bounded, scratch-reserved, configuration-locked DuckDB staging database per execution) and is consolidated into `typesystem` per this section's own rule for the second engine — `staging`'s local copy and `dag`'s mapping are gone; new `StagingEngineSpecDriftTest`. |
 | 2026-11-01 | v1.41 | 759 (#759) | **§16:** the `request.*` domain names both the 413 body-cap refusal and the 400 search-term length refusal. |
 | 2026-10-27 | v1.40 | 464 (#464) | **§16:** registers the `navigation.*` domain (pipeline-contract §13.24): the three refusals of the session-only navigation trees. |
 | 2026-10-24 | v1.39 | #517 release dependencies, core (S1) | **§15:** `pipeline.version.released` and its twins: one row per actual flip, dependencies first, root last; the detail keys `scope`, `release_id`, `cascade_root` and the root's `dependencies_released`. No new event name. |

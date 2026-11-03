@@ -3,6 +3,7 @@ package co.datapipelines.pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes.Validation
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.LogicalType
+import co.datapipelines.typesystem.StagingEngine
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldContainExactly
@@ -114,6 +115,23 @@ class ReferenceRulesTest {
 
         validate(pipeline, templates = h2Templates()).codes shouldNotContain Validation.TEMPLATE_DIALECT_MISMATCH
         validate(pipeline).codes shouldContain Validation.TEMPLATE_DIALECT_MISMATCH
+    }
+
+    @Test
+    fun `under a DUCKDB staging engine a tempdb node's template must be written in DuckDB`() {
+        // dp-lake P1: the twin of the H2 case above — the derivation, not a second hard-code, is
+        // what makes a DuckDB tempdb template valid and an H2 one a mismatch.
+        val pipeline =
+            Fixtures.pipeline(
+                nodes = listOf(Fixtures.node(source = "tempdb")),
+                settings = PipelineSettings(TempdbSettings(engine = StagingEngine.DUCKDB)),
+            )
+        val duckDbTemplates = StubTemplates(defaultLookup = TemplateLookup.Found(Dialect.DUCKDB))
+
+        validate(pipeline, templates = duckDbTemplates).codes shouldNotContain Validation.TEMPLATE_DIALECT_MISMATCH
+        val mismatch = validate(pipeline, templates = h2Templates()).withCode(Validation.TEMPLATE_DIALECT_MISMATCH).single()
+        mismatch.details["template_dialect"] shouldBe "H2"
+        mismatch.details["source_dialect"] shouldBe "DUCKDB"
     }
 
     @Test

@@ -538,7 +538,7 @@ jsonb in the execution's Context snapshot.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `engine` | string | optional (default `"H2"`) | Staging engine. v1 supports only `"H2"`. Future: `"DUCKDB"`, etc. |
+| `engine` | string | optional (default `"H2"`) | Staging engine ([Enums §7](enums.md#7-stagingengine--tempdb-engine)): `"H2"` (in-memory) or `"DUCKDB"` (a file-backed DuckDB database per execution — memory-bounded, scratch-reserved and configuration-locked, [Staging §8.5](staging.md#85-the-duckdb-engine)). Templates on `source: "tempdb"` are written in the engine's dialect (§12.6). |
 | `config` | object | optional | Engine-specific configuration. Keys depend on `engine`. For `H2`: `max_memory_mb` (default 1024). |
 
 If `settings.tempdb` is omitted entirely, defaults to H2 with default config.
@@ -994,7 +994,7 @@ is the same hole as an interpolated one, one directive earlier.
 
 | Code | Check |
 |---|---|
-| `pipeline.validation.tempdb_engine_unsupported` | `settings.tempdb.engine` is `H2` (v1) |
+| `pipeline.validation.tempdb_engine_unsupported` | `settings.tempdb.engine` is a [`StagingEngine`](enums.md#7-stagingengine--tempdb-engine) wire value — `H2` or `DUCKDB` |
 | `pipeline.validation.tempdb_config_invalid` | `settings.tempdb.config` keys are valid for the chosen engine |
 | `pipeline.validation.node_timeout_invalid` | A node's `settings.timeout_seconds` is a positive integer no greater than `datapipelines.executor.node-timeout-max-seconds` (default 900). Refused rather than clamped: an author who writes 14 400 and silently runs at 900 debugs a timeout that says nothing about what they asked for. `details` carries the node id, the requested value and the ceiling (§4.11) |
 | `pipeline.validation.pipeline_query_timeout_invalid` | `settings.query_timeout_seconds` (the pipeline-wide SQL statement timeout) is a positive integer no greater than `datapipelines.executor.node-query-timeout-max-seconds` (default 900). `details` carries the requested value and the ceiling (§5.3) |

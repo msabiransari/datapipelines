@@ -17,8 +17,8 @@ import java.util.UUID
  * consumption cannot be an import: `web` (which implements rest-api) sits at layer 5 and depends
  * on `dag` at layer 3, never the reverse (module-structure §4.2). The executor is what emits
  * these events and what writes `execution_events.event_type`, so the enum is declared here, at
- * the lowest layer that needs it, and `web` consumes it — the same resolution
- * `staging.StagingEngine` documents for its own cross-module enum.
+ * the lowest layer that needs it, and `web` consumes it — the lowest-shared-layer resolution
+ * `typesystem.StagingEngine` and `typesystem.Dialect` document for their own cross-module enums.
  */
 enum class SseEventType(
     val wire: String,

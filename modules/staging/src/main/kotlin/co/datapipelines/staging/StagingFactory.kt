@@ -2,6 +2,7 @@ package co.datapipelines.staging
 
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.H2RestrictedSession
+import co.datapipelines.typesystem.StagingEngine
 import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.SQLException
@@ -16,8 +17,9 @@ interface StagingFactory {
     /**
      * Opens a fresh per-execution staging database.
      *
-     * @param executionId the discriminator baked into the in-memory JDBC URL.
-     * @param engine the staging engine; defaults to [StagingEngine.H2], the only v1 engine.
+     * @param executionId the discriminator baked into the database's name (the H2 in-memory URL,
+     *   the DuckDB file name).
+     * @param engine the staging engine; defaults to [StagingEngine.H2].
      */
     fun create(
         executionId: UUID,
@@ -106,11 +108,11 @@ class H2StagingFactory(
         executionId: UUID,
         engine: StagingEngine,
     ): Staging {
-        // v1 supports H2 only. A future engine whose driver is absent from the classpath fails
-        // with `pipeline.staging.engine_unavailable`; with a single-constant enum the `when` is
-        // exhaustive and that branch is unreachable today.
+        // This factory builds H2 only. Another engine reaching it is a wiring mistake, refused as
+        // the catalogued `engine_unavailable` rather than silently staged on H2.
         when (engine) {
             StagingEngine.H2 -> Unit
+            StagingEngine.DUCKDB -> throw engineUnavailable(executionId, engine)
         }
 
         val jdbcUrl = "jdbc:h2:mem:exec_$executionId;MODE=${properties.mode};$LOWER_FOLDING"
@@ -172,6 +174,16 @@ class H2StagingFactory(
             message = "Could not create the H2 staging database for execution $executionId: $detail",
             details = mapOf("execution_id" to executionId.toString()),
             cause = cause,
+        )
+
+    private fun engineUnavailable(
+        executionId: UUID,
+        engine: StagingEngine,
+    ): DatapipelinesException =
+        DatapipelinesException(
+            code = StagingErrorCodes.ENGINE_UNAVAILABLE,
+            message = "The H2 staging factory cannot open a ${engine.wire} staging database (execution $executionId)",
+            details = mapOf("execution_id" to executionId.toString(), "engine" to engine.wire),
         )
 
     private companion object {

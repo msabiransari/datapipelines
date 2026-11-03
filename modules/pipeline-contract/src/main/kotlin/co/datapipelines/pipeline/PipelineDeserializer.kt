@@ -3,6 +3,7 @@ package co.datapipelines.pipeline
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.typesystem.ParameterCardinality
 import co.datapipelines.typesystem.ParameterConstraints
+import co.datapipelines.typesystem.StagingEngine
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.exc.InvalidNullException
