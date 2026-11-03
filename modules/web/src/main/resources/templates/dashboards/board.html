@@ -172,8 +172,8 @@
               <!-- #783: the dock's height is the user's, by the editor's ONE mechanism
                    (splitter.js `board-dock`, ui-screens §4.4): drag, or focus and Arrow ±16 px,
                    Shift ±64, Home/End, double-click to reset; remembered under
-                   `dp.pane.board-dock`. The role and its value pair are in the DOM from the
-                   start; splitter.js keeps aria-valuenow moving. -->
+                   `dp.pane.board-dock`. The role is in the markup; splitter.js publishes the
+                   value attributes at binding and keeps them in sync with the pane. -->
               <div class="dp-board-dock-splitter" data-splitter="board-dock" role="separator"
                    aria-orientation="horizontal" tabindex="0" aria-label="Resize the activity dock"></div>
               <div class="dp-board-dock-head">

@@ -351,6 +351,28 @@ class DashboardDockResizeBrowserTest : DashboardBrowserSuite() {
         withClue("the grip did not come back: $expanded") { expanded["centreHit"] shouldBe true }
     }
 
+    @Test
+    fun `the separator follows geometry changes without rewriting the saved height`() {
+        startTrace()
+        openBoard(remembered = REMEMBERED)
+        for ((width, height) in listOf(1280 to 720, REFERENCE_W to REFERENCE_H)) {
+            page.setViewportSize(width, height)
+            boardReady()
+            val geometry = read()
+            withClue("separator values after resizing to ${width}x$height: $geometry") {
+                near(geometry.d("valueNow"), geometry.d("paneH")) shouldBe true
+                near(geometry.d("valueMax"), geometry.d("layoutH") + geometry.d("paneH") - BOARD_FLOOR) shouldBe true
+                geometry.d("prop") shouldBe REMEMBERED.toDouble()
+                geometry["stored"] shouldBe REMEMBERED.toString()
+                if (height == 720) {
+                    geometry.d("paneH") shouldBeLessThan REMEMBERED.toDouble()
+                } else {
+                    near(geometry.d("paneH"), REMEMBERED.toDouble()) shouldBe true
+                }
+            }
+        }
+    }
+
     private companion object {
         const val STORAGE_KEY = "dp.pane.board-dock"
 

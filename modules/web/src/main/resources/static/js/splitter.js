@@ -506,7 +506,7 @@
       if (isFinite(px) && px >= 0) return Math.min(px, rendered);
       return rendered;
     };
-    return bind({
+    var binding = bind({
       handle: handle,
       pane: body,
       measure: paneHeight,
@@ -520,6 +520,17 @@
         return boardDockBounds(measure(region, "y"), paneHeight());
       },
     });
+    // CSS can shrink the pane without a drag (window size, filters, or a workspace tab).
+    // Publish the geometry the reader sees while keeping the remembered preference intact.
+    if (binding && typeof window.ResizeObserver === "function") {
+      var observer = new window.ResizeObserver(function () {
+        binding.publish(binding.current());
+      });
+      observer.observe(region);
+      observer.observe(body);
+      handle.__dpSplitterObserver = observer;
+    }
+    return binding;
   }
 
   /** Every pane present on the page; an absent pane's wiring returns null. */
@@ -553,7 +564,7 @@
      `bind` is idempotent per handle.
      The tag is bare inside `#app-main` on purpose and so RE-EXECUTES on every arrival and
      cached restore of a page that carries it (ui-screens §3.2): the restore and the wiring run
-     each time, but the document's two listeners install once per document (#783: before, each
+     each time, but the lifecycle listeners install once per document (#783: before, each
      evaluation added another `htmx:afterSwap` and `resize` pair, one per visit to a page
      carrying the tag). */
   if (typeof window !== "undefined" && typeof document !== "undefined") {
@@ -566,6 +577,16 @@
   }
   if (typeof window !== "undefined" && typeof document !== "undefined" && !window.__dpSplitterListening) {
     window.__dpSplitterListening = true;
+    document.addEventListener("htmx:beforeCleanupElement", function (event) {
+      var element = event.detail && event.detail.elt;
+      if (!element) return;
+      var handles = [element].concat(Array.from(element.querySelectorAll("[data-splitter]")));
+      handles.forEach(function (handle) {
+        if (!handle.__dpSplitterObserver) return;
+        handle.__dpSplitterObserver.disconnect();
+        delete handle.__dpSplitterObserver;
+      });
+    });
     /* Looked up at event time, so the listener installed by the first evaluation always runs
        the CURRENT module's wiring. */
     document.addEventListener("htmx:afterSwap", function () {
