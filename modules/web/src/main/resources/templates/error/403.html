@@ -6,8 +6,9 @@
      exception's user_message, th:text-rendered — never request data) and the request's
      correlation id. The actions carry hx-boost="false" like every other route outside the
      shell (layouts/default §B): the persistent-navigation guard blocks a boosted navigation
-     whose destination has no #app-main (/login, or the empty self-reload) with a
-     "Session or workspace changed" notice, so these must be REAL page loads. This comment
+     whose destination has no #app-main (/login) with a "Session or workspace changed"
+     notice. Reload the app uses GET /dashboard, since the failed POST URL may have no
+     GET handler. These actions must be REAL page loads. This comment
      ships to the browser and says nothing it would be wrong to serve. -->
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
@@ -25,9 +26,9 @@
         Correlation ID: <th:block th:text="${correlationId}"/>
       </p>
       <div class="u-flex u-gap-sm u-center-x u-mb-lg">
-        <a href="" hx-boost="false" class="ds-button ds-button-secondary">Reload</a>
-        <a th:href="@{/login}" hx-boost="false" class="ds-button ds-button-secondary">Log in</a>
-        <a th:href="@{/dashboard}" hx-boost="false" class="ds-button ds-button-secondary">Go to Dashboard</a>
+        <a th:if="${detail}" th:href="@{/dashboard}" hx-boost="false" class="ds-button ds-button-secondary">Reload the app</a>
+        <a th:if="${detail}" th:href="@{/login}" hx-boost="false" class="ds-button ds-button-secondary">Log in</a>
+        <a th:unless="${detail}" th:href="@{/dashboard}" hx-boost="false" class="ds-button ds-button-secondary">Go to Dashboard</a>
       </div>
     </div>
   </div>

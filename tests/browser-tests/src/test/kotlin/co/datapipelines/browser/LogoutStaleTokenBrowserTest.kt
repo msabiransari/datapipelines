@@ -75,6 +75,33 @@ class LogoutStaleTokenBrowserTest : BrowserSuite() {
         page.locator("#login-email").isVisible shouldBe true
     }
 
+    @Test
+    fun `a refused POST-only workspace switch recovers through a safe page load`() {
+        startTrace()
+        val user = seedLocalUser(uniqueEmail("switchcsrf"), generatedPassword("otp"), mustChange = false)
+        login(user.email, user.oneTimePassword)
+        page.waitForURL("**/dashboard")
+        val token = page.locator("#app-user-menu form input[name='_csrf']").inputValue()
+        page.evaluate(
+            """token => {
+                document.cookie = 'dp_csrf=stale-token-782; path=/';
+                const form = document.createElement('form');
+                form.method = 'POST'; form.action = '/workspace/switch';
+                const input = document.createElement('input');
+                input.type = 'hidden'; input.name = '_csrf'; input.value = token;
+                form.appendChild(input); document.body.appendChild(form); form.submit();
+            }""",
+            token,
+        )
+        page.locator("text=That action could not be taken").waitFor()
+        page.locator("a", Page.LocatorOptions().setHasText("Reload the app")).click()
+
+        page.url() shouldBe "$baseUrl/dashboard"
+        page.locator("#app-avatar").waitFor()
+        page.locator("#app-avatar").isVisible shouldBe true
+        page.context().cookies("$baseUrl/dashboard").any { it.name == "dp_session" } shouldBe true
+    }
+
     /**
      * The same page, a MACHINE consumer: a fetch with an Accept the handler reads as JSON
      * against a machine surface keeps the §13.7 envelope — the page shape never leaks to

@@ -6,6 +6,8 @@ import co.datapipelines.web.api.CorrelationId
 import io.kotest.matchers.shouldBe
 import jakarta.servlet.http.HttpServletRequest
 import org.junit.jupiter.api.Test
+import org.springframework.boot.LazyInitializationBeanFactoryPostProcessor
+import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.http.HttpStatus
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.web.servlet.ModelAndView
@@ -52,6 +54,26 @@ class CsrfErrorPageResolverTest {
         val page = resolver.resolveErrorView(request, HttpStatus.FORBIDDEN, emptyMap())
 
         page shouldBe null
+    }
+
+    @Test
+    fun `the UiConfig bean uses the bound deployment theme`() {
+        ApplicationContextRunner()
+            .withUserConfiguration(UiConfig::class.java)
+            .withPropertyValues("datapipelines.ui.theme=light")
+            .withInitializer { context ->
+                context.addBeanFactoryPostProcessor(LazyInitializationBeanFactoryPostProcessor())
+            }.run { context ->
+                context.getBean(UiProperties::class.java).theme shouldBe "light"
+                val request = MockHttpServletRequest("POST", "/workspace/switch")
+                request.setAttribute(AuthAttributes.CSRF_REFUSAL, CsrfInvalidException("mismatch"))
+                val boundResolver = context.getBean(CsrfErrorPageResolver::class.java)
+                CorrelationId.withId(CORRELATION_ID) {
+                    val page =
+                        checkNotNull(boundResolver.resolveErrorView(request, HttpStatus.FORBIDDEN, emptyMap()))
+                    page.model["activeTheme"] shouldBe "light"
+                }
+            }
     }
 
     private companion object {

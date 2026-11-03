@@ -30,12 +30,9 @@ object AuthAttributes {
     const val CSRF_REFUSAL = "co.datapipelines.auth.csrf_refusal"
 
     /**
-     * The error page a browser-shaped CSRF refusal FORWARDS to (#782). A forward, never
-     * `sendError`: the stash and the error status are REQUEST attributes, and only a
-     * FORWARD carries request attributes to the error render — under `sendError` the
-     * resolver has nothing to claim and the person would get the generic
-     * permission-refusal page. (The chain is registered for REQUEST dispatch only — see
-     * the handler's dispatch note — so no security filter re-runs on either dispatch.)
+     * The synchronous error-rendering target for a browser-shaped CSRF refusal (#782).
+     * The handler supplies the typed refusal and status as request attributes and renders
+     * before the correlation filter clears its MDC. See the handler's dispatch note.
      */
     const val ERROR_PAGE_PATH = "/error"
 }

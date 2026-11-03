@@ -673,11 +673,7 @@ class AuthHttpBoundaryTest {
     //
     // The CSRF refusal of a BROWSER navigation (Accept: text/html, no HX-Request, non-
     // machine path) must answer through a FORWARD to /error — a page, not the §13.7
-    // envelope. The "clears nothing" clause below is pinned against the dispatch
-    // alternative: planting sendError where the forward sits left these green BECAUSE
-    // the security chain is registered for REQUEST dispatch only (Boot 3.5.16
-    // AbstractFilterRegistrationBean; lane 782 falsification) — the ERROR dispatch
-    // never re-runs LogoutFilter. The guard pins the OUTCOME the owner requires:
+    // envelope. The guard pins the outcome independently of dispatch registration:
     // a refusal of a logout must not clear the session, whatever the wiring becomes.
 
     private fun browserHeaders(
