@@ -5,10 +5,7 @@ import co.datapipelines.auth.CsrfInvalidException
 import co.datapipelines.web.api.CorrelationId
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.boot.autoconfigure.web.servlet.error.ErrorViewResolver
-import org.springframework.core.Ordered
-import org.springframework.core.annotation.Order
 import org.springframework.http.HttpStatus
-import org.springframework.stereotype.Component
 import org.springframework.web.servlet.ModelAndView
 
 /**
@@ -27,9 +24,10 @@ import org.springframework.web.servlet.ModelAndView
  * data), the request's correlation id, and the deployment theme. The correlation id reads
  * the MDC directly: the forward runs MID-CHAIN, before the correlation filter's finally
  * clears the slot, so it is the same id the response header carries.
+ *
+ * Declared as an explicit `@Bean` in [UiConfig] (with the `@Order(HIGHEST_PRECEDENCE)` there),
+ * not by a stereotype: the house rule is zero DI stereotypes (015 / module-structure §8.4).
  */
-@Component
-@Order(Ordered.HIGHEST_PRECEDENCE)
 class CsrfErrorPageResolver(
     private val uiProperties: UiProperties = UiProperties(),
 ) : ErrorViewResolver {
