@@ -132,7 +132,7 @@ class DashboardFiltersBrowserTest : DashboardBrowserSuite() {
 
         // Measured at both desktop sizes: the panel ends at or before the board begins, it holds
         // the set's field, and the board keeps a usable width.
-        for ((width, height) in listOf(DESKTOP_BOARD_WIDTH to 900, NARROW_DESKTOP_BOARD_WIDTH to 800)) {
+        for ((width, height) in listOf(DESKTOP_BOARD_WIDTH to 900, narrowDesktopBoardWidth() to 800)) {
             page.setViewportSize(width, height)
             page.waitForFunction("() => document.querySelector('.dp-board-page').getAttribute('data-dp-filters') === 'some'")
             val r = regions()

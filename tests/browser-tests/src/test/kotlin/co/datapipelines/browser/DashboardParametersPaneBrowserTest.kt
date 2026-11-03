@@ -267,7 +267,7 @@ class DashboardParametersPaneBrowserTest : ParameterSetBrowserSuite() {
         val widths =
             listOf(
                 Triple(WIDE_WIDTH, WIDE_HEIGHT, false),
-                Triple(NARROW_WIDTH, NARROW_HEIGHT, false),
+                Triple(narrowDesktopBoardWidth(), NARROW_HEIGHT, false),
                 Triple(PHONE_WIDTH, PHONE_HEIGHT, true),
             )
         for (mode in listOf("light", "dark")) {
@@ -332,7 +332,6 @@ class DashboardParametersPaneBrowserTest : ParameterSetBrowserSuite() {
     private companion object {
         const val WIDE_WIDTH = 1440
         const val WIDE_HEIGHT = 900
-        const val NARROW_WIDTH = NARROW_DESKTOP_BOARD_WIDTH
         const val NARROW_HEIGHT = 800
         const val PHONE_WIDTH = 390
         const val PHONE_HEIGHT = 844

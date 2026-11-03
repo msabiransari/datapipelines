@@ -36,6 +36,65 @@ class ForbiddenConstructScannerTest {
             .codes
 
     @Test
+    fun `both spellings of the get_optional_template special variable are flagged`() {
+        // #787: the special variable loads a template BY KEY at render time, outside the
+        // declared `imports` closure (§6.3). Both spellings — the canonical rendering preserves
+        // the alias the author wrote, exactly as for ?eval_json. Case-sensitive matching is
+        // complete, not an omission: any other casing is a parse error (verified against the
+        // pinned jar), so no spelling the parser accepts can evade an exact-two-spelling match.
+        flagged("<#assign t = .get_optional_template('/lib@1')>").shouldBeTrue()
+        flagged("<#assign t = .getOptionalTemplate('/lib@1')>").shouldBeTrue()
+        ForbiddenConstructScanner
+            .scan("<#assign t = .getOptionalTemplate('/lib@1')>")
+            .map { it.construct } shouldContain ForbiddenConstructScanner.SPECIAL_VARIABLE_CONSTRUCT
+        rejected("<#assign t = .get_optional_template('/lib@1')>") shouldContain
+            PipelineErrorCodes.Template.DANGEROUS_CONSTRUCT
+    }
+
+    @Test
+    fun `the special variable is flagged in every expression position`() {
+        // The canonical description prints the call wherever an expression sits — the same
+        // sweep logic as the ?eval position matrix below.
+        listOf(
+            "\${.get_optional_template('/lib@1').exists?c}",
+            "<#if .getOptionalTemplate('/lib@1').exists>EXISTS</#if>",
+            // Captured assign: the call sits in the captured CONTENT, printed by the child
+            // interpolation's own description (an `= expr` with a captured block is not legal
+            // FTL — verified against the pinned jar, so that mixed shape is a syntax_error).
+            "<#macro m><#assign t>\${.get_optional_template('/lib@1').exists?c}</#assign></#macro>",
+            "<#assign t = .getOptionalTemplate('/lib@1') in ns>",
+            "<#function f><#return .getOptionalTemplate('/lib@1')?exists></#function>",
+            "<@n.mac arg=.get_optional_template('/lib@1')/>",
+        ).forEach { body ->
+            withClue("the special-variable load must not hide here: $body") { flagged(body).shouldBeTrue() }
+        }
+    }
+
+    @Test
+    fun `a space after the dot does not evade the special variable scan`() {
+        // `. get_optional_template` parses against the pinned jar and loads the same template;
+        // the scan runs over the canonical description (no space), which is what it is flagged
+        // through — the regex's `\s*` is the belt behind that brace, mirroring `?\s*`.
+        flagged("<#assign t = . get_optional_template('/lib@1')>").shouldBeTrue()
+    }
+
+    @Test
+    fun `a comment splitting the special variable name is a syntax error, not an evasion`() {
+        // Identifier lexing does not allow a comment inside the name (verified against the
+        // pinned jar) — so the body is refused at save regardless; the scan never sees a tree.
+        rejected("<#assign t = .get_opt<#-- c -->ional_template('/lib@1')>") shouldContain
+            PipelineErrorCodes.Template.SYNTAX_ERROR
+    }
+
+    @Test
+    fun `literal SQL mentioning the special variable is not flagged`() {
+        // Precision: a TextBlock is verbatim output and never re-parsed, so SQL prose or a
+        // string containing the construct's name must not reject an author (same rule as the
+        // built-ins' `SELECT 'x?eval'` case).
+        flagged("SELECT '.get_optional_template' FROM t -- .getOptionalTemplate").shouldBeFalse()
+    }
+
+    @Test
     fun `plain forbidden builtins are flagged`() {
         flagged("\${x?eval}").shouldBeTrue()
         flagged("\${x?api}").shouldBeTrue()

@@ -1,49 +1,83 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 import {
-  BROWSER_MAX, BROWSER_MIN, browserMaximum, effectiveWidth, keyedWidth, mountBrowserResize, parsePreference,
+  browserMaximum, effectiveWidth, keyedWidth, mountBrowserResize, parsePreference,
 } from "../../main/resources/static/js/browser-resize.mjs";
 
-test("the maximum leaves main its 320px beside the menu, within 280–480", () => {
-  assert.equal(browserMaximum(1512, 202, 320), 480);
-  assert.equal(browserMaximum(900, 64, 320), 480);
-  // The 280 floor (#784) wins over 800 - 202 - 320 = 278.
-  assert.equal(browserMaximum(800, 202, 320), 280);
-  assert.equal(browserMaximum(700, 202, 320), BROWSER_MIN);
+/* #788 — app.css is the range's ONE source, so this suite does not restate it: the `:root`
+   block is parsed from the stylesheet itself and every case below is expressed relative to
+   the values it holds (a plant that moves a bound re-derives the whole file). */
+const here = path.dirname(fileURLToPath(import.meta.url));
+const css = readFileSync(path.join(here, "../../main/resources/static/css/app.css"), "utf8");
+// app.css has several `:root` blocks (and the width bands re-declare the default inside
+// media rules); the shell's block is the one that declares the range itself.
+const rootBlock = [...css.matchAll(/:root\s*\{([^}]*)\}/g)].map(m => m[1])
+  .find(block => block.includes("--app-browser-min:"));
+assert.ok(rootBlock, "app.css must declare --app-browser-min in a :root block — it is the range's one source");
+const declared = name => {
+  const hit = rootBlock.match(new RegExp(`${name}:\\s*(\\d+(?:\\.\\d+)?)px`));
+  assert.ok(hit, `app.css's :root must declare ${name} in px — it is the range's one source`);
+  return Number(hit[1]);
+};
+const MIN = declared("--app-browser-min");
+const MAX = declared("--app-browser-max");
+const BASE_DEFAULT = declared("--app-browser-default");
+const RANGE = { min: MIN, max: MAX };
+// The suite's steps walk from the middle out; a range narrower than two steps cannot host them.
+assert.ok(MIN > 0 && MAX > MIN + 32, `the parsed range must be a usable one, read: ${MIN}–${MAX}`);
+const MID = Math.round((MIN + MAX) / 2);
+
+// What <main> keeps beside the browser — its own token (app.css's --app-main-min-width),
+// a fixed input to the maximum arithmetic, not part of the browser's range.
+const MAIN_MIN = 320;
+
+test("the maximum leaves main its minimum beside the menu, within the stylesheet's range", () => {
+  // At 1512 the viewport leaves 1512 - 202 - 320 = 918, more than the ceiling allows.
+  assert.equal(browserMaximum(1512, 202, MAIN_MIN, RANGE), Math.min(MAX, 918));
+  assert.equal(browserMaximum(900, 64, MAIN_MIN, RANGE), Math.min(MAX, 516));
+  // The floor wins over 800 - 202 - 320 = 278 whenever the range's minimum is the larger.
+  assert.equal(browserMaximum(800, 202, MAIN_MIN, RANGE), Math.max(MIN, 278));
+  assert.equal(browserMaximum(700, 202, MAIN_MIN, RANGE), MIN);
 });
 
 test("a viewport clamp changes the effective width, never below the minimum", () => {
-  // The floor wins over a 278 clamp (#784): the column takes 280 and main gives 2px.
-  assert.equal(effectiveWidth(480, 278), 280);
-  assert.equal(effectiveWidth(300, 480), 300);
-  assert.equal(effectiveWidth(1, 480), BROWSER_MIN);
+  // The floor wins over a 278 clamp: the column takes the minimum and main gives 2px.
+  assert.equal(effectiveWidth(MAX, 278, RANGE), Math.max(MIN, 278));
+  assert.equal(effectiveWidth(MID, MAX, RANGE), MID);
+  assert.equal(effectiveWidth(1, MAX, RANGE), MIN);
 });
 
-test("only a whole number of pixels within 280–480 is a preference", () => {
-  assert.equal(parsePreference("280"), 280);
-  assert.equal(parsePreference("300"), 300);
-  assert.equal(parsePreference("480px"), 480);
-  assert.equal(parsePreference(" 300 "), 300);
-  // 256 was a preference under the 240 floor; #784's 280 floor retires it (rail.js removes it on sight).
-  for (const raw of [null, undefined, "", "239", "240", "256", "279", "481", "2000", "300.5", "-300", "1e3", "300em", "calc(300px)", "<b>"]) {
-    assert.equal(parsePreference(raw), null, String(raw));
+test("only a whole number of pixels within the range is a preference", () => {
+  assert.equal(parsePreference(String(MIN), RANGE), MIN);
+  assert.equal(parsePreference(String(MID), RANGE), MID);
+  assert.equal(parsePreference(`${MAX}px`, RANGE), MAX);
+  assert.equal(parsePreference(` ${MID} `, RANGE), MID);
+  // 256 was a preference under the old 240 floor; #784's raised floor retired it and rail.js
+  // removes it on sight — kept as the named history case the issue pins.
+  assert.equal(parsePreference("256", RANGE), null);
+  for (const raw of [null, undefined, "", String(MIN - 1), String(MAX + 1), "2000", "300.5", "-300", "1e3", "300em", "calc(300px)", "<b>"]) {
+    assert.equal(parsePreference(raw, RANGE), null, String(raw));
   }
 });
 
 test("arrows step 16 within the range; Home and End go to its ends; other keys do nothing", () => {
-  assert.equal(keyedWidth("ArrowRight", 300, 480), 316);
-  assert.equal(keyedWidth("ArrowRight", 470, 480), 480);
-  assert.equal(keyedWidth("ArrowLeft", 300, 480), 284);
-  assert.equal(keyedWidth("ArrowLeft", 250, 480), BROWSER_MIN);
-  assert.equal(keyedWidth("Home", 400, 480), BROWSER_MIN);
-  // End clamps to the effective maximum (278); the stylesheet's clamp lifts it to the 280 floor.
-  assert.equal(keyedWidth("End", 300, 278), 278);
-  for (const key of ["Enter", " ", "ArrowUp", "Tab"]) assert.equal(keyedWidth(key, 300, 480), null);
+  assert.equal(keyedWidth("ArrowRight", MID, MAX, RANGE), MID + 16);
+  assert.equal(keyedWidth("ArrowRight", MAX - 16, MAX, RANGE), MAX);
+  assert.equal(keyedWidth("ArrowLeft", MID, MAX, RANGE), MID - 16);
+  assert.equal(keyedWidth("ArrowLeft", MIN - 5, MAX, RANGE), MIN);
+  assert.equal(keyedWidth("Home", MID, MAX, RANGE), MIN);
+  // End clamps to the effective maximum (278); the stylesheet's clamp lifts it to the floor.
+  assert.equal(keyedWidth("End", MID, Math.max(MIN, 278), RANGE), Math.max(MIN, 278));
+  for (const key of ["Enter", " ", "ArrowUp", "Tab"]) assert.equal(keyedWidth(key, MID, MAX, RANGE), null);
 });
 
 /* A document with just the parts mountBrowserResize reads: <html>'s inline style and computed
-   tokens, the two ids, the reset button, and a recording localStorage. */
-function fakeDocument({ workspace = "acme", viewport = 1512, menu = 202, browserWidth = 320 } = {}) {
+   tokens, the two ids, the reset button, and a recording localStorage. The tokens come from
+   the same parsed stylesheet values every pure-function case above uses. */
+function fakeDocument({ workspace = "acme", viewport = 1512, menu = 202, browserWidth = MID, bounds = true } = {}) {
   const listeners = new Map();
   const on = target => (type, handler) => listeners.set(`${target}:${type}`, handler);
   const inline = new Map();
@@ -59,7 +93,12 @@ function fakeDocument({ workspace = "acme", viewport = 1512, menu = 202, browser
       removeProperty: name => inline.delete(name),
     },
   };
-  const tokens = { "--app-menu-width": `${menu}px`, "--app-main-min-width": "320px", "--app-browser-default": "320px" };
+  const tokens = {
+    "--app-menu-width": `${menu}px`,
+    "--app-main-min-width": `${MAIN_MIN}px`,
+    "--app-browser-default": `${BASE_DEFAULT}px`,
+    ...(bounds ? { "--app-browser-min": `${MIN}px`, "--app-browser-max": `${MAX}px` } : {}),
+  };
   const window = {
     getComputedStyle: () => ({ getPropertyValue: name => tokens[name] ?? "" }),
     localStorage: {
@@ -96,60 +135,62 @@ function fakeDocument({ workspace = "acme", viewport = 1512, menu = 202, browser
 test("the separator names its range and the width it renders", () => {
   const page = fakeDocument();
   mountBrowserResize(page.document);
-  assert.equal(page.attributes.get("aria-valuemin"), String(BROWSER_MIN));
-  assert.equal(page.attributes.get("aria-valuemax"), "480");
-  assert.equal(page.attributes.get("aria-valuenow"), "320");
+  assert.equal(page.attributes.get("aria-valuemin"), String(MIN));
+  assert.equal(page.attributes.get("aria-valuemax"), String(Math.min(MAX, 1512 - 202 - MAIN_MIN)));
+  assert.equal(page.attributes.get("aria-valuenow"), String(Math.max(MIN, Math.min(BASE_DEFAULT, MAX))));
 });
 
 test("a key writes the preference to <html> and to this workspace's key, and nothing else", () => {
   const page = fakeDocument();
   mountBrowserResize(page.document);
   assert.equal(page.key("ArrowRight"), true);
-  assert.equal(page.inline.get("--app-browser-preferred"), "336px");
-  assert.deepEqual([...page.stored], [["dp-browser-width:acme", "336"]]);
-  assert.equal(page.attributes.get("aria-valuenow"), "336");
+  assert.equal(page.inline.get("--app-browser-preferred"), `${MID + 16}px`);
+  assert.deepEqual([...page.stored], [[`dp-browser-width:acme`, String(MID + 16)]]);
+  assert.equal(page.attributes.get("aria-valuenow"), String(MID + 16));
   assert.equal(page.key("Enter"), false);
-  assert.deepEqual([...page.stored], [["dp-browser-width:acme", "336"]]);
+  assert.deepEqual([...page.stored], [[`dp-browser-width:acme`, String(MID + 16)]]);
 });
 
 test("a narrow window lowers the maximum but never rewrites the stored preference", () => {
   const page = fakeDocument({ viewport: 800 });
   mountBrowserResize(page.document);
-  page.inline.set("--app-browser-preferred", "480px");
+  page.inline.set("--app-browser-preferred", `${MAX}px`);
   page.listeners.get("window:resize")();
-  assert.equal(page.attributes.get("aria-valuemax"), "280");
-  assert.equal(page.attributes.get("aria-valuenow"), "280");
-  assert.equal(page.inline.get("--app-browser-preferred"), "480px");
+  const narrowMax = Math.max(MIN, 800 - 202 - MAIN_MIN);
+  assert.equal(page.attributes.get("aria-valuemax"), String(narrowMax));
+  assert.equal(page.attributes.get("aria-valuenow"), String(narrowMax));
+  assert.equal(page.inline.get("--app-browser-preferred"), `${MAX}px`);
   assert.equal(page.stored.size, 0);
 });
 
 test("the menu's collapse moves the range, and an arrow at the clamp writes nothing", () => {
-  const page = fakeDocument({ viewport: 900, menu: 64, browserWidth: 480 });
+  const page = fakeDocument({ viewport: 900, menu: 64, browserWidth: MAX });
   mountBrowserResize(page.document);
   assert.deepEqual(page.observed.map(([target, options]) => [target === page.html, options.attributeFilter]), [[true, ["class"]]]);
-  page.inline.set("--app-browser-preferred", "480px");
+  page.inline.set("--app-browser-preferred", `${MAX}px`);
   page.tokens["--app-menu-width"] = "202px";
   page.listeners.get("html:class")();
-  assert.equal(page.attributes.get("aria-valuemax"), "378");
-  assert.equal(page.attributes.get("aria-valuenow"), "378");
-  // The column renders at the clamp (378): ArrowRight cannot move it and must not store 378.
-  page.document.getElementById("app-browser").getBoundingClientRect = () => ({ left: 202, width: 378 });
+  const collapsedMax = Math.max(MIN, 900 - 202 - MAIN_MIN);
+  assert.equal(page.attributes.get("aria-valuemax"), String(collapsedMax));
+  assert.equal(page.attributes.get("aria-valuenow"), String(collapsedMax));
+  // The column renders at the clamp: ArrowRight cannot move it and must not store the clamp.
+  page.document.getElementById("app-browser").getBoundingClientRect = () => ({ left: 202, width: collapsedMax });
   assert.equal(page.key("ArrowRight"), true);
-  assert.equal(page.inline.get("--app-browser-preferred"), "480px");
+  assert.equal(page.inline.get("--app-browser-preferred"), `${MAX}px`);
   assert.equal(page.stored.size, 0);
   assert.equal(page.key("ArrowLeft"), true);
-  assert.equal(page.inline.get("--app-browser-preferred"), "362px");
+  assert.equal(page.inline.get("--app-browser-preferred"), `${collapsedMax - 16}px`);
 });
 
 test("Reset removes the preference and its key", () => {
   const page = fakeDocument();
   mountBrowserResize(page.document);
   page.key("End");
-  assert.equal(page.stored.get("dp-browser-width:acme"), "480");
+  assert.equal(page.stored.get("dp-browser-width:acme"), String(Math.min(MAX, 1512 - 202 - MAIN_MIN)));
   page.listeners.get("reset:click")();
   assert.equal(page.inline.has("--app-browser-preferred"), false);
   assert.equal(page.stored.size, 0);
-  assert.equal(page.attributes.get("aria-valuenow"), "320");
+  assert.equal(page.attributes.get("aria-valuenow"), String(Math.max(MIN, Math.min(BASE_DEFAULT, MAX))));
 });
 
 test("a drag past the maximum stops at the maximum", () => {
@@ -158,16 +199,16 @@ test("a drag past the maximum stops at the maximum", () => {
   const pointer = { pointerId: 7, button: 0, preventDefault() {} };
   page.listeners.get("separator:pointerdown")(pointer);
   page.listeners.get("separator:pointermove")({ ...pointer, clientX: 202 + 900 });
-  assert.equal(page.inline.get("--app-browser-preferred"), "280px");
+  assert.equal(page.inline.get("--app-browser-preferred"), `${Math.max(MIN, 800 - 202 - MAIN_MIN)}px`);
   page.listeners.get("separator:pointermove")({ ...pointer, pointerId: 8, clientX: 202 + 250 });
-  assert.equal(page.inline.get("--app-browser-preferred"), "280px", "another pointer moves nothing");
+  assert.equal(page.inline.get("--app-browser-preferred"), `${Math.max(MIN, 800 - 202 - MAIN_MIN)}px`, "another pointer moves nothing");
 });
 
 test("without a workspace the width applies but nothing is stored", () => {
   const page = fakeDocument({ workspace: null });
   mountBrowserResize(page.document);
   page.key("Home");
-  assert.equal(page.inline.get("--app-browser-preferred"), `${BROWSER_MIN}px`);
+  assert.equal(page.inline.get("--app-browser-preferred"), `${MIN}px`);
   assert.equal(page.stored.size, 0);
 });
 
@@ -178,7 +219,22 @@ test("a page without the browser mounts nothing", () => {
   assert.equal(page.listeners.size, 0);
 });
 
-test("the cap and floor are the record's", () => {
-  assert.equal(BROWSER_MIN, 280);
-  assert.equal(BROWSER_MAX, 480);
+test("a sheet that does not resolve the range leaves the control unmounted, loudly", () => {
+  const errors = [];
+  const page = fakeDocument({ bounds: false });
+  const original = console.error;
+  console.error = message => errors.push(String(message));
+  try {
+    mountBrowserResize(page.document);
+  } finally {
+    console.error = original;
+  }
+  assert.equal(page.listeners.size, 0, "no control is wired without the stylesheet's bounds");
+  assert.equal(errors.filter(message => message.includes("--app-browser-min")).length, 1, "the refusal is visible in the console");
+});
+
+test("the range is the stylesheet's, read positive and ordered", () => {
+  assert.equal(MIN > 0, true, `--app-browser-min read ${MIN}`);
+  assert.equal(MAX > MIN, true, `--app-browser-max read ${MAX}, min ${MIN}`);
+  assert.equal(BASE_DEFAULT > 0, true, `--app-browser-default read ${BASE_DEFAULT}`);
 });

@@ -100,6 +100,8 @@ class ComponentBoundariesBrowserTest : VisualizationBrowserSuite() {
             listOf(
                 Edge("dock pane", ".dp-board-dock", BOUNDARY, BOUNDARY_FLOOR),
                 Edge("refresh row", "#dp-board-dock-pane-history .dp-refreshes-row", SEPARATOR, SEPARATOR_FLOOR),
+                // #783: the board dock's grip is the shared splitter's, measured like the editor's.
+                Edge("dock grip", ".dp-board-dock-splitter", BOUNDARY, NO_FLOOR, width = null, kind = "grip", outside = ".dp-board-dock"),
             ),
         )
     }

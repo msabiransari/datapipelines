@@ -34,12 +34,17 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
 
     /**
      * #554: the shell's desktop reference width for a case that asserts the filters COLUMN.
-     * Playwright's default 1280 leaves main 1280 - 202 (menu) - 320 (browser, #784) = 758 px, a board
-     * region under the filters' 820 px drawer threshold (dashboards.css); 1440 leaves main 918.
+     * Playwright's default 1280 leaves main 1280 - 202 (menu) - the browser's band default
+     * (app.css's `--app-browser-default`, #784) = 758 px, a board region under the filters'
+     * 820 px drawer threshold (dashboards.css); 1440 leaves main 918.
      */
     protected fun desktopBoard(height: Int = DEFAULT_VIEWPORT_HEIGHT) {
         page.setViewportSize(DESKTOP_BOARD_WIDTH, height)
     }
+
+    /** Keeps the narrow column scenario's 834px board region as the browser default changes. */
+    protected fun narrowDesktopBoardWidth(): Int =
+        DESKTOP_MENU_WIDTH + browserRange(page).effectiveDefault + 2 * DESKTOP_MAIN_PADDING + NARROW_BOARD_REGION_WIDTH
 
     /**
      * True when the page scrolls sideways — a page must never, at any width. `<main>` is the shell's scroll container
@@ -1033,11 +1038,11 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
     protected companion object {
         const val DESKTOP_BOARD_WIDTH = 1440
 
-        /**
-         * #554: the narrower desktop the column still holds at — main 1420 - 202 - 320 = 898, the region 834
-         * (#784 grew the band default 300 -> 320; at #554's 1400 the region is now 814, under the 820 drawer threshold).
-         */
-        const val NARROW_DESKTOP_BOARD_WIDTH = 1420
+        // Independent scenario inputs: expanded menu, this desktop band's padding, and a
+        // board region 14px above the filters' 820px drawer threshold. Browser width is read.
+        private const val DESKTOP_MENU_WIDTH = 202
+        private const val DESKTOP_MAIN_PADDING = 32
+        private const val NARROW_BOARD_REGION_WIDTH = 834
 
         /** Playwright's default viewport height, kept so a case's vertical geometry is unchanged. */
         const val DEFAULT_VIEWPORT_HEIGHT = 720

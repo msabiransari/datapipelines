@@ -77,6 +77,32 @@ class FreemarkerAstDriftTest {
     }
 
     @Test
+    fun `the special variable descriptions the 787 scan matches still print both spellings verbatim`() {
+        // #787 — ForbiddenConstructScanner matches `.get_optional_template` /
+        // `.getOptionalTemplate` as literal text inside an element's own description. Two pins:
+        // (1) the description prints the call at all — a jar that stops printing expressions on
+        // this node silently disarms the scan; (2) the canonical rendering PRESERVES the alias
+        // spelling the author wrote — the premise for listing both spellings in the regex. A jar
+        // that normalizes the alias to the snake-case key fails the camel pin here, and the
+        // then-dead spelling can be dropped from the regex deliberately, never silently.
+        FreemarkerAst
+            .ownText(parse("<#assign t = .get_optional_template('/lib@1')>").rootTreeNode) shouldContain
+            ".get_optional_template"
+        FreemarkerAst
+            .ownText(parse("<#assign t = .getOptionalTemplate('/lib@1')>").rootTreeNode) shouldContain
+            ".getOptionalTemplate"
+        // The inline position (the A0 render arm's shape) and the space-after-dot spelling,
+        // which canonicalizes to the token form — what the scan sees is always one of the two
+        // exact spellings, which is why the regex's `\s*` is belt, not the mechanism.
+        FreemarkerAst
+            .ownText(parse("\${.get_optional_template('/lib@1').exists?c}").rootTreeNode) shouldContain
+            ".get_optional_template"
+        FreemarkerAst
+            .ownText(parse("<#assign t = . get_optional_template('/lib@1')>").rootTreeNode) shouldBe
+            "#assign t = .get_optional_template(\"/lib@1\")"
+    }
+
+    @Test
     fun `the binding descriptions the 042 scan parses still print in their pinned shapes`() {
         // InterpolatedParameterScanner extracts names from these description spellings. A jar
         // bump that re-renders any of them would silently disarm the scope tracking and start

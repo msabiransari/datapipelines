@@ -31,6 +31,13 @@
 
   </template>
 
+  <!-- #783: the shared pane splitter (104 §A), the editor's tag verbatim. PARSER-BLOCKING and
+       above the markup on purpose: it restores the remembered `--dp-dock-pane-h` onto <html>
+       BEFORE the dock paints, so a height the person chose is the first frame's, never a
+       shift onto it. It stays a bare tag outside the catalog, and re-executes on every arrival
+       and cached restore by design (ui-screens §3.2); its document listeners install once. -->
+  <script th:src="@{/js/splitter.js}"></script>
+
   <!-- #350 — the global sidebar's current-leaf hook: which dashboard this page shows, by id
         AND full path, so the rail's Dashboards tree (js/tree/sidebar.mjs) can mark the leaf
         and reveal its folders (editor.html:11's shape, for the second family). -->
@@ -162,8 +169,13 @@
                  #400 built it. -->
             <section id="dp-board-dock" class="dp-board-dock" data-dp-dock-active="events"
                      aria-label="Dashboard activity">
-              <button type="button" class="dp-board-dock-splitter" data-dp-dock-resize
-                      aria-label="Resize the activity dock"></button>
+              <!-- #783: the dock's height is the user's, by the editor's ONE mechanism
+                   (splitter.js `board-dock`, ui-screens §4.4): drag, or focus and Arrow ±16 px,
+                   Shift ±64, Home/End, double-click to reset; remembered under
+                   `dp.pane.board-dock`. The role is in the markup; splitter.js publishes the
+                   value attributes at binding and keeps them in sync with the pane. -->
+              <div class="dp-board-dock-splitter" data-splitter="board-dock" role="separator"
+                   aria-orientation="horizontal" tabindex="0" aria-label="Resize the activity dock"></div>
               <div class="dp-board-dock-head">
                 <div class="dp-board-dock-tabs" role="tablist" aria-label="Activity views">
                   <button type="button" class="dp-board-dock-tab" role="tab" id="dp-board-dock-tab-events"

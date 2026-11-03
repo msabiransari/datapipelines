@@ -213,7 +213,8 @@ class UiScreensTransportVocabularyTest {
                     "-reads the dock's drag contract as the composition's control and asserts the tab strip stays reachable while the" +
                     " dock is collapsed. The 141 sidebar-resize suite is deleted with the pane; the dock's own resize (the bullet abo" +
                     "ve) is unchanged and remains `PipelineEditorDockResizeBrowserTest`'s. Since #535 the module carries no wiring fo" +
-                    "r the withdrawn pane either: `static/js/splitter.js` wires the dock and the explorer tree only.",
+                    "r the withdrawn pane either: `static/js/splitter.js` wires the editor's dock, the explorer tree and (#783) th" +
+                    "e dashboard board's activity dock only.",
                 // 5e1326773:1338
                 "| JS | the create modal's lifecycle (`/js/template-create-modal.js`: open/close, inline refusal, dialect-conditi" +
                     "onal-on-type, the script blocks); none of its own otherwise — `tree/sidebar.mjs` owns **Browse folders** (`data-" +

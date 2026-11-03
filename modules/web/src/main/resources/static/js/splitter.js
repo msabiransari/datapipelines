@@ -2,10 +2,11 @@
   "use strict";
 
   /*
-   * 104 §A — ONE splitter, two panes: the editor's dock by height, the explorers' tree by
-   * width. 141 made it four (the two editors' side panes); both retired with their pages
-   * (#349/#398) and their wiring is deleted — #433 the template rail, #535 the settings
-   * sidebar.
+   * 104 §A — ONE splitter, three panes: the editor's dock by height, the explorers' tree by
+   * width, and since #783 the dashboard board's activity dock by height (it had a page-local
+   * drag of its own in dashboards-page.js, retired). 141 made it four (the two editors' side
+   * panes); both retired with their pages (#349/#398) and their wiring is deleted — #433 the
+   * template rail, #535 the settings sidebar.
    *
    * The owner's report was about the editor's bottom dock ("it has a fixed height … I want
    * to drag the height"), but the explorers' tree pane had already produced the same request
@@ -18,11 +19,14 @@
    *
    * A size lands as ONE CSS custom property, and the stylesheets size from it:
    *
-   *     --pe-dock-pane-h   pipeline-editor.css  .pe-dock's second grid row
+   *     --pe-dock-pane-h   pipeline-editor.css  .pe-dock's pane row
    *     --tplx-tree-w      template-tree.css    .tplx-tree's width
+   *     --dp-dock-pane-h   dashboards.css       .dp-board-dock-body's height (#783)
    *
-   * Each is declared with the shipped default as the `var()` fallback, so an unset property
-   * IS the default — nothing to seed, nothing to reset to but "remove it".
+   * Each sheet carries the shipped default — the two docks as a `:root` declaration, the
+   * tree as the `var()` fallback — so an unset root property IS the default: nothing to seed,
+   * nothing to reset to but "remove it". A default re-declared on the PANE's own element
+   * would shadow the root's value and the remembered size would never show (#783 pins it).
    *
    * The property is written on `document.documentElement`, not on the pane's own container,
    * for two reasons that only showed up when this was tried the other way:
@@ -54,10 +58,12 @@
 
   /** Per-pane localStorage keys. Both explorers share ONE key: the width follows the user.
      The editors' side panes each had their own key (141 gave every editor's side pane one);
-     the panes retired with their pages (#349/#398), the keys with them (#433, #535). */
+     the panes retired with their pages (#349/#398), the keys with them (#433, #535). The
+     board's dock has its own (#783): a board and a pipeline are different reading tasks. */
   var KEYS = {
     editorDock: "dp.pane.editor-dock",
     explorerTree: "dp.pane.explorer-tree",
+    boardDock: "dp.pane.board-dock",
   };
 
   /** A stored size this large is not a pane, it is corruption. */
@@ -399,6 +405,20 @@
   var DOCK_CANVAS_FLOOR = 180;
   var TREE_MIN = 260;
   var TREE_MAX_SHARE = 0.4;
+  /* #783 — the least board the activity dock may leave: two grid rows of 80px
+     (`--dashboard-row-unit`), dashboards.css's `--dp-board-floor`, which the board page's
+     grid also enforces (the board row's minimum; the dock row gives way). */
+  var BOARD_FLOOR = 160;
+
+  /**
+   * #783 — the board dock's bounds, pure: the floor is the editor's DOCK_MIN, the ceiling is
+   * everything the board row and the pane share less the board's floor. `regionH` and `paneH`
+   * are measured by the adapter; `clamp`'s floor-wins rule keeps a window too short for both
+   * floors at DOCK_MIN rather than collapsing the pane.
+   */
+  function boardDockBounds(regionH, paneH) {
+    return { min: DOCK_MIN, max: (num(regionH) ? regionH : 0) + (num(paneH) ? paneH : 0) - BOARD_FLOOR };
+  }
 
   function wireEditorDock() {
     var dock = document.querySelector(".pe-dock");
@@ -460,6 +480,66 @@
     });
   }
 
+  /**
+   * #783 — the dashboard board's activity dock, the editor dock's contract: the property on
+   * the root (`--dp-dock-pane-h`), the default a `:root` declaration in dashboards.css, the
+   * height remembered under `dp.pane.board-dock` and restored at module load, so it survives a
+   * workspace tab switch, an in-shell leave and Back, and a reload. The board row
+   * (`.dp-board-layout`) is what a taller dock takes from, so it and the pane are the total.
+   */
+  function wireBoardDock() {
+    var dock = document.querySelector(".dp-board-dock");
+    var handle = document.querySelector('[data-splitter="board-dock"]');
+    var region = document.querySelector(".dp-board-layout");
+    var body = dock && dock.querySelector(".dp-board-dock-body");
+    if (!dock || !handle || !region || !body) return null;
+    /*
+     * The pane's height: the resolved root property (the editor's lesson — the rendered box
+     * carries the body's border and is 0 while collapsed, and the height expand restores is
+     * still the property), capped by the rendered body while open, because on a short window
+     * the dock's row gives way (`minmax(0, auto)`) and a step starts from what the person SEES.
+     */
+    var paneHeight = function () {
+      var px = parseFloat(window.getComputedStyle(root()).getPropertyValue("--dp-dock-pane-h"));
+      var rendered = measure(body, "y");
+      if (dock.hasAttribute("data-dp-dock-collapsed")) return isFinite(px) ? px : 0;
+      if (isFinite(px) && px >= 0) return Math.min(px, rendered);
+      return rendered;
+    };
+    var binding = bind({
+      handle: handle,
+      pane: body,
+      measure: paneHeight,
+      container: dock,
+      axis: "y",
+      invert: true,
+      prop: "--dp-dock-pane-h",
+      storageKey: KEYS.boardDock,
+      label: "Resize the activity dock",
+      bounds: function () {
+        return boardDockBounds(measure(region, "y"), paneHeight());
+      },
+    });
+    // CSS can shrink the pane without a drag (window size, filters, or a workspace tab).
+    // Publish the geometry the reader sees while keeping the remembered preference intact.
+    if (binding && typeof window.ResizeObserver === "function") {
+      var observer = new window.ResizeObserver(function () {
+        binding.publish(binding.current());
+      });
+      observer.observe(region);
+      observer.observe(body);
+      handle.__dpSplitterObserver = observer;
+    }
+    return binding;
+  }
+
+  /** Every pane present on the page; an absent pane's wiring returns null. */
+  function wireAll() {
+    wireEditorDock();
+    wireExplorerTree();
+    wireBoardDock();
+  }
+
   function wireExplorerTree() {
     var handle = document.querySelector('[data-splitter="explorer-tree"]');
     var tree = document.querySelector(".tplx-tree");
@@ -481,18 +561,37 @@
 
   /* The restore runs NOW, at parse time, above the markup — see the header. The wiring waits
      for the elements. htmx boosts swap `#app-main`, so the wiring re-runs after every swap;
-     `bind` is idempotent per handle. */
+     `bind` is idempotent per handle.
+     The tag is bare inside `#app-main` on purpose and so RE-EXECUTES on every arrival and
+     cached restore of a page that carries it (ui-screens §3.2): the restore and the wiring run
+     each time, but the lifecycle listeners install once per document (#783: before, each
+     evaluation added another `htmx:afterSwap` and `resize` pair, one per visit to a page
+     carrying the tag). */
   if (typeof window !== "undefined" && typeof document !== "undefined") {
     restore("--pe-dock-pane-h", KEYS.editorDock);
     restore("--tplx-tree-w", KEYS.explorerTree);
+    restore("--dp-dock-pane-h", KEYS.boardDock);
 
-    var wire = function () {
-      wireEditorDock();
-      wireExplorerTree();
-    };
-    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", wire);
-    else wire();
-    document.addEventListener("htmx:afterSwap", wire);
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", wireAll);
+    else wireAll();
+  }
+  if (typeof window !== "undefined" && typeof document !== "undefined" && !window.__dpSplitterListening) {
+    window.__dpSplitterListening = true;
+    document.addEventListener("htmx:beforeCleanupElement", function (event) {
+      var element = event.detail && event.detail.elt;
+      if (!element) return;
+      var handles = [element].concat(Array.from(element.querySelectorAll("[data-splitter]")));
+      handles.forEach(function (handle) {
+        if (!handle.__dpSplitterObserver) return;
+        handle.__dpSplitterObserver.disconnect();
+        delete handle.__dpSplitterObserver;
+      });
+    });
+    /* Looked up at event time, so the listener installed by the first evaluation always runs
+       the CURRENT module's wiring. */
+    document.addEventListener("htmx:afterSwap", function () {
+      if (window.DpSplitter && window.DpSplitter.wire) window.DpSplitter.wire();
+    });
     window.addEventListener("resize", function () {
       /* Every ceiling is viewport-relative; a window that shrank past a remembered size has
          to pull it back in, or the pane owns most of a narrow window. One pass per pane —
@@ -515,7 +614,11 @@
     clamp: clamp,
     bind: bind,
     restore: restore,
+    boardDockBounds: boardDockBounds,
+    wire: wireAll,
     KEYS: KEYS,
+    DOCK_MIN: DOCK_MIN,
+    BOARD_FLOOR: BOARD_FLOOR,
     STEP: STEP,
     SHIFT_STEP: SHIFT_STEP,
   };
