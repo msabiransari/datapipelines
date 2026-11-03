@@ -177,6 +177,9 @@ class FlywayMigrationIntegrationTest {
                 // #785 (V53) — the managed lake's catalog core: Iceberg's two catalog tables in the V1 shape,
                 // lake_control / lake_leases / lake_table_revisions, the dp_fence and revision triggers.
                 "53|lake catalog core|true",
+                // #798 (V54) — managed lake table definitions: namespaces, managed tables, definition versions, the
+                // column-semantics projection, and lake_tables' origin / revision_seq.
+                "54|lake definitions|true",
             )
     }
 
@@ -981,6 +984,70 @@ class FlywayMigrationIntegrationTest {
     }
 
     /**
+     * #798 (V54) — managed lake table definitions, read from the SHIPPED database: the closed lists the
+     * `lake.definitions` enums mirror (table status, apply state, version status, origin), the pointer/state pairing,
+     * the one-DRAFT index and every column. Behaviour is `LakeDefinitionRepositoryIntegrationTest`'s; this pins
+     * that production Flyway builds what it runs on.
+     */
+    @Test
+    @Suppress("LongMethod") // the inventory IS the assertion
+    fun `V54 creates the managed lake definitions with their closed lists, the one-draft index and lake_tables' origin`() {
+        query(
+            "SELECT conname || '|' || pg_get_constraintdef(oid) FROM pg_constraint WHERE conname IN " +
+                "('chk_lake_namespaces_status', 'chk_lake_tables_managed_status', 'chk_lake_tables_managed_apply_state', " +
+                "'chk_lake_tables_managed_apply_pointer', 'chk_lake_table_definition_versions_status', " +
+                "'chk_lake_tables_origin', 'chk_lake_tables_revision_seq') ORDER BY conname COLLATE \"C\"",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "chk_lake_namespaces_status|CHECK ((status = ANY (ARRAY['active'::text, 'deprecated'::text, 'archived'::text])))",
+                "chk_lake_table_definition_versions_status|CHECK ((status = ANY (ARRAY['DRAFT'::text, 'RELEASED'::text, " +
+                    "'DISCARDED'::text])))",
+                "chk_lake_tables_managed_apply_pointer|CHECK (((apply_state IS NULL) = (current_definition_version IS NULL)))",
+                "chk_lake_tables_managed_apply_state|CHECK ((apply_state = ANY (ARRAY['pending'::text, 'applying'::text, " +
+                    "'applied'::text, 'failed'::text])))",
+                "chk_lake_tables_managed_status|CHECK ((status = ANY (ARRAY['active'::text, 'deprecated'::text, " +
+                    "'archived'::text, 'purged'::text])))",
+                "chk_lake_tables_origin|CHECK ((origin = ANY (ARRAY['managed'::text, 'external'::text])))",
+                "chk_lake_tables_revision_seq|CHECK (((origin = 'managed'::text) OR (revision_seq IS NULL)))",
+            )
+        query(
+            "SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND " +
+                "indexname = 'uq_lake_table_definition_versions_one_draft'",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "CREATE UNIQUE INDEX uq_lake_table_definition_versions_one_draft ON public.lake_table_definition_versions " +
+                    "USING btree (table_id) WHERE (status = 'DRAFT'::text)",
+            )
+        columnsOf("lake_namespaces") shouldContainExactlyInAnyOrder
+            listOf(
+                "archived_at", "archived_by", "created_at", "created_by", "deprecated_at", "deprecated_by", "description",
+                "id", "name", "replacement_id", "status",
+            )
+        columnsOf("lake_tables_managed") shouldContainExactlyInAnyOrder
+            listOf(
+                "applied_at", "applied_version_here", "apply_error_json", "apply_operation_id", "apply_state",
+                "archived_at", "archived_by", "created_at", "created_by", "current_definition_version", "deprecated_at",
+                "deprecated_by", "id", "name", "namespace_id", "policy_json", "purge_allowed_after", "purged_at",
+                "purged_by", "replacement_id", "status",
+            )
+        columnsOf("lake_table_definition_versions") shouldContainExactlyInAnyOrder
+            listOf(
+                "body_hash", "body_json", "created_at", "created_by", "created_via", "discarded_at", "discarded_by",
+                "released_at", "released_by", "status", "table_id", "updated_at", "updated_by", "updated_via", "version",
+            )
+        columnsOf("lake_column_semantics") shouldContainExactlyInAnyOrder
+            listOf(
+                "applied_version", "doc", "field_id", "iceberg_type", "logical_type", "name", "ordinal", "required",
+                "table_id", "tags_json",
+            )
+        query(
+            "SELECT column_name || '|' || is_nullable || '|' || coalesce(column_default, '') FROM information_schema.columns " +
+                "WHERE table_schema = 'public' AND table_name = 'lake_tables' AND column_name IN ('origin', 'revision_seq') " +
+                "ORDER BY column_name COLLATE \"C\"",
+        ) { it.getString(1) } shouldContainExactly listOf("origin|NO|'external'::text", "revision_seq|YES|")
+    }
+
+    /**
      * #9 (V38) — the scheduler's schema, read from the SHIPPED database: the CHECK lists that R6's
      * table and the trail kinds live in, the partial one-active index (the durable overlap guard) and
      * SCHEDULE joining the trigger CHECK. The trail is append-only by construction, not by a
@@ -1482,8 +1549,8 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    @Suppress("LongMethod") // the inventory IS the assertion: one line per table of metadata-db §4 (47 after #778 + #785)
-    fun `creates exactly the forty-seven tables of metadata-db §4`() {
+    @Suppress("LongMethod") // the inventory IS the assertion: one line per table of metadata-db §4 (51 after #778 + #785 + #798)
+    fun `creates exactly the fifty-one tables of metadata-db §4`() {
         val tables =
             query(
                 """
@@ -1517,6 +1584,11 @@ class FlywayMigrationIntegrationTest {
                 "lake_control",
                 "lake_leases",
                 "lake_table_revisions",
+                // #798 (V54) — managed table definitions and their projection (metadata-db §4.48–§4.51).
+                "lake_namespaces",
+                "lake_tables_managed",
+                "lake_table_definition_versions",
+                "lake_column_semantics",
                 // 118 (V25) — the learned semantic layer.
                 "learned_facts",
                 // 137 (V27) — the mail claim rows.
@@ -1630,6 +1702,14 @@ class FlywayMigrationIntegrationTest {
                 "lake_table_references.lake_table_references_pkey",
                 "lake_tables.lake_tables_pkey",
                 "lake_tables.uq_lake_tables_datasource_namespace_name",
+                // #798 (V54) — the four PKs, a namespace / table name each registered once, one DRAFT per table.
+                "lake_column_semantics.lake_column_semantics_pkey",
+                "lake_namespaces.lake_namespaces_pkey",
+                "lake_namespaces.uq_lake_namespaces_name",
+                "lake_table_definition_versions.lake_table_definition_versions_pkey",
+                "lake_table_definition_versions.uq_lake_table_definition_versions_one_draft",
+                "lake_tables_managed.lake_tables_managed_pkey",
+                "lake_tables_managed.uq_lake_tables_managed_namespace_name",
                 // 118 (V25) — every read is per datasource; the workspace half is partial.
                 "learned_facts.idx_learned_facts_datasource",
                 // 7e (V36) — the successor of a retired fact (partial: few facts supersede one).
@@ -1811,6 +1891,14 @@ class FlywayMigrationIntegrationTest {
                 "chk_dialect",
                 // V30 (177, D11): the credential kind behind an execution — 'user' | 'endpoint' | 'server' | NULL.
                 "chk_executions_executed_by_key_kind",
+                // #798 (V54) — the semantics projection's floors and tags shape (§4.51), then the namespace's name grammar,
+                // description cap, lifecycle stamps and status (§4.48); `c` < `n` < `r`, so both sort before #778's rows.
+                "chk_lake_column_semantics_field",
+                "chk_lake_column_semantics_tags",
+                "chk_lake_namespaces_description",
+                "chk_lake_namespaces_name",
+                "chk_lake_namespaces_stamps",
+                "chk_lake_namespaces_status",
                 // #778 (V52) — the scan's family/status lists, version floors and reasons shape (§4.41), sorted before
                 // `chk_lake_table_format` (`r` < `t`); the reference's counters, resolved-identity pairing and site
                 // (§4.42), sorted after it (`f` < `r`).
@@ -1819,12 +1907,37 @@ class FlywayMigrationIntegrationTest {
                 "chk_lake_reference_scans_scanner_version",
                 "chk_lake_reference_scans_status",
                 "chk_lake_reference_scans_version",
+                // #798 (V54) — the definition version's body shape, stamps, status, floor and surface (§4.50), before
+                // `chk_lake_table_format` (`d` < `f`).
+                "chk_lake_table_definition_versions_body",
+                "chk_lake_table_definition_versions_discard_stamps",
+                "chk_lake_table_definition_versions_release_stamps",
+                "chk_lake_table_definition_versions_status",
+                "chk_lake_table_definition_versions_version",
+                "chk_lake_table_definition_versions_via",
                 // 089 §A (V15) — lake_tables.format is parquet|iceberg; a third value would
                 // generate bad view SQL later, and the database is the last place to catch it.
                 "chk_lake_table_format",
                 "chk_lake_table_references_counters",
                 "chk_lake_table_references_resolved",
                 "chk_lake_table_references_site",
+                // #798 (V54) — the managed table's apply state machine, lifecycle and policy shape (§4.49); then
+                // lake_tables' origin and the managed-only revision sequence (§4.52). The database's collation skips
+                // `_` at the first level (measured on postgres:16-alpine), so `applied` < `apply_error` < `applying`.
+                "chk_lake_tables_managed_applied",
+                "chk_lake_tables_managed_applied_at",
+                "chk_lake_tables_managed_apply_error",
+                "chk_lake_tables_managed_apply_pointer",
+                "chk_lake_tables_managed_apply_state",
+                "chk_lake_tables_managed_applying",
+                "chk_lake_tables_managed_name",
+                "chk_lake_tables_managed_policy",
+                "chk_lake_tables_managed_purge_stamps",
+                "chk_lake_tables_managed_stamps",
+                "chk_lake_tables_managed_status",
+                "chk_lake_tables_managed_versions",
+                "chk_lake_tables_origin",
+                "chk_lake_tables_revision_seq",
                 // 118 (V25) — learned_facts: the closed kind list, the kind↔scope rule, the
                 // fact/summary length windows, refs ≥ 1 (V26: for a DATASOURCE fact; a WORKSPACE
                 // rule may carry none), the trust set, the write surface, the scope↔workspace

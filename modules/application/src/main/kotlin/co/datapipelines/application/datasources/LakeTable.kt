@@ -36,6 +36,16 @@ data class LakeTable(
     val lastError: String? = null,
     /** When [lastError] was newly recorded (recording is transition-only — "broken since"). */
     val lastErrorAt: Instant? = null,
+    /**
+     * #798 / V54 — who maintains the row: `external` (a person or a manifest registered it, the only kind before
+     * V54) or `managed` (the managed lake's projection of one of its own tables, written by `modules/lake`).
+     */
+    val origin: LakeTableOrigin = LakeTableOrigin.EXTERNAL,
+    /**
+     * #798 / V54 — the `lake_table_revisions.seq` a managed row's [location] was projected from: the monotone guard
+     * of the projection repair (dp-lake design record §8b). Always null on an external row (CHECK).
+     */
+    val revisionSeq: Long? = null,
 ) {
     /** The dotted shorthand of the fully-qualified name — `nyc.mobility.hvfhv_zone_day`. */
     val qualifiedName: String get() = (namespace + name).joinToString(".")
@@ -55,6 +65,19 @@ enum class LakeTableFormat(
 
     companion object {
         fun fromWireOrNull(wire: String): LakeTableFormat? = entries.firstOrNull { it.wire == wire }
+    }
+}
+
+/** Who maintains a `lake_tables` row (metadata-db §4.15 / §4.52's CHECK); lowercase wire values. */
+enum class LakeTableOrigin(
+    val wire: String,
+) {
+    MANAGED("managed"),
+    EXTERNAL("external"),
+    ;
+
+    companion object {
+        fun fromWireOrNull(wire: String): LakeTableOrigin? = entries.firstOrNull { it.wire == wire }
     }
 }
 
