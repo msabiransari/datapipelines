@@ -1587,10 +1587,11 @@
 .pe-dock-splitter {
   position: absolute;
   user-select: none;
-  top: -4px;
+  /* #783: the lengths are app.css's shared grip tokens (9px strip, 40 x 3 pill), unchanged. */
+  top: calc((var(--app-splitter-strip) - 1px) / -2);
   left: 0;
   right: 0;
-  height: 9px;
+  height: var(--app-splitter-strip);
   z-index: 3;
   display: grid;
   place-items: center;
@@ -1603,8 +1604,8 @@
 
 .pe-dock-splitter::after {
   content: "";
-  width: 40px;
-  height: 3px;
+  width: var(--app-splitter-grip-w);
+  height: var(--app-splitter-grip-h);
   border-radius: var(--radius-pill, 999px);
   background: var(--border-default);
   transition: background var(--pe-transition);

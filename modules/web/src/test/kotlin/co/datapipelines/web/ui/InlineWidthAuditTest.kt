@@ -36,18 +36,19 @@ import org.springframework.core.io.support.PathMatchingResourcePatternResolver
  *
  * ## The one shape that is NOT an inline style, and why it is allowed
  *
- * 104's splitter (`static/js/splitter.js`) sizes two panes by writing ONE CSS custom
- * property — `--pe-dock-pane-h`, `--tplx-tree-w` — onto `document.documentElement` at
- * runtime. That is deliberately outside this audit and must stay allowed:
+ * 104's splitter (`static/js/splitter.js`) sizes three panes by writing ONE CSS custom
+ * property each — `--pe-dock-pane-h`, `--tplx-tree-w` and (#783) `--dp-dock-pane-h` — onto
+ * `document.documentElement` at runtime. That is deliberately outside this audit and must stay allowed:
  *
  *  - it is a SCRIPT setting `element.style`, not a `style="…"` attribute in a template. The
  *    regex below cannot see it, a CSP's `style-src` does not forbid it (that directive is
  *    about the attribute and about `<style>`), and the ban's actual subject — a width
  *    decision taken inside one template and invisible to every other — does not apply: the
  *    value is a USER's, not an author's;
- *  - it is a custom property on the ROOT, so the stylesheets keep owning the geometry. Both
- *    `pipeline-editor.css` and `template-tree.css` declare the shipped default as the
- *    `var()` fallback, which is what makes "reset to default" mean "remove the property".
+ *  - it is a custom property on the ROOT, so the stylesheets keep owning the geometry. The two
+ *    docks' stylesheets (`pipeline-editor.css`, `dashboards.css`) declare the shipped default on
+ *    `:root` itself and `template-tree.css` as the `var()` fallback; either way the root's inline
+ *    value wins, which is what makes "reset to default" mean "remove the property".
  *
  * The line the audit still draws, and which no round may cross: no `width`, `height`,
  * `max-width` or `grid-template-columns` written onto a CONTENT element, by a template or by

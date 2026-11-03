@@ -465,6 +465,11 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         page.addInitScript(COUNT_SCRIPT_EVALUATIONS)
         page.navigate("$baseUrl/dashboards/$board")
         page.waitForFunction("() => window.__dpPage?.ready===true")
+        // #783: the board carries the bare splitter tag too; ONE arrival is ONE evaluation (its listeners install
+        // once per document, its restore and wiring run per arrival).
+        @Suppress("UNCHECKED_CAST")
+        val onBoard = page.evaluate("() => window.__dpScriptEvaluations") as Map<String, Any?>
+        (onBoard["/js/splitter.js"] as Number?)?.toInt() shouldBe 1
         inShell("/parameter-sets/$parameterSet")
         parameterWorkspaceActive()
         inShell("/pipelines/$pipeline")
@@ -568,8 +573,8 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
     private companion object {
         /**
          * Bare `<script>` tags outside every page-asset catalog, which re-run on each arrival and cached restore of
-         * their page: only the editor's parser-blocking splitter. It sizes the dock before the first paint,
-         * so it cannot wait for a loader.
+         * their page: only the parser-blocking splitter, carried by the pipeline editor, the schedules explorer and
+         * (#783) the dashboard board. It restores the pane sizes before the first paint, so it cannot wait for a loader.
          */
         val BARE_PER_ARRIVAL =
             setOf(

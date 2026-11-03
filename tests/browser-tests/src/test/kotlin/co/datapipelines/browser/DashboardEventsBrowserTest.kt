@@ -97,16 +97,32 @@ class DashboardEventsBrowserTest : DashboardBrowserSuite() {
             "() => document.querySelector(\"[data-dp-dock-count='events']\").getAttribute('data-dp-count-zero') === 'true'",
         )
 
-        // Collapse folds the dock to its head; expanding again restores the body.
+        // Collapse folds the dock to its head; expanding again restores the body AT THE HEIGHT
+        // THE PERSON DRAGGED (#783: the height is splitter.js's root property, which a collapse
+        // never touches). Home is the resize's keyboard form that any window grants: the pane parks on
+        // its 120px floor (a step UP may meet this class's short-window ceiling first, by design, D1).
+        val grip = page.locator("[data-splitter='board-dock']")
+        bodyHeight() shouldBeGreaterThanOrEqual DOCK_MIN + GRIP_STEP
+        grip.focus()
+        grip.press("Home")
+        val dragged = bodyHeight()
+        dragged shouldBe DOCK_MIN
         page.click("[data-dp-dock-collapse]")
         page.waitForFunction(
             "() => document.getElementById('dp-board-dock').hasAttribute('data-dp-dock-collapsed')",
         )
+        bodyHeight() shouldBe 0
         page.click("[data-dp-dock-collapse]")
         page.waitForFunction(
             "() => !document.getElementById('dp-board-dock').hasAttribute('data-dp-dock-collapsed')",
         )
+        bodyHeight() shouldBe dragged
     }
+
+    /** The dock body's rendered height, rounded — the pane the splitter sizes (#783). */
+    private fun bodyHeight(): Int =
+        (page.evaluate("() => Math.round(document.querySelector('[data-dp-dock-body]').getBoundingClientRect().height)") as Number)
+            .toInt()
 
     /**
      * #476 — the board mounts the refreshes pane TWICE (the dock's History tab and the
@@ -171,5 +187,9 @@ class DashboardEventsBrowserTest : DashboardBrowserSuite() {
         const val POLL_WINDOW_MS = 35_000.0
         const val VISIBLE_COPY_FLOOR = 1
         const val ONE_POLLER_CEILING = 3
+
+        /** splitter.js's DOCK_MIN (the board dock's floor) and its Arrow step (#783). */
+        const val DOCK_MIN = 120
+        const val GRIP_STEP = 16
     }
 }
