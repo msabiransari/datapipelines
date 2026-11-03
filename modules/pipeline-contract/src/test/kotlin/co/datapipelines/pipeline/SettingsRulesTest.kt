@@ -37,6 +37,20 @@ class SettingsRulesTest {
     }
 
     @Test
+    fun `DuckDB accepts the same max_memory_mb key under the same positive-integer rule`() {
+        val settings = tempdb("""{"max_memory_mb": 512}""", StagingEngine.DUCKDB)
+        validator.validate(Fixtures.pipeline(settings = settings), workspaceId).failures.shouldBeEmpty()
+        settings.tempdb.maxMemoryMb shouldBe 512
+
+        listOf("""{"max_memory_mb": 0}""", """{"max_memory_mb": "512"}""", """{"threads": 8}""").forEach {
+            validator.validate(Fixtures.pipeline(settings = tempdb(it, StagingEngine.DUCKDB)), workspaceId).codes shouldContainExactly
+                listOf(Validation.TEMPDB_CONFIG_INVALID)
+        }
+        // Every engine has an entry: a missing one would refuse every key as "allowed: []".
+        TempdbSettings.ALLOWED_CONFIG_KEYS.keys shouldBe StagingEngine.entries.toSet()
+    }
+
+    @Test
     fun `an absent settings block is the same pipeline as an explicit H2 with no config`() {
         // §5.1: "If settings.tempdb is omitted entirely, defaults to H2 with default config."
         // Modelling absence and default-H2 differently would hand the executor two states where
@@ -130,8 +144,11 @@ class SettingsRulesTest {
         validator.validate(pipeline, workspaceId).failures.shouldBeEmpty()
     }
 
-    private fun tempdb(configJson: String): PipelineSettings {
+    private fun tempdb(
+        configJson: String,
+        engine: StagingEngine = StagingEngine.H2,
+    ): PipelineSettings {
         val config = Fixtures.json(configJson).properties().associate { it.key to it.value }
-        return PipelineSettings(TempdbSettings(StagingEngine.H2, config))
+        return PipelineSettings(TempdbSettings(engine, config))
     }
 }

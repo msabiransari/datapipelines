@@ -1,9 +1,9 @@
 # Staging (H2) Specification
 
-**Status:** v1.21 (frozen contract — additive-only changes after this point)
+**Status:** v1.22 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Configuration spec](configuration.md)
-**Last updated:** 2026-10-26
+**Last updated:** 2026-11-03
 
 ---
 
@@ -41,15 +41,23 @@ This spec defines:
 ### 3.1 Creation
 
 ```kotlin
-enum class StagingEngine { H2 }   // v1: H2 only; see enums.md
+enum class StagingEngine { H2, DUCKDB }   // declared in typesystem; see enums.md §7
 
 interface StagingFactory {
     fun create(executionId: UUID, engine: StagingEngine = StagingEngine.H2): Staging
 }
 
+// The production factory (#795): each engine is built by its own factory (DuckDB: §8.5).
+class EngineDispatchingStagingFactory(val h2: H2StagingFactory, val duckDb: DuckDbStagingFactory) : StagingFactory {
+    override fun create(executionId: UUID, engine: StagingEngine): Staging = when (engine) {
+        StagingEngine.H2 -> h2.create(executionId, engine)
+        StagingEngine.DUCKDB -> duckDb.create(executionId, engine)
+    }
+}
+
 class H2StagingFactory(private val config: H2StagingProperties) : StagingFactory {
     override fun create(executionId: UUID, engine: StagingEngine): Staging {
-        require(engine == StagingEngine.H2) { "v1 supports only StagingEngine.H2" }
+        if (engine != StagingEngine.H2) throw engineUnavailable(executionId, engine)   // a wiring mistake
         val jdbcUrl = "jdbc:h2:mem:exec_${executionId};MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE"
         // Two-phase, non-admin operational connection (§9.5). Bootstrap sa creates the
         // in-memory DB + a restricted user; the FIRST operational connection is opened as
@@ -63,7 +71,9 @@ class H2StagingFactory(private val config: H2StagingProperties) : StagingFactory
 }
 ```
 
-The signature is shared with [DAG Executor §9](dag-executor.md#9-tempdb-lifecycle-integration) — that doc's call site is canonical; this spec conforms to it. An unsupported engine (e.g. `DUCKDB` requested but not on the classpath) fails with `pipeline.staging.engine_unavailable`; any other creation failure fails with `pipeline.staging.creation_failed` (§7.2).
+The signature is shared with [DAG Executor §9](dag-executor.md#9-tempdb-lifecycle-integration) — that doc's call site is canonical; this spec conforms to it. The production factory dispatches on `settings.tempdb.engine`: `H2` is built as described in this section, `DUCKDB` as described in §8.5. Each engine's own factory refuses the other engine with `pipeline.staging.engine_unavailable` (a wiring mistake, never author input); any other creation failure fails with `pipeline.staging.creation_failed`, and a DuckDB database whose scratch reservation does not fit fails with `pipeline.staging.scratch_exhausted` before any file exists (§7.2).
+
+The key points below describe the H2 engine; the DuckDB engine's are in §8.5.
 
 Key points:
 - **JDBC URL**: `jdbc:h2:mem:exec_{execution_id}` — per-execution, isolated, in-memory.
@@ -481,7 +491,17 @@ Keys consumed by this spec:
 | `datapipelines.staging.h2.query-timeout-seconds` | `Statement.setQueryTimeout` on staging queries (§3.3) |
 | `datapipelines.staging.h2.max-connections` | Cap on operational connections per execution's pool (§9) |
 
-**Per-pipeline override.** `settings.tempdb.engine` selects the engine and `settings.tempdb.config.max_memory_mb` overrides `max-memory-mb` for that pipeline ([Pipeline Contract §5.1](pipeline-contract.md#51-settingstempdb--staging-engine-configuration), precedence per [Configuration §4](configuration.md#4-precedence)). No other staging key is per-pipeline overridable in v1.
+**DuckDB (§8.5).** A `DUCKDB` staging database binds no key of its own. Its bounds are the managed lake's admission keys, read whether or not the lake is enabled ([Configuration §3.36](configuration.md#336-managed-lake-dp-lake-785)):
+
+| Key | Used by |
+|---|---|
+| `datapipelines.lake.admission.staging-memory-limit` | The engine's `memory_limit` (§8.5) |
+| `datapipelines.lake.admission.staging-expansion-factor` | The default scratch reservation: `staging-memory-limit × staging-expansion-factor` (§8.5) |
+| `datapipelines.lake.admission.scratch-bytes` | The aggregate every DuckDB staging database's reservation shares (§8.5) |
+
+`insert-batch-size`, `result-batch-size`, `query-timeout-seconds` and `max-connections` above apply to both engines, and so does `max-memory-mb` as the executor's threshold (§8.5). `mode` is H2's only. The DuckDB files live in `<java.io.tmpdir>/dp-staging`; no key moves them.
+
+**Per-pipeline override.** `settings.tempdb.engine` selects the engine and `settings.tempdb.config.max_memory_mb` overrides `max-memory-mb` for that pipeline, on either engine ([Pipeline Contract §5.1](pipeline-contract.md#51-settingstempdb--staging-engine-configuration), precedence per [Configuration §4](configuration.md#4-precedence)). No other staging key is per-pipeline overridable in v1.
 
 ### 7.2 Error codes
 
@@ -493,10 +513,12 @@ Staging error codes are cataloged centrally in [Pipeline Contract §13.5](pipeli
 | `pipeline.staging.engine_unavailable` | The requested `settings.tempdb.engine` is not available (§3.1) |
 | `pipeline.staging.invalid_column_name` | A source column label fails validation or duplicates another (§4.5) |
 | `pipeline.staging.table_already_exists` | `CREATE TABLE` targets a name already staged in this execution (§4.5) |
-| `pipeline.staging.memory_limit_exceeded` | The staged footprint exceeds the effective memory budget (§8.2) |
-| `pipeline.staging.precision_overflow` | Source DECIMAL precision exceeds H2's limit (§5.2) |
+| `pipeline.staging.memory_limit_exceeded` | The staged footprint exceeds the effective memory budget (§8.2), or a DuckDB allocation passed the engine's `memory_limit` (§8.5) |
+| `pipeline.staging.precision_overflow` | Source DECIMAL precision exceeds H2's limit (§5.2), or on DuckDB a precision above 38 or an exact-unsized numeric (§8.5) |
 | `pipeline.staging.value_overflow` | A source value exceeds the staged column's capacity (§4.3) |
-| `pipeline.staging.cleanup_failed` | table cleanup (enumerate + `DROP TABLE`, §3.4) or connection close failed; logged, never masks a node failure |
+| `pipeline.staging.scratch_exhausted` | A DuckDB staging database's scratch reservation does not fit in the aggregate; refused before any file exists (§8.5) |
+| `pipeline.staging.scratch_limit_exceeded` | A DuckDB staging database outgrew its own reservation — the engine refused a spill, or the measured file, WAL and spill directory passed it (§8.5) |
+| `pipeline.staging.cleanup_failed` | table cleanup (enumerate + `DROP TABLE`, §3.4), connection close, or the deletion of a DuckDB database's files failed; logged, never masks a node failure |
 
 There is no `pipeline.staging.h2_creation_failed` — the engine-neutral `creation_failed` is the canonical code.
 
@@ -547,7 +569,52 @@ The JVM-level safety net is configured via:
 - JVM heap size (`-Xmx`) — sized as staging max-memory × max-concurrent-executions + baseline (see the resource-sizing guidance in [Deployment](deployment.md)).
 - Off-heap buffer pool limits (for Arrow / large BLOB handling).
 
-If the JVM OOMs mid-execution, the in-memory staging database dies with the process. No persistent state corruption (staging is in-memory only).
+If the JVM OOMs mid-execution, the in-memory staging database dies with the process. No persistent state corruption (H2 staging is in-memory only). A DuckDB staging database's files survive the process (§8.5's known limit); they hold staged copies only, never state anything reads back.
+
+### 8.5 The DuckDB engine
+
+A pipeline declaring `settings.tempdb.engine: DUCKDB` ([Pipeline Contract §5.1](pipeline-contract.md#51-settingstempdb--staging-engine-configuration)) stages into a **file-backed DuckDB database per execution** (dp-lake P1, #795). The `Staging` interface (§10) and the factory's signature (§3.1) are unchanged; what differs is the engine underneath, described here. Templates on `source: tempdb` are then written in DuckDB's SQL ([Templates](templates.md)), and staged tables map types per [Type System §6a](type-system.md#6a-duckdb-staging-type-mapping-canonical--duckdb).
+
+**Files.** The database is `<scratch dir>/exec_<execution id>.duckdb`, its write-ahead log `exec_<execution id>.duckdb.wal` and its spill directory `exec_<execution id>.tmp`, all beside each other. The scratch directory is `<java.io.tmpdir>/dp-staging`, created owner-only; P1 binds no key for it. Only the execution id reaches a path; nothing from request input does.
+
+**Open sequence.** In this order, each step refusing before the next:
+
+1. **Reserve** the database's scratch bytes from the factory's aggregate (`scratch-bytes`). Refused as `pipeline.staging.scratch_exhausted` before any file exists.
+2. Create the scratch directory and remove anything left by the same execution id.
+3. Open DP's own root connection with `allow_persistent_secrets = false` and streamed results (a materialized result is held outside the buffer manager's reading), then apply the settings below, the lock last.
+4. **Read the lock back.** A database whose lock did not take is never handed out.
+
+A failure after step 1 closes the root connection, deletes the files and releases the reservation, then surfaces as `pipeline.staging.creation_failed`.
+
+| Setting | Value | Why |
+|---|---|---|
+| `memory_limit` | `staging-memory-limit` (default 1 GB) | The buffer manager's bound (below) |
+| `temp_directory` | the spill directory beside the file | Spill stays inside the execution's own files |
+| `max_temp_directory_size` | the reservation | The engine refuses a spill past it (below) |
+| `threads` | four, or fewer on a host with fewer cores | DuckDB's own default is every core, so one execution's sort could starve the others. Four matches the default `max-connections`, and at the default memory limit it leaves the buffer manager 256 MB per thread |
+| `TimeZone` | `UTC` | SQL-side date arithmetic on a staged `TIMESTAMP` is in UTC ([Type System §6a](type-system.md#6a-duckdb-staging-type-mapping-canonical--duckdb)) |
+| `autoinstall_known_extensions`, `autoload_known_extensions`, `allow_community_extensions` | `false` | No extension is fetched or loaded |
+| `enable_external_access` | `false` | No file or network access from SQL |
+| `lock_configuration` | `true` | No later `SET` or `RESET` changes any of the above |
+
+**Leases.** The lease model is §9's: one owner per connection, at most `max-connections` out at once, `close()` never waits for a lease. Each lease is a fresh `duplicate()` of the locked root connection, closed when the lease returns, so per-lease session state (variables, temporary objects, prepared statements, an open transaction) dies with it. A duplicate shares the database and inherits the lock: measured on the pinned driver (1.5.5.1), `SET`, `RESET` and `SET lock_configuration = false` are refused on it.
+
+**Author SQL is contained before it runs.** Every connection author SQL can reach (`withConnection`, `withQuery`, `execute`) is a duplicate of a database already locked with external access off. Measured refusals on an author connection: `read_parquet` of a host file, `ATTACH` of a database file, `INSTALL`, `COPY … TO` a host path, `SET enable_external_access = true`, `SET memory_limit`, `SET`/`RESET lock_configuration`. `ATTACH ':memory:'` is allowed: it touches no file of its own, and its data is held to the same `memory_limit` and spills under the same reservation (measured: a table too large for both fails as `scratch_limit_exceeded`). No secret exists (persistent secrets off, no S3 in P1) and nothing goes outbound.
+
+**A temporary text gate (owner ruling 2026-11-03).** On the pinned driver, a few engine functions are not stopped by the configuration lock. Until the upstream fix ships, every author statement is read as raw text first, case-insensitively and including strings and comments, and refused if it contains `enable_logging`, `disable_logging`, `truncate_duckdb_logs` or `json_execute_serialized_sql`, or calls `query` or `query_table` (the table functions that run SQL text, so a refused name cannot be assembled at run time). The refusal is an `SQLException` with SQLState `42501` that names what it found and never echoes the statement; it surfaces as the node's query failure. Known false positive: a staged column or string that merely contains a refused name is refused in author SQL too. DP's own staging path (`stage`, `stageRows`) runs no author text and is not gated. A test pins the set of the driver's functions that execute SQL text, so a driver upgrade that adds one goes red.
+
+**Memory.** `memory_limit` bounds DuckDB's buffer manager, **not** the JVM heap and not every native allocation the engine makes (dp-lake design §11). The process-level bound is the lake's boot check and the JVM-level safety net of §8.4. An allocation past the limit fails inside the engine and surfaces as `pipeline.staging.memory_limit_exceeded` with the engine's own reading (`used/limit`) in `details.engine_reading`, also mid-drain: a stage stops at the batch that failed and its partial table is rolled back (§4.5). `StagingStats.memoryUsedBytes` is the sum of `duckdb_memory()`, so the executor's threshold check after each staging operation ([DAG Executor §9](dag-executor.md#9-tempdb-lifecycle-integration)) compares the engine's reading, not JVM heap. **Where the `max_memory_mb` clamp lands:** a pipeline's `max_memory_mb` is clamped by the executor to `max-memory-mb` on either engine and compared with that reading; the engine's `memory_limit` is a second ceiling, locked before any author SQL runs, that no pipeline value can raise.
+
+**Scratch.** Each database reserves its scratch bytes before it opens and releases them exactly once, in `close()` (or when the open fails). The reservation is `staging-memory-limit × staging-expansion-factor` (owner ruling 2026-11-02; 3 GB at the defaults); a caller may pass its own (the lake's delivery path will pass delivery bytes × factor) without changing `create(executionId, engine)`. All of a factory's databases share one aggregate, `scratch-bytes`. Within its reservation a database is bounded twice:
+
+- **The spill.** The engine's `max_temp_directory_size` is the reservation, so a spill past it fails inside the engine. It surfaces as `pipeline.staging.scratch_limit_exceeded` with the engine's reading of the spill directory in `details.engine_reading`.
+- **The file.** No DuckDB setting bounds the database file or its WAL. DP measures the file, WAL and spill directory after every write (`stage`, `stageRows`, `execute`, `withConnection`) and fails a total past the reservation as `pipeline.staging.scratch_limit_exceeded` with `details.measured_bytes`. A failing stage's partial table is rolled back.
+
+**Known limits (v1).** The two bounds are separate, so a database's disk use can briefly reach about **twice** its reservation: a file just under the reservation plus a spill up to it. And the file check runs after the statement, so one statement can overshoot before it is caught. Size `scratch-bytes` and the scratch volume with that headroom.
+
+**Types and values.** Columns are created per [Type System §6a](type-system.md#6a-duckdb-staging-type-mapping-canonical--duckdb). A column whose precision is above 38, or an exact-unsized numeric, is refused with `pipeline.staging.precision_overflow` naming the column before any table exists; the author `CAST`s it to `DECIMAL(p, s)` with `p ≤ 38` (owner ruling 2026-11-03). Values are appended through the driver's appender, each converted to its column's exact type and precision-checked first, so a value its column cannot hold is `pipeline.staging.value_overflow`, never a silent `NULL`.
+
+**Destruction.** `close()` drops nothing table by table: the file dies. It closes every connection and deletes the file, WAL and spill directory, at once when no lease is out, otherwise when the last lease returns. A deletion failure is logged as `pipeline.staging.cleanup_failed`; `close()` never throws (§3.4). **Known limit (v1): a JVM crash leaves the files behind.** Nothing reads them again, and nothing removes them except a later open of the same execution id, which a crashed execution never gets. They do not count against the aggregate (it lives in memory), so they take disk the reservations assume is free until the scratch directory is cleared (follow-up FOLLOWUP_ORPHANS).
 
 ---
 
@@ -655,21 +722,22 @@ data class StageResult(
 data class StagingStats(
     val tableCount: Int,
     val totalRows: Long,
-    val memoryUsedBytes: Long        // measured JVM heap, in-process (§8.2), not estimated
+    val memoryUsedBytes: Long        // measured, not estimated: JVM heap on H2 (§8.2), duckdb_memory() on DuckDB (§8.5)
 )
 ```
 
 `ColumnSchema` is the canonical column descriptor from [Type System §7.1](type-system.md#71-column-descriptor-json-schema).
 
-### 10.1 Future: DuckDB staging
+### 10.1 DuckDB staging
 
-For analytical workloads (large joins, aggregations on wide tables), DuckDB would outperform H2. The interface above is designed so that `DuckDbStaging` could be a drop-in replacement. Differences:
-- JDBC URL: `jdbc:duckdb:memory:exec_{id}`.
-- Type mapping: similar but DuckDB has `HUGEINT`, native nested types.
-- Parallelism: DuckDB is internally parallel (one connection parallelizes queries), so the lease model could be revisited — but only after verifying DuckDB's JDBC connection is documented thread-safe for concurrent statements.
-- Memory accounting: DuckDB has its own `memory_limit` setting and `duckdb_memory()` view; `MEMORY_USED()` is H2-specific.
+`DuckDbStaging` implements the interface above unchanged (#795; §8.5 has the engine's rules). Compared with H2:
+- **Storage**: a file per execution (`<java.io.tmpdir>/dp-staging/exec_{id}.duckdb`), deleted by `close()`, not an in-memory database.
+- **Type mapping**: [Type System §6a](type-system.md#6a-duckdb-staging-type-mapping-canonical--duckdb). `BIGINTEGER` is `BIGINT`, not `HUGEINT`, so it reads back as itself; precision is capped at 38.
+- **Parallelism**: DuckDB parallelizes one query internally (`threads`, §8.5), and the lease model stays §9's: each lease is its own duplicate connection, one owner each.
+- **Memory accounting**: the engine's `memory_limit` and the `duckdb_memory()` reading (§8.5) replace the JVM-heap measurement of §8.2.
+- **Containment**: a locked configuration with external access off, instead of §9.5's non-admin user.
 
-Marked as v2 candidate, not v1. Requesting an engine that is not on the classpath fails with `pipeline.staging.engine_unavailable`.
+Each engine's own factory refuses the other engine with `pipeline.staging.engine_unavailable` (§3.1).
 
 ---
 
@@ -716,6 +784,13 @@ These are documented in the authoring guide (future).
 - **Type round-trip tests** for every canonical type:
   - Source value → staged → queried back → wire-encoded → asserted equal to source.
   - Covers BIGINTEGER, BIGDECIMAL precision, TIMESTAMP UTC normalization, etc.
+- **DuckDB twins** (§8.5, #795) of the lifecycle, identifier-safety, round-trip, concurrency, memory-limit and failure-path suites, read back the way the executor reads a tempdb result. Plus, each falsified at birth (the guard disabled → red, restored → green):
+  - **Files**: the database file, WAL and spill directory are gone after `close()` on success, on a failed stage, after cancellation (`NonCancellable` close) and when the last lease returns after `close()`.
+  - **Lock**: a `duckdb_settings()` read-back on an author connection, and the measured refusals (file read, `ATTACH`, `INSTALL`, `COPY … TO`, `SET enable_external_access`, `SET memory_limit`, unlocking).
+  - **Memory**: staging past a tiny `memory_limit` fails as `memory_limit_exceeded` with the engine's reading, mid-cursor.
+  - **Scratch**: two databases that together exceed the aggregate — the second is refused before any file exists, and a release makes room; a failed open releases its reservation; a spill past the reservation and a file past it both fail as `scratch_limit_exceeded`.
+  - **Text gate**: every author route reaches it, DP's own staging path does not, and the driver's set of SQL-text-executing functions is pinned.
+  - **Classification**: only the engine's own out-of-memory messages are classified; an author's `error('Out of Memory Error …')` and a refused `SET` stay the driver's exception.
 
 ---
 
@@ -727,7 +802,7 @@ These are documented in the authoring guide (future).
 - The lifecycle: a bounded pool of non-admin (§9.5) connections, the first opened at execution start and at least one held for the execution, table drop (enumerate + `DROP TABLE`, §3.4) + close of every connection in `finally`, no GC reliance, no waiting on a lease still inside the driver.
 - The one-owner-per-connection lease model and per-lease session state (§9.2).
 - Identifier safety: column-name regex, duplicate rejection, unconditional double-quoting, no sanitizing.
-- The canonical → H2 type mapping (per [Type System §6](type-system.md#6-h2-staging-type-mapping-canonical--h2)).
+- The canonical → H2 type mapping (per [Type System §6](type-system.md#6-h2-staging-type-mapping-canonical--h2)) and the canonical → DuckDB one (per [Type System §6a](type-system.md#6a-duckdb-staging-type-mapping-canonical--duckdb)).
 - Table names = `output.table` from pipeline nodes (no prefixes).
 
 ### 13.2 Not frozen
@@ -736,7 +811,9 @@ These are documented in the authoring guide (future).
 - Batch sizes and timeouts (configuration, per [Configuration §3.3](configuration.md#33-staging-tempdb)).
 - The default and ceiling of `max-connections` (configuration; the model is frozen, the number is not — §9.4).
 - Memory-polling granularity (per staging operation today; could tighten).
-- The H2-specific class names (only the `Staging` interface is the contract).
+- The H2-specific and DuckDB-specific class names (only the `Staging` interface is the contract).
+- The DuckDB engine's storage (§8.5). A file-backed database per execution is an implementation of the frozen interface, not a change to it: `close()` still never throws, and the files die with the instance as H2's memory does.
+- The DuckDB bounds' numbers (`threads`, the reservation formula) and the temporary text gate, which goes when the upstream fix ships.
 
 ---
 
@@ -744,7 +821,7 @@ These are documented in the authoring guide (future).
 
 Out of scope for v1:
 
-- **DuckDB as alternative staging**: switch on per-pipeline or globally. Useful for analytical workloads.
+- **DuckDB as a global default**: v1 selects DuckDB per pipeline only (§8.5).
 - **Hybrid staging**: H2 for small state, DuckDB for large joins. Complex; only if profiling justifies.
 - **Spill-to-disk**: when in-memory limit hit, allow H2 to spill to disk (with severe perf warning) rather than fail. Useful for exploratory queries on large data.
 - **Indexing hints**: let templates declare `CREATE INDEX` for staging tables to speed up specific JOINs.
@@ -756,6 +833,7 @@ Out of scope for v1:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-03 | v1.22 | 795 (#795) dp-lake P1 DuckDB staging | New **§8.5 The DuckDB engine**: a file-backed database per execution under `<java.io.tmpdir>/dp-staging`, its scratch reserved before it opens (`scratch_exhausted`), its configuration locked with external access off before author SQL can reach it, every lease a duplicate of the locked root; `memory_limit` = `staging-memory-limit`, with the engine's own reading behind `memory_limit_exceeded`; spill and file bounded by the reservation (`scratch_limit_exceeded`), with the 2× peak and the after-statement check stated as known limits; a temporary raw-text gate on author SQL (owner ruling 2026-11-03). §3.1 the engine-dispatching factory; §7.1 the admission keys DuckDB reads (no key of its own); §7.2 the two new codes and the DuckDB cases of three existing ones; §10 `memoryUsedBytes` per engine; §10.1 rewritten as current; §12 the DuckDB tests; §13 the DuckDB type mapping frozen beside H2's, its storage and numbers not; §14's DuckDB item narrowed to a global default. |
 | 2026-10-26 | v1.21 | #361 landing follow-up | §8.2: use one JVM heap snapshot for cheap and post-GC samples, preventing a heap resize between separate committed/free reads from yielding a negative budget measurement. Whole-JVM accounting and collection cadence are unchanged. |
 | 2026-10-21 | v1.20 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **§ atomicity, one clause**: a writer of two tables is "the SCRIPT node" (was TRANSFORM). Status moves from v1.18 to v1.20 — it had not followed v1.19's row. A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-09-17 | v1.19 | 155 / #122 §8.2 cadence correction | §8.2: the mid-drain budget re-measurement is at most once per **second** (`BUDGET_CHECK_INTERVAL_MS`), not 250 ms — the doc kept the pre-108 §B number. The two-tier reading is now documented: a cheap non-collecting sample on the cadence (garbage included, over-estimate only), the accurate GC-forcing check deciding only when the cheap one exceeds the budget. No behaviour change. |

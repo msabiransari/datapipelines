@@ -15,8 +15,11 @@ package co.datapipelines.typesystem
  *    read back through §5.6 as `BIGDECIMAL(38, 0)` and change the column's type across staging.
  *  - **Approximate `DECIMAL` stages as `DOUBLE`** (§4.2, as on H2): the omitted scale is the
  *    only discriminator, and `DOUBLE` round-trips an IEEE 754 value losslessly.
- *  - **`TIMESTAMP` stages as `TIMESTAMP WITH TIME ZONE`** (DuckDB's `TIMESTAMPTZ`): an instant,
- *    read back as UTC by the staging session's `TimeZone = 'UTC'` (staging.md §8.5).
+ *  - **`TIMESTAMP` stages as `TIMESTAMP WITH TIME ZONE`** (DuckDB's `TIMESTAMPTZ`): an instant.
+ *    The pinned driver reads it back expressed at the JVM zone's offset whatever the session's
+ *    `TimeZone`, the instant unchanged, and egress normalizes it to UTC (§8.4). The staging
+ *    session's `TimeZone = 'UTC'` makes SQL-side date arithmetic (`CAST(ts AS DATE)`,
+ *    `strftime`) UTC instead (staging.md §8.5).
  *  - **`BINARY` stages as `BLOB`**, DuckDB's only byte-string type.
  *
  * ## Precision ceiling: 38, and no unbounded decimal
@@ -32,14 +35,15 @@ package co.datapipelines.typesystem
  *
  * ## Binding
  *
- * There is no `java.sql.Types` half: DuckDB staging binds every value with the untyped
- * `setObject(index, value)` (staging.md §8.5). Measured on the pinned driver, the typed form
- * rejects `Types.VARBINARY`, `Types.DATE` and `Types.TIME` as an unknown target type and
- * silently wraps a `Long` bound as `Types.INTEGER`, while the untyped form round-trips every
- * value the source reader produces and refuses an out-of-range one with a conversion error.
- * The one silent case the untyped form leaves — a `BigDecimal` wider than 38 digits binds as
- * NULL — is closed by the staging insert path, which checks each decimal value against its
- * column before binding.
+ * There is no `java.sql.Types` half: DuckDB staging writes through the driver's appender
+ * (staging.md §8.5), which takes each value as the one Java type its column stores — `Int` for
+ * `INTEGER`, `Long` for `BIGINT`, a `BigDecimal` at exactly the column's scale. Measured on the
+ * pinned driver, a prepared-statement batch was fifteen times slower and reported an engine
+ * out-of-memory as a transaction error, the typed `setObject` rejects `Types.VARBINARY`,
+ * `Types.DATE` and `Types.TIME` and wraps a `Long` bound as `Types.INTEGER`, and the untyped
+ * form binds a `BigDecimal` wider than 38 digits as NULL. The staging insert path therefore
+ * converts each value to its column's Java type and checks a decimal's precision before it
+ * appends, so no value reaches the engine in a shape it would silently change.
  */
 object DuckDbEgressMapper {
     /** DuckDB `DECIMAL` precision ceiling (§6a). */

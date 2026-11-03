@@ -1,9 +1,9 @@
 # Module Structure Specification
 
-**Status:** v1.9 (frozen contract — additive-only changes after this point)
+**Status:** v1.10 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** (all other specs — this spec operationalizes them into code structure)
-**Last updated:** 2026-11-02
+**Last updated:** 2026-11-03
 
 ---
 
@@ -392,15 +392,17 @@ The wiring lives in `app` (it owns the runnable artifact) even though the driver
 
 **Dependencies (external):**
 - `com.h2database:h2`
+- `org.duckdb:duckdb_jdbc` (`libs.duckdb.jdbc`, the version the catalog pins for every module) — the DuckDB staging engine ([Staging §8.5](staging.md#85-the-duckdb-engine))
 - `org.jetbrains.kotlinx:kotlinx-coroutines-core` — pool admission is a coroutine `Semaphore` and every staging operation is `suspend` ([Staging §9.2](staging.md#92-one-owner-per-connection-and-session-state-is-per-lease)).
 
 **Public API:**
 - `Staging` interface
 - `StagingFactory` interface — `create(executionId, engine: StagingEngine = H2)`
 - `H2Staging`, `H2StagingFactory` implementations
+- `DuckDbStaging`, `DuckDbStagingFactory` (with `DuckDbStagingProperties` and the per-factory `ScratchBudget`) and `EngineDispatchingStagingFactory`, which routes `create` by engine
 - `StageResult` (`columns: List<ColumnSchema>`), `StagingStats` data classes
 
-No repository: tempdb lives and dies with one execution and is never persisted (§3.1).
+No repository: tempdb lives and dies with one execution and is never persisted (§3.1). A DuckDB staging database is a file, deleted when the execution's staging closes.
 
 **Tests:** unit tests for type mapping; integration tests for staging round-trip; streaming tests for memory-bounded behavior.
 
@@ -1307,6 +1309,7 @@ Before considering the module structure "ready":
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-03 | v1.10 | 795 (#795, dp-lake P1) | §5.5 `staging`: external dependency `org.duckdb:duckdb_jdbc` and the DuckDB staging engine's public classes ([Staging §8.5](staging.md#85-the-duckdb-engine)). No new internal edge: `StagingEngine` moved into `typesystem`, which `staging` already depends on. |
 | 2026-11-02 | v1.9 | 785 (#785, dp-lake P2) | New module **`lake`** (§3, §3.1, §4.1 layer 4, §4.2 row, new **§5.21**): the managed lake's catalog core. Its §4.2 row is the dp-lake design record's edge set (`typesystem`, `persistence`, `datasources`, `staging`, `pipeline-contract`, `scheduler`, `auth`); P2 declares three. `web` gains the edge `lake` for the after-Flyway boot check. The root `allowedInternalDependencies` map moves with the table (`verifyModuleDependencies`). |
 | 2026-10-26 | v1.8 | 721 (#721) | §4.1/§4.2/§5.12: `tests/browser-tests` gains the internal edge `web` (`testImplementation`, a direct edge per the §4.2 rule — not `api` leakage through `app`) so `SiteShotsRailOrderTest` can pin the screenshot driver's rail table against `AppNav.ITEMS`. The root `allowedInternalDependencies` map and the §4.2 row move together (`verifyModuleDependencies`). Test-scope only: no production edge, public API or runtime change. |
 | 2026-10-24 | v1.7 | 442b (#442) | §5.16: `scheduler` gains `thymeleaf-spring6` (BOM-managed, already on `auth`'s and `web`'s class paths — the scheduler's lock gains its four lines) for the notice templates; its public API gains the `NotificationMailer` port and the `ScheduleNotifier` job (B5). `web` implements the port over `auth`'s `MailSender`. No internal dependency edge changes. |

@@ -28,6 +28,29 @@ interface StagingFactory {
 }
 
 /**
+ * The production factory (staging.md §3.1, §8.5): dispatches each execution on its pipeline's
+ * `settings.tempdb.engine`. An `H2` execution is built by [h2] exactly as before; a `DUCKDB` one by
+ * [duckDb], whose bounds come from `datapipelines.lake.admission.*` whether or not the lake itself is
+ * enabled — a non-lake DuckDB staging database reserves `staging-memory-limit × staging-expansion-factor`
+ * (owner ruling 2026-11-02). Each delegate keeps refusing the other's engine as `engine_unavailable`.
+ */
+class EngineDispatchingStagingFactory(
+    /** Builds every `H2` staging database; readable so wiring is testable. */
+    val h2: H2StagingFactory,
+    /** Builds every `DUCKDB` staging database; readable so wiring is testable. */
+    val duckDb: DuckDbStagingFactory,
+) : StagingFactory {
+    override fun create(
+        executionId: UUID,
+        engine: StagingEngine,
+    ): Staging =
+        when (engine) {
+            StagingEngine.H2 -> h2.create(executionId, engine)
+            StagingEngine.DUCKDB -> duckDb.create(executionId, engine)
+        }
+}
+
+/**
  * The H2 staging factory (staging.md §3.1).
  *
  * The JDBC URL is `jdbc:h2:mem:exec_{id};MODE={mode};DATABASE_TO_LOWER=TRUE` with **no

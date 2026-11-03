@@ -24,6 +24,7 @@ import co.datapipelines.datasources.crypto.CredentialEncryptor
 import co.datapipelines.datasources.crypto.KeyProviderConfig
 import co.datapipelines.datasources.crypto.KeyProviders
 import co.datapipelines.datasources.pooling.PoolLifecycleMetrics
+import co.datapipelines.lake.LakeProperties
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.DatasourceFacts
 import co.datapipelines.pipeline.PipelineNames
@@ -31,6 +32,9 @@ import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineResolver
 import co.datapipelines.pipeline.PipelineValidator
 import co.datapipelines.pipeline.TemplateDryRenderer
+import co.datapipelines.staging.DuckDbStagingFactory
+import co.datapipelines.staging.DuckDbStagingProperties
+import co.datapipelines.staging.EngineDispatchingStagingFactory
 import co.datapipelines.staging.H2StagingFactory
 import co.datapipelines.staging.H2StagingProperties
 import co.datapipelines.staging.StagingFactory
@@ -48,6 +52,7 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.core.env.Environment
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import java.nio.file.Path
 import co.datapipelines.pipeline.DatasourceRegistry as ContractDatasourceRegistry
 
 /**
@@ -510,24 +515,27 @@ class DomainConfiguration {
         )
 
     /**
-     * The per-execution tempdb factory (staging §3).
+     * The per-execution tempdb factory (staging §3), dispatching on the pipeline's
+     * `settings.tempdb.engine` (staging §8.5, #795) — see [stagingFactoryFor] for the mapping.
      *
-     * The properties are the **already-resolved** effective values; the per-pipeline
-     * `max_memory_mb` override is applied by the executor, clamped to this ceiling
-     * (configuration.md §3.3). `maxConnections` (146 / #118) travels here too — this hand-written
-     * copy is the hop a new knob silently misses, which `StagingH2WiringTest` guards.
+     * The DuckDB bounds are `datapipelines.lake.admission.*`, bound here with [Binder] rather than
+     * by injecting `LakeProperties`: that bean exists only while `datapipelines.lake.enabled=true`
+     * (`LakeAutoConfiguration`), and a DuckDB staging database needs its bounds with or without a
+     * lake. Same prefix, same class, same defaults — so a lake deployment and a lake-less one read
+     * one set of numbers.
      */
     @Bean
-    fun stagingFactory(properties: StagingH2Properties): StagingFactory =
-        H2StagingFactory(
-            H2StagingProperties(
-                mode = properties.mode,
-                maxMemoryMb = properties.maxMemoryMb,
-                insertBatchSize = properties.insertBatchSize,
-                resultBatchSize = properties.resultBatchSize,
-                queryTimeoutSeconds = properties.queryTimeoutSeconds,
-                maxConnections = properties.maxConnections,
-            ),
+    fun stagingFactory(
+        properties: StagingH2Properties,
+        environment: Environment,
+    ): StagingFactory =
+        stagingFactoryFor(
+            properties,
+            Binder
+                .get(environment)
+                .bind(LAKE_ADMISSION_PREFIX, Bindable.of(LakeProperties.Admission::class.java))
+                .orElseGet { LakeProperties.Admission() },
+            DEFAULT_DUCKDB_SCRATCH_DIR,
         )
 
     /** Exposed so [PipelineBodies] and the controllers share one repository instance. */
@@ -589,6 +597,70 @@ class DomainConfiguration {
             guard = guard,
         )
 }
+
+/** Where `datapipelines.lake.admission.*` lives; the staging bounds are read from it. */
+internal const val LAKE_ADMISSION_PREFIX = "${LakeProperties.PREFIX}.admission"
+
+/**
+ * The DuckDB staging scratch directory: `java.io.tmpdir/dp-staging`. P1 binds no key of its own
+ * (brief #795, stamped); an operator moves it by moving the JVM's temp directory.
+ */
+internal val DEFAULT_DUCKDB_SCRATCH_DIR: Path =
+    Path.of(System.getProperty("java.io.tmpdir"), "dp-staging").toAbsolutePath()
+
+/**
+ * The tempdb factory's mapping from bound configuration (staging §3, §8.5) — a function apart
+ * from the `@Bean` so the wiring tests drive it with bound values (an overload of the bean
+ * method's name would be a second factory-method candidate to Spring).
+ *
+ * - **H2** is built exactly as before #795: every [StagingH2Properties] field copied into the
+ *   staging module's own [H2StagingProperties]. The per-pipeline `max_memory_mb` override is applied
+ *   by the executor, clamped to `max-memory-mb` (configuration.md §3.3). `maxConnections` (146 /
+ *   #118) travels here too — this hand-written copy is the hop a new knob silently misses, which
+ *   `StagingH2WiringTest` guards.
+ * - **DuckDB** takes its bounds from [admission] — `staging-memory-limit` (the engine's locked
+ *   `memory_limit`), `staging-expansion-factor` and the `scratch-bytes` aggregate one
+ *   [co.datapipelines.staging.ScratchBudget] shares — and the engine-neutral knobs (batch sizes,
+ *   query timeout, connection cap) from `datapipelines.staging.h2.*`, so no DuckDB-only key exists.
+ *   Threads are [DuckDbStagingProperties.boundedThreads]. `StagingDuckDbWiringTest` guards the copy.
+ *
+ * Where the `max_memory_mb` clamp lands for DuckDB: the executor clamps the declared value to
+ * `max-memory-mb` and compares it with the measured `duckdb_memory()` sum after each staging
+ * operation, as on H2; the engine's `memory_limit` (`staging-memory-limit`) is locked before any
+ * author SQL runs, so no pipeline value can raise it (staging §8.5).
+ */
+internal fun stagingFactoryFor(
+    h2: StagingH2Properties,
+    admission: LakeProperties.Admission,
+    scratchDir: Path,
+): EngineDispatchingStagingFactory =
+    EngineDispatchingStagingFactory(
+        h2 =
+            H2StagingFactory(
+                H2StagingProperties(
+                    mode = h2.mode,
+                    maxMemoryMb = h2.maxMemoryMb,
+                    insertBatchSize = h2.insertBatchSize,
+                    resultBatchSize = h2.resultBatchSize,
+                    queryTimeoutSeconds = h2.queryTimeoutSeconds,
+                    maxConnections = h2.maxConnections,
+                ),
+            ),
+        duckDb =
+            DuckDbStagingFactory(
+                DuckDbStagingProperties(
+                    scratchDir = scratchDir,
+                    memoryLimitBytes = admission.stagingMemoryLimit.toBytes(),
+                    expansionFactor = admission.stagingExpansionFactor,
+                    scratchCapacityBytes = admission.scratchBytes.toBytes(),
+                    threads = DuckDbStagingProperties.boundedThreads(),
+                    insertBatchSize = h2.insertBatchSize,
+                    resultBatchSize = h2.resultBatchSize,
+                    queryTimeoutSeconds = h2.queryTimeoutSeconds,
+                    maxConnections = h2.maxConnections,
+                ),
+            ),
+    )
 
 /**
  * [KeyProviderConfig] over Spring's [Environment] — the aggregation layer supplying the

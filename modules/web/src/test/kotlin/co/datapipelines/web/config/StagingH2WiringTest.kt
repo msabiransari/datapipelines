@@ -1,5 +1,6 @@
 package co.datapipelines.web.config
 
+import co.datapipelines.staging.EngineDispatchingStagingFactory
 import co.datapipelines.staging.H2StagingFactory
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
@@ -9,6 +10,7 @@ import org.springframework.boot.context.properties.bind.BindException
 import org.springframework.boot.context.properties.bind.Bindable
 import org.springframework.boot.context.properties.bind.Binder
 import org.springframework.boot.context.properties.source.MapConfigurationPropertySource
+import org.springframework.core.env.AbstractEnvironment
 
 /**
  * `datapipelines.staging.h2.max-connections` through every layer it crosses (146 / #118,
@@ -65,6 +67,7 @@ class StagingH2WiringTest {
             .bind("datapipelines.staging.h2", Bindable.of(StagingH2Properties::class.java))
             .orElseGet { StagingH2Properties() }
 
+    /** Through the `@Bean` itself; the H2 delegate is what an `H2` execution is built by (#795). */
     private fun factoryFor(properties: StagingH2Properties): H2StagingFactory =
-        DomainConfiguration().stagingFactory(properties) as H2StagingFactory
+        (DomainConfiguration().stagingFactory(properties, object : AbstractEnvironment() {}) as EngineDispatchingStagingFactory).h2
 }
