@@ -1020,25 +1020,72 @@ class FlywayMigrationIntegrationTest {
             )
         columnsOf("lake_namespaces") shouldContainExactlyInAnyOrder
             listOf(
-                "archived_at", "archived_by", "created_at", "created_by", "deprecated_at", "deprecated_by", "description",
-                "id", "name", "replacement_id", "status",
+                "archived_at",
+                "archived_by",
+                "created_at",
+                "created_by",
+                "deprecated_at",
+                "deprecated_by",
+                "description",
+                "id",
+                "name",
+                "replacement_id",
+                "status",
             )
         columnsOf("lake_tables_managed") shouldContainExactlyInAnyOrder
             listOf(
-                "applied_at", "applied_version_here", "apply_error_json", "apply_operation_id", "apply_state",
-                "archived_at", "archived_by", "created_at", "created_by", "current_definition_version", "deprecated_at",
-                "deprecated_by", "id", "name", "namespace_id", "policy_json", "purge_allowed_after", "purged_at",
-                "purged_by", "replacement_id", "status",
+                "applied_at",
+                "applied_version_here",
+                "apply_error_json",
+                "apply_operation_id",
+                "apply_state",
+                "archived_at",
+                "archived_by",
+                "created_at",
+                "created_by",
+                "current_definition_version",
+                "deprecated_at",
+                "deprecated_by",
+                "id",
+                "name",
+                "namespace_id",
+                "policy_json",
+                "purge_allowed_after",
+                "purged_at",
+                "purged_by",
+                "replacement_id",
+                "status",
             )
         columnsOf("lake_table_definition_versions") shouldContainExactlyInAnyOrder
             listOf(
-                "body_hash", "body_json", "created_at", "created_by", "created_via", "discarded_at", "discarded_by",
-                "released_at", "released_by", "status", "table_id", "updated_at", "updated_by", "updated_via", "version",
+                "body_hash",
+                "body_json",
+                "created_at",
+                "created_by",
+                "created_via",
+                "discarded_at",
+                "discarded_by",
+                "released_at",
+                "released_by",
+                "status",
+                "table_id",
+                "updated_at",
+                "updated_by",
+                "updated_via",
+                "version",
             )
         columnsOf("lake_column_semantics") shouldContainExactlyInAnyOrder
             listOf(
-                "applied_version", "doc", "field_id", "iceberg_type", "logical_type", "name", "ordinal", "required",
-                "table_id", "tags_json",
+                "applied_version",
+                "doc",
+                "field_id",
+                "iceberg_type",
+                "logical_type",
+                "name",
+                "ordinal",
+                "required",
+                "table_id",
+                "tags_json",
             )
         query(
             "SELECT column_name || '|' || is_nullable || '|' || coalesce(column_default, '') FROM information_schema.columns " +
