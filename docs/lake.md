@@ -184,6 +184,10 @@ from (named by its `dp.definition.version` property) and the intent (the current
 | make a column required | breaking | `lake.definition.breaking_change` |
 | change the identifier fields | breaking | `lake.definition.breaking_change` |
 
+Whether a table holds rows is read from its current snapshot. A table with no snapshot has none. Otherwise
+the snapshot summary's `total-records` decides, and a summary without that key counts as rows, the conservative answer
+for the required-column rule.
+
 A version holding several changes takes the strictest class. Reviewed changes are refused in the first release; a
 breaking change's remedy is a replacement table and deprecating the old one. A refusal's `apply_error_json` carries
 `change_class`, `table_has_rows` and `changes`, each change `{kind, field_id, detail}`; a drift carries `reason`,
