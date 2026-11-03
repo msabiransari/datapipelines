@@ -47,7 +47,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
  * - [LogoutSameOriginMatcher] (#782): the logout posted from the app's own page — the browser's
  *   own `Sec-Fetch-Site: same-origin` attestation is that request's control, so a stale token
  *   there still clears the session and lands on /login (a refusal must not strand the person).
- * Cookie-authenticated state-changing requests need the `dp_csrf` double-submit token
+ * Other cookie-authenticated state-changing requests need the `dp_csrf` double-submit token
  * **everywhere**, the `/api/v1` prefix included — `SameSite=Lax` (§5.5: Strict breaks the
  * cross-site login redirect) is defence-in-depth, not the control, because it stops neither a
  * same-site subdomain attacker nor a cross-site top-level GET.

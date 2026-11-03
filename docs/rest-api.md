@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v2.107 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.108 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-11-02
+**Last updated:** 2026-11-03
 
 ---
 
@@ -1930,7 +1930,7 @@ All return the standard envelopes; mutations return the updated user record and 
 ```
 POST /logout
 ```
-Clears the `dp_session` cookie ([Auth §6.5](auth.md#65-logout)). Root-level (not under `/api/v1`), CSRF-protected, listed here for completeness.
+Clears the `dp_session` cookie and redirects to `/login` ([Auth §6.5](auth.md#65-logout)). This root-level browser route is outside `/api/v1`. Since #782, a `POST /logout` attested `Sec-Fetch-Site: same-origin` is exempt from the double-submit check so a stale tab can still log out. Other attestations and requests without that header keep the CSRF requirement ([Auth §8.4](auth.md#84-api-endpoints-auth-via-api-key-or-jwt)). A refused plain browser navigation renders the HTML 403 page and clears no session; API and htmx callers keep the JSON envelope. `GET /logout` never clears the session.
 
 ---
 
@@ -2884,6 +2884,7 @@ browser persistence. Clients must reject foreign/stale responses even after abor
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-03 | v2.108 | #782 logout CSRF | **§16.4:** the root-level browser logout has a narrow same-origin Fetch Metadata exemption; other callers retain double-submit validation. A refused browser navigation gets the 403 page and preserves its session; machine callers keep JSON. |
 | 2026-11-01 | v2.107 | 758 (#758) | **§24:** fixes the tree search whitespace alphabet on both client and server, after the shared raw-term bound; names the code points and empty-term browse behavior. |
 | 2026-10-27 | v2.106 | 464 (#464) | §24: the tree routes' refusals carry catalogued codes ([pipeline-contract §13.24](pipeline-contract.md#1324-navigation-trees)) instead of the stand-in `pipeline.execution.aborted`: `400 navigation.request.invalid`, `503 navigation.view.unavailable` (now with `Retry-After: 5`, no `details`) and `503 navigation.metadata.too_large`. Statuses are unchanged. |
 | 2026-10-27 | v2.105 | 575 (#575) | §18.1: all five wire inventory arms require a RELEASED current pointer; pipeline and template draft pointers and never-released templates are omitted, matching the promotability rule. |
