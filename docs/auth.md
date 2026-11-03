@@ -1137,7 +1137,7 @@ class SecurityConfig(
                 // Exemption follows the CREDENTIAL, not the path (§8.4): DP-API-Key (or
                 // Bearer dpk_ on /mcp); promotion requires a server-key header (§10.6);
                 // screenshot upload requires a single-use DP-Upload-Token (#353). No cookie authenticates there.
-                csrf.ignoringRequestMatchers(ApiKeyCredentialMatcher(), PromotionRouteMatcher(), UploadCapabilityRouteMatcher())
+                csrf.ignoringRequestMatchers(ApiKeyCredentialMatcher(), PromotionRouteMatcher(), UploadCapabilityRouteMatcher(), LogoutSameOriginMatcher())
                 // Double-submit needs a STABLE cookie; this chain has no server session to
                 // protect, so Spring's rotate-or-delete strategy is neutered (027).
                 csrf.sessionAuthenticationStrategy(NullAuthenticatedSessionStrategy())
