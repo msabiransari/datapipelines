@@ -158,6 +158,124 @@ class LocalLoginE2eTest {
         lines.forEach { it shouldNotContain LOCAL_PASSWORD }
     }
 
+    // ---------------------------------------------------- logout CSRF (#782)
+
+    /**
+     * The owner's option (a): a logout POSTED FROM THE APP'S OWN PAGE (the browser's
+     * `Sec-Fetch-Site: same-origin`) succeeds on ANY token state — a stale tab whose
+     * `dp_csrf` was re-minted logs out and lands on /login instead of a raw JSON 403.
+     * The exemption is [co.datapipelines.auth.LogoutSameOriginMatcher]; the falsification
+     * leg is removing it from the SecurityConfig call (the same-origin case then 403s).
+     */
+    @Test
+    fun `a stale-token logout posted from the app's own page still clears the session`() {
+        seedLocalUsers()
+        val login = postLogin(LOCAL_EMAIL, LOCAL_PASSWORD)
+        val dashboard = renderDashboard(login.sessionCookie())
+        val csrf = dashboard.csrf
+
+        // Rewrite the cookie half; the page's hidden token stays what it rendered. The
+        // posted pair no longer matches — the exact stale-tab shape the bug names.
+        val staleCookies = dashboard.cookies + ("dp_csrf" to "stale-${java.util.UUID.randomUUID()}")
+        val logout = postLogout(csrf, staleCookies, fetchSite = "same-origin")
+
+        logout.statusCode shouldBe 302
+        logout.headers.getValue("Location") shouldBe "/login"
+        clearsSession(logout) shouldBe true
+    }
+
+    /**
+     * A logout whose attestation says the page was NOT the app's own (same-site subdomain,
+     * cross-site) keeps the refusal — and the refusal must clear NOTHING. The forward-based
+     * error render carries no security filter (the chain is registered for REQUEST dispatch
+     * only, lane 782 dispatch note), and this guard pins that outcome whatever the wiring
+     * becomes: a refusal of a logout must never expire dp_session.
+     */
+    @Test
+    fun `a logout that is not from the app's own page is refused and clears nothing`() {
+        seedLocalUsers()
+        val login = postLogin(LOCAL_EMAIL, LOCAL_PASSWORD)
+        val dashboard = renderDashboard(login.sessionCookie())
+        val csrf = dashboard.csrf
+        val staleCookies = dashboard.cookies + ("dp_csrf" to "stale-${java.util.UUID.randomUUID()}")
+
+        for (fetchSite in listOf("same-site", "cross-site")) {
+            val refused = postLogout(csrf, staleCookies, fetchSite = fetchSite)
+
+            refused.statusCode shouldBe 403
+            refused.getHeader("Location") shouldBe null
+            // The page, not the §13.7 envelope: a browser form navigation gets HTML.
+            refused.contentType().contains("text/html") shouldBe true
+            refused.asString() shouldContain "Your page is out of date. Reload it and try again."
+            refused.asString() shouldNotContain "\"auth.csrf.invalid\""
+            clearsSession(refused) shouldBe false
+        }
+    }
+
+    @Test
+    fun `GET logout clears nothing`() {
+        seedLocalUsers()
+        val login = postLogin(LOCAL_EMAIL, LOCAL_PASSWORD)
+
+        val response =
+            given()
+                .port(port)
+                .cookies(mapOf("dp_session" to login.sessionCookie()))
+                .redirects()
+                .follow(false)
+                .`when`()
+                .get("/logout")
+
+        // /logout has no GET handler: the answer is the 404 page — and no cookie op at all.
+        clearsSession(response) shouldBe false
+    }
+
+    /** True only when the response explicitly EXPIRES dp_session (Max-Age=0), never for a mint. */
+    private fun clearsSession(response: io.restassured.response.Response): Boolean =
+        response.detailedCookies().asList().any { it.name == "dp_session" && it.maxAge == 0L }
+
+    private class DashboardRender(
+        val csrf: String,
+        val cookies: Map<String, String>,
+    )
+
+    private fun renderDashboard(session: String): DashboardRender {
+        val dashboard =
+            given()
+                .port(port)
+                .cookies(mapOf("dp_session" to session))
+                .`when`()
+                .get("/dashboard")
+                .then()
+                .statusCode(200)
+                .extract()
+        val csrf =
+            checkNotNull(CSRF_FIELD.find(dashboard.asString())) { "no _csrf hidden input on the dashboard" }
+                .groupValues[1]
+        return DashboardRender(
+            csrf = csrf,
+            cookies = mapOf("dp_session" to session) + dashboard.detailedCookies().asList().associate { it.name to it.value },
+        )
+    }
+
+    private fun postLogout(
+        csrf: String,
+        cookies: Map<String, String>,
+        fetchSite: String?,
+    ): io.restassured.response.Response =
+        given()
+            .port(port)
+            .cookies(cookies)
+            .contentType(ContentType.URLENC)
+            .formParam("_csrf", csrf)
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .header("User-Agent", "Mozilla/5.0 (lane-782 integration)")
+            .let { request -> fetchSite?.let { request.header("Sec-Fetch-Site", it) } ?: request }
+            .redirects()
+            .follow(false)
+            .`when`()
+            .post("/logout")
+
     // ------------------------------------------------------------------ helpers
 
     private fun loginPageHtml(): String =

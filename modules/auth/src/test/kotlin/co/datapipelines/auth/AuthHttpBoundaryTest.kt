@@ -5,11 +5,13 @@ import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.security.Keys
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotBeBlank
+import io.kotest.matchers.string.shouldNotContain
 import jakarta.servlet.ServletContext
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
@@ -665,6 +667,73 @@ class AuthHttpBoundaryTest {
     @Test
     fun `an api-key state change needs no csrf token at all`() {
         call(HttpMethod.POST, "/mcp", headers(apiKey = readKey)).statusCode.value() shouldBe 200
+    }
+
+    // ------------------------------------ browser-shaped refusals (#782 option a)
+    //
+    // The CSRF refusal of a BROWSER navigation (Accept: text/html, no HX-Request, non-
+    // machine path) must answer through a FORWARD to /error — a page, not the §13.7
+    // envelope. The "clears nothing" clause below is pinned against the dispatch
+    // alternative: planting sendError where the forward sits left these green BECAUSE
+    // the security chain is registered for REQUEST dispatch only (Boot 3.5.16
+    // AbstractFilterRegistrationBean; lane 782 falsification) — the ERROR dispatch
+    // never re-runs LogoutFilter. The guard pins the OUTCOME the owner requires:
+    // a refusal of a logout must not clear the session, whatever the wiring becomes.
+
+    private fun browserHeaders(
+        cookies: List<String>,
+        csrfToken: String? = "a-different-token",
+        fetchSite: String? = null,
+    ): HttpHeaders =
+        headers(cookies = cookies, csrfToken = csrfToken).apply {
+            set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            set("User-Agent", "Mozilla/5.0 (lane-782 boundary)")
+            fetchSite?.let { set("Sec-Fetch-Site", it) }
+        }
+
+    /** True only when the response explicitly EXPIRES dp_session (Max-Age=0), never for a mint. */
+    private fun clearsSession(response: ResponseEntity<String>): Boolean =
+        response.headers[HttpHeaders.SET_COOKIE].orEmpty().any {
+            it.startsWith("dp_session=") && it.contains("Max-Age=0")
+        }
+
+    @Test
+    fun `a browser-shaped csrf refusal of an app route answers html - not the envelope`() {
+        val response =
+            call(HttpMethod.POST, "/workspace/switch", browserHeaders(cookies = listOf("dp_session=$session")))
+
+        response.statusCode.value() shouldBe 403
+        response.headers.contentType.toString().contains("text/html") shouldBe true
+        response.body.shouldNotBeNull().shouldNotContain("auth.csrf.invalid")
+        clearsSession(response) shouldBe false
+    }
+
+    @Test
+    fun `a refused logout clears nothing - not the session, not a redirect`() {
+        // No Sec-Fetch-Site at all: a form POST missing the attestation is NOT exempt.
+        val response = call(HttpMethod.POST, "/logout", browserHeaders(cookies = listOf("dp_session=$session")))
+
+        response.statusCode.value() shouldBe 403
+        response.headers.contentType.toString().contains("text/html") shouldBe true
+        response.headers.location.shouldBeNull()
+        clearsSession(response) shouldBe false
+        response.body.shouldNotBeNull().shouldNotContain("auth.csrf.invalid")
+    }
+
+    @Test
+    fun `a same-site logout with a stale token is refused and clears nothing`() {
+        // The exemption's attestation boundary: same-site (a sibling origin the browser
+        // labels distinctly) is NOT the app's own page, so the refusal stands.
+        val response =
+            call(
+                HttpMethod.POST,
+                "/logout",
+                browserHeaders(cookies = listOf("dp_session=$session"), fetchSite = "same-site"),
+            )
+
+        response.statusCode.value() shouldBe 403
+        response.headers.location.shouldBeNull()
+        clearsSession(response) shouldBe false
     }
 
     // ----------------------------------- filter execution count (B12 behavioral, 015)
