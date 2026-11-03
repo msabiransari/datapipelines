@@ -328,7 +328,7 @@ its defaults:
 | Key | Holds | Written by | Status |
 |---|---|---|---|
 | `dp-rail` | `"1"` compact / `"0"` explicitly expanded (the menu) | `shell.js`; read pre-paint by `rail.js` | kept, same semantics |
-| `dp-browser-width:<workspace>` | the preferred browser width, inside app.css's `--app-browser-min`–`--app-browser-max` range (the range's one source; both scripts read it computed) | `browser-resize.mjs`; read pre-paint by `rail.js` | new; any other value is removed |
+| `dp-browser-width:<workspace>` | the preferred browser width, inside app.css's `--app-browser-min`–`--app-browser-max` range (the range's one source; both scripts read it computed; `ShellRenderTest` pins the separator's server-rendered ARIA to these properties) | `browser-resize.mjs`; read pre-paint by `rail.js` | new; any other value is removed |
 | `dp-browser-hidden:<workspace>` | `"1"` when the reader hid the browser | `shell.js`; read pre-paint by `rail.js` | new; removed by a desktop family menu click; any other value is removed |
 | `dp-rail-width:<workspace>` | the old rail+tree width | — | retired: removed on sight by `rail.js`, never reinterpreted (it measured a different composition) |
 | `dp-tree-open:<workspace>`, `dp-tree-panel:<workspace>:<family>` | the old accordion's open family | — | retired: removed on sight by `tree/sidebar.mjs` |
