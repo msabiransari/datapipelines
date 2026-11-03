@@ -22,6 +22,15 @@ import java.sql.SQLException
  *    that run SQL **text**, so `query('SELECT * FROM enable_' || 'logging(…)')` cannot assemble a
  *    refused name the raw text never contains.
  *
+ * "Followed by" means after any run of characters the engine treats as token separators, after the
+ * name and after an optional closing quote. Java's `\s` is ASCII-only, while the pinned engine also
+ * separates tokens with 18 non-ASCII code points (no-break space, U+2000–U+200B, narrow no-break
+ * space, medium mathematical space, word joiner, ideographic space, byte-order mark), so the
+ * class is `\s` plus every Unicode space separator, format character and control character. The
+ * rule stays the ruled shape — the bare word `query` (a column, an alias, a table) still passes; only
+ * a call is refused. `DuckDbCarrierCatalogTest` sweeps the code space against the pinned engine:
+ * every text the engine runs as a carrier call must be refused here.
+ *
  * Of the pinned driver's 943 functions, `query`, `query_table` and `json_execute_serialized_sql` are
  * the only ones that execute SQL text; `DuckDbCarrierCatalogTest` pins that set and goes red if a
  * driver bump adds another.
@@ -37,8 +46,13 @@ object DuckDbAuthorSqlGate {
     val REFUSED_NAMES: List<String> =
         listOf("enable_logging", "disable_logging", "truncate_duckdb_logs", "json_execute_serialized_sql")
 
-    /** The two SQL-text carriers, when called: the name, optionally quoted, then `(` or a comment. */
-    val CARRIER_CALL: Regex = Regex("""\bquery(?:_table)?"?\s*(?:\(|/\*|--)""", RegexOption.IGNORE_CASE)
+    /**
+     * The two SQL-text carriers, when called: the name, optionally quoted, then any run of token
+     * separators (ASCII whitespace, Unicode space separators, format and control characters), then
+     * `(` or a comment opener.
+     */
+    val CARRIER_CALL: Regex =
+        Regex("""\bquery(?:_table)?"?[\s\p{Z}\p{Cf}\p{Cc}]*(?:\(|/\*|--)""", RegexOption.IGNORE_CASE)
 
     /** SQLState for the refusal: class 42, insufficient privilege. */
     const val SQL_STATE = "42501"

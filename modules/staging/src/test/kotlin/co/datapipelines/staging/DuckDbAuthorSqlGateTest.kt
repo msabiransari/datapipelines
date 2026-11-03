@@ -4,6 +4,7 @@ import co.datapipelines.typesystem.ColumnSchema
 import co.datapipelines.typesystem.LogicalType
 import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -12,6 +13,9 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.Arguments
+import org.junit.jupiter.params.provider.MethodSource
 import java.nio.file.Path
 import java.sql.SQLException
 
@@ -76,6 +80,28 @@ class DuckDbAuthorSqlGateTest {
         forms.forEach { sql -> refusedText(sql).message shouldContain "`query` or `query_table`" }
     }
 
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("nonAsciiSeparatorCalls")
+    fun `a carrier call is refused when a non-ASCII separator the engine accepts precedes its argument`(
+        form: String,
+        sql: String,
+    ) {
+        withClue(form) { refusedText(sql).message shouldContain "`query` or `query_table`" }
+    }
+
+    @Test
+    fun `the widened rule still passes the bare word - a column, a string, an alias`() {
+        // These pin that the separator class did not drift into refusing the word itself (owner
+        // ruling 2026-11-03: only a CALL is refused).
+        listOf(
+            "SELECT query FROM t",
+            "SELECT 'query' AS x",
+            "SELECT 1 AS query",
+            "SELECT query FROM t",
+            "SELECT 1 AS query﻿",
+        ).forEach { sql -> shouldNotThrowAny { DuckDbAuthorSqlGate.check(sql) } }
+    }
+
     @Test
     fun `ordinary SQL that merely mentions the words passes`() {
         listOf(
@@ -134,5 +160,27 @@ class DuckDbAuthorSqlGateTest {
         shouldNotThrowAny { DuckDbAuthorSqlGate.check(sql) }
         shouldThrow<SQLException> { staging.authorExec(sql) }.message shouldContain "does not exist"
         staging.scalarText("SELECT count(*) FROM duckdb_logs()") shouldBe "0"
+    }
+
+    private companion object {
+        /**
+         * The lander's three named separators (#795 review F1), quoted and unquoted, plus a carrier
+         * whose separator run ends in a comment opener and the second carrier's name. Each is a text
+         * the pinned engine runs as a carrier call (measured, round-two evidence); the full sweep is
+         * `DuckDbCarrierCatalogTest`.
+         */
+        @JvmStatic
+        fun nonAsciiSeparatorCalls(): List<Arguments> =
+            listOf(
+                Arguments.of("U+00A0 unquoted", "SELECT * FROM query ('SELECT 1')"),
+                Arguments.of("U+00A0 quoted", "SELECT * FROM \"query\" ('SELECT 1')"),
+                Arguments.of("U+200B unquoted", "SELECT * FROM query​('SELECT 1')"),
+                Arguments.of("U+200B quoted", "SELECT * FROM \"query\"​('SELECT 1')"),
+                Arguments.of("U+FEFF unquoted", "SELECT * FROM query﻿('SELECT 1')"),
+                Arguments.of("U+FEFF quoted", "SELECT * FROM \"query\"﻿('SELECT 1')"),
+                Arguments.of("U+2003 query_table", "SELECT * FROM query_table ('t')"),
+                Arguments.of("U+3000 then a block comment", "SELECT * FROM query　/* c */('SELECT 1')"),
+                Arguments.of("U+2060 then a line comment", "SELECT * FROM query⁠-- c\n('SELECT 1')"),
+            )
     }
 }
