@@ -76,10 +76,16 @@ class ReusableRestTreeBrowserTest : BrowserSuite() {
         width("app-browser") shouldBe range.effectiveDefault
         page.locator("#browser-boundary").focus()
         page.keyboard().press("End")
-        page.waitForFunction("expected => document.getElementById('app-main').getBoundingClientRect().width === expected", 1440 - 202 - range.maximumAt(1440, 202))
+        page.waitForFunction(
+            "expected => document.getElementById('app-main').getBoundingClientRect().width === expected",
+            1440 - 202 - range.maximumAt(1440, 202),
+        )
         width("app-browser") shouldBe range.maximumAt(1440, 202)
         page.keyboard().press("Home")
-        page.waitForFunction("expected => document.getElementById('app-main').getBoundingClientRect().width === expected", 1440 - 202 - range.min)
+        page.waitForFunction(
+            "expected => document.getElementById('app-main').getBoundingClientRect().width === expected",
+            1440 - 202 - range.min,
+        )
         width("app-browser") shouldBe range.min
         page.evaluate(
             "() => window.__rowWitness === document.querySelector('#nav-tree-pipelines [data-tree-key=\"folder:scope\"]')",

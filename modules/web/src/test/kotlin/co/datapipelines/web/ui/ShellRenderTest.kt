@@ -801,10 +801,12 @@ class ShellRenderTest {
                     .inputStream
                     .use { it.readBytes().decodeToString() }
             val rootBlock =
-                Regex(""":root\s*\{([^}]+)}""").findAll(css)
+                Regex(""":root\s*\{([^}]+)}""")
+                    .findAll(css)
                     .map { it.groupValues[1] }
                     .firstOrNull { it.contains("--app-browser-min:") }
                     ?: throw AssertionError("app.css must declare --app-browser-min in a :root block")
+
             fun bound(name: String): Int {
                 val value = Regex("""$name:\s*(\d+)px""").find(rootBlock)?.groupValues?.get(1)
                 return requireNotNull(value?.toInt()) { "app.css's :root must declare $name in px" }

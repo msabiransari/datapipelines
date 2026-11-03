@@ -278,7 +278,7 @@ class PipelineSidebarTreeBrowserTest : RestTreeBrowserFixture() {
     }
 
     @Test
-    fun `the tablet band starts with a 64 menu and the browser at the range's floor, and the browser stays bounded once the menu expands`() {
+    fun `the tablet band starts with a 64 menu and the browser at the range's floor, and stays bounded once the menu expands`() {
         readyTree()
         seedPipeline("acme/one")
         page.setViewportSize(900, 900)
