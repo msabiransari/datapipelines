@@ -1,5 +1,6 @@
 package co.datapipelines.browser
 
+import com.microsoft.playwright.Page
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
@@ -66,7 +67,8 @@ class LogoutStaleTokenBrowserTest : BrowserSuite() {
         page.content() shouldContain "Correlation ID"
 
         // The way back: a plain (non-boosted) link to a working login form.
-        page.locator("a", com.microsoft.playwright.Page.LocatorOptions().setHasText("Log in")).first().click()
+        val back = page.locator("a", Page.LocatorOptions().setHasText("Log in"))
+        back.first().click()
         named(page, "the login form after the refusal page's Log in link") {
             page.locator("#login-email").waitFor()
         }
