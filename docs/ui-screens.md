@@ -3114,7 +3114,7 @@ These are **full-page** errors — the result of a browser navigation to a page 
 |---|---|---|
 | 401 (Unauthorized) | `GET /login?expired=true` | Login page with "Your session has expired" message |
 | 400 (Bad Request) | rendered in place (`error/400`) | "That request could not be read" + link to dashboard. The sentence under it is the form's ("Something in the form that was sent is missing or malformed") by default; a malformed value in a GET's address (#408, §5.1) says "The address names a value this page cannot read. Check the link and try again." Neither names the value |
-| 403 (Forbidden) | `GET /error?status=403` | "You don't have permission to access this page" + link back to dashboard |
+| 403 (Forbidden) | `GET /error?status=403` | "You don't have permission to access this page" + link back to dashboard. Two shapes (#782, [Auth §8.4](auth.md#84-api-endpoints-auth-via-api-key-or-jwt)): a refused plain form navigation instead shows "That action could not be taken" over the refusal's fixed user message ("Your page is out of date. Reload it and try again.") with the correlation id for support; the actions (Reload / Log in / Go to Dashboard) are real page loads — `hx-boost="false"` — because the persistent-navigation guard blocks a boosted navigation whose destination has no `#app-main` |
 | 404 (Not Found) | `GET /error?status=404` | "Page not found" + link to dashboard. A malformed id answers as an absent one (#408, §5.1) |
 | 500 (Server Error) | `GET /error?status=500` | "Something went wrong" + correlation_id for support |
 | Login errors | `GET /login?error={code}` | Login page with error message (domain_not_allowed, inactive, oidc_error, identity_mismatch) |
