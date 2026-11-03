@@ -157,7 +157,10 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
             names
                 .mapIndexed { i, name -> """{"name":"$name","x":0,"y":${i * rows},"w":12,"h":$rows}""" }
                 .joinToString(",", "[", "]")
-        sql("UPDATE dashboard_versions SET body_json = jsonb_set(body_json, '{layout,grid}', '$grid'::jsonb) WHERE dashboard_id = '$board'::uuid")
+        sql(
+            "UPDATE dashboard_versions SET body_json = jsonb_set(body_json, '{layout,grid}', '$grid'::jsonb) " +
+                "WHERE dashboard_id = '$board'::uuid",
+        )
         return board
     }
 
