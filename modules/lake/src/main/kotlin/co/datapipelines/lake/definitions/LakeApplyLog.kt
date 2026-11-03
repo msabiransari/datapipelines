@@ -6,11 +6,13 @@ import java.util.UUID
 /**
  * One structured line per apply or verify attempt that reached the table (observability §3.4R): ids, names, the
  * version and a code, never a body, a location or a credential. An attempt that found nothing to do logs nothing.
+ * Every event name is a literal in its own format string, so `ObservabilityEventCatalogParityTest` reads it against §3.4R.
  */
 internal object LakeApplyLog {
     private val log = LoggerFactory.getLogger(LakeDefinitionApplier::class.java)
 
-    private const val LINE = "event={} operation={} table_id={} namespace={} table={} version={} operation_id={} {}"
+    /** The fields every line carries after its event name, then the outcome's own tail. */
+    private const val FIELDS = " operation={} table_id={} namespace={} table={} version={} operation_id={} {}"
 
     fun ended(
         operation: String,
@@ -19,22 +21,53 @@ internal object LakeApplyLog {
         operationId: UUID,
         outcome: LakeApplyOutcome,
     ) {
-        val (warn, event, tail) =
-            when (outcome) {
-                is LakeApplyOutcome.Applied -> Triple(false, "lake.definition.applied", "committed=${outcome.committed}")
-                is LakeApplyOutcome.Failed -> Triple(true, "lake.definition.apply_failed", "code=${outcome.code}")
-                is LakeApplyOutcome.Busy -> Triple(false, DEFERRED, "code=${outcome.code} reason=${outcome.reason}")
-                is LakeApplyOutcome.Pending -> Triple(false, DEFERRED, "code=${outcome.code} reason=none")
-                is LakeApplyOutcome.Unknown -> Triple(true, "lake.definition.apply_unknown", "code=${outcome.code}")
-                LakeApplyOutcome.Superseded -> Triple(false, "lake.definition.apply_superseded", "")
-                is LakeApplyOutcome.NotApplicable -> return
+        val line = Line(operation, row, version, operationId)
+        when (outcome) {
+            is LakeApplyOutcome.Applied -> {
+                line.info("event=lake.definition.applied$FIELDS", "committed=${outcome.committed}")
             }
-        if (warn) {
-            log.warn(LINE, event, operation, row.id, row.namespace, row.name, version, operationId, tail)
-        } else {
-            log.info(LINE, event, operation, row.id, row.namespace, row.name, version, operationId, tail)
+
+            is LakeApplyOutcome.Failed -> {
+                line.warn("event=lake.definition.apply_failed$FIELDS", "code=${outcome.code}")
+            }
+
+            is LakeApplyOutcome.Busy -> {
+                line.info("event=lake.definition.apply_deferred$FIELDS", "code=${outcome.code} reason=${outcome.reason}")
+            }
+
+            is LakeApplyOutcome.Pending -> {
+                line.info("event=lake.definition.apply_deferred$FIELDS", "code=${outcome.code} reason=none")
+            }
+
+            is LakeApplyOutcome.Unknown -> {
+                line.warn("event=lake.definition.apply_unknown$FIELDS", "code=${outcome.code}")
+            }
+
+            LakeApplyOutcome.Superseded -> {
+                line.info("event=lake.definition.apply_superseded$FIELDS", "")
+            }
+
+            is LakeApplyOutcome.NotApplicable -> {
+                // Nothing to do was found: no line (§3.4R).
+            }
         }
     }
 
-    private const val DEFERRED = "lake.definition.apply_deferred"
+    /** The common six fields of one attempt. */
+    private class Line(
+        val operation: String,
+        val row: LakeManagedTable,
+        val version: Int?,
+        val operationId: UUID,
+    ) {
+        fun info(
+            format: String,
+            tail: String,
+        ) = log.info(format, operation, row.id, row.namespace, row.name, version, operationId, tail)
+
+        fun warn(
+            format: String,
+            tail: String,
+        ) = log.warn(format, operation, row.id, row.namespace, row.name, version, operationId, tail)
+    }
 }
