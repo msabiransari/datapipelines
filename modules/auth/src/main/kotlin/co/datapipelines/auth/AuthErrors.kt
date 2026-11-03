@@ -20,6 +20,24 @@ private const val HTTP_CONFLICT = 409
  */
 object AuthAttributes {
     const val AUTH_ERROR = "co.datapipelines.auth.error"
+
+    /**
+     * A browser-shaped CSRF refusal (#782), carried as a [CsrfInvalidException] so the error
+     * page's resolver (web module) can render `error/403` with the refusal's fixed user
+     * message. Set only on the forward branch of the access-denied handler; machine surfaces
+     * never set it, so their §13.7 JSON envelope is untouched.
+     */
+    const val CSRF_REFUSAL = "co.datapipelines.auth.csrf_refusal"
+
+    /**
+     * The error page a browser-shaped CSRF refusal FORWARDS to (#782). A forward, never
+     * `sendError`: the stash and the error status are REQUEST attributes, and only a
+     * FORWARD carries request attributes to the error render — under `sendError` the
+     * resolver has nothing to claim and the person would get the generic
+     * permission-refusal page. (The chain is registered for REQUEST dispatch only — see
+     * the handler's dispatch note — so no security filter re-runs on either dispatch.)
+     */
+    const val ERROR_PAGE_PATH = "/error"
 }
 
 /**

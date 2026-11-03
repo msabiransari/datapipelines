@@ -1,5 +1,6 @@
 package co.datapipelines.auth
 
+import jakarta.servlet.RequestDispatcher
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
 import org.slf4j.LoggerFactory
@@ -22,6 +23,30 @@ import org.springframework.security.web.csrf.MissingCsrfTokenException
  * [MissingCsrfTokenException] only when the *repository* held no token, so a request
  * that sent the `dp_csrf` cookie but no `DP-CSRF-Token` header arrives as an
  * `InvalidCsrfTokenException` even though the caller sent no token at all.
+ *
+ * ## The browser shape gets the error PAGE, not the envelope (#782)
+ * A refusal of a plain browser form navigation (Accept admits text/html, no htmx
+ * partial swap, not a machine surface) forwards to Boot's error rendering with the
+ * refusal stashed in [AuthAttributes.CSRF_REFUSAL], so the person sees the error/403
+ * page — the fixed user message, a Reload action, the correlation id — instead of raw
+ * JSON. The forward is deliberate over `sendError`: the stash is REQUEST data and only
+ * a FORWARD carries request attributes to the error render — under `sendError` the
+ * resolver has nothing to claim and the person would get the generic
+ * permission-refusal page, the wrong message for an out-of-date tab. The MDC
+ * correlation id is likewise still intact mid-chain, so the page quotes the same id
+ * the log line carries. The container's error status attribute is set by hand before
+ * the forward.
+ *
+ * Dispatch note (verified from Boot 3.5.16 bytecode, lane 782): the security chain is
+ * registered for REQUEST dispatch only — `AbstractFilterRegistrationBean` grants a
+ * non-[OncePerRequestFilter] (the chain's DelegatingFilterProxy) REQUEST alone, unless
+ * `spring.security.filter.dispatcher-types` says otherwise. No security filter —
+ * including LogoutFilter — re-runs on the ERROR or the FORWARD render, so the refusal
+ * cannot be "performed" again while the error page is being answered. Falsified
+ * in-lane: planting `sendError` where the forward sits left every "clears nothing"
+ * boundary guard green, which is what refuted the earlier ERROR-dispatch hazard
+ * claim. The page carries the refusal's FIXED user message only —
+ * never request data (observability redaction rule).
  *
  * Anything else is [AccessDeniedUndeclaredException] — `auth.permission.undeclared` with honest,
  * empty details. Refusals that DO know their requirement come from [ScopeInterceptor] through
@@ -48,7 +73,12 @@ class AuthAccessDeniedHandler(
                 request.requestURI,
                 clientAddressResolver.clientAddressOf(request),
             )
-            errorWriter.write(request, response, CsrfInvalidException(reason))
+            val refusal = CsrfInvalidException(reason)
+            if (rendersErrorPage(request)) {
+                forwardToErrorPage(request, response, refusal)
+                return
+            }
+            errorWriter.write(request, response, refusal)
             return
         }
         log.info(
@@ -71,9 +101,37 @@ class AuthAccessDeniedHandler(
         !request.getHeader(SecurityConfig.CSRF_HEADER).isNullOrBlank() ||
             !request.getParameter(CSRF_PARAMETER).isNullOrBlank()
 
+    /**
+     * A page a person reads (the [ScopeInterceptor] rule): not an API/partials/MCP machine
+     * surface, not an htmx partial swap, and an Accept that admits text/html. Machine surfaces
+     * keep the §13.7 JSON envelope byte-for-byte; htmx keeps its own refusal semantics.
+     */
+    private fun rendersErrorPage(request: HttpServletRequest): Boolean =
+        !isMachineSurface(request.appPath()) &&
+            request.getHeader(HX_REQUEST_HEADER) == null &&
+            (request.getHeader("Accept") ?: "").contains(TEXT_HTML)
+
+    private fun isMachineSurface(path: String): Boolean =
+        path.startsWith(ScopeInterceptor.API_PREFIX) ||
+            path.startsWith(ScopeInterceptor.PARTIALS_PREFIX) ||
+            path.startsWith(ScopeInterceptor.MCP_PREFIX)
+
+    private fun forwardToErrorPage(
+        request: HttpServletRequest,
+        response: HttpServletResponse,
+        refusal: CsrfInvalidException,
+    ) {
+        request.setAttribute(AuthAttributes.CSRF_REFUSAL, refusal)
+        request.setAttribute(RequestDispatcher.ERROR_STATUS_CODE, HttpServletResponse.SC_FORBIDDEN)
+        response.status = HttpServletResponse.SC_FORBIDDEN
+        request.getRequestDispatcher(AuthAttributes.ERROR_PAGE_PATH).forward(request, response)
+    }
+
     private companion object {
         const val MISSING = "missing"
         const val MISMATCH = "mismatch"
         const val CSRF_PARAMETER = "_csrf"
+        const val HX_REQUEST_HEADER = "HX-Request"
+        const val TEXT_HTML = "text/html"
     }
 }
