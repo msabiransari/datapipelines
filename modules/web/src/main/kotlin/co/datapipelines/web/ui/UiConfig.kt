@@ -35,7 +35,7 @@ class UiConfig {
      */
     @Bean
     @Order(Ordered.HIGHEST_PRECEDENCE)
-    fun csrfErrorPageResolver(): CsrfErrorPageResolver = CsrfErrorPageResolver()
+    fun csrfErrorPageResolver(uiProperties: UiProperties): CsrfErrorPageResolver = CsrfErrorPageResolver(uiProperties)
 
     /** Bean name pinned: it is the name the scanned stereotype carried (see [ThemeResolver]). */
     @Bean(name = ["uiThemeResolver"])
