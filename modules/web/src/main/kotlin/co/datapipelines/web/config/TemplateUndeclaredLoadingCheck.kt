@@ -15,7 +15,8 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
  * at save, and `RegistryTemplateLoader` refuses any render-time load outside the declared import
  * closure. This check is neither — bodies saved BEFORE the save rule landed (imports from older
  * releases, restored promotion bundles) can still carry it, and the operator is told once at boot,
- * as a COUNT: how many stored bodies would the new save rule refuse?
+ * as a COUNT of stored bodies matching the raw-text pattern. This is a candidate inventory,
+ * not the AST scanner's verdict: inert SQL text and script bodies can also match.
  *
  * The line is `event=templates.undeclared_loading_construct count=N` — WARN when N>0, INFO at
  * `count=0`. Count ONLY: no template id, no body text ever reaches the log (the same
@@ -23,9 +24,8 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
  * the two code layers already contain the construct at render, so the deployment is safe; the
  * operator decides whether to rewrite the named-by-nothing rows.
  *
- * The pattern lives here as its own constant, NOT imported from the scanner: the scanner is
- * `internal` to `templates`, and a web→templates-main-source dependency for one string would
- * invert the module direction the structure keeps. It is the same regex as the scanner's
+ * The pattern lives here as its own constant because the scanner is `internal` to `templates`.
+ * It matches the same spellings as the scanner's
  * `FORBIDDEN_SPECIAL_VARIABLE` (`\.\s*(get_optional_template|getOptionalTemplate)\b`), expressed
  * in Postgres ARE dialect (`\y` is ARE's word boundary; `\b` in ARE means backspace).
  */
