@@ -565,6 +565,19 @@ and path only). It never claims a switch request the page did not send.
 `WorkspaceSwitchOutcomeBrowserTest` pins the init phase with a planted `shell.js` abort, and the
 switch-result phase with an aborted, a 403 and a 302 switch.
 
+**Every `BrowserSuite` setup wait names its step (#825).** A timeout in `login`, the workspace
+create flow (`createWorkspace`, `createWorkspaceOn`, `createWorkspaceWithoutEntering`),
+`openBrowserTree` or `ensureTheme` raises an `AssertionError` from `BrowserSuite.named`, never
+Playwright's bare `TimeoutError`: `<the step> timed out — url=<where the page was>`, the step
+naming what it waited on (a selector, an address, a family) and never a typed value. The render
+and init waits append the document's facts from the suite's one probe, `shellInitFacts` (URL,
+`readyState`, `__dpShellInit`): the login form's fields, the create form's first render and all
+four of `ensureTheme`'s waits. The browser tree's root-level wait appends the tree as the wait
+left it (mounted families, level count, the root level's status, completion, rows and error
+sentence) before those facts. `BrowserSuiteSetupWaitsBrowserTest` pins every wrapper with a
+planted failure (a held route, a planted page, a removed control) at a 5 s bound, then runs the
+helper's real path with the plant gone.
+
 ```bash
 # The marketing site's screenshots, produced by a script rather than by hand (070 §C).
 ./app.sh --start --demo nyc                      # the deployment being photographed
