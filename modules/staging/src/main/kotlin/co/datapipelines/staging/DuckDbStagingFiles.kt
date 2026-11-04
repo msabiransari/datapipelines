@@ -1,10 +1,13 @@
 package co.datapipelines.staging
 
+import com.sun.security.auth.module.UnixSystem
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.NoSuchFileException
 import java.nio.file.Path
+import java.nio.file.attribute.PosixFileAttributes
+import java.nio.file.attribute.PosixFilePermission
 import java.nio.file.attribute.PosixFilePermissions
 import java.util.UUID
 import kotlin.io.path.isDirectory
@@ -85,18 +88,47 @@ internal class DuckDbStagingFiles(
          * Creates the scratch directory owner-only (`rwx------`) when it does not exist, and refuses
          * one that is a symbolic link: staged tables are user data, and the default location is under
          * `java.io.tmpdir`, which a host may share with other local users.
+         *
+         * On a POSIX file system the directory, whether found or just created, must then belong to
+         * the user the process runs as and grant nothing to group or other, or the open fails before
+         * any file is written (#795 review F7). A directory that fails is refused, never tightened:
+         * its mode belongs to whoever created it, and one that was open to others may already hold
+         * entries nobody can vouch for. Another file system has no owner or mode to read, and is
+         * not checked.
          */
         fun prepareScratchDir(dir: Path) {
             require(!Files.isSymbolicLink(dir)) { "the DuckDB staging scratch directory $dir is a symbolic link" }
+            val posix = "posix" in dir.fileSystem.supportedFileAttributeViews()
             if (!Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) {
-                val posix = "posix" in dir.fileSystem.supportedFileAttributeViews()
                 if (posix) {
-                    Files.createDirectories(dir, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")))
+                    Files.createDirectories(dir, PosixFilePermissions.asFileAttribute(OWNER_ONLY))
                 } else {
                     Files.createDirectories(dir)
                 }
             }
             require(Files.isDirectory(dir, LinkOption.NOFOLLOW_LINKS)) { "the DuckDB staging scratch path $dir is not a directory" }
+            if (posix) requirePrivate(dir)
         }
+
+        /**
+         * The owner is compared by numeric uid, not by `user.name`: a process whose uid has no
+         * passwd entry (an arbitrary container uid) reports `user.name` as `?`.
+         */
+        private fun requirePrivate(dir: Path) {
+            val attributes = Files.readAttributes(dir, PosixFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
+            val uid = UnixSystem().uid
+            val processUser = dir.fileSystem.userPrincipalLookupService.lookupPrincipalByName(uid.toString())
+            require(attributes.owner() == processUser) {
+                "the DuckDB staging scratch directory $dir belongs to ${attributes.owner().name}, " +
+                    "not to the user this process runs as (uid $uid)"
+            }
+            val granted = attributes.permissions()
+            require(OWNER_ONLY.containsAll(granted)) {
+                "the DuckDB staging scratch directory $dir is ${PosixFilePermissions.toString(granted)}; " +
+                    "it must grant nothing to group or other"
+            }
+        }
+
+        private val OWNER_ONLY: Set<PosixFilePermission> = PosixFilePermissions.fromString("rwx------")
     }
 }
