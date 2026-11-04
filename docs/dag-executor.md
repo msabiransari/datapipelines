@@ -1,9 +1,9 @@
 # DAG Executor Specification
 
-**Status:** v1.35 (revised — see Change Log)
+**Status:** v1.36 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract spec](pipeline-contract.md), [Templates spec](templates.md), [Datasources spec](datasources.md), [Staging spec](staging.md)
-**Last updated:** 2026-10-25
+**Last updated:** 2026-11-04 (#780)
 
 ---
 
@@ -593,8 +593,8 @@ node lands (7c). What is already true and binding:
 
 - **Every production evaluation runs on the evaluation pool**, never on a `dag-executor-N`
   thread: at most `size` evaluations run at once and at most `queue` submissions are admitted
-  (4/64 are the design's defaults; 7c lands the configuration block), and a refused submission
-  is a typed pool-exhausted refusal (the catalog row arrives with that lane). Each admitted
+  (the configured bounds — configuration §3.28's `pool-size` and `pool-queue`), and a refused submission
+  is a typed pool-exhausted refusal (`pipeline.script.pool_exhausted`). Each admitted
   evaluation gets its OWN daemon thread
   (`script-eval-N`) — a thread whose evaluation outlives its budget is abandoned by its caller
   (the JSONata engine never reads `Thread.interrupted()`), logged at ERROR, counted
@@ -795,9 +795,13 @@ node is that table's second caller and adds nothing to it. `$now()`/`$millis()` 
 execution's `current_timestamp` from the platform tier.
 
 After the last batch the declared invariants are evaluated over `{ rows, rejects, inputs }`
-**read back from the written tempdb tables** — never the JVM's memory of them — bounded across
-rows + rejects + table inputs by `max-input-rows` (`pipeline.script.invariants_too_large`);
-a template that declares none streams without any read-back. Then `strict: true` with a
+**read back from the written tempdb tables** — never the JVM's memory of them — bounded by
+`max-input-rows` on the COMBINED count: rows + rejects + table inputs, and in row mode also
+the caller output's buffered rows and rejects plus the streamed input table — so an input and
+an output each just over half the cap refuse together though each alone is under it
+(`pipeline.script.invariants_too_large`). Known gap (recorded, not built): a `table` caller
+output's gated rows are NOT part of the count — only its inputs are. A template that declares
+no invariants streams without any read-back. Then `strict: true` with a
 non-empty rejects table fails with `pipeline.script.rejects_strict` (count + first ten
 reasons). Failure after a write began is atomic (record §5.5): staging rolls back the partial
 table it is writing ([Staging §4.3](staging.md)) and the executor drops the **other** completed
@@ -1637,6 +1641,7 @@ document a customer can read before they need it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-04 | v1.36 | #780 script-invariants docs | §4's pool bullet points at configuration §3.28 for the configured bounds (the stale "4/64 design defaults; 7c lands the configuration block" and "the catalog row arrives with that lane" are gone) and names `pipeline.script.pool_exhausted`; §5.4's invariant paragraph states the read-back bound's COMBINED count — rows + rejects + table inputs, row mode adding the streamed input and a caller output's buffered rows and rejects — and records the known gap (a `table` caller output's gated rows are not counted). No behaviour change. |
 | 2026-10-25 | v1.35 | #711 | The ambient-read table names JSONata's `$random()` / `$shuffle()` refusals, including `$eval` and aliases. |
 | 2026-10-22 | v1.34 | 8b (#8) | §5.3 documents both engines, the per-engine bounds and structured console logging. |
 | 2026-10-21 | v1.33 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The TRANSFORM node is the SCRIPT node throughout**: the node-type prose and its section anchors, the `pipeline.script.*` refusal codes, the `datapipelines.script.*` budget keys and the meter `script.evaluations.abandoned` (was `transform.…`). A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
