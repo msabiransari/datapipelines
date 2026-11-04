@@ -1,7 +1,11 @@
 package co.datapipelines.lake
 
+import co.datapipelines.persistence.FailureShape
+import org.springframework.dao.DataAccessException
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.datasource.DataSourceTransactionManager
 import org.springframework.transaction.support.TransactionSynchronizationManager
+import org.springframework.transaction.support.TransactionTemplate
 import java.lang.management.ManagementFactory
 import java.time.Duration
 import java.time.Instant
@@ -58,17 +62,38 @@ sealed interface LeaseOutcome {
  * - **heartbeat** extends `expires_at` (never past `deadline_at`) only on a row that is still live and undeadlined.
  * - **release** deletes by operation id: every lease of the operation at once.
  *
- * Every comparison is PostgreSQL's `now()`, never this JVM's clock. Each statement autocommits on its own pooled
- * connection, so the lease row is visible to the fence trigger of another connection at once; calling inside a
- * Spring transaction would bind the statements to it and hide the lease until that transaction commits, so it is
- * refused ([requireNoTransaction]). The namespace lease is taken before the table lease (§8a fixed order); that
- * order is the caller's (P3/P4).
+ * Every comparison is PostgreSQL's `now()`, never this JVM's clock. Each statement commits on its own pooled
+ * connection before the call returns, so the lease row is visible to the fence trigger of another connection at once;
+ * calling inside a Spring transaction would bind the statements to it and hide the lease until that transaction
+ * commits, so it is refused ([requireNoTransaction]). The namespace lease is taken before the table lease (§8a fixed
+ * order); that order is the caller's (P3/P4).
+ *
+ * **A takeover waits at most [lockTimeout] (#812).** `ON CONFLICT DO UPDATE` locks the conflicting row before its
+ * `WHERE` is evaluated, so a takeover waits on any transaction that holds the row: the fence takes it `FOR SHARE` for
+ * the life of a catalog transaction, including a dead attempt's that is still open. The acquire therefore runs as its
+ * own short transaction whose first statement sets `lock_timeout` for that transaction only (`set_config(…, true)`,
+ * the value bound, never a session setting on the shared pool), then the acquire statement, then the commit. A lock
+ * wait that reaches the timeout (SQLSTATE `55P03`) answers [LeaseOutcome.Busy], with the row unchanged.
  */
 class LakeLeases(
     private val jdbc: JdbcTemplate,
     /** `lake_leases.holder_instance`: which process holds the lease (diagnostic only, never compared). */
     val holderInstance: String = defaultHolderInstance(),
+    /** How long one acquire waits on a lease row another transaction holds (`datapipelines.lake.catalog.lock-timeout-seconds`). */
+    val lockTimeout: Duration = Duration.ofSeconds(LakeProperties.DEFAULT_LOCK_TIMEOUT_SECONDS),
 ) {
+    init {
+        require(!lockTimeout.isNegative && !lockTimeout.isZero) { "lease lock timeout must be positive: $lockTimeout" }
+        require(lockTimeout.toMillis() <= Int.MAX_VALUE) { "lease lock timeout must fit PostgreSQL's lock_timeout: $lockTimeout" }
+    }
+
+    /** The acquire's own transaction, on the same DataSource as [jdbc] so its statements share one connection. */
+    private val acquireTransaction =
+        TransactionTemplate(DataSourceTransactionManager(requireNotNull(jdbc.dataSource) { "the lease JdbcTemplate has no DataSource" }))
+
+    /** `lock_timeout` as PostgreSQL reads it: whole milliseconds. */
+    private val lockTimeoutSetting = "${lockTimeout.toMillis()}ms"
+
     fun acquire(
         kind: LeaseKind,
         name: String,
@@ -83,21 +108,31 @@ class LakeLeases(
         val deadlineAt = OffsetDateTime.ofInstant(deadline, ZoneOffset.UTC)
         val seconds = ttl.toMillis() / MILLIS_PER_SECOND
         val token =
-            jdbc
-                .query(
-                    ACQUIRE_SQL,
-                    { rs, _ -> rs.getObject(1, UUID::class.java) },
-                    kind.sql,
-                    name,
-                    operationId,
-                    seconds,
-                    deadlineAt,
-                    deadlineAt,
-                    operation,
-                    holderInstance,
-                    deadlineAt,
-                    seconds,
-                ).singleOrNull()
+            try {
+                // Committed right after the acquire statement: a refused takeover still locked the row, and holds
+                // it until this transaction ends.
+                acquireTransaction.execute {
+                    jdbc.queryForObject(LOCAL_LOCK_TIMEOUT_SQL, String::class.java, lockTimeoutSetting)
+                    jdbc
+                        .query(
+                            ACQUIRE_SQL,
+                            { rs, _ -> rs.getObject(1, UUID::class.java) },
+                            kind.sql,
+                            name,
+                            operationId,
+                            seconds,
+                            deadlineAt,
+                            deadlineAt,
+                            operation,
+                            holderInstance,
+                            deadlineAt,
+                            seconds,
+                        ).singleOrNull()
+                }
+            } catch (e: DataAccessException) {
+                if (FailureShape.sqlState(e) == SQLSTATE_LOCK_NOT_AVAILABLE) return LeaseOutcome.Busy
+                throw e
+            }
         if (token != null) return LeaseOutcome.Acquired(LeaseHandle(kind, name, operationId, token))
         val past = jdbc.queryForObject(DEADLINE_PASSED_SQL, Boolean::class.java, deadlineAt) == true
         return if (past) LeaseOutcome.DeadlinePassed else LeaseOutcome.Busy
@@ -133,6 +168,12 @@ class LakeLeases(
 
     companion object {
         private const val MILLIS_PER_SECOND = 1000.0
+
+        /** `lock_not_available`: a lock wait reached `lock_timeout`. */
+        const val SQLSTATE_LOCK_NOT_AVAILABLE = "55P03"
+
+        /** `lock_timeout` for the current transaction only (`is_local = true`); the value is bound. */
+        private const val LOCAL_LOCK_TIMEOUT_SQL = "SELECT set_config('lock_timeout', ?, true)"
 
         private const val ON_CONFLICT =
             " ON CONFLICT (kind, name) DO UPDATE SET operation_id = EXCLUDED.operation_id, token = gen_random_uuid()," +

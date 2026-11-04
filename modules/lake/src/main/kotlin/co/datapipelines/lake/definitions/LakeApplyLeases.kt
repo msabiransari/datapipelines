@@ -14,6 +14,11 @@ import java.util.UUID
  * namespace does not exist yet; then the TABLE lease. Each acquire waits up to `lake.admission.lease-wait-seconds`
  * (bounded by the caller's deadline), polling; the wait and the deadline are read from the catalog clock, never this
  * JVM's. Every lease is taken under the attempt's one operation id, so `LakeLeases.release(operationId)` frees both.
+ *
+ * Each poll is itself bounded (#812): an acquire whose row another transaction holds (a fence's `FOR SHARE`) waits
+ * at most `LakeLeases.lockTimeout` (`lake.catalog.lock-timeout-seconds`), then counts as busy. The whole wait can
+ * therefore overrun the lease wait by up to one lock timeout. [tryTable] makes one such bounded attempt and answers
+ * busy after it.
  */
 class LakeApplyLeases(
     private val leases: LakeLeases,

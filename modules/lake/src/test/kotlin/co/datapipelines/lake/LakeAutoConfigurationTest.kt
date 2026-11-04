@@ -9,6 +9,7 @@ import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
 import org.springframework.boot.autoconfigure.jdbc.JdbcTemplateAutoConfiguration
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import software.amazon.awssdk.services.s3.S3Client
+import java.time.Duration
 
 /**
  * The module is inert unless `datapipelines.lake.enabled=true` (module-structure §5.21): no bean of it exists by
@@ -49,9 +50,12 @@ class LakeAutoConfigurationTest {
                 "datapipelines.lake.storage.region=eu-west-1",
                 "datapipelines.lake.storage.secret-key=never-printed-secret",
                 "datapipelines.lake.storage.access-key=never-printed-access",
+                "datapipelines.lake.catalog.lock-timeout-seconds=7",
             ).run { context ->
                 context.startupFailure shouldBe null
                 LAKE_BEANS.forEach { type -> context.getBeanNamesForType(type).size shouldBe 1 }
+                // #812: the lease acquire's lock_timeout is the catalog's key, not the library default.
+                context.getBean(LakeLeases::class.java).lockTimeout shouldBe Duration.ofSeconds(7)
                 val properties = context.getBean(LakeProperties::class.java)
                 properties.storage.root shouldBe "s3://dp-lake/lake"
                 properties.toString() shouldNotContain "never-printed-secret"

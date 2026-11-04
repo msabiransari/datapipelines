@@ -2,6 +2,7 @@ package co.datapipelines.lake.definitions
 
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.lake.LakeCatalogs
+import co.datapipelines.lake.LakeLeases
 import co.datapipelines.lake.LakeMinio
 import co.datapipelines.lake.LakeProperties
 import co.datapipelines.lake.LakeTestDb
@@ -43,13 +44,15 @@ internal class RecordingAuditSink : AuditEventSink {
  * Postgres ([LakeTestDb], V53 + V54 applied) and MinIO ([LakeMinio]), with a short lease wait and an injectable
  * after-commit hook. [reset] empties the catalog (LakeTestDb.reset) and every P3 table, and seeds one user.
  * [fileIoFactory], when given, replaces the catalog's object-store client factory (a fault seam, #811); null keeps
- * production's `S3FileIO`. It is a function-typed parameter: pass it by name, never as a trailing lambda.
+ * production's `S3FileIO`. It is a function-typed parameter: pass it by name, never as a trailing lambda. [leases]
+ * replaces the module's shared lease protocol (a shorter lock timeout, #812).
  */
 internal class LakeDefinitionsHarness(
     leaseWait: Duration = Duration.ofSeconds(1),
     hooks: LakeApplyHooks = LakeApplyHooks.NONE,
     authoringEnabled: Boolean = true,
     fileIoFactory: ((Map<String, String>) -> FileIO)? = null,
+    val leases: LakeLeases = LakeTestDb.leases,
 ) {
     val jdbc = LakeTestDb.jdbc
     val named = NamedParameterJdbcTemplate(LakeTestDb.dataSource)
@@ -61,13 +64,13 @@ internal class LakeDefinitionsHarness(
     val tx = TransactionTemplate(DataSourceTransactionManager(LakeTestDb.dataSource))
     val definitions = LakeDefinitionRepository(named)
     val applies = LakeApplyRepository(named)
-    val applyLeases = LakeApplyLeases(LakeTestDb.leases, leaseWait, Duration.ofMillis(POLL_MILLIS))
+    val applyLeases = LakeApplyLeases(leases, leaseWait, Duration.ofMillis(POLL_MILLIS))
     val applier = LakeDefinitionApplier(definitions, applies, applyLeases, catalogs, properties.name, tx, audit, hooks)
     val service =
         LakeDefinitionService(
             definitions = definitions,
             applier = applier,
-            leases = LakeTestDb.leases,
+            leases = leases,
             jobTimeout = properties.admission.jobTimeout,
             policyJson = LakeTablePolicy.defaultsJson(properties),
             tx = tx,
