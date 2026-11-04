@@ -55,7 +55,11 @@ data class DuckDbExtensionNotice(
  * read() refuses any shipped closure row without an entry here and any entry the closure lacks.
  */
 object DuckDbExtensionLicenses {
-    private const val CORE = "https://github.com/duckdb/duckdb/tree/v1.5.5"
+    private const val CORE_TREE = "https://github.com/duckdb/duckdb/tree/v"
+
+    /** The tag this inventory was reviewed at; [read] refuses it unless it is the Dockerfile's (= the catalog's) core. */
+    private const val CORE = "${CORE_TREE}1.5.5"
+    private const val CORE_COMPONENTS = 3
     private const val AMAZON = "Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved."
     private const val BUILD_ONLY = "build-only"
     private const val ROW_FIELDS = 5
@@ -298,17 +302,31 @@ object DuckDbExtensionLicenses {
         return ids
     }
 
-    /** Validates version, names, platform coverage, commit annotations, closures and reviewed licences offline. */
+    /**
+     * Validates version, names, platform coverage, commit annotations, closures and reviewed licences offline.
+     *
+     * [jdbcVersion] is the version catalog's `duckdb-jdbc` — the ONE hand-edited DuckDB version (#781). The
+     * Dockerfile's core ARG must be its first three components, the reviewed `duckdb` source tags must name
+     * that core, and every `duckdb`/`duckdb/` closure row must carry it. [CORE] stays a hand declaration: the
+     * inventory was REVIEWED at that tag, so deriving it would claim a review nobody did — a catalog bump
+     * stops here until the review is redone.
+     */
     fun read(
         dockerfile: String,
         checksumFile: String,
         closures: Map<String, String>,
+        jdbcVersion: String,
         inventory: Map<String, DuckDbExtensionLicense>,
     ): List<DuckDbExtensionNotice> {
         val versions = Regex("(?m)^ARG DUCKDB_CORE_VERSION=([^\\s]+)$").findAll(dockerfile).toList()
         check(versions.size == 1) { "Dockerfile must declare exactly one DUCKDB_CORE_VERSION" }
         val version = versions.single().groupValues[1]
         check(version.matches(Regex("[0-9]+(?:\\.[0-9]+)+"))) { "Invalid DUCKDB_CORE_VERSION: $version" }
+        check(jdbcVersion.matches(Regex("[0-9]+(?:\\.[0-9]+){2,}"))) { "Invalid catalog duckdb-jdbc version: $jdbcVersion" }
+        val jdbcCore = jdbcVersion.split('.').take(CORE_COMPONENTS).joinToString(".")
+        check(version == jdbcCore) {
+            "DUCKDB_CORE_VERSION $version is not the core of the catalog's duckdb-jdbc $jdbcVersion (expected $jdbcCore)"
+        }
         val loops = Regex("for ext in ([a-z0-9_ ]+); do").findAll(dockerfile).toList()
         check(loops.size == 1) { "Dockerfile must declare exactly one DuckDB extension loop" }
         val names =
@@ -332,12 +350,26 @@ object DuckDbExtensionLicenses {
             check(license.commit == commits.getValue(name)) { "DuckDB licence commit mismatch for $name: ${commits.getValue(name)}" }
             licenseIds(license.spdx)
             license.components.forEach { licenseIds(it.spdx) }
+            license.components.filter { isCorePart(it.name) }.forEach { component ->
+                val tag = "$CORE_TREE$version"
+                check(component.source == tag || component.source.startsWith("$tag/")) {
+                    "DuckDB reviewed licence tag is not core v$version for $name: ${component.name} (${component.source})"
+                }
+            }
             val closure = closure(name, closures.getValue(name))
+            closure.entries.filter { isCorePart(it.port) }.forEach { entry ->
+                check(entry.version == version) {
+                    "DuckDB closure row names core ${entry.version}, not v$version, for $name: ${entry.port}"
+                }
+            }
             check(closure.commit == license.commit) { "DuckDB closure commit mismatch for $name: ${closure.commit} vs ${license.commit}" }
             reconcile(name, closure, license.components)
             DuckDbExtensionNotice(name, version, license, closure)
         }
     }
+
+    /** DuckDB itself and its `third_party` directories — the parts whose version IS the core version. */
+    private fun isCorePart(name: String): Boolean = name == "duckdb" || name.startsWith("duckdb/")
 
     private fun mismatch(
         what: String,

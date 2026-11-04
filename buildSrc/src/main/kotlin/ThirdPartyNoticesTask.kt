@@ -28,6 +28,9 @@ abstract class ThirdPartyNoticesTask : DefaultTask() {
 
     @get:Input abstract val oracle: Property<Boolean>
 
+    /** The version catalog's `duckdb-jdbc`: the Dockerfile core ARG and the reviewed core tag are checked against it (#781). */
+    @get:Input abstract val duckdbJdbcVersion: Property<String>
+
     @get:InputFile
     @get:PathSensitive(PathSensitivity.NONE)
     abstract val dockerfile: RegularFileProperty
@@ -63,6 +66,7 @@ abstract class ThirdPartyNoticesTask : DefaultTask() {
                 dockerfile.get().asFile.readText(),
                 duckdbChecksums.get().asFile.readText(),
                 ThirdPartyNotices.closureFiles(duckdbClosures.get().asFile),
+                duckdbJdbcVersion.get(),
             )
         val renderer = ThirdPartyNotices(::resolvePom)
         val report =
@@ -234,8 +238,9 @@ class ThirdPartyNotices(
             dockerfile: String,
             checksumFile: String,
             closures: Map<String, String>,
+            jdbcVersion: String,
             inventory: Map<String, DuckDbExtensionLicense> = DuckDbExtensionLicenses.inventory(),
-        ): List<DuckDbExtensionNotice> = DuckDbExtensionLicenses.read(dockerfile, checksumFile, closures, inventory)
+        ): List<DuckDbExtensionNotice> = DuckDbExtensionLicenses.read(dockerfile, checksumFile, closures, jdbcVersion, inventory)
 
         /** The committed closure files by extension name; anything but a `.tsv` file in the directory fails. */
         fun closureFiles(directory: File): Map<String, String> {
