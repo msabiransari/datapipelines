@@ -166,7 +166,7 @@ object SiteFaqs {
             FaqEntry(
                 "How do I register an Iceberg table in dp-lake?",
                 "By its current metadata file, s3://bucket/table/metadata/00042-<uuid>.metadata.json, not by the " +
-                    "table root: DuckDB 1.5.5.1 cannot resolve a pyiceberg table's root, so the registry row names the " +
+                    "table root: DuckDB ${facts.duckdbVersion} cannot resolve a pyiceberg table's root, so the registry row names the " +
                     "file, and you re-register when the table commits. See docs/datasources.md §8C.7.",
                 "docs/datasources.md §8C.7",
             ),

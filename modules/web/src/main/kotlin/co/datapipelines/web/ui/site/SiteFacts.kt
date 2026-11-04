@@ -2,6 +2,7 @@ package co.datapipelines.web.ui.site
 
 import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.calculators.CalculatorRegistry
+import co.datapipelines.datasources.DuckDbVersion
 import co.datapipelines.datasources.semantics.LearnedFactKind
 import co.datapipelines.datasources.semantics.LearnedFactScope
 import co.datapipelines.mcp.McpToolCatalog
@@ -56,6 +57,12 @@ data class SiteFacts(
      * Null when the feature is off: the demo-data page's API section then does not render.
      */
     val demoApiKey: String? = null,
+    /**
+     * #781 — the bundled `duckdb_jdbc` version the jar ships, as the build resolved it ([DuckDbVersion]).
+     * A sentence that states an engine behaviour names the version through this token, never a literal;
+     * at a driver bump `DuckDbVersionSpecDriftTest` lists every page that renders it for a re-probe.
+     */
+    val duckdbVersion: String,
 ) {
     /** The read-only majority of the tool surface. */
     val readToolCount: Int get() = toolCount - mutatingToolCount
@@ -123,6 +130,7 @@ data class SiteFacts(
                 semanticsToolCount = McpToolCatalog.NAMES.count { it.startsWith("semantics_") },
                 demoEngineCounts = demoEngineCounts,
                 demoApiKey = demoApiKey,
+                duckdbVersion = DuckDbVersion.CURRENT.jdbc,
             )
 
         /**
