@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.73 (revised — see Change Log)
+**Status:** v1.74 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-11-04
@@ -1436,13 +1436,13 @@ checks are §12.13's ten `pipeline.validation.script_…` rows.
 | `pipeline.script.evaluation_failed` | 500 | the script threw; the detail carries the engine message bounded to 2 000 chars (record §7). |
 | `pipeline.script.timeout` | 504 | the engine's own wall-clock bound fired (`pipeline.node.timeout` is the outer backstop — the engine reports first, record §4.3). |
 | `pipeline.script.resource_limit` | 500 | a declared resource limit fired — depth (JSONata); heap/statements/stack/output/input bytes/result bytes (JavaScript); `details.kind` names which. |
-| `pipeline.script.pool_exhausted` | 503 | the evaluation pool's admission bound is full (record §4.3 — a node failure in a run, 503 on the tool/route). |
+| `pipeline.script.pool_exhausted` | 503 | the evaluation pool refused the evaluation — the admission bound (running plus waiting) was full, or the evaluation was admitted but waited its whole wall clock for a running slot without one freeing (record §4.3 — a node failure in a run, 503 on the tool/route). |
 | `pipeline.script.row_shape_mismatch` | 500 | a returned row's key set is not exactly the declared column set, with batch and row number (record §5.3). |
 | `pipeline.script.value_type_mismatch` | 500 | a returned value does not fit its column's wire form, with batch and row number (record §5.3). |
 | `pipeline.script.precision_lost` | 500 | a numeric value does not fit its declared precision/scale (record §5.3, R1 — DECIMAL rounds half-even; BIGDECIMAL is exact). |
 | `pipeline.script.value_too_large` | 500 | a value/object output or a single string above the byte caps (record §4.3: `max-value-bytes`, `max-string-bytes`). |
 | `pipeline.script.invariant_failed` | 500 | an invariant evaluated to other than `true`; names the invariant and its message (record §5.4). |
-| `pipeline.script.invariants_too_large` | 500 | the invariants' read-back exceeded `max-input-rows` (record §5.4 — an assertion over an unbounded table is a SQL node or a release check, not an invariant). |
+| `pipeline.script.invariants_too_large` | 500 | the invariants' read-back exceeded `max-input-rows` on the COMBINED count — the written outputs and rejects plus the table inputs together (row mode also adds the streamed input and, for a caller output, its buffered rows and rejects); an input and an output each under the cap can still refuse together (record §5.4 — an assertion over an unbounded table is a SQL node or a release check, not an invariant). |
 | `pipeline.script.rejects_strict` | 500 | `strict: true` and the rejects table is non-empty; carries the count and the first ten reasons (record §5.4). |
 | `script.js.unavailable` | 400 | the JavaScript isolate is not installed (D-T16): disabled and reported once at INFO at boot, refused at save/evaluate; never a 503. |
 
@@ -1953,6 +1953,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-04 | v1.74 | 780 (#780) script-invariants docs | §13.18's two script rows say what the code does: `pool_exhausted` names both refusal paths (the full admission bound, and an admitted evaluation that waited its whole wall clock for a running slot); `invariants_too_large` states the read-back's COMBINED count — written outputs and rejects plus table inputs, row mode adding the streamed input and a caller output's buffered rows and rejects. No code, code count or permission change. — Renumbered at merge after #810. |
 | 2026-11-04 | v1.73 | 810 (#811) | §13.25 gains `lake.definition.apply_unclassified` (`—`): an unclassified failure of the apply's commit step is returned as the release's apply outcome, and the row stays `applying` for `verifyApplying`. Failures outside that step can still propagate after the release commits (#822). |
 | 2026-11-04 | v1.72 | 798 merge | §13.25 gains the managed lake definition lifecycle and apply refusal catalog, alongside its constants. |
 | 2026-11-03 | v1.71 | 795 (#795) | dp-lake P1 DuckDB staging. §5.1: `engine` accepts `DUCKDB` (a file-backed DuckDB database per execution, [Staging §8.5](staging.md#85-the-duckdb-engine)), and `config.max_memory_mb` is the only key on either engine, clamped as before, with the engine's `memory_limit` as a second ceiling on `DUCKDB`. §12.8: `tempdb_engine_unsupported` checks the [`StagingEngine`](enums.md#7-stagingengine--tempdb-engine) wire values. §13.5 gains `pipeline.staging.scratch_exhausted` and `pipeline.staging.scratch_limit_exceeded`. |
