@@ -36,7 +36,7 @@ import kotlin.coroutines.coroutineContext
  *    allocation past it fails inside the engine and surfaces as `memory_limit_exceeded` with the
  *    engine's reading ([DuckDbEngineFailures]). [StagingStats.memoryUsedBytes] is the sum of
  *    `duckdb_memory()`. The limit does not bound the JVM heap or every native allocation
- *    (dp-lake design §11) — the process bound is the lake boot check's.
+ *    (dp-lake design §11). This class supplies no combined JVM/native process-memory bound.
  *  - **The disk bound is the reservation.** A spill past `max_temp_directory_size` fails inside the
  *    engine; the database file and WAL have no engine-side bound at all, so the file, WAL and spill
  *    directory are measured after every write and a total past the reservation fails as
@@ -47,12 +47,13 @@ import kotlin.coroutines.coroutineContext
  *  - **[close] drops nothing table by table**: the file dies. It closes the root connection and
  *    deletes the file, WAL and spill directory, then releases the reservation — at once when no
  *    lease is outstanding, otherwise when the last one returns.
- *  - **Every statement this class creates is bounded twice**: [withQuery] and [execute] set the
- *    configured query timeout, and [close] cancels the ones still running before it closes the pool,
+ *  - **Author statements this class creates carry the configured timeout**: [withQuery] and
+ *    [execute] set it, and [close] cancels statements still running before it closes the pool,
  *    so the last lease comes back without waiting the timeout out. Two limits, both left to the
  *    query timeout: a `withConnection` statement is the caller's to bound (the executor sets the
  *    timeout and cancels it with the node), and the driver's cancel does nothing to a statement
  *    that has not yet entered its execute, so a [close] landing in those microseconds misses it.
+ *    A zero query timeout disables the timeout bound, including that cancellation window.
  */
 class DuckDbStaging internal constructor(
     override val executionId: UUID,

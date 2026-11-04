@@ -38,7 +38,8 @@ import java.util.UUID
  * (measured, lane #795 probe 12 — `SET`, `RESET` and `SET lock_configuration = false` are refused).
  *
  * `memory_limit` bounds DuckDB's buffer manager only, not the JVM heap and not every native
- * allocation (dp-lake design §11); the process bound is the lake boot check's (#785).
+ * allocation (dp-lake design §11). Combined JVM/native process-memory admission is separate
+ * acceptance work; this factory does not enforce it.
  *
  * @param budget the aggregate every database of this factory reserves from; one per factory.
  * @param connect the JDBC open — `DriverManager` in production. A fault-injection seam for tests.

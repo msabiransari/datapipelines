@@ -16,7 +16,7 @@ import java.nio.file.Path
  *   execution id alone. Must be absolute and contain no `;` (the driver splits its URL on `;`).
  * @property memoryLimitBytes the engine's `SET memory_limit` (`staging-memory-limit`). It bounds
  *   DuckDB's buffer manager only — not the JVM heap, not every allocation the engine makes
- *   (dp-lake design §11); the process bound is the lake boot check's.
+ *   (dp-lake design §11). This value supplies no combined JVM/native process-memory bound.
  * @property expansionFactor `staging-expansion-factor`: a non-lake database reserves
  *   `memoryLimitBytes × expansionFactor` of scratch (owner ruling 2026-11-02).
  * @property scratchCapacityBytes the aggregate `scratch-bytes` every reservation shares ([ScratchBudget]).
