@@ -144,6 +144,8 @@ interface DatasourceRegistry {
      * - neither authenticates → [CredentialResync.BOTH_FAILED]; the row is left alone. There
      *   is nothing to resync to, and overwriting a broken credential with another broken one
      *   would destroy the operator's value for nothing.
+     * - the row is the managed lake datasource (#818) → [CredentialResync.MANAGED_ROW] before
+     *   any probe; configuration owns its credential, so nothing is written.
      *
      * Every branch that probed records the outcome on the row (§8.1B), so the datasources
      * screen shows what happened without an execution having to fail first.

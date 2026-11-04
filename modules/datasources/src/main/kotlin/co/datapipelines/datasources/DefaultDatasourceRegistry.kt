@@ -702,12 +702,17 @@ class DefaultDatasourceRegistry(
         // separating them from [decideByProbing] is what keeps "rule 3 fires only on a
         // difference" readable as one line rather than inferred from control flow.
         val row = repository.findByName(name) ?: return CredentialResync.NO_LIVE_ROW
-        val stored = decryptStored(row) ?: return CredentialResync.STORED_UNREADABLE
-        // The gate that keeps rule 3 free on a healthy boot: equal credentials mean there is
-        // no desync to diagnose, and probing every bootstrap datasource on every restart to
-        // rediscover that would be a cost with no question behind it.
-        if (stored == fileCredential) return CredentialResync.CREDENTIAL_MATCHES
-        return decideByProbing(row, stored, fileCredential)
+        // #818: the managed row's credential comes from configuration only; this write would bypass refuseManagedWrite.
+        if (row.toDatasource().isManagedLake()) return CredentialResync.MANAGED_ROW
+        val stored = decryptStored(row)
+        // The CREDENTIAL_MATCHES gate keeps rule 3 free on a healthy boot: equal credentials mean
+        // there is no desync to diagnose, and probing every bootstrap datasource on every restart
+        // to rediscover that would be a cost with no question behind it.
+        return when (stored) {
+            null -> CredentialResync.STORED_UNREADABLE
+            fileCredential -> CredentialResync.CREDENTIAL_MATCHES
+            else -> decideByProbing(row, stored, fileCredential)
+        }
     }
 
     /**

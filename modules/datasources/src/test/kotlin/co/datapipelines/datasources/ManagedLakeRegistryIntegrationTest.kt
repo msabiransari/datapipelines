@@ -212,6 +212,31 @@ class ManagedLakeRegistryIntegrationTest {
         }
     }
 
+    @Test
+    fun `a bootstrap credential resync never probes or writes the managed row`() {
+        val audit = RecordingAuditSink()
+        val registry = registry(auditSink = audit)
+        try {
+            registry.syncManagedLake(managed(), owner) shouldBe ManagedLakeSync.CREATED
+            val before = updatedAt()
+            val ciphertext = credentialHex()
+
+            val outcome = registry.resyncBootstrapCredential(LAKE, "a-bootstrap-file-secret")
+
+            assertAll(
+                { outcome shouldBe CredentialResync.MANAGED_ROW },
+                // Nothing probed: the resync's probe audits a connection test before it connects.
+                { audit.countOf(DatasourceAuditEvents.CONNECTION_TEST) shouldBe 0 },
+                { credentialHex() shouldBe ciphertext },
+                { updatedAt() shouldBe before },
+                // Configuration still owns the row: the next boot's sync finds it unchanged.
+                { registry.syncManagedLake(managed(), owner) shouldBe ManagedLakeSync.UNCHANGED },
+            )
+        } finally {
+            registry.shutdown()
+        }
+    }
+
     // ------------------ the generation's catalog read
 
     @Test
