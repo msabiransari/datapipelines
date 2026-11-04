@@ -1,6 +1,6 @@
 # The Managed Lake: Table Definitions
 
-**Status:** v1.3 (#798, dp-lake P3; #810, #811, #812)
+**Status:** v1.4 (#798, dp-lake P3; #810, #811, #812; #818, dp-lake P5)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and the names involved. The design is
@@ -234,10 +234,49 @@ Both names are checked before any catalog call or SQL; a name outside the gramma
 
 ---
 
+## 6. Reads
+
+A managed table is read through the **managed lake datasource**, the one `LAKE` datasource DP creates from
+configuration when the lake is enabled ([Datasources §8C.10](datasources.md#8c10-the-managed-lake-datasource), #818,
+dp-lake P5). A query names a table `<lake>.<namespace>.<table>`, for example `warehouse.sales.orders` when
+`datapipelines.lake.name` is `warehouse`.
+
+**What a reader sees.** Each server reads through a generation: one DuckDB instance whose views were built from the
+Iceberg catalog rows at one instant. A query reads the snapshot its table's catalog row named at that instant.
+
+| Table state | What a query sees |
+|---|---|
+| `active` | Its view |
+| `deprecated` | Its view; the deprecation notice appears in the table listing's remarks |
+| `archived`, `purged`, no catalog row, no lifecycle row, or the lake disabled | No view. A node that names it is refused before it runs with `lake.table.unavailable` (409, `details.table` and `details.reason`) |
+
+**When it sees new data.** New data is visible to the next query on this server and within a minute on others. Until
+the lake write path (#799) retires the committing server's generation itself, the freshness tick bounds freshness on
+every server, the committing one included.
+
+**The bound.** No generation outlives `reads.max-generation-age-seconds`. The tick retires a generation earlier when
+its tables' catalog rows have changed since it was built. A query still running on a retired generation is
+hard-closed at the retire ceiling, so the oldest snapshot any query reads is at most age + retire ceiling old. Boot
+refuses a configuration where age + retire ceiling + tick exceeds one twenty-fourth of the snapshot protection window
+(`retention.protection-days`), so a reader never reaches a snapshot that may already be expired.
+
+**The operator knobs** ([Configuration §3.36](configuration.md#336-managed-lake-dp-lake-785)):
+
+| Key (`datapipelines.lake.`) | Default | Effect |
+|---|---|---|
+| `reads.max-generation-age-seconds` | `900` | The age bound. Lower means fresher reads and more rebuilds |
+| `reads.freshness-tick-seconds` | `60` | How often each server compares its generation with the catalog. Must be below the age bound |
+| `reads.memory-limit` | `512MB` | The memory each managed instance may use. It cannot spill to disk, so a query that needs more fails |
+| `storage.reader-access-key` / `reader-secret-key` | (empty) | A read-only key pair for the reads; without it the writer pair is used. Read-only is the operator's contract: DP cannot verify the pair's permissions |
+| `name` | `lake` | The managed datasource's name and the first part of every table name. A datasource already holding the name refuses the boot (`lake.boot.datasource_name_taken`) |
+
+---
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-04 | v1.4 | 818 (#818) | New **§6 Reads**: what a reader sees per table state, when new data becomes visible (the committing-server half waits for #799), the age bound and the boot rule that keeps it inside the snapshot protection window, and the operator keys. |
 | 2026-11-04 | v1.3 | 810 merge review | §3 distinguishes the polling horizon from the final row-lock wait, which can overrun either the lease wait or the caller's deadline by one lock timeout. |
 | 2026-11-04 | v1.2 | 810 (#810, #811, #812) | Drift has an exit: a definition whose shape equals the live table applies as one commit that sets only `dp.definition.version` (§2 row, §3 row, §4 rule 2). An unclassified failure of the commit step leaves the row `applying` as `lake.definition.apply_unclassified`, and the release returns that outcome (§3 row and paragraph). A lease takeover waits at most the catalog lock timeout on a lease row another transaction holds, then counts as busy (§3 "One attempt" and "Crash between commit and stamp"). |
 | 2026-11-04 | v1.1 | 798 merge review | Serialize lifecycle eligibility with apply, refuse discard during any apply, require canonical partition parameters and complete JSON input; record the field-ID correction limitation (#820). |

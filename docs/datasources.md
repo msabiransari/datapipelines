@@ -1,6 +1,6 @@
 # Datasources Specification
 
-**Status:** v2.57 (frozen contract — additive-only changes after this point)
+**Status:** v2.58 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
 **Last updated:** 2026-11-04
@@ -421,6 +421,7 @@ Default 10 is conservative. High-traffic datasources can be tuned up. `datapipel
 - Pool kept alive for the datasource's lifetime.
 - On datasource update (PUT), the old pool is **retired** and the next lease builds a new one from the new row.
 - On datasource delete (soft), the pool is **retired** and new leases miss it.
+- The managed lake datasource's pool (§8C.10) is also retired when its generation is older than `datapipelines.lake.reads.max-generation-age-seconds` (checked at each lease, so no tick is needed), and when the freshness tick finds that the catalog has changed since the generation was built. Either way the next lease builds a new generation from the catalog.
 
 #### Retire, then close (094)
 
@@ -1555,6 +1556,19 @@ On boot, a backfill scans each released version that has no row, or a row from a
   gate `datasource.lake.table_unavailable` (§8C.2). The by-table lookup (datasource, namespace,
   table) is the read dp-lake's table lifecycle uses next.
 
+### 8C.10 The managed lake datasource
+
+Managed lake tables (tables DP defines and writes, [Lake §6](lake.md#6-reads)) are read through ONE datasource that DP creates itself: the **managed lake datasource** (#818, design record §6, §10). It is an ordinary `LAKE` datasource in every respect §8C.1–§8C.9 describe. The differences are listed here.
+
+- **Configuration is its only source.** When `datapipelines.lake.enabled=true`, boot creates the row (named `datapipelines.lake.name`, default `lake`; dialect `LAKE`; URL `jdbc:duckdb::memory:`; read-only; global, no owner workspace). On each later boot it rewrites the row if configuration has changed. An unchanged boot writes nothing. The row carries `properties.dialect.managed = "true"`, the store's addressing (region, endpoint, URL style) and the reader memory limit. A REST `PUT` or `DELETE` of it is refused with `datasource.managed` (409), and the UI's edit form refuses it too. A name already held by another datasource, live or soft-deleted, refuses the boot with `lake.boot.datasource_name_taken`; rename that datasource or choose another `datapipelines.lake.name`. The managed row is written before bootstrap registration runs (§8A), so a bootstrap entry with the same name is skipped as already present, and its credential is never probed or written (`datasource.bootstrap_managed_name`).
+- **Its credential.** The reader pair (`storage.reader-access-key` / `reader-secret-key`), when both are set, is the row's stored credential. Otherwise the writer pair is, and with neither the instance's credential chain is used. The credential is encrypted like every other datasource credential (§7). It never enters `properties.dialect`, a log line or an event. The reader pair is read-only by **operator contract** ([Configuration §3.36](configuration.md#336-managed-lake-dp-lake-785)): DP cannot verify what the pair is allowed to do.
+- **Every workspace sees it.** Boot grants it to every workspace, and so does every freshness tick, so a workspace created later can use it within one tick. Its tables are the managed tables. Registry rows for tables defined before the datasource existed are written at boot.
+- **Its views read the catalog.** A generation's view for a managed table reads the metadata location in the Iceberg catalog row (`iceberg_tables`) at build time, never the registry's copy. A table that is archived or purged, has no catalog row, has no lifecycle row, or belongs to a disabled lake (`datapipelines.lake.enabled=false`) gets no view. Each omission logs `lake.table_unavailable_omitted` ([Observability §3.4C](observability.md#34c-the-lake-instance-events-152)). A node that reads such a table is refused before a connection is leased, with `lake.table.unavailable` (409) naming the table and the reason. A deprecated table keeps its view, and its notice appears in the table listing's remarks (`iceberg; deprecated: …`).
+- **A generation is bounded in age.** A generation older than `datapipelines.lake.reads.max-generation-age-seconds` (default 900) is retired at the next lease (`lake.generation_expired`). A freshness tick every `datapipelines.lake.reads.freshness-tick-seconds` (default 60) compares each live generation with the catalog and retires a stale one early (`lake.generation_stale`). The oldest snapshot any query can read is therefore bounded by the age plus the retire ceiling (§5.2). `LakeRules` refuses a configuration where age + retire ceiling + tick exceeds one twenty-fourth of the snapshot protection window ([Configuration §7](configuration.md#7-config-validation)), so a reader never reaches a snapshot that may already be expired.
+- **Freshness.** New data is visible to the next query on this server and within a minute on others. A peer learns of a commit from the pool invalidation message (§5.7), or else from its next freshness tick. The "next query on this server" half needs the write path to retire the local generation when it commits; that is the lake write path's work (#799), not this datasource's. Until then, the tick bounds freshness on every server.
+- **No generation from an unverified read.** When the catalog read that builds a new generation fails, no generation is built, and the lease fails with `lake.unavailable` (503). A live generation keeps serving until its age bound. A failed tick read logs `lake.freshness_read_failed` and changes nothing.
+- **Locked down after its views.** Once the views are created, each managed instance turns off local file access and locks its configuration, and this holds on every connection of the generation. A query cannot read or write a local file, attach a database, or undo the lock. The engine limits of §8C.4 apply, with `datapipelines.lake.reads.memory-limit` (default `512MB`) as the instance's memory limit. With local files off, the instance cannot spill, so a query that needs more memory fails.
+
 ---
 
 ## 9. Validation Rules
@@ -1784,6 +1798,7 @@ fixture) get their Testcontainers twin.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-04 | v2.58 | 818 (#818) dp-lake P5 managed reads | §5.2: the managed generation's age bound and freshness tick retire its pool. New **§8C.10 the managed lake datasource**: created and re-synced from configuration (`datasource.managed` on edit, `lake.boot.datasource_name_taken` on a held name), its credential order, the grant to every workspace, views that read the catalog row, unavailable tables (`lake.table.unavailable`), the age bound and the tick, freshness stated as the record states it (the committing-server half waits for #799), `lake.unavailable`, and the lockdown with `reads.memory-limit`. |
 | 2026-11-04 | v2.57 | 816 merge review | §5.8: distinguish LAKE’s initial external-access setting from its mutable runtime configuration. |
 | 2026-11-03 | v2.56 | #816 | **§5.8 (new, TEMPORARY):** the raw-text author-SQL guard on every `DUCKDB` and `LAKE` lease (the staging guard of lane #795, shared from `typesystem`): rule, refusal code (`pipeline.node.query_execution_failed`, never `datasource.table_forbidden`), stated false positives, cost, residuals. **§5.6:** `DUCKDB` connections open with `lock_configuration=true`, refused in `properties.jdbc` / `jdbc_url`; the "toggles remain settable at runtime" sentence restated as history. `LAKE` is not locked (§5.8, measured). Additive. |
 | 2026-11-02 | v2.55 | #778 | **§8C.9 (new):** the lake reference index. Each released pipeline and parameter-set version's LAKE sites are scanned in the releasing transaction by the engine's own parser, resolved against the registry (status `exact`, `partial` or `unscannable`), and backfilled at boot. The promotion receiver reads the index to refuse a batch that names an unregistered table. Additive. |

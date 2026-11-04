@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.51 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.52 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-04
@@ -121,6 +121,7 @@ A datasource that is edited or deleted has its pool RETIRED, not closed on the s
 | INFO | `datasource.bootstrap_registered` | An absent datasource was validated and saved; one line per newly registered entry during boot | `name`, `dialect`, `readonly`, `scope=global` |
 | INFO | `datasource.bootstrap_skipped` | One bootstrap entry already exists (soft-deleted rows count), or another instance won the insert race; its row is kept. Credential reconciliation and any eligible lake seed still follow the already-present case | `name`, `reason` (`already_present`/`concurrent_registration`), `message` (static explanation) |
 | WARN | `datasource.bootstrap_credential_resynced` | For one existing entry, the stored credential failed authentication and the file credential worked; only the credential was replaced. One line per resync, not for unchanged working credentials | `name`, `env_key` (environment-variable name or `<literal>`, never the credential), `message` (static explanation) |
+| WARN | `datasource.bootstrap_managed_name` | A bootstrap entry names the managed lake datasource (#818, [Datasources §8C.10](datasources.md#8c10-the-managed-lake-datasource)). Configuration owns that row, so the entry is skipped and its credential is neither probed nor written | `name` |
 | ERROR | `datasource.bootstrap_credential_broken` | Both stored and file credentials failed authentication for one entry; the row stays unchanged and boot continues. Fix the named environment variable/database role or edit the datasource | `name`, `env_key` (variable name or `<literal>`), `message` (static explanation) |
 | ERROR | `datasource.bootstrap_credential_unreadable` | The stored credential could not be decrypted; it is not replaced, the row stays unchanged and boot continues. Check the deployment encryption key | `name`, `message` (static explanation; no key value) |
 | INFO | `datasource.bootstrap_lake_seed_skipped` | A bootstrap entry has a lake import but its datasource is soft-deleted; one line per skipped seed during boot | `name`, `reason=soft_deleted`, `message` (static explanation) |
@@ -148,7 +149,7 @@ The notices of [Auth §5A.8](auth.md#5a8-mail-the-welcome-mail-and-the-new-user-
 
 #### 3.4C The LAKE instance events (152)
 
-A `LAKE` datasource's pool owns one embedded DuckDB instance per pool generation ([Datasources §5.2](datasources.md#52-pool-lifecycle)): a retained owner connection is opened at pool build, initialized once, and released after the Hikari pool has shut down. Nine events name that lifecycle and its failures; the ERROR is the one that means a pool needs rebuilding, and the WARNs are what the operator should read.
+A `LAKE` datasource's pool owns one embedded DuckDB instance per pool generation ([Datasources §5.2](datasources.md#52-pool-lifecycle)): a retained owner connection is opened at pool build, initialized once, and released after the Hikari pool has shut down. Nine events name that lifecycle and its failures (the managed datasource's own events follow the table); the ERROR is the one that means a pool needs rebuilding, and the WARNs are what the operator should read.
 
 | Level | `event=` | When | Fields |
 |---|---|---|---|
@@ -161,6 +162,22 @@ A `LAKE` datasource's pool owns one embedded DuckDB instance per pool generation
 | WARN | `lake.instance_handles_closed` | At the generation's release, physical connections were still registered to it — ones HikariCP never accepted (their creation straddled the shutdown and the closed bag refused them), abandoned to a borrower at its shutdown ceiling, or whose earlier close the driver refused — and the generation released them. The counts distinguish what happened: `closed` (the generation's own close was confirmed), `already_closed` (found closed by something the wrapper never saw, e.g. an executor-driven abort), `in_flight` (a borrower's close was mid-flight on another thread; the last word was handed to it), `close_failures` (the driver refused — the honest residual, still registered) | `datasource`, `generation`, `handles`, `closed`, `already_closed`, `in_flight`, `close_failures`, `error` (the last driver refusal, empty when none), `message` |
 | WARN | `lake.view_failed` | One registered table's view could not be created at instance init (109 §A); it is recorded on the table's registry row and skipped, the surviving views serve | `datasource`, `table`, `error`, `message` |
 | WARN | `lake.view_outcome_record_failed` | The registry write of a view outcome threw; the instance still serves the surviving views, or an all-refused registry still refuses the pool build; the row keeps its previous state | `datasource`, `table`, `error` (exception class), `sql_state`, `message` (static explanation) |
+
+**The managed lake datasource (#818).** The datasource that serves managed lake tables ([Datasources §8C.10](datasources.md#8c10-the-managed-lake-datasource)) is a `LAKE` datasource, so the events above apply to it too. Nine more events name its reads: the row's sync from configuration at boot, how long a generation lives, and which tables it serves.
+
+| Level | `event=` | When | Fields |
+|---|---|---|---|
+| INFO | `lake.managed_datasource_registered` | Boot created the managed datasource's row from configuration | `datasource`, `credential_kind` |
+| INFO | `lake.managed_datasource_resynced` | Boot found the row different from configuration and rewrote it; its pools retire here and on peers | `datasource`, `credential_kind` |
+| INFO | `lake.managed_registry_backfilled` | Boot wrote registry rows for managed tables defined before the managed datasource existed | `datasource`, `rows` |
+| INFO | `lake.managed_datasource_granted` | Boot or a freshness tick granted the managed datasource to workspaces that could not see it | `datasource`, `workspaces` |
+| INFO | `lake.generation_expired` | A managed generation reached `reads.max-generation-age-seconds` and was retired when a lease was asked for; the next lease builds from the catalog | `datasource`, `age_seconds`, `max_age_seconds` |
+| INFO | `lake.generation_stale` | The freshness tick found the catalog changed since the generation was built and retired it | `datasource`, `tables_stale` |
+| INFO | `lake.freshness_tick_retired` | A freshness tick retired one or more generations; logged once per tick, only when the count is not zero | `generations` |
+| WARN | `lake.freshness_read_failed` | The freshness tick's catalog read failed. The tick skips that datasource, and the live generation serves until its age bound | `datasource`, `error`, `message` |
+| INFO | `lake.table_unavailable_omitted` | A generation was built without a view for a managed table: archived or purged, no catalog row, no lifecycle row, or the lake disabled. A node that reads it fails with `lake.table.unavailable` | `datasource`, `table`, `reason` |
+
+**`freshness_read_failed` is the one to read** if it repeats: the catalog cannot be read, so no new generation can be built either, and once the live one reaches its age bound, leases fail with `lake.unavailable`. No credential or key appears in any of these lines; `credential_kind` is `password` or `none`, never a value.
 
 **`instance_owner_lost` is the one to alert on**: it is a datasource whose engine went away underneath a live pool, and it does not self-heal — retire-and-rebuild (a datasource save, a table registration, or the reconcile) is the remedy, and the message says so. `view_failed` is the existing per-table isolation working (the table's row carries the error; the UI shows it); a burst of them after a registry change is a bad location or credential, not the engine. Nothing here is an audit row.
 
@@ -389,7 +406,7 @@ When `datapipelines.lake.enabled=true`, `LakeBootCheck` runs once after Flyway (
 |---|---|---|---|
 | INFO | `lake.boot.ok` | Every check passed: the catalog shape, the four V53 triggers, the control row, the store reachable and honouring `If-None-Match: *` | `bucket`, `prefix` |
 
-**The refusals are startup failures, not log events.** Each is an `IllegalStateException` whose message starts with its id, so the operator greps the boot failure for it: `lake.boot.catalog_shape`, `lake.boot.trigger_missing`, `lake.boot.control_row`, `lake.boot.storage_unreachable`, `lake.boot.conditional_put` (what each means: Configuration §7). No credential, key, or object body appears in any of them.
+**The refusals are startup failures, not log events.** Each is an `IllegalStateException` whose message starts with its id, so the operator greps the boot failure for it: `lake.boot.catalog_shape`, `lake.boot.trigger_missing`, `lake.boot.control_row`, `lake.boot.storage_unreachable`, `lake.boot.conditional_put`, and `lake.boot.datasource_name_taken` (#818, raised when the managed datasource is registered: another datasource holds `datapipelines.lake.name`) (what each means: Configuration §7). No credential, key, or object body appears in any of them.
 
 #### 3.4R The lake table definition apply events (#798)
 
@@ -707,6 +724,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 |---|---|---|---|
 | 2026-11-02 | v1.48 | 778 (#778) the lake reference index backfill | New **§3.4P**: the boot backfill's `lake.reference_index.backfill` (INFO, counts) and `lake.reference_index.backfill_failed` (WARN, version identity and exception class; no SQL, no parser message). |
 | 2026-11-02 | v1.49 | 785 (#785) managed lake boot check | New **§3.4Q** (numbered at merge after #778's §3.4P / v1.48): the `lake.boot.ok` INFO line and the five `lake.boot.*` refusal ids the after-Flyway boot check leads its startup failure with (defined here so a citation of one is checked; they are not log events). |
+| 2026-11-04 | v1.52 | 818 (#818) managed lake reads | **§3.4C** gains the managed datasource's events: `lake.managed_datasource_registered` / `_resynced` / `managed_registry_backfilled` / `managed_datasource_granted` (boot and tick), `lake.generation_expired` (age bound), `lake.generation_stale` and `lake.freshness_tick_retired` (the tick and its count), `lake.freshness_read_failed` (WARN) and `lake.table_unavailable_omitted`. **§3.4Q** lists `lake.boot.datasource_name_taken`. **§3.4A** gains `datasource.bootstrap_managed_name` (WARN): a bootstrap entry naming the managed datasource is skipped and its credential is never probed or written. The brief's `lake.generation_not_built` is not an event: a failed build read is the `lake.unavailable` error. |
 | 2026-11-04 | v1.51 | 810 (#811) unclassified apply failure | **§3.4R** gains `lake.definition.apply_unclassified` (ERROR, `cause` + `sql_state`). It is logged where an unclassified failure of the commit step is caught, before the attempt's `apply_unknown` line, whose `code` is then `lake.definition.apply_unclassified`. |
 | 2026-11-03 | v1.50 | 798 (#798) lake table definition apply | New **§3.4R** (after #785's §3.4Q / v1.49): one line per apply or verify attempt that reached the table, with the events `lake.definition.applied` (INFO), `apply_failed` (WARN), `apply_deferred` (INFO, lease busy or back to pending), `apply_unknown` (WARN, the row stays applying) and `apply_superseded` (INFO). No body, location or storage value is logged. |
 | 2026-11-01 | v1.47 | 762 (#762) never-admissible dashboard refresh | **§3.4J** gains `dashboard.refresh_never_admissible`: the WARN a refresh logs when it is refused at once because it can never be admitted on this instance (`workspace_id`, `dashboard_id`, `invocations`, `ceiling`, `key`). |
