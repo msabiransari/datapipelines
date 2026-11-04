@@ -407,6 +407,41 @@ class ManagedLakeRegistryIntegrationTest {
         )
     }
 
+    @Test
+    fun `the generation lists a location only for a table it planned a view for - #818b C`() {
+        val at = { name: String -> "s3://dp-lake/sales/$name/metadata/00001-a.metadata.json" }
+        val withStatus = { name: String, status: String? -> table(name, at(name)).copy(status = status) }
+        val generation =
+            ManagedLakeGeneration(
+                LAKE,
+                listOf(
+                    withStatus("active", "active"),
+                    withStatus("deprecated", "deprecated").copy(deprecationMessage = "use v2"),
+                    withStatus("archived", "archived"),
+                    withStatus("purged", "purged"),
+                    withStatus("nolifecycle", null),
+                    table("nocatalog", null),
+                ),
+            )
+        val disabled = ManagedLakeGeneration(LAKE, listOf(withStatus("active", "active").copy(lakeDisabled = true)))
+        assertAll(
+            {
+                generation.locations shouldBe
+                    mapOf(
+                        "lake.sales.active" to at("active"),
+                        "lake.sales.deprecated" to at("deprecated"),
+                        "lake.sales.archived" to null,
+                        "lake.sales.purged" to null,
+                        "lake.sales.nolifecycle" to null,
+                        "lake.sales.nocatalog" to null,
+                    )
+            },
+            { disabled.locations shouldBe mapOf("lake.sales.active" to null) },
+            // The snapshot stays complete: restoring an archived table (same location) is still staleness.
+            { generation.staleTableCount(generation.tables.map { if (it.name == "archived") it.copy(status = "active") else it }) shouldBe 1 },
+        )
+    }
+
     // ------------------ fixtures
 
     private fun managed(secret: String = READER_SECRET) =

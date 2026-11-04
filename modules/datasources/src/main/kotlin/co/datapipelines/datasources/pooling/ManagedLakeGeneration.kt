@@ -19,8 +19,23 @@ data class ManagedLakeGeneration(
     /** The facts the views were built from, keyed by qualified name (see [ManagedLakeTable.generationKey]). */
     private val snapshot: Map<String, ManagedLakeTable.GenerationKey> = tables.associate { it.qualifiedName to it.generationKey }
 
-    /** Qualified name → the metadata location its view reads, or null for an omitted table. The P8 surface reads this. */
-    val locations: Map<String, String?> get() = tables.associate { it.qualifiedName to it.metadataLocation }
+    /**
+     * The versions this generation reads, for the P8 surface (record §17(a): the reference index's
+     * `versionsReading()` scopes protection to them). One key per table of the snapshot, so the map is
+     * exactly as complete as [tables]:
+     *
+     * - a table the planner gave a view (`unavailableReason` null: `active` or `deprecated`) maps to the
+     *   catalog metadata location that view reads;
+     * - every other table maps to null, its location withheld even when the catalog row has one: `archived`,
+     *   `purged`, every table of a disabled lake, no catalog row, no lifecycle row. This generation reads none
+     *   of those versions, so P8 must not count them as read.
+     *
+     * Planned, not proven built: a listed view whose creation failed (the row's `lastError`) is still listed.
+     * That over-reports, which for a retention guard is the safe direction; the map never omits a version a
+     * view reads. Staleness compares the full snapshot ([staleTableCount]), not this map.
+     */
+    val locations: Map<String, String?>
+        get() = tables.associate { it.qualifiedName to it.metadataLocation.takeIf { _ -> it.unavailableReason == null } }
 
     /**
      * How many tables differ between this generation and [current], a fresh catalog read: a table
