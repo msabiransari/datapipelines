@@ -91,11 +91,13 @@ class DuckDbStagingFactory internal constructor(
     ): DuckDbStaging {
         val files = DuckDbStagingFiles(properties.scratchDir, executionId)
         var root: DuckDBConnection? = null
+        var scratchValidated = false
         // The open's own failures (driver, file system, a refused path) become `creation_failed`
         // after the half-open database is abandoned; anything else propagates unchanged.
         val failure: Exception =
             try {
                 DuckDbStagingFiles.prepareScratchDir(properties.scratchDir)
+                scratchValidated = true
                 files.delete().forEach { (path, e) -> log.warn("stale DuckDB staging path {} could not be removed: {}", path, e.message) }
                 val opened = connect("$URL_PREFIX${files.database}", openProperties()).unwrap(DuckDBConnection::class.java)
                 root = opened
@@ -112,7 +114,7 @@ class DuckDbStagingFactory internal constructor(
             } catch (e: IllegalArgumentException) {
                 e
             }
-        abandon(executionId, root, files)
+        if (scratchValidated) abandon(executionId, root, files)
         throw creationFailed(executionId, failure)
     }
 

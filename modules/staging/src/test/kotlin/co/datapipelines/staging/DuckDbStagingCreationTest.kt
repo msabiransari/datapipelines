@@ -4,7 +4,6 @@ import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.StagingEngine
 import com.sun.security.auth.module.UnixSystem
 import io.kotest.assertions.throwables.shouldThrow
-import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -60,15 +59,38 @@ class DuckDbStagingCreationTest {
         assumeTrue(posix(), "POSIX file system: owner and mode are only read there")
         val dir = Files.createDirectory(scratch.resolve("shared"))
         Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString(mode))
+        val executionId = UUID.randomUUID()
+        val sentinel = Files.writeString(dir.resolve("exec_$executionId.duckdb"), "untouched")
         val factory = duckFactory(dir)
 
-        val thrown = shouldThrow<DatapipelinesException> { factory.create(UUID.randomUUID(), StagingEngine.DUCKDB) }
+        val thrown = shouldThrow<DatapipelinesException> { factory.create(executionId, StagingEngine.DUCKDB) }
 
         thrown.code shouldBe StagingErrorCodes.CREATION_FAILED
-        Files.list(dir).use { it.toList() }.shouldBeEmpty()
+        Files.list(dir).use { it.toList() } shouldBe listOf(sentinel)
+        Files.readString(sentinel) shouldBe "untouched"
         PosixFilePermissions.toString(Files.getPosixFilePermissions(dir)) shouldBe mode
         factory.budget.reservedBytes shouldBe 0L
         shouldThrow<IllegalArgumentException> { DuckDbStagingFiles.prepareScratchDir(dir) }.message shouldContain "grant nothing"
+    }
+
+    @Test
+    fun `refusing a scratch directory symlink leaves its target untouched`() {
+        val target = Files.createDirectory(scratch.resolve("target"))
+        val executionId = UUID.randomUUID()
+        val sentinel = Files.writeString(target.resolve("exec_$executionId.duckdb"), "untouched")
+        val link = Files.createSymbolicLink(scratch.resolve("link"), target)
+        val props = duckProps(link)
+        val factory =
+            DuckDbStagingFactory(props, ScratchBudget(props.scratchCapacityBytes)) { _, _ ->
+                error("The driver must not be called for a refused scratch directory")
+            }
+
+        val thrown = shouldThrow<DatapipelinesException> { factory.create(executionId, StagingEngine.DUCKDB) }
+
+        thrown.code shouldBe StagingErrorCodes.CREATION_FAILED
+        Files.readString(sentinel) shouldBe "untouched"
+        Files.isSymbolicLink(link) shouldBe true
+        factory.budget.reservedBytes shouldBe 0L
     }
 
     @Test
