@@ -10,6 +10,7 @@ import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
+import org.junit.jupiter.api.assertAll
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.wait.strategy.Wait
@@ -52,6 +53,11 @@ import java.util.concurrent.atomic.AtomicReference
  *
  * Falsified by skipping the close in `ConnectionPoolManager.reapRetiring`'s ceiling branch: the query is then still
  * running at the bound, so the termination assertion fails.
+ *
+ * The second case is the brief's claim 2, a characterization of what IS, kept while the owner rules on it: with no
+ * later borrower, no freshness tick and no invalidation, nothing retires a generation past its age bound (the bound
+ * is judged only at a lease), so the reaper has nothing to close and an executing reader runs on past age + ceiling.
+ * Only a later borrower's lease retires it, and the close then follows at the ceiling.
  */
 @Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -114,6 +120,67 @@ class ManagedLakeActiveQueryCloseIntegrationTest {
                 }
             } finally {
                 // Cleanup only after the assertion: a planted (still running) query is cancelled here.
+                runCatching { statement.cancel() }
+                run.thread.join(CLEANUP_JOIN_MS)
+                runCatching { lease.close() }
+            }
+        } finally {
+            registry.shutdown()
+        }
+    }
+
+    @Test
+    fun `claim 2 - with no later borrower nothing retires an executing reader's generation past its age bound`() {
+        jdbc.jdbcTemplate.execute("TRUNCATE datasources, users CASCADE")
+        val owner = actor()
+        val registry =
+            DefaultDatasourceRegistry(
+                DatasourceRepository(jdbc),
+                testEncryptor(),
+                lakeTables = { emptyList() },
+                retireCeiling = CEILING,
+                managedLake = { listOf(TRIPS) },
+                maxGenerationAge = SHORT_AGE,
+            )
+        try {
+            registry.syncManagedLake(managed(), owner) shouldBe ManagedLakeSync.CREATED
+            val datasource = registry.get(LAKE).shouldNotBeNull()
+            val pool = registry.poolFor(datasource).shouldBeInstanceOf<HikariConnectionPool>()
+            val builtAt = registry.generationBuiltAt(LAKE).shouldNotBeNull()
+            val lease = pool.leaseConnection()
+            val statement = pool.poolConnectionOf(lease).unwrap(java.sql.Connection::class.java).prepareStatement(LONG_QUERY)
+            val run = RunningQuery(statement)
+            try {
+                run.start()
+                awaitExecuting(run)
+                // Past age + ceiling, with no lease, no tick and no invalidation: the reaper finds nothing retired.
+                val quietUntil = builtAt.plus(SHORT_AGE).plus(CEILING)
+                Thread.sleep(Duration.between(Instant.now(), quietUntil).toMillis().coerceAtLeast(0) + DEADLINE_MARGIN_MS)
+                val quiet = registry.reapRetiredPools()
+                val stillRunningAt = Instant.now()
+                val stillRunning = run.ended.count == 1L
+                val stillLive = registry.generationBuiltAt(LAKE)
+                // A later borrower: its lease judges the age bound, retires the generation, and the close follows.
+                val borrowedAt = Instant.now()
+                registry.poolFor(datasource)
+                Thread.sleep(CEILING.toMillis() + DEADLINE_MARGIN_MS)
+                val reapStarted = Instant.now()
+                val closing = registry.reapRetiredPools()
+                val ended = run.ended.await(TERMINATION_BOUND.toMillis(), TimeUnit.MILLISECONDS)
+                println(
+                    "CLAIM2_NO_BORROWER built=$builtAt age=$SHORT_AGE ceiling=$CEILING quiet_reap_hard_closed=${quiet.hardClosed} " +
+                        "still_running_at=$stillRunningAt still_running=$stillRunning live_generation_built=$stillLive " +
+                        "borrowed=$borrowedAt reap_started=$reapStarted hard_closed=${closing.hardClosed} " +
+                        "ended=${run.endedAt.get()} outcome=${run.outcome.get()}",
+                )
+                assertAll(
+                    { quiet.hardClosed shouldBe 0 },
+                    { stillRunning shouldBe true },
+                    { stillLive shouldBe builtAt },
+                    { closing.hardClosed shouldBe 1 },
+                    { ended shouldBe true },
+                )
+            } finally {
                 runCatching { statement.cancel() }
                 run.thread.join(CLEANUP_JOIN_MS)
                 runCatching { lease.close() }
@@ -221,6 +288,9 @@ class ManagedLakeActiveQueryCloseIntegrationTest {
 
         /** A short ceiling, so the test waits seconds; the production default is 90 s. */
         val CEILING: Duration = Duration.ofSeconds(2)
+
+        /** Claim 2's age bound: short, so the test crosses age + ceiling in seconds. */
+        val SHORT_AGE: Duration = Duration.ofSeconds(3)
 
         /** How long after the reap call the query must have ended. */
         val TERMINATION_BOUND: Duration = Duration.ofSeconds(15)
