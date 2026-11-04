@@ -1,6 +1,6 @@
 # The Managed Lake: Table Definitions
 
-**Status:** v1.4 (#798, dp-lake P3; #810, #811, #812; #818, dp-lake P5)
+**Status:** v1.5 (#798, dp-lake P3; #810, #811, #812; #818, dp-lake P5)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and the names involved. The design is
@@ -242,7 +242,9 @@ dp-lake P5). A query names a table `<lake>.<namespace>.<table>`, for example `wa
 `datapipelines.lake.name` is `warehouse`.
 
 **What a reader sees.** Each server reads through a generation: one DuckDB instance whose views were built from the
-Iceberg catalog rows at one instant. A query reads the snapshot its table's catalog row named at that instant.
+Iceberg catalog rows at one instant. A query reads the snapshot its table's catalog row named at that instant. A table's
+state is read at that instant too: a table archived or restored afterwards keeps its old row below until the
+generation is replaced.
 
 | Table state | What a query sees |
 |---|---|
@@ -276,6 +278,7 @@ refuses a configuration where age + retire ceiling + tick exceeds one twenty-fou
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-04 | v1.5 | 818b (#818) | §6: a table's state, like its snapshot, is the one the reader's generation was built with. |
 | 2026-11-04 | v1.4 | 818 (#818) | New **§6 Reads**: what a reader sees per table state, when new data becomes visible (the committing-server half waits for #799), the age bound and the boot rule that keeps it inside the snapshot protection window, and the operator keys. |
 | 2026-11-04 | v1.3 | 810 merge review | §3 distinguishes the polling horizon from the final row-lock wait, which can overrun either the lease wait or the caller's deadline by one lock timeout. |
 | 2026-11-04 | v1.2 | 810 (#810, #811, #812) | Drift has an exit: a definition whose shape equals the live table applies as one commit that sets only `dp.definition.version` (§2 row, §3 row, §4 rule 2). An unclassified failure of the commit step leaves the row `applying` as `lake.definition.apply_unclassified`, and the release returns that outcome (§3 row and paragraph). A lease takeover waits at most the catalog lock timeout on a lease row another transaction holds, then counts as busy (§3 "One attempt" and "Crash between commit and stamp"). |

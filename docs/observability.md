@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.52 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.53 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-04
@@ -174,7 +174,8 @@ A `LAKE` datasource's pool owns one embedded DuckDB instance per pool generation
 | INFO | `lake.generation_expired` | A managed generation reached `reads.max-generation-age-seconds` and was retired when a lease was asked for; the next lease builds from the catalog | `datasource`, `age_seconds`, `max_age_seconds` |
 | INFO | `lake.generation_stale` | The freshness tick found the catalog changed since the generation was built and retired it | `datasource`, `tables_stale` |
 | INFO | `lake.freshness_tick_retired` | A freshness tick retired one or more generations; logged once per tick, only when the count is not zero | `generations` |
-| WARN | `lake.freshness_read_failed` | The freshness tick's catalog read failed. The tick skips that datasource, and the live generation serves until its age bound | `datasource`, `error`, `message` |
+| WARN | `lake.freshness_read_failed` | The freshness tick's catalog read failed, including a read cancelled at the tick's 5 s statement bound (`sql_state=57014`). The tick skips that datasource, and the live generation serves until its age bound | `datasource`, `sql_state`, `error`, `message` |
+| WARN | `lake.freshness_tick_failed` | A step of the freshness tick (`refresh` or `regrant`) failed, for example its statement was cancelled at the 5 s bound. The tick's next step, the next tick and the other scheduled jobs still run | `step`, `error` (the class), `sql_state`, `message` |
 | INFO | `lake.table_unavailable_omitted` | A generation was built without a view for a managed table: archived or purged, no catalog row, no lifecycle row, or the lake disabled. A node that reads it fails with `lake.table.unavailable` | `datasource`, `table`, `reason` |
 
 **`freshness_read_failed` is the one to read** if it repeats: the catalog cannot be read, so no new generation can be built either, and once the live one reaches its age bound, leases fail with `lake.unavailable`. No credential or key appears in any of these lines; `credential_kind` is `password` or `none`, never a value.
@@ -724,6 +725,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 |---|---|---|---|
 | 2026-11-02 | v1.48 | 778 (#778) the lake reference index backfill | New **§3.4P**: the boot backfill's `lake.reference_index.backfill` (INFO, counts) and `lake.reference_index.backfill_failed` (WARN, version identity and exception class; no SQL, no parser message). |
 | 2026-11-02 | v1.49 | 785 (#785) managed lake boot check | New **§3.4Q** (numbered at merge after #778's §3.4P / v1.48): the `lake.boot.ok` INFO line and the five `lake.boot.*` refusal ids the after-Flyway boot check leads its startup failure with (defined here so a citation of one is checked; they are not log events). |
+| 2026-11-04 | v1.53 | 818b (#818) managed reads corrections | **§3.4C**: `lake.freshness_read_failed` carries `sql_state`; new `lake.freshness_tick_failed` (WARN, `step`, `error`, `sql_state`), one line per failed tick step, after which the tick's next step and the next tick still run. |
 | 2026-11-04 | v1.52 | 818 (#818) managed lake reads | **§3.4C** gains the managed datasource's events: `lake.managed_datasource_registered` / `_resynced` / `managed_registry_backfilled` / `managed_datasource_granted` (boot and tick), `lake.generation_expired` (age bound), `lake.generation_stale` and `lake.freshness_tick_retired` (the tick and its count), `lake.freshness_read_failed` (WARN) and `lake.table_unavailable_omitted`. **§3.4Q** lists `lake.boot.datasource_name_taken`. **§3.4A** gains `datasource.bootstrap_managed_name` (WARN): a bootstrap entry naming the managed datasource is skipped and its credential is never probed or written. The brief's `lake.generation_not_built` is not an event: a failed build read is the `lake.unavailable` error. |
 | 2026-11-04 | v1.51 | 810 (#811) unclassified apply failure | **§3.4R** gains `lake.definition.apply_unclassified` (ERROR, `cause` + `sql_state`). It is logged where an unclassified failure of the commit step is caught, before the attempt's `apply_unknown` line, whose `code` is then `lake.definition.apply_unclassified`. |
 | 2026-11-03 | v1.50 | 798 (#798) lake table definition apply | New **§3.4R** (after #785's §3.4Q / v1.49): one line per apply or verify attempt that reached the table, with the events `lake.definition.applied` (INFO), `apply_failed` (WARN), `apply_deferred` (INFO, lease busy or back to pending), `apply_unknown` (WARN, the row stays applying) and `apply_superseded` (INFO). No body, location or storage value is logged. |
