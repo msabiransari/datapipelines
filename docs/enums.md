@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.44 (living document — updated as enums evolve)
+**Status:** v1.45 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -505,6 +505,14 @@ Pre-created and fixed: the three member roles are the ONLY roles an `mcp` key ca
 |---|---|
 | `dashboard.refresh` | A dashboard refresh ended — COMPLETED, PARTIAL, FAILED, ABORTED or TIMED_OUT |
 
+**Lake definition audit events** (same `audit_log` table; emitted by the managed lake's table definitions, [Lake §2](lake.md#2-lifecycle) and [§3](lake.md#3-apply-states), #798). Each row is written INSIDE the transaction of the state change it records (strict: a refused audit insert rolls the change back). `user_id` is the acting person, or NULL when the system applies a definition (a promotion landing, a settle pass). `details` carries `table_id`, `namespace`, `table` and `version`; never a definition body, a column name list, a storage location or a credential.
+
+| Value | Trigger |
+|---|---|
+| `lake.definition.released` | A table definition's DRAFT became RELEASED and the table's current definition. `details` also carries `via` (`session` \| `api_key` \| `mcp`) |
+| `lake.definition.applied` | An apply attempt stamped the table `applied`: the Iceberg table holds the current definition (committed by this attempt, or found already there after a crash). `details` also carries `operation_id` |
+| `lake.definition.apply_failed` | An apply attempt stamped the table `failed`: a reviewed or breaking change, drift, or a change Iceberg refused. `details` also carries `operation_id` and `code` (a `lake.definition.*` code, [Pipeline Contract §13.25](pipeline-contract.md#1325-managed-lake)). A retryable give-up (`pending`) writes no row |
+
 ---
 
 ## 16. Error Code Domains (prefix catalog)
@@ -543,6 +551,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `request.*` | The platform's request refusals: `413 request.body_too_large` from the body-cap filter on `/api/v1` and `/mcp`, before any handler or parser (#279); and `400 request.query_too_long` from the search-owning services for a search term over 200 characters after the trim (#504b) | pipeline-contract §13.21 |
 | `navigation.*` (`navigation.request.*`, `navigation.view.*`, `navigation.metadata.*`) | The session-only navigation trees (#464): a malformed, foreign or stale tree request or continuation (400), an unavailable promotion view (503, `Retry-After`), one node over the page budget (503) | pipeline-contract §13.24 (defined in [REST API §24](rest-api.md#24-first-party-navigation-trees)) |
 | `lake.catalog.*` | The managed lake's catalog refusals (#785): a write the lease fence refused (`lake.catalog.fenced`), a catalog in restore (`lake.catalog.restoring`), and a commit whose outcome the connection lost (`lake.catalog.outcome_unknown` — never retried blind) | pipeline-contract §13.25 |
+| `lake.definition.*` | The managed lake's table definitions (#798): an unknown table or version, a lifecycle refusal (`not_draft`, `not_released`, `version_conflict`, `applied_version`, `name_taken`), an invalid body, a change the supported-change policy will not apply (`reviewed_change`, `breaking_change`), a table changed outside DP (`drift`), a table another operation holds (`table_busy`), and authoring off in this environment (`authoring_disabled`) | pipeline-contract §13.25 (defined in [Lake §4](lake.md#4-the-supported-change-policy)) |
 
 **Removed 2026-08-07** (D5): the `auth.rate_limit.*` domain (folded into `rate_limit.exceeded`), the `template.import.*` domain (folded into `template.validation.*`), the `idempotency_key.*` spelling (now `idempotency.*`), and `result.claim_check_expired` (now `result.expired` under the D9 result model).
 
@@ -1042,6 +1051,7 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these four and NULL. V3
 | `ParameterKind`, `SelectorSourceKind`, `PresentationControl`, `NumericFormatKind` | the [parameter-engine record §3](superpowers/specs/2026-09-21-parameter-engine-design.md) (`parameters` declares them; §27–§30 here are the wire tables) | rest-api, mcp-server (#194 lane D) |
 | `RefreshStatus` | [Dashboards §5](dashboards.md#5-the-runtime) (`visualization` declares it; §38 here is the wire table) | metadata-db (the V43 CHECK), rest-api §23.3, the dashboard runtime |
 | `EvaluationCaller`, `ParameterEvaluationStatus`, `QueryAttemptOutcome` | the [parameter-set workspace spec §2](superpowers/specs/2026-10-02-parameter-set-workspace-spec.md) (`parameters` declares them; §39–§41 here are the wire tables) | metadata-db (the V48 CHECKs), the History tab (ui-screens §4.23) |
+| `LakeTableStatus`, `LakeApplyState`, `LakeChangeClass` | [lake.md](lake.md) (`lake` declares them; §46–§48 here are the wire tables) | metadata-db (the V54 CHECKs), the lake surfaces (P8) |
 | `RendererKind`, `AssertionKind`, `TestRunStatus`, `DashboardObjectType`, `ActionScope`, `StateSetting`, `LayoutPosition` | the [dashboard implementation spec §3](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) (`visualization` declares them; §31–§37 here are the wire tables) | [Dashboards](dashboards.md), metadata-db (the V42 CHECK), rest-api and mcp-server (L1b) |
 
 ---
@@ -1142,10 +1152,49 @@ Stored in `lake_reference_scans.status` ([Metadata DB §4.41](metadata-db.md#441
 
 ---
 
+## 46. `LakeTableStatus` — a managed lake table's lifecycle
+
+Stored in `lake_tables_managed.status` and, without `purged`, `lake_namespaces.status` ([Metadata DB §4.48](metadata-db.md#448-lake_namespaces), [§4.49](metadata-db.md#449-lake_tables_managed)). #798 writes `active` only; the transitions (super admin only) belong to the lake surfaces (P8) and the purge sequence (dp-lake record §9).
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `ACTIVE` | `active` | In use: readable, open to ingestion appends, and its definition can change |
+| `DEPRECATED` | `deprecated` | Still readable; ingestion appends are refused and maintenance continues (dp-lake record D5; the refusal code lands with the phase that builds the refusal) |
+| `ARCHIVED` | `archived` | Off the read surface (a query naming it fails; the code lands with that phase); can be restored, or purged after its cooling-off window |
+| `PURGED` | `purged` | The Iceberg pointer was dropped; the row stays so its name and history can be explained. Tables only |
+
+---
+
+## 47. `LakeApplyState` — a managed table's apply state
+
+Stored in `lake_tables_managed.apply_state` ([Metadata DB §4.49](metadata-db.md#449-lake_tables_managed)): whether THIS environment's Iceberg table holds the table's current definition. NULL before the first release. The transitions are [Lake §3](lake.md#3-apply-states).
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `PENDING` | `pending` | A released definition waits to be applied, or a retryable attempt gave up (another operation held the table, the catalog fenced or restored, the attempt's commit did not happen) |
+| `APPLYING` | `applying` | An attempt owns the row (`apply_operation_id`); only that attempt, or a verify of it, moves the row on |
+| `APPLIED` | `applied` | The Iceberg table holds the current definition (`applied_version_here = current_definition_version`) |
+| `FAILED` | `failed` | The apply refused: a reviewed or breaking change, drift, or a change Iceberg refused. `apply_error_json` carries the code and the changes; a new release supersedes it |
+
+---
+
+## 48. `LakeChangeClass` — the supported-change policy's classes
+
+Computed, never stored on its own: the class of the change from the Iceberg table's shape to a definition's ([Lake §4](lake.md#4-the-supported-change-policy)). It appears in `apply_error_json.change_class` of a refused apply.
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `COMPATIBLE` | `compatible` | Applied: an optional column added, a type widened (int→long, float→double, decimal precision), a doc or tags changed, a partition field added, a required column added to an empty table |
+| `REVIEWED` | `reviewed` | Refused in the first release (`lake.definition.reviewed_change`, dp-lake record R2): a drop, rename, reorder, a column made optional, a partition field removed or reordered |
+| `BREAKING` | `breaking` | Refused (`lake.definition.breaking_change`); the remedy is a replacement table and deprecating the old one: a narrowing or incompatible type change, a decimal scale change, a column made required, a required column added to a table with rows, the identifier fields changed |
+
+---
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-04 | v1.45 | 798 (#798) | New **§46 `LakeTableStatus`**, **§47 `LakeApplyState`** and **§48 `LakeChangeClass`** (V54's two CHECKs and the supported-change policy's classes, held to their Kotlin enums by `LakeDefinitionEnumsSpecDriftTest`); **§15** gains the three lake definition audit events (`lake.definition.released` / `applied` / `apply_failed`, held by `LakeAuditEventsSpecDriftTest`); **§16** registers the `lake.definition.*` domain (pipeline-contract §13.25). Section numbers follow #778's §45; a lane merging after this one with its own §46 renumbers. |
 | 2026-11-02 | v1.42 | 778 (#778) | New **§45 `LakeScanStatus`** (`exact` / `partial` / `unscannable`, `lake_reference_scans.status`, V52) with the `reasons_json` kind words. |
 | 2026-11-02 | v1.43 | 785 (#785) | **§16** (row renumbered at merge after #778's v1.42): registers the `lake.catalog.*` domain (pipeline-contract §13.25), the managed lake's three catalog refusals. |
 | 2026-11-03 | v1.44 | 795 (#795) | **§7 `StagingEngine`** gains `DUCKDB` (dp-lake P1: a file-backed, memory-bounded, scratch-reserved, configuration-locked DuckDB staging database per execution) and is consolidated into `typesystem` per this section's own rule for the second engine — `staging`'s local copy and `dag`'s mapping are gone; new `StagingEngineSpecDriftTest`. |

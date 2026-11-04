@@ -73,6 +73,9 @@ class LakeTableRepositoryIntegrationTest {
             { inserted.format shouldBe LakeTableFormat.PARQUET },
             { inserted.partitionColumn shouldBe "pickup_date" },
             { inserted.registeredBy shouldBe userId },
+            // #798 (V54): a registration is an external row and carries no revision sequence.
+            { inserted.origin shouldBe LakeTableOrigin.EXTERNAL },
+            { inserted.revisionSeq shouldBe null },
         )
 
         val listed = repository.findByDatasource("sample-lake")
@@ -139,6 +142,28 @@ class LakeTableRepositoryIntegrationTest {
                 mapOf("actor" to userId),
             )
         }
+    }
+
+    @Test
+    fun `V54 - a managed row reads back its origin and revision sequence, an external row may not carry one`() {
+        jdbc.update(
+            "INSERT INTO lake_tables (datasource_id, namespace, name, format, location, registered_by, origin, revision_seq) " +
+                "VALUES ('sample-lake', ARRAY['lake', 'sales'], 'orders', 'iceberg', 's3://b/m.metadata.json', :actor, " +
+                "'managed', 42)",
+            mapOf("actor" to userId),
+        )
+        val managed = repository.findByDatasource("sample-lake").single()
+        assertAll(
+            { managed.origin shouldBe LakeTableOrigin.MANAGED },
+            { managed.revisionSeq shouldBe 42L },
+        )
+        shouldThrow<Exception> {
+            jdbc.update(
+                "INSERT INTO lake_tables (datasource_id, namespace, name, format, location, registered_by, revision_seq) " +
+                    "VALUES ('sample-lake', ARRAY['nyc'], 't', 'parquet', 's3://b/x', :actor, 7)",
+                mapOf("actor" to userId),
+            )
+        }.message.shouldNotBeNull().contains("chk_lake_tables_revision_seq") shouldBe true
     }
 
     @Test

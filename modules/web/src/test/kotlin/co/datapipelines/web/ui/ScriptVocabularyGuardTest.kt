@@ -49,6 +49,10 @@ import kotlin.text.RegexOption.IGNORE_CASE
  *     constraint name, the migration tests' pre-state rows, the research snapshots.
  *   - **The sample-data fence** — `site/demo/manifest-*.json`'s `transform` key names a
  *     dataset's derivation step for the fenced `scripts/sample-data*` builds.
+ *   - **Iceberg partition transforms** — a managed lake table's partition intent names Apache
+ *     Iceberg's own transforms (identity, year/month/day/hour, bucket, truncate) under the body key
+ *     `partition[].transform` (dp-lake design record §5.1 and §8 step 4, #798): the lake
+ *     definitions package and `docs/lake.md`.
  */
 class ScriptVocabularyGuardTest {
     @Test
@@ -247,6 +251,16 @@ class ScriptVocabularyGuardTest {
                     Regex("^docs/dashboards\\.md$"),
                     Regex("transform", setOf(IGNORE_CASE)),
                     "the visualization block: a visualization pins a TEMPLATE through the `transform` key",
+                ),
+                Triple(
+                    Regex("^modules/lake/src/(?:main|test)/kotlin/co/datapipelines/lake/definitions/"),
+                    Regex("transform", setOf(IGNORE_CASE)),
+                    "Iceberg partition transforms: the lake definition body's partition[].transform (#798)",
+                ),
+                Triple(
+                    Regex("^docs/lake\\.md$"),
+                    Regex("transform", setOf(IGNORE_CASE)),
+                    "Iceberg partition transforms in the managed lake's definition body (#798)",
                 ),
                 Triple(
                     Regex("^docs/pipeline-editor\\.md$"),

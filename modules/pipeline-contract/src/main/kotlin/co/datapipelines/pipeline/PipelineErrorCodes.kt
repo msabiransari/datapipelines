@@ -2039,6 +2039,48 @@ object PipelineErrorCodes {
          * committed. Never retried (E1 #774 F3); settle decides (P4).
          */
         const val CATALOG_OUTCOME_UNKNOWN = "lake.catalog.outcome_unknown"
+
+        // #798 (dp-lake P3) — the managed table definitions' lifecycle and apply outcomes (§13.25). No route returns
+        // them before P8 (HTTP `—`); the apply outcomes are also recorded on the table's `apply_error_json`.
+
+        /** No managed table (or no such definition version of it) by that id or (namespace, table). */
+        const val DEFINITION_NOT_FOUND = "lake.definition.not_found"
+
+        /** The version named is not the table's DRAFT (release, purge-draft). */
+        const val DEFINITION_NOT_DRAFT = "lake.definition.not_draft"
+
+        /** Discard names a version that is not RELEASED. */
+        const val DEFINITION_NOT_RELEASED = "lake.definition.not_released"
+
+        /** The caller's `expected_body_hash` is not the draft's current hash: someone else wrote first. */
+        const val DEFINITION_VERSION_CONFLICT = "lake.definition.version_conflict"
+
+        /** The body breaks a rule of lake.md §1; `details.path` names the offending element. */
+        const val DEFINITION_INVALID_BODY = "lake.definition.invalid_body"
+
+        /** A managed table of that name already exists in the namespace. */
+        const val DEFINITION_NAME_TAKEN = "lake.definition.name_taken"
+
+        /** Discard names the version this environment has applied. */
+        const val DEFINITION_APPLIED_VERSION = "lake.definition.applied_version"
+
+        /** The change from the applied definition is in the policy's reviewed class (lake.md §4); recorded on the table as `failed`. */
+        const val DEFINITION_REVIEWED_CHANGE = "lake.definition.reviewed_change"
+
+        /** The change from the applied definition is in the policy's breaking class (lake.md §4); recorded on the table as `failed`. */
+        const val DEFINITION_BREAKING_CHANGE = "lake.definition.breaking_change"
+
+        /**
+         * The Iceberg table holds neither the target definition nor the last applied one (it was changed outside DP);
+         * recorded on the table as `failed` with the field diff.
+         */
+        const val DEFINITION_DRIFT = "lake.definition.drift"
+
+        /** Another operation holds the table (its lease, or an apply in flight); nothing changed. */
+        const val DEFINITION_TABLE_BUSY = "lake.definition.table_busy"
+
+        /** This deployment has authoring disabled: definitions are written where authoring is enabled and promoted. */
+        const val DEFINITION_AUTHORING_DISABLED = "lake.definition.authoring_disabled"
     }
 }
 

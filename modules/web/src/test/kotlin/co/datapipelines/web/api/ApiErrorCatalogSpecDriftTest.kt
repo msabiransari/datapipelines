@@ -355,8 +355,10 @@ class ApiErrorCatalogSpecDriftTest {
          * `pipeline.staging.scratch_limit_exceeded` (both 500, the `pipeline.staging.` family
          * default — no explicit catalog row), landed in the SAME commit as their
          * `PipelineErrorCodes.Staging` and `StagingErrorCodes` constants.
+         * 425 → 437 with #798: §13.25 gains the twelve `lake.definition.*` rows, all `—`, landed in the SAME
+         * commit as their `PipelineErrorCodes.Lake` constants. Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 425
+        const val SECTION_13_ROW_COUNT = 437
 
         /**
          * §12's distinct validation codes.

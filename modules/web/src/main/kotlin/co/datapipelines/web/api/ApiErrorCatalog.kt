@@ -467,6 +467,19 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Lake.CATALOG_FENCED,
             PipelineErrorCodes.Lake.CATALOG_RESTORING,
             PipelineErrorCodes.Lake.CATALOG_OUTCOME_UNKNOWN,
+            // §13.25 (#798) — the definitions' lifecycle and apply outcomes: the service has no route before P8.
+            PipelineErrorCodes.Lake.DEFINITION_NOT_FOUND,
+            PipelineErrorCodes.Lake.DEFINITION_NOT_DRAFT,
+            PipelineErrorCodes.Lake.DEFINITION_NOT_RELEASED,
+            PipelineErrorCodes.Lake.DEFINITION_VERSION_CONFLICT,
+            PipelineErrorCodes.Lake.DEFINITION_INVALID_BODY,
+            PipelineErrorCodes.Lake.DEFINITION_NAME_TAKEN,
+            PipelineErrorCodes.Lake.DEFINITION_APPLIED_VERSION,
+            PipelineErrorCodes.Lake.DEFINITION_REVIEWED_CHANGE,
+            PipelineErrorCodes.Lake.DEFINITION_BREAKING_CHANGE,
+            PipelineErrorCodes.Lake.DEFINITION_DRIFT,
+            PipelineErrorCodes.Lake.DEFINITION_TABLE_BUSY,
+            PipelineErrorCodes.Lake.DEFINITION_AUTHORING_DISABLED,
         )
 
     /**
@@ -597,6 +610,8 @@ object ApiErrorCatalog {
             "navigation." to "The navigation tree changed under you. Reload it and try again.",
             // #785 §13.25 — the managed lake's fence: another operation holds the table, or the catalog is
             // being restored. Never returned live in P2 (NEVER_RETURNED_LIVE); the line is the manual's.
+            // #798 §13.25 — the definitions' family line, placed BEFORE `lake.` (the first matching prefix wins).
+            "lake.definition." to "That table definition can't be changed this way. Check the definition and try again.",
             "lake." to "The lake is busy with another change to this table. Try again shortly.",
         )
 

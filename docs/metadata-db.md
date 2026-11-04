@@ -1,6 +1,6 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.51 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.52 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
 **Last updated:** 2026-11-02
@@ -78,6 +78,9 @@ pipelines ──1:N── pipeline_check_runs (the server-run release-check hist
 
 workspaces ──1:N── lake_reference_scans (one per scanned released pipeline / parameter-set version, ON DELETE CASCADE — §4.41)
 lake_reference_scans ──1:N── lake_table_references (the version's table positions, ON DELETE CASCADE — §4.42)
+lake_namespaces ──1:N── lake_tables_managed (namespace_id — §4.49)
+lake_tables_managed ──1:N── lake_table_definition_versions (table_id, no cascade — §4.50)
+lake_tables_managed ──1:N── lake_column_semantics (the applied version's columns, ON DELETE CASCADE — §4.51)
 ```
 
 Not shown, because they are not foreign keys: `audit_log.key_id` names an `api_keys` row without referencing it (the audit trail outlives the key), and `template_versions.imports_json` references other template versions inside a JSONB array (validated at save time, D2 — a JSONB array cannot carry an FK). The `{id, version}` entries in that array — and the `template` refs inside `pipeline_versions.body_json` — name a template by its human id (`templates.name` since V4), never by the surrogate `templates.id`.
@@ -694,6 +697,7 @@ CREATE TABLE lake_tables (
 - `partition_column` is nullable with no default: an unpartitioned table has none, and NULL is the truthful spelling of that (the `description` precedent, D4/2.9.4).
 - `registered_by` / `registered_at` follow the house `created_by`/`created_at` shape — a real FK to `users(id)` (`ON DELETE RESTRICT`, the §2 default) and a DB-defaulted TIMESTAMPTZ. There is no `updated_at`: a row is inserted and deleted, never edited — re-registration is delete + insert, so the registration audit columns always name the actor of the row that exists.
 - `last_error` / `last_error_at` (V22, 109 §A) record the connect-time view creation's failure ([datasources.md §8C.2](datasources.md#8c2-a-view-per-registered-table-built-at-connect--and-isolated-per-table)): a failing view is skipped and its bounded engine error stored here instead of failing the pool build; a later success clears both in the same UPDATE. NULL is the healthy spelling, so previously-healthy rows needed no backfill. Recording is transition-only (an unchanged outcome writes nothing), so `last_error_at` reads as "broken since", never "last observed". Written by `LakeTableRepository.recordViewOutcome` from the pool's view application.
+- **V54 (#798) adds `origin` and `revision_seq`** ([§4.52](#452-lake_tables-origin-and-revision-sequence)): every row above is `external`; a `managed` row is the managed lake's projection of one of its own tables, guarded by its revision sequence.
 - `uq_lake_tables_datasource_namespace_name` is the one rule beyond the CHECK: a table is its (datasource, namespace, name) triple, registered once. It is NAMED so the service maps its violation to the catalogued `datasource.lake_table_duplicate` (the `uq_pipelines_workspace_name` precedent, §4.4), and its index doubles as the access path for the registry's hot read — "list the tables of one datasource" — which is why §5 creates no separate index on `datasource_id`.
 
 ---
@@ -1758,6 +1762,192 @@ CREATE UNIQUE INDEX uq_lake_table_revisions_current ON lake_table_revisions (nam
 - **`protected_until` is left NULL (= protected)** by the trigger; a later statement finalises it (record §8a, P6's orphan sweep reads it). `operation_id` is the writing session's `dp.operation_id`.
 - No application code inserts, updates or deletes a row; the triggers are the only writers.
 
+### 4.48 `lake_namespaces`
+
+**One row per managed-lake namespace; not versioned** (V54; #798, dp-lake design record §5.2, builder B7). `LakeDefinitionService.createDraft` writes the row (`ON CONFLICT (name) DO NOTHING`) when the first table definition naming the namespace is created; the Iceberg namespace itself is created by the first apply, under a namespace lease ([§4.46](#446-lake_leases)). Its description, status and replacement are edited directly, never promoted; those edits and the lifecycle transitions belong to P8.
+
+```sql
+CREATE TABLE lake_namespaces (
+    id             UUID        PRIMARY KEY,
+    name           TEXT        NOT NULL,
+    description    TEXT        NOT NULL DEFAULT '',
+    status         TEXT        NOT NULL DEFAULT 'active',
+    deprecated_at  TIMESTAMPTZ NULL,
+    deprecated_by  UUID        REFERENCES users(id),
+    archived_at    TIMESTAMPTZ NULL,
+    archived_by    UUID        REFERENCES users(id),
+    replacement_id UUID        REFERENCES lake_namespaces(id),
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by     UUID        NOT NULL REFERENCES users(id),
+    CONSTRAINT uq_lake_namespaces_name UNIQUE (name),
+    CONSTRAINT chk_lake_namespaces_name CHECK (name ~ '^[a-z0-9_]{1,63}$'),
+    CONSTRAINT chk_lake_namespaces_description CHECK (char_length(description) <= 2000),
+    CONSTRAINT chk_lake_namespaces_status CHECK (status IN ('active', 'deprecated', 'archived')),
+    CONSTRAINT chk_lake_namespaces_stamps CHECK (
+        status <> 'active' OR (deprecated_at IS NULL AND deprecated_by IS NULL AND archived_at IS NULL AND archived_by IS NULL)
+    )
+);
+```
+
+**Notes:**
+- **The name grammar is `LakeNames.requireName`'s** (`^[a-z0-9_]{1,63}$`): the name is an Iceberg namespace and a storage path segment (`<root>/<namespace>/<table id>`). The CHECK is the database's copy of the same rule; the service refuses first.
+- `status` takes the [`LakeTableStatus`](enums.md#46-laketablestatus--a-managed-lake-tables-lifecycle) values except `purged` (a namespace is archived, never purged). An active row carries no lifecycle stamp; which transitions are allowed is P8's.
+
+### 4.49 `lake_tables_managed`
+
+**One row per managed table: its lifecycle, its definition pointer, and THIS environment's apply state machine** (V54; #798, record §5.2, §7). The id is the table's storage segment, so the table lives at `<root>/<namespace>/<id>` and a rename never moves data.
+
+```sql
+CREATE TABLE lake_tables_managed (
+    id                         UUID        PRIMARY KEY,
+    namespace_id               UUID        NOT NULL REFERENCES lake_namespaces(id),
+    name                       TEXT        NOT NULL,
+    status                     TEXT        NOT NULL DEFAULT 'active',
+    deprecated_at              TIMESTAMPTZ NULL,
+    deprecated_by              UUID        REFERENCES users(id),
+    archived_at                TIMESTAMPTZ NULL,
+    archived_by                UUID        REFERENCES users(id),
+    purged_at                  TIMESTAMPTZ NULL,
+    purged_by                  UUID        REFERENCES users(id),
+    replacement_id             UUID        REFERENCES lake_tables_managed(id),
+    purge_allowed_after        TIMESTAMPTZ NULL,
+    current_definition_version INTEGER     NULL,
+    applied_version_here       INTEGER     NULL,
+    apply_state                TEXT        NULL,
+    apply_error_json           JSONB       NULL,
+    applied_at                 TIMESTAMPTZ NULL,
+    apply_operation_id         UUID        NULL,
+    policy_json                JSONB       NOT NULL,
+    created_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by                 UUID        NOT NULL REFERENCES users(id),
+    CONSTRAINT uq_lake_tables_managed_namespace_name UNIQUE (namespace_id, name),
+    CONSTRAINT chk_lake_tables_managed_name CHECK (name ~ '^[a-z0-9_]{1,63}$'),
+    CONSTRAINT chk_lake_tables_managed_status CHECK (status IN ('active', 'deprecated', 'archived', 'purged')),
+    CONSTRAINT chk_lake_tables_managed_stamps CHECK (
+        status <> 'active' OR (deprecated_at IS NULL AND deprecated_by IS NULL AND archived_at IS NULL
+            AND archived_by IS NULL AND purged_at IS NULL AND purged_by IS NULL)
+    ),
+    CONSTRAINT chk_lake_tables_managed_purge_stamps CHECK ((status = 'purged') = (purged_at IS NOT NULL)),
+    CONSTRAINT chk_lake_tables_managed_versions CHECK (
+        (current_definition_version IS NULL OR current_definition_version >= 1)
+        AND (applied_version_here IS NULL OR applied_version_here >= 1)
+    ),
+    CONSTRAINT chk_lake_tables_managed_apply_state CHECK (apply_state IN ('pending', 'applying', 'applied', 'failed')),
+    CONSTRAINT chk_lake_tables_managed_apply_pointer CHECK ((apply_state IS NULL) = (current_definition_version IS NULL)),
+    CONSTRAINT chk_lake_tables_managed_applying CHECK (apply_state <> 'applying' OR apply_operation_id IS NOT NULL),
+    CONSTRAINT chk_lake_tables_managed_applied CHECK (
+        apply_state <> 'applied' OR applied_version_here = current_definition_version
+    ),
+    CONSTRAINT chk_lake_tables_managed_apply_error CHECK (
+        (apply_state IS NOT DISTINCT FROM 'failed') = (apply_error_json IS NOT NULL)
+        AND (apply_error_json IS NULL OR jsonb_typeof(apply_error_json) = 'object')
+    ),
+    CONSTRAINT chk_lake_tables_managed_applied_at CHECK ((applied_version_here IS NULL) = (applied_at IS NULL)),
+    CONSTRAINT chk_lake_tables_managed_policy CHECK (jsonb_typeof(policy_json) = 'object')
+);
+```
+
+**Notes:**
+- **`current_definition_version`** is the highest RELEASED definition version ([§4.50](#450-lake_table_definition_versions)); NULL until the first release. **`applied_version_here`** is the version whose intent this environment's Iceberg table holds (stamped with `applied_at`). They differ while an apply is pending, running or failed.
+- **`apply_state`** is [`LakeApplyState`](enums.md#47-lakeapplystate--a-managed-tables-apply-state): NULL before the first release, then `pending` → `applying` → `applied` | `failed` ([lake.md §3](lake.md#3-apply-states)). The CHECKs pin the pairings: no state without a pointer; `applying` names its attempt; `applied` means `applied_version_here = current_definition_version`; `apply_error_json` (`{code, message, details}`) is present exactly when `failed`.
+- **`apply_operation_id`** is the attempt that set `applying`. Every later stamp is `UPDATE … WHERE id = ? AND apply_state = 'applying' AND apply_operation_id = ?`: zero rows means a later attempt took the row over, and the stale attempt writes nothing. The same id is the attempt's lease operation and the `lake_table_revisions.operation_id` of anything it committed, which is how `LakeDefinitionApplier.verifyApplying` decides whether a crashed attempt committed ([§4.47](#447-lake_table_revisions)).
+- **`policy_json`** is the per-environment retention and maintenance policy (record §5.2): written at creation from `datapipelines.lake.retention.*` / `datapipelines.lake.maintenance.*`, never promoted, edited by a super admin (P8). P3 stores it; P6 reads it.
+- The lifecycle columns (`status`, the stamps, `replacement_id`, `purge_allowed_after`) exist for P8 and the purge flow; P3 writes `active` only.
+- `uq_lake_tables_managed_namespace_name` refuses a second table of the same name in a namespace (`lake.definition.name_taken`); its index prefix also serves the FK on `namespace_id`.
+
+### 4.50 `lake_table_definition_versions`
+
+**The promoted object: a managed table's definition bodies, DRAFT | RELEASED | DISCARDED** (V54; #798, record §5.2). The lifecycle follows versioning §3 ([lake.md §2](lake.md#2-lifecycle)); the body schema is [lake.md §1](lake.md#1-the-definition-body).
+
+```sql
+CREATE TABLE lake_table_definition_versions (
+    table_id     UUID        NOT NULL REFERENCES lake_tables_managed(id),
+    version      INTEGER     NOT NULL,
+    status       TEXT        NOT NULL DEFAULT 'DRAFT',
+    body_json    JSONB       NOT NULL,
+    body_hash    TEXT        NOT NULL,
+    released_at  TIMESTAMPTZ NULL,
+    released_by  UUID        REFERENCES users(id),
+    discarded_at TIMESTAMPTZ NULL,
+    discarded_by UUID        REFERENCES users(id),
+    updated_by   UUID        REFERENCES users(id),
+    updated_at   TIMESTAMPTZ NULL,
+    created_via  TEXT        NOT NULL DEFAULT 'session',
+    updated_via  TEXT        NOT NULL DEFAULT 'session',
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by   UUID        NOT NULL REFERENCES users(id),
+    PRIMARY KEY (table_id, version),
+    CONSTRAINT chk_lake_table_definition_versions_version CHECK (version >= 1),
+    CONSTRAINT chk_lake_table_definition_versions_status CHECK (status IN ('DRAFT', 'RELEASED', 'DISCARDED')),
+    CONSTRAINT chk_lake_table_definition_versions_body CHECK (
+        jsonb_typeof(body_json) = 'object' AND NOT (body_json ? 'name') AND NOT (body_json ? 'namespace')
+    ),
+    CONSTRAINT chk_lake_table_definition_versions_release_stamps CHECK (
+        (status = 'DRAFT' AND released_at IS NULL AND released_by IS NULL)
+        OR (status <> 'DRAFT' AND released_at IS NOT NULL)
+    ),
+    CONSTRAINT chk_lake_table_definition_versions_discard_stamps CHECK (
+        (status = 'DISCARDED' AND discarded_at IS NOT NULL)
+        OR (status <> 'DISCARDED' AND discarded_at IS NULL AND discarded_by IS NULL)
+    ),
+    CONSTRAINT chk_lake_table_definition_versions_via CHECK (
+        created_via IN ('session', 'api_key', 'mcp') AND updated_via IN ('session', 'api_key', 'mcp')
+    )
+);
+CREATE UNIQUE INDEX uq_lake_table_definition_versions_one_draft
+    ON lake_table_definition_versions (table_id) WHERE status = 'DRAFT';
+```
+
+**Notes:**
+- **The body is validated before it is stored** (`LakeDefinitionBodies.parse`, [lake.md §1](lake.md#1-the-definition-body)); an invalid body never reaches `body_hash`. `body_hash` is the house hash, computed in the same statement as the write: `encode(sha256(convert_to(CAST(:body AS jsonb)::text, 'UTF8')), 'hex')`. A draft write is conditional on the caller's hash (`lake.definition.version_conflict` otherwise).
+- **One DRAFT per table** is the partial unique index, the `uq_pipeline_versions_one_draft` pattern ([§4.5](#45-pipeline_versions)): the physical guard behind copy-on-write.
+- The FK has no cascade: a table row is deleted only by `purgeDraft` of a never-released table, which deletes its one version first.
+- `created_via` / `updated_via` are `WriteSurface` values ([versioning §3.7](versioning.md#37-what-rides-the-draft-vs-the-release)), passed in by the caller (P8's surfaces).
+
+### 4.51 `lake_column_semantics`
+
+**A read-only projection of the APPLIED definition, keyed by Iceberg field id** (V54; #798, record §5.2, builder B8). `LakeProjectionWriter` deletes and re-inserts a table's rows inside the transaction that stamps `applied`, so the projection and `applied_version_here` cannot disagree.
+
+```sql
+CREATE TABLE lake_column_semantics (
+    table_id        UUID    NOT NULL REFERENCES lake_tables_managed(id) ON DELETE CASCADE,
+    field_id        INTEGER NOT NULL,
+    ordinal         INTEGER NOT NULL,
+    name            TEXT    NOT NULL,
+    logical_type    TEXT    NOT NULL,
+    iceberg_type    TEXT    NOT NULL,
+    required        BOOLEAN NOT NULL,
+    doc             TEXT    NULL,
+    tags_json       JSONB   NOT NULL DEFAULT '[]'::jsonb,
+    applied_version INTEGER NOT NULL,
+    PRIMARY KEY (table_id, field_id),
+    CONSTRAINT chk_lake_column_semantics_field CHECK (field_id >= 1 AND ordinal >= 0 AND applied_version >= 1),
+    CONSTRAINT chk_lake_column_semantics_tags CHECK (jsonb_typeof(tags_json) = 'array')
+);
+```
+
+**Notes:**
+- `logical_type` is the body's DP type (`LogicalType` wire, with precision and scale where they apply, e.g. `DECIMAL(12,2)`); `iceberg_type` is Iceberg's own type string. Column names and types for queries are still read from Iceberg metadata (record §5.2, schema authority); this table carries the descriptions and tags Iceberg does not.
+- Learned facts keep using `learned_facts` ([§4.18](#418-learned_facts)); nothing joins this table to them.
+- No application path writes a row outside the `applied` transaction.
+
+### 4.52 `lake_tables` origin and revision sequence
+
+**V54 adds two columns to [§4.15](#415-lake_tables)'s registry** (#798, record §5.2, §8b).
+
+```sql
+ALTER TABLE lake_tables
+    ADD COLUMN origin TEXT NOT NULL DEFAULT 'external',
+    ADD COLUMN revision_seq BIGINT NULL,
+    ADD CONSTRAINT chk_lake_tables_origin CHECK (origin IN ('managed', 'external')),
+    ADD CONSTRAINT chk_lake_tables_revision_seq CHECK (origin = 'managed' OR revision_seq IS NULL);
+```
+
+**Notes:**
+- **`origin`**: `external` is every row registered by a person or a manifest, the only kind before V54, so the default leaves every existing row's meaning unchanged and `LakeTableRepository`'s inserts state it explicitly. `managed` is the managed lake's projection of one of its own tables: namespace `[<lake name>, <namespace>]`, `format = iceberg`, `location` = the current metadata file.
+- **`revision_seq`** is the `lake_table_revisions.seq` the managed row's `location` was projected from. The projection only moves forward: `… ON CONFLICT … DO UPDATE … WHERE lake_tables.origin = 'managed' AND (lake_tables.revision_seq IS NULL OR lake_tables.revision_seq < EXCLUDED.revision_seq)` (record §8b; an older writer that resumes late changes nothing).
+- A managed row is written only when the datasource named by `datapipelines.lake.name` exists; the registry's own `lake_tables_*` tools refusing `origin = managed` rows is P8's.
+
 ## 5. Index Strategy Summary
 
 **This table is generated from §4 and must contain nothing §4 does not create.** Two kinds of entry appear:
@@ -1896,6 +2086,13 @@ CREATE UNIQUE INDEX uq_lake_table_revisions_current ON lake_table_revisions (nam
 | `lake_table_revisions` | `idx_lake_table_revisions_table` | explicit | V53: a table's revisions in order — the orphan sweep's and the history's walk |
 | `lake_table_revisions` | `idx_lake_table_revisions_operation` | explicit | V53: an operation's pointer moves — what one attempt committed |
 | `lake_table_revisions` | `uq_lake_table_revisions_current` | explicit (partial, unique) | V53: at most one CURRENT revision (`superseded_at IS NULL`) per table — the trigger supersedes before it inserts |
+| `lake_namespaces` | `lake_namespaces_pkey` | via PK | Lookup by id ([§4.48](#448-lake_namespaces)) |
+| `lake_namespaces` | `uq_lake_namespaces_name` | via UNIQUE | V54: one namespace per name — the create path's `ON CONFLICT (name)` arbiter |
+| `lake_tables_managed` | `lake_tables_managed_pkey` | via PK | Lookup by id — every lifecycle and apply statement ([§4.49](#449-lake_tables_managed)) |
+| `lake_tables_managed` | `uq_lake_tables_managed_namespace_name` | via UNIQUE | V54: one table per (namespace, name) — the `(namespace, table)` lookup and `lake.definition.name_taken`; its prefix serves the FK on `namespace_id` |
+| `lake_table_definition_versions` | `lake_table_definition_versions_pkey` | via PK | `(table_id, version)` fetch ([§4.50](#450-lake_table_definition_versions)) |
+| `lake_table_definition_versions` | `uq_lake_table_definition_versions_one_draft` | explicit (partial, unique) | V54: one DRAFT per table — the physical guard behind copy-on-write |
+| `lake_column_semantics` | `lake_column_semantics_pkey` | via PK | A table's columns by field id; its prefix serves the projection's delete-and-rebuild ([§4.51](#451-lake_column_semantics)) |
 
 **Deliberately absent:**
 - `uq_users_email` — this name never existed. The uniqueness rule is a `UNIQUE` *constraint* declared inline in §4, so Postgres names its index `users_email_key`. The old entry would have sent a migration author looking for a `CREATE UNIQUE INDEX` statement that was not there. (`uq_pipelines_name`/`pipelines_name_key` are gone too — V4 replaced the global rule with the explicitly named `uq_pipelines_workspace_name`.)
@@ -1971,6 +2168,10 @@ table and the test's expected-table list in the same commit.
 | `lake_control` | environment-local | LakeCatalog | — | — | This lake's mode and restore epoch; meaningless beside another environment's catalog |
 | `lake_leases` | environment-local | LakeCatalog | — | — | Live write leases of this deployment's operations; runtime coordination, never authored |
 | `lake_table_revisions` | environment-local | LakeCatalog | — | — | This catalog's pointer history, written by its triggers; it protects THIS bucket's files from the orphan sweep |
+| `lake_namespaces` | environment-local | LakeNamespace | — | — | Created on each environment by its own first definition naming the namespace; description and status are edited per environment and never promoted (record §5.2, B7) |
+| `lake_tables_managed` | environment-local | LakeTable | — | — | The table row in THIS environment: its apply state, applied version and policy are facts about this deployment's Iceberg table; the receiver creates its own row when a definition version is imported (P9) |
+| `lake_table_definition_versions` | promotable | LakeTableDefinition | `lake_table_definition_versions.version` | `(namespace, table, version)` | The promoted object (record §5.2): a RELEASED body transfers at its exact version number; the receiver applies it to its own table. The import path itself is P9's |
+| `lake_column_semantics` | derived | LakeTableDefinition | — | — | Rebuilt from the applied body inside the `applied` transaction; a receiver derives its own when it applies |
 
 ---
 
@@ -2286,6 +2487,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-02 | v1.52 | 798 (#798, dp-lake P3) | **V54 — managed lake table definitions.** New **§4.48 `lake_namespaces`** (one row per namespace, not versioned), **§4.49 `lake_tables_managed`** (lifecycle, the definition pointer, `applied_version_here` and the apply state machine `pending` / `applying` / `applied` / `failed` with `apply_operation_id` owning an `applying` row, `policy_json`), **§4.50 `lake_table_definition_versions`** (DRAFT / RELEASED / DISCARDED bodies, the house `body_hash`, the one-DRAFT partial unique index) and **§4.51 `lake_column_semantics`** (the applied version's projection by Iceberg field id); **§4.52** adds `lake_tables.origin` (`managed` / `external`, default `external`) and `revision_seq` (managed rows only), noted in §4.15. JSONB columns take the `_json` suffix (§2), so the record's `policy`, `apply_error` and `body` are `policy_json`, `apply_error_json` and `body_json`. §3 ERD, §5 (seven indexes) and §5A (three environment-local or derived, the definition versions promotable) updated. Down path documented in the migration header, not shipped. |
 | 2026-11-02 | v1.50 | 778 (#778) | **V52 — the lake reference index.** New **§4.41 `lake_reference_scans`** (one row per scanned released pipeline or parameter-set version — `exact` / `partial` / `unscannable`, the findings in `reasons_json`, `scanner_version` for re-scans; keyed by workspace, family, entity id and version) and **§4.42 `lake_table_references`** (one row per table position, the written triple and the resolved registry identity, cascading from the scan); §3 ERD, §5 (three indexes) and §5A (both **derived**) updated. Down path documented in the migration header, not shipped. |
 | 2026-11-02 | v1.51 | 785 (#785, dp-lake P2; sections and this row renumbered at merge after #778's v1.50) | **V53 — the managed lake's catalog core.** New **§4.43 `iceberg_tables`** and **§4.44 `iceberg_namespace_properties`** (Iceberg 1.12.0's `JdbcCatalog` V1 shape, byte for byte, created by Flyway so the library runs with `init-catalog-tables=false` and issues no DDL), **§4.45 `lake_control`** (one row, the catalog mode), **§4.46 `lake_leases`** (the design record §8a's lease rows) and **§4.47 `lake_table_revisions`** (the trigger-written revision log). **§2's no-trigger rule gains its one named exception:** `dp_fence` on both catalog tables and `dp_revlog` / `dp_revlog_drop` on `iceberg_tables` (§7 and `FlywayMigrationIntegrationTest` list exactly these four). §5 gains nine indexes; §5A classifies all five tables environment-local. V52 is #778's. Down path documented in the migration header, not shipped. |
 | 2026-10-25 | v1.49 | 442c (#442) | §4.23: nullable target_ref frozen at run creation (V51). §4.40: strict pending cap, shared advisory key, bounded acquisition, lock order and resend refusal. |

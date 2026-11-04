@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.49 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.50 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-02
@@ -391,6 +391,20 @@ When `datapipelines.lake.enabled=true`, `LakeBootCheck` runs once after Flyway (
 
 **The refusals are startup failures, not log events.** Each is an `IllegalStateException` whose message starts with its id, so the operator greps the boot failure for it: `lake.boot.catalog_shape`, `lake.boot.trigger_missing`, `lake.boot.control_row`, `lake.boot.storage_unreachable`, `lake.boot.conditional_put` (what each means: Configuration §7). No credential, key, or object body appears in any of them.
 
+#### 3.4R The lake table definition apply events (#798)
+
+`LakeDefinitionApplier` brings a managed lake table's Iceberg state to its current released definition ([Lake §3](lake.md#3-apply-states)). Every apply or verify attempt that reached the table logs exactly one line, under the applier's logger, when it ends. An attempt that found nothing to do (the version is no longer current, or the row is not in a state the call moves) logs nothing. Each line carries `operation` (`lake.definition.apply` or `lake.definition.verify`), `table_id`, `namespace`, `table`, `version` and `operation_id`. For a verify, `version` is the table's current definition version and `operation_id` is the id of the interrupted attempt it settles. The definition body, the table location and every `datapipelines.lake.storage` value are never logged.
+
+| Level | `event=` | When | Fields (beyond the common six) |
+|---|---|---|---|
+| INFO | `lake.definition.applied` | The table holds the version, and the row is `applied`. `committed=false` means the table already matched and no Iceberg commit was made | `committed` |
+| WARN | `lake.definition.apply_failed` | A definite refusal (an unsupported change, drift, an Iceberg validation refusal) was recorded, and the row is `failed` | `code` (a `lake.definition.*` code, [Pipeline Contract §13.25](pipeline-contract.md#1325-managed-lake)) |
+| INFO | `lake.definition.apply_deferred` | Nothing was committed, and a later attempt applies the table. With `reason=namespace`, `table` or `deadline`, a lease could not be taken and the row is unchanged (`code=lake.definition.table_busy`). With `reason=none`, the row went back to `pending`: `code` names the catalog refusal (the fence, restoring mode), or is `null` when a verify found that the interrupted attempt committed nothing | `code`, `reason` |
+| WARN | `lake.definition.apply_unknown` | The commit's outcome is unknown. The row stays `applying` until `verifyApplying` settles it from the revision log | `code` (`lake.catalog.outcome_unknown`) |
+| INFO | `lake.definition.apply_superseded` | The attempt's conditional stamp changed no row, because a newer attempt owns the table. This attempt recorded nothing | — |
+
+The three audit events of the same lifecycle (`lake.definition.released`, `.applied`, `.apply_failed`, [Enums §15](enums.md#15-authauditevent--auth-audit-log-events)) are separate rows in `auth_audit_log`. A log line is not an audit row, and the audit row does not replace the log line.
+
 ### 3.5 Log destination
 
 - **Stdout** by default — collected by container runtime (Docker / k8s) and shipped to the operator's log aggregator (CloudWatch, Stackdriver, Loki, ELK, etc.).
@@ -692,6 +706,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 |---|---|---|---|
 | 2026-11-02 | v1.48 | 778 (#778) the lake reference index backfill | New **§3.4P**: the boot backfill's `lake.reference_index.backfill` (INFO, counts) and `lake.reference_index.backfill_failed` (WARN, version identity and exception class; no SQL, no parser message). |
 | 2026-11-02 | v1.49 | 785 (#785) managed lake boot check | New **§3.4Q** (numbered at merge after #778's §3.4P / v1.48): the `lake.boot.ok` INFO line and the five `lake.boot.*` refusal ids the after-Flyway boot check leads its startup failure with (defined here so a citation of one is checked; they are not log events). |
+| 2026-11-03 | v1.50 | 798 (#798) lake table definition apply | New **§3.4R** (after #785's §3.4Q / v1.49): one line per apply or verify attempt that reached the table, with the events `lake.definition.applied` (INFO), `apply_failed` (WARN), `apply_deferred` (INFO, lease busy or back to pending), `apply_unknown` (WARN, the row stays applying) and `apply_superseded` (INFO). No body, location or storage value is logged. |
 | 2026-11-01 | v1.47 | 762 (#762) never-admissible dashboard refresh | **§3.4J** gains `dashboard.refresh_never_admissible`: the WARN a refresh logs when it is refused at once because it can never be admitted on this instance (`workspace_id`, `dashboard_id`, `invocations`, `ceiling`, `key`). |
 | 2026-10-24 | v1.46 | 442b (#442) schedule notification delivery | **§3.4E** gains the nine `scheduler.notification.*` events (`enqueued`, `backlog_full`, `sent`, `retry`, `failed`, `uncertain`, `render_failed`, `port_failed`, `settle_lost`) and the rule that they carry the recipient's domain, never an address; **§4.1** gains `datapipelines.scheduler.notifications.{sent,failed,uncertain}`. |
 | 2026-10-21 | v1.45 | #637 retention event-catalogue parity | **§3.4's namespace sentence** now lists thirteen namespaces, including `retention`; `ObservabilityEventCatalogParityTest` enforces the existing `retention.step_failed` row with a non-vacuity floor of one. No event added or renamed. |
