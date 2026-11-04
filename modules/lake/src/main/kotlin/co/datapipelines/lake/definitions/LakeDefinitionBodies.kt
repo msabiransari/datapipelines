@@ -4,6 +4,7 @@ import co.datapipelines.lake.definitions.LakeDefinitionErrors.invalidBody
 import co.datapipelines.typesystem.LogicalType
 import com.fasterxml.jackson.core.JacksonException
 import com.fasterxml.jackson.core.StreamReadFeature
+import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.json.JsonMapper
 import com.fasterxml.jackson.databind.node.JsonNodeFactory
@@ -26,7 +27,12 @@ object LakeDefinitionBodies {
     private val FIELD_KEYS = setOf("id", "name", "type", "precision", "scale", "required", "doc", "tags")
     private val PARTITION_KEYS = setOf("field_id", "transform")
 
-    private val mapper = JsonMapper.builder().enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build()
+    private val mapper =
+        JsonMapper
+            .builder()
+            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+            .build()
 
     /** Parses and validates [json]; [base] is the body the new version builds on (null for a table's first). */
     fun parse(
