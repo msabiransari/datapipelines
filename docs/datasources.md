@@ -1,9 +1,9 @@
 # Datasources Specification
 
-**Status:** v2.56 (frozen contract — additive-only changes after this point)
+**Status:** v2.57 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
-**Last updated:** 2026-11-03
+**Last updated:** 2026-11-04
 
 ---
 
@@ -599,7 +599,7 @@ The flag is a first-class writable field since the workspaces surfaces slice. Wh
 - **Rule.** Over the whole text, case-insensitively, string literals and comments included: a short list of engine function names is refused anywhere, and a call to either of the engine's SQL-text table functions is refused — the name, quoted or not, followed by `(` or a comment opener after any run of the separators the engine accepts between a name and its argument list (ASCII whitespace and 18 Unicode space, format and control characters, measured over U+0001–U+2FFFF on the pinned driver). The names live in source (`DuckDbAuthorSqlGate`), pinned by a catalog test that goes red when a driver bump changes the engine's function set, and by a separator sweep that asks the engine itself which call forms it runs.
 - **Refusal.** SQLState `42501`, a message naming what was found and never echoing the author's text. An author statement's refusal surfaces as `pipeline.node.query_execution_failed` carrying that message — on a pipeline node, `sql_probe`, preview rows and a parameter selector — never `datasource.table_forbidden`, because the privilege classifier (§5.6's boundaries, 123 §A) excludes the guard's own refusal type: no table was read and no credential is at fault.
 - **False positives (stated).** The guard reads raw text, so it also refuses an ordinary statement whose string literal, comment or identifier — a lake table's name or location included — contains one of the refused names, or that writes one of the SQL-text function names directly before `(` or a comment. The author rewrites the statement; there is no escape hatch. A statement DP generates meets the same rule, so a writeback into, or the introspection of, a table so named fails under that operation's own code.
-- **Configuration lock.** A `DUCKDB` connection opens with `lock_configuration=true` (§5.6), so author SQL can change no engine setting — only session state (`SET search_path`, `USE`). A `LAKE` instance is **not** locked: the lock is engine-wide, and a second pool joining a named or file engine (a rebuild beside a live generation, a second datasource on the same file) must still apply its own `memory_limit`/`threads`/`temp_directory` — measured red on the pinned driver. A lake keeps external access by design, so on `LAKE` the guard is the control.
+- **Configuration lock.** A `DUCKDB` connection opens with `lock_configuration=true` (§5.6), so author SQL can change no engine setting — only session state (`SET search_path`, `USE`). A `LAKE` instance is **not** locked: the lock is engine-wide, and a second pool joining a named or file engine (a rebuild beside a live generation, a second datasource on the same file) must still apply its own `memory_limit`/`threads`/`temp_directory` — measured red on the pinned driver. A lake opens with external access enabled. Its configuration remains mutable, so that initial setting is not an author-SQL invariant; the statement guard applies independently of it.
 - **Cost.** Measured on a 10 kB statement: ~17 µs when the text never spells the SQL-text function word (a literal pre-filter skips the pattern), ~290 µs in the worst ordinary case (the word in every one of 1,000 column names).
 - **Residuals.** `ResultSet.getStatement()` returns the driver's statement, and `DatabaseMetaData` runs the driver's own SQL — both reachable from DP code only, never from author text.
 
@@ -1784,6 +1784,7 @@ fixture) get their Testcontainers twin.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-04 | v2.57 | 816 merge review | §5.8: distinguish LAKE’s initial external-access setting from its mutable runtime configuration. |
 | 2026-11-03 | v2.56 | #816 | **§5.8 (new, TEMPORARY):** the raw-text author-SQL guard on every `DUCKDB` and `LAKE` lease (the staging guard of lane #795, shared from `typesystem`): rule, refusal code (`pipeline.node.query_execution_failed`, never `datasource.table_forbidden`), stated false positives, cost, residuals. **§5.6:** `DUCKDB` connections open with `lock_configuration=true`, refused in `properties.jdbc` / `jdbc_url`; the "toggles remain settable at runtime" sentence restated as history. `LAKE` is not locked (§5.8, measured). Additive. |
 | 2026-11-02 | v2.55 | #778 | **§8C.9 (new):** the lake reference index. Each released pipeline and parameter-set version's LAKE sites are scanned in the releasing transaction by the engine's own parser, resolved against the registry (status `exact`, `partial` or `unscannable`), and backfilled at boot. The promotion receiver reads the index to refuse a batch that names an unregistered table. Additive. |
 | 2026-10-25 | v2.54 | #709 | **§8C.8:** the scheduler/dashboards bullet was false since #9/#10 shipped — restated as general features over LAKE sources; the v2.20 row stays as history. A correction of prose under the additive-only rule; no field, code or route change. |
