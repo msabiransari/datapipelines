@@ -41,8 +41,10 @@ sealed interface LakeApplyOutcome {
     ) : LakeApplyOutcome
 
     /**
-     * A commit's outcome is unknown ([code] `lake.catalog.outcome_unknown`). The row stays `applying` for
-     * [LakeDefinitionApplier.verifyApplying].
+     * A commit's outcome is unknown. The row stays `applying` for [LakeDefinitionApplier.verifyApplying], which settles
+     * it from the revision log. [code] says why: `lake.catalog.outcome_unknown`, the catalog connection failed while
+     * the commit was in flight; `lake.definition.apply_unclassified`, the commit step failed with an exception the
+     * catalog does not classify (#811).
      */
     data class Unknown(
         override val code: String,

@@ -7,7 +7,6 @@ import co.datapipelines.lake.definitions.LakeDefinitionFixtures.ORDERS_V1
 import co.datapipelines.lake.definitions.LakeDefinitionFixtures.ORDERS_V2
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.WriteSurface
-import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
@@ -94,7 +93,8 @@ class LakeDefinitionApplyIntegrationTest {
     fun `(iii) a crash between commit and stamp leaves applying - the retry finds S == intent and adds no revision`() {
         val id = createAndRelease()
         crash.armed = true
-        shouldThrow<IllegalStateException> { releaseNext(id, ORDERS_V2) }.message shouldBe CrashOnce.MESSAGE
+        releaseNext(id, ORDERS_V2) shouldBe LakeApplyOutcome.Unknown(PipelineErrorCodes.Lake.DEFINITION_APPLY_UNCLASSIFIED)
+        crash.armed shouldBe false
         val afterCrash = h.revisions(NS, T)
         h.table(id).applyState shouldBe LakeApplyState.APPLYING
         val retry = h.applier.apply(id, 2, LakeTestDb.leases.catalogNowPlus(Duration.ofMinutes(1)), h.actor)
@@ -229,7 +229,8 @@ class LakeDefinitionApplyIntegrationTest {
         h.revisions(NS, T) shouldBe before
 
         crash.armed = true
-        shouldThrow<IllegalStateException> { h.applier.apply(id, 2, deadline(), h.actor) }
+        h.applier.apply(id, 2, deadline(), h.actor) shouldBe LakeApplyOutcome.Unknown(PipelineErrorCodes.Lake.DEFINITION_APPLY_UNCLASSIFIED)
+        crash.armed shouldBe false
         h.table(id).applyState shouldBe LakeApplyState.APPLYING
         val committed = h.revisions(NS, T)
         val verified = h.applier.verifyApplying(id, deadline())

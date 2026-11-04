@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.72 (revised — see Change Log)
+**Status:** v1.73 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-11-04
@@ -1711,6 +1711,7 @@ The `lake.definition.*` rows (#798, dp-lake P3; [lake.md](lake.md)) are the mana
 | `lake.definition.drift` | — | The Iceberg table holds neither the target definition nor the last applied one (it was changed outside DP); recorded on the table as `failed` with the field diff. |
 | `lake.definition.table_busy` | — | Another operation holds the table (its lease, or an apply in flight); nothing changed. |
 | `lake.definition.authoring_disabled` | — | This deployment has authoring disabled: definitions are written where authoring is enabled and promoted. |
+| `lake.definition.apply_unclassified` | — | The apply's commit step failed with an exception that is not one of the catalog's refusals (#811), so whether the commit landed is unknown. The row stays `applying` until `verifyApplying` settles it from the revision log; it is never recorded as `failed`. A release that reached this outcome has landed, and it returns the outcome. |
 
 
 ---
@@ -1952,6 +1953,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-04 | v1.73 | 810 (#811) | §13.25 gains `lake.definition.apply_unclassified` (`—`): an unclassified failure of the apply's commit step is returned as the release's apply outcome, and the row stays `applying` for `verifyApplying`. The release no longer throws after its landing. |
 | 2026-11-04 | v1.72 | 798 merge | §13.25 gains the managed lake definition lifecycle and apply refusal catalog, alongside its constants. |
 | 2026-11-03 | v1.71 | 795 (#795) | dp-lake P1 DuckDB staging. §5.1: `engine` accepts `DUCKDB` (a file-backed DuckDB database per execution, [Staging §8.5](staging.md#85-the-duckdb-engine)), and `config.max_memory_mb` is the only key on either engine, clamped as before, with the engine's `memory_limit` as a second ceiling on `DUCKDB`. §12.8: `tempdb_engine_unsupported` checks the [`StagingEngine`](enums.md#7-stagingengine--tempdb-engine) wire values. §13.5 gains `pipeline.staging.scratch_exhausted` and `pipeline.staging.scratch_limit_exceeded`. |
 | 2026-11-02 | v1.70 | 778 (#778) | §13.13 gains `pipeline.promotion.lake_table_unavailable` (409): the receiver refuses a batch whose landed pipeline or parameter-set versions read a lake table its registry does not hold, reported once, rolled back whole. Landed in the SAME commit as the `PipelineErrorCodes.Versioning` constant and the `ApiErrorCatalog` row (§13 row count 419 → 420). §13.8's `datasource.lake.table_unavailable` row: `lake_tables.last_error` is V22, not V20 (doc drift). |

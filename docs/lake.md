@@ -1,6 +1,6 @@
 # The Managed Lake: Table Definitions
 
-**Status:** v1.2 (#798, dp-lake P3; #810)
+**Status:** v1.2 (#798, dp-lake P3; #810, #811)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and the names involved. The design is
@@ -135,7 +135,7 @@ release / promotion landing ──► pending ──(attempt owns the row)──
 | `applying` | the attempt commits the change | `applied` |
 | `applying` | the change is refused (§4), drifted, or refused by Iceberg before the commit | `failed`, `apply_error_json` holds `code` and the detail |
 | `applying` | the namespace or table lease is busy past the wait, or the catalog fenced or restored | `pending` |
-| `applying` | the commit's outcome is unknown, or an unclassified error after the commit began | stays `applying`; a verify settles it |
+| `applying` | the commit's outcome is unknown: the catalog connection failed while it was in flight, or the commit step failed with an error the catalog does not classify (`lake.definition.apply_unclassified`) | stays `applying`; a verify settles it |
 | `applying` | a verify finds no catalog revision by the attempt's operation | `pending` |
 | `applying` | a verify finds the attempt's revision | `applied` |
 
@@ -152,6 +152,13 @@ process dies after the commit, the row stays `applying`. A later attempt finds t
 (same shape, `dp.definition.version` = the version) and stamps `applied` without a commit; a verify of the dead
 attempt reads the revision log and stamps `applied` (a revision exists) or `pending` (none does). A verify leaves
 alone a row whose table lease is still held.
+
+**An unclassified failure of the commit.** The commit step can fail with an exception that is not one of the
+catalog's refusals. That ends the attempt the same way: the row stays `applying` and the attempt's outcome is
+`lake.definition.apply_unclassified`. A release that reaches it returns that outcome rather than throwing, because
+its landing has already committed. A verify settles the row from the revision log. Some failures outside the commit
+step still propagate after a release has landed
+([#822](https://github.com/msabiransari/datapipelines/issues/822)).
 
 **What `applied` writes,** in one transaction with the stamp: the column semantics projection
 (`lake_column_semantics`, rebuilt from the definition: field id, name, DP and Iceberg type, required, doc, tags) and,
@@ -228,6 +235,6 @@ Both names are checked before any catalog call or SQL; a name outside the gramma
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-04 | v1.2 | 810 (#810) | Drift has an exit: a definition whose shape equals the live table applies as one commit that sets only `dp.definition.version` (§2 row, §3 row, §4 rule 2). |
+| 2026-11-04 | v1.2 | 810 (#810, #811) | Drift has an exit: a definition whose shape equals the live table applies as one commit that sets only `dp.definition.version` (§2 row, §3 row, §4 rule 2). An unclassified failure of the commit step leaves the row `applying` as `lake.definition.apply_unclassified`, and the release returns that outcome (§3 row and paragraph). |
 | 2026-11-04 | v1.1 | 798 merge review | Serialize lifecycle eligibility with apply, refuse discard during any apply, require canonical partition parameters and complete JSON input; record the field-ID correction limitation (#820). |
 | 2026-11-03 | v1.0 | 798 (#798) | New document: the definition body and its closed type list, the lifecycle, the apply states, the supported-change policy and the names, as dp-lake P3 built them. Not packaged in the product jar (the lake surfaces, P8, decide its audience). |

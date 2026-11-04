@@ -6,6 +6,7 @@ import co.datapipelines.lake.LakeMinio
 import co.datapipelines.lake.LakeProperties
 import co.datapipelines.lake.LakeTestDb
 import co.datapipelines.pipeline.AuthoringGuard
+import org.apache.iceberg.io.FileIO
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
 import org.springframework.transaction.support.TransactionSynchronizationManager
@@ -41,16 +42,21 @@ internal class RecordingAuditSink : AuditEventSink {
  * The definitions wired as production wires them ([LakeDefinitionsAutoConfiguration]'s graph) over the module's one
  * Postgres ([LakeTestDb], V53 + V54 applied) and MinIO ([LakeMinio]), with a short lease wait and an injectable
  * after-commit hook. [reset] empties the catalog (LakeTestDb.reset) and every P3 table, and seeds one user.
+ * [fileIoFactory], when given, replaces the catalog's object-store client factory (a fault seam, #811); null keeps
+ * production's `S3FileIO`. It is a function-typed parameter: pass it by name, never as a trailing lambda.
  */
 internal class LakeDefinitionsHarness(
     leaseWait: Duration = Duration.ofSeconds(1),
     hooks: LakeApplyHooks = LakeApplyHooks.NONE,
     authoringEnabled: Boolean = true,
+    fileIoFactory: ((Map<String, String>) -> FileIO)? = null,
 ) {
     val jdbc = LakeTestDb.jdbc
     val named = NamedParameterJdbcTemplate(LakeTestDb.dataSource)
     val properties = LakeProperties(enabled = true, storage = LakeMinio.storage(bucket = BUCKET))
-    val catalogs = LakeCatalogs(properties, LakeTestDb.catalogDatabase())
+    val catalogs =
+        fileIoFactory?.let { LakeCatalogs(properties, LakeTestDb.catalogDatabase(), it) }
+            ?: LakeCatalogs(properties, LakeTestDb.catalogDatabase())
     val audit = RecordingAuditSink()
     val tx = TransactionTemplate(DataSourceTransactionManager(LakeTestDb.dataSource))
     val definitions = LakeDefinitionRepository(named)
