@@ -478,7 +478,12 @@ data class ScriptProperties(
     val poolQueue: Int = 64,
     /** Grace past the wall clock before an evaluation is abandoned, counted and logged. */
     val abandonGraceSeconds: Long = 30,
-    /** Rows cap on any table input (rows in row mode, any table input in table/value mode). */
+    /**
+     * Rows cap by path (#780): at `templates_evaluate` and in the test suite, the `rows`
+     * batch and each table input before evaluation; at run, a table/value node's table
+     * inputs before loading and the invariants' read-back (combined). A run's `row`-mode
+     * input streams in batches with no row cap of its own.
+     */
     val maxInputRows: Long = 100_000,
     /** Cap on a value/object output (a Context value is not a table). */
     val maxValueBytes: Long = 1_048_576,
