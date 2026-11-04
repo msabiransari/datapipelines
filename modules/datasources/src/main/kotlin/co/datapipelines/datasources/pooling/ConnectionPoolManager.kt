@@ -72,6 +72,13 @@ interface ConnectionPool : AutoCloseable {
      * `0` for a pool with no such notion, which makes it immediately reapable. See [softEvict].
      */
     val activeConnections: Int get() = 0
+
+    /**
+     * #818 — what this generation of the MANAGED lake datasource was built from, or null for every
+     * other pool. Non-null is what subjects a pool to the age bound in [ConnectionPoolManager.poolFor]
+     * and to the freshness tick (design record §10, RULING 4).
+     */
+    val managedGeneration: ManagedLakeGeneration? get() = null
 }
 
 /**
@@ -121,6 +128,8 @@ class HikariConnectionPool(
     private val instanceOwner: PoolInstanceOwner? = null,
     /** The datasource's dialect; `DUCKDB` and `LAKE` arm the author-SQL guard (class KDoc). */
     private val dialect: Dialect? = null,
+    /** #818 — set only for a generation of the managed lake datasource ([ConnectionPool.managedGeneration]). */
+    override val managedGeneration: ManagedLakeGeneration? = null,
     /**
      * #204 L2 — armed ONLY for the de-privileged in-process H2 pool ([H2InProcessPool.build]).
      * Invoked, exactly once per failing lease, when the acquisition failure's exception graph
@@ -356,6 +365,13 @@ class ConnectionPoolManager(
     /** Injectable so the reaper's state machine can be tested without sleeping. */
     private val clock: () -> Instant = Instant::now,
     /**
+     * #818 RULING 4 item 1 — `datapipelines.lake.reads.max-generation-age-seconds`: [poolFor] retires a
+     * MANAGED lake generation ([ConnectionPool.managedGeneration] non-null) older than this before it
+     * leases from it, whatever messages did or did not arrive. Null (no lake configured, every test
+     * that is not about it) bounds nothing. Pools of every other kind are never aged out.
+     */
+    private val maxGenerationAge: Duration? = null,
+    /**
      * LAST on purpose, and not a function type: Kotlin's trailing-lambda form binds to the last
      * parameter, so with a `() -> Instant` there the long-standing
      * `ConnectionPoolManager { ds -> … }` call shape would silently start supplying a CLOCK
@@ -363,7 +379,7 @@ class ConnectionPoolManager(
      */
     private val metrics: PoolLifecycleMetrics = PoolLifecycleMetrics.NONE,
 ) : AutoCloseable {
-    private val pools = ConcurrentHashMap<String, ConnectionPool>()
+    private val pools = ConcurrentHashMap<String, LivePool>()
 
     /**
      * Pools that have left [pools] and are draining. A QUEUE rather than a map keyed by name:
@@ -372,8 +388,60 @@ class ConnectionPoolManager(
      */
     private val retiring = ConcurrentLinkedQueue<RetiringPool>()
 
-    /** The pool for [datasource], created atomically on first call and cached thereafter. */
-    fun poolFor(datasource: Datasource): ConnectionPool = pools.computeIfAbsent(datasource.name) { poolFactory(datasource) }
+    /**
+     * The pool for [datasource], created atomically on first call and cached thereafter, except that a
+     * managed lake generation older than [maxGenerationAge] is retired first and a new one built
+     * (#818, design record §10 RULING 4 item 1).
+     *
+     * The expiry runs INSIDE the lease path, so it needs no tick, no message and no peer: a clock
+     * comparison on this instance. `remove(name, live)` retires exactly the generation that was
+     * judged old. When two callers race on an expired generation, one wins the removal and the other
+     * finds a fresh entry, or builds one through the same at-most-once `computeIfAbsent`. The new
+     * generation's `builtAt` is read BEFORE its factory call, so a slow build is never credited with
+     * a younger snapshot than the catalog read it began with.
+     */
+    fun poolFor(datasource: Datasource): ConnectionPool {
+        while (true) {
+            val live = pools.computeIfAbsent(datasource.name) { LivePool(builtAt = clock(), pool = poolFactory(datasource)) }
+            val age = Duration.between(live.builtAt, clock())
+            if (maxGenerationAge == null || live.pool.managedGeneration == null || age <= maxGenerationAge) return live.pool
+            if (pools.remove(datasource.name, live)) {
+                enqueueRetired(datasource.name, live.pool)
+                LOG.info(
+                    "event=lake.generation_expired datasource={} age_seconds={} max_age_seconds={} " +
+                        "message=\"managed lake generation retired at its age bound; the next lease builds from the catalog\"",
+                    datasource.name,
+                    age.seconds,
+                    maxGenerationAge.seconds,
+                )
+            }
+        }
+    }
+
+    /**
+     * #818 — the freshness tick's retirement: retires [name]'s live pool only while it is still
+     * [expected], the generation the caller compared. A generation another caller already replaced is
+     * left alone, so a tick never retires a pool it did not judge stale.
+     */
+    fun retireGeneration(
+        name: String,
+        expected: ConnectionPool,
+    ): Boolean {
+        val live = pools[name] ?: return false
+        if (live.pool !== expected || !pools.remove(name, live)) return false
+        enqueueRetired(name, live.pool)
+        return true
+    }
+
+    /** #818 — every live managed lake generation, by datasource name: what the freshness tick compares. */
+    fun liveManagedGenerations(): Map<String, ConnectionPool> =
+        pools.entries.filter { it.value.pool.managedGeneration != null }.associate { it.key to it.value.pool }
+
+    /**
+     * #818 — the instant [name]'s live pool was built (read before its factory call), or null when no
+     * pool is live. The age bound's input, exposed for the bound's proofs and the P8 lake surface.
+     */
+    fun generationBuiltAt(name: String): Instant? = pools[name]?.builtAt
 
     /**
      * Retires the pool for a datasource whose connection config changed and returns the freshly
@@ -400,10 +468,18 @@ class ConnectionPoolManager(
      */
     fun retire(name: String): Boolean {
         val retired = pools.remove(name) ?: return false
+        enqueueRetired(name, retired.pool)
+        return true
+    }
+
+    /** Retirement step 1's tail, shared by every path that took a pool out of the map. */
+    private fun enqueueRetired(
+        name: String,
+        retired: ConnectionPool,
+    ) {
         retiring += RetiringPool(retired, deadline = clock().plus(retireCeiling))
         retired.softEvict()
         metrics.poolRetired(name)
-        return true
     }
 
     /**
@@ -461,9 +537,15 @@ class ConnectionPoolManager(
      * this runs, and the JVM is going away regardless.
      */
     override fun close() {
-        pools.keys.toList().forEach { name -> pools.remove(name)?.close() }
+        pools.keys.toList().forEach { name -> pools.remove(name)?.pool?.close() }
         generateSequence { retiring.poll() }.forEach { it.pool.close() }
     }
+
+    /** A live pool with the instant it was built: the age bound's input (#818). */
+    private class LivePool(
+        val builtAt: Instant,
+        val pool: ConnectionPool,
+    )
 
     /** A pool out of the map, draining, with the instant after which it is closed regardless. */
     private data class RetiringPool(
@@ -598,7 +680,13 @@ class ConnectionPoolManager(
                     owner.close()
                     throw e
                 }
-            return HikariConnectionPool(datasource.name, hikari, owner, dialect = datasource.dialect)
+            return HikariConnectionPool(
+                datasource.name,
+                hikari,
+                owner,
+                dialect = datasource.dialect,
+                managedGeneration = lakeViews?.managed,
+            )
         }
 
         /**
@@ -647,6 +735,7 @@ class ConnectionPoolManager(
                     plan = lakeViews?.plan ?: LakeViewPlan(emptyList(), emptyList(), emptyList()),
                     datasourceName = datasource.name,
                     recorder = lakeViews?.recorder ?: LakeViewOutcomeRecorder.NONE,
+                    lockdown = if (lakeViews?.managed != null) ManagedLakeGeneration.LOCKDOWN_STATEMENTS else emptyList(),
                 )
             val owner = LakeInstanceOwner.open(delegate, datasource.name, initializer::initialize)
             config.connectionInitSql = null

@@ -357,8 +357,10 @@ class ApiErrorCatalogSpecDriftTest {
          * `PipelineErrorCodes.Staging` and `StagingErrorCodes` constants.
          * 425 → 437 with #798: §13.25 gains the twelve `lake.definition.*` rows, all `—`, landed in the SAME
          * commit as their `PipelineErrorCodes.Lake` constants. Re-derived from the document's own parse.
+         * 437 → 440 with #818: §13.8's `datasource.managed` (409) and §13.25's `lake.unavailable` (503) and
+         * `lake.table.unavailable` (409), landed in the SAME commit as their constants and catalog rows.
          */
-        const val SECTION_13_ROW_COUNT = 437
+        const val SECTION_13_ROW_COUNT = 440
 
         /**
          * §12's distinct validation codes.

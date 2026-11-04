@@ -1,8 +1,10 @@
 package co.datapipelines.datasources
 
 import co.datapipelines.datasources.pooling.ConnectionPool
+import co.datapipelines.datasources.pooling.ManagedLakeGeneration
 import co.datapipelines.datasources.pooling.ReapOutcome
 import co.datapipelines.typesystem.Dialect
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -259,6 +261,35 @@ interface DatasourceRegistry {
      * registry with no lake catalog has no broken tables to report.
      */
     fun lakeBrokenTables(datasourceName: String): List<LakeBrokenTable> = emptyList()
+
+    /**
+     * #818 (record §10 "Unavailable tables") — [datasourceName]'s managed tables that have no view:
+     * archived, purged, unknown to the catalog, or on a disabled lake. A node whose SQL names one
+     * fails `lake.table.unavailable` at CONNECT. Default empty — no managed lake behind a fake.
+     */
+    fun lakeUnavailableTables(datasourceName: String): List<LakeUnavailableTable> = emptyList()
+
+    /**
+     * #818 A1 — the boot registrar's privileged create-or-re-sync of the managed lake datasource
+     * ([Datasource.isManagedLake]); the only write path that may touch that row. Defaulted so fakes
+     * compile; only the production registry backs it.
+     */
+    fun syncManagedLake(
+        datasource: Datasource,
+        actor: UUID,
+    ): ManagedLakeSync = error("this registry cannot write the managed lake datasource")
+
+    /**
+     * #818 RULING 4 item 2 — the freshness tick: retire every live managed generation whose catalog
+     * moved since it was built. Returns how many were retired. Default 0.
+     */
+    fun refreshManagedGenerations(): Int = 0
+
+    /** #818 — the instant [name]'s live pool was built (read before its factory call), or null when none is live. */
+    fun generationBuiltAt(name: String): Instant? = null
+
+    /** #818 — the catalog snapshot [name]'s live managed generation was built from, or null. */
+    fun liveManagedGeneration(name: String): ManagedLakeGeneration? = null
 }
 
 /**

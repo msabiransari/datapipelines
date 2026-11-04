@@ -122,6 +122,48 @@ class LakeRulesTest {
         enabled(LakeRules.STATEMENT_TIMEOUT_SECONDS to "0") shouldHaveSize 1
     }
 
+    @Test
+    fun `the freshness tick stays below the age bound and the reader memory is a positive size`() {
+        enabled(LakeRules.FRESHNESS_TICK_SECONDS to "900").single() shouldStartWith LakeRules.FRESHNESS_TICK_SECONDS
+        enabled(LakeRules.FRESHNESS_TICK_SECONDS to "899") shouldContainExactly emptyList()
+        enabled(LakeRules.READS_MEMORY_LIMIT to "0MB").single() shouldStartWith LakeRules.READS_MEMORY_LIMIT
+        enabled(LakeRules.READS_MEMORY_LIMIT to "plenty").single() shouldStartWith LakeRules.READS_MEMORY_LIMIT
+        enabled(LakeRules.READS_MEMORY_LIMIT to "2GB") shouldContainExactly emptyList()
+    }
+
+    @Test
+    fun `age bound plus retire ceiling plus tick fits an hour of every protected day - record 10 ruling 4`() {
+        // One protected day = 3600 s. Shipped ceiling = node timeout 60 + 30 = 90; tick 60.
+        // 3450 + 90 + 60 = 3600 is admitted (≤); 3451 refuses, naming the age bound and the ceiling it used.
+        enabled(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to "3450") shouldContainExactly emptyList()
+        val refused = enabled(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to "3451").single()
+        refused shouldStartWith LakeRules.MAX_GENERATION_AGE_SECONDS
+        refused shouldContain "retire ceiling (90)"
+        refused shouldContain "(3600)"
+    }
+
+    @Test
+    fun `the retire ceiling is read the way datasources derives it`() {
+        val atBoundary = mapOf(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to "3450")
+
+        fun judged(snapshot: ConfigSnapshot): List<String> =
+            ConfigValidator
+                .validate(
+                    snapshot.copy(
+                        lake = shipped + mapOf(LakeRules.ENABLED to "true", LakeRules.BUCKET to "b", LakeRules.REGION to "r") + atBoundary,
+                    ),
+                ).violations
+        val base = ConfigSnapshots.valid()
+        judged(base) shouldContainExactly emptyList()
+        // A longer node timeout raises the derived ceiling: 61 + 30 = 91 tips the sum over.
+        judged(base.copy(executorNodeQueryTimeoutSeconds = "61")).single() shouldContain "retire ceiling (91)"
+        // An explicit ceiling wins over the derivation, in both directions.
+        judged(base.copy(executorNodeQueryTimeoutSeconds = "61", datasourcesRetireCeilingSeconds = "90")) shouldContainExactly emptyList()
+        judged(base.copy(datasourcesRetireCeilingSeconds = "91")).single() shouldContain "retire ceiling (91)"
+        judged(base.copy(datasourcesRetireCeilingSeconds = "soon")).single() shouldStartWith
+            "datapipelines.datasources.retire-ceiling-seconds"
+    }
+
     private fun defaultOf(key: String): String? {
         val raw = yaml[key]?.toString() ?: return null
         return PLACEHOLDER_DEFAULT.find(raw)?.groupValues?.get(1) ?: raw

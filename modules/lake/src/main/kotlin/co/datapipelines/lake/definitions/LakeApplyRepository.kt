@@ -160,6 +160,32 @@ class LakeApplyRepository(
             """.trimIndent(),
             mapOf("lake" to lake, "ns" to namespace, "table" to table, "by" to registeredBy),
         )
+
+    /**
+     * #818 (P5): the set-based sibling of [upsertRegistryRow], run by the managed datasource's registrar at every
+     * boot. Every defined table (a `lake_tables_managed` row) with a CURRENT revision and NO registry row gets the
+     * row [upsertRegistryRow] would have written, had the datasource existed when the table was applied (that
+     * method answers 0 without it). Insert-only: an existing row, managed or external, is never touched; moving
+     * an existing managed row stays [upsertRegistryRow]'s job. Answers the rows written.
+     */
+    fun backfillRegistryRows(
+        lake: String,
+        registeredBy: UUID,
+    ): Int =
+        jdbc.update(
+            """
+            INSERT INTO lake_tables (datasource_id, namespace, name, format, location, registered_by, origin, revision_seq)
+            SELECT d.name, ARRAY[CAST(:lake AS text), n.name], m.name, 'iceberg', r.metadata_location, :by, 'managed', r.seq
+              FROM datasources d
+              JOIN lake_tables_managed m ON TRUE
+              JOIN lake_namespaces n ON n.id = m.namespace_id
+              JOIN lake_table_revisions r ON r.namespace = n.name AND r.table_name = m.name
+                                         AND r.superseded_at IS NULL AND r.dropped_at IS NULL
+             WHERE d.name = :lake AND NOT d.is_deleted
+            ON CONFLICT ON CONSTRAINT uq_lake_tables_datasource_namespace_name DO NOTHING
+            """.trimIndent(),
+            mapOf("lake" to lake, "by" to registeredBy),
+        )
 }
 
 /** One row of the semantics projection (metadata-db §4.51), computed from the applied definition body. */

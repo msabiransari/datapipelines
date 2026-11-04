@@ -4,9 +4,11 @@ import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.pooling.PoolLifecycleMetrics
 import co.datapipelines.web.metrics.MicrometerPoolLifecycleMetrics
 import io.micrometer.core.instrument.MeterRegistry
+import org.slf4j.LoggerFactory
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.scheduling.annotation.Scheduled
+import java.util.concurrent.TimeUnit
 
 /**
  * The retired-pool reaper, scheduled (datasources.md §5.2, 094) — the third sibling of
@@ -41,6 +43,19 @@ class PoolReaperSchedulingConfiguration {
         DatasourcePoolReaperScheduler(datasources)
 
     /**
+     * #818 (dp-lake record §10 RULING 4 item 2) — the managed lake's freshness tick, the reaper's sibling on the
+     * same `dp-scheduled` thread. Unlike the reaper's, its cadence IS a key (`reads.freshness-tick-seconds`),
+     * because it is one term of the `LakeRules` inequality an operator tunes. Inert without a managed generation:
+     * the registry's pass iterates live managed generations only, and the regrant returns at once when the lake
+     * is disabled.
+     */
+    @Bean
+    fun managedLakeFreshnessScheduler(
+        datasources: DatasourceRegistry,
+        registrar: ManagedLakeDatasourceRegistrar,
+    ): ManagedLakeFreshnessScheduler = ManagedLakeFreshnessScheduler(datasources, registrar)
+
+    /**
      * The pool-retirement instruments (observability.md §4.1). A real
      * [MeterRegistry]-backed implementation, never a no-op: the ceiling firing is exactly the
      * kind of event a deployment learns about from a counter and an alert, not from a log it
@@ -50,6 +65,36 @@ class PoolReaperSchedulingConfiguration {
      */
     @Bean
     fun poolLifecycleMetrics(meterRegistry: MeterRegistry): PoolLifecycleMetrics = MicrometerPoolLifecycleMetrics(meterRegistry)
+}
+
+/**
+ * The `@Scheduled` adapter over the managed lake's freshness pass (#818): one catalog read per live managed
+ * generation, a stale one retired, then the grant to workspaces created since the last tick. `fixedDelay`, as
+ * the reaper, so a slow catalog read delays the next tick instead of piling on.
+ */
+class ManagedLakeFreshnessScheduler(
+    private val datasources: DatasourceRegistry,
+    private val registrar: ManagedLakeDatasourceRegistrar,
+) {
+    @Scheduled(fixedDelayString = TICK_SECONDS_PLACEHOLDER, initialDelayString = TICK_SECONDS_PLACEHOLDER, timeUnit = TimeUnit.SECONDS)
+    fun tick() {
+        val retired = datasources.refreshManagedGenerations()
+        // The brief's DoS bound: a retire storm is bounded by the pool count, and the count is logged per tick.
+        if (retired > 0) {
+            log.info(
+                "event=lake.freshness_tick_retired generations={} message=\"freshness tick retired stale managed generations\"",
+                retired,
+            )
+        }
+        registrar.regrant()
+    }
+
+    companion object {
+        private val log = LoggerFactory.getLogger(ManagedLakeFreshnessScheduler::class.java)
+
+        /** `reads.freshness-tick-seconds`, defaulted as application.yml defaults it (the drift test pins that value). */
+        const val TICK_SECONDS_PLACEHOLDER = "\${datapipelines.lake.reads.freshness-tick-seconds:60}"
+    }
 }
 
 /** The `@Scheduled` adapter over [DatasourceRegistry.reapRetiredPools] — see [PoolReaperSchedulingConfiguration]. */

@@ -228,6 +228,15 @@ object ApiErrorCatalog {
             // recorded as broken: the content a party behind us serves failed, like
             // `datasource_connection_failed`, so 502 and the WARN demotion below.
             PipelineErrorCodes.Datasource.LAKE_TABLE_UNAVAILABLE to HttpStatus.BAD_GATEWAY,
+            // #818 (dp-lake record §6) — the managed lake datasource is configuration's, so an edit or a delete
+            // conflicts with the server's ownership of the row: 409, like `datasource.in_use`.
+            PipelineErrorCodes.Datasource.MANAGED to HttpStatus.CONFLICT,
+            // #818 (record §10) — the catalog read a new managed generation needs failed, so none was built:
+            // the metadata database is the dependency, and the condition is temporary.
+            PipelineErrorCodes.Lake.UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
+            // #818 (record §10 "Unavailable tables") — a managed table this server serves no view for: the
+            // table's state (archived, no catalog row, lake disabled) conflicts with the read.
+            PipelineErrorCodes.Lake.TABLE_UNAVAILABLE to HttpStatus.CONFLICT,
             // 109 §A — the registration pre-flight refusal: 400 like the family default, wired
             // explicitly so the code owns a row rather than being absorbed (the 025 A2 convention).
             PipelineErrorCodes.Datasource.LAKE_TABLE_UNREADABLE to HttpStatus.BAD_REQUEST,
@@ -672,6 +681,13 @@ object ApiErrorCatalog {
                 "This connection's database user isn't allowed to read that table. Ask the database owner for access.",
             PipelineErrorCodes.Datasource.LAKE_TABLE_UNAVAILABLE to
                 "A registered table on this data lake couldn't be read. The recorded reason is in the error details.",
+            // #818 — the "lake." family line ("busy with another change") describes neither of these.
+            PipelineErrorCodes.Datasource.MANAGED to
+                "This connection is the server's managed lake. It is set in the server configuration and can't be changed here.",
+            PipelineErrorCodes.Lake.UNAVAILABLE to
+                "The lake can't be read right now because its catalog didn't answer. Try again in a moment.",
+            PipelineErrorCodes.Lake.TABLE_UNAVAILABLE to
+                "That lake table isn't available to read. The reason is in the error details.",
             PipelineErrorCodes.Template.NOT_FOUND to
                 "We couldn't find that template. It may have been deleted.",
             PipelineErrorCodes.Template.DUPLICATE_NAME to

@@ -1,14 +1,20 @@
 package co.datapipelines.web.config
 
 import co.datapipelines.application.datasources.LakeTableMutationGate
+import co.datapipelines.application.datasources.LakeTableOrigin
 import co.datapipelines.application.datasources.LakeTableRegistryService
 import co.datapipelines.application.datasources.LakeTableRepository
+import co.datapipelines.application.datasources.ManagedLakeTableRepository
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.LakeIntrospectionCache
 import co.datapipelines.datasources.LakeRegisteredTable
 import co.datapipelines.datasources.LakeTableCatalog
 import co.datapipelines.datasources.LakeViewOutcomeRecorder
+import co.datapipelines.datasources.ManagedLakeCatalog
+import co.datapipelines.datasources.ManagedLakeTable
 import co.datapipelines.datasources.PoolInvalidationPublisher
+import co.datapipelines.lake.LakeProperties
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
@@ -34,19 +40,78 @@ class LakeConfiguration {
      * and the executor can refuse a node that references a broken table.
      */
     @Bean
-    fun lakeTableCatalog(tables: LakeTableRepository): LakeTableCatalog =
+    fun lakeTableCatalog(
+        tables: LakeTableRepository,
+        managedLake: ManagedLakeCatalog,
+    ): LakeTableCatalog =
         LakeTableCatalog { datasourceName ->
-            tables.findByDatasource(datasourceName).map { row ->
+            val rows = tables.findByDatasource(datasourceName)
+            // #818: a managed row is enriched from the managed read (catalog location, lifecycle), so every
+            // reader of this port (introspection, stats, the probe's listing root) sees what the generation
+            // serves. The read runs only when the datasource HAS managed rows, and a failure propagates.
+            val managed =
+                if (rows.none { it.origin == LakeTableOrigin.MANAGED }) {
+                    emptyMap()
+                } else {
+                    managedLake.managedTables(datasourceName).associateBy { it.qualifiedName }
+                }
+            rows.map { row ->
+                val current = managed[(row.namespace + row.name).joinToString(".")]
+                val isManaged = row.origin == LakeTableOrigin.MANAGED
                 LakeRegisteredTable(
                     namespace = row.namespace,
                     name = row.name,
                     format = row.format.wire,
-                    location = row.location,
+                    location = if (isManaged) current?.metadataLocation ?: row.location else row.location,
                     partitionColumn = row.partitionColumn,
                     lastError = row.lastError,
+                    managed = isManaged,
+                    notice = if (isManaged) current?.deprecationMessage else null,
+                    // A served table's reason is null; only a managed row the managed read did not return at all
+                    // (it raced a delete between the two reads) falls back to "no lifecycle row".
+                    unavailableReason =
+                        when {
+                            !isManaged -> null
+                            current == null -> ManagedLakeTable.REASON_NO_LIFECYCLE_ROW
+                            else -> current.unavailableReason
+                        },
                 )
             }
         }
+
+    /** #818 (record §6) — the managed lake datasource at boot; see [ManagedLakeDatasourceRegistrar] for the ordering. */
+    @Bean
+    @Suppress("LongParameterList") // each collaborator is one write the registrar owns
+    fun managedLakeDatasourceRegistrar(
+        lakeProperties: ObjectProvider<LakeProperties>,
+        datasources: DatasourceRegistry,
+        grants: co.datapipelines.datasources.DatasourceGrantRepository,
+        applyRepository: ObjectProvider<co.datapipelines.lake.definitions.LakeApplyRepository>,
+        userService: co.datapipelines.auth.UserService,
+        lakeCatalogStartupCheck: LakeCatalogStartupCheck,
+    ): ManagedLakeDatasourceRegistrar =
+        ManagedLakeDatasourceRegistrar(lakeProperties, datasources, grants, applyRepository, userService, lakeCatalogStartupCheck)
+
+    /** #818 — the managed read's SQL (a sibling of [LakeTableRepository], see its KDoc). */
+    @Bean
+    fun managedLakeTableRepository(jdbc: NamedParameterJdbcTemplate): ManagedLakeTableRepository = ManagedLakeTableRepository(jdbc)
+
+    /**
+     * #818 (record §10) — the `datasources`-module port the managed generation is built from and the freshness
+     * tick compares against. Bound whether or not the lake is enabled: with `datapipelines.lake.enabled=false`
+     * ([LakeProperties] is then not bound) every managed table is reported unavailable (`lake.disabled`), so a
+     * managed row left over from an enabled past serves no view instead of an unbounded one.
+     */
+    @Bean
+    fun managedLakeCatalog(
+        repository: ManagedLakeTableRepository,
+        lakeProperties: ObjectProvider<LakeProperties>,
+    ): ManagedLakeCatalog {
+        val enabled = lakeProperties.ifAvailable?.enabled == true
+        return ManagedLakeCatalog { lake ->
+            repository.managedTables(lake).let { rows -> if (enabled) rows else rows.map { it.copy(lakeDisabled = true) } }
+        }
+    }
 
     /**
      * 109 §A — the pool build's outcome write, over the same repository: the per-connection

@@ -2,6 +2,7 @@ package co.datapipelines.executor
 
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.LakeBrokenTable
+import co.datapipelines.datasources.LakeUnavailableTable
 import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.pipeline.NodeType
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -13,6 +14,7 @@ import co.datapipelines.templates.TemplateRenderException
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
@@ -349,6 +351,53 @@ class NodeRunnerTest {
 
             failureOf(runner, Fixtures.node("read", source = "lakeds3")).code shouldNotBe
                 PipelineErrorCodes.Datasource.LAKE_TABLE_UNAVAILABLE
+        }
+
+    // ------------------------------- managed lake: unavailable tables (#818, record §10)
+
+    @Test
+    fun `a node naming an archived managed table fails lake_table_unavailable at connect, with the reason`() =
+        runBlocking<Unit> {
+            val archived = LakeUnavailableTable(listOf("lake", "sales"), "orders", "status archived")
+            val registry =
+                FakeDatasourceRegistry(
+                    mapOf("lake" to lakeDatasource("lake")),
+                    unavailableLakeTables = mapOf("lake" to listOf(archived)),
+                )
+            val runner = runner(sql = "SELECT count(*) FROM lake.sales.orders", registry = registry)
+
+            val error = failureOf(runner, Fixtures.node("read", source = "lake"))
+
+            assertAll(
+                { error.code shouldBe PipelineErrorCodes.Lake.TABLE_UNAVAILABLE },
+                { error.details["table"] shouldBe "lake.sales.orders" },
+                { error.details["reason"] shouldBe "status archived" },
+                { error.details["datasource"] shouldBe "lake" },
+                // A registry read, never a probe: no connection was leased.
+                { registry.leased.get() shouldBe 0 },
+            )
+        }
+
+    @Test
+    fun `quoted and bare spellings of an unavailable managed table are refused, a longer name is not`() =
+        runBlocking<Unit> {
+            val purged = LakeUnavailableTable(listOf("lake", "sales"), "orders", "status purged")
+            val registry =
+                FakeDatasourceRegistry(
+                    mapOf("lake2" to lakeDatasource("lake2")),
+                    unavailableLakeTables = mapOf("lake2" to listOf(purged)),
+                )
+            listOf("SELECT * FROM \"lake\".\"sales\".\"orders\"", "SELECT * FROM orders", "SELECT * FROM \"orders\"").forEach { sql ->
+                withClue(sql) {
+                    failureOf(runner(sql = sql, registry = registry), Fixtures.node("read", source = "lake2")).code shouldBe
+                        PipelineErrorCodes.Lake.TABLE_UNAVAILABLE
+                }
+            }
+            failureOf(
+                runner(sql = "SELECT * FROM orders_v2", registry = registry),
+                Fixtures.node("read", source = "lake2"),
+            ).code shouldNotBe
+                PipelineErrorCodes.Lake.TABLE_UNAVAILABLE
         }
 
     // ------------ fail-closed semantics (044 F2/F3): the backstop's null/throw cases are REFUSALS

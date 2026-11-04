@@ -13,11 +13,16 @@ import java.util.concurrent.ConcurrentHashMap
  * isolation (109 §A): the [plan] [co.datapipelines.datasources.LakeViewStatements.planForTables]
  * generated from the registry rows, the datasource name (the recorder's key prefix), and the
  * [recorder] outcomes are written through. See [LakeInstanceInitializer] for the mechanics.
+ *
+ * [managed] (#818) is set only for the MANAGED lake datasource: the catalog snapshot the plan was
+ * built from, carried onto the pool for the age bound and the freshness tick, and the trigger for
+ * the §15a filesystem lock ([ManagedLakeGeneration.LOCKDOWN_STATEMENTS]) after the views.
  */
 class LakeViewInit(
     val datasourceName: String,
     val plan: LakeViewPlan,
     val recorder: LakeViewOutcomeRecorder,
+    val managed: ManagedLakeGeneration? = null,
 )
 
 /**
@@ -57,6 +62,11 @@ class LakeInstanceInitializer(
     private val plan: LakeViewPlan,
     private val datasourceName: String,
     private val recorder: LakeViewOutcomeRecorder,
+    /**
+     * #818 — statements run strictly AFTER every view, on the owner: the managed generation's §15a
+     * filesystem lock. Empty (every external LAKE datasource) changes nothing.
+     */
+    private val lockdown: List<String> = emptyList(),
 ) {
     private val log = org.slf4j.LoggerFactory.getLogger(LakeInstanceInitializer::class.java)
 
@@ -85,6 +95,9 @@ class LakeInstanceInitializer(
         // they are shared infrastructure, and a failure there is never one table's fault.
         (adapterInit + plan.prelude).forEach { statement -> connection.createStatement().use { it.execute(statement) } }
         plan.views.forEach { view -> applyView(connection, view) }
+        // #818 §15a: last, and strict. A lock that failed to apply is a generation that must not
+        // serve, so the failure fails the build like the adapter init does.
+        lockdown.forEach { statement -> connection.createStatement().use { it.execute(statement) } }
     }
 
     /**

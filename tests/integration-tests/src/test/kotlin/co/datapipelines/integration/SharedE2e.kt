@@ -136,7 +136,7 @@ internal object SharedE2e {
      * user; `server /data` and the readiness wait below work unchanged (proven 2026-09-24 on
      * LakeMinioE2eTest + TaxiVsRideshareFourEngineE2eTest, 7/7).
      */
-    private const val MINIO_IMAGE = "cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1"
+    internal const val MINIO_IMAGE = "cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1"
     private const val MINIO_PORT = 9000
 
     /** The root credential the lake datasources and the seeding client both present. */

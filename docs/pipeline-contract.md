@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.72 (revised — see Change Log)
+**Status:** v1.73 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-11-04
@@ -1208,6 +1208,7 @@ Defined and described in [Datasources §9–10](datasources.md#9-validation-rule
 | `datasource.validation.duplicate_name` | 409 | Name already exists — the namespace is global across workspaces too (workspaces design §3: `name` stays the PK/AAD anchor) |
 | `datasource.validation.workspace_forbidden` | 400 | Workspaces D8 refusal: non-admin attempted the `global` flag (or any mutation of a global datasource), a `readonly` flip on a global datasource, or a workspace binding the caller is not in — including member CUD while `member-datasources-enabled` is off (workspaces design §8) |
 | `datasource.in_use` | 409 | Delete blocked: pipelines reference this datasource |
+| `datasource.managed` | 409 | An edit or a delete of the managed lake datasource (`properties.dialect.managed = true`, [Datasources §8C.10](datasources.md#8c10-the-managed-lake-datasource)): the server creates and re-syncs that row from `datapipelines.lake.*` at every boot, so no surface may change it. Refused in the registry, below every surface (#818) |
 | `datasource.not_found` | 404 | Datasource name unknown on a read/mutate/test path (added 2026-08-11, gate C) |
 | `datasource.grant_required` | 404 | The datasource exists on the instance but is not GRANTED to the caller's workspace ([RBAC design §4](superpowers/specs/2026-09-10-rbac-design.md), D-R7). A 404 and not a 403 because the 404 rule has no exception for datasources: an ungranted datasource is INVISIBLE, and "this exists, you may not see it" turns the flat, global datasource namespace into an enumeration oracle — every name on the instance probeable one request at a time |
 | `datasource.driver_not_loaded` | 400 | JDBC driver JAR for the dialect is not on the classpath |
@@ -1711,6 +1712,8 @@ The `lake.definition.*` rows (#798, dp-lake P3; [lake.md](lake.md)) are the mana
 | `lake.definition.drift` | — | The Iceberg table holds neither the target definition nor the last applied one (it was changed outside DP); recorded on the table as `failed` with the field diff. |
 | `lake.definition.table_busy` | — | Another operation holds the table (its lease, or an apply in flight); nothing changed. |
 | `lake.definition.authoring_disabled` | — | This deployment has authoring disabled: definitions are written where authoring is enabled and promoted. |
+| `lake.unavailable` | 503 | The catalog read a new managed reader generation is built from failed, so no generation was built (#818, [Datasources §8C.10](datasources.md#8c10-the-managed-lake-datasource)). A live generation keeps serving until its age bound; a lease with none fails here. `details` carry `datasource` and the bounded `cause`. |
+| `lake.table.unavailable` | 409 | A node or an introspection read names a managed table this server serves no view for (#818): archived or purged, no catalog row, no lifecycle row, or the lake disabled. Refused at CONNECT, before a connection is leased. `details` carry `datasource`, `table` (dotted) and `reason`. |
 
 
 ---
@@ -1952,6 +1955,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-04 | v1.73 | 818 (#818) | dp-lake P5 managed reads. §13.8 gains `datasource.managed` (409); §13.25 gains `lake.unavailable` (503) and `lake.table.unavailable` (409), landed in the SAME commit as their `PipelineErrorCodes` constants and `ApiErrorCatalog` rows (§13 row count 437 → 440). |
 | 2026-11-04 | v1.72 | 798 merge | §13.25 gains the managed lake definition lifecycle and apply refusal catalog, alongside its constants. |
 | 2026-11-03 | v1.71 | 795 (#795) | dp-lake P1 DuckDB staging. §5.1: `engine` accepts `DUCKDB` (a file-backed DuckDB database per execution, [Staging §8.5](staging.md#85-the-duckdb-engine)), and `config.max_memory_mb` is the only key on either engine, clamped as before, with the engine's `memory_limit` as a second ceiling on `DUCKDB`. §12.8: `tempdb_engine_unsupported` checks the [`StagingEngine`](enums.md#7-stagingengine--tempdb-engine) wire values. §13.5 gains `pipeline.staging.scratch_exhausted` and `pipeline.staging.scratch_limit_exceeded`. |
 | 2026-11-02 | v1.70 | 778 (#778) | §13.13 gains `pipeline.promotion.lake_table_unavailable` (409): the receiver refuses a batch whose landed pipeline or parameter-set versions read a lake table its registry does not hold, reported once, rolled back whole. Landed in the SAME commit as the `PipelineErrorCodes.Versioning` constant and the `ApiErrorCatalog` row (§13 row count 419 → 420). §13.8's `datasource.lake.table_unavailable` row: `lake_tables.last_error` is V22, not V20 (doc drift). |

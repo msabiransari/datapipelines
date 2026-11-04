@@ -5,6 +5,7 @@ import co.datapipelines.datasources.crypto.CredentialEncryptor
 import co.datapipelines.datasources.pooling.ConnectionPool
 import co.datapipelines.datasources.pooling.ConnectionPoolManager
 import co.datapipelines.datasources.pooling.LakeViewInit
+import co.datapipelines.datasources.pooling.ManagedLakeGeneration
 import co.datapipelines.datasources.pooling.PoolLifecycleMetrics
 import co.datapipelines.datasources.pooling.ReapOutcome
 import co.datapipelines.persistence.FailureShape
@@ -99,8 +100,19 @@ class DefaultDatasourceRegistry(
      * own default has at registration.
      */
     private val fileRoots: DatasourceFileRoots = DatasourceFileRoots.EMPTY,
+    /**
+     * #818 (dp-lake P5, record §10) — the managed lake's catalog read. The managed datasource's
+     * generations are planned from it, and the freshness tick compares against it. The assembling
+     * layer implements it over `ManagedLakeTableRepository`.
+     */
+    private val managedLake: ManagedLakeCatalog = ManagedLakeCatalog.NONE,
+    /** #818 RULING 4 item 1 — `reads.max-generation-age-seconds`; null when no lake is configured. */
+    private val maxGenerationAge: Duration? = null,
 ) : DatasourceRegistry {
     private val log = org.slf4j.LoggerFactory.getLogger(DefaultDatasourceRegistry::class.java)
+
+    /** #818 — the managed datasource's read rules over [managedLake]. */
+    private val managedReads = ManagedLakeReads(managedLake)
 
     /**
      * The row version (`updated_at`) each LIVE pool was built from — the whole state
@@ -163,6 +175,7 @@ class DefaultDatasourceRegistry(
                 )
             },
             retireCeiling = retireCeiling,
+            maxGenerationAge = maxGenerationAge,
             metrics = poolMetrics,
         )
 
@@ -174,6 +187,7 @@ class DefaultDatasourceRegistry(
      */
     private fun lakeViewInit(datasource: Datasource): LakeViewInit? {
         if (datasource.dialect != Dialect.LAKE) return null
+        if (datasource.isManagedLake()) return managedLakeViewInit(datasource)
         val tables = lakeTables.registeredTables(datasource.name)
         if (tables.isEmpty()) return null
         val plan =
@@ -190,6 +204,30 @@ class DefaultDatasourceRegistry(
             datasourceName = datasource.name,
             plan = plan,
             recorder = { name, namespace, table, error -> lakeViewRecorder.record(name, namespace, table, error) },
+        )
+    }
+
+    /**
+     * #818 (record §10 "One snapshot per generation") — the managed datasource's view init, ALWAYS
+     * built, even with no table, because the generation carries the snapshot the age bound and the
+     * freshness tick judge, and the §15a filesystem lock.
+     *
+     * The catalog read comes FIRST and its failure propagates as `lake.unavailable`: no generation
+     * is built from anything unverified, so the live one (if any) serves until its bound. Managed
+     * rows are planned from the catalog's metadata location; external rows on the same datasource
+     * keep today's path. Unlike [lakeViewInit], an all-refused plan still builds. The managed
+     * generation must exist for the bound and the lock, and each refusal is recorded on its row by
+     * the initializer, as for any failed view.
+     */
+    private fun managedLakeViewInit(datasource: Datasource): LakeViewInit {
+        val managed = managedReads.read(datasource.name)
+        val tables = managedReads.plannerInput(datasource.name, lakeTables.registeredTables(datasource.name), managed)
+        val plan = LakeViewStatements.planForTables(tables, DialectAdapters.forDialect(datasource.dialect), duckdbExtensionDirectory)
+        return LakeViewInit(
+            datasourceName = datasource.name,
+            plan = plan,
+            recorder = { name, namespace, table, error -> lakeViewRecorder.record(name, namespace, table, error) },
+            managed = ManagedLakeGeneration(datasource.name, managed),
         )
     }
 
@@ -272,6 +310,12 @@ class DefaultDatasourceRegistry(
                 ?: datasource
         return LakeTablePreflight.check(withCredential, table, duckdbExtensionDirectory, duckdbMemoryLimit)
     }
+
+    /** #818 — the managed tables a node cannot read (record §10 "Unavailable tables"); empty for every other datasource. */
+    override fun lakeUnavailableTables(datasourceName: String): List<LakeUnavailableTable> =
+        lakeTables
+            .registeredTables(datasourceName)
+            .mapNotNull { row -> row.unavailableReason?.let { LakeUnavailableTable(row.namespace, row.name, it) } }
 
     /** 109 §A — the executor's pre-execution read: the datasource's registered tables whose view creation last FAILED. */
     override fun lakeBrokenTables(datasourceName: String): List<LakeBrokenTable> =
@@ -370,6 +414,7 @@ class DefaultDatasourceRegistry(
         // the first — so this replaces it rather than joining it.
         val existing = repository.findByName(toPersist.name)
         val isCreate = existing == null
+        refuseManagedWrite(toPersist.name, stored = existing?.toDatasource(), incoming = toPersist)
         validator.validate(toPersist, isCreate, existing?.credentialKind).orThrow()
         cache.invalidate(toPersist.name)
         return if (isCreate) {
@@ -418,6 +463,7 @@ class DefaultDatasourceRegistry(
      * change that node in that version.
      */
     override fun delete(name: String): DeleteResult {
+        refuseManagedWrite(name, stored = repository.findByName(name)?.toDatasource(), incoming = null)
         val referencing = references.referencesTo(name)
         if (referencing.isNotEmpty()) {
             return DeleteResult(
@@ -438,6 +484,142 @@ class DefaultDatasourceRegistry(
         }
         return DeleteResult(deleted = deleted, name = name)
     }
+
+    /**
+     * #818 (record §6) — the ONE chokepoint below every surface (UI form, REST PUT/POST/DELETE): the
+     * managed lake datasource is the server's, re-synced from configuration at every boot, so no
+     * caller edits or deletes it, and no caller creates a row that claims to be it. The registrar
+     * writes through [syncManagedLake], which never passes here.
+     */
+    private fun refuseManagedWrite(
+        name: String,
+        stored: Datasource?,
+        incoming: Datasource?,
+    ) {
+        if (stored?.isManagedLake() != true && incoming?.isManagedLake() != true) return
+        throw DatapipelinesException(
+            DatasourceErrorCodes.MANAGED,
+            "Datasource '$name' is the managed lake: the server owns it and re-creates it from its lake " +
+                "configuration at every start, so it can't be edited or deleted here.",
+            mapOf("datasource" to name),
+        )
+    }
+
+    /**
+     * #818 A1 — the registrar's privileged write: create the managed row, or re-sync it to
+     * [datasource] (the configuration), or report that a row which is NOT the managed one holds the
+     * name. Validated like every save (the adapter's own rules); never passes [refuseManagedWrite].
+     *
+     * Unlike `BootstrapDatasourceRegistrar.register` (create-if-absent, never update), this OVERWRITES
+     * a managed row that drifted, because configuration is the managed row's only source. The stored
+     * secret is compared decrypted, as the bootstrap credential resync compares it ([decryptStored]),
+     * so an unchanged boot writes nothing and bumps no `updated_at`. A change retires the local pool
+     * and publishes to peers, the three steps every save runs.
+     */
+    override fun syncManagedLake(
+        datasource: Datasource,
+        actor: UUID,
+    ): ManagedLakeSync {
+        require(datasource.isManagedLake()) { "syncManagedLake writes only the managed lake datasource" }
+        val existing = repository.findByName(datasource.name)
+        return when {
+            existing == null -> createManagedLake(datasource, actor)
+            !existing.toDatasource().isManagedLake() -> ManagedLakeSync.NAME_TAKEN
+            isInSync(existing, datasource) -> ManagedLakeSync.UNCHANGED
+            else -> resyncManagedLake(datasource, existing.credentialKind)
+        }
+    }
+
+    /** Whether the stored managed row already carries everything [desired] configures, its decrypted secret included. */
+    private fun isInSync(
+        stored: DatasourceRow,
+        desired: Datasource,
+    ): Boolean = ManagedLakeReads.sameManagedShape(stored.toDatasource(), desired) && decryptStored(stored) == desired.secret
+
+    /** [syncManagedLake]'s create branch: a name held by a soft-deleted row is taken, and a peer's concurrent insert is re-judged. */
+    private fun createManagedLake(
+        datasource: Datasource,
+        actor: UUID,
+    ): ManagedLakeSync {
+        val name = datasource.name
+        if (repository.existsIncludingDeleted(name)) return ManagedLakeSync.NAME_TAKEN
+        validator.validate(datasource, isCreate = true, storedKind = null).orThrow()
+        val encrypted = datasource.secret?.let { encryptor.encrypt(it, name) }
+        try {
+            repository.create(datasource, encrypted, actor)
+        } catch (e: DatapipelinesException) {
+            // A peer booting at the same instant won the insert: re-judge its row.
+            if (e.code != DatasourceErrorCodes.DUPLICATE_NAME) throw e
+            return if (repository.findByName(name)?.toDatasource()?.isManagedLake() == true) {
+                ManagedLakeSync.UNCHANGED
+            } else {
+                ManagedLakeSync.NAME_TAKEN
+            }
+        }
+        cache.invalidate(name)
+        return ManagedLakeSync.CREATED
+    }
+
+    /** [syncManagedLake]'s drift branch: the row is rewritten from configuration, and its pool retires here and on peers. */
+    private fun resyncManagedLake(
+        datasource: Datasource,
+        storedKind: CredentialKind,
+    ): ManagedLakeSync {
+        val name = datasource.name
+        validator.validate(datasource, isCreate = false, storedKind = storedKind).orThrow()
+        repository.update(datasource, datasource.secret?.let { encryptor.encrypt(it, name) })
+            ?: error("datasource '$name' vanished during the managed re-sync")
+        if (retirePool(name)) audit(DatasourceAuditEvents.POOL_REBUILD, name, DatasourceAuditEvent.SYSTEM_ACTOR)
+        cache.invalidate(name)
+        invalidation.publish(name)
+        return ManagedLakeSync.RESYNCED
+    }
+
+    /**
+     * #818 RULING 4 item 2 — the freshness tick's body: for each live MANAGED generation, one catalog
+     * read compared with the snapshot the generation was built from; a stale generation is retired
+     * (`lake.generation_stale`), and the next lease builds from the catalog. Never touches any other
+     * pool. A failed read retires nothing: the live generation serves until its age bound.
+     *
+     * @return how many generations were retired.
+     */
+    @Suppress("TooGenericExceptionCaught") // a failed read is logged and skipped; the age bound still holds
+    override fun refreshManagedGenerations(): Int {
+        var retired = 0
+        poolManager.liveManagedGenerations().forEach { (name, pool) ->
+            val generation = pool.managedGeneration ?: return@forEach
+            val current =
+                try {
+                    managedLake.managedTables(name)
+                } catch (e: RuntimeException) {
+                    log.warn(
+                        "event=lake.freshness_read_failed datasource={} error=\"{}\" " +
+                            "message=\"freshness tick skipped; the live generation serves until its age bound\"",
+                        name,
+                        deepestThrowableMessage(e).take(MAX_LOGGED_CAUSE_CHARS),
+                    )
+                    return@forEach
+                }
+            val stale = generation.staleTableCount(current)
+            if (stale > 0 && poolManager.retireGeneration(name, pool)) {
+                poolRowVersions.remove(name)
+                retired++
+                log.info(
+                    "event=lake.generation_stale datasource={} tables_stale={} " +
+                        "message=\"managed lake generation retired: the catalog moved since it was built\"",
+                    name,
+                    stale,
+                )
+            }
+        }
+        return retired
+    }
+
+    /** #818 — the instant [name]'s live pool was built, or null when none is live (the age bound's input; P8). */
+    override fun generationBuiltAt(name: String): Instant? = poolManager.generationBuiltAt(name)
+
+    /** #818 — the snapshot [name]'s live managed generation was built from, or null (the tick's input; P8). */
+    override fun liveManagedGeneration(name: String): ManagedLakeGeneration? = poolManager.liveManagedGenerations()[name]?.managedGeneration
 
     /** The subscriber's target (§5.7, 050/R1): the same retirement the local save/delete paths run. */
     override fun retirePool(name: String): Boolean {
@@ -789,5 +971,8 @@ class DefaultDatasourceRegistry(
     private companion object {
         const val PROBE_CONNECTION_TIMEOUT_MS = 10_000L
         const val NANOS_PER_MILLI = 1_000_000L
+
+        /** #818 — the bound on a catalog failure's text in the freshness tick's WARN. */
+        const val MAX_LOGGED_CAUSE_CHARS = 500
     }
 }

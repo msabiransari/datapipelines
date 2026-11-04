@@ -4,6 +4,7 @@ import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DeleteResult
 import co.datapipelines.datasources.LakeBrokenTable
+import co.datapipelines.datasources.LakeUnavailableTable
 import co.datapipelines.datasources.ResultRowReader
 import co.datapipelines.datasources.TestResult
 import co.datapipelines.datasources.ValidationResult
@@ -383,6 +384,8 @@ class FakeDatasourceRegistry(
      * (the default) is the interface's own default, so every other suite is unchanged.
      */
     private val brokenLakeTables: Map<String, List<LakeBrokenTable>> = emptyMap(),
+    /** #818 — the [DatasourceRegistry.lakeUnavailableTables] answer, name → managed tables with no view. */
+    private val unavailableLakeTables: Map<String, List<LakeUnavailableTable>> = emptyMap(),
 ) : DatasourceRegistry {
     /** Connections handed out, and the ones handed back — the resource-leak assertion surface. */
     val leased = AtomicInteger()
@@ -434,6 +437,8 @@ class FakeDatasourceRegistry(
         TrackingPool(datasource, leased, closed, driverPrologueMs, cancelsInPrologue, blockingDriver)
 
     override fun lakeBrokenTables(datasourceName: String): List<LakeBrokenTable> = brokenLakeTables[datasourceName].orEmpty()
+
+    override fun lakeUnavailableTables(datasourceName: String): List<LakeUnavailableTable> = unavailableLakeTables[datasourceName].orEmpty()
 
     override fun testConnection(name: String): TestResult? = TestResult(true, Instant.now())
 

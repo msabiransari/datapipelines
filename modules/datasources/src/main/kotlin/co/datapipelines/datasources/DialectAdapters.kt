@@ -688,6 +688,7 @@ class LakeDialectAdapter(
         enumValue(properties, "catalog.kind", CATALOG_KINDS)?.let { errors += it }
         enumValue(properties, "url_style", URL_STYLES)?.let { errors += it }
         enumValue(properties, "unsigned", BOOLEAN_WORDS)?.let { errors += it }
+        enumValue(properties, "managed", BOOLEAN_WORDS)?.let { errors += it }
         limitValueError(properties)?.let { errors += it }
         return ValidationResult.of(errors)
     }
@@ -940,6 +941,10 @@ class LakeDialectAdapter(
                 "memory_limit",
                 "threads",
                 "temp_directory",
+                // #818: marks the server-owned managed lake datasource (design record §6). Accepted
+                // here so the registrar's row validates; DefaultDatasourceRegistry refuses it on
+                // every caller's save (`datasource.managed`).
+                "managed",
             )
         val CATALOG_KINDS = setOf("s3", "glue", "s3_tables", "rest")
         val ICEBERG_KINDS = setOf("glue", "s3_tables", "rest")

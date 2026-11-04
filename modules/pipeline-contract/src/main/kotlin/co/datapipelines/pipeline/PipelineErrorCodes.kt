@@ -768,6 +768,9 @@ object PipelineErrorCodes {
         const val WORKSPACE_FORBIDDEN = "datasource.validation.workspace_forbidden"
 
         const val IN_USE = "datasource.in_use"
+
+        /** #818 — an edit or delete of the managed lake datasource, which the server owns (§13.8). 409. */
+        const val MANAGED = "datasource.managed"
         const val NOT_FOUND = "datasource.not_found"
         const val DRIVER_NOT_LOADED = "datasource.driver_not_loaded"
 
@@ -2081,6 +2084,20 @@ object PipelineErrorCodes {
 
         /** This deployment has authoring disabled: definitions are written where authoring is enabled and promoted. */
         const val DEFINITION_AUTHORING_DISABLED = "lake.definition.authoring_disabled"
+
+        // #818 (dp-lake P5) — the managed reads (§13.25, design record §10).
+
+        /**
+         * The managed lake datasource has no live generation and the catalog read a new one needs failed:
+         * no generation is built from an unverified read. 503; `details.cause` names the failure.
+         */
+        const val UNAVAILABLE = "lake.unavailable"
+
+        /**
+         * A node named a managed table that has no view in the generation: archived, purged, unknown to the
+         * catalog, or the lake is disabled. 409; `details.table` names it, `details.reason` says why.
+         */
+        const val TABLE_UNAVAILABLE = "lake.table.unavailable"
     }
 }
 

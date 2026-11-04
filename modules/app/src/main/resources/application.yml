@@ -681,6 +681,7 @@ datapipelines:
     reads:
       max-generation-age-seconds: ${DATAPIPELINES_LAKE_READS_MAX_GENERATION_AGE_SECONDS:900}
       freshness-tick-seconds: ${DATAPIPELINES_LAKE_READS_FRESHNESS_TICK_SECONDS:60}
+      memory-limit: ${DATAPIPELINES_LAKE_READS_MEMORY_LIMIT:512MB}
     maintenance:
       window: ${DATAPIPELINES_LAKE_MAINTENANCE_WINDOW:02:00-05:00}
       max-bytes-rewritten-per-run: ${DATAPIPELINES_LAKE_MAINTENANCE_MAX_BYTES_REWRITTEN_PER_RUN:50GB}
