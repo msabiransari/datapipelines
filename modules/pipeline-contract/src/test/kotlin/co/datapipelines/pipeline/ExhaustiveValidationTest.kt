@@ -3,6 +3,7 @@ package co.datapipelines.pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes.Validation
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.LogicalType
+import co.datapipelines.typesystem.StagingEngine
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
@@ -162,7 +163,7 @@ class ExhaustiveValidationTest {
                 {
                   "schema_version": 1,
                   "name": "p", "display_name": "P", "description": "d",
-                  "settings": {"tempdb": {"engine": "DUCKDB"}},
+                  "settings": {"tempdb": {"engine": "ROCKSDB"}},
                   "parameters": {"p": {"type": "MONEY"}},
                   "nodes": [
                     {"id": "a", "description": "d", "type": "SELECT", "source": "pg-prod",

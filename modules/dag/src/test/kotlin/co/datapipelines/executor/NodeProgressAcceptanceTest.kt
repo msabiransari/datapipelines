@@ -15,9 +15,9 @@ import co.datapipelines.staging.H2StagingFactory
 import co.datapipelines.staging.H2StagingProperties
 import co.datapipelines.staging.StageObserver
 import co.datapipelines.staging.Staging
-import co.datapipelines.staging.StagingEngine
 import co.datapipelines.staging.StagingFactory
 import co.datapipelines.typesystem.Dialect
+import co.datapipelines.typesystem.StagingEngine
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.collections.shouldBeEmpty

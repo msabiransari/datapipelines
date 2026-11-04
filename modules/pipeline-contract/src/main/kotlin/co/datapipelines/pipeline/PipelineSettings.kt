@@ -1,5 +1,6 @@
 package co.datapipelines.pipeline
 
+import co.datapipelines.typesystem.StagingEngine
 import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonInclude
@@ -48,9 +49,9 @@ data class PipelineSettings(
  * no config" are the same pipeline, and modelling them differently would give the executor
  * two states to handle where the spec defines one.
  *
- * `config` keys are engine-specific; for H2 the only valid key is [MAX_MEMORY_MB_KEY]
- * (§12.8 `tempdb_config_invalid`). Values stay as [JsonNode] so the validator can check the
- * declared JSON type, not a Jackson-coerced approximation of it.
+ * `config` keys are engine-specific; for both H2 and DuckDB the only valid key is
+ * [MAX_MEMORY_MB_KEY] (§12.8 `tempdb_config_invalid`). Values stay as [JsonNode] so the
+ * validator can check the declared JSON type, not a Jackson-coerced approximation of it.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class TempdbSettings(
@@ -64,18 +65,24 @@ data class TempdbSettings(
      * override it.
      *
      * Per D6, a present value takes precedence over the global
-     * `datapipelines.staging.h2.max-memory-mb`; absent means "use the global".
+     * `datapipelines.staging.h2.max-memory-mb`; absent means "use the global". The executor clamps
+     * it to that global on either engine; on DuckDB the engine's own `memory_limit`
+     * (`datapipelines.lake.admission.staging-memory-limit`, locked before any author SQL runs) is a
+     * second ceiling no pipeline value can raise (staging.md §8.5).
      */
     @get:JsonIgnore
     val maxMemoryMb: Int?
         get() = config[MAX_MEMORY_MB_KEY]?.takeIf { it.isIntegralNumber }?.asInt()
 
     companion object {
-        /** The only `config` key H2 accepts in v1 (§5.1). */
+        /** The only `config` key either engine accepts (§5.1). */
         const val MAX_MEMORY_MB_KEY = "max_memory_mb"
 
         /** Valid `config` keys per engine — the §12.8 `tempdb_config_invalid` check reads this. */
         val ALLOWED_CONFIG_KEYS: Map<StagingEngine, Set<String>> =
-            mapOf(StagingEngine.H2 to setOf(MAX_MEMORY_MB_KEY))
+            mapOf(
+                StagingEngine.H2 to setOf(MAX_MEMORY_MB_KEY),
+                StagingEngine.DUCKDB to setOf(MAX_MEMORY_MB_KEY),
+            )
     }
 }

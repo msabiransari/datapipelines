@@ -1,6 +1,5 @@
 package co.datapipelines.pipeline
 
-import co.datapipelines.typesystem.Dialect
 import com.fasterxml.jackson.annotation.JsonCreator
 import com.fasterxml.jackson.annotation.JsonValue
 
@@ -65,44 +64,6 @@ enum class WriteMode(
         fun fromWire(value: String): WriteMode =
             fromWireOrNull(value)
                 ?: throw IllegalArgumentException("Unknown WriteMode: ${value.truncateForError()}")
-    }
-}
-
-/**
- * The tempdb engine a pipeline stages through (pipeline-contract §5.1, enums.md §7).
- *
- * v1 supports `H2` only; `DUCKDB` is reserved and MUST NOT be accepted by validators until
- * the engine lands (enums.md "Values marked (reserved)").
- */
-enum class StagingEngine(
-    @JsonValue val wire: String,
-) {
-    H2("H2"),
-    ;
-
-    /**
-     * The SQL dialect templates targeting `source: "tempdb"` must be written in.
-     *
-     * Derived, not hard-coded: §12.6 originally pinned H2 and SPEC-REVIEW 2.1.8 replaced that
-     * with "the dialect of the engine declared in `settings.tempdb.engine`", so a DuckDB
-     * staging engine makes DuckDB templates valid the day it lands, with no second edit.
-     */
-    val dialect: Dialect
-        get() =
-            when (this) {
-                H2 -> Dialect.H2
-            }
-
-    companion object {
-        val WIRE_VALUES: List<String> = entries.map { it.wire }
-
-        fun fromWireOrNull(value: String?): StagingEngine? = entries.firstOrNull { it.wire == value }
-
-        @JsonCreator
-        @JvmStatic
-        fun fromWire(value: String): StagingEngine =
-            fromWireOrNull(value)
-                ?: throw IllegalArgumentException("Unknown StagingEngine: ${value.truncateForError()}")
     }
 }
 

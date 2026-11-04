@@ -15,10 +15,8 @@ import co.datapipelines.events.PipelineCompleted
 import co.datapipelines.events.PipelineFailed
 import co.datapipelines.pipeline.NodeSource
 import co.datapipelines.pipeline.NodeType
-import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.staging.Staging
-import co.datapipelines.staging.StagingEngine
 import co.datapipelines.staging.StagingFactory
 import co.datapipelines.templates.TemplateEngine
 import co.datapipelines.typesystem.DatapipelinesException
@@ -50,7 +48,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.coroutineContext
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
-import co.datapipelines.pipeline.StagingEngine as PipelineStagingEngine
 
 /**
  * The runtime engine (dag-executor.md §5): takes a validated pipeline plus parameters, walks the
@@ -185,8 +182,14 @@ class PipelineExecutor(
         try {
             // §15.2: staging creation opens JDBC connections — blocking work, so it belongs on the
             // executor's own pool, never on whatever thread the caller happened to arrive on.
-            val opened = withContext(dispatcher.context) { stagingFactory.create(executionId, stagingEngineFor(request.pipeline)) }
-            staging = opened
+            // The opened database is recorded INSIDE the block, for `finally` to close: withContext
+            // dispatches its result back "with a prompt cancellation guarantee" — a caller cancelled
+            // by then gets CancellationException and the result is discarded (its KDoc) — so an
+            // assignment after the call would never run and the database would leak (#795 F5).
+            val opened =
+                withContext(dispatcher.context) {
+                    stagingFactory.create(executionId, request.pipeline.settings.tempdb.engine).also { staging = it }
+                }
             val ctx = nodeContext(request, opened, handle, run, context)
             return withTimeout(config.executionTimeoutSeconds.seconds) {
                 coroutineScope {
@@ -1063,14 +1066,6 @@ class PipelineExecutor(
     }
 
     private suspend fun emit(event: ExecutionEvent) = eventEmitter.emit(event)
-
-    private fun stagingEngineFor(pipeline: Pipeline): StagingEngine =
-        when (pipeline.settings.tempdb.engine) {
-            // The two enums are separate declarations by layering necessity (staging.StagingEngine
-            // KDoc): `staging` may not depend on `pipeline-contract`, so `dag` — which depends on
-            // both — owns the mapping. Exhaustive, so a new engine is a compile error here.
-            PipelineStagingEngine.H2 -> StagingEngine.H2
-        }
 
     private companion object {
         val LOG = LoggerFactory.getLogger(PipelineExecutor::class.java)

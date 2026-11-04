@@ -10,8 +10,8 @@ import co.datapipelines.scripting.JsonataEngine
 import co.datapipelines.scripting.ScriptEvaluationPool
 import co.datapipelines.scripting.ScriptLanguage
 import co.datapipelines.staging.Staging
-import co.datapipelines.staging.StagingEngine
 import co.datapipelines.staging.StagingFactory
+import co.datapipelines.typesystem.StagingEngine
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual

@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.70 (revised — see Change Log)
+**Status:** v1.71 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-03
 
 ---
 
@@ -538,8 +538,8 @@ jsonb in the execution's Context snapshot.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `engine` | string | optional (default `"H2"`) | Staging engine. v1 supports only `"H2"`. Future: `"DUCKDB"`, etc. |
-| `config` | object | optional | Engine-specific configuration. Keys depend on `engine`. For `H2`: `max_memory_mb` (default 1024). |
+| `engine` | string | optional (default `"H2"`) | Staging engine ([Enums §7](enums.md#7-stagingengine--tempdb-engine)): `"H2"` (in-memory) or `"DUCKDB"` (a file-backed DuckDB database per execution — memory-bounded, scratch-reserved and configuration-locked, [Staging §8.5](staging.md#85-the-duckdb-engine)). Templates on `source: "tempdb"` are written in the engine's dialect (§12.6). |
+| `config` | object | optional | Engine-specific configuration. Keys depend on `engine`; for both `H2` and `DUCKDB` the only key is `max_memory_mb` (a positive integer, default 1024), clamped to the operator's ceiling ([Configuration §3.3](configuration.md#33-staging-tempdb)). On `DUCKDB` the engine's own `memory_limit` is a second ceiling no pipeline value can raise ([Staging §8.5](staging.md#85-the-duckdb-engine)). |
 
 If `settings.tempdb` is omitted entirely, defaults to H2 with default config.
 
@@ -994,7 +994,7 @@ is the same hole as an interpolated one, one directive earlier.
 
 | Code | Check |
 |---|---|
-| `pipeline.validation.tempdb_engine_unsupported` | `settings.tempdb.engine` is `H2` (v1) |
+| `pipeline.validation.tempdb_engine_unsupported` | `settings.tempdb.engine` is a [`StagingEngine`](enums.md#7-stagingengine--tempdb-engine) wire value — `H2` or `DUCKDB` |
 | `pipeline.validation.tempdb_config_invalid` | `settings.tempdb.config` keys are valid for the chosen engine |
 | `pipeline.validation.node_timeout_invalid` | A node's `settings.timeout_seconds` is a positive integer no greater than `datapipelines.executor.node-timeout-max-seconds` (default 900). Refused rather than clamped: an author who writes 14 400 and silently runs at 900 debugs a timeout that says nothing about what they asked for. `details` carries the node id, the requested value and the ceiling (§4.11) |
 | `pipeline.validation.pipeline_query_timeout_invalid` | `settings.query_timeout_seconds` (the pipeline-wide SQL statement timeout) is a positive integer no greater than `datapipelines.executor.node-query-timeout-max-seconds` (default 900). `details` carries the requested value and the ceiling (§5.3) |
@@ -1153,6 +1153,8 @@ Error codes follow the format `{domain}.{entity}.{failure}`. Codes are lowercase
 | `pipeline.staging.memory_limit_exceeded` | 500 | Per-execution memory limit hit |
 | `pipeline.staging.invalid_column_name` | 500 | Source column label fails identifier validation or duplicates another in the same result set ([Staging §4.5](staging.md#45-identifier-safety-normative)) |
 | `pipeline.staging.table_already_exists` | 500 | Staged CREATE TABLE targets a name already staged in this execution (defensive; save-time uniqueness is the primary guard) |
+| `pipeline.staging.scratch_exhausted` | 500 | A DuckDB staging database's scratch reservation does not fit in the aggregate (`datapipelines.lake.admission.scratch-bytes`); refused before any file exists, retryable once a running execution releases its reservation ([Staging §8.5](staging.md#85-the-duckdb-engine)) |
+| `pipeline.staging.scratch_limit_exceeded` | 500 | A DuckDB staging database outgrew its own scratch reservation: the engine refused a spill past `max_temp_directory_size`, or the database file, WAL and spill directory measured more than the reservation after a write ([Staging §8.5](staging.md#85-the-duckdb-engine)) |
 
 ### 13.6 Type mapping
 
@@ -1936,6 +1938,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-03 | v1.71 | 795 (#795) | dp-lake P1 DuckDB staging. §5.1: `engine` accepts `DUCKDB` (a file-backed DuckDB database per execution, [Staging §8.5](staging.md#85-the-duckdb-engine)), and `config.max_memory_mb` is the only key on either engine, clamped as before, with the engine's `memory_limit` as a second ceiling on `DUCKDB`. §12.8: `tempdb_engine_unsupported` checks the [`StagingEngine`](enums.md#7-stagingengine--tempdb-engine) wire values. §13.5 gains `pipeline.staging.scratch_exhausted` and `pipeline.staging.scratch_limit_exceeded`. |
 | 2026-11-02 | v1.70 | 778 (#778) | §13.13 gains `pipeline.promotion.lake_table_unavailable` (409): the receiver refuses a batch whose landed pipeline or parameter-set versions read a lake table its registry does not hold, reported once, rolled back whole. Landed in the SAME commit as the `PipelineErrorCodes.Versioning` constant and the `ApiErrorCatalog` row (§13 row count 419 → 420). §13.8's `datasource.lake.table_unavailable` row: `lake_tables.last_error` is V22, not V20 (doc drift). |
 | 2026-11-01 | v1.69 | 779 (#779) | §4.9, §8.5 and §12.9: literal and scalar-reference mappings onto child value-mode SCRIPT keys share the existing caller-override contract; SCRIPT targets are ANY at save and checked by the child's pinned output contract at run. Object/list references remain refused. |
 | 2026-11-01 | v1.68 | 762 (#762) | §13.23's `dashboard.refresh.saturated` row: additive `details.reason` (`busy` / `never_admissible`) and, for `never_admissible`, `details.invocations`, `details.ceiling` and `details.key`. Code, status and `Retry-After` unchanged; the §13.23 row count is unchanged. |

@@ -351,8 +351,12 @@ class ApiErrorCatalogSpecDriftTest {
          * `lake.catalog.restoring` and `lake.catalog.outcome_unknown`, all `—` rows
          * (NEVER_RETURNED_LIVE: they arise inside DP's own catalog writes and no route reaches them
          * before P8), landed in the SAME commit as their `PipelineErrorCodes.Lake` constants.
+         * 423 → 425 with #795: §13.5 gains `pipeline.staging.scratch_exhausted` and
+         * `pipeline.staging.scratch_limit_exceeded` (both 500, the `pipeline.staging.` family
+         * default — no explicit catalog row), landed in the SAME commit as their
+         * `PipelineErrorCodes.Staging` and `StagingErrorCodes` constants.
          */
-        const val SECTION_13_ROW_COUNT = 423
+        const val SECTION_13_ROW_COUNT = 425
 
         /**
          * §12's distinct validation codes.

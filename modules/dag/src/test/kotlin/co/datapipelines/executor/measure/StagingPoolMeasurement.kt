@@ -18,11 +18,11 @@ import co.datapipelines.staging.H2Staging
 import co.datapipelines.staging.H2StagingFactory
 import co.datapipelines.staging.H2StagingProperties
 import co.datapipelines.staging.Staging
-import co.datapipelines.staging.StagingEngine
 import co.datapipelines.staging.StagingFactory
 import co.datapipelines.templates.TemplateEngine
 import co.datapipelines.typesystem.ColumnSchema
 import co.datapipelines.typesystem.Dialect
+import co.datapipelines.typesystem.StagingEngine
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.async

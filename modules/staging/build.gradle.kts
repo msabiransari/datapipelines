@@ -5,6 +5,10 @@ dependencies {
     implementation(project(":modules:typesystem"))
 
     implementation(libs.h2)
+    // The DuckDB staging engine (staging.md §8.5): compile-time, not runtimeOnly as in datasources,
+    // because the stager writes through the driver's own appender and duplicate() — no JDBC
+    // interface carries either. Catalog-pinned version (module-structure.md §5.5).
+    implementation(libs.duckdb.jdbc)
     // Pool admission is a coroutine Semaphore and every staging operation
     // suspends on it (staging.md §9.2); the driver serializes nothing.
     implementation(libs.kotlinx.coroutines.core)
