@@ -445,6 +445,11 @@ FORBIDDEN = [
     (r"(?<![A-Z_])REDIS_PASSWORD=", "renamed DATAPIPELINES_REDIS_PASSWORD (075)"),
     (r"(?<![A-Z_])JWT_SECRET=", "renamed DATAPIPELINES_JWT_SECRET (075)"),
     (r"(?<![A-Z_])ENCRYPTION_KEY=", "renamed DATAPIPELINES_DB_ENCRYPTION_KEY (075)"),
+    # --- retired build tasks, 780 --------------------------------------------------
+    # 242a retired the mirror directory and its tasks on 2026-09-25; a doc that names
+    # the task sends a reader to a build step that is not there. The current checks are
+    # the regenerated golden + docsExport + this audit (permissions record, slice (b)).
+    (r"skillArtifacts", "gradle task retired by 242a (2026-09-25): golden regenerate + docsExport + docs-audit.sh"),
 ]
 
 # Check D alone also covers the files a deployer copies from. They are not docs, so
