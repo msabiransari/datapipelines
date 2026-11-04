@@ -14,11 +14,12 @@ import org.springframework.web.servlet.ModelAndView
  * The auth module's access-denied handler forwards a refused browser form navigation to the
  * error page with the refusal stashed in [AuthAttributes.CSRF_REFUSAL]; Boot's error
  * controller asks its ErrorViewResolvers, and this one claims requests carrying the stash.
- * Resolvers WITHOUT a claim return null — Boot then falls through to the default resolution
- * (the plain error/403 for a plain 403, whitelabel otherwise), so a future non-CSRF
- * sendError source keeps today's behaviour. The `@Order(HIGHEST_PRECEDENCE)` is the same
- * load-bearing order the UI advice carries: Boot's DefaultErrorViewResolver sits behind it,
- * and only a claiming resolver may answer.
+ * Resolvers WITHOUT a claim return null — Boot then falls through to the conventional status
+ * templates, with whitelabel only when no view exists, so a future non-CSRF sendError source
+ * keeps today's behaviour. [UiConfig] explicitly retains Boot's conventional
+ * resolver: Boot does not register it automatically when a custom resolver exists. The
+ * `@Order(HIGHEST_PRECEDENCE)` puts this resolver ahead of that fallback, and only a claiming
+ * resolver may answer.
  *
  * The page carries the refusal's FIXED user message (`th:text`-rendered, never request
  * data), the request's correlation id, and the deployment theme. The correlation id reads

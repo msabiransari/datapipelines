@@ -3,7 +3,10 @@ package co.datapipelines.web.ui
 import co.datapipelines.auth.UserRepository
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.web.ui.site.SiteDemoData
+import org.springframework.boot.autoconfigure.web.WebProperties
+import org.springframework.boot.autoconfigure.web.servlet.error.DefaultErrorViewResolver
 import org.springframework.boot.context.properties.EnableConfigurationProperties
+import org.springframework.context.ApplicationContext
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.core.Ordered
@@ -36,6 +39,13 @@ class UiConfig {
     @Bean
     @Order(Ordered.HIGHEST_PRECEDENCE)
     fun csrfErrorPageResolver(uiProperties: UiProperties): CsrfErrorPageResolver = CsrfErrorPageResolver(uiProperties)
+
+    /** Boot backs off its conventional resolver when any custom ErrorViewResolver exists. */
+    @Bean
+    fun conventionErrorViewResolver(
+        applicationContext: ApplicationContext,
+        webProperties: WebProperties,
+    ): DefaultErrorViewResolver = DefaultErrorViewResolver(applicationContext, webProperties.resources)
 
     /** Bean name pinned: it is the name the scanned stereotype carried (see [ThemeResolver]). */
     @Bean(name = ["uiThemeResolver"])
