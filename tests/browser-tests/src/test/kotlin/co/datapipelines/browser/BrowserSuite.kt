@@ -421,7 +421,7 @@ abstract class BrowserSuite {
         /** What [phase] can have observed — never a fact only a later phase would learn. */
         private fun facts(page: Page): List<String> =
             when (phase) {
-                SwitchPhase.SWITCHER_RENDER -> documentPhaseFacts(page, FIRST_RENDER_TIMEOUT_MS, "select=not run")
+                SwitchPhase.SWITCHER_RENDER -> renderPhaseFacts(page)
                 SwitchPhase.SHELL_INIT -> documentPhaseFacts(page, initTimeoutMs, requestFact())
                 SwitchPhase.SELECT -> listOf(requestFact(), "switcher=${switcherFacts(page)}")
                 SwitchPhase.SWITCH_REQUEST -> listOf(requestFact(), requestWaitFact()) + pageStateFact()
@@ -430,7 +430,17 @@ abstract class BrowserSuite {
                 SwitchPhase.SELECTED_VALUE -> listOf("selected=${selected ?: "not read"}")
             }
 
-        /** The render and init phases: their bound, what the switch had done, the document, the failed loads. */
+        /** Reload uses the supplied page's navigation timeout; only the switcher's render has our explicit bound. */
+        private fun renderPhaseFacts(page: Page) =
+            listOf(
+                "reloadBound=page navigation timeout",
+                "switcherRenderBound=${FIRST_RENDER_TIMEOUT_MS.toLong()}ms",
+                "select=not run",
+                documentFact(page),
+                failedLoadsFact(),
+            )
+
+        /** The init phase: its bound, what the switch had done, the document, the failed loads. */
         private fun documentPhaseFacts(
             page: Page,
             bound: Double,
