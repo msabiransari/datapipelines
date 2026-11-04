@@ -60,6 +60,9 @@ class ManagedLakeMinioIntegrationTest {
 
     @Volatile private var catalogTables: List<ManagedLakeTable> = emptyList()
 
+    /** The managed catalog port both the build and the tick read (the tick takes its catalog as an argument, #818b A). */
+    private val catalog = ManagedLakeCatalog { catalogTables }
+
     /** The registry projection the planner must NOT read: a stale location, for every managed table. */
     @Volatile private var projection: List<LakeRegisteredTable> = emptyList()
 
@@ -94,7 +97,7 @@ class ManagedLakeMinioIntegrationTest {
             lakeTables = { projection },
             lakeViewRecorder = { _, namespace, table, error -> recorded += (namespace + table).joinToString(".") to error },
             retireCeiling = retireCeiling,
-            managedLake = { catalogTables },
+            managedLake = catalog,
             maxGenerationAge = Duration.ofMinutes(MAX_AGE_MINUTES),
         )
 
@@ -134,10 +137,10 @@ class ManagedLakeMinioIntegrationTest {
             registry.syncManagedLake(managed(), owner)
             val l1 = registry.leaseCount("SELECT count(*) FROM trips")
             val firstGeneration = registry.liveManagedGeneration(LAKE).shouldNotBeNull()
-            registry.refreshManagedGenerations() shouldBe 0
+            registry.refreshManagedGenerations(catalog) shouldBe 0
 
             catalogTables = listOf(table("trips", CURRENT))
-            registry.refreshManagedGenerations() shouldBe 1
+            registry.refreshManagedGenerations(catalog) shouldBe 1
             val l2 = registry.leaseCount("SELECT count(*) FROM trips")
             assertAll(
                 { l1 shouldBeInRange 1..(ICEBERG_ROWS - 1) },

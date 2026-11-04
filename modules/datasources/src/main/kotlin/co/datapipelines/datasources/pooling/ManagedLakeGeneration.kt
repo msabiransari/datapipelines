@@ -1,5 +1,6 @@
 package co.datapipelines.datasources.pooling
 
+import co.datapipelines.datasources.LakeUnavailableTable
 import co.datapipelines.datasources.ManagedLakeTable
 
 /**
@@ -36,6 +37,16 @@ data class ManagedLakeGeneration(
      */
     val locations: Map<String, String?>
         get() = tables.associate { it.qualifiedName to it.metadataLocation.takeIf { _ -> it.unavailableReason == null } }
+
+    /**
+     * #818b B — the tables this generation planned no view for, each with the reason its snapshot recorded: what
+     * the executor's CONNECT check refuses (`lake.table.unavailable`) for a node leased from THIS generation. Read
+     * from the snapshot, never from a fresh catalog read: a node is judged by the views its connection carries, so
+     * a catalog outage cannot block a node the live generation can serve, and a table restored after this build
+     * stays refused until the generation that serves it.
+     */
+    val unavailableTables: List<LakeUnavailableTable>
+        get() = tables.mapNotNull { table -> table.unavailableReason?.let { LakeUnavailableTable(table.namespace, table.name, it) } }
 
     /**
      * How many tables differ between this generation and [current], a fresh catalog read: a table

@@ -288,13 +288,66 @@ class ManagedLakeRegistryIntegrationTest {
     }
 
     @Test
+    fun `a build reads the catalog exactly once, and the generation it serves is that read - #818b B`() {
+        val registry = registry()
+        try {
+            registry.syncManagedLake(managed(), owner) shouldBe ManagedLakeSync.CREATED
+            catalogTables = listOf(table("orders", null))
+            val before = catalogReads.get()
+            val pool = registry.poolFor(registry.get(LAKE).shouldNotBeNull())
+            pool.leaseConnection().use { selectOne(it) shouldBe 1 }
+            assertAll(
+                { catalogReads.get() - before shouldBe 1 },
+                { pool.managedGeneration.shouldNotBeNull().tables shouldBe catalogTables },
+                {
+                    val reasons = registry.liveManagedGeneration(LAKE).shouldNotBeNull().unavailableTables.map { it.reason }
+                    reasons shouldBe listOf(ManagedLakeTable.REASON_NO_CATALOG_ROW)
+                },
+            )
+        } finally {
+            registry.shutdown()
+        }
+    }
+
+    @Test
+    fun `the tick reads the catalog it is handed, never the build's port - #818b A`() {
+        val registry = registry()
+        try {
+            registry.syncManagedLake(managed(), owner)
+            registry.poolFor(registry.get(LAKE).shouldNotBeNull())
+            val buildReads = catalogReads.get()
+            val tickReads = java.util.concurrent.atomic.AtomicInteger()
+            val tickCatalog =
+                ManagedLakeCatalog { _ ->
+                    tickReads.incrementAndGet()
+                    throw org.springframework.dao.QueryTimeoutException("cancelled", java.sql.SQLException("canceling statement", "57014"))
+                }
+
+            val logs = capturingLogs { registry.refreshManagedGenerations(tickCatalog) shouldBe 0 }
+
+            assertAll(
+                { tickReads.get() shouldBe 1 },
+                { catalogReads.get() shouldBe buildReads },
+                {
+                    logs.any {
+                        it.contains("event=lake.freshness_read_failed") && it.contains("datasource=$LAKE") && it.contains("sql_state=57014")
+                    } shouldBe true
+                },
+                { registry.liveManagedGeneration(LAKE).shouldNotBeNull() },
+            )
+        } finally {
+            registry.shutdown()
+        }
+    }
+
+    @Test
     fun `a failed tick read retires nothing - the live generation serves on`() {
         val registry = registry()
         try {
             registry.syncManagedLake(managed(), owner)
             val pool = registry.poolFor(registry.get(LAKE).shouldNotBeNull())
             catalogFailure = IllegalStateException("catalog connection refused")
-            val logs = capturingLogs { registry.refreshManagedGenerations() shouldBe 0 }
+            val logs = capturingLogs { registry.refreshManagedGenerations(catalog) shouldBe 0 }
             assertAll(
                 { logs.any { it.contains("event=lake.freshness_read_failed") && it.contains("datasource=$LAKE") } shouldBe true },
                 { registry.poolFor(registry.get(LAKE).shouldNotBeNull()) shouldBe pool },
@@ -318,13 +371,13 @@ class ManagedLakeRegistryIntegrationTest {
             generation.tables.map { it.qualifiedName } shouldContainExactly listOf("lake.sales.orders")
 
             repeat(THREE_TICKS) {
-                withClue("tick ${it + 1} on an unchanged catalog") { registry.refreshManagedGenerations() shouldBe 0 }
+                withClue("tick ${it + 1} on an unchanged catalog") { registry.refreshManagedGenerations(catalog) shouldBe 0 }
             }
             registry.poolFor(registry.get(LAKE).shouldNotBeNull()) shouldBe pool
 
             // The table's first commit lands in the catalog: the generation that omitted it is stale.
             catalogTables = listOf(table("orders", metadataLocation = "s3://dp-lake/sales/orders/metadata/00001-a.metadata.json"))
-            val logs = capturingLogs { registry.refreshManagedGenerations() shouldBe 1 }
+            val logs = capturingLogs { registry.refreshManagedGenerations(catalog) shouldBe 1 }
             assertAll(
                 { logs.any { it.contains("event=lake.generation_stale") && it.contains("tables_stale=1") } shouldBe true },
                 { registry.liveManagedGeneration(LAKE).shouldBeNull() },
@@ -340,7 +393,7 @@ class ManagedLakeRegistryIntegrationTest {
         try {
             registry.save(Fixtures.h2(name = "warehouse", secret = "pw"), owner)
             registry.poolFor(registry.get("warehouse").shouldNotBeNull()).leaseConnection().use { selectOne(it) shouldBe 1 }
-            registry.refreshManagedGenerations() shouldBe 0
+            registry.refreshManagedGenerations(catalog) shouldBe 0
             catalogReads.get() shouldBe 0
         } finally {
             registry.shutdown()
@@ -375,22 +428,22 @@ class ManagedLakeRegistryIntegrationTest {
     // ------------------ the executor's read
 
     @Test
-    fun `lakeUnavailableTables lists exactly the managed rows that carry a reason`() {
-        val registry =
-            registry(
-                registered =
-                    listOf(
-                        row("orders").copy(unavailableReason = "status archived"),
-                        row("customers"),
-                        external(),
-                    ),
+    fun `the generation's unavailable tables are exactly its snapshot rows that carry a reason - #818b B`() {
+        val generation =
+            ManagedLakeGeneration(
+                LAKE,
+                listOf(
+                    table("orders", "s3://dp-lake/sales/orders/metadata/00001-a.metadata.json").copy(status = "archived"),
+                    table("customers", "s3://dp-lake/sales/customers/metadata/00001-a.metadata.json"),
+                    table("returns", null),
+                ),
             )
-        try {
-            registry.lakeUnavailableTables(LAKE) shouldContainExactly
-                listOf(LakeUnavailableTable(listOf(LAKE, "sales"), "orders", "status archived"))
-        } finally {
-            registry.shutdown()
-        }
+
+        generation.unavailableTables shouldContainExactly
+            listOf(
+                LakeUnavailableTable(listOf(LAKE, "sales"), "orders", "status archived"),
+                LakeUnavailableTable(listOf(LAKE, "sales"), "returns", ManagedLakeTable.REASON_NO_CATALOG_ROW),
+            )
     }
 
     @Test

@@ -40,7 +40,9 @@ import java.util.UUID
  *
  * Then, every boot: the backfill of registry rows for tables defined while no datasource row existed, and the
  * grant to every workspace (record D3: the lake is server-level). [regrant] repeats the grant on the freshness
- * tick, so a workspace created after boot sees the lake within one tick.
+ * tick, so a workspace created after boot sees the lake within one tick. The tick's grant runs over the
+ * repository the tick passes in (its statement-bounded one, #818b A) and as the system actor this registrar
+ * provisioned at boot, so the tick issues exactly one statement and provisions nothing.
  *
  * `enabled=false`: nothing is written, and an existing managed row stays where it is (record §6). The managed
  * catalog bean then reports every managed table unavailable (`lake.disabled`).
@@ -56,10 +58,14 @@ class ManagedLakeDatasourceRegistrar(
 ) {
     private val log = LoggerFactory.getLogger(ManagedLakeDatasourceRegistrar::class.java)
 
+    /** The system actor [register] provisioned; null until it ran with the lake enabled (then [regrant] does nothing). */
+    @Volatile private var systemActor: UUID? = null
+
     @PostConstruct
     fun register() {
         val properties = lakeProperties.ifAvailable?.takeIf { it.enabled } ?: return
         val actor = userService.provisionSystemActor().id
+        systemActor = actor
         val desired = desiredDatasource(properties)
         when (registry.syncManagedLake(desired, actor)) {
             ManagedLakeSync.NAME_TAKEN -> {
@@ -103,17 +109,23 @@ class ManagedLakeDatasourceRegistrar(
         grantEveryWorkspace(desired.name, actor)
     }
 
-    /** The freshness tick's half (record §10, D3): grant the managed lake to workspaces created since the last pass. */
-    fun regrant() {
+    /**
+     * The freshness tick's half (record §10, D3): grant the managed lake to workspaces created since the last
+     * pass, through [tickGrants] (the tick's bounded repository), as the boot-provisioned system actor. One
+     * INSERT; nothing when the lake is disabled or [register] has not provisioned the actor.
+     */
+    fun regrant(tickGrants: DatasourceGrantRepository) {
         val properties = lakeProperties.ifAvailable?.takeIf { it.enabled } ?: return
-        grantEveryWorkspace(properties.name, userService.provisionSystemActor().id)
+        val actor = systemActor ?: return
+        grantEveryWorkspace(properties.name, actor, tickGrants)
     }
 
     private fun grantEveryWorkspace(
         name: String,
         actor: UUID,
+        through: DatasourceGrantRepository = grants,
     ) {
-        val granted = grants.grantToEveryWorkspace(name, actor)
+        val granted = through.grantToEveryWorkspace(name, actor)
         if (granted > 0) {
             log.info(
                 "event=lake.managed_datasource_granted datasource={} workspaces={} " +

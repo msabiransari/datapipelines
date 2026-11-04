@@ -217,7 +217,7 @@ class ScheduledJobsSchedulerTest {
                 ReapOutcome.NOTHING
             }
         }
-        every { datasources.refreshManagedGenerations() } answers { tick(FRESHNESS) { 0 } }
+        every { datasources.refreshManagedGenerations(any()) } answers { tick(FRESHNESS) { 0 } }
         val events = mockk<ExecutionEventRepository>()
         every { events.deleteOlderThan(any()) } answers { tick(RETAIN) { 0 } }
         val jdbc = mockk<NamedParameterJdbcTemplate>()

@@ -265,13 +265,6 @@ interface DatasourceRegistry {
     fun lakeBrokenTables(datasourceName: String): List<LakeBrokenTable> = emptyList()
 
     /**
-     * #818 (record §10 "Unavailable tables") — [datasourceName]'s managed tables that have no view:
-     * archived, purged, unknown to the catalog, or on a disabled lake. A node whose SQL names one
-     * fails `lake.table.unavailable` at CONNECT. Default empty — no managed lake behind a fake.
-     */
-    fun lakeUnavailableTables(datasourceName: String): List<LakeUnavailableTable> = emptyList()
-
-    /**
      * #818 A1 — the boot registrar's privileged create-or-re-sync of the managed lake datasource
      * ([Datasource.isManagedLake]); the only write path that may touch that row. Defaulted so fakes
      * compile; only the production registry backs it.
@@ -283,9 +276,12 @@ interface DatasourceRegistry {
 
     /**
      * #818 RULING 4 item 2 — the freshness tick: retire every live managed generation whose catalog
-     * moved since it was built. Returns how many were retired. Default 0.
+     * moved since it was built, as read through [catalog]. The caller passes the read it can bound: the
+     * scheduled tick hands in a catalog over its own statement-bounded template (#818b A), so a catalog
+     * statement queued behind a lock ends at that bound instead of holding the scheduler thread the pool
+     * reaper shares. Returns how many were retired. Default 0.
      */
-    fun refreshManagedGenerations(): Int = 0
+    fun refreshManagedGenerations(catalog: ManagedLakeCatalog): Int = 0
 
     /** #818 — the instant [name]'s live pool was built (read before its factory call), or null when none is live. */
     fun generationBuiltAt(name: String): Instant? = null

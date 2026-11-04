@@ -138,23 +138,42 @@ class ManagedLakeDatasourceRegistrarTest {
         val fixture = Fixture(enabled = false, sync = ManagedLakeSync.CREATED)
 
         fixture.registrar.register()
-        fixture.registrar.regrant()
+        fixture.registrar.regrant(fixture.tickGrants)
 
         assertAll(
             { verify(exactly = 0) { fixture.registry.syncManagedLake(any(), any()) } },
             { verify(exactly = 0) { fixture.grants.grantToEveryWorkspace(any(), any()) } },
+            { verify(exactly = 0) { fixture.tickGrants.grantToEveryWorkspace(any(), any()) } },
         )
     }
 
     @Test
-    fun `the tick regrants without re-syncing the row`() {
+    fun `the tick regrants through the tick's repository as the boot actor, provisioning nothing - #818b A`() {
         val fixture = Fixture(enabled = true, sync = ManagedLakeSync.UNCHANGED)
+        fixture.registrar.register()
 
-        fixture.registrar.regrant()
+        fixture.registrar.regrant(fixture.tickGrants)
+        fixture.registrar.regrant(fixture.tickGrants)
 
         assertAll(
-            { verify(exactly = 0) { fixture.registry.syncManagedLake(any(), any()) } },
+            { verify(exactly = 1) { fixture.registry.syncManagedLake(any(), any()) } },
+            // The boot's own grant only: the tick never writes through the boot repository.
             { verify(exactly = 1) { fixture.grants.grantToEveryWorkspace("lake", actor) } },
+            { verify(exactly = 2) { fixture.tickGrants.grantToEveryWorkspace("lake", actor) } },
+            // Provisioned once, at boot: a tick issues the grant INSERT and nothing else.
+            { verify(exactly = 1) { fixture.users.provisionSystemActor() } },
+        )
+    }
+
+    @Test
+    fun `a tick before the boot registration grants nothing`() {
+        val fixture = Fixture(enabled = true, sync = ManagedLakeSync.UNCHANGED)
+
+        fixture.registrar.regrant(fixture.tickGrants)
+
+        assertAll(
+            { verify(exactly = 0) { fixture.tickGrants.grantToEveryWorkspace(any(), any()) } },
+            { verify(exactly = 0) { fixture.users.provisionSystemActor() } },
         )
     }
 
@@ -167,8 +186,9 @@ class ManagedLakeDatasourceRegistrarTest {
         val synced = slot<Datasource>()
         val registry = mockk<DatasourceRegistry> { every { syncManagedLake(capture(synced), actor) } returns sync }
         val grants = mockk<DatasourceGrantRepository> { every { grantToEveryWorkspace(any(), any()) } returns 2 }
+        val tickGrants = mockk<DatasourceGrantRepository> { every { grantToEveryWorkspace(any(), any()) } returns 0 }
         val apply = mockk<LakeApplyRepository> { every { backfillRegistryRows(any(), any()) } returns 0 }
-        private val users =
+        val users =
             mockk<UserService> {
                 every { provisionSystemActor() } returns mockk<User> { every { id } returns actor }
             }

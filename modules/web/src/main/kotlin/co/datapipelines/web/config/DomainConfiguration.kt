@@ -322,7 +322,7 @@ class DomainConfiguration {
         encryptor: CredentialEncryptor,
         references: DatasourceReferences,
         invalidation: PoolInvalidationPublisher,
-        lakeTables: LakeTableCatalog,
+        lakeTableRepository: co.datapipelines.application.datasources.LakeTableRepository,
         lakeViewRecorder: LakeViewOutcomeRecorder,
         environment: Environment,
         poolMetrics: PoolLifecycleMetrics,
@@ -345,7 +345,9 @@ class DomainConfiguration {
             auditSink = DatasourceAuditSink.NONE,
             cache = DatasourceMetadataCache(),
             invalidation = invalidation,
-            lakeTables = lakeTables,
+            // #818b B: the registry PROJECTION, never the enriched `lakeTableCatalog` bean: a managed build reads the
+            // catalog once (its snapshot), and a node's CONNECT check reads no catalog (LakeConfiguration KDoc).
+            lakeTables = LakeConfiguration.projectionCatalog(lakeTableRepository),
             lakeViewRecorder = lakeViewRecorder,
             // configuration.md §3.25 (089 §D): the bundled DuckDB extension directory. Empty =
             // unset — the LAKE adapter keeps its explicit INSTALL+LOAD pairs (a bare `java -jar`

@@ -1,7 +1,16 @@
 package co.datapipelines.web.config
 
 import co.datapipelines.auth.AuditProperties
+import co.datapipelines.auth.User
+import co.datapipelines.auth.UserService
+import co.datapipelines.datasources.DatasourceGrantRepository
+import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.ManagedLakeCatalog
+import co.datapipelines.datasources.ManagedLakeSync
 import co.datapipelines.executor.ExecutorConfig
+import co.datapipelines.lake.LakeBootCheck
+import co.datapipelines.lake.LakeProperties
+import co.datapipelines.lake.definitions.LakeApplyRepository
 import co.datapipelines.parameters.ParametersConfig
 import co.datapipelines.visualization.DashboardRuntimeConfig
 import co.datapipelines.web.dashboards.runtime.DashboardRuntimeConfiguration
@@ -41,6 +50,11 @@ import javax.sql.DataSource
  * sweep's UPDATE at the sweep bound, the dashboard refreshes' retention DELETE and the parameter
  * evaluations' sweep UPDATE and retention DELETE at the retention bound; the runtime's SHARED
  * `DashboardRefreshRepository` bean stays unbounded.
+ *
+ * #818b A — the managed lake's freshness tick, the fifth job on that thread: its two statements (the managed
+ * catalog read, the regrant INSERT) carry the freshness bound through the production scheduler bean, while the
+ * registrar's boot-time grant and the build's catalog read stay on the unbounded shared template. That the bound
+ * then cancels a held statement on the real scheduler is `ManagedLakeReadsE2eTest`'s.
  */
 class ScheduledJobsStatementBoundsTest {
     private val recording = RecordingDataSource()
@@ -138,6 +152,40 @@ class ScheduledJobsStatementBoundsTest {
         recording.everyTimeout() shouldBe setOf(RETENTION_BOUND)
     }
 
+    @Test
+    fun `the freshness tick's catalog read and regrant INSERT carry the freshness bound - the boot grant does not`() {
+        val registrar = registrar()
+        registrar.register()
+        recording.timeoutOf("INSERT INTO datasource_workspaces") shouldBe UNBOUNDED
+        recording.clear()
+        // A registry that reads the catalog it is handed, as DefaultDatasourceRegistry does (its own test pins that).
+        val datasources =
+            mockk<DatasourceRegistry> {
+                every { refreshManagedGenerations(any()) } answers {
+                    firstArg<ManagedLakeCatalog>().managedTables(LAKE).size shouldBe 1
+                    0
+                }
+            }
+
+        PoolReaperSchedulingConfiguration()
+            .managedLakeFreshnessScheduler(datasources, registrar, jdbc, providerOf(LAKE_PROPERTIES))
+            .tick()
+
+        recording.timeoutOf("SELECT t.namespace, t.name") shouldBe FRESHNESS_BOUND
+        recording.timeoutOf("INSERT INTO datasource_workspaces") shouldBe FRESHNESS_BOUND
+        recording.everyTimeout() shouldBe setOf(FRESHNESS_BOUND)
+        recording.statementCount() shouldBe 2
+    }
+
+    @Test
+    fun `the build's managed catalog read stays on the shared template - only the tick's is bounded`() {
+        LakeConfiguration()
+            .managedLakeCatalog(co.datapipelines.application.datasources.ManagedLakeTableRepository(jdbc), providerOf(LAKE_PROPERTIES))
+            .managedTables(LAKE)
+
+        recording.timeoutOf("SELECT t.namespace, t.name") shouldBe UNBOUNDED
+    }
+
     /**
      * Non-vacuity: one recording across the four #636 statements and the shared bean's unbounded one
      * holds every value the cases above distinguish — a recorder that saw no `setQueryTimeout`, or saw
@@ -189,6 +237,7 @@ class ScheduledJobsStatementBoundsTest {
                 every { getString("referencing_table") } returns "executions"
                 every { getString("referencing_column") } returns "executed_by"
                 every { getObject("id", UUID::class.java) } returns UUID.randomUUID()
+                every { getArray("namespace").array } returns arrayOf(LAKE, "sales")
             }
         }
 
@@ -210,7 +259,27 @@ class ScheduledJobsStatementBoundsTest {
         }
 
         fun everyTimeout(): Set<Int> = statements.map { it.second[0] }.toSet()
+
+        fun statementCount(): Int = statements.size
+
+        fun clear() = statements.clear()
     }
+
+    /** The production registrar over the unbounded template, its other collaborators answering the boot. */
+    private fun registrar(): ManagedLakeDatasourceRegistrar {
+        val actor = UUID.randomUUID()
+        return ManagedLakeDatasourceRegistrar(
+            lakeProperties = providerOf(LAKE_PROPERTIES),
+            registry = mockk { every { syncManagedLake(any(), actor) } returns ManagedLakeSync.UNCHANGED },
+            grants = DatasourceGrantRepository(jdbc),
+            applyRepository = StaticListableBeanFactory().getBeanProvider(LakeApplyRepository::class.java),
+            userService = mockk<UserService> { every { provisionSystemActor() } returns mockk<User> { every { id } returns actor } },
+            bootCheck = LakeCatalogStartupCheck(StaticListableBeanFactory().getBeanProvider(LakeBootCheck::class.java)),
+        )
+    }
+
+    private inline fun <reified T : Any> providerOf(bean: T): ObjectProvider<T> =
+        StaticListableBeanFactory(mapOf("bean" to bean)).getBeanProvider(T::class.java)
 
     private companion object {
         /** #326: the sweep's bound — two-thirds of its 15 s cadence. */
@@ -234,5 +303,16 @@ class ScheduledJobsStatementBoundsTest {
 
         /** No `setQueryTimeout` call. */
         const val UNBOUNDED = 0
+
+        /** #818b A: the freshness tick's bound, two statements of it inside the 5 s reaper's cadence each. */
+        const val FRESHNESS_BOUND = 5
+
+        const val LAKE = "lake"
+
+        val LAKE_PROPERTIES =
+            LakeProperties(
+                enabled = true,
+                storage = LakeProperties.Storage(bucket = "dp-lake", region = "us-east-1", endpoint = "http://minio:9000", pathStyle = true),
+            )
     }
 }

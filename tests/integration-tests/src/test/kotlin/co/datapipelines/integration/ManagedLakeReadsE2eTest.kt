@@ -10,6 +10,7 @@ import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.ints.shouldBeInRange
+import io.kotest.matchers.longs.shouldBeInRange
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -75,6 +76,15 @@ import kotlin.io.path.relativeTo
  * - **C**, a boot whose `lake.name` is held by an ordinary datasource: refused with `lake.boot.datasource_name_taken`.
  * - **D**, a boot with the lake disabled: the managed row stays, and a read of a managed table is refused
  *   `lake.table.unavailable` with reason `lake.disabled`.
+ * - **G** (#818b A): the freshness tick's two statements, each held behind a lock on the real scheduler, are
+ *   cancelled at the tick's statement bound while the lock is still granted, and the reaper then runs.
+ * - **E** (#818b B): a catalog outage leaves E's live generation serving until its age bound; past it the rebuild
+ *   is refused `lake.unavailable` and nothing is installed.
+ * - **F** (#818b B): lifecycle moves, each judged against the generation the lease came from (F's tick and age
+ *   bound are both longer than the test, so only an explicit retire builds a new one).
+ *
+ * E, F and G each connect under their own `ApplicationName`, so `pg_stat_activity` attributes a statement to one
+ * instance; A and B keep ticking against the same database meanwhile, which is why every lock watcher filters on it.
  *
  * The Iceberg fixture is the checked-in `lake-fixture/iceberg/trips_iceberg` (its metadata bakes the bucket name
  * `dp-lake-it`, see [LakeMinioE2eTest]); its `00001` snapshot holds fewer rows than `00002`'s 2 000, so a row count
@@ -260,7 +270,146 @@ class ManagedLakeReadsE2eTest {
         }
     }
 
+    @Test
+    @Order(8)
+    fun `A - each freshness-tick statement is cancelled at its bound under a held lock, and the reaper then runs`() {
+        val held = boot(maxAgeSeconds = B_MAX_AGE_SECONDS, tickSeconds = HELD_TICK_SECONDS, application = APP_G, recordTicks = true)
+        try {
+            countOn(portOf(held)) shouldBe ICEBERG_ROWS
+            val recorder = held.getBean(ScheduledJobsSchedulerE2eTest.TickRecorder::class.java)
+            metadata { lock ->
+                lock.autoCommit = false
+                lock.createStatement().use {
+                    it.execute("LOCK TABLE lake_tables_managed IN ACCESS EXCLUSIVE MODE")
+                    it.execute("LOCK TABLE datasource_workspaces IN SHARE MODE")
+                }
+                try {
+                    metadata { watcher ->
+                        val read = cancelledWhileHeld(watcher, "the catalog read", CATALOG_READ_TEXT, "lake_tables_managed", "AccessExclusiveLock")
+                        val regrant = cancelledWhileHeld(watcher, "the regrant", REGRANT_TEXT, "datasource_workspaces", "ShareLock")
+                        val reaps = recorder.countOf(REAP_JOB)
+                        val ticks = recorder.countOf(FRESHNESS_JOB)
+                        val regrantGoneAt = System.nanoTime()
+                        // One scheduler thread: the reaper may wait its own cadence plus one more held tick (two bounded
+                        // statements) behind the lock. That wait is claim 3's delay, measured here.
+                        awaitTrue(Duration.ofSeconds(REAPER_CADENCE_SECONDS + 2 * FRESHNESS_BOUND_SECONDS + BOUND_SLACK_SECONDS)) {
+                            recorder.countOf(REAP_JOB) > reaps
+                        }
+                        val reaperDelay = Duration.ofNanos(System.nanoTime() - regrantGoneAt).toMillis()
+                        awaitTrue(Duration.ofSeconds(HELD_TICK_SECONDS + 2 * FRESHNESS_BOUND_SECONDS + BOUND_SLACK_SECONDS)) {
+                            recorder.countOf(FRESHNESS_JOB) > ticks
+                        }
+                        val stillHeld =
+                            lockGranted(watcher, "lake_tables_managed", "AccessExclusiveLock") &&
+                                lockGranted(watcher, "datasource_workspaces", "ShareLock")
+                        println(
+                            "HELD_LOCK_TICK read_queued_to_gone_ms=$read regrant_queued_to_gone_ms=$regrant " +
+                                "reaper_after_regrant_ms=$reaperDelay " +
+                                "reaps_after=${recorder.countOf(REAP_JOB) - reaps} ticks_after=${recorder.countOf(FRESHNESS_JOB) - ticks} " +
+                                "locks_still_granted=$stillHeld",
+                        )
+                        assertAll(
+                            { read shouldBeInRange CANCEL_WINDOW_MS },
+                            { regrant shouldBeInRange CANCEL_WINDOW_MS },
+                            { stillHeld shouldBe true },
+                        )
+                    }
+                } finally {
+                    lock.rollback()
+                }
+            }
+        } finally {
+            held.close()
+        }
+    }
+
+    @Test
+    @Order(9)
+    fun `B - a catalog outage leaves the live generation serving until its age bound, then refuses and installs nothing`() {
+        val outage = boot(maxAgeSeconds = OUTAGE_MAX_AGE_SECONDS, tickSeconds = OUTAGE_TICK_SECONDS, application = APP_E, recordTicks = true)
+        try {
+            val portE = portOf(outage)
+            countOn(portE) shouldBe ICEBERG_ROWS
+            val builtAt = generationBuiltAt(outage).shouldNotBeNull()
+            val recorder = outage.getBean(ScheduledJobsSchedulerE2eTest.TickRecorder::class.java)
+            metadata { it.createStatement().use { st -> st.execute("ALTER TABLE lake_tables_managed RENAME TO lake_tables_managed_away") } }
+            try {
+                // Two tick starts: the first has then finished, its catalog read failed against the outage.
+                val ticks = recorder.countOf(FRESHNESS_JOB)
+                awaitTrue(Duration.ofSeconds(OUTAGE_TICK_SECONDS * 3)) { recorder.countOf(FRESHNESS_JOB) >= ticks + 2 }
+                countOn(portE) shouldBe ICEBERG_ROWS
+                generationBuiltAt(outage) shouldBe builtAt
+
+                Thread.sleep(Duration.between(Instant.now(), builtAt.plusSeconds(OUTAGE_MAX_AGE_SECONDS + 1)).toMillis().coerceAtLeast(0))
+                val refused = refusalOn(portE)
+                assertAll(
+                    { refused shouldContain "lake.unavailable" },
+                    { generationBuiltAt(outage) shouldBe null },
+                )
+            } finally {
+                metadata { it.createStatement().use { st -> st.execute("ALTER TABLE lake_tables_managed_away RENAME TO lake_tables_managed") } }
+            }
+            countOn(portE) shouldBe ICEBERG_ROWS
+            generationBuiltAt(outage).shouldNotBeNull().isAfter(builtAt) shouldBe true
+        } finally {
+            outage.close()
+        }
+    }
+
+    @Test
+    @Order(10)
+    fun `B - availability is the leased generation's snapshot through every lifecycle move, with no projection fallback`() {
+        val lifecycle = boot(maxAgeSeconds = B_MAX_AGE_SECONDS, tickSeconds = LIFECYCLE_TICK_SECONDS, application = APP_F)
+        try {
+            val portF = portOf(lifecycle)
+            countOn(portF) shouldBe ICEBERG_ROWS
+
+            setStatus("archived")
+            withClue("active -> archived: the live generation was built active and still serves") { countOn(portF) shouldBe ICEBERG_ROWS }
+            retireManagedPool(lifecycle) shouldBe true
+            refusalOn(portF).also {
+                it shouldContain "lake.table.unavailable"
+                it shouldContain "status archived"
+            }
+
+            setStatus("active")
+            withClue("archived -> active: the leased generation was built archived, so it still refuses") {
+                refusalOn(portF) shouldContain "status archived"
+            }
+            retireManagedPool(lifecycle) shouldBe true
+            countOn(portF) shouldBe ICEBERG_ROWS
+
+            setStatus("deprecated")
+            retireManagedPool(lifecycle) shouldBe true
+            withClue("a deprecated table stays readable") { countOn(portF) shouldBe ICEBERG_ROWS }
+            setStatus("active")
+
+            renameLifecycleRow(from = "trips", to = AWAY)
+            retireManagedPool(lifecycle) shouldBe true
+            refusalOn(portF) shouldContain "no lifecycle row"
+            renameLifecycleRow(from = AWAY, to = "trips")
+
+            // The projection row still names PREVIOUS (see A4): a fallback to it would serve the older snapshot.
+            registryLocation() shouldBe PREVIOUS
+            renameCatalogRow(from = "trips", to = AWAY)
+            retireManagedPool(lifecycle) shouldBe true
+            refusalOn(portF) shouldContain "no catalog row"
+            renameCatalogRow(from = AWAY, to = "trips")
+            retireManagedPool(lifecycle) shouldBe true
+            countOn(portF) shouldBe ICEBERG_ROWS
+        } finally {
+            lifecycle.close()
+        }
+    }
+
     // ------------------------------------------------------------- reads through the pipeline surface
+
+    private fun refusalOn(targetPort: Int): String =
+        executeOn(targetPort)
+            .firstOrNull { it.first == "node_failed" }
+            ?.second
+            .shouldNotBeNull()
+            .toString()
 
     private fun countOn(targetPort: Int): Int {
         val events = executeOn(targetPort)
@@ -363,7 +512,124 @@ class ManagedLakeReadsE2eTest {
         return registry.javaClass.getMethod("generationBuiltAt", String::class.java).invoke(registry, LAKE) as Instant?
     }
 
+    /** The registry's own retire, by name (the hook #799's settle and an operator use); true when a pool was live. */
+    private fun retireManagedPool(context: ApplicationContext): Boolean {
+        val registry = context.getBean("datasourceRegistry")
+        return registry.javaClass.getMethod("retirePool", String::class.java).invoke(registry, LAKE) as Boolean
+    }
+
+    private fun portOf(context: ConfigurableApplicationContext): Int =
+        Integer.parseInt(checkNotNull(context.environment.getProperty("local.server.port")))
+
+    /**
+     * Waits for [instanceText]'s statement from instance G to queue on [table]'s lock, then for it to leave the
+     * waiters while that lock is still granted; returns queued-to-gone in ms. A red run says which never happened.
+     */
+    private fun cancelledWhileHeld(
+        watcher: Connection,
+        what: String,
+        instanceText: String,
+        table: String,
+        mode: String,
+    ): Long {
+        awaitTrue(Duration.ofSeconds(HELD_TICK_SECONDS + FRESHNESS_BOUND_SECONDS + BOUND_SLACK_SECONDS)) {
+            waitingOnLock(watcher, instanceText)
+        }
+        val queuedAt = System.nanoTime()
+        val deadline = queuedAt + Duration.ofSeconds(FRESHNESS_BOUND_SECONDS + BOUND_SLACK_SECONDS).toNanos()
+        while (System.nanoTime() < deadline && waitingOnLock(watcher, instanceText)) Thread.sleep(WATCH_MILLIS)
+        val goneAt = System.nanoTime()
+        withClue("$what was still waiting on $table after ${FRESHNESS_BOUND_SECONDS + BOUND_SLACK_SECONDS}s: no bound cancelled it") {
+            waitingOnLock(watcher, instanceText) shouldBe false
+        }
+        withClue("$what left the waiters only because the lock on $table went") { lockGranted(watcher, table, mode) shouldBe true }
+        return Duration.ofNanos(goneAt - queuedAt).toMillis()
+    }
+
+    private fun waitingOnLock(
+        watcher: Connection,
+        statementText: String,
+    ): Boolean =
+        watcher
+            .prepareStatement(
+                "SELECT count(*) FROM pg_stat_activity WHERE application_name = ? AND wait_event_type = 'Lock' AND query LIKE ?",
+            ).use { ps ->
+                ps.setString(1, APP_G)
+                ps.setString(2, statementText)
+                ps.executeQuery().use { rs ->
+                    rs.next()
+                    rs.getInt(1) > 0
+                }
+            }
+
+    private fun lockGranted(
+        watcher: Connection,
+        table: String,
+        mode: String,
+    ): Boolean =
+        watcher
+            .prepareStatement(
+                "SELECT count(*) FROM pg_locks l JOIN pg_class c ON c.oid = l.relation WHERE c.relname = ? AND l.mode = ? AND l.granted",
+            ).use { ps ->
+                ps.setString(1, table)
+                ps.setString(2, mode)
+                ps.executeQuery().use { rs ->
+                    rs.next()
+                    rs.getInt(1) > 0
+                }
+            }
+
     // ------------------------------------------------------------- the metadata database, directly
+
+    /** A lifecycle status the V54 checks admit: each non-active status carries its own stamp, active carries none. */
+    private fun setStatus(status: String) {
+        metadata { connection ->
+            connection
+                .prepareStatement(
+                    "UPDATE lake_tables_managed SET status = ?, " +
+                        "deprecated_at = CASE WHEN ? = 'deprecated' THEN now() END, " +
+                        "archived_at = CASE WHEN ? = 'archived' THEN now() END WHERE name = 'trips'",
+                ).use { ps ->
+                    ps.setString(1, status)
+                    ps.setString(2, status)
+                    ps.setString(3, status)
+                    ps.executeUpdate() shouldBe 1
+                }
+        }
+    }
+
+    private fun renameLifecycleRow(
+        from: String,
+        to: String,
+    ) {
+        metadata { connection ->
+            connection.prepareStatement("UPDATE lake_tables_managed SET name = ? WHERE name = ?").use { ps ->
+                ps.setString(1, to)
+                ps.setString(2, from)
+                ps.executeUpdate() shouldBe 1
+            }
+        }
+    }
+
+    /** The catalog row renamed under leases on its old AND new names (the V53 fence checks both on a rename). */
+    private fun renameCatalogRow(
+        from: String,
+        to: String,
+    ) {
+        metadata { connection ->
+            underLease(connection, leaseNames = listOf("sales.$from", "sales.$to")) {
+                connection
+                    .prepareStatement(
+                        "UPDATE iceberg_tables SET table_name = ? WHERE catalog_name = ? AND table_namespace = 'sales' AND table_name = ?",
+                    ).use { ps ->
+                        ps.setString(1, to)
+                        ps.setString(2, LAKE)
+                        ps.setString(3, from)
+                        ps.executeUpdate() shouldBe 1
+                    }
+            }
+        }
+    }
 
     private data class ManagedRow(
         val dialect: String,
@@ -473,23 +739,12 @@ class ManagedLakeReadsE2eTest {
     /** The V53 fence: a catalog write needs a live table lease and its token set in the same transaction. */
     private fun underLease(
         connection: Connection,
+        leaseNames: List<String> = listOf("sales.trips"),
         write: () -> Unit,
     ) {
         val token = UUID.randomUUID()
         val operation = UUID.randomUUID()
-        connection
-            .prepareStatement(
-                "INSERT INTO lake_leases " +
-                    "(kind, name, operation_id, token, acquired_at, expires_at, deadline_at, operation, holder_instance) " +
-                    "VALUES ('table', 'sales.trips', ?, ?, now(), now() + interval '1 minute', " +
-                    "now() + interval '1 minute', 'test', 'test') " +
-                    "ON CONFLICT (kind, name) DO UPDATE SET operation_id = EXCLUDED.operation_id, token = EXCLUDED.token, " +
-                    "expires_at = EXCLUDED.expires_at, deadline_at = EXCLUDED.deadline_at",
-            ).use { ps ->
-                ps.setObject(1, operation)
-                ps.setObject(2, token)
-                ps.executeUpdate()
-            }
+        leaseNames.forEach { leaseName -> lease(connection, leaseName, operation, token) }
         connection.autoCommit = false
         try {
             connection.prepareStatement("SELECT set_config('dp.lease_token', ?, true), set_config('dp.operation_id', ?, true)").use { ps ->
@@ -502,6 +757,29 @@ class ManagedLakeReadsE2eTest {
         } finally {
             connection.autoCommit = true
         }
+    }
+
+    /** One table lease row for [leaseName], held by [operation] with [token] (the fence matches both). */
+    private fun lease(
+        connection: Connection,
+        leaseName: String,
+        operation: UUID,
+        token: UUID,
+    ) {
+        connection
+            .prepareStatement(
+                "INSERT INTO lake_leases " +
+                    "(kind, name, operation_id, token, acquired_at, expires_at, deadline_at, operation, holder_instance) " +
+                    "VALUES ('table', ?, ?, ?, now(), now() + interval '1 minute', " +
+                    "now() + interval '1 minute', 'test', 'test') " +
+                    "ON CONFLICT (kind, name) DO UPDATE SET operation_id = EXCLUDED.operation_id, token = EXCLUDED.token, " +
+                    "expires_at = EXCLUDED.expires_at, deadline_at = EXCLUDED.deadline_at",
+            ).use { ps ->
+                ps.setString(1, leaseName)
+                ps.setObject(2, operation)
+                ps.setObject(3, token)
+                ps.executeUpdate()
+            }
     }
 
     private fun systemActor(connection: Connection): UUID =
@@ -547,6 +825,32 @@ class ManagedLakeReadsE2eTest {
         private const val B_TICK_SECONDS = 2L
 
         private const val POLL_MILLIS = 500L
+
+        /** G (#818b A): a 2 s tick; the bound is the issue's 5 s, a literal (never read back from the class under test). */
+        private const val HELD_TICK_SECONDS = 2L
+        private const val FRESHNESS_BOUND_SECONDS = 5L
+        private const val REAPER_CADENCE_SECONDS = 5L
+        private const val BOUND_SLACK_SECONDS = 3L
+        private const val WATCH_MILLIS = 100L
+
+        /** Queued-to-gone: at least the bound less one watch poll and the queue's own detection lag, at most bound + slack. */
+        private val CANCEL_WINDOW_MS = (FRESHNESS_BOUND_SECONDS * 1000 - 1000)..((FRESHNESS_BOUND_SECONDS + BOUND_SLACK_SECONDS) * 1000)
+        private const val CATALOG_READ_TEXT = "%SELECT t.namespace, t.name, t.format%FROM lake_tables t%"
+        private const val REGRANT_TEXT = "%INSERT INTO datasource_workspaces%FROM workspaces w%"
+        private const val REAP_JOB = "co.datapipelines.web.config.DatasourcePoolReaperScheduler.reap"
+        private const val FRESHNESS_JOB = "co.datapipelines.web.config.ManagedLakeFreshnessScheduler.tick"
+
+        /** E (#818b B): a tick that runs twice inside the age bound, so a failed tick read is observed before expiry. */
+        private const val OUTAGE_MAX_AGE_SECONDS = 30L
+        private const val OUTAGE_TICK_SECONDS = 5L
+
+        /** F (#818b B): a tick longer than the test, so only an explicit retire builds a new generation. */
+        private const val LIFECYCLE_TICK_SECONDS = 600L
+        private const val AWAY = "trips_away"
+
+        private const val APP_E = "dp818-e"
+        private const val APP_F = "dp818-f"
+        private const val APP_G = "dp818-g"
         private val EXECUTION_BUDGET: Duration = Duration.ofSeconds(180)
 
         private const val MINIO_PORT = 9000
@@ -630,10 +934,11 @@ class ManagedLakeReadsE2eTest {
             tickSeconds: Long,
             name: String = LAKE,
             enabled: Boolean = true,
+            application: String? = null,
         ): List<Pair<String, String>> =
             listOf(
                 "management.server.port" to "0",
-                "spring.datasource.url" to database.jdbcUrl,
+                "spring.datasource.url" to (application?.let { urlNamed(it) } ?: database.jdbcUrl),
                 "spring.datasource.username" to database.username,
                 "spring.datasource.password" to database.password,
                 "datapipelines.redis.password" to "",
@@ -666,11 +971,23 @@ class ManagedLakeReadsE2eTest {
             tickSeconds: Long,
             name: String = LAKE,
             enabled: Boolean = true,
-        ): ConfigurableApplicationContext =
-            SpringApplicationBuilder(DatapipelinesApplication::class.java).run(
+            application: String? = null,
+            recordTicks: Boolean = false,
+        ): ConfigurableApplicationContext {
+            val sources =
+                listOfNotNull(
+                    DatapipelinesApplication::class.java,
+                    ScheduledJobsSchedulerE2eTest.TickRecorderConfiguration::class.java.takeIf { recordTicks },
+                )
+            return SpringApplicationBuilder(*sources.toTypedArray()).run(
                 "--server.port=0",
-                *bootProperties(maxAgeSeconds, tickSeconds, name, enabled).map { (k, v) -> "--$k=$v" }.toTypedArray(),
+                *bootProperties(maxAgeSeconds, tickSeconds, name, enabled, application).map { (k, v) -> "--$k=$v" }.toTypedArray(),
             )
+        }
+
+        /** The suite's database under a Postgres `ApplicationName`, so `pg_stat_activity` names the instance. */
+        private fun urlNamed(application: String): String =
+            database.jdbcUrl + (if ('?' in database.jdbcUrl) "&" else "?") + "ApplicationName=" + application
 
         @AfterAll
         @JvmStatic

@@ -1,12 +1,20 @@
 package co.datapipelines.web.config
 
+import co.datapipelines.application.datasources.ManagedLakeTableRepository
+import co.datapipelines.datasources.DatasourceGrantRepository
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.ManagedLakeCatalog
 import co.datapipelines.datasources.pooling.PoolLifecycleMetrics
+import co.datapipelines.executor.BoundedJdbc
+import co.datapipelines.lake.LakeProperties
+import co.datapipelines.persistence.FailureShape
 import co.datapipelines.web.metrics.MicrometerPoolLifecycleMetrics
 import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.scheduling.annotation.Scheduled
 import java.util.concurrent.TimeUnit
 
@@ -48,12 +56,37 @@ class PoolReaperSchedulingConfiguration {
      * because it is one term of the `LakeRules` inequality an operator tunes. Inert without a managed generation:
      * the registry's pass iterates live managed generations only, and the regrant returns at once when the lake
      * is disabled.
+     *
+     * #818b A — every statement the tick issues runs over [statements], a dedicated template bounded at
+     * [ManagedLakeFreshnessScheduler.FRESHNESS_STATEMENT_TIMEOUT_SECONDS] (the sweep's and the retention job's
+     * `BoundedJdbc` pattern, never the shared template's timeout). The tick issues two kinds, and only these:
+     * the managed catalog read (one per live managed generation, over the same SQL and disabled-lake rule as
+     * the build's read: [LakeConfiguration.managedLakeCatalogOver]) and the regrant's one INSERT.
      */
     @Bean
     fun managedLakeFreshnessScheduler(
         datasources: DatasourceRegistry,
         registrar: ManagedLakeDatasourceRegistrar,
-    ): ManagedLakeFreshnessScheduler = ManagedLakeFreshnessScheduler(datasources, registrar)
+        jdbc: NamedParameterJdbcTemplate,
+        lakeProperties: ObjectProvider<LakeProperties>,
+    ): ManagedLakeFreshnessScheduler {
+        val statements =
+            BoundedJdbc.bounded(
+                jdbc,
+                ManagedLakeFreshnessScheduler.FRESHNESS_STATEMENT_TIMEOUT_SECONDS,
+                "FRESHNESS_STATEMENT_TIMEOUT_SECONDS",
+            )
+        return ManagedLakeFreshnessScheduler(
+            datasources = datasources,
+            registrar = registrar,
+            catalog =
+                LakeConfiguration.managedLakeCatalogOver(
+                    ManagedLakeTableRepository(statements),
+                    enabled = lakeProperties.ifAvailable?.enabled == true,
+                ),
+            grants = DatasourceGrantRepository(statements),
+        )
+    }
 
     /**
      * The pool-retirement instruments (observability.md §4.1). A real
@@ -71,26 +104,67 @@ class PoolReaperSchedulingConfiguration {
  * The `@Scheduled` adapter over the managed lake's freshness pass (#818): one catalog read per live managed
  * generation, a stale one retired, then the grant to workspaces created since the last tick. `fixedDelay`, as
  * the reaper, so a slow catalog read delays the next tick instead of piling on.
+ *
+ * #818b A — both steps read and write through [catalog] and [grants], the bean's statement-bounded pair, so a
+ * statement queued behind a lock is cancelled at [FRESHNESS_STATEMENT_TIMEOUT_SECONDS] and the shared
+ * `dp-scheduled` thread returns to the reaper. Each step is isolated as the retention tick's are: a step that
+ * throws is one WARN (`event=lake.freshness_tick_failed step=<name>`, class and SQLState only), the next step
+ * runs, and nothing reaches the scheduler, so the next tick runs on schedule. The registry's pass already turns
+ * a failed catalog read into its own WARN (`lake.freshness_read_failed`); the catch here holds what escapes.
+ * Failed ticks are not added to `ScheduledJob`'s failed-tick counter: that enum lives outside this lane.
  */
 class ManagedLakeFreshnessScheduler(
     private val datasources: DatasourceRegistry,
     private val registrar: ManagedLakeDatasourceRegistrar,
+    private val catalog: ManagedLakeCatalog,
+    private val grants: DatasourceGrantRepository,
 ) {
     @Scheduled(fixedDelayString = TICK_SECONDS_PLACEHOLDER, initialDelayString = TICK_SECONDS_PLACEHOLDER, timeUnit = TimeUnit.SECONDS)
     fun tick() {
-        val retired = datasources.refreshManagedGenerations()
-        // The brief's DoS bound: a retire storm is bounded by the pool count, and the count is logged per tick.
-        if (retired > 0) {
-            log.info(
-                "event=lake.freshness_tick_retired generations={} message=\"freshness tick retired stale managed generations\"",
-                retired,
+        step("refresh") {
+            val retired = datasources.refreshManagedGenerations(catalog)
+            // The brief's DoS bound: a retire storm is bounded by the pool count, and the count is logged per tick.
+            if (retired > 0) {
+                log.info(
+                    "event=lake.freshness_tick_retired generations={} message=\"freshness tick retired stale managed generations\"",
+                    retired,
+                )
+            }
+        }
+        step("regrant") { registrar.regrant(grants) }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // the point IS any failure: one WARN line, the next step and tick run
+    private inline fun step(
+        name: String,
+        block: () -> Unit,
+    ) {
+        try {
+            block()
+        } catch (e: RuntimeException) {
+            // The class and the SQLState only — no message, no stack (a store's message can carry a row).
+            log.warn(
+                "event=lake.freshness_tick_failed step={} error={} sql_state={} " +
+                    "message=\"freshness tick step failed; the next step and the next tick still run\"",
+                name,
+                FailureShape.cause(e),
+                FailureShape.sqlState(e),
             )
         }
-        registrar.regrant()
     }
 
     companion object {
         private val log = LoggerFactory.getLogger(ManagedLakeFreshnessScheduler::class.java)
+
+        /**
+         * #818b A — the bound on each statement of the tick, a JDBC `queryTimeout` (Postgres cancels with SQLState
+         * `57014`). Not a configuration key, for the reaper's reason: it bounds how long the tick can hold the
+         * `dp-scheduled` thread the 5 s reaper shares, so a tick blocked on both of its statements delays a reap by
+         * at most 2 × 5 s. A healthy catalog read and the grant INSERT take milliseconds, so the bound fires only on
+         * a statement queued behind a lock. A cancelled read retires nothing (the generation serves until its age
+         * bound); a cancelled INSERT grants nothing and the next tick retries the same idempotent INSERT.
+         */
+        const val FRESHNESS_STATEMENT_TIMEOUT_SECONDS = 5
 
         /** `reads.freshness-tick-seconds`, defaulted as application.yml defaults it (the drift test pins that value). */
         const val TICK_SECONDS_PLACEHOLDER = "\${datapipelines.lake.reads.freshness-tick-seconds:60}"

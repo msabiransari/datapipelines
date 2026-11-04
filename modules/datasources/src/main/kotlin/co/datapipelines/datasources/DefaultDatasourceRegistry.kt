@@ -102,8 +102,14 @@ class DefaultDatasourceRegistry(
     private val fileRoots: DatasourceFileRoots = DatasourceFileRoots.EMPTY,
     /**
      * #818 (dp-lake P5, record §10) — the managed lake's catalog read. The managed datasource's
-     * generations are planned from it, and the freshness tick compares against it. The assembling
-     * layer implements it over `ManagedLakeTableRepository`.
+     * generations are planned from it: ONE read per build, the generation's whole snapshot (#818b B).
+     * The freshness tick passes its own bounded read instead ([refreshManagedGenerations]). The
+     * assembling layer implements it over `ManagedLakeTableRepository`.
+     *
+     * [lakeTables] must then be the registry PROJECTION (`lake_tables` as stored), never a port that
+     * itself reads this catalog: the build takes only its external rows, and the executor's broken-view
+     * check reads it at CONNECT, where a catalog read would make a catalog outage refuse a node the
+     * live generation can serve.
      */
     private val managedLake: ManagedLakeCatalog = ManagedLakeCatalog.NONE,
     /** #818 RULING 4 item 1 — `reads.max-generation-age-seconds`; null when no lake is configured. */
@@ -310,12 +316,6 @@ class DefaultDatasourceRegistry(
                 ?: datasource
         return LakeTablePreflight.check(withCredential, table, duckdbExtensionDirectory, duckdbMemoryLimit)
     }
-
-    /** #818 — the managed tables a node cannot read (record §10 "Unavailable tables"); empty for every other datasource. */
-    override fun lakeUnavailableTables(datasourceName: String): List<LakeUnavailableTable> =
-        lakeTables
-            .registeredTables(datasourceName)
-            .mapNotNull { row -> row.unavailableReason?.let { LakeUnavailableTable(row.namespace, row.name, it) } }
 
     /** 109 §A — the executor's pre-execution read: the datasource's registered tables whose view creation last FAILED. */
     override fun lakeBrokenTables(datasourceName: String): List<LakeBrokenTable> =
@@ -576,26 +576,28 @@ class DefaultDatasourceRegistry(
     }
 
     /**
-     * #818 RULING 4 item 2 — the freshness tick's body: for each live MANAGED generation, one catalog
-     * read compared with the snapshot the generation was built from; a stale generation is retired
+     * #818 RULING 4 item 2 — the freshness tick's body: for each live MANAGED generation, one read of
+     * [catalog] compared with the snapshot the generation was built from; a stale generation is retired
      * (`lake.generation_stale`), and the next lease builds from the catalog. Never touches any other
-     * pool. A failed read retires nothing: the live generation serves until its age bound.
+     * pool. A failed read, a statement cancelled at the caller's bound included (`sql_state=57014`),
+     * retires nothing: the live generation serves until its age bound.
      *
      * @return how many generations were retired.
      */
     @Suppress("TooGenericExceptionCaught") // a failed read is logged and skipped; the age bound still holds
-    override fun refreshManagedGenerations(): Int {
+    override fun refreshManagedGenerations(catalog: ManagedLakeCatalog): Int {
         var retired = 0
         poolManager.liveManagedGenerations().forEach { (name, pool) ->
             val generation = pool.managedGeneration ?: return@forEach
             val current =
                 try {
-                    managedLake.managedTables(name)
+                    catalog.managedTables(name)
                 } catch (e: RuntimeException) {
                     log.warn(
-                        "event=lake.freshness_read_failed datasource={} error=\"{}\" " +
+                        "event=lake.freshness_read_failed datasource={} sql_state={} error=\"{}\" " +
                             "message=\"freshness tick skipped; the live generation serves until its age bound\"",
                         name,
+                        FailureShape.sqlState(e),
                         deepestThrowableMessage(e).take(MAX_LOGGED_CAUSE_CHARS),
                     )
                     return@forEach

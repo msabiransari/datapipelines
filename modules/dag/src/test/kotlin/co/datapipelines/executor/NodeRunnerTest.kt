@@ -2,7 +2,8 @@ package co.datapipelines.executor
 
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.LakeBrokenTable
-import co.datapipelines.datasources.LakeUnavailableTable
+import co.datapipelines.datasources.ManagedLakeTable
+import co.datapipelines.datasources.pooling.ManagedLakeGeneration
 import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.pipeline.NodeType
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -358,11 +359,10 @@ class NodeRunnerTest {
     @Test
     fun `a node naming an archived managed table fails lake_table_unavailable at connect, with the reason`() =
         runBlocking<Unit> {
-            val archived = LakeUnavailableTable(listOf("lake", "sales"), "orders", "status archived")
             val registry =
                 FakeDatasourceRegistry(
                     mapOf("lake" to lakeDatasource("lake")),
-                    unavailableLakeTables = mapOf("lake" to listOf(archived)),
+                    managedGenerations = mapOf("lake" to generation("lake", managedTable("lake", "orders", status = "archived"))),
                 )
             val runner = runner(sql = "SELECT count(*) FROM lake.sales.orders", registry = registry)
 
@@ -373,7 +373,7 @@ class NodeRunnerTest {
                 { error.details["table"] shouldBe "lake.sales.orders" },
                 { error.details["reason"] shouldBe "status archived" },
                 { error.details["datasource"] shouldBe "lake" },
-                // A registry read, never a probe: no connection was leased.
+                // Judged on the pool's generation before the lease: no connection was leased.
                 { registry.leased.get() shouldBe 0 },
             )
         }
@@ -381,11 +381,10 @@ class NodeRunnerTest {
     @Test
     fun `quoted and bare spellings of an unavailable managed table are refused, a longer name is not`() =
         runBlocking<Unit> {
-            val purged = LakeUnavailableTable(listOf("lake", "sales"), "orders", "status purged")
             val registry =
                 FakeDatasourceRegistry(
                     mapOf("lake2" to lakeDatasource("lake2")),
-                    unavailableLakeTables = mapOf("lake2" to listOf(purged)),
+                    managedGenerations = mapOf("lake2" to generation("lake2", managedTable("lake", "orders", status = "purged"))),
                 )
             listOf("SELECT * FROM \"lake\".\"sales\".\"orders\"", "SELECT * FROM orders", "SELECT * FROM \"orders\"").forEach { sql ->
                 withClue(sql) {
@@ -399,6 +398,41 @@ class NodeRunnerTest {
             ).code shouldNotBe
                 PipelineErrorCodes.Lake.TABLE_UNAVAILABLE
         }
+
+    @Test
+    fun `a deprecated managed table the generation serves is not refused - #818b B`() =
+        runBlocking<Unit> {
+            val registry =
+                FakeDatasourceRegistry(
+                    mapOf("lake3" to lakeDatasource("lake3")),
+                    managedGenerations =
+                        mapOf("lake3" to generation("lake3", managedTable("lake3", "orders", status = "deprecated", deprecated = "use v2"))),
+                )
+
+            // No refusal: the node reaches the in-memory engine, whose own error (no such view here) is not this check's.
+            failureOf(runner(sql = "SELECT count(*) FROM lake3.sales.orders", registry = registry), Fixtures.node("read", source = "lake3"))
+                .code shouldNotBe PipelineErrorCodes.Lake.TABLE_UNAVAILABLE
+            registry.leased.get() shouldBe 1
+        }
+
+    private fun generation(
+        lake: String,
+        vararg tables: ManagedLakeTable,
+    ) = ManagedLakeGeneration(lake, tables.toList())
+
+    private fun managedTable(
+        lake: String,
+        name: String,
+        status: String,
+        deprecated: String? = null,
+    ) = ManagedLakeTable(
+        namespace = listOf(lake, "sales"),
+        name = name,
+        format = "iceberg",
+        metadataLocation = "s3://dp-lake/sales/$name/metadata/00001-a.metadata.json",
+        status = status,
+        deprecationMessage = deprecated,
+    )
 
     // ------------ fail-closed semantics (044 F2/F3): the backstop's null/throw cases are REFUSALS
 

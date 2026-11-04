@@ -694,12 +694,11 @@ class NodeRunner(
         // raw "table not found", which says nothing about WHY. Refuse HERE, at CONNECT, with
         // the registry's recorded reason (details carry `table` and `last_error`). The check is
         // a registry read against the rendered SQL's table references — no connection is leased
-        // for a node that cannot succeed.
+        // for a node that cannot succeed. The managed lake's own refusal (a table its generation
+        // serves no view for, #818) runs at the lease below, against the generation leased.
         if (datasource.dialect == Dialect.LAKE) {
             phase(ctx, NodePhase.CONNECT, node.id) {
                 LakeTableGate.enforceAvailable(datasourceRegistry, datasource, bound)
-                // #818: a managed table this server serves no view for (archived, no catalog row, lake disabled).
-                ManagedLakeTableGate.enforceAvailable(datasourceRegistry, datasource, bound)
             }
         }
         // Workspaces design §6 layer 2a (D10): the save-time readonly check read the registry
@@ -745,8 +744,8 @@ class NodeRunner(
                 // execution caused this credential to be decrypted", which is the one question
                 // datasources §7.4 exists to answer.
                 auditSink?.withCause(ctx.executionId, node.id) {
-                    datasourceRegistry.poolFor(datasource).leaseConnection()
-                } ?: datasourceRegistry.poolFor(datasource).leaseConnection()
+                    ManagedLakeTableGate.leaseServing(datasourceRegistry, datasource, bound)
+                } ?: ManagedLakeTableGate.leaseServing(datasourceRegistry, datasource, bound)
             }
         return connection.use { conn ->
             when (node.type) {
