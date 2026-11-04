@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory
 import java.io.IOException
 import java.sql.Connection
 import java.sql.DriverManager
+import java.sql.ResultSet
 import java.sql.SQLException
 import java.util.Properties
 import java.util.UUID
@@ -19,13 +20,17 @@ import java.util.UUID
  * ## Open sequence
  *
  * 1. **Reserve** the scratch bytes from [budget] — `scratch_exhausted` before any file exists.
- * 2. Create the scratch directory (owner-only) and remove any leftover of this execution id.
+ * 2. Create the scratch directory owner-only, or check that a pre-existing one belongs to the
+ *    process user and grants nothing to group or other (POSIX, [DuckDbStagingFiles.prepareScratchDir]),
+ *    and remove any leftover of this execution id.
  * 3. Open DP's own **root** connection on `<scratch dir>/exec_<id>.duckdb` with
  *    `allow_persistent_secrets=false` and streamed results, then apply, in order: `memory_limit`,
  *    `temp_directory` (beside the file), `max_temp_directory_size` = the reservation, `threads`,
  *    `TimeZone = 'UTC'`, extension autoinstall/autoload and community extensions off,
  *    `enable_external_access = false`, and last `lock_configuration = true`.
- * 4. **Read the lock back**; a database whose lock did not take is never handed out.
+ * 4. **Read the configuration back** in one SELECT on the locked root — the lock, external access
+ *    off, `memory_limit` and `max_temp_directory_size` ([DuckDbConfigurationReadBack]); a database
+ *    where any of them did not take is never handed out.
  *
  * Any failure after the reservation closes the root, deletes the files and releases the
  * reservation (`try`/`finally`), then surfaces as `creation_failed`. Every lease afterwards is a
@@ -138,11 +143,10 @@ class DuckDbStagingFactory internal constructor(
                 "SET lock_configuration = true",
             )
         root.createStatement().use { st -> settings.forEach { st.execute(it) } }
-        val locked =
-            root.createStatement().use { st ->
-                st.executeQuery(LOCK_READBACK).use { rs -> rs.next() && rs.getBoolean(1) && !rs.getBoolean(2) }
-            }
-        if (!locked) throw SQLException("the staging database's configuration lock did not take")
+        val readBack = DuckDbConfigurationReadBack.sql(properties.memoryLimitBytes, reservationBytes)
+        val failed = root.createStatement().use { st -> st.executeQuery(readBack).use(DuckDbConfigurationReadBack::failures) }
+        // Server log only (creationFailed): the caller gets the fixed text.
+        if (failed.isNotEmpty()) throw SQLException("the staging database's locked configuration did not take: ${failed.joinToString()}")
     }
 
     /** The finalizer the last lease out (or `close()`) runs exactly once; never throws an Exception. */
@@ -225,10 +229,33 @@ class DuckDbStagingFactory internal constructor(
     private companion object {
         val log = LoggerFactory.getLogger(DuckDbStagingFactory::class.java)
         const val URL_PREFIX = "jdbc:duckdb:"
-        const val LOCK_READBACK =
-            "SELECT current_setting('lock_configuration'), current_setting('enable_external_access')"
 
         /** A single-quoted SQL literal; the path is operator configuration plus a UUID, quoted anyway. */
         fun literal(value: String): String = "'${value.replace("'", "''")}'"
     }
+}
+
+/**
+ * The configuration read-back of a new staging database (staging.md §8.5; #795 review F8): one
+ * SELECT on the locked root, one column per check, each true when it holds.
+ *
+ * The engine reports `memory_limit` and `max_temp_directory_size` only as display text (`64.0 MiB`;
+ * no byte form is readable), so each is compared, inside the engine, with the engine's own
+ * `format_bytes` of the configured bytes. That is equality to display precision — one decimal of
+ * the unit — and a skipped or ignored SET leaves the engine default (a share of the host's memory,
+ * `90% of available disk space`), which never meets it (measured, lane #795 round two).
+ */
+internal object DuckDbConfigurationReadBack {
+    private val CHECKS = listOf("lock_configuration", "enable_external_access off", "memory_limit", "max_temp_directory_size")
+
+    fun sql(
+        memoryLimitBytes: Long,
+        reservationBytes: Long,
+    ): String =
+        "SELECT current_setting('lock_configuration'), NOT current_setting('enable_external_access'), " +
+            "current_setting('memory_limit') = format_bytes($memoryLimitBytes), " +
+            "current_setting('max_temp_directory_size') = format_bytes($reservationBytes)"
+
+    /** The checks of [sql]'s row that do not hold — a NULL counts as not holding; all of them without a row. */
+    fun failures(rs: ResultSet): List<String> = if (rs.next()) CHECKS.filterIndexed { i, _ -> !rs.getBoolean(i + 1) } else CHECKS
 }
