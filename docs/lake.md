@@ -1,6 +1,6 @@
 # The Managed Lake: Table Definitions
 
-**Status:** v1.0 (#798, dp-lake P3)
+**Status:** v1.1 (#798, dp-lake P3)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and the names involved. The design is
@@ -17,7 +17,7 @@ the error codes are [Pipeline Contract §13.25](pipeline-contract.md#1325-manage
 
 A table's definition is versioned like every authored artifact: DRAFT, then RELEASED, then possibly DISCARDED
 (`lake_table_definition_versions`, one DRAFT per table). The body is a JSON object with three keys; any other key, at
-any level, is refused.
+any level, is refused. Parsing consumes one complete JSON value; trailing values are refused.
 
 ```json
 {
@@ -42,8 +42,10 @@ any level, is refused.
 | `fields[].required` | Boolean, default `false` |
 | `fields[].doc` | At most 1,000 characters; no control character but newline and tab |
 | `fields[].tags` | At most 16 tags, each `[a-z0-9_]{1,63}`, unique. Tags are DP's semantics; they are not written to Iceberg |
-| `partition` | Optional, at most 8 objects `{field_id, transform}`. `transform` is `identity`, `year`, `month`, `day`, `hour`, `bucket[N]` or `truncate[N]` (N in 1–10,000), and must be one Iceberg accepts for the column's type. The same field takes at most one time transform; no entry repeats |
+| `partition` | Optional, at most 8 objects `{field_id, transform}`. `transform` is `identity`, `year`, `month`, `day`, `hour`, `bucket[N]` or `truncate[N]` (N in 1–10,000, written without leading zeroes), and must be one Iceberg accepts for the column's type. The same field takes at most one time transform; no entry repeats |
 | `identifier_field_ids` | Optional ids of required fields, each listed once; an approximate `DECIMAL` cannot be one |
+
+Field-ID allocation for corrections after a rejected release has a remaining workflow limitation ([#820](https://github.com/msabiransari/datapipelines/issues/820)); the staged-shape check refuses a mismatch before commit.
 
 The closed type list maps each DP logical type to exactly one Iceberg type:
 
@@ -81,7 +83,7 @@ stored JSON, and every later write names the hash it read (optimistic concurrenc
 `D` is a DRAFT, `R` RELEASED, `X` DISCARDED; `cur` is the table's current definition version. **dev** is an
 authoring deployment (`datapipelines.deployment.authoring-enabled=true`); **hard** is any other. In a hard deployment every
 verb below is refused `lake.definition.authoring_disabled`, with nothing changed: definitions reach it only by
-promotion (P9).
+promotion (P9). Lifecycle mutations lock the managed-table row before version rows, so eligibility checks serialize with apply claims and final stamps.
 
 | Before | Event | Posture | Outcome | After |
 |---|---|---|---|---|
@@ -101,7 +103,7 @@ promotion (P9).
 | `1R cur=1` | purge draft | dev | refused `lake.definition.not_draft` | unchanged |
 | `1R 2R cur=2`, applied here = 1 | discard(v2) | dev | allowed: `2X`; `cur` falls to the highest RELEASED (1); the state becomes `applied` (1 is applied here) | `1R 2X cur=1` |
 | `1R 2R cur=2`, applied here = 2 | discard(v2) | dev | refused `lake.definition.applied_version`: this environment's Iceberg table holds v2 | unchanged |
-| `1R 2R cur=2`, `applying` | discard(v2) | dev | refused `lake.definition.table_busy` | unchanged |
+| any current version, `applying` | discard(any version) | dev | refused `lake.definition.table_busy` | unchanged |
 | `1R 2D cur=1` | discard(v2) | dev | refused `lake.definition.not_released` | unchanged |
 | any | any verb on an unknown table or version | both | refused `lake.definition.not_found` | unchanged |
 | any | any verb | hard | refused `lake.definition.authoring_disabled` | unchanged |
@@ -220,4 +222,5 @@ Both names are checked before any catalog call or SQL; a name outside the gramma
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-04 | v1.1 | 798 merge review | Serialize lifecycle eligibility with apply, refuse discard during any apply, require canonical partition parameters and complete JSON input; record the field-ID correction limitation (#820). |
 | 2026-11-03 | v1.0 | 798 (#798) | New document: the definition body and its closed type list, the lifecycle, the apply states, the supported-change policy and the names, as dp-lake P3 built them. Not packaged in the product jar (the lake surfaces, P8, decide its audience). |
