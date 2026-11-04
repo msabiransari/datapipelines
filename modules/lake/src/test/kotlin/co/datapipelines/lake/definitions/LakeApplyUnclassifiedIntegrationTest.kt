@@ -37,7 +37,7 @@ class LakeApplyUnclassifiedIntegrationTest {
     private val metadataWrites = FailingMetadataWrites()
     private val afterCommit = ThrowAfterCommit()
     private val h = LakeDefinitionsHarness(hooks = afterCommit, fileIoFactory = metadataWrites::wrap)
-    private val lines = ListAppender<ILoggingEvent>()
+    private val lines = ListAppender<ILoggingEvent>() // raw-list-appender: synchronous — only test thread logs
     private val applierLog = LoggerFactory.getLogger(LakeDefinitionApplier::class.java) as Logger
 
     @BeforeEach
