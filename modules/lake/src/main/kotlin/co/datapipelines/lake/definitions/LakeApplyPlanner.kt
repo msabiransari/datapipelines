@@ -12,6 +12,8 @@ import java.util.concurrent.atomic.AtomicInteger
  * The §7 decision of one apply (dp-lake design record §7, lake.md §3), before anything is committed:
  * - no table → create it (its fresh field ids must be the body's, or the create would silently renumber);
  * - S == intent(vN), `dp.definition.version` included → applied with no commit (the crash-between case);
+ * - S == intent(vN) under another or no `dp.definition.version` → ONE commit that sets only the property (drift's
+ *   remedy: the live shape adopted as vN; also a version that changes only tags, which are not part of a shape);
  * - S == intent(last applied) and the change is COMPATIBLE → ONE staged transaction, checked against intent before
  *   it is handed back;
  * - REVIEWED / BREAKING → refused, no commit; anything else → drift, with a field-by-field diff.
@@ -59,7 +61,12 @@ internal class LakeApplyPlanner(
         val current = LakeTableShape.of(table)
         val intentShape = LakeTableShape.of(intent)
         val appliedVersion = LakeTableShape.definitionVersionOf(table)
-        if (current == intentShape && appliedVersion == version) return Plan.AlreadyApplied
+        if (current == intentShape) {
+            if (appliedVersion == version) return Plan.AlreadyApplied
+            // The table already holds the intent under another stamp (or none): drift's remedy, the live shape adopted
+            // as a new version, or a tags-only version. Only the version property moves; no schema, spec or data change.
+            return Plan.Commit { table.updateProperties().set(LakeTableProperties.DEFINITION_VERSION, version.toString()).commit() }
+        }
         val base = appliedVersion?.let(bodyOf)
         if (base == null) return drift(REASON_UNKNOWN_VERSION, appliedVersion, emptyList())
         val expected = LakeTableShape.of(base)

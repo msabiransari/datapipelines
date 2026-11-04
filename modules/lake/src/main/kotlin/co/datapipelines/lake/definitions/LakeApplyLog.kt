@@ -1,5 +1,6 @@
 package co.datapipelines.lake.definitions
 
+import co.datapipelines.persistence.FailureShape
 import org.slf4j.LoggerFactory
 import java.util.UUID
 
@@ -53,6 +54,21 @@ internal object LakeApplyLog {
         }
     }
 
+    /**
+     * An exception from the apply's commit step that is none of the catalog's classified refusals (#811), at the
+     * point it is caught and before the attempt's ending line: its class and SQLSTATE only, never its message or
+     * stack (observability §3.4G).
+     */
+    fun unclassified(
+        row: LakeManagedTable,
+        version: Int,
+        operationId: UUID,
+        failure: Throwable,
+    ) = Line(LakeDefinitionApplier.OPERATION_APPLY, row, version, operationId).error(
+        "event=lake.definition.apply_unclassified$FIELDS",
+        "cause=${FailureShape.cause(failure)} sql_state=${FailureShape.sqlState(failure)}",
+    )
+
     /** The common six fields of one attempt. */
     private class Line(
         val operation: String,
@@ -69,5 +85,10 @@ internal object LakeApplyLog {
             format: String,
             tail: String,
         ) = log.warn(format, operation, row.id, row.namespace, row.name, version, operationId, tail)
+
+        fun error(
+            format: String,
+            tail: String,
+        ) = log.error(format, operation, row.id, row.namespace, row.name, version, operationId, tail)
     }
 }

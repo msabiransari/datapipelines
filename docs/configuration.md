@@ -1,8 +1,8 @@
 # Configuration Reference
 
-**Status:** v1.74 (operator reference; source-traced configuration authority)
+**Status:** v1.75 (operator reference; source-traced configuration authority)
 **Owner:** datapipelines.co core
-**Last updated:** 2026-11-02
+**Last updated:** 2026-11-04
 
 ---
 
@@ -735,7 +735,7 @@ the lanes named in their rows, so that one key set is documented and validated f
 | `datapipelines.lake.admission.max-open-partitions-per-append` | `64` | Partitions one append may write at once (P4). ≥ 1 |
 | `datapipelines.lake.admission.job-timeout` | `2h` | Every attempt's absolute deadline, fixed at admission and inherited by its leases (P4/P6). Enters the `orphan-grace-hours` rule |
 | `datapipelines.lake.admission.lease-wait-seconds` | `60` | How long an operation waits for a busy lease (P4/P6). Must be below `datapipelines.executor.node-query-timeout-max-seconds` (§3.2) |
-| `datapipelines.lake.catalog.lock-timeout-seconds` | `5` | `lock_timeout` on every catalog connection the lake opens (design record §8a). ≥ 1 |
+| `datapipelines.lake.catalog.lock-timeout-seconds` | `5` | `lock_timeout` on every catalog connection the lake opens (design record §8a), and the longest one lease acquire waits on a lease row another transaction holds before it counts as busy (#812; set for that acquire's transaction only, never on the shared pool). ≥ 1 |
 | `datapipelines.lake.catalog.statement-timeout-seconds` | `30` | `statement_timeout` on every catalog connection the lake opens. ≥ 1; enters the `orphan-grace-hours` rule |
 | `datapipelines.lake.reads.max-generation-age-seconds` | `900` | A managed reader generation older than this is retired before its next lease, and the lease builds a new one (P5). ≥ 1; enters the reads rule (§7) |
 | `datapipelines.lake.reads.freshness-tick-seconds` | `60` | How often each live managed generation is compared with the catalog rows; a stale generation is retired early (P5). ≥ 1 and below `max-generation-age-seconds`; enters the reads rule (§7) |
@@ -1442,7 +1442,8 @@ The Helm input reference already lives in the commented `deploy/helm/datapipelin
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-04 | v1.74 | #818 dp-lake P5 managed reads | §3.36: new key `reads.memory-limit` (thirty-two keys); `reads.*` rows say what each bounds; the reader pair's row states the credential order and that read-only is an operator contract DP cannot verify. §5 template gains the key. §7 gains the reads rule (tick below the age bound; age + retire ceiling + tick within an hour of each protected day) and the `lake.boot.datasource_name_taken` refusal. §8 traces the P5 consumers. |
+| 2026-11-04 | v1.75 | #818 dp-lake P5 managed reads | §3.36: new key `reads.memory-limit` (thirty-two keys); `reads.*` rows say what each bounds; the reader pair's row states the credential order and that read-only is an operator contract DP cannot verify. §5 template gains the key. §7 gains the reads rule (tick below the age bound; age + retire ceiling + tick within an hour of each protected day) and the `lake.boot.datasource_name_taken` refusal. §8 traces the P5 consumers. |
+| 2026-11-04 | v1.74 | 810 (#812) | §3.36 `catalog.lock-timeout-seconds` also bounds a lease acquire's wait on a lease row another transaction holds; the acquire then counts as busy. |
 | 2026-11-02 | v1.73 | #785 landing, security pass F2 | §3.36 `storage.endpoint`: a URL carrying userinfo, a query or a fragment is refused at startup (only scheme + host were checked); the row says so. |
 | 2026-11-02 | v1.72 | #785 dp-lake P2 catalog core | New **§3.36 Managed lake**: the thirty-one `datapipelines.lake.*` keys of the design record §6 (enabled, name, mode, `storage.*` with the two secret credential pairs, `admission.*`, `catalog.*`, `reads.*`, `maintenance.*`, `retention.*`), inert unless enabled. §5 template gains the `lake:` block. §7 gains the lake rules (judged only when enabled) and the after-Flyway `lake.boot.*` refusals. §8 traces the binding. |
 | 2026-11-01 | v1.71 | #762 never-admissible refresh | §3.34: `max-executions-per-refresh` must not exceed the executor's `max-concurrent-executions-per-instance` (startup refuses) and the dashboard execution cap above it WARNs; the count is distinct executions; a refresh over the smaller ceiling is refused at once with `details.reason = never_admissible`; saved dashboards whose static all-source upper bound exceeds the ceiling are named at boot as possible refusals. §7 likewise. |
