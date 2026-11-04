@@ -120,6 +120,7 @@ class PipelineValidator(
         // §12.13 AFTER §12.10 (7c, #7): the script rules read the writer map the calculator
         // rules establish — a value-mode SCRIPT's `context_key` is a writer of the same kind.
         ScriptRules.check(pipeline, orgContext, templates, workspaceId, collector, calculatorKinds)
+        LakeDeliveryRules.check(pipeline, datasources, workspaceId, collector)
         return collector.toResult()
     }
 

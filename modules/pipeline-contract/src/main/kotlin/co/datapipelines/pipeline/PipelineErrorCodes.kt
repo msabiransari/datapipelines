@@ -2028,6 +2028,16 @@ object PipelineErrorCodes {
      * column is `—`, `ApiErrorCatalog.NEVER_RETURNED_LIVE`); P8 brings the surfaces and their statuses.
      */
     object Lake {
+        const val DELIVERY_ONE_PER_PIPELINE = "lake.delivery.one_per_pipeline"
+        const val APPEND_ONE_PER_TABLE = "lake.append.one_per_table"
+        const val APPEND_REQUIRES_DELIVERY = "lake.append.requires_delivery"
+        const val APPEND_REJECTS_NOT_STRICT = "lake.append.rejects_not_strict"
+        const val APPEND_INVALID_NODE = "lake.append.invalid_node"
+        const val APPEND_BARRIER = "lake.append.barrier"
+        const val APPEND_REPLACE_REFUSED = "lake.append.replace_refused"
+        const val DELIVERY_INVALID_NODE = "lake.delivery.invalid_node"
+        const val DELIVERY_REQUIRES_DUCKDB = "lake.delivery.requires_duckdb"
+
         /** `DP001`: a catalog write without a live lease of its operation on the row's name (§8a). */
         const val CATALOG_FENCED = "lake.catalog.fenced"
 

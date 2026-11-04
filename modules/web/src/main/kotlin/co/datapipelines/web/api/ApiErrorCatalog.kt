@@ -144,6 +144,15 @@ object ApiErrorCatalog {
     /** Every code whose status differs from its family default (§13, rest-api §7.6). */
     private val EXCEPTIONS: Map<String, HttpStatus> =
         mapOf(
+            PipelineErrorCodes.Lake.DELIVERY_ONE_PER_PIPELINE to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_ONE_PER_TABLE to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_REQUIRES_DELIVERY to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_REJECTS_NOT_STRICT to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_INVALID_NODE to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_BARRIER to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_REPLACE_REFUSED to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.DELIVERY_INVALID_NODE to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.DELIVERY_REQUIRES_DUCKDB to HttpStatus.BAD_REQUEST,
             // 091 §13.7: the one `auth.api_key.` code that is not 401. The credential is fine;
             // the ISSUANCE BODY named an expiry that is not usable, which is a 400.
             co.datapipelines.auth.AuthErrorCodes.API_KEY_EXPIRY_INVALID to HttpStatus.BAD_REQUEST,

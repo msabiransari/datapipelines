@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.74 (revised — see Change Log)
+**Status:** v1.75 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-11-04
@@ -343,6 +343,7 @@ Note: no `output` block. DML's side effect IS the output.
 | `context_key` | string | CALCULATOR nodes on a single-output kind; value-mode SCRIPT nodes | The Context key this node writes, per §6.1's `[a-z_][a-z0-9_]*`. Deliberately not called `output`: it names a value downstream nodes bind as `:context_key`, never a table. XOR with `context_keys` on a `CALCULATOR` node (§4.10); required on a value-mode `SCRIPT` node (§4.12); forbidden on every other type. |
 | `context_keys` | object | CALCULATOR nodes on a multi-output kind | The Context key each of the kind's named outputs is written to, as `{output name: context key}` — every declared output mapped, each key per §6.1. XOR with `context_key`; forbidden on every other type. See §4.10. |
 | `output` | object | conditional | Optional for `DQL` nodes — omitted means `{"target": "caller"}`. Forbidden for `DML` / `DDL` / `CALCULATOR` nodes. On `PIPELINE` nodes, permitted only when the pinned child has a caller node (§12.9). On `SCRIPT` nodes: required in `row`/`table` mode (`tempdb` or `caller`), forbidden in `value` mode (§4.12). See §4.7. |
+| `delivery` | object | no | DQL with source `tempdb` and DuckDB staging only: `{feed, id}` identifies the immutable landing folder. At most one per pipeline. Managed append requires it and depends transitively on all non-append nodes (§13.25). |
 | `depends_on` | array of string | yes | Parent node IDs. Empty array for source nodes. Must reference existing node IDs. No cycles. **Data flow only** — never an edge added to avoid contention between nodes; the executor owns scheduling (§4.11). |
 | `settings` | object | no | Per-node execution settings. v1 holds one key, `timeout_seconds` — this node's wall-clock deadline. See §4.11. |
 | `strict` | boolean | no | SCRIPT nodes only: fail the node when the rejects table is non-empty (`pipeline.script.rejects_strict`). Default `false` (partition — the rejects are written and the run continues). Legal only when the pinned contract declares rejects (§12.13). See §4.12. |
@@ -828,6 +829,7 @@ No node resolves to `caller`. The pipeline returns execution stats only; no `dat
 ### 10.1 Rules
 
 - Format: `[a-z0-9_]+`, length 1–63 (H2 identifier limits).
+- Managed lake datasource outputs use exactly `namespace.table`, each segment matching the identifier grammar; other output tables retain the single identifier grammar.
 - Uniqueness is **per namespace**: all `tempdb` `output.table` values must be unique among themselves (they share one staging database), and `datasource` `output.table` values must be unique per target datasource. A tempdb table and a write-back table may share a name; two write-backs to different datasources may share a name.
 - Must not be `tempdb` or any name starting and ending with `__` (reserved namespace).
 - **Recommended convention** (not enforced, but LLM prompts and UI defaults should follow):
@@ -892,7 +894,7 @@ Hard validation errors at write-time. Validation code: `pipeline.validation.forb
 - Absolute path: leading `/` or drive-letter pattern.
 - Environment literal: exact-match `dev`, `staging`, `prod`, `production` as a whole value.
 
-These heuristics are deliberately conservative (whole-value or prefix matches) — `stg_orders` containing "stg" is fine; a `source` of `pg-prod` is fine (it is a datasource *name*; the check applies to values that are not references into the datasource registry).
+These heuristics are deliberately conservative (whole-value or prefix matches) — `stg_orders` containing "stg" is fine; a `source` of `pg-prod` is fine (it is a datasource *name*; the check applies to values that are not references into the datasource registry). A valid `namespace.table` output for the configured managed lake is also a portable table reference and is exempt from the hostname heuristic; external datasource output tables retain the scan.
 
 ---
 
@@ -948,7 +950,7 @@ All checks run at pipeline create/update time. A pipeline that fails any check i
 | Code | Check |
 |---|---|
 | `pipeline.validation.unknown_datasource` | Every node `source` (except `tempdb`) AND every `output.datasource` exists in the env's datasource registry |
-| `pipeline.validation.datasource_readonly` | No write-shaped use names a readonly datasource: no `DML`/`DDL` node `source` and no `output.datasource` resolves to one flagged `is_readonly` (workspaces design 2026-08-16 §6, D6). The three and only three write shapes, each a distinct runtime raise site, checked as one rule; `details` carries the node id, the datasource name, and which shape fired (`dml_source` / `ddl_source` / `output_target`). DQL reads and everything `tempdb` are untouched — the check is on the use, never on the datasource alone |
+| `pipeline.validation.datasource_readonly` | Except for managed lake append governed by §13.25, no write-shaped use names a readonly datasource: no `DML`/`DDL` node `source` and no `output.datasource` resolves to one flagged `is_readonly` (workspaces design 2026-08-16 §6, D6). The three and only three write shapes, each a distinct runtime raise site, checked as one rule; `details` carries the node id, the datasource name, and which shape fired (`dml_source` / `ddl_source` / `output_target`). DQL reads and everything `tempdb` are untouched — the check is on the use, never on the datasource alone |
 
 ### 12.6 Template validations
 
@@ -1696,6 +1698,15 @@ The `lake.definition.*` rows (#798, dp-lake P3; [lake.md](lake.md)) are the mana
 
 | Code | HTTP | Description |
 |---|---|---|
+| `lake.delivery.one_per_pipeline` | 400 | A pipeline declares more than one delivery node. |
+| `lake.append.one_per_table` | 400 | Multiple append nodes target the same managed table. |
+| `lake.append.requires_delivery` | 400 | Managed lake append requires a delivery node. |
+| `lake.append.rejects_not_strict` | 400 | Every rejects-producing script in an append pipeline must be strict. |
+| `lake.append.invalid_node` | 400 | Managed append belongs to a DQL node with source tempdb. |
+| `lake.append.barrier` | 400 | Every append must transitively depend on every non-append node; details name missing dependencies. |
+| `lake.append.replace_refused` | 400 | Managed lake publication supports append only. |
+| `lake.delivery.invalid_node` | 400 | A delivery block belongs to a DQL node with source tempdb. |
+| `lake.delivery.requires_duckdb` | 400 | A delivery requires DuckDB staging. |
 | `lake.catalog.fenced` | — | SQLSTATE `DP001`: a catalog write without a lease token, with a token or operation that is not the live lease's, against a name the operation holds no lease on, or a rename without the source name's lease. Another operation holds the table, or this operation's lease expired or reached its deadline |
 | `lake.catalog.restoring` | — | SQLSTATE `DP002`: a catalog write while `lake_control.mode = 'restoring'` (the recovery procedure has the catalog) |
 | `lake.catalog.outcome_unknown` | — | the catalog connection failed (SQLSTATE class `08`) while a write was in flight, so the write may or may not have committed. DP never replays the statement (a replay can report a committed write as failed and let the library delete its files); the operation's settle step decides from the revision log. The catalog session that saw it refuses further work |
@@ -1953,6 +1964,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-04 | v1.75 | 799 (#799) | Delivery node block, managed-only qualified append targets, and nine §13.25 structure refusals. Appends require one delivery and a transitive dependency barrier over all non-append nodes; rejects-producing scripts must be strict. External readonly datasources retain their refusal. |
 | 2026-11-04 | v1.74 | 780 (#780) script-invariants docs | §13.18's two script rows say what the code does: `pool_exhausted` names both refusal paths (the full admission bound, and an admitted evaluation that waited its whole wall clock for a running slot); `invariants_too_large` states the read-back's COMBINED count — written outputs and rejects plus table inputs, row mode adding the streamed input and a caller output's buffered rows and rejects. No code, code count or permission change. — Renumbered at merge after #810. |
 | 2026-11-04 | v1.73 | 810 (#811) | §13.25 gains `lake.definition.apply_unclassified` (`—`): an unclassified failure of the apply's commit step is returned as the release's apply outcome, and the row stays `applying` for `verifyApplying`. Failures outside that step can still propagate after the release commits (#822). |
 | 2026-11-04 | v1.72 | 798 merge | §13.25 gains the managed lake definition lifecycle and apply refusal catalog, alongside its constants. |

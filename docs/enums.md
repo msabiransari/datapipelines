@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.45 (living document — updated as enums evolve)
+**Status:** v1.46 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -551,6 +551,8 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `request.*` | The platform's request refusals: `413 request.body_too_large` from the body-cap filter on `/api/v1` and `/mcp`, before any handler or parser (#279); and `400 request.query_too_long` from the search-owning services for a search term over 200 characters after the trim (#504b) | pipeline-contract §13.21 |
 | `navigation.*` (`navigation.request.*`, `navigation.view.*`, `navigation.metadata.*`) | The session-only navigation trees (#464): a malformed, foreign or stale tree request or continuation (400), an unavailable promotion view (503, `Retry-After`), one node over the page budget (503) | pipeline-contract §13.24 (defined in [REST API §24](rest-api.md#24-first-party-navigation-trees)) |
 | `lake.catalog.*` | The managed lake's catalog refusals (#785): a write the lease fence refused (`lake.catalog.fenced`), a catalog in restore (`lake.catalog.restoring`), and a commit whose outcome the connection lost (`lake.catalog.outcome_unknown` — never retried blind) | pipeline-contract §13.25 |
+| `lake.delivery.*` | Delivery structure and landing refusals | pipeline-contract §13.25 |
+| `lake.append.*` | Managed append structure, barrier and publication refusals | pipeline-contract §13.25 |
 | `lake.definition.*` | The managed lake's table definitions (#798): an unknown table or version, a lifecycle refusal (`not_draft`, `not_released`, `version_conflict`, `applied_version`, `name_taken`), an invalid body, a change the supported-change policy will not apply (`reviewed_change`, `breaking_change`), a table changed outside DP (`drift`), a table another operation holds (`table_busy`), and authoring off in this environment (`authoring_disabled`) | pipeline-contract §13.25 (defined in [Lake §4](lake.md#4-the-supported-change-policy)) |
 
 **Removed 2026-08-07** (D5): the `auth.rate_limit.*` domain (folded into `rate_limit.exceeded`), the `template.import.*` domain (folded into `template.validation.*`), the `idempotency_key.*` spelling (now `idempotency.*`), and `result.claim_check_expired` (now `result.expired` under the D9 result model).
@@ -1194,6 +1196,7 @@ Computed, never stored on its own: the class of the change from the Iceberg tabl
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-04 | v1.46 | 799 (#799) | §16 registers `lake.delivery.*` and `lake.append.*` domains for delivery and managed append structure/publication. |
 | 2026-11-04 | v1.45 | 798 (#798) | New **§46 `LakeTableStatus`**, **§47 `LakeApplyState`** and **§48 `LakeChangeClass`** (V54's two CHECKs and the supported-change policy's classes, held to their Kotlin enums by `LakeDefinitionEnumsSpecDriftTest`); **§15** gains the three lake definition audit events (`lake.definition.released` / `applied` / `apply_failed`, held by `LakeAuditEventsSpecDriftTest`); **§16** registers the `lake.definition.*` domain (pipeline-contract §13.25). Section numbers follow #778's §45; a lane merging after this one with its own §46 renumbers. |
 | 2026-11-02 | v1.42 | 778 (#778) | New **§45 `LakeScanStatus`** (`exact` / `partial` / `unscannable`, `lake_reference_scans.status`, V52) with the `reasons_json` kind words. |
 | 2026-11-02 | v1.43 | 785 (#785) | **§16** (row renumbered at merge after #778's v1.42): registers the `lake.catalog.*` domain (pipeline-contract §13.25), the managed lake's three catalog refusals. |
