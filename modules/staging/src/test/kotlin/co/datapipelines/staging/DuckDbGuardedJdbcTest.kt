@@ -1,5 +1,6 @@
 package co.datapipelines.staging
 
+import co.datapipelines.typesystem.jdbc.DuckDbAuthorSqlGate
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.booleans.shouldBeFalse

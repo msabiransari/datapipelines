@@ -2,6 +2,7 @@ package co.datapipelines.staging
 
 import co.datapipelines.typesystem.ColumnSchema
 import co.datapipelines.typesystem.LogicalType
+import co.datapipelines.typesystem.jdbc.DuckDbAuthorSqlGate
 import io.kotest.assertions.throwables.shouldNotThrowAny
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue

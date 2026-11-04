@@ -3,6 +3,8 @@ package co.datapipelines.staging
 import co.datapipelines.typesystem.ColumnSchema
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.LogicalTypeMapping
+import co.datapipelines.typesystem.jdbc.DuckDbAuthorSqlGate
+import co.datapipelines.typesystem.jdbc.guardedForAuthorSql
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -27,7 +29,7 @@ import kotlin.coroutines.coroutineContext
  * differs is the engine underneath:
  *
  *  - **Author leases are gated.** [withConnection], [withQuery] and [execute] hand out a
- *    [GuardedConnection]: every SQL text passes [DuckDbAuthorSqlGate] (TEMPORARY, owner ruling
+ *    [Connection] wrapped by [guardedForAuthorSql]: every SQL text passes [DuckDbAuthorSqlGate] (TEMPORARY, owner ruling
  *    2026-11-03) on a connection whose configuration is already locked. DP's own statements run on
  *    an ungated lease.
  *  - **The memory bound is the engine's.** `memory_limit` bounds DuckDB's buffer manager; an
@@ -186,7 +188,8 @@ class DuckDbStaging internal constructor(
 
     // ------------------------------------------------------------ leases
 
-    private suspend fun <T> authorLease(block: suspend (Connection) -> T): T = classifying { pool.lease(::GuardedConnection, block) }
+    private suspend fun <T> authorLease(block: suspend (Connection) -> T): T =
+        classifying { pool.lease({ it.guardedForAuthorSql() }, block) }
 
     private suspend fun <T> internalLease(block: suspend (Connection) -> T): T = classifying { pool.lease({ it }, block) }
 
