@@ -1,9 +1,9 @@
 # Module Structure Specification
 
-**Status:** v1.9 (frozen contract — additive-only changes after this point)
+**Status:** v1.10 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** (all other specs — this spec operationalizes them into code structure)
-**Last updated:** 2026-11-02
+**Last updated:** 2026-11-03
 
 ---
 
@@ -246,8 +246,9 @@ Some concerns touch every module:
 - `H2IngressMapper` (H2 JDBC metadata → canonical `ColumnSchema`) and `H2EgressMapper` (canonical → H2 DDL type string + `java.sql.Types` code) — **two objects, not inverses**; signatures in [Staging §5.3](staging.md#53-mappers-and-helper-signatures)
 - `JsonEncoder` (canonical value → wire representation)
 - `SchemaEnvelope` data class
+- `co.datapipelines.typesystem.jdbc` (#816, TEMPORARY — [Datasources §5.8](datasources.md#58-the-author-sql-guard-on-duckdb-and-lake-leases-temporary-816)): `DuckDbAuthorSqlGate` (`REFUSED_NAMES`, `SEPARATOR`, `CARRIER_CALL`, `SQL_STATE`, `check(sql)`), its refusal type `DuckDbAuthorSqlRefusal`, and the decorator factory `Connection.guardedForAuthorSql()`. Here because two modules arm it — `datasources` (every `DUCKDB`/`LAKE` lease) and DuckDB `staging` — and `typesystem` is the one module both already depend on; plain `java.sql`, no new dependency.
 
-**Tests:** unit tests for every mapper; round-trip tests for every type.
+**Tests:** unit tests for every mapper; round-trip tests for every type; the guard's text rules and every decorator entry point (over H2 — the engine-driven sweep and catalog tests live in `datasources`, where the DuckDB driver is).
 
 ### 5.2 `pipeline-contract`
 
@@ -1307,6 +1308,7 @@ Before considering the module structure "ready":
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-03 | v1.10 | 816 (#816) | §5.1: `typesystem` gains the package `co.datapipelines.typesystem.jdbc` — the TEMPORARY raw-text author-SQL guard and its JDBC decorator ([Datasources §5.8](datasources.md#58-the-author-sql-guard-on-duckdb-and-lake-leases-temporary-816)), shared by `datasources` and DuckDB `staging`. No dependency edge changes. Additive. |
 | 2026-11-02 | v1.9 | 785 (#785, dp-lake P2) | New module **`lake`** (§3, §3.1, §4.1 layer 4, §4.2 row, new **§5.21**): the managed lake's catalog core. Its §4.2 row is the dp-lake design record's edge set (`typesystem`, `persistence`, `datasources`, `staging`, `pipeline-contract`, `scheduler`, `auth`); P2 declares three. `web` gains the edge `lake` for the after-Flyway boot check. The root `allowedInternalDependencies` map moves with the table (`verifyModuleDependencies`). |
 | 2026-10-26 | v1.8 | 721 (#721) | §4.1/§4.2/§5.12: `tests/browser-tests` gains the internal edge `web` (`testImplementation`, a direct edge per the §4.2 rule — not `api` leakage through `app`) so `SiteShotsRailOrderTest` can pin the screenshot driver's rail table against `AppNav.ITEMS`. The root `allowedInternalDependencies` map and the §4.2 row move together (`verifyModuleDependencies`). Test-scope only: no production edge, public API or runtime change. |
 | 2026-10-24 | v1.7 | 442b (#442) | §5.16: `scheduler` gains `thymeleaf-spring6` (BOM-managed, already on `auth`'s and `web`'s class paths — the scheduler's lock gains its four lines) for the notice templates; its public API gains the `NotificationMailer` port and the `ScheduleNotifier` job (B5). `web` implements the port over `auth`'s `MailSender`. No internal dependency edge changes. |

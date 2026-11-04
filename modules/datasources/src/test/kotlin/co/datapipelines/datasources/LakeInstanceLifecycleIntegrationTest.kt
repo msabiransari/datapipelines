@@ -2,6 +2,7 @@ package co.datapipelines.datasources
 
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.spi.ILoggingEvent
+import co.datapipelines.datasources.pooling.ConnectionPool
 import co.datapipelines.datasources.pooling.ConnectionPoolManager
 import co.datapipelines.datasources.pooling.HikariConnectionPool
 import co.datapipelines.datasources.pooling.LakeInstanceInitializer
@@ -110,7 +111,7 @@ class LakeInstanceLifecycleIntegrationTest {
                     // share the instance. (Not a view from the plan — a marker made NOW.)
                     a.createStatement().use { it.execute("CREATE TABLE nyc.mobility.marker AS SELECT 99 AS v") }
                     assertAll(
-                        { physicalId(a) shouldNotBe physicalId(b) },
+                        { physicalId(pool, a) shouldNotBe physicalId(pool, b) },
                         { countOf(b, "SELECT count(*) FROM hvfhv_trips") shouldBe 2 },
                         { countOf(b, "SELECT v FROM marker") shouldBe 99 },
                         // Engine limits were applied ONCE, on the owner, and are instance-global.
@@ -474,7 +475,15 @@ class LakeInstanceLifecycleIntegrationTest {
      */
     private fun capturingLogs(block: () -> Unit): List<String> = co.datapipelines.datasources.capturingLogs(block = block)
 
-    private fun physicalId(connection: Connection): Int = System.identityHashCode(connection.unwrap(Connection::class.java))
+    /**
+     * The physical connection's identity behind a lease. #816: a LAKE lease is the author-SQL
+     * guard, whose `unwrap` answers itself, so the identity is read through the pool's own
+     * connection (Hikari's proxy), whose `unwrap` reaches the physical duplicate.
+     */
+    private fun physicalId(
+        pool: ConnectionPool,
+        connection: Connection,
+    ): Int = System.identityHashCode((pool as HikariConnectionPool).poolConnectionOf(connection).unwrap(Connection::class.java))
 
     private fun rootMessage(e: Throwable): String = generateSequence(e) { it.cause }.last().message.orEmpty()
 
