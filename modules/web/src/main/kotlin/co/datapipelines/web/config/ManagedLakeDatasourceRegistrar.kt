@@ -88,7 +88,7 @@ class ManagedLakeDatasourceRegistrar(
             }
 
             ManagedLakeSync.UNCHANGED -> {
-                Unit
+                // Configuration and the stored row agree: nothing to write, nothing to log.
             }
         }
         val backfilled = applyRepository.ifAvailable?.backfillRegistryRows(desired.name, actor) ?: 0
