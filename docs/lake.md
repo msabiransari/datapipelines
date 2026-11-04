@@ -1,6 +1,6 @@
 # The Managed Lake: Table Definitions
 
-**Status:** v1.2 (#798, dp-lake P3; #810, #811, #812)
+**Status:** v1.3 (#798, dp-lake P3; #810, #811, #812)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and the names involved. The design is
@@ -140,11 +140,12 @@ release / promotion landing ──► pending ──(attempt owns the row)──
 | `applying` | a verify finds the attempt's revision | `applied` |
 
 **One attempt.** An attempt takes the NAMESPACE lease first when the Iceberg namespace does not exist yet, then the
-TABLE lease `<namespace>.<table>`, waiting up to `datapipelines.lake.admission.lease-wait-seconds` for each and never
-past the attempt's deadline; a lease still held by another operation ends the attempt `table_busy` with nothing
+TABLE lease `<namespace>.<table>`, polling until the earlier of `datapipelines.lake.admission.lease-wait-seconds`
+and the attempt's deadline. A lease still held by another operation ends the attempt `table_busy` with nothing
 changed. Each try waits at most `datapipelines.lake.catalog.lock-timeout-seconds` on a lease row that another
-transaction holds, such as a dead attempt's catalog transaction that is still open, and then counts as busy (#812);
-the whole wait can therefore run over the lease wait by up to one lock timeout. It marks the row `applying` under its own operation id, creates the namespace if needed, heartbeats the
+transaction holds, such as a dead attempt's catalog transaction that is still open, and then counts as busy (#812).
+The final row-lock wait can therefore finish up to one lock timeout after the polling horizon, including the
+attempt's deadline. It marks the row `applying` under its own operation id, creates the namespace if needed, heartbeats the
 table lease, plans (§4), commits through the fenced catalog, and only then stamps the row. Every stamp is conditional
 on `apply_state = 'applying'` AND the attempt's own operation id: an attempt that was overtaken (a newer release, a
 verify) changes nothing. Leases are released when the attempt ends, whatever its outcome.
@@ -237,6 +238,7 @@ Both names are checked before any catalog call or SQL; a name outside the gramma
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-04 | v1.3 | 810 merge review | §3 distinguishes the polling horizon from the final row-lock wait, which can overrun either the lease wait or the caller's deadline by one lock timeout. |
 | 2026-11-04 | v1.2 | 810 (#810, #811, #812) | Drift has an exit: a definition whose shape equals the live table applies as one commit that sets only `dp.definition.version` (§2 row, §3 row, §4 rule 2). An unclassified failure of the commit step leaves the row `applying` as `lake.definition.apply_unclassified`, and the release returns that outcome (§3 row and paragraph). A lease takeover waits at most the catalog lock timeout on a lease row another transaction holds, then counts as busy (§3 "One attempt" and "Crash between commit and stamp"). |
 | 2026-11-04 | v1.1 | 798 merge review | Serialize lifecycle eligibility with apply, refuse discard during any apply, require canonical partition parameters and complete JSON input; record the field-ID correction limitation (#820). |
 | 2026-11-03 | v1.0 | 798 (#798) | New document: the definition body and its closed type list, the lifecycle, the apply states, the supported-change policy and the names, as dp-lake P3 built them. Not packaged in the product jar (the lake surfaces, P8, decide its audience). |
