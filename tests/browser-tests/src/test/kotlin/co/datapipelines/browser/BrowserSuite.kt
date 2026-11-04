@@ -222,38 +222,54 @@ abstract class BrowserSuite {
      * instance-wide, not a member who was just provisioned, so the session's active workspace
      * is still whatever it was. Nearly every fixture means "and work in it", and the switch is
      * also the only thing that re-stamps the session cookie's `active_workspace` claim.
+     *
+     * #761: a red out of here names the ONE [SwitchPhase] that did not finish and carries only
+     * the facts that phase can have, so a dead shell never reads as a refused switch. [initTimeoutMs]
+     * bounds the shell-init wait; it exists for WorkspaceSwitchOutcomeBrowserTest's planted init
+     * failure alone, which would otherwise wait the whole first-render bound. Every other caller
+     * keeps the default.
      */
     protected fun enterWorkspace(
         page: Page,
         name: String,
+        initTimeoutMs: Double = FIRST_RENDER_TIMEOUT_MS,
     ) {
-        // A full reload first: the create submit is hx-boosted, so only the main content was
-        // swapped and the rail still holds the switcher rendered BEFORE this workspace existed.
-        // The switcher's first render after the reload is a first-render wait too (#327): the
-        // loaded-box bound, then the select acts on a present element at the default patience.
-        page.reload()
-        page.locator("#workspace-switcher").waitFor(Locator.WaitForOptions().setTimeout(FIRST_RENDER_TIMEOUT_MS))
-        // `force`: the select is an invisible overlay on the switcher card (the label is the
-        // hit target), so Playwright's visibility precondition never clears on it.
-        val outcome = WorkspaceSwitchOutcome("$baseUrl/workspace/switch")
+        val outcome = WorkspaceSwitchOutcome("$baseUrl/workspace/switch", initTimeoutMs)
+        // Watched from BEFORE the reload: the render and init phases name the loads that failed.
+        val loadFailed = Consumer<Request> { outcome.recordFailedLoad(it) }
         val requested = Consumer<Request> { if (outcome.matches(it)) outcome.request = it }
         val responded = Consumer<Response> { if (outcome.matches(it.request())) outcome.response = it }
         val failed = Consumer<Request> { if (outcome.matches(it)) outcome.failure = it.failure() }
         val navigated = Consumer<Frame> { if (it == page.mainFrame()) outcome.navigationUrl = it.url() }
-        page.onRequest(requested)
-        page.onResponse(responded)
-        page.onRequestFailed(failed)
-        page.onFrameNavigated(navigated)
+        page.onRequestFailed(loadFailed)
         try {
+            // A full reload first: the create submit is hx-boosted, so only the main content was
+            // swapped and the rail still holds the switcher rendered BEFORE this workspace existed.
+            // The switcher's first render after the reload is a first-render wait too (#327): the
+            // loaded-box bound, then the select acts on a present element at the default patience.
+            page.reload()
+            page.locator("#workspace-switcher").waitFor(Locator.WaitForOptions().setTimeout(FIRST_RENDER_TIMEOUT_MS))
+            // The switch's own transport is watched from here on, as before #761: the reload's
+            // navigation must never stand in for the switch's.
+            page.onRequest(requested)
+            page.onResponse(responded)
+            page.onRequestFailed(failed)
+            page.onFrameNavigated(navigated)
+            outcome.phase = SwitchPhase.SHELL_INIT
             // #629: the switch is submitted by shell.js's delegated change listener; select only
             // once its init ran, so a change can never fire into a page with no listener.
             page.waitForFunction(
                 "() => window.__dpShellInit === true",
                 null,
-                Page.WaitForFunctionOptions().setTimeout(FIRST_RENDER_TIMEOUT_MS),
+                Page.WaitForFunctionOptions().setTimeout(initTimeoutMs),
             )
+            outcome.phase = SwitchPhase.SELECT
+            // `force`: the select is an invisible overlay on the switcher card (the label is the
+            // hit target), so Playwright's visibility precondition never clears on it.
             page.selectOption("#workspace-switcher", arrayOf(name), Page.SelectOptionOptions().setForce(true))
+            outcome.phase = SwitchPhase.SWITCH_REQUEST
             awaitSwitchRequest(page, outcome)
+            outcome.phase = SwitchPhase.SWITCH_RESULT
             // Observe the POST itself: an abort has no response and must fail immediately;
             // an absent request must be distinguishable from a response redirecting elsewhere.
             page.waitForCondition { outcome.failure != null || (outcome.response != null && outcome.navigationUrl != null) }
@@ -261,11 +277,18 @@ abstract class BrowserSuite {
             if (outcome.failure != null || location !in setOf("/dashboard", "$baseUrl/dashboard")) {
                 outcome.fail(page, name)
             }
+            outcome.phase = SwitchPhase.DASHBOARD_LANDING
             page.waitForURL("$baseUrl/dashboard")
-            if (page.locator("#workspace-switcher").inputValue() != name) outcome.fail(page, name)
+            outcome.phase = SwitchPhase.SELECTED_VALUE
+            val selected = page.locator("#workspace-switcher").inputValue()
+            if (selected != name) {
+                outcome.selected = selected
+                outcome.fail(page, name)
+            }
         } catch (e: PlaywrightException) {
             outcome.fail(page, name, e)
         } finally {
+            page.offRequestFailed(loadFailed)
             page.offRequest(requested)
             page.offResponse(responded)
             page.offRequestFailed(failed)
@@ -284,17 +307,21 @@ abstract class BrowserSuite {
         page: Page,
         outcome: WorkspaceSwitchOutcome,
     ) {
+        val bound = "${SWITCH_REQUEST_TIMEOUT_MS.toLong()}ms"
         try {
             page.waitForCondition(
                 { outcome.request != null || outcome.failure != null },
                 Page.WaitForConditionOptions().setTimeout(SWITCH_REQUEST_TIMEOUT_MS),
             )
+            outcome.requestWait = "observed within $bound"
         } catch (_: TimeoutError) {
             outcome.pageState = switcherState(page)
             println("WARN #629 no switch POST after ${SWITCH_REQUEST_TIMEOUT_MS}ms; re-dispatching change once: ${outcome.pageState}")
+            outcome.requestWait = "none within $bound, re-dispatching the change once"
             page.evaluate(
                 "() => document.getElementById('workspace-switcher').dispatchEvent(new Event('change', { bubbles: true }))",
             )
+            outcome.requestWait = "none within $bound, the change re-dispatched once"
         }
     }
 
@@ -316,17 +343,66 @@ abstract class BrowserSuite {
                 """.trimIndent(),
             ).toString()
 
-    /** Only the switch's transport metadata; never cookies, headers containing tokens or bodies. */
-    private class WorkspaceSwitchOutcome(
-        private val url: String,
+    /**
+     * The in-document facts of a shell-init wait — url, document readiness, the flag — read
+     * defensively, because a page mid-navigation refuses evaluate. ONE probe for the suite:
+     * [enterWorkspace]'s render and init phases (#761) and AppShellBrowserTest's own waits (#717).
+     */
+    protected fun shellInitFacts(on: Page): String =
+        runCatching {
+            on.evaluate(
+                "() => 'url=' + location.href + " +
+                    "' readyState=' + document.readyState + " +
+                    "' __dpShellInit=' + String(window.__dpShellInit)",
+            ) as String
+        }.getOrElse { "the document probe itself failed: $it" }
+
+    /**
+     * #761: [enterWorkspace]'s steps, in order. A red names the phase that did not finish — [label]
+     * leads its message, [step] says what did not happen — and prints only what that phase can
+     * have observed.
+     */
+    private enum class SwitchPhase(
+        val label: String,
+        val step: String,
     ) {
+        SWITCHER_RENDER("switcher-render", "the reload and the switcher's first render did not finish"),
+        SHELL_INIT("shell-init", "the window.__dpShellInit wait did not finish"),
+        SELECT("select", "the forced selectOption did not finish"),
+        SWITCH_REQUEST("switch-request", "the wait for the switch request and its one re-dispatch did not finish"),
+        SWITCH_RESULT("switch-result", "the switch request's outcome was not a redirect to /dashboard"),
+        DASHBOARD_LANDING("dashboard-landing", "the navigation to /dashboard did not finish"),
+        SELECTED_VALUE("selected-value", "the switcher on /dashboard did not show the requested workspace"),
+    }
+
+    /**
+     * The switch's transport metadata and the document's own state only: never cookies, header
+     * values or bodies, and a failed load's URL without its query or fragment (#761).
+     */
+    private inner class WorkspaceSwitchOutcome(
+        private val url: String,
+        private val initTimeoutMs: Double,
+    ) {
+        var phase = SwitchPhase.SWITCHER_RENDER
         var request: Request? = null
         var response: Response? = null
         var failure: String? = null
         var navigationUrl: String? = null
         var pageState: String? = null
+        var requestWait: String? = null
+        var selected: String? = null
+        private val failedLoads = mutableListOf<String>()
+        private var failedLoadCount = 0
 
         fun matches(request: Request): Boolean = request.url() == url && request.method() == "POST"
+
+        /** Every failed load since the reload is counted; the first [FAILED_LOADS_KEPT] are kept. */
+        fun recordFailedLoad(request: Request) {
+            failedLoadCount++
+            if (failedLoads.size < FAILED_LOADS_KEPT) {
+                failedLoads += "${request.resourceType()} ${originAndPath(request.url())} ${request.failure()}"
+            }
+        }
 
         fun fail(
             page: Page,
@@ -339,11 +415,69 @@ abstract class BrowserSuite {
             name: String,
         ): String =
             "Workspace switch to '$name' did not reach /dashboard with the requested workspace: " +
-                "request=${request?.method() ?: "none"} $url, " +
-                "status=${response?.status() ?: "none"}, " +
-                "Location=${response?.headerValue("location") ?: "none"}, " +
-                "failure=${failure ?: "none"}, finalUrl=${page.url()}, " +
-                "pageState=${pageState ?: "not read (the POST arrived in time)"}"
+                "phase=${phase.label} (${phase.step}), " +
+                (facts(page) + "finalUrl=${page.url()}").joinToString(", ")
+
+        /** What [phase] can have observed — never a fact only a later phase would learn. */
+        private fun facts(page: Page): List<String> =
+            when (phase) {
+                SwitchPhase.SWITCHER_RENDER -> renderPhaseFacts(page)
+                SwitchPhase.SHELL_INIT -> documentPhaseFacts(page, initTimeoutMs, requestFact())
+                SwitchPhase.SELECT -> listOf(requestFact(), "switcher=${switcherFacts(page)}")
+                SwitchPhase.SWITCH_REQUEST -> listOf(requestFact(), requestWaitFact()) + pageStateFact()
+                SwitchPhase.SWITCH_RESULT -> listOf(requestFact(), requestWaitFact()) + pageStateFact() + transportFacts()
+                SwitchPhase.DASHBOARD_LANDING -> listOf(requestFact()) + transportFacts()
+                SwitchPhase.SELECTED_VALUE -> listOf("selected=${selected ?: "not read"}")
+            }
+
+        /** Reload uses the supplied page's navigation timeout; only the switcher's render has our explicit bound. */
+        private fun renderPhaseFacts(page: Page) =
+            listOf(
+                "reloadBound=page navigation timeout",
+                "switcherRenderBound=${FIRST_RENDER_TIMEOUT_MS.toLong()}ms",
+                "select=not run",
+                documentFact(page),
+                failedLoadsFact(),
+            )
+
+        /** The init phase: its bound, what the switch had done, the document, the failed loads. */
+        private fun documentPhaseFacts(
+            page: Page,
+            bound: Double,
+            switchFact: String,
+        ) = listOf("bound=${bound.toLong()}ms", switchFact, documentFact(page), failedLoadsFact())
+
+        private fun requestFact() = "request=${request?.let { "${it.method()} ${it.url()}" } ?: "none"}"
+
+        private fun requestWaitFact() = "requestWait=${requestWait ?: "did not finish"}"
+
+        /** Printed only when the request wait timed out and read it — never a stand-in claim. */
+        private fun pageStateFact() = listOfNotNull(pageState?.let { "pageState=$it" })
+
+        private fun transportFacts() =
+            listOf(
+                "status=${response?.status() ?: "none"}",
+                "Location=${response?.headerValue("location") ?: "none"}",
+                "failure=${failure ?: "none"}",
+            )
+
+        private fun documentFact(page: Page) = "document=${shellInitFacts(page)}"
+
+        private fun switcherFacts(page: Page) = runCatching { switcherState(page) }.getOrElse { "the switcher probe itself failed: $it" }
+
+        private fun failedLoadsFact(): String {
+            if (failedLoadCount == 0) return "failedLoads=none since the reload"
+            val shown = if (failedLoadCount > failedLoads.size) " (the first ${failedLoads.size} shown)" else ""
+            return "failedLoads=$failedLoadCount since the reload$shown [${failedLoads.joinToString("; ")}]"
+        }
+
+        /** Origin and path only: a query or a fragment can carry a capability. */
+        private fun originAndPath(raw: String): String =
+            runCatching {
+                val uri = java.net.URI(raw)
+                val port = if (uri.port == -1) "" else ":${uri.port}"
+                if (uri.isOpaque || uri.host == null) "${uri.scheme}:" else "${uri.scheme}://${uri.host}$port${uri.rawPath.orEmpty()}"
+            }.getOrElse { "(an unparseable URL)" }
     }
 
     /** A logged-out session — a fresh context+page pair the test must [Session.close]. */
@@ -518,6 +652,9 @@ abstract class BrowserSuite {
         private const val SECRET_BYTES = 32
         private const val BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
         private val SECURE_RANDOM = SecureRandom()
+
+        /** #761: how many failed loads since the reload a render/init red prints (all are counted). */
+        private const val FAILED_LOADS_KEPT = 10
 
         private fun randomSecret(): String =
             Base64.getEncoder().encodeToString(ByteArray(SECRET_BYTES).also { SECURE_RANDOM.nextBytes(it) })

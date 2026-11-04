@@ -100,6 +100,8 @@ val generateThirdPartyNotices = tasks.register<ThirdPartyNoticesTask>("generateT
     })
     mysql.set(providers.gradleProperty("mysql").isPresent)
     oracle.set(providers.gradleProperty("oracle").isPresent)
+    // #781: the catalog is the one hand-edited DuckDB version; the licence read checks the ARG and CORE against it.
+    duckdbJdbcVersion.set(libs.versions.duckdb.jdbc.get())
     dockerfile.set(rootProject.layout.projectDirectory.file("Dockerfile"))
     duckdbChecksums.set(rootProject.layout.projectDirectory.file("deploy/duckdb-extensions.sha256"))
     licenseTexts.set(rootProject.layout.projectDirectory.dir("gradle/licenses"))

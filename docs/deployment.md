@@ -1,9 +1,9 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.61
+**Status:** v1.63
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-04
 
 ---
 
@@ -39,25 +39,61 @@ Published to `ghcr.io/datapipelines/datapipelines:{version}` and `docker.io/data
 - **User**: non-root (`datapipelines`, a system account created with `useradd --system`; no fixed UID — a chart or compose `runAsUser` must not assume 1000).
 - **Entrypoint**: `["java", "-Dpolyglot.engine.userResourceCache=/opt/graaljs/resources", "-jar", "/app/datapipelines.jar"]` (exec form). The image defines no JVM-flags hook: a JVM option variable (`JAVA_TOOL_OPTIONS` and friends) would reach the JVM without one, which is why the shipped deploy files refuse those names (§6.4, §9).
 
-To re-pin on a `DUCKDB_CORE_VERSION` bump, update **three inputs together**: the
-Dockerfile core ARG, `deploy/duckdb-extensions.sha256` (eight sums plus the four
-`# <name> commit=<hash>` annotations), and the commit-bound licence inventory in
-`buildSrc/src/main/kotlin/DuckDbExtensionLicenses.kt`. In a temporary directory,
-for each of `linux_amd64` and `linux_arm64` and each of `httpfs`, `aws`, `iceberg`,
-`avro`, fetch `https://extensions.duckdb.org/v<core>/<platform>/<name>.duckdb_extension.gz`,
-decompress with `gunzip`, and run `sha256sum` on the **decompressed** file. Write
-sorted `sha256sum -c` lines relative to `/opt/duckdb/extensions`; inspect each
-binary's final 512 bytes (`tail -c 512 <file> | strings`) for its extension
-repository commit, core and platform. Both platforms must report the same commit
-per extension. Refresh each extension's linked closure,
-`deploy/duckdb-extension-ports/<name>.tsv`, at those commits and the core version, as
-DEVELOPMENT.md's third-party notices section describes: the vcpkg port closure, direct
-and transitive, plus the DuckDB core `third_party` code and port-vendored code that
-both binaries' symbols witness. Review every new component's `LICENSE`, update its
-licence in `DuckDbExtensionLicenses.kt` and vendor any new SPDX text from the snapshot
-named in the allowlist. Run `:modules:app:generateThirdPartyNotices`, the buildSrc licence
-fixtures and `DockerfileDuckDbExtensionPinTest`, rebuild the jar, and prove one
-bad sum refuses the image build before building the restored pins successfully.
+**Bumping DuckDB (the runbook, #781).** The version catalog's `duckdb-jdbc`
+(`gradle/libs.versions.toml`) declares the bundled driver version. The runtime token
+reads the resolved version; build checks and the drift guard cover the related pins
+and detected statements described below. A bump follows these steps in order:
+
+1. **Catalog.** Edit `duckdb-jdbc`. Dependency locking is strict, so the next resolution
+   refuses the edit until step 2 has run.
+2. **Locks and verification metadata.** Regenerate every `gradle.lockfile` and
+   `gradle/verification-metadata.xml` from a cold `GRADLE_USER_HOME` with CI's cold
+   command, as DEVELOPMENT.md §6.2 and §6.3 describe, and review the added checksums.
+   What the jar states about the driver follows the resolution with no edit: the
+   datasources jar's generated `duckdb-version.properties`, the site's version token and
+   `DuckDbVersionTest`'s `PRAGMA version` oracle.
+3. **Core ARG and checksums.** Set the Dockerfile's `DUCKDB_CORE_VERSION` to the catalog
+   version's first three components: the core the driver reports as `PRAGMA version`
+   (`v<core>`), which keys the extension repository (the JDBC patch version 404s there).
+   In a temporary directory, for each of `linux_amd64` and `linux_arm64` and each of
+   `httpfs`, `aws`, `iceberg`, `avro`, fetch
+   `https://extensions.duckdb.org/v<core>/<platform>/<name>.duckdb_extension.gz`,
+   decompress with `gunzip`, and run `sha256sum` on the **decompressed** file. Write
+   sorted `sha256sum -c` lines relative to `/opt/duckdb/extensions` into
+   `deploy/duckdb-extensions.sha256`; inspect each binary's final 512 bytes
+   (`tail -c 512 <file> | strings`) for its extension repository commit, core and
+   platform, and write the four `# <name> commit=<hash>` annotations. Both platforms
+   must report the same commit per extension.
+4. **Closures.** Refresh each extension's linked closure,
+   `deploy/duckdb-extension-ports/<name>.tsv`, at those commits and the core version, as
+   DEVELOPMENT.md's third-party notices section describes (#692, #747): the vcpkg port
+   closure, direct and transitive, plus the DuckDB core `third_party` code and
+   port-vendored code that both binaries' symbols witness.
+5. **`CORE` review.** `CORE` in `buildSrc/src/main/kotlin/DuckDbExtensionLicenses.kt` is
+   the core tag the inventory's licences were reviewed at, and stays hand-declared: a
+   derived tag would claim a review nobody did. Review every new component's `LICENSE`,
+   update its licence and the tag, and vendor any new SPDX text from the snapshot named
+   in the allowlist. The notices build refuses an ARG that is not the catalog version's
+   core, a reviewed core tag other than `v<ARG>`, and a `duckdb` or `duckdb/*` closure
+   row naming another core (DEVELOPMENT.md's message list).
+6. **The guard's lists and inventory.** Run `DuckDbVersionSpecDriftTest`. Its red list
+   contains detected, non-allowlisted literals that name an old version without dated
+   provenance: move each to the new version, or re-word it when the old version was
+   the point. Its re-probe list names detected provenance notes and source locations
+   that render the version token: rerun each probe on the new version and record the
+   result with its new date, or leave the note describing the version it measured.
+   Review the tracked-file literal inventory as well: the guard skips binary files
+   and files of 4 MB or more, and cannot discover a bare obsolete version unless a
+   non-allowlisted DuckDB context names that version somewhere in the tree. Review
+   its reasoned ownership exclusions, including generated files, frozen snapshots,
+   and the sample-data CLI pins and manifests; those have separate update procedures.
+7. **Posture evidence.** Rerun the dp-lake read-posture evidence harness (spike E9,
+   #775) against the new driver and extensions. A changed result is a finding to resolve
+   before the bump lands.
+8. **Prove it.** Run `:modules:app:generateThirdPartyNotices`, the buildSrc licence
+   fixtures, `DockerfileDuckDbExtensionPinTest` and `DuckDbVersionSpecDriftTest`, rebuild
+   the jar, and prove one bad sum refuses the image build before building the restored
+   pins successfully.
 
 **`-Duser.timezone=UTC` is normative, not a suggestion.** The type system assumes a UTC JVM: ingest normalizes timezone-aware source values to UTC and treats naive source timestamps as already-UTC ([Type System §8.4](type-system.md#84-timestamp-timezone-normalization)), and every internal `TIMESTAMPTZ` is stored and rendered in UTC. A container whose JVM default zone is anything else silently shifts rendered timestamps. No image entrypoint sets it: every deployment — container, bare JVM or JAR (§3.2, §6.5) — MUST pass `-Duser.timezone=UTC` itself.
 
@@ -1376,6 +1412,8 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-04 | v1.63 | #781 merge follow-up | **§3.1:** state the version guard's detected-literal scope, ownership exclusions and uncaptured-bare-version limit; require reviewing the tracked-file inventory during a bump. |
+| 2026-11-04 | v1.62 | #781 | **§3.1:** the three-input DuckDB re-pin paragraph becomes the bump runbook: the version catalog's `duckdb-jdbc` is the one hand-edited DuckDB version, then cold locks and verification metadata, the core ARG and checksums, closures, the hand-declared `CORE` review, `DuckDbVersionSpecDriftTest`'s red and re-probe lists, and the E9 read-posture harness rerun. The notices build now refuses an ARG, reviewed core tag or core closure row that disagrees with the catalog. No version changes. |
 | 2026-11-01 | v1.61 | #685 merge follow-up | **§3.1 / §6.5:** the image disables glibc's native thread-stack cache before its JVMs start; overrides retain that entry, and bare JVM launches set it before Java starts. The Dockerfile drift guard pins the declaration and launch order. |
 | 2026-10-28 | v1.60 | #747 | **§3.1:** the DuckDB re-pin recipe refreshes each extension's linked closure, `deploy/duckdb-extension-ports/<name>.tsv` (the vcpkg port closure, direct and transitive, plus the DuckDB core `third_party` code and port-vendored code both binaries' symbols witness), before reviewing every new component's licence; the generator refuses a closure bound to another commit, a closure entry without a reviewed licence and a reviewed component missing from the closure. |
 | 2026-10-27 | v1.59 | #743 — renumbered at merge after #692’s v1.58 | **§3.1:** the four image bullets state what the Dockerfile builds — base image `eclipse-temurin:21-jre` (Ubuntu glibc; argon2-jvm loads its native library through JNA), a single-stage build (the boot jar is built on the host and copied in; the image adds the DuckDB extension bundle, the GraalJS isolate + resource cache and the third-party notices file), the `useradd --system` account with no fixed UID, and the exec-form entrypoint naming the GraalJS resource cache and `/app/datapipelines.jar`; the timezone paragraph no longer claims the entrypoint bakes the UTC flag in — every deployment passes `-Duser.timezone=UTC` itself. `DeploymentImageBulletsSpecDriftTest` pins the bullets to the Dockerfile (one `FROM` tag, the `ENTRYPOINT` array verbatim, the `USER`/`useradd --system` account) and refuses the retired claims — the base tag, the builder-stage build, the builder-image pin, the JVM-flags variable, the fixed UID, the wrong jar path and the baked-in-UTC claim — described here rather than quoted, so the retired-words grep over this file stays empty. The Dockerfile's healthcheck comment now names the Ubuntu base, not alpine. |

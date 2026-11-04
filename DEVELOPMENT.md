@@ -553,6 +553,18 @@ use `BrowserSuite.FIRST_RENDER_TIMEOUT_MS` (90 s, CI and local alike); every act
 acts on a present DOM and keeps the ordinary patience (30 s locally, where a 30 s wait IS the
 defect; the gates raise that to CI's 90 s per action with `-Pdp.browser.ciPatience=true`, #438).
 
+**A failed workspace switch names the ONE phase that did not finish (#761).**
+`BrowserSuite.enterWorkspace` runs seven phases in order: `switcher-render` (the reload and the
+switcher's first render), `shell-init` (the `window.__dpShellInit` wait), `select`,
+`switch-request` (the 15 s wait for the switch request and its one re-dispatch), `switch-result`
+(the response or failure and its `Location`), `dashboard-landing` and `selected-value`. Every red
+it raises leads with `phase=<name>` and prints only what that phase can have observed. A shell that
+never initialized reads `phase=shell-init`, `request=none`, the document's URL, readiness and flag,
+and the subresource loads that failed since the reload (all counted, the first ten listed, origin
+and path only). It never claims a switch request the page did not send.
+`WorkspaceSwitchOutcomeBrowserTest` pins the init phase with a planted `shell.js` abort, and the
+switch-result phase with an aborted, a 403 and a 302 switch.
+
 ```bash
 # The marketing site's screenshots, produced by a script rather than by hand (070 §C).
 ./app.sh --start --demo nyc                      # the deployment being photographed
@@ -1427,6 +1439,15 @@ Malformed Dockerfile declarations fail as
 `Invalid DUCKDB_CORE_VERSION:`,
 `Dockerfile must declare exactly one DuckDB extension loop` or
 `Duplicate or empty DuckDB extension names:`.
+The version catalog's `duckdb-jdbc` is the one hand-edited DuckDB version (#781); the
+read refuses any other site that disagrees with it as
+`Invalid catalog duckdb-jdbc version:`,
+`DUCKDB_CORE_VERSION <arg> is not the core of the catalog's duckdb-jdbc <jdbc>` (the ARG
+must be the catalog version's first three components),
+`DuckDB reviewed licence tag is not core v<version> for <name>:` (the inventory's
+`duckdb/duckdb/tree/v…` tag) and
+`DuckDB closure row names core <x>, not v<version>, for <name>:` (a `duckdb` or
+`duckdb/*` closure row).
 A needed text absent from `gradle/licenses` fails as `Missing vendored licence text:`.
 Re-pin the core ARG, checksum/commit manifest and reviewed licence inventory together;
 see [Deployment §3.1](docs/deployment.md#31-docker-image).

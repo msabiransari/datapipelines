@@ -18,6 +18,8 @@ import co.datapipelines.templates.WorkspaceTemplateEngines
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.mockk.mockk
 import io.modelcontextprotocol.server.McpStatelessSyncServer
 import io.modelcontextprotocol.server.transport.HttpServletStatelessServerTransport
@@ -83,6 +85,30 @@ class McpServerAutoConfigurationTest {
             .run { context ->
                 context.getBeanProvider(McpToolDispatcher::class.java).ifAvailable shouldBe null
             }
+    }
+
+    /**
+     * 780 — the script budgets the manual's `scripts-evaluation` quotes are the WIRED ones:
+     * the stub supplies non-defaults (1234/7/65/99) and the rendered document carries exactly
+     * them, proving the `ScriptDocValues` bean flows through `DocContext.of` into the prose.
+     * A render that fell back to `DocContext.DEFAULTS` (100000/4/64/100) is red here — which
+     * is the guard a golden under the defaults cannot be (a planted literal renders
+     * identically when the default equals the literal).
+     */
+    @Test
+    fun `the rendered scripts-evaluation carries the wired script budgets, not the defaults`() {
+        runner.run { context ->
+            val markdown = context.getBean(co.datapipelines.mcp.docs.DocSet::class.java).get("scripts-evaluation").markdown
+            // the renderer re-wraps prose to its own width; compare on one line (DocSetStructureTest's pattern)
+            val oneLine = markdown.replace(Regex("\\s+"), " ")
+            assertAll(
+                { oneLine shouldContain "(`1234` rows) before any evaluation" },
+                { oneLine shouldContain "At most `7` evaluations run at once" },
+                { oneLine shouldContain "at most `65` are admitted in total" },
+                { oneLine shouldContain "(default `99`)" },
+                { oneLine shouldNotContain "100000" },
+            )
+        }
     }
 
     /** The collaborator beans `app` supplies; mocked, since none of them is under test here. */
@@ -160,6 +186,13 @@ class McpServerAutoConfigurationTest {
         @Bean fun resultUrls(): ResultUrlFactory = ResultUrlFactory { "https://dp.test/api/v1/executions/$it/result" }
 
         @Bean fun executorConfig(): ExecutorConfig = ExecutorConfig()
+
+        // 780 — the script numbers the served manual's `scripts-evaluation` quotes. NON-default
+        // on purpose: the wiring test above asserts the rendered prose carries exactly these,
+        // so a docSet that fell back to DocContext.DEFAULTS (100000/4/64/100) is red.
+        @Bean fun scriptDocValues(): co.datapipelines.mcp.docs.ScriptDocValues =
+            co.datapipelines.mcp.docs
+                .ScriptDocValues(maxInputRows = 1234, poolSize = 7, poolQueue = 65, maxDepth = 99)
 
         // 242a — the served manual's §13 port (`web`'s DocsConfiguration declares the real
         // implementation in the assembled application). The set renders from the packaged

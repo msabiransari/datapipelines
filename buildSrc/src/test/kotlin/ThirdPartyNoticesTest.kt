@@ -159,6 +159,7 @@ class ThirdPartyNoticesTest {
                 root().resolve("Dockerfile").readText(),
                 root().resolve("deploy/duckdb-extensions.sha256").readText(),
                 closures(),
+                catalogDuckDbJdbc(),
             )
         assertEquals(
             listOf("avro:v1.5.5+f9d5902", "aws:v1.5.5+efa54a9", "httpfs:v1.5.5+827222f", "iceberg:v1.5.5+45163a28"),
@@ -179,7 +180,9 @@ class ThirdPartyNoticesTest {
     fun `a Dockerfile name without checksum coverage and an unlisted name both fail`() {
         listOf(fixtureDockerfile.replace("httpfs", "mystery"), fixtureDockerfile.replace("httpfs ", "")).forEach {
             val failure =
-                assertThrows(IllegalStateException::class.java) { ThirdPartyNotices.duckdbExtensions(it, checksums(), closures()) }
+                assertThrows(IllegalStateException::class.java) {
+                    ThirdPartyNotices.duckdbExtensions(it, checksums(), closures(), FIXTURE_JDBC)
+                }
             assertTrue(failure.message.orEmpty().contains("httpfs"), failure.message)
         }
     }
@@ -204,6 +207,7 @@ class ThirdPartyNoticesTest {
                     fixtureDockerfile,
                     checksums(),
                     closures(),
+                    FIXTURE_JDBC,
                     DuckDbExtensionLicenses.inventory() - "httpfs",
                 )
             }
@@ -219,7 +223,7 @@ class ThirdPartyNoticesTest {
             )
         val failure =
             assertThrows(IllegalStateException::class.java) {
-                ThirdPartyNotices.duckdbExtensions(fixtureDockerfile, checksums(), closures(), inventory)
+                ThirdPartyNotices.duckdbExtensions(fixtureDockerfile, checksums(), closures(), FIXTURE_JDBC, inventory)
             }
         assertEquals("Unknown DuckDB component licence: Unknown-ID", failure.message)
     }
@@ -287,7 +291,7 @@ class ThirdPartyNoticesTest {
         inventory["httpfs"] = httpfs.copy(components = httpfs.components + DuckDbComponent("mystery", "MIT", "https://example.test"))
         val failure =
             assertThrows(IllegalStateException::class.java) {
-                ThirdPartyNotices.duckdbExtensions(fixtureDockerfile, checksums(), closures(), inventory)
+                ThirdPartyNotices.duckdbExtensions(fixtureDockerfile, checksums(), closures(), FIXTURE_JDBC, inventory)
             }
         assertEquals("DuckDB inventory component not in closure for httpfs: mystery", failure.message)
     }
@@ -395,6 +399,58 @@ class ThirdPartyNoticesTest {
     }
 
     @Test
+    fun `the Dockerfile core ARG is the catalog duckdb-jdbc's first three components`() {
+        val real = root().resolve("Dockerfile").readText()
+        val arg = requireNotNull(Regex("(?m)^ARG DUCKDB_CORE_VERSION=(\\S+)$").find(real)).groupValues[1]
+        assertEquals(catalogDuckDbJdbc().split('.').take(3).joinToString("."), arg)
+        listOf(
+            extensionsFailure(jdbc = "1.5.6.0") to "(expected 1.5.6)",
+            extensionsFailure(dockerfile = fixtureDockerfile.replace("=1.5.5\n", "=1.5.6\n")) to "DUCKDB_CORE_VERSION 1.5.6 ",
+            extensionsFailure(jdbc = "2.0.0") to "(expected 2.0.0)",
+        ).forEach { (failure, detail) ->
+            assertTrue(failure.startsWith("DUCKDB_CORE_VERSION "), failure)
+            assertTrue(failure.contains(" is not the core of the catalog's duckdb-jdbc "), failure)
+            assertTrue(failure.contains(detail), failure)
+        }
+        listOf("1.5", "", "\${OTHER}", "1.5.5.1-SNAPSHOT").forEach {
+            assertEquals("Invalid catalog duckdb-jdbc version: $it", extensionsFailure(jdbc = it))
+        }
+    }
+
+    @Test
+    fun `a reviewed core tag other than the Dockerfile's core fails naming the extension and component`() {
+        listOf(
+            inventoryWithCoreSource("httpfs") { it.replace("/tree/v1.5.5", "/tree/v1.5.6") } to "duckdb (",
+            inventoryWithCoreSource("iceberg") { it.replace("/tree/v1.5.5/third_party/re2", "/tree/v1.5.55/third_party/re2") } to
+                "duckdb/re2 (",
+        ).forEach { (inventory, component) ->
+            val failure = extensionsFailure(inventory = inventory)
+            assertTrue(failure.startsWith("DuckDB reviewed licence tag is not core v1.5.5 for "), failure)
+            assertTrue(failure.contains(component), failure)
+        }
+    }
+
+    @Test
+    fun `a closure row for DuckDB naming another core version fails naming the row`() {
+        val failure = extensionsFailure(closures = closure("httpfs") { it.replace("duckdb/re2\t1.5.5\t", "duckdb/re2\t1.5.6\t") })
+        assertEquals("DuckDB closure row names core 1.5.6, not v1.5.5, for httpfs: duckdb/re2", failure)
+        assertEquals(
+            "DuckDB closure row names core 1.5.4, not v1.5.5, for avro: duckdb",
+            extensionsFailure(closures = closure("avro") { it.replace("\nduckdb\t1.5.5\t", "\nduckdb\t1.5.4\t") }),
+        )
+    }
+
+    private fun extensionsFailure(
+        closures: Map<String, String> = closures(),
+        jdbc: String = FIXTURE_JDBC,
+        dockerfile: String = fixtureDockerfile,
+        inventory: Map<String, DuckDbExtensionLicense> = DuckDbExtensionLicenses.inventory(),
+    ): String =
+        assertThrows(IllegalStateException::class.java) {
+            extensions(closures = closures, jdbc = jdbc, dockerfile = dockerfile, inventory = inventory)
+        }.message.orEmpty()
+
+    @Test
     fun `missing duplicate and interpolated DuckDB core versions fail closed`() {
         listOf(
             "",
@@ -402,11 +458,37 @@ class ThirdPartyNoticesTest {
             fixtureDockerfile.replace("=1.5.5", "=\${OTHER}"),
             fixtureDockerfile + "ARG DUCKDB_CORE_VERSION=\${OTHER}\n",
         ).forEach {
-            assertThrows(IllegalStateException::class.java) { ThirdPartyNotices.duckdbExtensions(it, checksums(), closures()) }
+            assertThrows(IllegalStateException::class.java) {
+                ThirdPartyNotices.duckdbExtensions(it, checksums(), closures(), FIXTURE_JDBC)
+            }
         }
     }
 
     private val fixtureDockerfile = "ARG DUCKDB_CORE_VERSION=1.5.5\nfor ext in httpfs aws iceberg avro; do\n"
+
+    /** The catalog's `duckdb-jdbc`, read the way the build reads it — the one hand-edited DuckDB version (#781). */
+    private fun catalogDuckDbJdbc(): String =
+        requireNotNull(Regex("""(?m)^duckdb-jdbc = "([^"]+)"""").find(root().resolve("gradle/libs.versions.toml").readText())) {
+            "no duckdb-jdbc version in the catalog"
+        }.groupValues[1]
+
+    /** The inventory with every reviewed `duckdb`-tree source of [name] rewritten by [edit]. */
+    private fun inventoryWithCoreSource(
+        name: String,
+        edit: (String) -> String,
+    ): Map<String, DuckDbExtensionLicense> {
+        val inventory = DuckDbExtensionLicenses.inventory().toMutableMap()
+        val license = inventory.getValue(name)
+        inventory[name] =
+            license.copy(
+                components =
+                    license.components.map {
+                        if (it.name == "duckdb" || it.name.startsWith("duckdb/")) it.copy(source = edit(it.source)) else it
+                    },
+            )
+        check(inventory != DuckDbExtensionLicenses.inventory()) { "edit missed" }
+        return inventory
+    }
 
     private fun checksums(): String =
         buildString {
@@ -419,7 +501,10 @@ class ThirdPartyNoticesTest {
     private fun extensions(
         checksums: String = checksums(),
         closures: Map<String, String> = closures(),
-    ): List<DuckDbExtensionNotice> = ThirdPartyNotices.duckdbExtensions(fixtureDockerfile, checksums, closures)
+        jdbc: String = FIXTURE_JDBC,
+        dockerfile: String = fixtureDockerfile,
+        inventory: Map<String, DuckDbExtensionLicense> = DuckDbExtensionLicenses.inventory(),
+    ): List<DuckDbExtensionNotice> = ThirdPartyNotices.duckdbExtensions(dockerfile, checksums, closures, jdbc, inventory)
 
     private fun root(): File = File(requireNotNull(System.getProperty("repo.catalog"))).parentFile.parentFile
 
@@ -461,4 +546,9 @@ class ThirdPartyNoticesTest {
         name: String,
         version: String,
     ): String = "<parent><groupId>$group</groupId><artifactId>$name</artifactId><version>$version</version></parent>"
+
+    private companion object {
+        /** A catalog version whose core is the fixture Dockerfile's (and the committed closures') 1.5.5. */
+        const val FIXTURE_JDBC = "1.5.5.1"
+    }
 }

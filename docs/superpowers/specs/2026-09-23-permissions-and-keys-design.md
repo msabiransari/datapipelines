@@ -320,8 +320,12 @@ the first code commit. Migration: the next free number at that point (7b takes V
 **(b) Key identities and key roles.**
 - `users.kind`, identities, `api_keys.role` with its CHECK, the migration (PK9), and removal of
   scopes (§4). C1–C5 land here.
-- The skill's key sentences change in the same commit, with the mirror regenerated
-  (`:modules:mcp-server:skillArtifacts`).
+- The skill's key sentences change in the same commit as the code. The mirror
+  regeneration this bullet originally named — `:modules:mcp-server:skillArtifacts` — was
+  retired by 242a on 2026-09-25 (the manual is rendered at boot; the mirror directory and
+  its build tasks are gone). The equivalent checks today: the narrative golden
+  regenerated (`DOCS_GOLDEN_REGENERATE=true`, then re-run green), `:modules:mcp-server:docsExport`
+  and `scripts/docs-audit.sh` green (record `2026-09-25-agent-docs-by-area-design.md:107`).
 - Docs: auth §4 (identities), §7.4, §7.5, §7.7, metadata-db, enums, rest-api §16 (key creation
   takes a role, not scopes), mcp-server.
 

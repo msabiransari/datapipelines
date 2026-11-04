@@ -1,3 +1,6 @@
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.artifacts.result.UnresolvedDependencyResult
+
 // module-structure.md §5.4 — allowed internal deps: typesystem, persistence (#336: FailureShape
 // for the lease's cleanup WARNs; the SQLState walk stays in its one implementation).
 plugins { id("datapipelines.common-conventions") }
@@ -88,4 +91,33 @@ tasks.named<Test>("test") {
         .file(rootProject.file("docs/datasources.md"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .withPropertyName("dialectChecklistSpec")
+}
+
+// #781 — the DuckDB driver version as RESOLVED, packaged beside the code that loads it, so what the
+// product states (DuckDbVersion, the site) is what the jar carries — never a typed literal. Read off
+// the runtime graph like :modules:app's generateThirdPartyNotices; the catalog is the declaration,
+// this is the resolution (STRICT locks make them equal, DuckDbVersionTest proves it).
+val generateDuckDbVersion =
+    tasks.register<WriteProperties>("generateDuckDbVersion") {
+        description = "Writes the resolved org.duckdb:duckdb_jdbc version for DuckDbVersion."
+        destinationFile.set(layout.buildDirectory.file("generated/duckdb-version/duckdb-version.properties"))
+        property(
+            "jdbc",
+            providers.provider {
+                val graph = configurations["runtimeClasspath"].incoming.resolutionResult
+                // A refused resolution (a catalog bump before the locks move) surfaces as ITS error,
+                // not as "found []": an unresolved edge is not a component.
+                graph.allDependencies.filterIsInstance<UnresolvedDependencyResult>().firstOrNull()?.let { throw it.failure }
+                val drivers =
+                    graph.allComponents
+                        .mapNotNull { it.id as? ModuleComponentIdentifier }
+                        .filter { it.group == "org.duckdb" && it.module == "duckdb_jdbc" }
+                check(drivers.size == 1) { "runtimeClasspath must resolve exactly one org.duckdb:duckdb_jdbc, found $drivers" }
+                drivers.single().version
+            },
+        )
+    }
+
+tasks.named<ProcessResources>("processResources") {
+    from(generateDuckDbVersion) { into("co/datapipelines/datasources") }
 }

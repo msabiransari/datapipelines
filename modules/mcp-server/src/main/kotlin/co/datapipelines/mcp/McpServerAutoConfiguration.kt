@@ -433,19 +433,22 @@ class McpServerAutoConfiguration {
      * narrative resources from the jar, the boot configuration through [DocContext], and the
      * shipped catalogs through the same tool instances the dispatcher serves and the
      * [DocErrorCatalog] port (`web` declares the implementation — the 068/074 pattern: wherever
-     * the MCP surface is wired, the assembled application has declared it too).
+     * the MCP surface is wired, the assembled application has declared it too). The script
+     * budgets (780) come through [ScriptDocValues] as a REQUIRED parameter the same way — no
+     * silent default: `web`'s `ScriptDocsConfiguration` declares it from `ScriptProperties`.
      */
     @Bean
     @ConditionalOnMissingBean
     fun docSet(
         executorConfig: ExecutorConfig,
+        scriptValues: co.datapipelines.mcp.docs.ScriptDocValues,
         mcpTools: List<McpTool>,
         errorCatalog: co.datapipelines.mcp.docs.DocErrorCatalog,
     ): co.datapipelines.mcp.docs.DocSet =
         co.datapipelines.mcp.docs
             .DocRenderer(
                 co.datapipelines.mcp.docs.DocContext
-                    .of(executorConfig),
+                    .of(executorConfig, scriptValues),
                 errorCatalog,
                 mcpTools,
             ).render()
