@@ -80,7 +80,7 @@ class LakeDefinitionService(
     ): LakeDefinitionVersion {
         requireAuthoring()
         return inTransaction {
-            val table = definitions.findTable(tableId) ?: throw LakeDefinitionErrors.notFound(tableId)
+            val table = definitions.findTableForUpdate(tableId) ?: throw LakeDefinitionErrors.notFound(tableId)
             val released = table.currentDefinitionVersion?.let { definitions.findVersion(tableId, it) }
             val body = LakeDefinitionBodies.parse(bodyJson, base = released?.let { LakeDefinitionBodies.read(it.bodyJson) })
             val canonical = LakeDefinitionBodies.toJson(body)
@@ -122,7 +122,7 @@ class LakeDefinitionService(
     ): LakeReleaseResult {
         requireAuthoring()
         inTransaction {
-            val table = definitions.findTable(tableId) ?: throw LakeDefinitionErrors.notFound(tableId)
+            val table = definitions.findTableForUpdate(tableId) ?: throw LakeDefinitionErrors.notFound(tableId)
             if (definitions.releaseDraft(tableId, version, expectedHash, actor) == 0) {
                 val row = definitions.findVersion(tableId, version) ?: throw LakeDefinitionErrors.notFound(tableId, version)
                 if (row.status == PipelineVersionStatus.DRAFT) throw LakeDefinitionErrors.versionConflict(tableId)
@@ -147,8 +147,9 @@ class LakeDefinitionService(
 
     /**
      * RELEASED [version] → DISCARDED; the current definition falls back to the highest version still RELEASED. The
-     * version this environment has applied is refused (`lake.definition.applied_version`), and so is the current
-     * version while an apply attempt holds it (`lake.definition.table_busy`).
+     * version this environment has applied is refused (`lake.definition.applied_version`). Discard is also refused
+     * while any apply is in flight (`lake.definition.table_busy`): a newer release may already have moved the pointer
+     * beyond the version that attempt is still applying.
      */
     fun discard(
         tableId: UUID,
@@ -157,9 +158,9 @@ class LakeDefinitionService(
     ) {
         requireAuthoring()
         inTransaction {
-            val table = definitions.findTable(tableId) ?: throw LakeDefinitionErrors.notFound(tableId)
+            val table = definitions.findTableForUpdate(tableId) ?: throw LakeDefinitionErrors.notFound(tableId)
             if (table.appliedVersionHere == version) throw LakeDefinitionErrors.appliedVersion(tableId, version)
-            if (table.applyState == LakeApplyState.APPLYING && table.currentDefinitionVersion == version) {
+            if (table.applyState == LakeApplyState.APPLYING) {
                 throw LakeDefinitionErrors.tableBusy(tableId, LakeApplyState.APPLYING.wire)
             }
             if (definitions.discardRelease(tableId, version, actor) == 0) {
@@ -180,7 +181,7 @@ class LakeDefinitionService(
     ) {
         requireAuthoring()
         inTransaction {
-            val table = definitions.findTable(tableId) ?: throw LakeDefinitionErrors.notFound(tableId)
+            val table = definitions.findTableForUpdate(tableId) ?: throw LakeDefinitionErrors.notFound(tableId)
             if (definitions.deleteDraft(tableId, expectedHash) == 0) {
                 if (definitions.findDraft(tableId) == null) throw LakeDefinitionErrors.notDraft(tableId, null, null)
                 throw LakeDefinitionErrors.versionConflict(tableId)

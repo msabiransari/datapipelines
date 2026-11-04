@@ -46,6 +46,13 @@ class LakeDefinitionRepository(
     fun findTable(tableId: UUID): LakeManagedTable? =
         jdbc.query("$SELECT_TABLE WHERE t.id = :id", mapOf("id" to tableId), TABLE_MAPPER).singleOrNull()
 
+    /**
+     * Locks the managed row for a lifecycle transaction. All lifecycle mutations take this lock
+     * before changing version rows, serializing their eligibility checks with apply claims/stamps.
+     */
+    fun findTableForUpdate(tableId: UUID): LakeManagedTable? =
+        jdbc.query("$SELECT_TABLE WHERE t.id = :id FOR UPDATE OF t", mapOf("id" to tableId), TABLE_MAPPER).singleOrNull()
+
     /** The (namespace, table) lookup: the managed table of that name, or null. */
     fun findTable(
         namespace: String,
