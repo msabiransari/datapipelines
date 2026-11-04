@@ -12,10 +12,10 @@ RUN groupadd --system datapipelines && useradd --system --gid datapipelines data
 
 # dp-lake (089 §D): bundle the DuckDB extensions a LAKE datasource loads, so the runtime
 # never INSTALLs and a hardened deployment needs no egress to extensions.duckdb.org
-# (configuration.md §3.25). The version is the CORE version the pinned duckdb_jdbc reports
-# (`PRAGMA version` -> v1.5.5 for duckdb_jdbc 1.5.5.1), NOT the JDBC patch version — the
-# repository path 404s on the latter. A duckdb_jdbc upgrade must re-pin this ARG and the
-# `v<ver>` directory with it; the binaries are valid for exactly one core version.
+# (configuration.md §3.25). The version is the CORE of the catalog's duckdb-jdbc (its first
+# three components, what `PRAGMA version` reports), NOT the JDBC patch version — the repository
+# path 404s on the latter. The notices build refuses an ARG that is not that core (#781); a bump
+# follows deployment.md §3.1's runbook. The binaries are valid for exactly one core version.
 # `avro` is bundled because `LOAD iceberg` auto-loads it from the directory. The four add
 # ~108 MB uncompressed to the image (~39 MB downloaded at build). The extension repository
 # publishes no checksums for these artifacts; deploy/duckdb-extensions.sha256 pins
