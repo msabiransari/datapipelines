@@ -480,6 +480,8 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Lake.DEFINITION_DRIFT,
             PipelineErrorCodes.Lake.DEFINITION_TABLE_BUSY,
             PipelineErrorCodes.Lake.DEFINITION_AUTHORING_DISABLED,
+            // §13.25 (#811) — an apply outcome, returned in the release's result; no route before P8.
+            PipelineErrorCodes.Lake.DEFINITION_APPLY_UNCLASSIFIED,
         )
 
     /**

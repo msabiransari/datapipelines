@@ -110,8 +110,14 @@ class LakeDefinitionService(
     /**
      * DRAFT [version] → RELEASED (at [expectedHash] when given), the table's current definition → [version], apply
      * state → `pending`, `lake.definition.released` audited — one transaction; then the apply, in this request, with
-     * the deadline `now + lake.admission.job-timeout` read from the catalog clock. The apply's outcome is reported,
-     * never thrown: the landing stands.
+     * the deadline `now + lake.admission.job-timeout` read from the catalog clock. The landing stands whatever the
+     * apply reaches, and the apply's outcome is RETURNED in [LakeReleaseResult.apply]: applied, a recorded refusal, a
+     * busy table, a catalog refusal, or an unknown commit outcome, which includes an exception the catalog does not
+     * classify from the commit step (`Unknown`, `lake.definition.apply_unclassified`, #811).
+     *
+     * Still thrown after the landing committed (#822): an unclassified failure before the commit (the row is put
+     * back to `pending` first), a failure opening the table's catalog session (the row stays `applying`), and a
+     * failure of DP's metadata store during the apply. The landing has committed in each case.
      */
     fun release(
         tableId: UUID,

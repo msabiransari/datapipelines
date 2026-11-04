@@ -1,6 +1,6 @@
 # The Managed Lake: Table Definitions
 
-**Status:** v1.1 (#798, dp-lake P3)
+**Status:** v1.2 (#798, dp-lake P3; #810, #811, #812)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and the names involved. The design is
@@ -105,6 +105,7 @@ promotion (P9). Lifecycle mutations lock the managed-table row before version ro
 | `1R 2R cur=2`, applied here = 2 | discard(v2) | dev | refused `lake.definition.applied_version`: this environment's Iceberg table holds v2 | unchanged |
 | any current version, `applying` | discard(any version) | dev | refused `lake.definition.table_busy` | unchanged |
 | `1R 2D cur=1` | discard(v2) | dev | refused `lake.definition.not_released` | unchanged |
+| `1R cur=1`, the table changed outside DP (drift) | write the live shape (hash of `1R`), release(v2) | dev | allowed: `2R`, `cur=2`; the apply sets only the table's `dp.definition.version` (§4 rule 2) | `1R 2R cur=2`, applied here = 2 |
 | any | any verb on an unknown table or version | both | refused `lake.definition.not_found` | unchanged |
 | any | any verb | hard | refused `lake.definition.authoring_disabled` | unchanged |
 
@@ -130,17 +131,20 @@ release / promotion landing ──► pending ──(attempt owns the row)──
 | NULL, `applied`, `failed`, `pending` | a release makes a version current | `pending` (`applying` stays `applying`) |
 | `pending`, `failed`, `applying` | an attempt marks the row with its operation id | `applying` |
 | `applying` | the attempt finds the Iceberg table already at the definition (a crash after its commit) | `applied`, no commit |
+| `applying` | the attempt finds the table's shape already equal to the definition under another version stamp, or none (drift adopted, a tags-only version) | `applied`, one commit that sets only `dp.definition.version` |
 | `applying` | the attempt commits the change | `applied` |
 | `applying` | the change is refused (§4), drifted, or refused by Iceberg before the commit | `failed`, `apply_error_json` holds `code` and the detail |
 | `applying` | the namespace or table lease is busy past the wait, or the catalog fenced or restored | `pending` |
-| `applying` | the commit's outcome is unknown, or an unclassified error after the commit began | stays `applying`; a verify settles it |
+| `applying` | the commit's outcome is unknown: the catalog connection failed while it was in flight, or the commit step failed with an error the catalog does not classify (`lake.definition.apply_unclassified`) | stays `applying`; a verify settles it |
 | `applying` | a verify finds no catalog revision by the attempt's operation | `pending` |
 | `applying` | a verify finds the attempt's revision | `applied` |
 
 **One attempt.** An attempt takes the NAMESPACE lease first when the Iceberg namespace does not exist yet, then the
 TABLE lease `<namespace>.<table>`, waiting up to `datapipelines.lake.admission.lease-wait-seconds` for each and never
 past the attempt's deadline; a lease still held by another operation ends the attempt `table_busy` with nothing
-changed. It marks the row `applying` under its own operation id, creates the namespace if needed, heartbeats the
+changed. Each try waits at most `datapipelines.lake.catalog.lock-timeout-seconds` on a lease row that another
+transaction holds, such as a dead attempt's catalog transaction that is still open, and then counts as busy (#812);
+the whole wait can therefore run over the lease wait by up to one lock timeout. It marks the row `applying` under its own operation id, creates the namespace if needed, heartbeats the
 table lease, plans (§4), commits through the fenced catalog, and only then stamps the row. Every stamp is conditional
 on `apply_state = 'applying'` AND the attempt's own operation id: an attempt that was overtaken (a newer release, a
 verify) changes nothing. Leases are released when the attempt ends, whatever its outcome.
@@ -149,7 +153,14 @@ verify) changes nothing. Leases are released when the attempt ends, whatever its
 process dies after the commit, the row stays `applying`. A later attempt finds the table already at the definition
 (same shape, `dp.definition.version` = the version) and stamps `applied` without a commit; a verify of the dead
 attempt reads the revision log and stamps `applied` (a revision exists) or `pending` (none does). A verify leaves
-alone a row whose table lease is still held.
+alone a row whose table lease is still held, or whose lease row another transaction holds past the lock timeout.
+
+**An unclassified failure of the commit.** The commit step can fail with an exception that is not one of the
+catalog's refusals. That ends the attempt the same way: the row stays `applying` and the attempt's outcome is
+`lake.definition.apply_unclassified`. A release that reaches it returns that outcome rather than throwing, because
+its landing has already committed. A verify settles the row from the revision log. Some failures outside the commit
+step still propagate after a release has landed
+([#822](https://github.com/msabiransari/datapipelines/issues/822)).
 
 **What `applied` writes,** in one transaction with the stamp: the column semantics projection
 (`lake_column_semantics`, rebuilt from the definition: field id, name, DP and Iceberg type, required, doc, tags) and,
@@ -165,9 +176,13 @@ An apply compares three shapes by field id: the Iceberg table's current one (S),
 from (named by its `dp.definition.version` property) and the intent (the current definition).
 
 1. S equals the intent and the property already names the version: nothing to do, `applied`.
-2. S differs from the definition it says it was applied from: someone changed the table outside DP.
+2. S equals the intent but the property names another version, or none: one commit sets only the property (no
+   schema, spec or data change), `applied`. A version that changes only tags takes this path too.
+3. S differs from the definition it says it was applied from: someone changed the table outside DP.
    `failed`, `lake.definition.drift`, with `details.diff` listing the changes between that definition and S.
-3. Otherwise the change from S to the intent is classified, and only a COMPATIBLE change is staged and committed.
+   The exit is rule 2: write the live shape as a new draft and release it. Build the draft on the version applied
+   here; a rejected current release that holds other field ids is discarded first ([#820](https://github.com/msabiransari/datapipelines/issues/820)).
+4. Otherwise the change from S to the intent is classified, and only a COMPATIBLE change is staged and committed.
 
 | Change | Class | Refusal |
 |---|---|---|
@@ -222,5 +237,6 @@ Both names are checked before any catalog call or SQL; a name outside the gramma
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-04 | v1.2 | 810 (#810, #811, #812) | Drift has an exit: a definition whose shape equals the live table applies as one commit that sets only `dp.definition.version` (§2 row, §3 row, §4 rule 2). An unclassified failure of the commit step leaves the row `applying` as `lake.definition.apply_unclassified`, and the release returns that outcome (§3 row and paragraph). A lease takeover waits at most the catalog lock timeout on a lease row another transaction holds, then counts as busy (§3 "One attempt" and "Crash between commit and stamp"). |
 | 2026-11-04 | v1.1 | 798 merge review | Serialize lifecycle eligibility with apply, refuse discard during any apply, require canonical partition parameters and complete JSON input; record the field-ID correction limitation (#820). |
 | 2026-11-03 | v1.0 | 798 (#798) | New document: the definition body and its closed type list, the lifecycle, the apply states, the supported-change policy and the names, as dp-lake P3 built them. Not packaged in the product jar (the lake surfaces, P8, decide its audience). |

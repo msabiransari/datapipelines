@@ -9,6 +9,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.jdbc.core.JdbcTemplate
 import software.amazon.awssdk.services.s3.S3Client
+import java.time.Duration
 
 /**
  * The managed lake's beans (module-structure §5.21, §8.4 — declared here, never by stereotype annotations).
@@ -26,8 +27,12 @@ import software.amazon.awssdk.services.s3.S3Client
 @ConditionalOnProperty(prefix = LakeProperties.PREFIX, name = ["enabled"], havingValue = "true")
 @EnableConfigurationProperties(LakeProperties::class)
 class LakeAutoConfiguration {
+    /** A takeover's lock wait is bounded by the catalog's `lock-timeout-seconds`, as the catalog sessions are (#812). */
     @Bean
-    fun lakeLeases(jdbc: JdbcTemplate): LakeLeases = LakeLeases(jdbc)
+    fun lakeLeases(
+        jdbc: JdbcTemplate,
+        properties: LakeProperties,
+    ): LakeLeases = LakeLeases(jdbc, lockTimeout = Duration.ofSeconds(properties.catalog.lockTimeoutSeconds))
 
     @Bean
     fun lakeCatalogs(

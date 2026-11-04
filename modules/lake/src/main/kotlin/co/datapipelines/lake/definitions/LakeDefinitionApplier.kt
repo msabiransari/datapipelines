@@ -172,8 +172,10 @@ class LakeDefinitionApplier(
 
     /**
      * The commit, through the session so its failure is classified. A fence or restoring refusal means nothing was
-     * committed → `pending`; an unknown outcome leaves `applying` for [verifyApplying]; anything else propagates and
-     * leaves `applying` too (whether the commit landed is the revision log's to say, not this exception's).
+     * committed → `pending`; an unknown outcome leaves `applying` for [verifyApplying]. Any other exception from the
+     * commit step (#811) is logged at ERROR by class and SQLSTATE and ALSO leaves `applying`, returned as
+     * [LakeApplyOutcome.Unknown] (`lake.definition.apply_unclassified`): whether the commit landed is the revision
+     * log's to say, not this exception's, and a release's landing has already committed (lake.md §3).
      */
     private fun commit(
         attempt: Attempt,
@@ -182,12 +184,18 @@ class LakeDefinitionApplier(
     ): LakeApplyOutcome {
         try {
             session.write { plan.run() }
+            hooks.afterCommit(attempt.row.id, attempt.operationId)
         } catch (e: LakeCatalogException.OutcomeUnknown) {
             return LakeApplyOutcome.Unknown(e.code)
         } catch (e: LakeCatalogException) {
             return pending(attempt, e.code)
+        } catch (
+            // The commit may have landed whatever the failure is: never `failed`, never `pending`, never thrown.
+            @Suppress("TooGenericExceptionCaught") e: RuntimeException,
+        ) {
+            LakeApplyLog.unclassified(attempt.row, attempt.version, attempt.operationId, e)
+            return LakeApplyOutcome.Unknown(PipelineErrorCodes.Lake.DEFINITION_APPLY_UNCLASSIFIED)
         }
-        hooks.afterCommit(attempt.row.id, attempt.operationId)
         return stampApplied(attempt, committed = true)
     }
 
