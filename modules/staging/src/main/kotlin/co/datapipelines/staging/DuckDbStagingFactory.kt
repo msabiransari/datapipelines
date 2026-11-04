@@ -108,7 +108,7 @@ class DuckDbStagingFactory internal constructor(
                 e
             }
         abandon(executionId, root, files)
-        throw creationFailed(executionId, failure.message, failure)
+        throw creationFailed(executionId, failure)
     }
 
     private fun openProperties(): Properties =
@@ -188,17 +188,29 @@ class DuckDbStagingFactory internal constructor(
         }
     }
 
+    /**
+     * The catalogued `creation_failed`: a fixed text and the execution id, nothing from the failure.
+     * A driver or file-system message names paths under the operator's scratch directory, and the
+     * executor transports a setup failure's message AND its cause chain to the caller (057,
+     * `error-detail: full`), so [failure] is not attached as the cause. It goes to the server log
+     * at WARN instead, whole — the operator's own path, for the operator.
+     */
     private fun creationFailed(
         executionId: UUID,
-        detail: String?,
-        cause: Exception,
-    ): DatapipelinesException =
-        DatapipelinesException(
-            code = StagingErrorCodes.CREATION_FAILED,
-            message = "Could not create the DuckDB staging database for execution $executionId: $detail",
-            details = mapOf("execution_id" to executionId.toString()),
-            cause = cause,
+        failure: Exception,
+    ): DatapipelinesException {
+        log.warn(
+            "{}: DuckDB staging database for execution {} could not be created",
+            StagingErrorCodes.CREATION_FAILED,
+            executionId,
+            failure,
         )
+        return DatapipelinesException(
+            code = StagingErrorCodes.CREATION_FAILED,
+            message = "Could not create the DuckDB staging database for execution $executionId; the cause is in the server log.",
+            details = mapOf("execution_id" to executionId.toString()),
+        )
+    }
 
     private fun engineUnavailable(
         executionId: UUID,
