@@ -87,6 +87,10 @@ class DuckDbAuthorSqlGateTest {
         form: String,
         sql: String,
     ) {
+        // Non-vacuity: the case carries the separator its name says. Written as an escape, so an
+        // editor cannot strip it unseen; without it the case would be an ASCII one the old rule refused.
+        val named = form.substringBefore(' ').removePrefix("U+").toInt(HEX)
+        withClue("$form carries U+%04X".format(named)) { sql.codePoints().anyMatch { it == named } shouldBe true }
         withClue(form) { refusedText(sql).message shouldContain "`query` or `query_table`" }
     }
 
@@ -98,8 +102,8 @@ class DuckDbAuthorSqlGateTest {
             "SELECT query FROM t",
             "SELECT 'query' AS x",
             "SELECT 1 AS query",
-            "SELECT query FROM t",
-            "SELECT 1 AS query﻿",
+            "SELECT query\u00A0FROM t",
+            "SELECT 1 AS query\uFEFF",
         ).forEach { sql -> shouldNotThrowAny { DuckDbAuthorSqlGate.check(sql) } }
     }
 
@@ -193,6 +197,8 @@ class DuckDbAuthorSqlGateTest {
         /** SQL text that assembles the logging call at run time, in memory storage: no refused name appears whole. */
         const val ASSEMBLED_LOGGING_CALL = "'SELECT * FROM enable_' || 'logging(level = ''info'', storage = ''memory'')'"
 
+        const val HEX = 16
+
         /**
          * The lander's three named separators (#795 review F1), quoted and unquoted, plus a carrier
          * whose separator run ends in a comment opener and the second carrier's name. Each is a text
@@ -202,15 +208,15 @@ class DuckDbAuthorSqlGateTest {
         @JvmStatic
         fun nonAsciiSeparatorCalls(): List<Arguments> =
             listOf(
-                Arguments.of("U+00A0 unquoted", "SELECT * FROM query ('SELECT 1')"),
-                Arguments.of("U+00A0 quoted", "SELECT * FROM \"query\" ('SELECT 1')"),
-                Arguments.of("U+200B unquoted", "SELECT * FROM query​('SELECT 1')"),
-                Arguments.of("U+200B quoted", "SELECT * FROM \"query\"​('SELECT 1')"),
-                Arguments.of("U+FEFF unquoted", "SELECT * FROM query﻿('SELECT 1')"),
-                Arguments.of("U+FEFF quoted", "SELECT * FROM \"query\"﻿('SELECT 1')"),
-                Arguments.of("U+2003 query_table", "SELECT * FROM query_table ('t')"),
-                Arguments.of("U+3000 then a block comment", "SELECT * FROM query　/* c */('SELECT 1')"),
-                Arguments.of("U+2060 then a line comment", "SELECT * FROM query⁠-- c\n('SELECT 1')"),
+                Arguments.of("U+00A0 unquoted", "SELECT * FROM query\u00A0('SELECT 1')"),
+                Arguments.of("U+00A0 quoted", "SELECT * FROM \"query\"\u00A0('SELECT 1')"),
+                Arguments.of("U+200B unquoted", "SELECT * FROM query\u200B('SELECT 1')"),
+                Arguments.of("U+200B quoted", "SELECT * FROM \"query\"\u200B('SELECT 1')"),
+                Arguments.of("U+FEFF unquoted", "SELECT * FROM query\uFEFF('SELECT 1')"),
+                Arguments.of("U+FEFF quoted", "SELECT * FROM \"query\"\uFEFF('SELECT 1')"),
+                Arguments.of("U+2003 query_table", "SELECT * FROM query_table\u2003('t')"),
+                Arguments.of("U+3000 then a block comment", "SELECT * FROM query\u3000/* c */('SELECT 1')"),
+                Arguments.of("U+2060 then a line comment", "SELECT * FROM query\u2060-- c\n('SELECT 1')"),
             )
     }
 }
