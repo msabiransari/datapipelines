@@ -144,13 +144,13 @@ object LakeDefinitionRules {
             val path = "partition[$i]"
             val field = body.field(p.fieldId) ?: throw invalidBody("$path.field_id", "unknown_field", "no field has id ${p.fieldId}")
             val match = TRANSFORM.matchEntire(p.transform) ?: throw invalidBody("$path.transform", "grammar", "unknown transform")
-            val parameter =
-                match.groupValues
-                    .drop(TRANSFORM_PARAMETER_GROUPS)
-                    .firstOrNull { it.isNotEmpty() }
-                    ?.toIntOrNull()
+            val parameterText = match.groupValues.drop(TRANSFORM_PARAMETER_GROUPS).firstOrNull { it.isNotEmpty() }
+            val parameter = parameterText?.toIntOrNull()
             if (parameter != null && parameter !in 1..MAX_TRANSFORM_PARAMETER) {
                 throw invalidBody("$path.transform", "out_of_range", "a transform parameter is in 1..$MAX_TRANSFORM_PARAMETER")
+            }
+            if (parameter != null && parameterText != parameter.toString()) {
+                throw invalidBody("$path.transform", "noncanonical", "a transform parameter has no leading zeroes")
             }
             if (!Transforms.fromString(p.transform).canTransform(field.icebergType)) {
                 throw invalidBody("$path.transform", "unsupported_type", "${p.transform} cannot partition a ${field.typeLabel} field")
