@@ -1,6 +1,6 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.62
+**Status:** v1.63
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-04
@@ -40,8 +40,9 @@ Published to `ghcr.io/datapipelines/datapipelines:{version}` and `docker.io/data
 - **Entrypoint**: `["java", "-Dpolyglot.engine.userResourceCache=/opt/graaljs/resources", "-jar", "/app/datapipelines.jar"]` (exec form). The image defines no JVM-flags hook: a JVM option variable (`JAVA_TOOL_OPTIONS` and friends) would reach the JVM without one, which is why the shipped deploy files refuse those names (§6.4, §9).
 
 **Bumping DuckDB (the runbook, #781).** The version catalog's `duckdb-jdbc`
-(`gradle/libs.versions.toml`) is the one hand-edited DuckDB version. Every other site
-reads it or is checked against it, so a bump is these steps in order:
+(`gradle/libs.versions.toml`) declares the bundled driver version. The runtime token
+reads the resolved version; build checks and the drift guard cover the related pins
+and detected statements described below. A bump follows these steps in order:
 
 1. **Catalog.** Edit `duckdb-jdbc`. Dependency locking is strict, so the next resolution
    refuses the edit until step 2 has run.
@@ -75,12 +76,17 @@ reads it or is checked against it, so a bump is these steps in order:
    in the allowlist. The notices build refuses an ARG that is not the catalog version's
    core, a reviewed core tag other than `v<ARG>`, and a `duckdb` or `duckdb/*` closure
    row naming another core (DEVELOPMENT.md's message list).
-6. **The guard's two lists.** Run `DuckDbVersionSpecDriftTest`. Its red list is every
-   literal that still names the old version without a dated provenance note: move each
-   to the new version, or re-word it when the old version was the point. Its re-probe
-   list is every dated measurement note and every page that renders the version token:
-   rerun each probe on the new version and record the result with its new date, or
-   leave the note describing the version it measured.
+6. **The guard's lists and inventory.** Run `DuckDbVersionSpecDriftTest`. Its red list
+   contains detected, non-allowlisted literals that name an old version without dated
+   provenance: move each to the new version, or re-word it when the old version was
+   the point. Its re-probe list names detected provenance notes and source locations
+   that render the version token: rerun each probe on the new version and record the
+   result with its new date, or leave the note describing the version it measured.
+   Review the tracked-file literal inventory as well: the guard skips binary files
+   and files of 4 MB or more, and cannot discover a bare obsolete version unless a
+   non-allowlisted DuckDB context names that version somewhere in the tree. Review
+   its reasoned ownership exclusions, including generated files, frozen snapshots,
+   and the sample-data CLI pins and manifests; those have separate update procedures.
 7. **Posture evidence.** Rerun the dp-lake read-posture evidence harness (spike E9,
    #775) against the new driver and extensions. A changed result is a finding to resolve
    before the bump lands.
@@ -1406,6 +1412,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-04 | v1.63 | #781 merge follow-up | **§3.1:** state the version guard's detected-literal scope, ownership exclusions and uncaptured-bare-version limit; require reviewing the tracked-file inventory during a bump. |
 | 2026-11-04 | v1.62 | #781 | **§3.1:** the three-input DuckDB re-pin paragraph becomes the bump runbook: the version catalog's `duckdb-jdbc` is the one hand-edited DuckDB version, then cold locks and verification metadata, the core ARG and checksums, closures, the hand-declared `CORE` review, `DuckDbVersionSpecDriftTest`'s red and re-probe lists, and the E9 read-posture harness rerun. The notices build now refuses an ARG, reviewed core tag or core closure row that disagrees with the catalog. No version changes. |
 | 2026-11-01 | v1.61 | #685 merge follow-up | **§3.1 / §6.5:** the image disables glibc's native thread-stack cache before its JVMs start; overrides retain that entry, and bare JVM launches set it before Java starts. The Dockerfile drift guard pins the declaration and launch order. |
 | 2026-10-28 | v1.60 | #747 | **§3.1:** the DuckDB re-pin recipe refreshes each extension's linked closure, `deploy/duckdb-extension-ports/<name>.tsv` (the vcpkg port closure, direct and transitive, plus the DuckDB core `third_party` code and port-vendored code both binaries' symbols witness), before reviewing every new component's licence; the generator refuses a closure bound to another commit, a closure entry without a reviewed licence and a reviewed component missing from the closure. |
