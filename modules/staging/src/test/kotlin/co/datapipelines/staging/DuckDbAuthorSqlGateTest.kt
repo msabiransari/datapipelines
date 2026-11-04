@@ -8,6 +8,7 @@ import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import io.kotest.matchers.types.shouldBeInstanceOf
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -143,6 +144,32 @@ class DuckDbAuthorSqlGateTest {
     }
 
     @Test
+    fun `a separator-hidden carrier through execute is refused before the driver, and the database lives on`() {
+        // Review F3, staging level: a no-break space between the carrier and its argument, and an
+        // argument that assembles the logging call (memory storage only — lane rule). With the gate
+        // out of the way the pinned engine runs this exact statement and logging comes on (round-two
+        // probe); gated, it must never reach the driver.
+        staging.authorExec("CREATE TABLE stg_kept AS SELECT 7 AS x")
+        val sql = "CREATE TABLE stg_reach AS SELECT * FROM query\u00A0($ASSEMBLED_LOGGING_CALL)"
+
+        val outcome = runCatching { runBlocking { staging.execute(sql) } }
+
+        withClue("the engine's logging setting after the statement") { loggingSetting() shouldBe "0" }
+        val refusal = outcome.exceptionOrNull().shouldBeInstanceOf<SQLException>()
+        refusal.sqlState shouldBe DuckDbAuthorSqlGate.SQL_STATE
+        refusal.message shouldContain "temporary guard"
+        // A second lease answers, and what was staged before is still there: no abort, no damage.
+        runBlocking { staging.withQuery("SELECT 42") { rs -> if (rs.next()) rs.getInt(1) else null } } shouldBe 42
+        staging.scalarText("SELECT x FROM stg_kept") shouldBe "7"
+    }
+
+    /**
+     * The setting read through the author path — the name split so the read is not itself refused.
+     * The pinned engine reports it as `0` or `1` (round-two probe).
+     */
+    private fun loggingSetting(): String? = staging.scalarText("SELECT value FROM duckdb_settings() WHERE name = 'enable_' || 'logging'")
+
+    @Test
     fun `DP's own staging path is not gated, so the false positive only bites author SQL`() {
         runBlocking {
             staging.stageRows("stg_cols", listOf(ColumnSchema("enable_logging", LogicalType.INTEGER)), sequenceOf(listOf(1)))
@@ -163,6 +190,9 @@ class DuckDbAuthorSqlGateTest {
     }
 
     private companion object {
+        /** SQL text that assembles the logging call at run time, in memory storage: no refused name appears whole. */
+        const val ASSEMBLED_LOGGING_CALL = "'SELECT * FROM enable_' || 'logging(level = ''info'', storage = ''memory'')'"
+
         /**
          * The lander's three named separators (#795 review F1), quoted and unquoted, plus a carrier
          * whose separator run ends in a comment opener and the second carrier's name. Each is a text
