@@ -1439,6 +1439,15 @@ Malformed Dockerfile declarations fail as
 `Invalid DUCKDB_CORE_VERSION:`,
 `Dockerfile must declare exactly one DuckDB extension loop` or
 `Duplicate or empty DuckDB extension names:`.
+The version catalog's `duckdb-jdbc` is the one hand-edited DuckDB version (#781); the
+read refuses any other site that disagrees with it as
+`Invalid catalog duckdb-jdbc version:`,
+`DUCKDB_CORE_VERSION <arg> is not the core of the catalog's duckdb-jdbc <jdbc>` (the ARG
+must be the catalog version's first three components),
+`DuckDB reviewed licence tag is not core v<version> for <name>:` (the inventory's
+`duckdb/duckdb/tree/v…` tag) and
+`DuckDB closure row names core <x>, not v<version>, for <name>:` (a `duckdb` or
+`duckdb/*` closure row).
 A needed text absent from `gradle/licenses` fails as `Missing vendored licence text:`.
 Re-pin the core ARG, checksum/commit manifest and reviewed licence inventory together;
 see [Deployment §3.1](docs/deployment.md#31-docker-image).
