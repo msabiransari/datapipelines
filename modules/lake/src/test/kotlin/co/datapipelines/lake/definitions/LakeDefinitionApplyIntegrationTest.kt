@@ -10,6 +10,7 @@ import co.datapipelines.pipeline.WriteSurface
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.apache.iceberg.Table
@@ -110,18 +111,7 @@ class LakeDefinitionApplyIntegrationTest {
     @Test
     fun `(iv) a foreign hand-edit is drift - failed with a diff naming the field, zero commits`() {
         val id = createAndRelease()
-        LakeTestDb.lease(LeaseKind.TABLE, "$NS.$T").let { foreign ->
-            h.catalogs.open(foreign).use { s ->
-                s.write {
-                    s
-                        .loadTable(NS, T)
-                        .updateSchema()
-                        .addColumn("hand_added", Types.StringType.get())
-                        .commit()
-                }
-            }
-            LakeTestDb.leases.release(foreign.operationId)
-        }
+        handEdit()
         val before = h.revisions(NS, T)
         val outcome = releaseNext(id, ORDERS_V2)
         val after = h.revisions(NS, T)
@@ -138,6 +128,72 @@ class LakeDefinitionApplyIntegrationTest {
             (it.event to it.details["code"]) shouldBe
                 (LakeAuditEvents.APPLY_FAILED to PipelineErrorCodes.Lake.DEFINITION_DRIFT)
         }
+    }
+
+    @Test
+    fun `drift has an exit - the live shape adopted as the next version applies as one property-only commit`() {
+        val id = createAndRelease()
+        handEdit()
+        val drifted = load()
+        val before = h.revisions(NS, T)
+        val outcome = releaseNext(id, ADOPTED)
+        val adopted = load()
+        println(
+            "(drift exit) revisions $before -> ${h.revisions(NS, T)}; outcome = $outcome; schema id ${drifted.schema().schemaId()} -> " +
+                "${adopted.schema().schemaId()}, spec id ${drifted.spec().specId()} -> ${adopted.spec().specId()}, snapshot " +
+                "${drifted.currentSnapshot()?.snapshotId()} -> ${adopted.currentSnapshot()?.snapshotId()}",
+        )
+        outcome shouldBe LakeApplyOutcome.Applied(2, committed = true)
+        h.revisions(NS, T) shouldBe before + 1
+        adopted.properties()[LakeTableProperties.DEFINITION_VERSION] shouldBe "2"
+        // A property-only commit: the schema, the spec and the data are exactly the ones the hand-edit left.
+        adopted.schema().schemaId() shouldBe drifted.schema().schemaId()
+        adopted.schemas().keys shouldBe drifted.schemas().keys
+        adopted.spec().specId() shouldBe drifted.spec().specId()
+        adopted.currentSnapshot()?.snapshotId() shouldBe drifted.currentSnapshot()?.snapshotId()
+        LakeTableShape.of(adopted) shouldBe LakeTableShape.of(drifted)
+        h.table(id).let { (it.applyState to it.appliedVersionHere) shouldBe (LakeApplyState.APPLIED to 2) }
+        h.audit.events
+            .last()
+            .event shouldBe LakeAuditEvents.APPLIED
+    }
+
+    @Test
+    fun `after the drift exit, a version that changes the table takes the normal path - classified, staged, committed`() {
+        val id = createAndRelease()
+        handEdit()
+        releaseNext(id, ADOPTED) shouldBe LakeApplyOutcome.Applied(2, committed = true)
+        val adopted = load()
+        val before = h.revisions(NS, T)
+        val outcome = releaseNext(id, ADOPTED_PLUS_NOTE)
+        val after = load()
+        println(
+            "(drift exit, next) revisions $before -> ${h.revisions(NS, T)}; outcome = $outcome; field ids = " +
+                "${after.schema().columns().map {
+                    it.fieldId()
+                }}; schema id ${adopted.schema().schemaId()} -> ${after.schema().schemaId()}",
+        )
+        outcome shouldBe LakeApplyOutcome.Applied(3, committed = true)
+        h.revisions(NS, T) shouldBe before + 1
+        LakeTableShape.of(after) shouldBe LakeTableShape.of(LakeDefinitionBodies.parse(ADOPTED_PLUS_NOTE, null))
+        after.schema().schemaId() shouldNotBe adopted.schema().schemaId()
+        after.properties()[LakeTableProperties.DEFINITION_VERSION] shouldBe "3"
+    }
+
+    @Test
+    fun `drift found by a failed release - discard it, adopt the live shape from the applied version, and the release applies`() {
+        val id = createAndRelease()
+        handEdit()
+        releaseNext(id, ORDERS_V2).code shouldBe PipelineErrorCodes.Lake.DEFINITION_DRIFT
+        // The rejected v2 holds field id 5 for `channel`; the live table's 5 is `hand_added`, so the adoption builds on
+        // the applied v1 once v2 is discarded (the field-ID limitation of #820).
+        h.service.discard(id, 2, h.actor)
+        h.table(id).currentDefinitionVersion shouldBe 1
+        val outcome = releaseNext(id, ADOPTED)
+        println("(drift found by release) outcome = $outcome; table = ${h.table(id).applyState}")
+        outcome shouldBe LakeApplyOutcome.Applied(3, committed = true)
+        load().properties()[LakeTableProperties.DEFINITION_VERSION] shouldBe "3"
+        h.table(id).let { (it.applyState to it.appliedVersionHere) shouldBe (LakeApplyState.APPLIED to 3) }
     }
 
     @Test
@@ -315,6 +371,22 @@ class LakeDefinitionApplyIntegrationTest {
         return h.service.release(id, draft.version, h.actor, WriteSurface.SESSION).apply
     }
 
+    /** Changes the table outside DP, under a foreign lease: an optional `hand_added` string column (Iceberg gives it id 5). */
+    private fun handEdit() {
+        LakeTestDb.lease(LeaseKind.TABLE, "$NS.$T").let { foreign ->
+            h.catalogs.open(foreign).use { s ->
+                s.write {
+                    s
+                        .loadTable(NS, T)
+                        .updateSchema()
+                        .addColumn("hand_added", Types.StringType.get())
+                        .commit()
+                }
+            }
+            LakeTestDb.leases.release(foreign.operationId)
+        }
+    }
+
     private fun load(): Table {
         val lease = LakeTestDb.lease(LeaseKind.TABLE, "$NS.$T")
         try {
@@ -348,6 +420,30 @@ class LakeDefinitionApplyIntegrationTest {
     private companion object {
         const val NS = "sales"
         const val T = "orders"
+
+        val V1_FIELDS =
+            listOf(
+                LakeDefinitionFixtures.field(1, "id", "BIGINTEGER", "required" to true, "doc" to "order id"),
+                LakeDefinitionFixtures.field(2, "customer", "STRING", "tags" to listOf("pii")),
+                LakeDefinitionFixtures.field(3, "amount", "DECIMAL", "precision" to 12, "scale" to 2),
+                LakeDefinitionFixtures.field(4, "ordered_at", "TIMESTAMP", "required" to true),
+            )
+
+        /** [handEdit]'s live shape written down as a definition: `orders` v1 + the hand-added column at id 5. */
+        val ADOPTED: String =
+            LakeDefinitionFixtures.body(
+                V1_FIELDS + LakeDefinitionFixtures.field(5, "hand_added", "STRING"),
+                partition = listOf(LakeDefinitionFixtures.partition(4, "day")),
+                identifiers = listOf(1),
+            )
+
+        /** [ADOPTED] + an optional `note` column (id 6): a COMPATIBLE change after the drift exit. */
+        val ADOPTED_PLUS_NOTE: String =
+            LakeDefinitionFixtures.body(
+                V1_FIELDS + LakeDefinitionFixtures.field(5, "hand_added", "STRING") + LakeDefinitionFixtures.field(6, "note", "STRING"),
+                partition = listOf(LakeDefinitionFixtures.partition(4, "day")),
+                identifiers = listOf(1),
+            )
         const val UUID_LENGTH = 36
         const val MIN_WAIT_MILLIS = 900L
         const val POLL_MILLIS = 50L

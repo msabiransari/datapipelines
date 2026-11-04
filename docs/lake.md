@@ -1,6 +1,6 @@
 # The Managed Lake: Table Definitions
 
-**Status:** v1.1 (#798, dp-lake P3)
+**Status:** v1.2 (#798, dp-lake P3; #810)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and the names involved. The design is
@@ -105,6 +105,7 @@ promotion (P9). Lifecycle mutations lock the managed-table row before version ro
 | `1R 2R cur=2`, applied here = 2 | discard(v2) | dev | refused `lake.definition.applied_version`: this environment's Iceberg table holds v2 | unchanged |
 | any current version, `applying` | discard(any version) | dev | refused `lake.definition.table_busy` | unchanged |
 | `1R 2D cur=1` | discard(v2) | dev | refused `lake.definition.not_released` | unchanged |
+| `1R cur=1`, the table changed outside DP (drift) | write the live shape (hash of `1R`), release(v2) | dev | allowed: `2R`, `cur=2`; the apply sets only the table's `dp.definition.version` (§4 rule 2) | `1R 2R cur=2`, applied here = 2 |
 | any | any verb on an unknown table or version | both | refused `lake.definition.not_found` | unchanged |
 | any | any verb | hard | refused `lake.definition.authoring_disabled` | unchanged |
 
@@ -130,6 +131,7 @@ release / promotion landing ──► pending ──(attempt owns the row)──
 | NULL, `applied`, `failed`, `pending` | a release makes a version current | `pending` (`applying` stays `applying`) |
 | `pending`, `failed`, `applying` | an attempt marks the row with its operation id | `applying` |
 | `applying` | the attempt finds the Iceberg table already at the definition (a crash after its commit) | `applied`, no commit |
+| `applying` | the attempt finds the table's shape already equal to the definition under another version stamp, or none (drift adopted, a tags-only version) | `applied`, one commit that sets only `dp.definition.version` |
 | `applying` | the attempt commits the change | `applied` |
 | `applying` | the change is refused (§4), drifted, or refused by Iceberg before the commit | `failed`, `apply_error_json` holds `code` and the detail |
 | `applying` | the namespace or table lease is busy past the wait, or the catalog fenced or restored | `pending` |
@@ -165,9 +167,13 @@ An apply compares three shapes by field id: the Iceberg table's current one (S),
 from (named by its `dp.definition.version` property) and the intent (the current definition).
 
 1. S equals the intent and the property already names the version: nothing to do, `applied`.
-2. S differs from the definition it says it was applied from: someone changed the table outside DP.
+2. S equals the intent but the property names another version, or none: one commit sets only the property (no
+   schema, spec or data change), `applied`. A version that changes only tags takes this path too.
+3. S differs from the definition it says it was applied from: someone changed the table outside DP.
    `failed`, `lake.definition.drift`, with `details.diff` listing the changes between that definition and S.
-3. Otherwise the change from S to the intent is classified, and only a COMPATIBLE change is staged and committed.
+   The exit is rule 2: write the live shape as a new draft and release it. Build the draft on the version applied
+   here; a rejected current release that holds other field ids is discarded first ([#820](https://github.com/msabiransari/datapipelines/issues/820)).
+4. Otherwise the change from S to the intent is classified, and only a COMPATIBLE change is staged and committed.
 
 | Change | Class | Refusal |
 |---|---|---|
@@ -222,5 +228,6 @@ Both names are checked before any catalog call or SQL; a name outside the gramma
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-04 | v1.2 | 810 (#810) | Drift has an exit: a definition whose shape equals the live table applies as one commit that sets only `dp.definition.version` (§2 row, §3 row, §4 rule 2). |
 | 2026-11-04 | v1.1 | 798 merge review | Serialize lifecycle eligibility with apply, refuse discard during any apply, require canonical partition parameters and complete JSON input; record the field-ID correction limitation (#820). |
 | 2026-11-03 | v1.0 | 798 (#798) | New document: the definition body and its closed type list, the lifecycle, the apply states, the supported-change policy and the names, as dp-lake P3 built them. Not packaged in the product jar (the lake surfaces, P8, decide its audience). |
