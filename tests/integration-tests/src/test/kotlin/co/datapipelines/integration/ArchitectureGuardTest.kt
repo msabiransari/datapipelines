@@ -508,14 +508,14 @@ class ArchitectureGuardTest {
          * their task factory and the admission gate. A transport reaches the scheduler through
          * `ScheduleService` only, which is deliberately NOT in this list. #376: the evaluation history's
          * stale sweep and retention (steps of the retention tick) — the History tab READS the records, never
-         * the jobs that close and delete them.
+         * the jobs that close and delete them. #818: the managed lake's freshness tick and the registry pass it runs.
          */
         val JOB_SERVICE =
             Regex(
                 "\\b(StaleExecutionSweeper|ExecutionEventRetention|reapRetiredPools|StaleExecutionSweepScheduler|" +
                     "DatasourcePoolReaperScheduler|ExecutionEventRetentionScheduler|AuditLogRetention|" +
                     "ScheduleDispatcher|ScheduledRunWorker|RunReconciler|ScheduleNotifier|SchedulerTasks|SchedulerAdmission|" +
-                    "ParameterEvaluationSweeper|ParameterEvaluationRetention)\\b",
+                    "ParameterEvaluationSweeper|ParameterEvaluationRetention|ManagedLakeFreshnessScheduler|refreshManagedGenerations)\\b",
             )
 
         /** The ordinary evaluate's call sites (spec §4.5) — the REST route, the dashboard runtime, the MCP tool. */

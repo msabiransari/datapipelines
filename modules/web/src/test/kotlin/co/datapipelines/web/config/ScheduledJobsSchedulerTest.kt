@@ -35,6 +35,7 @@ import org.springframework.context.ApplicationListener
 import org.springframework.context.SmartLifecycle
 import org.springframework.context.annotation.AnnotationConfigApplicationContext
 import org.springframework.context.event.ContextClosedEvent
+import org.springframework.core.env.MapPropertySource
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor
@@ -56,12 +57,14 @@ import javax.sql.DataSource
  * thread, and stop in the right place in the shutdown sequence.
  *
  * A real Spring context of the three REAL scheduling configurations (`@EnableScheduling` lives on
- * [SweepSchedulingConfiguration]), the SSE log executor exactly as [WebSurfaceConfiguration] builds
- * it, and the two REAL shutdown lifecycles — so Spring's own registrar decides which scheduler each
- * job gets, exactly as it does in the application. Only the jobs' stores are stand-ins, and each
- * one logs which thread its job's tick arrived on: the startup tick every `fixedDelay` job takes at
- * refresh is the observation, never a direct call of the adapter (which would run on the test's own
- * thread and prove nothing). The assembled application's twin is `ScheduledJobsSchedulerE2eTest`.
+ * [SweepSchedulingConfiguration]; since #818 the pool reaper's configuration also holds the managed
+ * lake's freshness tick, the fourth job, run here at a one-second cadence), the SSE log executor
+ * exactly as [WebSurfaceConfiguration] builds it, and the two REAL shutdown lifecycles — so Spring's
+ * own registrar decides which scheduler each job gets, exactly as it does in the application. Only
+ * the jobs' stores are stand-ins, and each one logs which thread its job's tick arrived on: the
+ * startup tick every `fixedDelay` job takes at refresh is the observation, never a direct call of
+ * the adapter (which would run on the test's own thread and prove nothing). The assembled
+ * application's twin is `ScheduledJobsSchedulerE2eTest`.
  *
  * Until #316 there was no `TaskScheduler` bean, Spring resolved the context's unique
  * `ScheduledExecutorService` — `sseLogScheduler` — and every tick below arrived on `dp-sse-log`.
@@ -110,7 +113,7 @@ class ScheduledJobsSchedulerTest {
     }
 
     @Test
-    fun `the jobs' scheduler is theirs alone - Spring's default, one thread, three jobs, no bean wired to it`() {
+    fun `the jobs' scheduler is theirs alone - Spring's default, one thread, four jobs, no bean wired to it`() {
         schedulingContext().use { context ->
             val scheduler = context.getBean(SCHEDULER_BEAN).shouldBeInstanceOf<ThreadPoolTaskScheduler>()
             // The registrar's router resolves its default lazily — the bean, not the SSE executor.
@@ -123,7 +126,7 @@ class ScheduledJobsSchedulerTest {
             val resolved = ReflectionTestUtils.getField(router, "defaultScheduler").shouldBeInstanceOf<Supplier<*>>().get()
             resolved shouldBeSameInstanceAs scheduler
             scheduler.poolSize shouldBe 1
-            // Who else is on the thread: the @Scheduled tasks (exactly the three jobs) and the beans
+            // Who else is on the thread: the @Scheduled tasks (exactly the four jobs) and the beans
             // wired to the scheduler — only Spring's @Scheduled processor, whose router registers
             // itself as a dependent when it resolves the default (and is destroyed first because of it).
             processor.scheduledTasks.map { it.task.toString() }.toSet() shouldBe SCHEDULED_METHODS
@@ -214,6 +217,7 @@ class ScheduledJobsSchedulerTest {
                 ReapOutcome.NOTHING
             }
         }
+        every { datasources.refreshManagedGenerations() } answers { tick(FRESHNESS) { 0 } }
         val events = mockk<ExecutionEventRepository>()
         every { events.deleteOlderThan(any()) } answers { tick(RETAIN) { 0 } }
         val jdbc = mockk<NamedParameterJdbcTemplate>()
@@ -236,6 +240,9 @@ class ScheduledJobsSchedulerTest {
             // mock would make the missing increment unobservable.
             registerBean(ExecutorMetrics::class.java, Supplier { ExecutorMetrics(SimpleMeterRegistry()) })
             registerBean(DatasourceRegistry::class.java, Supplier { datasources })
+            // #818 — the freshness tick's regrant half; the lake is not under test here.
+            registerBean(ManagedLakeDatasourceRegistrar::class.java, Supplier { mockk<ManagedLakeDatasourceRegistrar>(relaxed = true) })
+            environment.propertySources.addFirst(MapPropertySource("freshness", mapOf(FRESHNESS_TICK_KEY to "1")))
             registerBean(MeterRegistry::class.java, Supplier { SimpleMeterRegistry() })
             registerBean(ExecutionEventRepository::class.java, Supplier { events })
             registerBean(NamedParameterJdbcTemplate::class.java, Supplier { jdbc })
@@ -325,12 +332,17 @@ class ScheduledJobsSchedulerTest {
         const val SWEEP = "sweep"
         const val REAP = "reap"
         const val RETAIN = "retain"
-        val JOBS = listOf(SWEEP, REAP, RETAIN)
+        const val FRESHNESS = "freshness"
+
+        /** #818 — one second, so the freshness tick's startup tick lands inside [AWAIT_SECONDS]. */
+        const val FRESHNESS_TICK_KEY = "datapipelines.lake.reads.freshness-tick-seconds"
+        val JOBS = listOf(SWEEP, REAP, RETAIN, FRESHNESS)
         val SCHEDULED_METHODS =
             setOf(
                 "co.datapipelines.web.config.StaleExecutionSweepScheduler.sweep",
                 "co.datapipelines.web.config.DatasourcePoolReaperScheduler.reap",
                 "co.datapipelines.web.config.ExecutionEventRetentionScheduler.retain",
+                "co.datapipelines.web.config.ManagedLakeFreshnessScheduler.tick",
             )
         const val TICK_STARTED = "test.tick_started"
         const val TICK_ENDED = "test.tick_ended"

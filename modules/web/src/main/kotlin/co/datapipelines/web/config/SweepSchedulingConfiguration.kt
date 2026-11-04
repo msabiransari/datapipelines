@@ -32,7 +32,8 @@ import java.time.Duration
  *
  * - **The jobs have a scheduler of their own (#316):** [taskScheduler], ONE daemon thread named
  *   `dp-scheduled`. Every `@Scheduled` job in the context ticks on it — this sweep, the pool reaper
- *   (`PoolReaperSchedulingConfiguration`) and the retention sweep (`RetentionSchedulingConfiguration`)
+ *   and the managed lake's freshness tick (`PoolReaperSchedulingConfiguration`, #818 for the tick) and the
+ *   retention sweep (`RetentionSchedulingConfiguration`)
  *   — and nothing else does: no bean is wired to it; Spring's registrar looks it up. Until #316
  *   none was declared, and the registrar fell back to the context's unique
  *   `ScheduledExecutorService` — `WebSurfaceConfiguration`'s `sseLogScheduler`, the `dp-sse-log`

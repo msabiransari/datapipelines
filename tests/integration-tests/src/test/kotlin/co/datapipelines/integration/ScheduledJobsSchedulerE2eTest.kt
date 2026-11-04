@@ -411,6 +411,8 @@ class ScheduledJobsSchedulerE2eTest {
                 "datapipelines.auth.oidc.providers[0].issuer-uri" to oidc.issuer,
                 "datapipelines.auth.oidc.providers[0].display-name" to "Test google",
                 "datapipelines.auth.base-url" to "http://localhost:8080",
+                // #818: the freshness tick's startup tick must land inside the await (its default is 60 s).
+                "datapipelines.lake.reads.freshness-tick-seconds" to "1",
             )
         // As command-line arguments, NOT builder `properties(...)` — PersistenceRestartE2eTest says why.
         return SpringApplicationBuilder(DatapipelinesApplication::class.java, TickRecorderConfiguration::class.java)
@@ -582,6 +584,8 @@ class ScheduledJobsSchedulerE2eTest {
                 "co.datapipelines.web.config.ExecutionEventRetentionScheduler.retain",
                 // #10 L2: the dashboard refresh sweep — an approved `@Scheduled` home riding the same thread.
                 "co.datapipelines.web.dashboards.runtime.DashboardRefreshSweepScheduler.sweep",
+                // #818: the managed lake's freshness tick, booted at a one-second cadence below.
+                "co.datapipelines.web.config.ManagedLakeFreshnessScheduler.tick",
             )
         val WRITERS = listOf("audit", "execution_events", "replay_log")
 
