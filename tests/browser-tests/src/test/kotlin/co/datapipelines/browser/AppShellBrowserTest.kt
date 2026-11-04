@@ -918,25 +918,16 @@ class AppShellBrowserTest : BrowserSuite() {
      * #717: waits for the shell-init flag the way `named` waits for elements — a bare
      * Playwright timeout names neither the flag nor the document (#696's CI red spent a
      * gate unread). A timeout becomes an AssertionError carrying the URL, the document
-     * readiness and the flag's value, read at the moment of the failure.
+     * readiness and the flag's value, read at the moment of the failure by the suite's one
+     * probe, [shellInitFacts] (lifted into BrowserSuite for the workspace switch, #761).
      */
     private fun waitForShellInit() {
         try {
             page.waitForFunction("() => window.__dpShellInit === true")
         } catch (e: PlaywrightException) {
-            throw AssertionError("window.__dpShellInit never turned true — ${shellInitFacts()}", e)
+            throw AssertionError("window.__dpShellInit never turned true — ${shellInitFacts(page)}", e)
         }
     }
-
-    /** The in-document facts [waitForShellInit]'s timeout names; itself read defensively. */
-    private fun shellInitFacts(): String =
-        runCatching {
-            page.evaluate(
-                "() => 'url=' + location.href + " +
-                    "' readyState=' + document.readyState + " +
-                    "' __dpShellInit=' + String(window.__dpShellInit)",
-            ) as String
-        }.getOrElse { "the document probe itself failed: $it" }
 
     /**
      * #717: what the document a FULL navigation just landed looks like at the moment of

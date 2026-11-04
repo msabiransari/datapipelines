@@ -553,6 +553,18 @@ use `BrowserSuite.FIRST_RENDER_TIMEOUT_MS` (90 s, CI and local alike); every act
 acts on a present DOM and keeps the ordinary patience (30 s locally, where a 30 s wait IS the
 defect; the gates raise that to CI's 90 s per action with `-Pdp.browser.ciPatience=true`, #438).
 
+**A failed workspace switch names the ONE phase that did not finish (#761).**
+`BrowserSuite.enterWorkspace` runs seven phases in order: `switcher-render` (the reload and the
+switcher's first render), `shell-init` (the `window.__dpShellInit` wait), `select`,
+`switch-request` (the 15 s wait for the switch request and its one re-dispatch), `switch-result`
+(the response or failure and its `Location`), `dashboard-landing` and `selected-value`. Every red
+it raises leads with `phase=<name>` and prints only what that phase can have observed. A shell that
+never initialized reads `phase=shell-init`, `request=none`, the document's URL, readiness and flag,
+and the subresource loads that failed since the reload (all counted, the first ten listed, origin
+and path only). It never claims a switch request the page did not send.
+`WorkspaceSwitchOutcomeBrowserTest` pins the init phase with a planted `shell.js` abort, and the
+switch-result phase with an aborted, a 403 and a 302 switch.
+
 ```bash
 # The marketing site's screenshots, produced by a script rather than by hand (070 §C).
 ./app.sh --start --demo nyc                      # the deployment being photographed
