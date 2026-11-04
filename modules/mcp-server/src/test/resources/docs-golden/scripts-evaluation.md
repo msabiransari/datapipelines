@@ -86,7 +86,8 @@ rows and rejects) must together fit `datapipelines.script.max-input-rows`. An in
 output each just over half the cap fail together, though each alone is under it; past the
 combined count is `pipeline.script.invariants_too_large`. Known gap: a `table` caller
 output's gated rows are NOT part of the count (only its inputs are). No invariants declared
-means no read-back and no row bound — the run stays bounded by
+means no invariant read-back or combined read-back row bound; the table/value input caps
+above still apply. The run also stays bounded by
 `datapipelines.script.max-value-bytes`, `datapipelines.script.max-string-bytes`,
 `datapipelines.script.max-depth` (default `100`), the wall clock and the
 JavaScript caps (`datapipelines.script.js.*`).
