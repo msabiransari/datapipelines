@@ -21,9 +21,12 @@ import java.util.UUID
  *
  * [close] refuses new leases at once. If no lease is outstanding it runs [finalize] — close the root,
  * delete the files, release the reservation — before returning; otherwise the LAST lease to return
- * runs it. `close()` therefore never waits for a lease still inside the driver (§6), and the driver
- * offers no way to stop one: `DuckDBConnection.abort` is unsupported. A lease still running is bounded
- * by its statement's query timeout and the node's cancellation. [finalize] runs exactly once.
+ * runs it. `close()` therefore never waits for a lease still inside the driver (§6). The driver can
+ * stop one: `Statement.cancel()` interrupts the lease's connection while that statement executes
+ * (measured, lane #795 round two: a runaway aggregate stopped within milliseconds), and its query
+ * timeout does the same on the driver's own timer. The pool holds no statement; [DuckDbStaging]
+ * cancels the ones it created before it closes the pool. `DuckDBConnection.abort` stays unsupported.
+ * [finalize] runs exactly once.
  */
 internal class DuckDbLeasePool(
     val executionId: UUID,

@@ -11,6 +11,9 @@ import org.slf4j.LoggerFactory
 import java.sql.Connection
 import java.sql.ResultSet
 import java.sql.SQLException
+import java.sql.Statement
+import java.util.Collections
+import java.util.IdentityHashMap
 import java.util.UUID
 import kotlin.coroutines.coroutineContext
 
@@ -42,6 +45,12 @@ import kotlin.coroutines.coroutineContext
  *  - **[close] drops nothing table by table**: the file dies. It closes the root connection and
  *    deletes the file, WAL and spill directory, then releases the reservation — at once when no
  *    lease is outstanding, otherwise when the last one returns.
+ *  - **Every statement this class creates is bounded twice**: [withQuery] and [execute] set the
+ *    configured query timeout, and [close] cancels the ones still running before it closes the pool,
+ *    so the last lease comes back without waiting the timeout out. Two limits, both left to the
+ *    query timeout: a `withConnection` statement is the caller's to bound (the executor sets the
+ *    timeout and cancels it with the node), and the driver's cancel does nothing to a statement
+ *    that has not yet entered its execute, so a [close] landing in those microseconds misses it.
  */
 class DuckDbStaging internal constructor(
     override val executionId: UUID,
@@ -53,6 +62,8 @@ class DuckDbStaging internal constructor(
     private val bookkeeping = Any()
     private val stagedTables = linkedSetOf<String>()
     private var stagedRowTotal = 0L
+    private val running: MutableSet<Statement> = Collections.newSetFromMap(IdentityHashMap())
+    private var closed = false
     private val failures = DuckDbEngineFailures(executionId, config.memoryLimitBytes, reservation.bytes)
 
     override suspend fun <T> withConnection(block: suspend (Connection) -> T): T = authorLease(block).also { checkScratch() }
@@ -116,16 +127,23 @@ class DuckDbStaging internal constructor(
                 stmt.queryTimeout = config.queryTimeoutSeconds
                 stmt.fetchSize = config.resultBatchSize
                 stmt.closeOnCompletion()
-                block(stmt.executeQuery(sql))
+                inFlight(stmt) { block(stmt.executeQuery(sql)) }
             }
         }
 
     /**
      * Returns the affected row count; DDL reports 0 (JDBC's contract — the pinned driver returns −1
-     * for a `CREATE TABLE … AS`, lane #795 probe 16).
+     * for a `CREATE TABLE … AS`, lane #795 probe 16). Bounded as [withQuery] is: the configured
+     * query timeout, and [close] cancels it.
      */
     override suspend fun execute(sql: String): Long {
-        val affected = authorLease { connection -> connection.createStatement().use { it.executeUpdate(sql) }.toLong() }
+        val affected =
+            authorLease { connection ->
+                connection.createStatement().use { stmt ->
+                    stmt.queryTimeout = config.queryTimeoutSeconds
+                    inFlight(stmt) { stmt.executeUpdate(sql) }.toLong()
+                }
+            }
         checkScratch()
         return affected.coerceAtLeast(0L)
     }
@@ -137,10 +155,17 @@ class DuckDbStaging internal constructor(
     }
 
     override fun close() {
+        val toCancel =
+            synchronized(bookkeeping) {
+                closed = true
+                running.toList()
+            }
+        toCancel.forEach(::cancel)
         val outstanding = pool.close()
         if (outstanding > 0) {
             log.warn(
-                "tempdb closed with {} lease(s) still out for execution {}; the last one deletes the database",
+                "tempdb closed with {} lease(s) still out for execution {}; its running statements were cancelled " +
+                    "and the last lease to return deletes the database",
                 outstanding,
                 executionId,
             )
@@ -156,6 +181,9 @@ class DuckDbStaging internal constructor(
     /** The most leases ever out at once — a measurement for tests. */
     val peakActiveLeases: Int get() = pool.peakActiveLeases
 
+    /** Statements [withQuery] and [execute] have running now — a measurement for tests. */
+    val inFlightStatements: Int get() = synchronized(bookkeeping) { running.size }
+
     // ------------------------------------------------------------ leases
 
     private suspend fun <T> authorLease(block: suspend (Connection) -> T): T = classifying { pool.lease(::GuardedConnection, block) }
@@ -169,6 +197,34 @@ class DuckDbStaging internal constructor(
         } catch (e: SQLException) {
             throw failures.classify(e)
         }
+
+    /**
+     * Runs [body] with [statement] registered, so [close] can cancel it: around the execute and, for
+     * a cursor, its reading. Refused once [close] ran, so no statement starts after its cancel pass.
+     */
+    private suspend fun <T> inFlight(
+        statement: Statement,
+        body: suspend () -> T,
+    ): T {
+        synchronized(bookkeeping) {
+            check(!closed) { "staging database for execution $executionId is closed" }
+            running += statement
+        }
+        try {
+            return body()
+        } finally {
+            synchronized(bookkeeping) { running -= statement }
+        }
+    }
+
+    /** The driver refuses `cancel()` on a statement that closed meanwhile: it finished, nothing to stop. */
+    private fun cancel(statement: Statement) {
+        try {
+            statement.cancel()
+        } catch (e: SQLException) {
+            log.debug("tempdb statement of execution {} had already closed when close() cancelled it: {}", executionId, e.message)
+        }
+    }
 
     /** The disk bound (class KDoc): measured after a write, refused past the reservation. */
     private fun checkScratch() {
