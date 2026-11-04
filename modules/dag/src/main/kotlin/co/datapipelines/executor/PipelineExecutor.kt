@@ -182,8 +182,14 @@ class PipelineExecutor(
         try {
             // §15.2: staging creation opens JDBC connections — blocking work, so it belongs on the
             // executor's own pool, never on whatever thread the caller happened to arrive on.
-            val opened = withContext(dispatcher.context) { stagingFactory.create(executionId, request.pipeline.settings.tempdb.engine) }
-            staging = opened
+            // The opened database is recorded INSIDE the block, for `finally` to close: withContext
+            // dispatches its result back "with a prompt cancellation guarantee" — a caller cancelled
+            // by then gets CancellationException and the result is discarded (its KDoc) — so an
+            // assignment after the call would never run and the database would leak (#795 F5).
+            val opened =
+                withContext(dispatcher.context) {
+                    stagingFactory.create(executionId, request.pipeline.settings.tempdb.engine).also { staging = it }
+                }
             val ctx = nodeContext(request, opened, handle, run, context)
             return withTimeout(config.executionTimeoutSeconds.seconds) {
                 coroutineScope {
