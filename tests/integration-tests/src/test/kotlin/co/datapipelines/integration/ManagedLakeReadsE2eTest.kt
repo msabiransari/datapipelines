@@ -356,50 +356,94 @@ class ManagedLakeReadsE2eTest {
         }
     }
 
+    // Each lifecycle case below is independent: it sets the row's state itself and restores it in `finally`, so a
+    // falsification that breaks one case cannot hide another behind an earlier failure. They share instance F.
+
     @Test
     @Order(10)
-    fun `B - availability is the leased generation's snapshot through every lifecycle move, with no projection fallback`() {
-        val lifecycle = boot(maxAgeSeconds = B_MAX_AGE_SECONDS, tickSeconds = LIFECYCLE_TICK_SECONDS, application = APP_F)
+    fun `B - active to archived - served until the generation is replaced, then refused with the generation's reason`() {
+        val portF = lifecycleReady()
         try {
-            val portF = portOf(lifecycle)
+            // This read builds F's generation while the row is active; the archive below lands after it.
             countOn(portF) shouldBe ICEBERG_ROWS
-
             setStatus("archived")
             withClue("active -> archived: the live generation was built active and still serves") { countOn(portF) shouldBe ICEBERG_ROWS }
-            retireManagedPool(lifecycle) shouldBe true
+            retireManagedPool(lifecycle()) shouldBe true
             refusalOn(portF).also {
                 it shouldContain "lake.table.unavailable"
                 it shouldContain "status archived"
             }
-
+        } finally {
             setStatus("active")
-            withClue("archived -> active: the leased generation was built archived, so it still refuses") {
-                refusalOn(portF) shouldContain "status archived"
+        }
+    }
+
+    @Test
+    @Order(11)
+    fun `B - archived to active - refused with the leased generation's reason until it is replaced, then served`() {
+        val portF = lifecycleReady(status = "archived")
+        try {
+            refusalOn(portF) shouldContain "status archived"
+            setStatus("active")
+            withClue("archived -> active: the leased generation was built archived, so it still refuses, never an engine error") {
+                refusalOn(portF).also {
+                    it shouldContain "lake.table.unavailable"
+                    it shouldContain "status archived"
+                }
             }
-            retireManagedPool(lifecycle) shouldBe true
-            countOn(portF) shouldBe ICEBERG_ROWS
-
-            setStatus("deprecated")
-            retireManagedPool(lifecycle) shouldBe true
-            withClue("a deprecated table stays readable") { countOn(portF) shouldBe ICEBERG_ROWS }
-            setStatus("active")
-
-            renameLifecycleRow(from = "trips", to = AWAY)
-            retireManagedPool(lifecycle) shouldBe true
-            refusalOn(portF) shouldContain "no lifecycle row"
-            renameLifecycleRow(from = AWAY, to = "trips")
-
-            // The projection row still names PREVIOUS (see A4): a fallback to it would serve the older snapshot.
-            registryLocation() shouldBe PREVIOUS
-            renameCatalogRow(from = "trips", to = AWAY)
-            retireManagedPool(lifecycle) shouldBe true
-            refusalOn(portF) shouldContain "no catalog row"
-            renameCatalogRow(from = AWAY, to = "trips")
-            retireManagedPool(lifecycle) shouldBe true
+            retireManagedPool(lifecycle()) shouldBe true
             countOn(portF) shouldBe ICEBERG_ROWS
         } finally {
-            lifecycle.close()
+            setStatus("active")
         }
+    }
+
+    @Test
+    @Order(12)
+    fun `B - a deprecated table stays readable`() {
+        val portF = lifecycleReady(status = "deprecated")
+        try {
+            countOn(portF) shouldBe ICEBERG_ROWS
+        } finally {
+            setStatus("active")
+        }
+    }
+
+    @Test
+    @Order(13)
+    fun `B - a table with no lifecycle row is refused no lifecycle row`() {
+        renameLifecycleRow(from = "trips", to = AWAY)
+        try {
+            refusalOn(lifecycleReady()) shouldContain "no lifecycle row"
+        } finally {
+            renameLifecycleRow(from = AWAY, to = "trips")
+        }
+    }
+
+    @Test
+    @Order(14)
+    fun `B - a table with no catalog row is refused no catalog row, never served from the projection`() {
+        // The projection row still names PREVIOUS (see A4): a fallback to it would serve the older snapshot.
+        registryLocation() shouldBe PREVIOUS
+        renameCatalogRow(from = "trips", to = AWAY)
+        try {
+            refusalOn(lifecycleReady()) shouldContain "no catalog row"
+        } finally {
+            renameCatalogRow(from = AWAY, to = "trips")
+        }
+        countOn(lifecycleReady()) shouldBe ICEBERG_ROWS
+    }
+
+    /** Instance F, booted once: its tick and age bound outlast the suite, so only [retireManagedPool] replaces a generation. */
+    private fun lifecycle(): ConfigurableApplicationContext =
+        instanceF ?: boot(maxAgeSeconds = B_MAX_AGE_SECONDS, tickSeconds = LIFECYCLE_TICK_SECONDS, application = APP_F).also { instanceF = it }
+
+    /** F's port, after the row is set to [status] (when given) and F's live generation, if any, is replaced. */
+    private fun lifecycleReady(status: String? = null): Int {
+        val context = lifecycle()
+        status?.let { setStatus(it) }
+        retireManagedPool(context)
+        return portOf(context)
     }
 
     // ------------------------------------------------------------- reads through the pipeline surface
@@ -865,8 +909,9 @@ class ManagedLakeReadsE2eTest {
 
         private val oidc = OidcDiscoveryStub()
 
-        /** The OTHER instances this suite boots; B lives for the class, C and D only for their test. */
+        /** The OTHER instances this suite boots; B and F live for the class, C, D, E and G only for their test. */
         private var instanceB: ConfigurableApplicationContext? = null
+        private var instanceF: ConfigurableApplicationContext? = null
         private var portB: Int = 0
         private var pipelineId: String = ""
 
@@ -993,6 +1038,7 @@ class ManagedLakeReadsE2eTest {
         @JvmStatic
         fun closeInstances() {
             instanceB?.close()
+            instanceF?.close()
             oidc.close()
         }
 
