@@ -26,8 +26,9 @@ import java.util.concurrent.TimeUnit
  * - **No second `@EnableScheduling`:** the sweep configuration's annotation is the context's
  *   one; `@Scheduled` here rides the jobs' own scheduler, its one `dp-scheduled` thread (#316 —
  *   not Spring's default, and no longer the SSE log streamer's `dp-sse-log` thread it fell back to
- *   before; the sweep configuration's KDoc has the decision). The tick reads one in-memory queue —
- *   usually empty — and closes what has drained.
+ *   before; the sweep configuration's KDoc has the decision). The tick walks the live pool map for
+ *   managed lake generations past their age bound and retires them (#818c), then reads one in-memory
+ *   queue — usually empty — and closes what has drained. Neither half issues a statement.
  * - **`fixedDelay`, not `fixedRate`:** a slow tick delays the next instead of piling on. The
  *   reaper catches up by construction: every decision is made from the pool's CURRENT active
  *   count and its own absolute deadline, never from how long ago the last tick ran.
@@ -171,17 +172,35 @@ class ManagedLakeFreshnessScheduler(
     }
 }
 
-/** The `@Scheduled` adapter over [DatasourceRegistry.reapRetiredPools] — see [PoolReaperSchedulingConfiguration]. */
+/**
+ * The `@Scheduled` adapter over [DatasourceRegistry.reapRetiredPools] — see [PoolReaperSchedulingConfiguration].
+ *
+ * #818c (record §10 RULING 4 amended 2026-11-05, item 3) — the pass first retires every managed lake generation past
+ * `reads.max-generation-age-seconds`, with no borrower (`ConnectionPoolManager.retireExpiredGenerations`), then reaps,
+ * so an idle server's over-age generation is retired within one [ReaperDelay] of its age bound and hard-closed within
+ * one more of its ceiling. The pass issues no statement: the retirement is a clock comparison over the live map.
+ * Each retirement logs `lake.generation_expired trigger=reaper`; the pass logs its count once, only when it is not
+ * zero (`lake.reaper_retired`, the freshness tick's pattern). The count is at most the live managed generation
+ * count, one per managed datasource name.
+ */
 class DatasourcePoolReaperScheduler(
     private val datasources: DatasourceRegistry,
 ) {
     @Scheduled(fixedDelay = REAP_INTERVAL_MILLIS)
     fun reap() {
-        datasources.reapRetiredPools()
+        val outcome = datasources.reapRetiredPools()
+        if (outcome.expired > 0) {
+            log.info(
+                "event=lake.reaper_retired generations={} message=\"the pool reaper retired managed generations past their age bound\"",
+                outcome.expired,
+            )
+        }
     }
 
     companion object {
-        /** Five seconds — see [PoolReaperSchedulingConfiguration] for why, and why not sixty. */
+        private val log = LoggerFactory.getLogger(DatasourcePoolReaperScheduler::class.java)
+
+        /** Five seconds — see [PoolReaperSchedulingConfiguration] for why, and why not sixty. [ReaperDelay] starts from it. */
         const val REAP_INTERVAL_MILLIS = 5_000L
     }
 }

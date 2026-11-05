@@ -2,7 +2,11 @@ package co.datapipelines.datasources.pooling
 
 import co.datapipelines.datasources.Fixtures
 import co.datapipelines.datasources.ManagedLakeTable
+import co.datapipelines.datasources.capturingLogs
+import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeSameInstanceAs
 import io.kotest.matchers.types.shouldNotBeSameInstanceAs
 import org.junit.jupiter.api.Test
@@ -15,6 +19,10 @@ import java.util.concurrent.atomic.AtomicInteger
  * #818 (dp-lake P5, design record §10 RULING 4 item 1): the age bound inside [ConnectionPoolManager.poolFor].
  * A managed lake generation older than `reads.max-generation-age-seconds` is retired BEFORE a lease is taken
  * from it, with no tick and no message, and a new generation is built. Every other pool is untouched.
+ *
+ * #818c (RULING 4 amended 2026-11-05, item 3): the reaper's pass ([ConnectionPoolManager.reapRetiring]) retires an
+ * over-age managed generation with NO lease after the build, no tick and no invalidation, through the lease path's
+ * own judgement, so the ceiling's close follows on a later pass. The lease-time cases above stay unchanged.
  */
 class ConnectionPoolManagerGenerationAgeTest {
     private class AgePool(
@@ -138,6 +146,107 @@ class ConnectionPoolManagerGenerationAgeTest {
         now = now.plusSeconds(1)
         manager.reapRetiring() shouldBe ReapOutcome(drained = 0, hardClosed = 1)
         first.closed shouldBe true
+    }
+
+    @Test
+    fun `the reaper's pass retires an over-age managed generation with no lease, and a later pass hard-closes it`() {
+        val manager = manager(managed = true)
+        val first = manager.poolFor(LAKE) as AgePool
+        first.active = 1
+
+        now = start.plusSeconds(MAX_AGE_SECONDS + 1)
+        val logs = capturingLogs { manager.reapRetiring() shouldBe ReapOutcome(drained = 0, hardClosed = 0, expired = 1) }
+
+        // Retired by the pass, not by a lease: nothing called poolFor after the build.
+        builds.get() shouldBe 1
+        manager.hasPool(LAKE.name) shouldBe false
+        manager.generationBuiltAt(LAKE.name) shouldBe null
+        manager.retiringCount() shouldBe 1
+        first.softEvicted shouldBe true
+        first.closed shouldBe false
+        metrics.retired shouldBe listOf(LAKE.name)
+        val expired = logs.filter { it.startsWith("event=lake.generation_expired") }
+        expired shouldHaveSize 1
+        expired.single() shouldContain "trigger=reaper"
+
+        now = now.plusSeconds(CEILING_SECONDS - 1)
+        manager.reapRetiring() shouldBe ReapOutcome.NOTHING
+        first.closed shouldBe false
+        now = now.plusSeconds(1)
+        manager.reapRetiring() shouldBe ReapOutcome(drained = 0, hardClosed = 1)
+        first.closed shouldBe true
+    }
+
+    @Test
+    fun `a managed generation exactly at its bound is left to serve by the reaper's pass`() {
+        val manager = manager(managed = true)
+        val first = manager.poolFor(LAKE) as AgePool
+
+        now = start.plusSeconds(MAX_AGE_SECONDS)
+        manager.reapRetiring() shouldBe ReapOutcome.NOTHING
+        manager.retireExpiredGenerations() shouldBe 0
+
+        manager.generationBuiltAt(LAKE.name) shouldBe start
+        manager.retiringCount() shouldBe 0
+        first.softEvicted shouldBe false
+        // One millisecond past it, the same pass retires it: the boundary is the lease path's (served while age <= bound).
+        now = start.plusSeconds(MAX_AGE_SECONDS).plusMillis(1)
+        manager.retireExpiredGenerations() shouldBe 1
+        manager.generationBuiltAt(LAKE.name) shouldBe null
+    }
+
+    @Test
+    fun `an over-age generation that has drained is retired and closed in one pass`() {
+        val manager = manager(managed = true)
+        val first = manager.poolFor(LAKE) as AgePool
+
+        now = start.plusSeconds(MAX_AGE_SECONDS + 1)
+        manager.reapRetiring() shouldBe ReapOutcome(drained = 1, hardClosed = 0, expired = 1)
+
+        first.closed shouldBe true
+        manager.retiringCount() shouldBe 0
+    }
+
+    @Test
+    fun `the reaper's pass never ages out a non-managed pool, nor anything without a bound`() {
+        val plain = manager(managed = false)
+        val first = plain.poolFor(LAKE)
+        now = start.plusSeconds(MAX_AGE_SECONDS * 100)
+
+        val logs = capturingLogs { plain.reapRetiring() shouldBe ReapOutcome.NOTHING }
+
+        plain.generationBuiltAt(LAKE.name) shouldBe start
+        plain.poolFor(LAKE) shouldBeSameInstanceAs first
+        plain.retiringCount() shouldBe 0
+        logs.filter { it.startsWith("event=lake.generation_expired") }.shouldBeEmpty()
+
+        val unbounded =
+            ConnectionPoolManager(
+                poolFactory = { ds -> AgePool(ds.name, ManagedLakeGeneration(ds.name, emptyList()), builds.incrementAndGet()) },
+                clock = { now },
+            )
+        val managed = unbounded.poolFor(LAKE)
+        now = now.plusSeconds(MAX_AGE_SECONDS * 100)
+        unbounded.retireExpiredGenerations() shouldBe 0
+        unbounded.poolFor(LAKE) shouldBeSameInstanceAs managed
+    }
+
+    @Test
+    fun `the reaper's pass leaves a generation a lease already replaced, and logs the lease as the trigger`() {
+        val manager = manager(managed = true)
+        val first = manager.poolFor(LAKE) as AgePool
+        first.active = 1
+
+        now = start.plusSeconds(MAX_AGE_SECONDS + 1)
+        val logs = capturingLogs { manager.poolFor(LAKE) }
+        val second = manager.poolFor(LAKE)
+        logs.single { it.startsWith("event=lake.generation_expired") } shouldContain "trigger=lease"
+
+        // The fresh generation is young: the pass retires nothing more, and the one already queued stays queued once.
+        manager.reapRetiring() shouldBe ReapOutcome.NOTHING
+        manager.poolFor(LAKE) shouldBeSameInstanceAs second
+        manager.retiringCount() shouldBe 1
+        metrics.retired shouldBe listOf(LAKE.name)
     }
 
     @Test

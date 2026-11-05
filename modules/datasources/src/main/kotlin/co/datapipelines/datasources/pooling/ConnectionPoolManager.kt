@@ -314,6 +314,11 @@ data class ReapOutcome(
     val drained: Int,
     /** Pools closed at the ceiling with connections still out — each logged one WARN. */
     val hardClosed: Int,
+    /**
+     * #818c (record §10 RULING 4 amended, item 3) — managed lake generations this pass retired at their age bound
+     * before it reaped ([ConnectionPoolManager.retireExpiredGenerations]); at most the live managed generation count.
+     */
+    val expired: Int = 0,
 ) {
     /** Total pools closed this tick. */
     val closed: Int get() = drained + hardClosed
@@ -367,8 +372,10 @@ class ConnectionPoolManager(
     /**
      * #818 RULING 4 item 1 — `datapipelines.lake.reads.max-generation-age-seconds`: [poolFor] retires a
      * MANAGED lake generation ([ConnectionPool.managedGeneration] non-null) older than this before it
-     * leases from it, whatever messages did or did not arrive. Null (no lake configured, every test
-     * that is not about it) bounds nothing. Pools of every other kind are never aged out.
+     * leases from it, whatever messages did or did not arrive; #818c (item 3, amended 2026-11-05) — and
+     * [reapRetiring] retires one on the reaper's next pass with no borrower at all. Null (no lake
+     * configured, every test that is not about it) bounds nothing. Pools of every other kind are never
+     * aged out.
      */
     private val maxGenerationAge: Duration? = null,
     /**
@@ -403,19 +410,63 @@ class ConnectionPoolManager(
     fun poolFor(datasource: Datasource): ConnectionPool {
         while (true) {
             val live = pools.computeIfAbsent(datasource.name) { LivePool(builtAt = clock(), pool = poolFactory(datasource)) }
-            val age = Duration.between(live.builtAt, clock())
-            if (maxGenerationAge == null || live.pool.managedGeneration == null || age <= maxGenerationAge) return live.pool
-            if (pools.remove(datasource.name, live)) {
-                enqueueRetired(datasource.name, live.pool)
-                LOG.info(
-                    "event=lake.generation_expired datasource={} age_seconds={} max_age_seconds={} " +
-                        "message=\"managed lake generation retired at its age bound; the next lease builds from the catalog\"",
-                    datasource.name,
-                    age.seconds,
-                    maxGenerationAge.seconds,
-                )
-            }
+            val age = expiredAge(live) ?: return live.pool
+            retireExpired(datasource.name, live, age, TRIGGER_LEASE)
         }
+    }
+
+    /**
+     * #818c (record §10 RULING 4 amended 2026-11-05, item 3) — the reaper's half of the age bound: retires every
+     * live MANAGED lake generation past [maxGenerationAge], with no borrower, through the SAME judgement
+     * ([expiredAge]) and the same compare-and-remove `remove(name, live)` the lease path uses. A generation another
+     * caller already replaced (a lease that judged it first, the freshness tick, an invalidation) fails the
+     * compare and is left alone, so a lease racing this pass can neither double-retire it nor lose the fresh entry
+     * it built. [reapRetiring] runs this FIRST, so an over-age generation that has already drained is retired and
+     * closed in one pass.
+     *
+     * Statement-free by construction: a walk of the in-memory map and one clock comparison per pool; the soft
+     * evict of a retired generation closes its idle in-process duplicates and sends nothing to any database. So a
+     * held lock can never starve it (the reason 818b bounded the freshness tick). Its work per pass is bounded by
+     * the live managed generation count — one per managed datasource name.
+     *
+     * @return how many generations it retired; 0 at once when no age bound is configured.
+     */
+    fun retireExpiredGenerations(): Int {
+        if (maxGenerationAge == null) return 0
+        var retired = 0
+        pools.forEach { (name, live) ->
+            val age = expiredAge(live) ?: return@forEach
+            if (retireExpired(name, live, age, TRIGGER_REAPER)) retired++
+        }
+        return retired
+    }
+
+    /** The age of [live] when it is a managed generation past [maxGenerationAge]; null when it may still serve. */
+    private fun expiredAge(live: LivePool): Duration? {
+        val bound = maxGenerationAge ?: return null
+        if (live.pool.managedGeneration == null) return null
+        val age = Duration.between(live.builtAt, clock())
+        return age.takeIf { it > bound }
+    }
+
+    /** Retires [live] only while it is still [name]'s live entry; true when this caller won the removal. */
+    private fun retireExpired(
+        name: String,
+        live: LivePool,
+        age: Duration,
+        trigger: String,
+    ): Boolean {
+        if (!pools.remove(name, live)) return false
+        enqueueRetired(name, live.pool)
+        LOG.info(
+            "event=lake.generation_expired datasource={} trigger={} age_seconds={} max_age_seconds={} " +
+                "message=\"managed lake generation retired at its age bound; the next lease builds from the catalog\"",
+            name,
+            trigger,
+            age.seconds,
+            maxGenerationAge?.seconds,
+        )
+        return true
     }
 
     /**
@@ -483,13 +534,16 @@ class ConnectionPoolManager(
     }
 
     /**
-     * Closes every retiring pool that has drained, plus every one whose ceiling has passed.
+     * The reaper's pass: first retires every managed lake generation past its age bound
+     * ([retireExpiredGenerations], #818c), then closes every retiring pool that has drained, plus every one
+     * whose ceiling has passed.
      *
      * Driven by the assembling layer's scheduled tick (one per instance). Idempotent and cheap:
-     * with nothing retiring it reads one empty queue.
+     * with no managed generation and nothing retiring it walks the live map and reads one empty queue.
      */
     fun reapRetiring(): ReapOutcome {
-        if (retiring.isEmpty()) return ReapOutcome.NOTHING
+        val expired = retireExpiredGenerations()
+        if (retiring.isEmpty()) return ReapOutcome(drained = 0, hardClosed = 0, expired = expired)
         val now = clock()
         var drained = 0
         var hardClosed = 0
@@ -519,7 +573,7 @@ class ConnectionPoolManager(
                 }
             }
         }
-        return ReapOutcome(drained = drained, hardClosed = hardClosed)
+        return ReapOutcome(drained = drained, hardClosed = hardClosed, expired = expired)
     }
 
     /** Whether a live pool currently exists for [name] (test/observability aid). */
@@ -555,6 +609,12 @@ class ConnectionPoolManager(
 
     companion object {
         private val LOG = LoggerFactory.getLogger(ConnectionPoolManager::class.java)
+
+        /** `lake.generation_expired`'s `trigger`: the lease path judged the age ([poolFor]). */
+        const val TRIGGER_LEASE = "lease"
+
+        /** `lake.generation_expired`'s `trigger`: the reaper's pass judged it with no borrower ([retireExpiredGenerations]). */
+        const val TRIGGER_REAPER = "reaper"
 
         /**
          * The library default ceiling: the executor's own default `node-query-timeout-seconds`

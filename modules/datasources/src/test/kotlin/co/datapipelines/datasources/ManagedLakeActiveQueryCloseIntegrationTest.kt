@@ -54,10 +54,15 @@ import java.util.concurrent.atomic.AtomicReference
  * Falsified by skipping the close in `ConnectionPoolManager.reapRetiring`'s ceiling branch: the query is then still
  * running at the bound, so the termination assertion fails.
  *
- * The second case is the brief's claim 2, a characterization of what IS, kept while the owner rules on it: with no
- * later borrower, no freshness tick and no invalidation, nothing retires a generation past its age bound (the bound
- * is judged only at a lease), so the reaper has nothing to close and an executing reader runs on past age + ceiling.
- * Only a later borrower's lease retires it, and the close then follows at the ceiling.
+ * The second case is the guard of #818c (record §10 RULING 4 amended 2026-11-05, item 3; it replaces 818b's claim-2
+ * characterization, which showed that nothing but a later lease retired an over-age generation). With no later
+ * borrower, no freshness tick and no invalidation, the reaper's own pass retires the executing reader's generation
+ * once it is past its age bound (the first reap after `built + age`: `expired = 1`, the live generation gone, the
+ * query still running, since the lease is held), and the next reap past that retirement's ceiling hard-closes it and
+ * the query ends. No `poolFor` is called after the first one, so no lease judges the age. The borrower half of the
+ * old characterization is dropped: the lease path's retirement is `ConnectionPoolManagerGenerationAgeTest`'s, and a
+ * borrower here would only hide whether the reaper retired on its own. Falsified by removing the retirement from
+ * `ConnectionPoolManager.reapRetiring`: the first reap then retires nothing.
  */
 @Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -130,7 +135,8 @@ class ManagedLakeActiveQueryCloseIntegrationTest {
     }
 
     @Test
-    fun `claim 2 - with no later borrower nothing retires an executing reader's generation past its age bound`() {
+    @Suppress("LongMethod") // one timeline is the witness: build, burn, retiring reap, deadline, closing reap, end
+    fun `with no later borrower the reaper retires an executing reader's generation past its age bound and closes it`() {
         jdbc.jdbcTemplate.execute("TRUNCATE datasources, users CASCADE")
         val owner = actor()
         val registry =
@@ -144,8 +150,7 @@ class ManagedLakeActiveQueryCloseIntegrationTest {
             )
         try {
             registry.syncManagedLake(managed(), owner) shouldBe ManagedLakeSync.CREATED
-            val datasource = registry.get(LAKE).shouldNotBeNull()
-            val pool = registry.poolFor(datasource).shouldBeInstanceOf<HikariConnectionPool>()
+            val pool = registry.poolFor(registry.get(LAKE).shouldNotBeNull()).shouldBeInstanceOf<HikariConnectionPool>()
             val builtAt = registry.generationBuiltAt(LAKE).shouldNotBeNull()
             val lease = pool.leaseConnection()
             val statement = pool.poolConnectionOf(lease).unwrap(java.sql.Connection::class.java).prepareStatement(LONG_QUERY)
@@ -153,32 +158,42 @@ class ManagedLakeActiveQueryCloseIntegrationTest {
             try {
                 run.start()
                 awaitExecuting(run)
-                // Past age + ceiling, with no lease, no tick and no invalidation: the reaper finds nothing retired.
-                val quietUntil = builtAt.plus(SHORT_AGE).plus(CEILING)
-                Thread.sleep(Duration.between(Instant.now(), quietUntil).toMillis().coerceAtLeast(0) + DEADLINE_MARGIN_MS)
-                val quiet = registry.reapRetiredPools()
-                val stillRunningAt = Instant.now()
-                val stillRunning = run.ended.count == 1L
-                val stillLive = registry.generationBuiltAt(LAKE)
-                // A later borrower: its lease judges the age bound, retires the generation, and the close follows.
-                val borrowedAt = Instant.now()
-                registry.poolFor(datasource)
-                Thread.sleep(CEILING.toMillis() + DEADLINE_MARGIN_MS)
-                val reapStarted = Instant.now()
+                // Past the age bound, with no lease, no tick and no invalidation: only the reaper's pass can retire it.
+                val ageBound = builtAt.plus(SHORT_AGE)
+                Thread.sleep(Duration.between(Instant.now(), ageBound).toMillis().coerceAtLeast(0) + DEADLINE_MARGIN_MS)
+                val retiringReapAt = Instant.now()
+                val retiring = registry.reapRetiredPools()
+                val liveAfterRetire = registry.generationBuiltAt(LAKE)
+                val runningAfterRetire = run.ended.count == 1L
+                val deadline = retiringReapAt.plus(CEILING)
+                Thread.sleep(Duration.between(Instant.now(), deadline).toMillis().coerceAtLeast(0) + DEADLINE_MARGIN_MS)
+                // Still executing at the ceiling: what ends it below is the close, not completion.
+                val runningAtCeiling = run.ended.count == 1L
+                val closingReapAt = Instant.now()
                 val closing = registry.reapRetiredPools()
                 val ended = run.ended.await(TERMINATION_BOUND.toMillis(), TimeUnit.MILLISECONDS)
+                val endedAt = run.endedAt.get()
                 println(
-                    "CLAIM2_NO_BORROWER built=$builtAt age=$SHORT_AGE ceiling=$CEILING quiet_reap_hard_closed=${quiet.hardClosed} " +
-                        "still_running_at=$stillRunningAt still_running=$stillRunning live_generation_built=$stillLive " +
-                        "borrowed=$borrowedAt reap_started=$reapStarted hard_closed=${closing.hardClosed} " +
-                        "ended=${run.endedAt.get()} outcome=${run.outcome.get()}",
+                    "REAPER_RETIRES_NO_BORROWER built=$builtAt age=$SHORT_AGE ceiling=$CEILING age_bound=$ageBound " +
+                        "retiring_reap=$retiringReapAt expired=${retiring.expired} hard_closed_first=${retiring.hardClosed} " +
+                        "live_after_retire=$liveAfterRetire running_after_retire=$runningAfterRetire " +
+                        "running_at_ceiling=$runningAtCeiling closing_reap=$closingReapAt hard_closed=${closing.hardClosed} " +
+                        "ended=$endedAt outcome=${run.outcome.get()}",
                 )
                 assertAll(
-                    { quiet.hardClosed shouldBe 0 },
-                    { stillRunning shouldBe true },
-                    { stillLive shouldBe builtAt },
-                    { closing.hardClosed shouldBe 1 },
+                    { withClue("the first reap past the age bound retires the generation") { retiring.expired shouldBe 1 } },
+                    { withClue("its lease is held, so the first reap closes nothing") { retiring.hardClosed shouldBe 0 } },
+                    { withClue("the retired generation is no longer the live one") { liveAfterRetire shouldBe null } },
+                    { runningAfterRetire shouldBe true },
+                    { runningAtCeiling shouldBe true },
+                    { withClue("the reap past the ceiling hard-closes it") { closing.hardClosed shouldBe 1 } },
+                    { closing.expired shouldBe 0 },
                     { ended shouldBe true },
+                    {
+                        Duration.between(closingReapAt, endedAt.shouldNotBeNull()).toMillis() shouldBeLessThanOrEqual
+                            TERMINATION_BOUND.toMillis()
+                    },
+                    { run.outcome.get().startsWith("failed:") shouldBe true },
                 )
             } finally {
                 runCatching { statement.cancel() }
@@ -289,7 +304,7 @@ class ManagedLakeActiveQueryCloseIntegrationTest {
         /** A short ceiling, so the test waits seconds; the production default is 90 s. */
         val CEILING: Duration = Duration.ofSeconds(2)
 
-        /** Claim 2's age bound: short, so the test crosses age + ceiling in seconds. */
+        /** The reaper case's age bound: short, so the test crosses age + ceiling in seconds. */
         val SHORT_AGE: Duration = Duration.ofSeconds(3)
 
         /** How long after the reap call the query must have ended. */

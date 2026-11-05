@@ -1,9 +1,9 @@
 # Observability Specification
 
-**Status:** v1.53 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.54 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-11-04
+**Last updated:** 2026-11-05
 
 ---
 
@@ -171,7 +171,8 @@ A `LAKE` datasource's pool owns one embedded DuckDB instance per pool generation
 | INFO | `lake.managed_datasource_resynced` | Boot found the row different from configuration and rewrote it; its pools retire here and on peers | `datasource`, `credential_kind` |
 | INFO | `lake.managed_registry_backfilled` | Boot wrote registry rows for managed tables defined before the managed datasource existed | `datasource`, `rows` |
 | INFO | `lake.managed_datasource_granted` | Boot or a freshness tick granted the managed datasource to workspaces that could not see it | `datasource`, `workspaces` |
-| INFO | `lake.generation_expired` | A managed generation reached `reads.max-generation-age-seconds` and was retired when a lease was asked for; the next lease builds from the catalog | `datasource`, `age_seconds`, `max_age_seconds` |
+| INFO | `lake.generation_expired` | A managed generation passed `reads.max-generation-age-seconds` and was retired, either when a lease was asked for (`trigger=lease`) or by the pool reaper's pass with no borrower (`trigger=reaper`, #818c); the next lease builds from the catalog. The retirement issues no statement | `datasource`, `trigger`, `age_seconds`, `max_age_seconds` |
+| INFO | `lake.reaper_retired` | A pool reaper pass retired one or more managed generations past their age bound; logged once per pass, only when the count is not zero. The count is at most the number of live managed generations (one per managed datasource) | `generations` |
 | INFO | `lake.generation_stale` | The freshness tick found the catalog changed since the generation was built and retired it | `datasource`, `tables_stale` |
 | INFO | `lake.freshness_tick_retired` | A freshness tick retired one or more generations; logged once per tick, only when the count is not zero | `generations` |
 | WARN | `lake.freshness_read_failed` | The freshness tick's catalog read failed, including a read cancelled at the tick's 5 s statement bound (`sql_state=57014`). The tick skips that datasource, and the live generation serves until its age bound | `datasource`, `sql_state`, `error`, `message` |
@@ -272,7 +273,7 @@ The same class/SQLState rule applies to both lake outcome-recorder failure paths
 
 #### 3.4H The scheduled jobs' thread (#316)
 
-Every `@Scheduled` job — the stale-execution sweep (every 15 s), the pool reaper (every 5 s), the managed lake's freshness tick (every `reads.freshness-tick-seconds`, 60 s by default; #818), the dashboard refresh sweep (every 60 s) and the hourly retention sweep — runs on ONE thread of its own, `dp-scheduled` (`SweepSchedulingConfiguration`'s `taskScheduler`), and nothing else runs there. Their lines therefore carry `thread: dp-scheduled` (§3.1): `execution.swept` / `execution.sweep_failed`, `execution.events_purged` / `execution.event_retention_failed`, `keys.purged`, the `audit.retention*` lines and `retention.step_failed` (§7), the dashboard and parameter housekeeping lines (§3.4J, §3.4M), and §3.4A's `datasource.pool_hard_closed`. Until #316 they carried `dp-sse-log`: the jobs ran on the SSE log streamer's thread ([REST API §10.3](rest-api.md#103-replay-sse-stream)'s replays), so a slow tick stalled every replay and a burst of replays delayed the sweep.
+Every `@Scheduled` job — the stale-execution sweep (every 15 s), the pool reaper (every 5 s), the managed lake's freshness tick (every `reads.freshness-tick-seconds`, 60 s by default; #818), the dashboard refresh sweep (every 60 s) and the hourly retention sweep — runs on ONE thread of its own, `dp-scheduled` (`SweepSchedulingConfiguration`'s `taskScheduler`), and nothing else runs there. Their lines therefore carry `thread: dp-scheduled` (§3.1): `execution.swept` / `execution.sweep_failed`, `execution.events_purged` / `execution.event_retention_failed`, `keys.purged`, the `audit.retention*` lines and `retention.step_failed` (§7), the dashboard and parameter housekeeping lines (§3.4J, §3.4M), §3.4A's `datasource.pool_hard_closed`, and §3.4C's `lake.reaper_retired` with the `lake.generation_expired trigger=reaper` lines of the reaper's pass (#818c: the pass retires a managed generation past its age bound before it reaps, and neither half issues a statement). Until #316 they carried `dp-sse-log`: the jobs ran on the SSE log streamer's thread ([REST API §10.3](rest-api.md#103-replay-sse-stream)'s replays), so a slow tick stalled every replay and a burst of replays delayed the sweep.
 
 | Level | `event=` | When | Fields |
 |---|---|---|---|
@@ -725,6 +726,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 |---|---|---|---|
 | 2026-11-02 | v1.48 | 778 (#778) the lake reference index backfill | New **§3.4P**: the boot backfill's `lake.reference_index.backfill` (INFO, counts) and `lake.reference_index.backfill_failed` (WARN, version identity and exception class; no SQL, no parser message). |
 | 2026-11-02 | v1.49 | 785 (#785) managed lake boot check | New **§3.4Q** (numbered at merge after #778's §3.4P / v1.48): the `lake.boot.ok` INFO line and the five `lake.boot.*` refusal ids the after-Flyway boot check leads its startup failure with (defined here so a citation of one is checked; they are not log events). |
+| 2026-11-05 | v1.54 | 818c (#818) managed reader lifetime | **§3.4C**: `lake.generation_expired` gains `trigger` (`lease` or `reaper`): the pool reaper now retires a managed generation past its age bound with no borrower; new `lake.reaper_retired` (INFO, `generations`), one line per reaper pass that retired any. **§3.4H**: the reaper's pass includes that retirement and still issues no statement. |
 | 2026-11-04 | v1.53 | 818b (#818) managed reads corrections | **§3.4C**: `lake.freshness_read_failed` carries `sql_state`; new `lake.freshness_tick_failed` (WARN, `step`, `error`, `sql_state`), one line per failed tick step, after which the tick's next step and the next tick still run. |
 | 2026-11-04 | v1.52 | 818 (#818) managed lake reads | **§3.4C** gains the managed datasource's events: `lake.managed_datasource_registered` / `_resynced` / `managed_registry_backfilled` / `managed_datasource_granted` (boot and tick), `lake.generation_expired` (age bound), `lake.generation_stale` and `lake.freshness_tick_retired` (the tick and its count), `lake.freshness_read_failed` (WARN) and `lake.table_unavailable_omitted`. **§3.4Q** lists `lake.boot.datasource_name_taken`. **§3.4A** gains `datasource.bootstrap_managed_name` (WARN): a bootstrap entry naming the managed datasource is skipped and its credential is never probed or written. The brief's `lake.generation_not_built` is not an event: a failed build read is the `lake.unavailable` error. |
 | 2026-11-04 | v1.51 | 810 (#811) unclassified apply failure | **§3.4R** gains `lake.definition.apply_unclassified` (ERROR, `cause` + `sql_state`). It is logged where an unclassified failure of the commit step is caught, before the attempt's `apply_unknown` line, whose `code` is then `lake.definition.apply_unclassified`. |
