@@ -361,7 +361,7 @@ class ApiErrorCatalogSpecDriftTest {
          * in the SAME commit as its `PipelineErrorCodes.Lake` constant.
          * #799 adds nine delivery/append structure refusals (400), bringing the count to 447; six listing codes bring it to 453.
          */
-        const val SECTION_13_ROW_COUNT = 456
+        const val SECTION_13_ROW_COUNT = 461
 
         /**
          * §12's distinct validation codes.

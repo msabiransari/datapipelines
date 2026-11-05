@@ -2029,6 +2029,11 @@ object PipelineErrorCodes {
      */
     object Lake {
         const val APPEND_FORBIDDEN = "lake.append.forbidden"
+        const val APPEND_AMBIGUOUS_COLUMN = "lake.append.ambiguous_column"
+        const val APPEND_UNKNOWN_COLUMN = "lake.append.unknown_column"
+        const val APPEND_MISSING_REQUIRED_COLUMN = "lake.append.missing_required_column"
+        const val APPEND_NULL_IN_REQUIRED = "lake.append.null_in_required"
+        const val APPEND_TYPE_MISMATCH = "lake.append.type_mismatch"
         const val APPEND_RECIPE_EXISTS = "lake.append.recipe_exists"
         const val APPEND_RECIPE_WRITE_FAILED = "lake.append.recipe_write_failed"
         const val DELIVERY_INVALID_KEY = "lake.delivery.invalid_key"
