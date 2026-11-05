@@ -217,6 +217,9 @@ class PublishedEndpointServeService(
                 pipelineId = endpoint.pipelineId,
                 pipelineVersion = version.version,
                 pipeline = version.pipeline,
+                lakeExecutionMetadata =
+                    co.datapipelines.pipeline.LakeExecutionMetadata
+                        .from(version),
                 lakeAppendGrant =
                     co.datapipelines.application.LakeAppendAuthorization.grant(
                         principal,

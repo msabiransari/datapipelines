@@ -1,5 +1,6 @@
 package co.datapipelines.lake.append
 
+import co.datapipelines.pipeline.LakeAppendColumn
 import co.datapipelines.pipeline.LakeAppendInput
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
@@ -7,7 +8,6 @@ import org.apache.iceberg.Schema
 import org.apache.iceberg.types.Type
 import org.apache.iceberg.types.TypeUtil
 import org.apache.iceberg.types.Types
-import java.sql.ResultSetMetaData
 import java.util.Locale
 
 /** A schema-order binding; a missing optional column has no source index and is written as null. */
@@ -43,7 +43,18 @@ class AppendColumnCheck {
         var result: AppendColumnPlan? = null
         input.scan { rows ->
             check(result == null) { "An append scan must supply exactly one cursor." }
-            val plan = plan(rows.metaData, schema)
+            val metadata = rows.metaData
+            val columns =
+                input.originalColumns ?: (1..metadata.columnCount).map { index ->
+                    LakeAppendColumn(
+                        metadata.getColumnLabel(index),
+                        metadata.getColumnTypeName(index),
+                        metadata.getPrecision(index),
+                        metadata.getScale(index),
+                    )
+                }
+            check(columns.size == metadata.columnCount) { "Original query columns do not match the staged relation." }
+            val plan = plan(columns, schema)
             val required = plan.bindings.filter { it.field.isRequired }
             val nulls = linkedMapOf<String, Long>()
             var rowCount = 0L
@@ -64,10 +75,10 @@ class AppendColumnCheck {
     }
 
     private fun plan(
-        metadata: ResultSetMetaData,
+        columns: List<LakeAppendColumn>,
         schema: Schema,
     ): AppendColumnPlan {
-        val names = (1..metadata.columnCount).groupBy { folded(metadata.getColumnLabel(it)) }
+        val names = (1..columns.size).groupBy { folded(columns[it - 1].name) }
         val ambiguous = names.filterValues { it.size > 1 }.keys.sorted()
         if (ambiguous.isNotEmpty()) refuse(PipelineErrorCodes.Lake.APPEND_AMBIGUOUS_COLUMN, mapOf("columns" to ambiguous))
         val expected = schema.columns().associateBy { folded(it.name()) }
@@ -75,17 +86,18 @@ class AppendColumnCheck {
         if (unknown.isNotEmpty()) refuse(PipelineErrorCodes.Lake.APPEND_UNKNOWN_COLUMN, mapOf("columns" to unknown))
         val missing = schema.columns().filter { it.isRequired && folded(it.name()) !in names }.map { it.name() }
         if (missing.isNotEmpty()) refuse(PipelineErrorCodes.Lake.APPEND_MISSING_REQUIRED_COLUMN, mapOf("columns" to missing))
-        return AppendColumnPlan(schema, schema.columns().map { bind(metadata, it, names[folded(it.name())]?.single()) })
+        return AppendColumnPlan(schema, schema.columns().map { bind(columns, it, names[folded(it.name())]?.single()) })
     }
 
     private fun bind(
-        metadata: ResultSetMetaData,
+        columns: List<LakeAppendColumn>,
         field: Types.NestedField,
         index: Int?,
     ): AppendColumnBinding {
         if (index == null) return AppendColumnBinding(field, null, null)
-        val name = metadata.getColumnTypeName(index).uppercase(Locale.ROOT)
-        val source = nativeType(name, metadata.getPrecision(index), metadata.getScale(index))
+        val column = columns[index - 1]
+        val name = column.nativeType.uppercase(Locale.ROOT)
+        val source = nativeType(name, column.precision, column.scale)
         if (source != null && (!field.type().isPrimitiveType || !TypeUtil.isPromotionAllowed(source, field.type().asPrimitiveType()))) {
             refuse(PipelineErrorCodes.Lake.APPEND_TYPE_MISMATCH, mapOf("column" to field.name(), "source_type" to name))
         }

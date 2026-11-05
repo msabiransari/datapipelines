@@ -3,6 +3,7 @@ package co.datapipelines.lake.append
 import co.datapipelines.lake.LakeProperties
 import co.datapipelines.lake.delivery.DeliveryKey
 import co.datapipelines.persistence.FailureShape
+import co.datapipelines.pipeline.LakeExecutionInput
 import co.datapipelines.pipeline.PipelineErrorCodes.Lake
 import co.datapipelines.pipeline.PipelineJson
 import co.datapipelines.typesystem.DatapipelinesException
@@ -26,6 +27,11 @@ data class WrittenRecipe(
     val sha256: String,
     val exactReplayPossible: Boolean,
 )
+
+/** Creates a writer whose redactor sees this execution family's actual pinned child declarations. */
+fun interface RecipeWriterFactory {
+    fun forExecution(execution: LakeExecutionInput): RecipeWriter
+}
 
 /** Conditional PUT through the configured writer client. Never overwrites, retries a PUT, or deletes an object. */
 class RecipeWriter(

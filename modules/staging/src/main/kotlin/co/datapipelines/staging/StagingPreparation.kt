@@ -1,6 +1,7 @@
 package co.datapipelines.staging
 
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.ReleaseNotifications
 import org.slf4j.Logger
 import java.sql.Connection
 import java.util.UUID
@@ -20,7 +21,9 @@ fun interface TrustedStagingInitializer {
 }
 
 /** Scratch admission without opening a database; either opened once or closed without opening. */
-interface StagingPreparation : AutoCloseable {
+interface StagingPreparation :
+    AutoCloseable,
+    ReleaseNotifications {
     val executionId: UUID
     val reservedBytes: Long
 
@@ -38,6 +41,8 @@ internal class ReservedStagingPreparation(
     private val claimed = AtomicBoolean(false)
     override val executionId: UUID get() = reservation.executionId
     override val reservedBytes: Long get() = reservation.bytes
+
+    override fun afterRelease(callback: () -> Unit) = reservation.afterRelease(callback)
 
     override fun open(initializer: TrustedStagingInitializer): Staging {
         check(claimed.compareAndSet(false, true)) { "Staging admission was already opened or closed." }

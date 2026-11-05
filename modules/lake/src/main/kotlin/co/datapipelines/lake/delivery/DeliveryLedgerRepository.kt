@@ -20,6 +20,21 @@ class DeliveryLedgerRepository(
 
     fun find(id: UUID): LakeDelivery? = jdbc.query("SELECT * FROM lake_deliveries WHERE id = :id", mapOf("id" to id), ROW).singleOrNull()
 
+    /** The recorded effective identity, including service identities for keys; retention may already have removed the execution. */
+    fun executionActor(executionId: UUID): UUID? =
+        jdbc
+            .query(
+                "SELECT executed_by FROM pipeline_executions WHERE execution_id = :id",
+                mapOf("id" to executionId),
+            ) { rows, _ -> rows.getObject("executed_by", UUID::class.java) }
+            .singleOrNull()
+
+    /** Recovery lineage from the same bounded metadata source as the permanent attempts. */
+    fun restoreEpoch(): UUID =
+        requireNotNull(
+            jdbc.queryForObject("SELECT restore_epoch FROM lake_control WHERE id = 1", emptyMap<String, Any>(), UUID::class.java),
+        )
+
     /** Candidates only; the settling actor must separately establish lease ownership before a negative verdict. */
     fun unsettled(tableId: UUID): List<LakeDelivery> =
         jdbc.query(

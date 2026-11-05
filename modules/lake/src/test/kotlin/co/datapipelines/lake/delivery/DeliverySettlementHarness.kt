@@ -14,20 +14,25 @@ import org.springframework.transaction.support.TransactionTemplate
 import java.sql.Connection
 import java.time.Duration
 import java.util.UUID
+import javax.sql.DataSource
 
 /** Real ledger, real fence and separate bounded JDBC statements; no MinIO needed to move the catalog pointer. */
-internal class DeliverySettlementHarness {
-    val jdbc = JdbcTemplate(LakeTestDb.dataSource).apply { queryTimeout = 2 }
+internal class DeliverySettlementHarness(
+    dataSource: DataSource = LakeTestDb.dataSource,
+    private val resetDatabase: () -> Unit = LakeTestDb::reset,
+    private val connect: () -> Connection = { LakeTestDb.connect() },
+) {
+    val jdbc = JdbcTemplate(dataSource).apply { queryTimeout = 2 }
     val named = NamedParameterJdbcTemplate(jdbc)
     val repository = DeliveryLedgerRepository(named)
     val observations = DeliverySettlementRepository(named)
-    val transaction = TransactionTemplate(DataSourceTransactionManager(LakeTestDb.dataSource))
+    val transaction = TransactionTemplate(DataSourceTransactionManager(dataSource))
     val ledger = DeliveryLedger(repository, transaction)
     val tableId: UUID = UUID.randomUUID()
     val actor: UUID = UUID.fromString("00000000-0000-0000-0000-000000000799")
 
     fun reset() {
-        LakeTestDb.reset()
+        resetDatabase()
         jdbc.execute("TRUNCATE lake_delivery_attempts, lake_deliveries, lake_tables_managed, lake_namespaces CASCADE")
         jdbc.update(
             "INSERT INTO users (id, email, display_name, provider, provider_subject) VALUES (?, ?, 'Lane 799', 'google', ?) " +
@@ -72,7 +77,7 @@ internal class DeliverySettlementHarness {
     }
 
     fun fencedConnection(lease: LeaseHandle): Connection =
-        LakeTestDb.connect().also { connection ->
+        connect().also { connection ->
             connection
                 .prepareStatement(
                     "SELECT set_config('dp.lease_token', ?, false), set_config('dp.operation_id', ?, false)",

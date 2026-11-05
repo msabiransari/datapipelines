@@ -18,6 +18,7 @@ import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.executor.ExecutorConfig
 import co.datapipelines.persistence.FailureShape
+import co.datapipelines.pipeline.LakeExecutionMetadata
 import co.datapipelines.pipeline.ParameterBinder
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -307,6 +308,7 @@ class PipelineJobExecutor(
                 pipelineId = pipelineId,
                 pipelineVersion = version,
                 pipeline = executable.pipeline,
+                lakeExecutionMetadata = LakeExecutionMetadata.from(executable),
                 lakeAppendGrant = LakeAppendAuthorization.grant(principal, executable.writesManagedLake, Instant.now()),
                 userId = principal.userId,
                 workspaceId = workspace.id,

@@ -33,6 +33,7 @@ class ExecutorHarness(
         co.datapipelines.calculators.CalculatorRegistry::find,
     /** The SCRIPT-node collaborators (7c, #7) — wired by tests that exercise a SCRIPT node. */
     scripts: ScriptSupport? = null,
+    lakeAppendPort: co.datapipelines.pipeline.LakeAppendPort? = null,
 ) : Closeable {
     val emitter = RecordingEmitter()
     val flags = InMemoryCancellationFlags()
@@ -64,6 +65,7 @@ class ExecutorHarness(
             subPipelineRunner = subPipelineRunner,
             calculatorKinds = calculatorKinds,
             scripts = scripts,
+            lakeAppendPort = lakeAppendPort,
         )
 
     override fun close() {

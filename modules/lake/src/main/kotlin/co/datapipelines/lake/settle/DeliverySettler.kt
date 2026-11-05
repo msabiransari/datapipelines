@@ -46,7 +46,7 @@ class DeliverySettler(
 
     private fun failEndedExecution(row: LakeDelivery): Int {
         if (!observations.executionEnded(row.executionId)) return 0
-        return if (ledger.conclude(row, DeliveryConclusion.Failed(LakeDeliveryFailurePhase.VALIDATION, null))) 1 else 0
+        return if (ledger.conclude(row, DeliveryConclusion.Failed(LakeDeliveryFailurePhase.VALIDATION, null), settled = true)) 1 else 0
     }
 
     private fun settlePublishing(
@@ -69,7 +69,7 @@ class DeliverySettler(
                 } else {
                     DeliveryConclusion.Failed(LakeDeliveryFailurePhase.PUBLISH, null)
                 }
-            return if (ledger.conclude(row, conclusion)) 1 else 0
+            return if (ledger.conclude(row, conclusion, settled = true)) 1 else 0
         } finally {
             leases.release(takeover)
         }

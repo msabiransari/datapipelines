@@ -2028,6 +2028,18 @@ object PipelineErrorCodes {
      * column is `—`, `ApiErrorCatalog.NEVER_RETURNED_LIVE`); P8 brings the surfaces and their statuses.
      */
     object Lake {
+        const val CAPACITY_BUSY = "lake.capacity.busy"
+        const val APPEND_GRANT_MISSING = "lake.append.grant_missing"
+        const val APPEND_OUTCOME_UNKNOWN = "lake.append.outcome_unknown"
+        const val APPEND_FAILED = "lake.append.failed"
+        const val APPEND_PROVENANCE_MISSING = "lake.append.provenance_missing"
+        const val APPEND_AUTHORITY_LOST = "lake.append.authority_lost"
+        const val COMMIT_CONTENDED = "lake.commit.contended"
+        const val TABLE_BUSY = "lake.table.busy"
+        const val TABLE_DEPRECATED = "lake.table.deprecated"
+        const val TABLE_UNAVAILABLE = "lake.table.unavailable"
+        const val DELIVERY_CHANGED = "lake.delivery.changed"
+        const val DELIVERY_CHANGED_DURING_READ = "lake.delivery.changed_during_read"
         const val APPEND_FORBIDDEN = "lake.append.forbidden"
         const val APPEND_AMBIGUOUS_COLUMN = "lake.append.ambiguous_column"
         const val APPEND_UNKNOWN_COLUMN = "lake.append.unknown_column"
@@ -2043,6 +2055,7 @@ object PipelineErrorCodes {
         const val DELIVERY_UNSUPPORTED_FORMAT = "lake.delivery.unsupported_format"
         const val DELIVERY_INVALID_MANIFEST = "lake.delivery.invalid_manifest"
         const val DELIVERY_LISTING_FAILED = "lake.delivery.listing_failed"
+        const val DELIVERY_ADMISSION_FAILED = "lake.delivery.admission_failed"
 
         const val DELIVERY_ONE_PER_PIPELINE = "lake.delivery.one_per_pipeline"
         const val APPEND_ONE_PER_TABLE = "lake.append.one_per_table"

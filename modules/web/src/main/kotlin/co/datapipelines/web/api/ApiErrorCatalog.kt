@@ -144,6 +144,18 @@ object ApiErrorCatalog {
     /** Every code whose status differs from its family default (§13, rest-api §7.6). */
     private val EXCEPTIONS: Map<String, HttpStatus> =
         mapOf(
+            PipelineErrorCodes.Lake.CAPACITY_BUSY to HttpStatus.SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Lake.APPEND_GRANT_MISSING to HttpStatus.FORBIDDEN,
+            PipelineErrorCodes.Lake.APPEND_OUTCOME_UNKNOWN to HttpStatus.SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Lake.APPEND_FAILED to HttpStatus.INTERNAL_SERVER_ERROR,
+            PipelineErrorCodes.Lake.APPEND_PROVENANCE_MISSING to HttpStatus.INTERNAL_SERVER_ERROR,
+            PipelineErrorCodes.Lake.APPEND_AUTHORITY_LOST to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Lake.COMMIT_CONTENDED to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Lake.TABLE_BUSY to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Lake.TABLE_DEPRECATED to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Lake.TABLE_UNAVAILABLE to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Lake.DELIVERY_CHANGED to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Lake.DELIVERY_CHANGED_DURING_READ to HttpStatus.CONFLICT,
             PipelineErrorCodes.Lake.DELIVERY_INVALID_KEY to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Lake.APPEND_FORBIDDEN to HttpStatus.FORBIDDEN,
             PipelineErrorCodes.Lake.APPEND_AMBIGUOUS_COLUMN to HttpStatus.BAD_REQUEST,
@@ -159,6 +171,7 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Lake.DELIVERY_UNSUPPORTED_FORMAT to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Lake.DELIVERY_INVALID_MANIFEST to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Lake.DELIVERY_LISTING_FAILED to HttpStatus.SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Lake.DELIVERY_ADMISSION_FAILED to HttpStatus.SERVICE_UNAVAILABLE,
             PipelineErrorCodes.Lake.DELIVERY_ONE_PER_PIPELINE to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Lake.APPEND_ONE_PER_TABLE to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Lake.APPEND_REQUIRES_DELIVERY to HttpStatus.BAD_REQUEST,
@@ -645,6 +658,21 @@ object ApiErrorCatalog {
 
     private val USER_MESSAGE_OVERRIDES: Map<String, String> =
         mapOf(
+            PipelineErrorCodes.Lake.CAPACITY_BUSY to "Delivery capacity is busy. Retry when an ingestion slot and scratch are available.",
+            PipelineErrorCodes.Lake.APPEND_GRANT_MISSING to "The execution has no checked authority to append to the lake.",
+            PipelineErrorCodes.Lake.APPEND_OUTCOME_UNKNOWN to
+                "Publication is unconfirmed. Wait for settlement before retrying this delivery.",
+            PipelineErrorCodes.Lake.APPEND_FAILED to "The append failed. Inspect its recorded delivery outcome before retrying.",
+            PipelineErrorCodes.Lake.APPEND_PROVENANCE_MISSING to
+                "The execution lacks its required recovery provenance. Report this execution.",
+            PipelineErrorCodes.Lake.APPEND_AUTHORITY_LOST to "The append lost its lease authority. Retry after settlement.",
+            PipelineErrorCodes.Lake.COMMIT_CONTENDED to "The catalog remained contended. Retry the same immutable delivery.",
+            PipelineErrorCodes.Lake.TABLE_BUSY to "This table has an active or unconfirmed publication. Retry after settlement.",
+            PipelineErrorCodes.Lake.TABLE_DEPRECATED to "A deprecated table does not accept new deliveries.",
+            PipelineErrorCodes.Lake.TABLE_UNAVAILABLE to "The managed table is unavailable for ingestion.",
+            PipelineErrorCodes.Lake.DELIVERY_CHANGED to "This delivery id already names different files. Use a new id for corrected input.",
+            PipelineErrorCodes.Lake.DELIVERY_CHANGED_DURING_READ to
+                "The delivery changed while staging read it. Its files must be immutable.",
             PipelineErrorCodes.Lake.APPEND_FORBIDDEN to "Your current role cannot append deliveries to the lake.",
             PipelineErrorCodes.Lake.APPEND_AMBIGUOUS_COLUMN to "The staged result has column names that differ only by case.",
             PipelineErrorCodes.Lake.APPEND_UNKNOWN_COLUMN to "The staged result contains a column outside the managed table schema.",

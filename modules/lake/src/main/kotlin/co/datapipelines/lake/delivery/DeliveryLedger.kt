@@ -1,11 +1,14 @@
 package co.datapipelines.lake.delivery
 
+import co.datapipelines.auth.AuditEventSink
+import org.slf4j.LoggerFactory
 import org.springframework.transaction.support.TransactionTemplate
 
 /** Atomic delivery/attempt changes; listing and lease takeover always happen outside these short transactions. */
 class DeliveryLedger(
     private val repository: DeliveryLedgerRepository,
     private val transaction: TransactionTemplate,
+    private val audit: AuditEventSink? = null,
 ) {
     /** Immutable fingerprint wins before state handling. PUBLISHING and UNKNOWN never become a fresh attempt here. */
     fun receive(request: ReceiveDelivery): DeliveryReceipt =
@@ -50,22 +53,50 @@ class DeliveryLedger(
     fun conclude(
         row: LakeDelivery,
         conclusion: DeliveryConclusion,
+        settled: Boolean = false,
     ): Boolean {
         require(allowed(row.state, conclusion)) { "Invalid delivery conclusion from ${row.state}." }
-        return transaction.execute {
-            if (repository.conclude(row, conclusion) == 0) {
-                false
-            } else {
-                val outcome =
-                    when (conclusion) {
-                        is DeliveryConclusion.Published -> LakeDeliveryAttemptOutcome.PUBLISHED
-                        is DeliveryConclusion.Failed -> LakeDeliveryAttemptOutcome.FAILED
-                        is DeliveryConclusion.Unknown -> LakeDeliveryAttemptOutcome.UNKNOWN
-                    }
-                check(repository.finishAttempt(row, outcome) == 1) { "Delivery attempt is absent or already terminal." }
-                true
-            }
-        } == true
+        val changed =
+            transaction.execute {
+                if (repository.conclude(row, conclusion) == 0) {
+                    false
+                } else {
+                    val outcome =
+                        when (conclusion) {
+                            is DeliveryConclusion.Published -> LakeDeliveryAttemptOutcome.PUBLISHED
+                            is DeliveryConclusion.Failed -> LakeDeliveryAttemptOutcome.FAILED
+                            is DeliveryConclusion.Unknown -> LakeDeliveryAttemptOutcome.UNKNOWN
+                        }
+                    check(repository.finishAttempt(row, outcome) == 1) { "Delivery attempt is absent or already terminal." }
+                    val event =
+                        when (conclusion) {
+                            is DeliveryConclusion.Published -> LakeDeliveryAuditEvents.PUBLISHED
+                            is DeliveryConclusion.Failed -> LakeDeliveryAuditEvents.FAILED
+                            is DeliveryConclusion.Unknown -> LakeDeliveryAuditEvents.UNKNOWN
+                        }
+                    val details =
+                        mapOf(
+                            "table_id" to row.tableId.toString(),
+                            "delivery_id" to row.id.toString(),
+                            "operation_id" to row.operationId.toString(),
+                            "outcome" to outcome.name,
+                        )
+                    audit?.log(event, userId = if (settled) null else repository.executionActor(row.executionId), details = details)
+                    if (settled) audit?.log(LakeDeliveryAuditEvents.SETTLED, details = details)
+                    true
+                }
+            } == true
+        if (changed) {
+            log.info(
+                "event=lake.delivery.concluded table_id={} delivery_id={} operation_id={} outcome={} settled={} cause=none sql_state=none",
+                row.tableId,
+                row.id,
+                row.operationId,
+                conclusion.javaClass.simpleName,
+                settled,
+            )
+        }
+        return changed
     }
 
     private fun allowed(
@@ -85,4 +116,8 @@ class DeliveryLedger(
                 false
             }
         }
+
+    private companion object {
+        val log = LoggerFactory.getLogger(DeliveryLedger::class.java)
+    }
 }

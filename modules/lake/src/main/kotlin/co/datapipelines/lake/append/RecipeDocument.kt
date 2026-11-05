@@ -26,6 +26,7 @@ data class RecipePipeline(
     val resolvedParameters: Map<String, JsonNode>,
     val templates: List<RecipeReference>,
     val parameterSets: List<RecipeReference>,
+    val pipelines: List<RecipeReference> = emptyList(),
 )
 
 /** All provenance required before commit; no storage configuration, credentials or ambient SQL context. */
@@ -77,6 +78,7 @@ class RecipeDocument(
         root.set<JsonNode>("resolved_parameters", safe.parameters)
         root.set<JsonNode>("templates", references(execution.templates))
         root.set<JsonNode>("parameter_sets", references(execution.parameterSets))
+        root.set<JsonNode>("pipelines", references(execution.pipelines))
         root.putObject("applied_definition").apply {
             put("version", publication.appliedDefinitionVersion)
             set<JsonNode>("body", publication.appliedDefinitionBody.deepCopy())

@@ -47,6 +47,26 @@ class ScheduledJobsStatementBoundsTest {
     private val jdbc = NamedParameterJdbcTemplate(recording)
 
     @Test
+    fun `lake settlement mode observation and protection finalization carry their dedicated five second bound`() {
+        val sweep =
+            co.datapipelines.lake.settle.LakeSettlementSweep(
+                NamedParameterJdbcTemplate(
+                    co.datapipelines.lake.append.LakeAppendRuntime
+                        .statements(recording),
+                ),
+                mockk(),
+                mockk(),
+                mockk(),
+                mockk(),
+            )
+        sweep.finalizeProtection()
+        sweep.runOnce() // Recording result says non-normal: the mode guard itself still executes SQL.
+        recording.timeoutOf("UPDATE lake_table_revisions r SET protected_until") shouldBe 5
+        recording.timeoutOf("SELECT mode =") shouldBe 5
+        recording.everyTimeout() shouldBe setOf(5)
+    }
+
+    @Test
     fun `the stale sweep's UPDATE carries the sweep bound - the repository's other statements do not`() {
         val executions = EngineConfiguration().executionRepository(jdbc, ExecutorProperties(lifecycleWriteTimeoutSeconds = LIFECYCLE))
 

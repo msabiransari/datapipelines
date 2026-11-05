@@ -404,7 +404,7 @@ When `datapipelines.lake.enabled=true`, `LakeBootCheck` runs once after Flyway (
 | ERROR | `lake.definition.apply_unclassified` | The apply's commit step failed with an exception that is not one of the catalog's refusals, so whether the commit landed is unknown. The row stays `applying`, and the attempt ends with `apply_unknown`. `operation` is always `lake.definition.apply` | `cause`, `sql_state` (the exception's class and first SQLSTATE, §3.4G; never its message or stack) |
 | INFO | `lake.definition.apply_superseded` | The attempt's conditional stamp changed no row, because a newer attempt owns the table. This attempt recorded nothing | — |
 
-The three audit events of the same lifecycle (`lake.definition.released`, `.applied`, `.apply_failed`, [Enums §15](enums.md#15-authauditevent--auth-audit-log-events)) are separate rows in `auth_audit_log`. A log line is not an audit row, and the audit row does not replace the log line.
+The three audit events of the same lifecycle (`lake.definition.released`, `.applied`, `.apply_failed`, [Enums §15](enums.md#15-authauditevent--auth-audit-log-events)) are separate rows in `audit_log`. A log line is not an audit row, and the audit row does not replace the log line.
 
 #### 3.4S Lake delivery, publication and settle events (#799)
 
@@ -413,8 +413,29 @@ Delivery storage failures report the exception class and first SQLSTATE using §
 | Level | Event | When | Fields |
 |---|---|---|---|
 | WARN | `lake.delivery.listing_failed` | The trusted S3 listing failed at the SDK boundary. The caller receives a fixed message with no SDK cause and may retry | `cause`, `sql_state` |
+| WARN | `lake.delivery.admission_failed` | Metadata admission failed before staging; safe fixed retryable refusal | `execution_id`, `cause`, `sql_state` |
+| INFO | `lake.delivery.landed` | Slot/scratch, trusted manifest and every target's ledger receipt were admitted | `execution_id`, `targets`, `files`, `bytes`, `deadline`, `cause=none`, `sql_state=none` |
+| INFO | `lake.delivery.already_published` | Permanent duplicate evidence skips this target's append | `delivery_id`, `operation_id`, `message="already published"`, `cause=none`, `sql_state=none` |
+| INFO | `lake.append.started` | Grant and table lease admitted the conditional PUBLISHING claim | `delivery_id`, `operation_id`, `table_id`, `deadline`, `cause=none`, `sql_state=none` |
+| INFO | `lake.delivery.concluded` | Delivery and attempt stamps committed together; zero-row stale transitions emit nothing | `table_id`, `delivery_id`, `operation_id`, `outcome`, `settled`, `cause=none`, `sql_state=none` |
+| WARN | `lake.append.failed` | Publication unwound after recording a safe failed/unknown verdict where possible | `delivery_id`, `operation_id`, `cause`, `sql_state` |
+| WARN | `lake.append.stamp_failed` | Outcome stamping failed; permanent revision evidence and the sweep recover the verdict | `delivery_id`, `operation_id`, `cause`, `sql_state` |
+| WARN | `lake.append.lease_release_failed` | Bounded lease release failed; expiry/takeover remains authoritative | `delivery_id`, `operation_id`, `cause`, `sql_state` |
+| WARN | `lake.append.heartbeat_failed` | Periodic metadata renewal failed; the watch loses authority and later mutations stop | `operation_id`, `cause`, `sql_state` |
+| WARN | `lake.append.settlement_deferred` | Immediate settlement failed and leaves recovery to a later sweep | `delivery_id`, `operation_id`, `cause`, `sql_state` |
+| WARN | `lake.delivery.cleanup_deferred` | Pre-publication cleanup could not stamp every receipt; resources were released and terminal executions are sweepable | `execution_id`, `cause`, `sql_state` |
+| INFO | `lake.settle.sweep` | A normal-mode rotating recovery page finished | `tables`, `cause=none`, `sql_state=none` |
+| WARN | `lake.settle.deferred` | One table's recovery failed; later eligible tables/pages remain recoverable | `table_id`, `cause`, `sql_state` |
+| WARN | `lake.settle.sweep_deferred` | The bounded sweep failed outside an individual table, including a held control-row lock | `cause`, `sql_state` |
 | WARN | `lake.append.recipe_write_failed` | The immutable recipe PUT failed before catalog publication. No storage message or cause chain crosses the boundary | `cause`, `sql_state` |
 | WARN | `lake.file.delete_refused` | Iceberg requested a file deletion. The production FileIO records the key and refuses it; files remain for the maintenance protected-graph check, including manifest-merge cleanup | `path`, `cause=LibraryDeleteRefusedException`, `sql_state=none` |
+
+`lake.delivery.published`, `.failed`, `.unknown` and `.settled` are separate audit events
+([Enums §15](enums.md#15-authauditevent--auth-audit-log-events)), written strictly in the same metadata transaction
+as their conditional state/attempt changes. Their details contain only `table_id`, `delivery_id`, `operation_id`
+and `outcome`. A lost acknowledgement can record UNKNOWN followed by PUBLISHED and SETTLED without a second CAS.
+Ingestion storage setup failures use the staging boundary's fixed message and log only execution id and class;
+generated secret SQL, credentials and driver messages never reach an execution event or recipe.
 
 ### 3.5 Log destination
 

@@ -150,6 +150,12 @@ data class NodeExecutionContext(
     val operations: NodeOperations = NodeOperations(),
     /** The root's checked append authority, inherited without deriving anything from [userId]. */
     val lakeAppendGrant: co.datapipelines.pipeline.LakeAppendGrant? = null,
+    /** Execution-owned managed delivery; never inherited by a child with a different staging database. */
+    val lakeAppendSession: co.datapipelines.pipeline.LakeAppendSession? = null,
+    /** Actual template versions used by this execution's recipe. */
+    val lakeLineage: co.datapipelines.pipeline.LakeExecutionLineage? = null,
+    /** The one delivery node whose successful SQL must be followed by the trusted re-list. */
+    val lakeDeliveryNodeId: String? = null,
     /** The root surface's admission check, retained through every composed child execution. */
     val pipelineAdmission: ((Pipeline, UUID, Int) -> Unit)? = null,
 )
@@ -307,7 +313,9 @@ class NodeRunner(
             return runScript(node, ctx, startedAt)
         }
         val sql = phase(ctx, NodePhase.RENDER, node.id) { render(node, ctx) }
-        return dispatchRendered(node, ctx, startedAt, sql)
+        val result = dispatchRendered(node, ctx, startedAt, sql)
+        if (node.id == ctx.lakeDeliveryNodeId) ctx.lakeAppendSession?.readCompleted()
+        return result
     }
 
     /**
@@ -381,7 +389,14 @@ class NodeRunner(
     private fun render(
         node: ExecutableNode,
         ctx: NodeExecutionContext,
-    ): String = templateEngine.render(node.template, ctx.values, ctx.renderBudgetChars)
+    ): String =
+        if (ctx.lakeLineage == null) {
+            templateEngine.render(node.template, ctx.values, ctx.renderBudgetChars)
+        } else {
+            templateEngine.render(node.template, ctx.values, ctx.renderBudgetChars) { ref, hash ->
+                ctx.lakeLineage.templateUsed(co.datapipelines.pipeline.LakeArtifactReference(ref.id, ref.version, hash))
+            }
+        }
 
     // ---------------------------------------------------------------- tempdb
 
@@ -435,10 +450,19 @@ class NodeRunner(
 
             is NodeOutput.Datasource -> {
                 phase(ctx, NodePhase.WRITEBACK, node.id) {
-                    tempdbCursor(node, bound, ctx, resolved) { rs ->
-                        val op = ctx.operations.observerFor(node.id)
-                        val written = writebackRunner.writeback(rs, output, ctx.tempdbDialect, ctx.workspaceId, op)
-                        NodeResult.of(node.id, written, startedAt)
+                    val lake = ctx.lakeAppendSession?.takeIf { it.datasourceName == output.datasource }
+                    if (lake != null) {
+                        val target =
+                            datasourceRegistry.getVisible(output.datasource, ctx.workspaceId)
+                                ?: throw NodeRefusals.datasourceNotFound(output.datasource)
+                        if (target.dialect != Dialect.LAKE) throw NodeRefusals.writebackTargetReadonly(output)
+                        LakeNodeWriteback.run(node, output, bound, ctx, resolved, startedAt, lake) { checkStagingBudget(node, ctx) }
+                    } else {
+                        tempdbCursor(node, bound, ctx, resolved) { rs ->
+                            val op = ctx.operations.observerFor(node.id)
+                            val written = writebackRunner.writeback(rs, output, ctx.tempdbDialect, ctx.workspaceId, op)
+                            NodeResult.of(node.id, written, startedAt)
+                        }
                     }
                 }
             }

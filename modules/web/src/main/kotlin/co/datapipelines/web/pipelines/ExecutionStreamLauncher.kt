@@ -66,6 +66,7 @@ data class ExecuteLaunch(
     val resultPageRows: Int? = null,
     val idempotencyKey: String?,
     val lakeAppendGrant: co.datapipelines.pipeline.LakeAppendGrant? = null,
+    val lakeExecutionMetadata: co.datapipelines.pipeline.LakeExecutionMetadata? = null,
 ) {
     /** The surface-free half this launch carries into `application` (056/D6). */
     internal fun toLaunch(): ExecutionLaunch =
@@ -169,6 +170,7 @@ class ExecutionStreamLauncher(
      * ("not wired in this runtime"), exactly as [subPipelineRunner] fails a PIPELINE node.
      */
     private val scriptSupport: co.datapipelines.executor.ScriptSupport? = null,
+    private val lakeAppendPort: co.datapipelines.pipeline.LakeAppendPort? = null,
     /**
      * #266 — the emitter's event recorder: the batched one in the application (PersistenceConfiguration),
      * null in module-slice wiring and unit tests, where the emitter's direct default applies.
@@ -359,6 +361,7 @@ class ExecutionStreamLauncher(
                         triggeredVia = ExecutionTrigger.REST,
                         executedByKeyKind = request.principal.executedByKeyKind(),
                         lakeAppendGrant = request.lakeAppendGrant,
+                        lakeExecutionMetadata = request.lakeExecutionMetadata,
                         executionId = executionId,
                     ),
                 )
@@ -446,6 +449,7 @@ class ExecutionStreamLauncher(
             progress = executionProgress,
             subPipelineRunner = subPipelineRunner,
             scripts = scriptSupport,
+            lakeAppendPort = lakeAppendPort,
         )
 
     private companion object {

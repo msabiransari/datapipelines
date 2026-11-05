@@ -1,17 +1,64 @@
 package co.datapipelines.lake.delivery
 
 import co.datapipelines.lake.LakeProperties
+import co.datapipelines.typesystem.ReleaseNotifications
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import org.springframework.util.unit.DataSize
 import java.time.Duration
 import java.time.Instant
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 class DeliveryAdmissionTest {
     private val clock = Instant.parse("2026-11-05T00:00:00Z")
     private val timeout = Duration.ofHours(2)
+
+    @Test
+    fun `logical close cannot admit another ingestion until its quarantined resource releases`() {
+        val admission = admission()
+        val released = CompletableFuture<Unit>()
+        var closed = 0
+        val resource =
+            object : AutoCloseable, ReleaseNotifications {
+                override fun close() {
+                    closed++
+                }
+
+                override fun afterRelease(callback: () -> Unit) {
+                    released.thenRun(callback)
+                }
+            }
+        val first = requireNotNull(admission.acquire { resource })
+        first.close()
+        first.close()
+        closed shouldBe 1
+        admission.acquire { Resource() } shouldBe null
+        released.complete(Unit)
+        val next = requireNotNull(admission.acquire { Resource() })
+        // Repeated logical/final close must not create a second permit.
+        first.close()
+        released.complete(Unit)
+        admission.acquire { Resource() } shouldBe null
+        next.close()
+    }
+
+    @Test
+    fun `a reservation finalized before logical close releases its ingestion slot immediately`() {
+        val admission = admission()
+        val released = CompletableFuture.completedFuture(Unit)
+        val resource =
+            object : AutoCloseable, ReleaseNotifications {
+                override fun close() = Unit
+
+                override fun afterRelease(callback: () -> Unit) {
+                    released.thenRun(callback)
+                }
+            }
+        requireNotNull(admission.acquire { resource }).close()
+        requireNotNull(admission.acquire { Resource() }).close()
+    }
 
     @Test
     fun `slot precedes scratch and a refused slot never calls its scratch factory`() {

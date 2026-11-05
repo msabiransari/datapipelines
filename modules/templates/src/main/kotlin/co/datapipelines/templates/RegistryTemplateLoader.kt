@@ -1,5 +1,6 @@
 package co.datapipelines.templates
 
+import co.datapipelines.pipeline.TemplateRef
 import freemarker.cache.TemplateLoader
 import java.io.IOException
 import java.io.Reader
@@ -88,6 +89,21 @@ class RegistryTemplateLoader(
     )
 
     private val pinned = ThreadLocal<Source?>()
+    private val referenceObserver = ThreadLocal<((TemplateRef, String) -> Unit)?>()
+
+    /** Restored on pooled workers, so one execution's lineage never captures another render. */
+    internal fun <T> withReferenceObserver(
+        observer: (TemplateRef, String) -> Unit,
+        block: () -> T,
+    ): T {
+        val previous = referenceObserver.get()
+        referenceObserver.set(observer)
+        try {
+            return block()
+        } finally {
+            if (previous == null) referenceObserver.remove() else referenceObserver.set(previous)
+        }
+    }
 
     /**
      * The thread's currently declared closure — the set of `{id, version}` keys a load may
@@ -174,7 +190,7 @@ class RegistryTemplateLoader(
             identity = stored.bodyHash,
             lastModified = stored.lastModified.toEpochMilli(),
             importKeys = stored.imports.mapNotNull { parseKey(it.key) }.toSet(),
-        )
+        ).also { referenceObserver.get()?.invoke(TemplateRef(stored.id, stored.version), stored.bodyHash) }
 
     /**
      * Runs [block] with [source] as THE answer for its key on this thread — so a parse the

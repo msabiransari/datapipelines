@@ -1,5 +1,6 @@
 package co.datapipelines.lake.delivery
 
+import co.datapipelines.pipeline.LakeStatementExecution
 import java.sql.Connection
 import java.sql.SQLTimeoutException
 import java.time.Clock
@@ -21,11 +22,12 @@ class DeliveryMaterializer(
         connection: Connection,
         manifest: DeliveryManifest,
         deadline: Instant,
+        statements: LakeStatementExecution = LakeStatementExecution.DIRECT,
     ) {
         connection.createStatement().use { statement ->
             statement.queryTimeout = remainingSeconds(deadline)
             // Bound strings still glob by default. This setting makes listed keys literal, including '?' and '['.
-            statement.execute("SET s3_url_compatibility_mode = true")
+            statements.execute(statement) { statement.execute("SET s3_url_compatibility_mode = true") }
         }
         val function =
             when (manifest.format) {
@@ -37,14 +39,14 @@ class DeliveryMaterializer(
             connection.prepareStatement("CREATE TABLE delivery AS SELECT * FROM $function(?)").use { statement ->
                 statement.queryTimeout = remainingSeconds(deadline)
                 statement.setArray(1, paths)
-                statement.execute()
+                statements.execute(statement) { statement.execute() }
             }
         } finally {
             paths.free()
         }
         connection.createStatement().use { statement ->
             statement.queryTimeout = remainingSeconds(deadline)
-            statement.execute("CREATE TABLE delivery_files (key VARCHAR, size BIGINT, etag VARCHAR)")
+            statements.execute(statement) { statement.execute("CREATE TABLE delivery_files (key VARCHAR, size BIGINT, etag VARCHAR)") }
         }
         connection.prepareStatement("INSERT INTO delivery_files VALUES (?, ?, ?)").use { statement ->
             manifest.files.forEach { file ->
@@ -52,7 +54,7 @@ class DeliveryMaterializer(
                 statement.setString(1, file.key)
                 statement.setLong(2, file.size)
                 statement.setString(ETAG_COLUMN, file.etag)
-                statement.executeUpdate()
+                statements.execute(statement) { statement.executeUpdate() }
             }
         }
     }

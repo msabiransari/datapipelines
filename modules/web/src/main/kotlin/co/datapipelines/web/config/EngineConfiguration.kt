@@ -220,6 +220,7 @@ class EngineConfiguration {
     @Suppress("LongParameterList")
     @Bean
     fun pipelineExecutorBean(
+        lakeAppendPort: co.datapipelines.pipeline.LakeAppendPort? = null,
         templateEngines: WorkspaceTemplateEngines,
         datasourceRegistry: DatasourceRegistry,
         stagingFactory: StagingFactory,
@@ -265,6 +266,7 @@ class EngineConfiguration {
             subPipelineRunner = subPipelineRunner,
             progress = progress,
             scripts = scriptSupport,
+            lakeAppendPort = lakeAppendPort,
         )
 
     /**

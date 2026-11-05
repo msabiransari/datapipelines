@@ -97,6 +97,9 @@ class PipelineExecuteController(
                 pipelineId = id,
                 pipelineVersion = version,
                 pipeline = executable.pipeline,
+                lakeExecutionMetadata =
+                    co.datapipelines.pipeline.LakeExecutionMetadata
+                        .from(executable),
                 lakeAppendGrant =
                     co.datapipelines.application.LakeAppendAuthorization.grant(
                         principal,

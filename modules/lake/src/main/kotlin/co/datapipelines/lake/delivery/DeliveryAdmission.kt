@@ -1,6 +1,7 @@
 package co.datapipelines.lake.delivery
 
 import co.datapipelines.lake.LakeProperties
+import co.datapipelines.typesystem.ReleaseNotifications
 import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.Semaphore
@@ -91,10 +92,17 @@ class AdmittedDelivery<T : AutoCloseable> internal constructor(
 
     override fun close() {
         if (closed.compareAndSet(false, true)) {
-            try {
+            if (reservation is ReleaseNotifications) {
+                // Staging.close can quarantine an active JDBC lease. Its finalizer, not logical close,
+                // releases the scratch reservation and therefore this execution's ingestion slot.
+                reservation.afterRelease(releaseSlot)
                 reservation.close()
-            } finally {
-                releaseSlot()
+            } else {
+                try {
+                    reservation.close()
+                } finally {
+                    releaseSlot()
+                }
             }
         }
     }

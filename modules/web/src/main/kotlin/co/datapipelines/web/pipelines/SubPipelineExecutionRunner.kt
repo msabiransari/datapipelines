@@ -141,6 +141,7 @@ class SubPipelineExecutionRunner(
      * [ExecutionStreamLauncher]; null only in module-slice wiring.
      */
     private val scriptSupport: co.datapipelines.executor.ScriptSupport? = null,
+    private val lakeAppendPort: co.datapipelines.pipeline.LakeAppendPort? = null,
     /**
      * #266 — the emitter's event recorder: the batched one in the application (PersistenceConfiguration),
      * null in module-slice wiring and unit tests, where the emitter's direct default applies.
@@ -159,7 +160,8 @@ class SubPipelineExecutionRunner(
         // The child resolves in the PARENT execution's workspace (design §3: cross-workspace
         // references do not exist) — carried down on the context since 025 A5, so no lookup.
         val workspaceId = ctx.workspaceId
-        val (record, child) = loadChild(node, ref, workspaceId)
+        val (record, child, metadata) = loadChild(node, ref, workspaceId)
+        ctx.lakeLineage?.childPipelineUsed(ref, metadata, child.parameters)
         ctx.pipelineAdmission?.invoke(child, record.id, ref.version)
 
         // Minted before execution starts: the parent's node stats and any failure detail must be
@@ -169,7 +171,7 @@ class SubPipelineExecutionRunner(
         // and the sinks below report the parent's own output write onto it.
         ctx.operations.tracker(node.id)?.childExecution(childExecutionId)
         val outcome = SinkOutcome()
-        val request = childRequest(node, ctx, ref, record, child, childExecutionId, outcome)
+        val request = childRequest(node, ctx, ref, record, child, metadata, childExecutionId, outcome)
         val result = executeChild(node, record, request, workspaceId)
         recordResultColumns(result)
         ensureOutputDelivered(node, request.executionId, outcome)
@@ -249,10 +251,10 @@ class SubPipelineExecutionRunner(
         node: ExecutableNode,
         ref: PipelineNodeRef,
         workspaceId: UUID,
-    ): Pair<PipelineRecord, Pipeline> {
+    ): Triple<PipelineRecord, Pipeline, co.datapipelines.pipeline.LakeExecutionMetadata> {
         val record = pipelines.findByNameAnyStatus(workspaceId, ref.name)
-        val body = record?.let { pipelines.findVersionBody(workspaceId, it.id, ref.version) }
-        if (record == null || body == null) {
+        val snapshot = record?.let { pipelines.findExecutionSnapshot(workspaceId, it.id, ref.version) }
+        if (record == null || snapshot == null) {
             throw childFailure(
                 node,
                 childExecutionId = null,
@@ -262,7 +264,15 @@ class SubPipelineExecutionRunner(
                 cause = null,
             )
         }
-        return record to deserializer.readOrThrow(body)
+        return Triple(
+            record,
+            deserializer.readOrThrow(snapshot.bodyJson),
+            co.datapipelines.pipeline.LakeExecutionMetadata(
+                snapshot.bodyJson,
+                snapshot.bodyHash,
+                snapshot.status == co.datapipelines.pipeline.PipelineVersionStatus.DRAFT,
+            ),
+        )
     }
 
     /** The child request: parent's principal (D9), lineage, PIPELINE trigger, depth + 1, sink. */
@@ -272,12 +282,15 @@ class SubPipelineExecutionRunner(
         ref: PipelineNodeRef,
         record: PipelineRecord,
         child: Pipeline,
+        metadata: co.datapipelines.pipeline.LakeExecutionMetadata,
         childExecutionId: UUID,
         outcome: SinkOutcome,
     ) = ExecuteRequest(
         pipelineId = record.id,
         pipelineVersion = ref.version,
         pipeline = child,
+        lakeExecutionMetadata = metadata,
+        inheritedLakeLineage = ctx.lakeLineage,
         userId = ctx.userId,
         executedByKeyKind = ctx.executedByKeyKind,
         // Composition inherits the parent's workspace (design §5.3): the child runs where
@@ -703,6 +716,7 @@ class SubPipelineExecutionRunner(
             progress = executionProgress,
             subPipelineRunner = this,
             scripts = scriptSupport,
+            lakeAppendPort = lakeAppendPort,
         )
 
     /** What the sink delivered — written by the child's caller node, read after `execute` returns. */

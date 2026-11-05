@@ -47,6 +47,8 @@ class ResolvedScript(
     val body: String,
     val contract: ScriptContract,
     val invariants: List<ScriptInvariant>,
+    /** The same row read that supplied [body], for a managed delivery's execution recipe. */
+    val bodyHash: String = "",
 )
 
 /** Resolves the pinned `{id, version}` of a SCRIPT node inside the execution's workspace. */
@@ -169,6 +171,9 @@ internal object ScriptNodeRuns {
                         details = mapOf("template" to node.template.key, "node" to node.id),
                     )
             }
+        ctx.lakeLineage?.templateUsed(
+            co.datapipelines.pipeline.LakeArtifactReference(node.template.id, node.template.version, resolved.bodyHash),
+        )
         val engine = engineFor(resolved.type, support, node)
         val script = compile(node, resolved, engine)
         val limits = limitsOf(node, ctx, support, config)

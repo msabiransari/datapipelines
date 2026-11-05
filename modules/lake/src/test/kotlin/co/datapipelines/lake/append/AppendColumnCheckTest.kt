@@ -1,5 +1,6 @@
 package co.datapipelines.lake.append
 
+import co.datapipelines.pipeline.LakeAppendColumn
 import co.datapipelines.pipeline.LakeAppendInput
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
@@ -20,6 +21,30 @@ import java.sql.ResultSetMetaData
 /** Binding is a native type check, not the canonical envelope's fallback-to-text policy. */
 class AppendColumnCheckTest {
     private val checker = AppendColumnCheck()
+
+    @Test
+    fun `materialization cannot hide duplicate original column labels by renaming them`() {
+        val stored = input(listOf(Column("id", "INTEGER"), Column("id_1", "INTEGER")))
+        val original =
+            object : LakeAppendInput by stored {
+                override val originalColumns =
+                    listOf(LakeAppendColumn("id", "INTEGER", 0, 0), LakeAppendColumn("ID", "INTEGER", 0, 0))
+            }
+        shouldThrow<DatapipelinesException> { checker.check(original, schema(Types.IntegerType.get())) }
+            .code shouldBe PipelineErrorCodes.Lake.APPEND_AMBIGUOUS_COLUMN
+    }
+
+    @Test
+    fun `a materialized null retains its original SQL NULL type for an optional string field`() {
+        val stored = input(listOf(Column("id", "INTEGER")), listOf(listOf(null)))
+        val original =
+            object : LakeAppendInput by stored {
+                override val originalColumns = listOf(LakeAppendColumn("id", "SQLNULL", 0, 0))
+            }
+        val plan = checker.check(original, schema(Types.StringType.get()))
+        plan.bindings.single().sourceType shouldBe null
+        plan.rowCount shouldBe 1
+    }
 
     @Test
     fun `column validation stops at the callers cancellation or deadline during its scan`() {

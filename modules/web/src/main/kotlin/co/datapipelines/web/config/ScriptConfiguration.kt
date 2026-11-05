@@ -152,6 +152,7 @@ class ScriptConfiguration {
                                 version.contract
                                     ?: error("script version ${ref.key} has no contract (chk_script_blocks)"),
                             invariants = version.invariants.orEmpty(),
+                            bodyHash = version.bodyHash,
                         )
                     }
                 },

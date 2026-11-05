@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.82 (revised — see Change Log)
+**Status:** v1.83 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-11-05
@@ -1702,6 +1702,18 @@ The `lake.definition.*` rows (#798, dp-lake P3; [lake.md](lake.md)) are the mana
 | Code | HTTP | Description |
 |---|---|---|
 | `lake.delivery.invalid_key` | 400 | Delivery feed and resolved id must match `[a-z0-9_-]{1,64}` before any storage or SQL access. |
+| `lake.capacity.busy` | 503 | Ingestion slot and delivery-sized scratch could not both be reserved within the shared wait; retryable, before listing or opening staging. |
+| `lake.append.grant_missing` | 403 | Runtime backstop: the execution lacks the entry point's checked append grant; no table lease or publication starts. |
+| `lake.append.outcome_unknown` | 503 | Catalog publication is unconfirmed; retained files are never treated as evidence of failure, and settlement uses the permanent revision log. |
+| `lake.append.failed` | 500 | Publication failed before a more specific safe refusal was available. The permanent ledger records its outcome; library messages and causes stay private. |
+| `lake.append.provenance_missing` | 500 | The execution snapshot or applied definition body required for the immutable recipe is absent; no catalog publication starts. |
+| `lake.append.authority_lost` | 409 | The lease or catalog fence refused publication; retries require a fresh admitted attempt after settlement. |
+| `lake.commit.contended` | 409 | Bounded CAS attempts ended without commit evidence. The attempt failed in the publish phase; already written files remain. |
+| `lake.table.busy` | 409 | Another operation or an unconfirmed publication prevents this attempt; retryable after settlement. |
+| `lake.table.deprecated` | 409 | A deprecated managed table refuses delivery ingestion. |
+| `lake.table.unavailable` | 409 | The managed ingestion target is missing, archived or purged. This ledger-level refusal differs from the datasource read refusal `datasource.lake.table_unavailable`. |
+| `lake.delivery.changed` | 409 | The immutable delivery identity already has a different trusted fingerprint; a correction needs a new delivery id. |
+| `lake.delivery.changed_during_read` | 409 | The post-read trusted re-list differs from the original manifest; unpublished attempts fail in the staging phase. |
 | `lake.append.ambiguous_column` | 400 | The staged result has column names that differ only by case. |
 | `lake.append.unknown_column` | 400 | The staged result contains a column outside the managed table schema. Name comparison follows DuckDB: ASCII case only, without Unicode normalization. |
 | `lake.append.missing_required_column` | 400 | The staged result omits a required managed table column. |
@@ -1716,6 +1728,7 @@ The `lake.definition.*` rows (#798, dp-lake P3; [lake.md](lake.md)) are the mana
 | `lake.delivery.unsupported_format` | 400 | Delivery data files must all be Parquet or all CSV; unknown or mixed extensions are refused. |
 | `lake.delivery.invalid_manifest` | 400 | The listing is invalid or has no data files: duplicate or out-of-prefix keys, invalid size or ETag, invalid marker, or broken pagination. |
 | `lake.delivery.listing_failed` | 503 | The object store could not be listed within the admission deadline; retryable. Storage error messages and causes are not exposed. |
+| `lake.delivery.admission_failed` | 503 | Delivery admission or its metadata transaction failed; retryable. Database error messages and causes are not exposed. |
 | `lake.delivery.one_per_pipeline` | 400 | A pipeline declares more than one delivery node. |
 | `lake.append.one_per_table` | 400 | Multiple append nodes target the same managed table. |
 | `lake.append.requires_delivery` | 400 | Managed lake append requires a delivery node. |
@@ -1988,6 +2001,7 @@ Out of scope for v1.1, tracked for future:
 | 2026-11-05 | v1.80 | 799 (#799) | §13.25 adds strict append column-name, required-value and native-type refusals before data files are opened. |
 | 2026-11-05 | v1.81 | 799 (#799) | §13.25 pins column-name comparison to DuckDB’s ASCII identifier semantics; non-ASCII names cannot alias managed ASCII fields through Unicode folding. |
 | 2026-11-05 | v1.82 | 799 (#799) | §13.25 adds the partition fanout bound for uncommitted Parquet append files. |
+| 2026-11-05 | v1.83 | 799 (#799) | §13.25 adds admission, target status and immutable delivery identity refusals. |
 | 2026-11-04 | v1.76 | 799 (#799) trusted listing | §13.25 adds six delivery key/listing/manifest refusal codes, including retryable incomplete and unavailable-store outcomes; SDK messages and causes stay private. |
 | 2026-11-04 | v1.75 | 799 (#799) | Delivery node block, managed-only qualified append targets, and nine §13.25 structure refusals. Appends require one delivery and a transitive dependency barrier over all non-append nodes; rejects-producing scripts must be strict. External readonly datasources retain their refusal. |
 | 2026-11-04 | v1.74 | 780 (#780) script-invariants docs | §13.18's two script rows say what the code does: `pool_exhausted` names both refusal paths (the full admission bound, and an admitted evaluation that waited its whole wall clock for a running slot); `invariants_too_large` states the read-back's COMBINED count — written outputs and rejects plus table inputs, row mode adding the streamed input and a caller output's buffered rows and rejects. No code, code count or permission change. — Renumbered at merge after #810. |
