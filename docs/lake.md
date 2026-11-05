@@ -1,6 +1,6 @@
 # The Managed Lake: Table Definitions
 
-**Status:** v1.5 (#798, dp-lake P3; #810, #811, #812; #818, dp-lake P5)
+**Status:** v1.6 (#798, dp-lake P3; #810, #811, #812; #818, dp-lake P5)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and the names involved. The design is
@@ -256,11 +256,17 @@ generation is replaced.
 the lake write path (#799) retires the committing server's generation itself, the freshness tick bounds freshness on
 every server, the committing one included.
 
-**The bound.** No generation outlives `reads.max-generation-age-seconds`. The tick retires a generation earlier when
-its tables' catalog rows have changed since it was built. A query still running on a retired generation is
-hard-closed at the retire ceiling, so the oldest snapshot any query reads is at most age + retire ceiling old. Boot
-refuses a configuration where age + retire ceiling + tick exceeds one twenty-fourth of the snapshot protection window
-(`retention.protection-days`), so a reader never reaches a snapshot that may already be expired.
+**The bound.** A generation is retired once it is older than `reads.max-generation-age-seconds`: by the next lease
+that asks for it, or, when nothing asks, by the pool reaper, which checks every live generation's age on every pass
+and issues no statement to do it. The tick retires a generation earlier when its tables' catalog rows have changed
+since it was built. A query still running on a retired generation is hard-closed at the retire ceiling. The reaper
+runs every 5 s on the one scheduler thread every scheduled job shares, so a pass can start late by the reaper delay:
+260 s, the cadence plus the longest every other job's statements can hold that thread (a constant derived from those
+jobs, not a key). A late pass can delay both the retirement and the close, so the oldest snapshot any query reads is
+at most age + 2 × reaper delay + retire ceiling old. Boot refuses a configuration where age + 2 × reaper delay +
+retire ceiling + tick exceeds one twenty-fourth of the snapshot protection window (`retention.protection-days`), so a
+reader never reaches a snapshot that may already be expired. With the shipped keys that is 900 + 520 + 90 + 60 =
+1570 s against 25 200 s.
 
 **The operator knobs** ([Configuration §3.36](configuration.md#336-managed-lake-dp-lake-785)):
 
@@ -278,6 +284,7 @@ refuses a configuration where age + retire ceiling + tick exceeds one twenty-fou
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-05 | v1.6 | 818c (#818) | §6 "The bound.": the pool reaper retires an over-age generation nobody leases from, and the bound and boot rule gain 2 × the reaper delay (260 s, derived from the scheduled jobs). |
 | 2026-11-04 | v1.5 | 818b (#818) | §6: a table's state, like its snapshot, is the one the reader's generation was built with. |
 | 2026-11-04 | v1.4 | 818 (#818) | New **§6 Reads**: what a reader sees per table state, when new data becomes visible (the committing-server half waits for #799), the age bound and the boot rule that keeps it inside the snapshot protection window, and the operator keys. |
 | 2026-11-04 | v1.3 | 810 merge review | §3 distinguishes the polling horizon from the final row-lock wait, which can overrun either the lease wait or the caller's deadline by one lock timeout. |
