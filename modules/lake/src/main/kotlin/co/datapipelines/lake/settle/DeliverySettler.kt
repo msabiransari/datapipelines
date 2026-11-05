@@ -23,6 +23,7 @@ class DeliverySettler(
     private val deliveries: DeliveryLedgerRepository,
     private val ledger: DeliveryLedger,
     private val leases: LakeLeases,
+    private val projection: LakeProjectionRepair,
 ) {
     /** Returns the number of changed delivery rows; busy/live attempts remain unsettled. */
     fun settle(
@@ -30,13 +31,17 @@ class DeliverySettler(
         deadline: Instant,
     ): Int {
         val target = observations.target(tableId) ?: return 0
-        return deliveries.unsettled(tableId).sumOf { row ->
-            when (row.state) {
-                LakeDeliveryState.RECEIVED -> failEndedExecution(row)
-                LakeDeliveryState.PUBLISHING, LakeDeliveryState.UNKNOWN -> settlePublishing(target, row, deadline)
-                LakeDeliveryState.PUBLISHED, LakeDeliveryState.FAILED -> 0
+        val changed =
+            deliveries.unsettled(tableId).sumOf { row ->
+                when (row.state) {
+                    LakeDeliveryState.RECEIVED -> failEndedExecution(row)
+                    LakeDeliveryState.PUBLISHING, LakeDeliveryState.UNKNOWN -> settlePublishing(target, row, deadline)
+                    LakeDeliveryState.PUBLISHED, LakeDeliveryState.FAILED -> 0
+                }
             }
-        }
+        // Also runs when a previous worker committed and stamped PUBLISHED but died before repair.
+        projection.repair(target)
+        return changed
     }
 
     private fun failEndedExecution(row: LakeDelivery): Int {

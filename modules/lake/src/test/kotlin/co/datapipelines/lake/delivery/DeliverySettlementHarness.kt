@@ -6,6 +6,7 @@ import co.datapipelines.lake.LeaseHandle
 import co.datapipelines.lake.definitions.LakeDefinitionRepository
 import co.datapipelines.lake.settle.DeliverySettlementRepository
 import co.datapipelines.lake.settle.DeliverySettler
+import co.datapipelines.lake.settle.LakeProjectionRepair
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
@@ -41,7 +42,8 @@ internal class DeliverySettlementHarness {
 
     fun leases(lockTimeout: Duration = Duration.ofMillis(100)): LakeLeases = LakeLeases(jdbc, lockTimeout = lockTimeout)
 
-    fun settler(leases: LakeLeases = leases()): DeliverySettler = DeliverySettler(observations, repository, ledger, leases)
+    fun settler(leases: LakeLeases = leases()): DeliverySettler =
+        DeliverySettler(observations, repository, ledger, leases, LakeProjectionRepair(named, transaction, "lake799") {})
 
     fun receive(): LakeDelivery =
         ledger
