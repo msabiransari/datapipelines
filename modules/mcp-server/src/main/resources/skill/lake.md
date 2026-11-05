@@ -22,7 +22,7 @@ Each managed output is a DQL/tempdb node with
 `output: {target: datasource, datasource: <managed lake name>, table: "namespace.table", mode: append}`.
 Allow one append per table and make **every other node** an ancestor of every append via `depends_on`.
 This publication barrier includes validations and the delivery node. A SCRIPT with rejects must be strict.
-`replace` is refused. An author-or-higher effective role is required; a schedule uses the system actor.
+`replace` is refused. The effective role must be author, workspace admin or super admin; schedules use the system actor.
 Filtering rows in SQL is an authoring decision: the same delivery id cannot later publish the filtered-out rows.
 
 Parameter `redact_in_recipe` is optional and defaults to **false**. Set it to true for sensitive values that

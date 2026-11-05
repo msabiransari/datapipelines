@@ -62,10 +62,10 @@ class ParquetAppendWriterIntegrationTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["identity", "year", "month", "day", "hour", "bucket", "truncate"])
-    fun `fanout uses every admitted transform and writes readable schema ordered rows`(transform: String) {
-        val spec = spec(transform)
+    fun `fanout uses every admitted partition function and writes readable schema ordered rows`(partitionFunction: String) {
+        val spec = spec(partitionFunction)
         val sql =
-            if (transform == "bucket") {
+            if (partitionFunction == "bucket") {
                 "SELECT i::BIGINT AS id, TIMESTAMP '2026-11-05 00:30:00' AS at, 'abcd'::VARCHAR AS region FROM range(1024) t(i)"
             } else {
                 "SELECT * FROM (VALUES (1::BIGINT, TIMESTAMP '2026-11-05 00:30:00', 'abcd'), " +
@@ -75,13 +75,13 @@ class ParquetAppendWriterIntegrationTest {
         h.withTable(PARTITION_SCHEMA, spec) { table ->
             h.withInput(sql) { input ->
                 val written = writer.write(table, input, UUID.randomUUID(), 16) {}
-                val expectedRows = if (transform == "bucket") 1024L else 3L
+                val expectedRows = if (partitionFunction == "bucket") 1024L else 3L
                 written.rows shouldBe expectedRows
                 written.files.sumOf { it.recordCount() } shouldBe expectedRows
                 h.read(table, written.files).size.toLong() shouldBe expectedRows
                 written.files.all { it.location().startsWith("${table.location()}/data/") } shouldBe true
                 written.files.all { h.codecs(table, it) == setOf("ZSTD") } shouldBe true
-                assertPartitions(transform, written.files.map { it.partition().get(0, Any::class.java) }.toSet())
+                assertPartitions(partitionFunction, written.files.map { it.partition().get(0, Any::class.java) }.toSet())
                 table.currentSnapshot() shouldBe null
             }
         }
@@ -139,11 +139,11 @@ class ParquetAppendWriterIntegrationTest {
         }
     }
 
-    private fun spec(transform: String): PartitionSpec =
+    private fun spec(partitionFunction: String): PartitionSpec =
         PartitionSpec
             .builderFor(PARTITION_SCHEMA)
             .apply {
-                when (transform) {
+                when (partitionFunction) {
                     "identity" -> identity("region")
                     "year" -> year("at")
                     "month" -> month("at")
@@ -151,17 +151,17 @@ class ParquetAppendWriterIntegrationTest {
                     "hour" -> hour("at")
                     "bucket" -> bucket("id", 16)
                     "truncate" -> truncate("region", 2)
-                    else -> error("unknown fixture transform")
+                    else -> error("unknown fixture partition function")
                 }
             }.build()
 
     private fun assertPartitions(
-        transform: String,
+        partitionFunction: String,
         actual: Set<Any>,
     ) {
         val first = OffsetDateTime.parse("2026-11-05T00:30:00Z")
         val second = OffsetDateTime.parse("2027-01-01T00:30:00Z")
-        when (transform) {
+        when (partitionFunction) {
             "identity" -> {
                 actual shouldBe setOf("abcd", "abef", "cdef")
             }
@@ -192,7 +192,7 @@ class ParquetAppendWriterIntegrationTest {
             }
 
             else -> {
-                error("unknown fixture transform")
+                error("unknown fixture partition function")
             }
         }
     }

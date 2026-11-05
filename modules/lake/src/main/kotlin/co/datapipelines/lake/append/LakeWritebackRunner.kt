@@ -182,10 +182,10 @@ class LakeWritebackRunner(
             try {
                 ledger.conclude(row, conclusion)
             } catch (stampFailure: Exception) {
-                logFailure("lake.append.stamp_failed", request, stampFailure)
+                logFailure("event=lake.append.stamp_failed delivery_id={} operation_id={} cause={} sql_state={}", request, stampFailure)
             }
         }
-        logFailure("lake.append.failed", request, failure)
+        logFailure("event=lake.append.failed delivery_id={} operation_id={} cause={} sql_state={}", request, failure)
         throw publicFailure(failure)
     }
 
@@ -239,23 +239,22 @@ class LakeWritebackRunner(
         try {
             leases.release(request.delivery.operationId)
         } catch (failure: Exception) {
-            logFailure("lake.append.lease_release_failed", request, failure)
+            logFailure("event=lake.append.lease_release_failed delivery_id={} operation_id={} cause={} sql_state={}", request, failure)
         }
         try {
             settler.settle(request.delivery.tableId, request.deadline)
         } catch (failure: Exception) {
-            logFailure("lake.append.settlement_deferred", request, failure)
+            logFailure("event=lake.append.settlement_deferred delivery_id={} operation_id={} cause={} sql_state={}", request, failure)
         }
     }
 
     private fun logFailure(
-        event: String,
+        format: String,
         request: AppendPublicationInput,
         failure: Throwable,
     ) {
         log.warn(
-            "event={} delivery_id={} operation_id={} cause={} sql_state={}",
-            event,
+            format,
             request.delivery.id,
             request.delivery.operationId,
             FailureShape.cause(failure),
