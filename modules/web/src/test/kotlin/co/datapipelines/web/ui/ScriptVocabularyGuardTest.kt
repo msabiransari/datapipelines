@@ -53,6 +53,8 @@ import kotlin.text.RegexOption.IGNORE_CASE
  *     Iceberg's own transforms (identity, year/month/day/hour, bucket, truncate) under the body key
  *     `partition[].transform` (dp-lake design record §5.1 and §8 step 4, #798): the lake
  *     definitions package and `docs/lake.md`.
+ *   - **XSLT XML element** — the #461 source guard recognizes `xsl:transform`; only its
+ *     exact regex declaration is admitted, never the script-node noun beside it.
  */
 class ScriptVocabularyGuardTest {
     @Test
@@ -202,6 +204,11 @@ class ScriptVocabularyGuardTest {
         /** The floor is the count of tracked text files the walk saw at the rename (2026-10-20). */
         private const val SCAN_FLOOR = 2_500
 
+        private const val XSLT_POLICY_PATH = "modules/app/src/test/kotlin/co/datapipelines/config/SpringAdvisoryPolicy.kt"
+        private const val XSLT_POLICY_LINE =
+            "private val XSLT = Regex(\"\"\"(?i)\\b(?:XsltView(?:Resolver)?|XSLT)\\b|" +
+                "<\\s*xsl:(?:stylesheet|transform)\\b|\\btext/xsl\\b\"\"\")"
+
         /** Line shapes admitted EVERYWHERE, each naming the sense it protects. */
         private val GLOBAL_EXEMPTIONS =
             listOf(
@@ -229,6 +236,11 @@ class ScriptVocabularyGuardTest {
                     Regex("ui/ScriptVocabularyGuardTest\\.kt$"),
                     Regex("transform", setOf(IGNORE_CASE)),
                     "the guard itself names every sense it protects",
+                ),
+                Triple(
+                    Regex("^${Regex.escape(XSLT_POLICY_PATH)}$"),
+                    Regex("^\\s*${Regex.escape(XSLT_POLICY_LINE)}$"),
+                    "the XSLT XML element in the #461 security guard's exact declaration",
                 ),
                 // Match the whole line so a property cannot hide a retired identifier beside it.
                 // Include text-transform and transition continuations; pin existing prose phrase by phrase.
@@ -495,6 +507,7 @@ class ScriptVocabularyGuardTest {
         /** Restored kept-sense lines (#640, #663) a path entry must admit — path to line. */
         private val ADMITTED =
             listOf(
+                XSLT_POLICY_PATH to "    $XSLT_POLICY_LINE",
                 "guard.css" to "transform: translateX(0);",
                 "guard.css" to "text-transform: uppercase;",
                 "guard.css" to "    transform var(--duration-fast) var(--ease-out);",
@@ -529,6 +542,8 @@ class ScriptVocabularyGuardTest {
         /** The node noun in those same files stays red: the path entries admit the block, not the word. */
         private val NOT_ADMITTED =
             listOf(
+                XSLT_POLICY_PATH to "val transformNode = 1",
+                XSLT_POLICY_PATH to "$XSLT_POLICY_LINE // a TRANSFORM node",
                 "guard.css" to ".type-transform {",
                 "guard.css" to "--type-transform: …",
                 "guard.css" to "[data-transform]",
