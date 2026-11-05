@@ -100,14 +100,21 @@ abstract class BrowserSuite {
     /**
      * Drives the local login form (auth.md §5A). Asserts nothing — the caller decides
      * what the outcome should be; this helper only types and clicks.
+     *
+     * #825: each step that can time out is [named]. The fields' step names the FIELDS, never
+     * what was typed into them.
      */
     protected fun login(
         email: String,
         password: String,
     ) {
-        page.navigate("$baseUrl/login")
-        page.fill("#login-email", email)
-        page.fill("#login-password", password)
+        named(page, "the login page navigation ($baseUrl/login)") {
+            page.navigate("$baseUrl/login")
+        }
+        named(page, "the login form's fields (#login-email, #login-password on $baseUrl/login)", ::shellInitFacts) {
+            page.fill("#login-email", email)
+            page.fill("#login-password", password)
+        }
         named(page, "the login form's submit button ('form button[type=submit]' on $baseUrl/login)") {
             page.click("form button[type=submit]")
         }
@@ -117,17 +124,24 @@ abstract class BrowserSuite {
      * Runs [block]; a timeout becomes an AssertionError naming [what] and where the page was —
      * Playwright's bare `TimeoutError` named neither the element nor the document, and four of
      * these reds spent a gate each on setup waits nobody could attribute (#355).
+     *
+     * #825: [facts], when given, appends what the page itself held when the wait gave up (a
+     * render or init wait passes [shellInitFacts]). It is read defensively, so a probe that
+     * throws can never replace the named red. It sits BEFORE [block] on purpose: callers pass
+     * the block as a trailing lambda, which Kotlin binds to the LAST function-typed parameter.
      */
     protected fun named(
         on: Page,
         what: String,
+        facts: ((Page) -> String)? = null,
         block: () -> Unit,
     ) {
         try {
             block()
         } catch (e: com.microsoft.playwright.PlaywrightException) {
             if (e.message?.contains("Timeout") == true) {
-                throw AssertionError("$what timed out — url=${on.url()}", e)
+                val held = facts?.let { probe -> " — " + runCatching { probe(on) }.getOrElse { "the facts probe itself failed: $it" } }
+                throw AssertionError("$what timed out — url=${on.url()}${held.orEmpty()}", e)
             }
             throw e
         }
@@ -138,6 +152,9 @@ abstract class BrowserSuite {
      * The browser shows the family of the CURRENT page, so off a page of that family this follows
      * the menu's link (a boosted swap: the same document) or, with the menu off screen (a phone),
      * navigates to the catalog; on a phone it then opens the browser drawer.
+     *
+     * #825: the navigation, the drawer click and the root-level wait are each [named]; the
+     * root-level red also prints the tree as the wait left it ([treeFacts]).
      */
     protected fun openBrowserTree(
         family: String,
@@ -145,13 +162,53 @@ abstract class BrowserSuite {
     ) {
         if (!(on.evaluate("() => location.pathname") as String).startsWith("/$family")) {
             val link = on.locator(".app-nav-link[data-nav-section='/$family']")
-            if (link.isVisible) link.click() else on.navigate("$baseUrl/$family")
-            on.waitForURL("**/$family")
+            val viaLink = link.isVisible
+            val via = if (viaLink) "the menu's /$family section link" else "$baseUrl/$family"
+            named(on, "the $family page navigation ($via, waiting for **/$family)") {
+                if (viaLink) link.click() else on.navigate("$baseUrl/$family")
+                on.waitForURL("**/$family")
+            }
         }
         val closedDrawer =
             "() => matchMedia('(max-width: 760.98px)').matches && !document.documentElement.classList.contains('browser-open')"
-        if (on.evaluate(closedDrawer) == true) on.click("#browser-open")
-        on.waitForFunction("family => window.DatapipelinesSidebarTrees.get(family)?.state.levels.get(null)?.complete", family)
+        if (on.evaluate(closedDrawer) == true) {
+            named(on, "the phone browser drawer's open button (#browser-open, family $family)") { on.click("#browser-open") }
+        }
+        named(on, "the $family browser tree's root level (DatapipelinesSidebarTrees '$family', parent null)", { treeFacts(it, family) }) {
+            on.waitForFunction("family => window.DatapipelinesSidebarTrees.get(family)?.state.levels.get(null)?.complete", family)
+        }
+    }
+
+    /**
+     * #825: [family]'s browser tree as its root-level wait left it — whether it is mounted (and
+     * which families are), its level count, and the root level's status, completion, row count
+     * and the widget's own error sentence — then the document's facts. No DOM and no row content;
+     * read defensively like [shellInitFacts], because a page mid-navigation refuses evaluate.
+     */
+    private fun treeFacts(
+        on: Page,
+        family: String,
+    ): String {
+        val tree =
+            runCatching {
+                on.evaluate(
+                    """
+                    family => {
+                      const trees = window.DatapipelinesSidebarTrees;
+                      if (!trees) return 'tree=absent (no window.DatapipelinesSidebarTrees)';
+                      const tree = trees.get(family);
+                      if (!tree) return 'tree=absent (mounted: ' + (Array.from(trees.keys()).join(',') || 'none') + ')';
+                      const levels = tree.state.levels;
+                      const root = levels.get(null);
+                      if (!root) return 'tree=mounted levels=' + levels.size + ' rootLevel=absent';
+                      return 'tree=mounted levels=' + levels.size + ' rootLevel=' + root.status + ' complete=' + root.complete +
+                        ' rows=' + root.nodes.size + (root.error ? ' error=' + root.error.message : '');
+                    }
+                    """.trimIndent(),
+                    family,
+                ) as String
+            }.getOrElse { "the tree probe itself failed: $it" }
+        return "$tree, document: ${shellInitFacts(on)}"
     }
 
     /**
@@ -165,10 +222,37 @@ abstract class BrowserSuite {
      * [createWorkspace] on an explicit page — a test driving a SECOND session (a member beside
      * an admin) needs the identical flow, and a hand-rolled copy is how one of them quietly
      * stops waiting for the row and races the next navigation.
+     *
+     * [renderTimeoutMs] bounds the create form's first render (#825); it exists for
+     * BrowserSuiteSetupWaitsBrowserTest's planted render failure alone, which would otherwise
+     * wait the whole first-render bound. Every other caller keeps the default.
      */
     protected fun createWorkspaceOn(
         page: Page,
         name: String,
+        renderTimeoutMs: Double = FIRST_RENDER_TIMEOUT_MS,
+    ) {
+        submitWorkspaceCreate(page, name, renderTimeoutMs)
+        enterWorkspace(page, name)
+    }
+
+    /**
+     * [createWorkspaceOn] WITHOUT entering the new workspace — the raw product behaviour, for
+     * the one suite whose subject is the switcher itself. [renderTimeoutMs] as there.
+     */
+    protected fun createWorkspaceWithoutEntering(
+        name: String,
+        renderTimeoutMs: Double = FIRST_RENDER_TIMEOUT_MS,
+    ) = submitWorkspaceCreate(page, name, renderTimeoutMs)
+
+    /**
+     * The create flow both entry points share, up to the created row (#825 lifted it, so the two
+     * cannot drift): each step that can time out is [named].
+     */
+    private fun submitWorkspaceCreate(
+        page: Page,
+        name: String,
+        renderTimeoutMs: Double,
     ) {
         named(page, "the workspaces page navigation ($baseUrl/workspaces)") {
             page.navigate("$baseUrl/workspaces")
@@ -178,38 +262,23 @@ abstract class BrowserSuite {
         // wait the whole flow hangs on: under a loaded gate it has outrun the action default
         // three gates running (#327, and #283/#303 before it). Wait for THAT event with the
         // loaded-box bound, then fill — the input is present, so the fill keeps the default.
-        page
-            .locator("form[action*='/workspaces/create'] input[name=name]")
-            .waitFor(Locator.WaitForOptions().setTimeout(FIRST_RENDER_TIMEOUT_MS))
-        page.fill("form[action*='/workspaces/create'] input[name=name]", name)
+        val render = "the workspace create form's first render ($WORKSPACE_NAME_INPUT, bound ${renderTimeoutMs.toLong()}ms)"
+        named(page, render, ::shellInitFacts) {
+            page.locator(WORKSPACE_NAME_INPUT).waitFor(Locator.WaitForOptions().setTimeout(renderTimeoutMs))
+        }
+        named(page, "the workspace create form's name field ($WORKSPACE_NAME_INPUT)") {
+            page.fill(WORKSPACE_NAME_INPUT, name)
+        }
         // Wait for the form-submit navigation to settle, THEN the row — a selector wait
         // started before the submit can bind to the outgoing document. `?` is a glob
         // metacharacter, so the query is matched with plain wildcards.
-        page.click("form[action*='/workspaces/create'] button[type=submit]")
+        named(page, "the workspace create form's submit button ($WORKSPACE_CREATE_SUBMIT)") {
+            page.click(WORKSPACE_CREATE_SUBMIT)
+        }
         // The name appears in THREE places (the table cell, the switcher's hidden
         // <option>, the members heading) — a bare text= wait resolves to the first,
         // the hidden option, and waits for visibility forever. Wait for the visible
         // table cell.
-        named(page, "the created workspace's row (the visible table cell naming '$name')") {
-            page.locator("td", Page.LocatorOptions().setHasText(name)).first().waitFor()
-        }
-        enterWorkspace(page, name)
-    }
-
-    /**
-     * [createWorkspaceOn] WITHOUT entering the new workspace — the raw product behaviour, for
-     * the one suite whose subject is the switcher itself.
-     */
-    protected fun createWorkspaceWithoutEntering(name: String) {
-        named(page, "the workspaces page navigation ($baseUrl/workspaces)") {
-            page.navigate("$baseUrl/workspaces")
-            page.waitForURL("**/workspaces")
-        }
-        page
-            .locator("form[action*='/workspaces/create'] input[name=name]")
-            .waitFor(Locator.WaitForOptions().setTimeout(FIRST_RENDER_TIMEOUT_MS))
-        page.fill("form[action*='/workspaces/create'] input[name=name]", name)
-        page.click("form[action*='/workspaces/create'] button[type=submit]")
         named(page, "the created workspace's row (the visible table cell naming '$name')") {
             page.locator("td", Page.LocatorOptions().setHasText(name)).first().waitFor()
         }
@@ -589,14 +658,27 @@ abstract class BrowserSuite {
      * the completion signal. A no-op when the page already shows that mode. The deployment
      * default is `dark` (owner, 2026-09-11), so a test that photographs "light then dark" starts
      * by asking for light; it must not assume where the toggle begins.
+     *
+     * #825: the href read and the three waits are each [named] with the document's facts; the
+     * read is a wait too (the locator waits for `#theme-link` to exist).
      */
     protected fun ensureTheme(mode: String) {
         val wanted = "/themes/$mode.css"
-        val current = page.locator("#theme-link").first().getAttribute("href") ?: ""
+        var current = ""
+        named(page, "the #theme-link href read (wanted $wanted)", ::shellInitFacts) {
+            current = page.locator("#theme-link").first().getAttribute("href") ?: ""
+        }
         if (current.contains(wanted)) return
-        page.waitForResponse("**/partials/profile/theme") { page.locator("#mode-toggle").click() }
-        page.waitForFunction("() => document.getElementById('theme-link').getAttribute('href').includes('$wanted')")
-        page.locator("html[data-theme='$mode']").waitFor()
+        val swap = "wanted $wanted, current href $current"
+        named(page, "the theme PATCH response ($swap)", ::shellInitFacts) {
+            page.waitForResponse("**/partials/profile/theme") { page.locator("#mode-toggle").click() }
+        }
+        named(page, "the #theme-link swap ($swap)", ::shellInitFacts) {
+            page.waitForFunction("() => document.getElementById('theme-link').getAttribute('href').includes('$wanted')")
+        }
+        named(page, "the html[data-theme='$mode'] update ($swap)", ::shellInitFacts) {
+            page.locator("html[data-theme='$mode']").waitFor()
+        }
     }
 
     /** Generates per-run secrets — no literal secret in any fixture (the HIGH-2 rule). */
@@ -655,6 +737,10 @@ abstract class BrowserSuite {
 
         /** #761: how many failed loads since the reload a render/init red prints (all are counted). */
         private const val FAILED_LOADS_KEPT = 10
+
+        /** #825: the create form's name input and submit button, ONE spelling for the shared create flow. */
+        private const val WORKSPACE_NAME_INPUT = "form[action*='/workspaces/create'] input[name=name]"
+        private const val WORKSPACE_CREATE_SUBMIT = "form[action*='/workspaces/create'] button[type=submit]"
 
         private fun randomSecret(): String =
             Base64.getEncoder().encodeToString(ByteArray(SECRET_BYTES).also { SECURE_RANDOM.nextBytes(it) })
