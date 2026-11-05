@@ -327,7 +327,11 @@ class ManagedLakeActiveQueryCloseIntegrationTest {
                 .use { client ->
                     client.createBucket { it.bucket(BUCKET) }
                     val fixture =
-                        Path.of(checkNotNull(ManagedLakeActiveQueryCloseIntegrationTest::class.java.getResource("/lake-fixture/iceberg")).toURI())
+                        Path.of(
+                            checkNotNull(
+                                ManagedLakeActiveQueryCloseIntegrationTest::class.java.getResource("/lake-fixture/iceberg"),
+                            ).toURI(),
+                        )
                     Files.walk(fixture).use { paths ->
                         paths.filter { Files.isRegularFile(it) }.forEach { file ->
                             client.putObject({ it.bucket(BUCKET).key("iceberg/${fixture.relativize(file)}") }, RequestBody.fromFile(file))

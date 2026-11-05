@@ -1,5 +1,6 @@
 package co.datapipelines.web.config
 
+import co.datapipelines.application.datasources.ManagedLakeTableRepository
 import co.datapipelines.auth.AuditProperties
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserService
@@ -180,7 +181,7 @@ class ScheduledJobsStatementBoundsTest {
     @Test
     fun `the build's managed catalog read stays on the shared template - only the tick's is bounded`() {
         LakeConfiguration()
-            .managedLakeCatalog(co.datapipelines.application.datasources.ManagedLakeTableRepository(jdbc), providerOf(LAKE_PROPERTIES))
+            .managedLakeCatalog(ManagedLakeTableRepository(jdbc), providerOf(LAKE_PROPERTIES))
             .managedTables(LAKE)
 
         recording.timeoutOf("SELECT t.namespace, t.name") shouldBe UNBOUNDED
@@ -312,7 +313,13 @@ class ScheduledJobsStatementBoundsTest {
         val LAKE_PROPERTIES =
             LakeProperties(
                 enabled = true,
-                storage = LakeProperties.Storage(bucket = "dp-lake", region = "us-east-1", endpoint = "http://minio:9000", pathStyle = true),
+                storage =
+                    LakeProperties.Storage(
+                        bucket = "dp-lake",
+                        region = "us-east-1",
+                        endpoint = "http://minio:9000",
+                        pathStyle = true,
+                    ),
             )
     }
 }

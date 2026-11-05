@@ -97,6 +97,7 @@ import kotlin.io.path.relativeTo
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
 )
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
+@Suppress("LargeClass") // one managed-read suite over shared booted instances and fixtures; a split boots its contexts twice
 class ManagedLakeReadsE2eTest {
     @LocalServerPort
     private var port: Int = 0
@@ -285,7 +286,8 @@ class ManagedLakeReadsE2eTest {
                 }
                 try {
                     metadata { watcher ->
-                        val read = cancelledWhileHeld(watcher, "the catalog read", CATALOG_READ_TEXT, "lake_tables_managed", "AccessExclusiveLock")
+                        val read =
+                            cancelledWhileHeld(watcher, "the catalog read", CATALOG_READ_TEXT, "lake_tables_managed", "AccessExclusiveLock")
                         val regrant = cancelledWhileHeld(watcher, "the regrant", REGRANT_TEXT, "datasource_workspaces", "ShareLock")
                         val reaps = recorder.countOf(REAP_JOB)
                         val ticks = recorder.countOf(FRESHNESS_JOB)
@@ -305,7 +307,9 @@ class ManagedLakeReadsE2eTest {
                         println(
                             "HELD_LOCK_TICK read_queued_to_gone_ms=$read regrant_queued_to_gone_ms=$regrant " +
                                 "reaper_after_regrant_ms=$reaperDelay " +
-                                "reaps_after=${recorder.countOf(REAP_JOB) - reaps} ticks_after=${recorder.countOf(FRESHNESS_JOB) - ticks} " +
+                                "reaps_after=${recorder.countOf(
+                                    REAP_JOB,
+                                ) - reaps} ticks_after=${recorder.countOf(FRESHNESS_JOB) - ticks} " +
                                 "locks_still_granted=$stillHeld",
                         )
                         assertAll(
@@ -326,7 +330,8 @@ class ManagedLakeReadsE2eTest {
     @Test
     @Order(9)
     fun `B - a catalog outage leaves the live generation serving until its age bound, then refuses and installs nothing`() {
-        val outage = boot(maxAgeSeconds = OUTAGE_MAX_AGE_SECONDS, tickSeconds = OUTAGE_TICK_SECONDS, application = APP_E, recordTicks = true)
+        val outage =
+            boot(maxAgeSeconds = OUTAGE_MAX_AGE_SECONDS, tickSeconds = OUTAGE_TICK_SECONDS, application = APP_E, recordTicks = true)
         try {
             val portE = portOf(outage)
             countOn(portE) shouldBe ICEBERG_ROWS
@@ -347,7 +352,11 @@ class ManagedLakeReadsE2eTest {
                     { generationBuiltAt(outage) shouldBe null },
                 )
             } finally {
-                metadata { it.createStatement().use { st -> st.execute("ALTER TABLE lake_tables_managed_away RENAME TO lake_tables_managed") } }
+                metadata {
+                    it.createStatement().use { st ->
+                        st.execute("ALTER TABLE lake_tables_managed_away RENAME TO lake_tables_managed")
+                    }
+                }
             }
             countOn(portE) shouldBe ICEBERG_ROWS
             generationBuiltAt(outage).shouldNotBeNull().isAfter(builtAt) shouldBe true
@@ -436,7 +445,8 @@ class ManagedLakeReadsE2eTest {
 
     /** Instance F, booted once: its tick and age bound outlast the suite, so only [retireManagedPool] replaces a generation. */
     private fun lifecycle(): ConfigurableApplicationContext =
-        instanceF ?: boot(maxAgeSeconds = B_MAX_AGE_SECONDS, tickSeconds = LIFECYCLE_TICK_SECONDS, application = APP_F).also { instanceF = it }
+        instanceF
+            ?: boot(maxAgeSeconds = B_MAX_AGE_SECONDS, tickSeconds = LIFECYCLE_TICK_SECONDS, application = APP_F).also { instanceF = it }
 
     /** F's port, after the row is set to [status] (when given) and F's live generation, if any, is replaced. */
     private fun lifecycleReady(status: String? = null): Int {

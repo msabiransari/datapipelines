@@ -22,6 +22,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import java.sql.Timestamp
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * #818 (dp-lake P5, design record §6, §10) — the managed lake datasource at the registry level: metadata in a
@@ -52,9 +53,7 @@ class ManagedLakeRegistryIntegrationTest {
 
     @Volatile private var catalogFailure: RuntimeException? = null
 
-    private val catalogReads =
-        java.util.concurrent.atomic
-            .AtomicInteger()
+    private val catalogReads = AtomicInteger()
 
     private val catalog =
         ManagedLakeCatalog { _ ->
@@ -300,7 +299,12 @@ class ManagedLakeRegistryIntegrationTest {
                 { catalogReads.get() - before shouldBe 1 },
                 { pool.managedGeneration.shouldNotBeNull().tables shouldBe catalogTables },
                 {
-                    val reasons = registry.liveManagedGeneration(LAKE).shouldNotBeNull().unavailableTables.map { it.reason }
+                    val reasons =
+                        registry
+                            .liveManagedGeneration(LAKE)
+                            .shouldNotBeNull()
+                            .unavailableTables
+                            .map { it.reason }
                     reasons shouldBe listOf(ManagedLakeTable.REASON_NO_CATALOG_ROW)
                 },
             )
@@ -316,7 +320,7 @@ class ManagedLakeRegistryIntegrationTest {
             registry.syncManagedLake(managed(), owner)
             registry.poolFor(registry.get(LAKE).shouldNotBeNull())
             val buildReads = catalogReads.get()
-            val tickReads = java.util.concurrent.atomic.AtomicInteger()
+            val tickReads = AtomicInteger()
             val tickCatalog =
                 ManagedLakeCatalog { _ ->
                     tickReads.incrementAndGet()
@@ -491,7 +495,10 @@ class ManagedLakeRegistryIntegrationTest {
             },
             { disabled.locations shouldBe mapOf("lake.sales.active" to null) },
             // The snapshot stays complete: restoring an archived table (same location) is still staleness.
-            { generation.staleTableCount(generation.tables.map { if (it.name == "archived") it.copy(status = "active") else it }) shouldBe 1 },
+            {
+                val restored = generation.tables.map { if (it.name == "archived") it.copy(status = "active") else it }
+                generation.staleTableCount(restored) shouldBe 1
+            },
         )
     }
 

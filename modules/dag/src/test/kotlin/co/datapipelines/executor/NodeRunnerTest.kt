@@ -41,6 +41,7 @@ import java.util.concurrent.CopyOnWriteArrayList
  * Every code path §14 lists: DQL with each output (tempdb / caller / datasource), DML, DDL;
  * success; template failure; connection failure; query failure; write-back failure.
  */
+@Suppress("LargeClass") // one runner contract over one H2 fixture pair; the managed-lake CONNECT cases share it (#818b)
 class NodeRunnerTest {
     private val executionId = UUID.randomUUID()
     private val staging: Staging = Fixtures.stagingFactory().create(executionId)
@@ -406,7 +407,9 @@ class NodeRunnerTest {
                 FakeDatasourceRegistry(
                     mapOf("lake3" to lakeDatasource("lake3")),
                     managedGenerations =
-                        mapOf("lake3" to generation("lake3", managedTable("lake3", "orders", status = "deprecated", deprecated = "use v2"))),
+                        mapOf(
+                            "lake3" to generation("lake3", managedTable("lake3", "orders", status = "deprecated", deprecated = "use v2")),
+                        ),
                 )
 
             // No refusal: the node reaches the in-memory engine, whose own error (no such view here) is not this check's.
