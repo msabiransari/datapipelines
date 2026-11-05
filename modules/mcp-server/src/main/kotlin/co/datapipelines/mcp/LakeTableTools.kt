@@ -3,6 +3,7 @@ package co.datapipelines.mcp
 import co.datapipelines.application.datasources.LakeTableRegistryService
 import co.datapipelines.application.datasources.toWireMap
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.DuckDbVersion
 import co.datapipelines.executor.ExecutorJson
 import io.modelcontextprotocol.spec.McpSchema
 
@@ -40,7 +41,7 @@ class LakeTablesRegisterTool(
                     "'acme.analytics' shorthand), table, format (parquet | iceberg) and location are required; " +
                     "partition_column is optional. The location is s3://bucket/prefix/ (parquet: a directory or " +
                     "glob; iceberg: the table's CURRENT metadata file, e.g. " +
-                    "s3://bucket/table/metadata/00042-<uuid>.metadata.json — DuckDB 1.5.5 cannot scan a " +
+                    "s3://bucket/table/metadata/00042-<uuid>.metadata.json — DuckDB ${DuckDbVersion.CURRENT.core} cannot scan a " +
                     "pyiceberg table by its root, so register the file, and re-register it when the table " +
                     "commits) or a file:// path — no other scheme, and " +
                     "no quotes, backslashes, whitespace or control characters (it is interpolated into the " +
