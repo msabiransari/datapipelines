@@ -36,6 +36,7 @@ class LakeExecutionLineage(
 ) {
     private val templates = ConcurrentHashMap.newKeySet<LakeArtifactReference>()
     private val pipelines = ConcurrentHashMap.newKeySet<LakeArtifactReference>()
+    private val resolvedNodes = ConcurrentHashMap.newKeySet<String>()
     private val childDeclarations = ConcurrentHashMap<Pair<String, Int>, ConcurrentHashMap<String, Parameter>>()
 
     /** Called at the actual source resolution, without another lookup of a mutable draft. */
@@ -47,6 +48,18 @@ class LakeExecutionLineage(
     /** Stable recipe ordering, without discarding two different contents used under one draft version. */
     fun templateReferences(): List<LakeArtifactReference> =
         templates.sortedWith(compareBy(LakeArtifactReference::name, LakeArtifactReference::version, LakeArtifactReference::bodyHash))
+
+    /** Mark only after this node's actual artifact observations; node IDs belong to this execution, not its parent. */
+    fun nodeResolved(nodeId: String) {
+        resolvedNodes += nodeId
+    }
+
+    /** Parallel append siblings may not have rendered yet; their future draft hashes must never be guessed. */
+    fun unresolvedNodes(pipeline: Pipeline): List<String> =
+        pipeline.nodes
+            .filter { it.template.id.isNotBlank() && it.id !in resolvedNodes }
+            .map { it.id }
+            .sorted()
 
     /** Child inputs use the exact body that was loaded, including its recipe-redaction declarations. */
     fun childPipelineUsed(

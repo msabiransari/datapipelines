@@ -174,6 +174,7 @@ internal object ScriptNodeRuns {
         ctx.lakeLineage?.templateUsed(
             co.datapipelines.pipeline.LakeArtifactReference(node.template.id, node.template.version, resolved.bodyHash),
         )
+        ctx.lakeLineage?.nodeResolved(node.id)
         val engine = engineFor(resolved.type, support, node)
         val script = compile(node, resolved, engine)
         val limits = limitsOf(node, ctx, support, config)

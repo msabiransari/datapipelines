@@ -29,6 +29,9 @@ internal class AppendRecipeAssembler(
                 "The applied table has no definition version.",
             )
         val definition = required(definitions.findVersion(request.delivery.tableId, version), "The applied definition body is absent.")
+        // Observe pending nodes FIRST: a sibling resolving between snapshots can only make us conservative.
+        val unresolvedNodes = execution.lineage.unresolvedNodes(execution.pipeline)
+        val templates = execution.lineage.templateReferences()
         return RecipePublication(
             request.manifest,
             RecipePipeline(
@@ -39,9 +42,10 @@ internal class AppendRecipeAssembler(
                 execution.pipeline,
                 json.readTree(metadata.bodyJson),
                 execution.parameters,
-                execution.lineage.templateReferences().map { RecipeReference(it.name, it.version, it.bodyHash) },
+                templates.map { RecipeReference(it.name, it.version, it.bodyHash) },
                 emptyList(),
                 execution.lineage.pipelineReferences().map { RecipeReference(it.name, it.version, it.bodyHash) },
+                unresolvedNodes,
             ),
             version,
             json.readTree(definition.bodyJson),

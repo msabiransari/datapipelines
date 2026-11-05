@@ -6,6 +6,24 @@ import org.junit.jupiter.api.Test
 
 class LakeExecutionLineageTest {
     @Test
+    fun `two nodes sharing a draft still resolve separately and child node ids cannot resolve the parent`() {
+        val root = LakeExecutionLineage()
+        val child = LakeExecutionLineage(root)
+        val nodes =
+            listOf("first", "sibling").map {
+                Node(it, "", NodeType.DQL, "tempdb", TemplateRef("test/query.sql", 1), NodeOutput.Caller, emptyList())
+            }
+        val pipeline = Pipeline(Pipeline.SUPPORTED_SCHEMA_VERSION, "test/lineage", "Lineage", "", PipelineSettings(), emptyMap(), nodes)
+        root.templateUsed(LakeArtifactReference("test/query.sql", 1, "a".repeat(64)))
+        root.nodeResolved("first")
+        child.nodeResolved("sibling")
+        root.unresolvedNodes(pipeline) shouldBe listOf("sibling")
+        child.unresolvedNodes(pipeline) shouldBe listOf("first")
+        root.nodeResolved("sibling")
+        root.unresolvedNodes(pipeline) shouldBe emptyList()
+    }
+
+    @Test
     fun `actual child and grandchild inputs contribute their hashes to the parent recipe`() {
         val root = LakeExecutionLineage()
         val child = LakeExecutionLineage(root)

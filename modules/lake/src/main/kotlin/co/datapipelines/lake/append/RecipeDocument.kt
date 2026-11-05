@@ -27,6 +27,7 @@ data class RecipePipeline(
     val templates: List<RecipeReference>,
     val parameterSets: List<RecipeReference>,
     val pipelines: List<RecipeReference> = emptyList(),
+    val unresolvedNodes: List<String> = emptyList(),
 )
 
 /** All provenance required before commit; no storage configuration, credentials or ambient SQL context. */
@@ -59,7 +60,8 @@ class RecipeDocument(
         root.put("worker", publication.worker)
         root.put("recorded_at", publication.recordedAt.toString())
         root.put("restore_epoch", publication.restoreEpoch.toString())
-        root.put("exact_replay_possible", safe.exactReplayPossible)
+        root.put("exact_replay_possible", safe.exactReplayPossible && execution.unresolvedNodes.isEmpty())
+        root.set<JsonNode>("unresolved_nodes", mapper.valueToTree(execution.unresolvedNodes))
         root.set<JsonNode>("redacted_paths", mapper.valueToTree(safe.redactedPaths))
         root.putObject("delivery").apply {
             put("feed", publication.delivery.key.feed)

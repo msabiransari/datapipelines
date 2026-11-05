@@ -327,8 +327,11 @@ does not mutate the executed body or its recorded hash; omitted/false metadata p
 operator-supplied inputs. This is declared-input redaction, not a scrubber for secrets placed in SQL text,
 descriptions or data. This parameter model has no separate secret logical type.
 
-The recipe's replay flag reports whether input redaction already prevents exact replay. Recovery must also
-verify that every recorded artifact hash remains available; a draft reference can change after execution.
+The recipe's replay flag is also false when a parallel sibling has not resolved its templates yet;
+`unresolved_nodes` names those nodes. A recipe records only artifact hashes actually observed before publication,
+and never guesses a future draft's contents. Such a recipe needs directed reprocessing. Once every node has
+resolved, the flag can be true, provided no input was redacted. Recovery must still verify that every recorded
+artifact hash remains available; a draft reference can change after execution.
 
 Publication refreshes the table and checks permanent revision/attempt evidence before each bounded CAS retry.
 One Iceberg transaction appends all files and sets `dp.delivery.key`, `dp.operation.id`, `dp.recipe` and

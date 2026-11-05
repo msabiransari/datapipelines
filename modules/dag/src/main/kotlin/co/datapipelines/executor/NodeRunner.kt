@@ -393,9 +393,10 @@ class NodeRunner(
         if (ctx.lakeLineage == null) {
             templateEngine.render(node.template, ctx.values, ctx.renderBudgetChars)
         } else {
-            templateEngine.render(node.template, ctx.values, ctx.renderBudgetChars) { ref, hash ->
-                ctx.lakeLineage.templateUsed(co.datapipelines.pipeline.LakeArtifactReference(ref.id, ref.version, hash))
-            }
+            templateEngine
+                .render(node.template, ctx.values, ctx.renderBudgetChars) { ref, hash ->
+                    ctx.lakeLineage.templateUsed(co.datapipelines.pipeline.LakeArtifactReference(ref.id, ref.version, hash))
+                }.also { ctx.lakeLineage.nodeResolved(node.id) }
         }
 
     // ---------------------------------------------------------------- tempdb

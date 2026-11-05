@@ -123,6 +123,7 @@ class ManagedLakeDeliveryE2eTest {
         val events = execute(pipeline, batch)
         events.contains("pipeline_completed") shouldBe true
         state(batch) shouldBe "PUBLISHED"
+        ManagedLakeRecipeAssertions.complete(jdbc, batch, BUCKET)
         val attempts = attemptCount(batch)
         execute(pipeline, batch).contains("pipeline_completed") shouldBe true
         attemptCount(batch) shouldBe attempts
