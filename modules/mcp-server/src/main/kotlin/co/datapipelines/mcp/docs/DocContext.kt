@@ -1,5 +1,7 @@
 package co.datapipelines.mcp.docs
 
+import co.datapipelines.datasources.DuckDbVersion
+
 /**
  * The values the narrative prose names that live in configuration — the typed render context
  * (record §3.3). A narrative resource writes `${key}` where a deployment-configurable number
@@ -14,7 +16,10 @@ package co.datapipelines.mcp.docs
  * authority is code (the name grammar, the citation cap, the preview-row cap) stay literal
  * in the prose. The executor timeouts come from [co.datapipelines.executor.ExecutorConfig],
  * the script budgets from [ScriptDocValues] (780) — both REQUIRED of whoever assembles the
- * `docSet` bean.
+ * `docSet` bean. The driver versions are the one code-sourced substitution (from
+ * [DuckDbVersion], the packaged build input, not boot configuration): the prose names the
+ * engine version the build ships, and the version drift guard's re-probe list
+ * (deployment §3.1) is what keeps that prose true across a bump.
  */
 data class DocContext(
     val executionTimeoutSeconds: Long = 600,
@@ -25,6 +30,7 @@ data class DocContext(
     val scriptPoolSize: Int = 4,
     val scriptPoolQueue: Int = 64,
     val scriptMaxDepth: Int = 100,
+    val duckdbCore: String = DuckDbVersion.CURRENT.core,
 ) {
     /** The `${key}` substitution table — one entry per field, spelled as the prose writes it. */
     val placeholders: Map<String, String> =
@@ -37,6 +43,7 @@ data class DocContext(
             "script_pool_size" to scriptPoolSize.toString(),
             "script_pool_queue" to scriptPoolQueue.toString(),
             "script_max_depth" to scriptMaxDepth.toString(),
+            "duckdb_core" to duckdbCore,
         )
 
     companion object {

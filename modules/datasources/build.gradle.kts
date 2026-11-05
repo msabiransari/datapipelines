@@ -97,12 +97,16 @@ tasks.named<Test>("test") {
 // product states (DuckDbVersion, the site) is what the jar carries — never a typed literal. Read off
 // the runtime graph like :modules:app's generateThirdPartyNotices; the catalog is the declaration,
 // this is the resolution (STRICT locks make them equal, DuckDbVersionTest proves it).
+// #826 — the same file now also carries the BOM-managed H2 and SQLite JDBC drivers' resolved
+// versions (keys "h2" and "sqlite_jdbc", mirroring DriverVersions): they have no catalog row, so
+// this generated resolution is the drift guard's (DriverVersionSpecDriftTest) authority for them.
 val generateDuckDbVersion =
     tasks.register<WriteProperties>("generateDuckDbVersion") {
-        description = "Writes the resolved org.duckdb:duckdb_jdbc version for DuckDbVersion."
+        description =
+            "Writes the resolved pinned-driver versions (org.duckdb:duckdb_jdbc, com.h2database:h2, " +
+                "org.xerial:sqlite-jdbc) for DuckDbVersion and DriverVersions."
         destinationFile.set(layout.buildDirectory.file("generated/duckdb-version/duckdb-version.properties"))
-        property(
-            "jdbc",
+        fun resolvedDriver(group: String, module: String) =
             providers.provider {
                 val graph = configurations["runtimeClasspath"].incoming.resolutionResult
                 // A refused resolution (a catalog bump before the locks move) surfaces as ITS error,
@@ -111,11 +115,13 @@ val generateDuckDbVersion =
                 val drivers =
                     graph.allComponents
                         .mapNotNull { it.id as? ModuleComponentIdentifier }
-                        .filter { it.group == "org.duckdb" && it.module == "duckdb_jdbc" }
-                check(drivers.size == 1) { "runtimeClasspath must resolve exactly one org.duckdb:duckdb_jdbc, found $drivers" }
+                        .filter { it.group == group && it.module == module }
+                check(drivers.size == 1) { "runtimeClasspath must resolve exactly one $group:$module, found $drivers" }
                 drivers.single().version
-            },
-        )
+            }
+        property("jdbc", resolvedDriver("org.duckdb", "duckdb_jdbc"))
+        property("h2", resolvedDriver("com.h2database", "h2"))
+        property("sqlite_jdbc", resolvedDriver("org.xerial", "sqlite-jdbc"))
     }
 
 tasks.named<ProcessResources>("processResources") {

@@ -136,7 +136,7 @@ class H2StagingLifecycleTest {
     private fun execUserCount(connection: Connection): Long =
         // UPPER(...), not §12's bare literal: the factory creates the user with an UNQUOTED
         // `CREATE USER STAGING_EXEC`, so under the URL's DATABASE_TO_LOWER=TRUE the catalog stores
-        // it as `staging_exec` (measured on 2.3.232). The literal comparison would return 0 while
+        // it as `staging_exec` (measured on 2.3.232, 2026-08-10). The literal comparison would return 0 while
         // the user was very much alive — turning this test's whole point, "the user is gone once
         // the database dies", into a constant that can no longer distinguish the two states.
         scalarLong(connection, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.USERS WHERE UPPER(USER_NAME) = 'STAGING_EXEC'")
