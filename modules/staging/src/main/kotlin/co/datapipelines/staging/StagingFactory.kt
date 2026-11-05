@@ -25,6 +25,17 @@ interface StagingFactory {
         executionId: UUID,
         engine: StagingEngine = StagingEngine.H2,
     ): Staging
+
+    /** Reserves delivery-sized scratch before listing, without opening a staging database. */
+    fun prepareDelivery(
+        executionId: UUID,
+        reservationBytes: Long,
+    ): StagingPreparation =
+        throw DatapipelinesException(
+            StagingErrorCodes.ENGINE_UNAVAILABLE,
+            "This staging factory does not support delivery preparation.",
+            mapOf("execution_id" to executionId.toString()),
+        )
 }
 
 /**
@@ -40,6 +51,11 @@ class EngineDispatchingStagingFactory(
     /** Builds every `DUCKDB` staging database; readable so wiring is testable. */
     val duckDb: DuckDbStagingFactory,
 ) : StagingFactory {
+    override fun prepareDelivery(
+        executionId: UUID,
+        reservationBytes: Long,
+    ): StagingPreparation = duckDb.prepareDelivery(executionId, reservationBytes)
+
     override fun create(
         executionId: UUID,
         engine: StagingEngine,
