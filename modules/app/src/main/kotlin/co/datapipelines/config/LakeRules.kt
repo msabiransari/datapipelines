@@ -1,6 +1,7 @@
 package co.datapipelines.config
 
 import co.datapipelines.web.config.DatasourcesProperties
+import co.datapipelines.web.config.ReaperDelay
 import org.springframework.boot.convert.DurationStyle
 import org.springframework.util.unit.DataSize
 import java.net.URI
@@ -20,9 +21,10 @@ import java.time.Duration
  *   scratch-bytes` ([checkLakeAdmission]);
  * - every other number positive, the maintenance window `HH:MM-HH:MM` ([checkLakeBounds]);
  * - `freshness-tick-seconds < max-generation-age-seconds`, `reads.memory-limit` a positive size, and
- *   `max-generation-age + retire-ceiling + freshness-tick ≤ protection-days × 86400 / 24` (record §10 RULING 4,
- *   #818 P5) ([checkLakeReads]). The retire ceiling is the one `datasources` applies: `retire-ceiling-seconds`
- *   when set, else `node-query-timeout-seconds + 30` (datasources.md §5.2).
+ *   `max-generation-age + 2 × reaper-delay + retire-ceiling + freshness-tick ≤ protection-days × 86400 / 24`
+ *   (record §10 RULING 4 as amended 2026-11-05, #818 P5 / #818c) ([checkLakeReads]). The retire ceiling is the one
+ *   `datasources` applies: `retire-ceiling-seconds` when set, else `node-query-timeout-seconds + 30` (datasources.md
+ *   §5.2). The reaper delay is no key: [ReaperDelay.SECONDS], derived from the scheduling layer and pinned there.
  *
  * Deferred, with the lane that consumes the input: `scratch-bytes ≤ the pod's /tmp limit` and the cgroup memory
  * sum to P1/P6 (the sum's amendment adds keys that do not exist yet, and E10b is its acceptance — owner
@@ -220,8 +222,12 @@ internal object LakeRules {
     /**
      * The managed reads (record §10 RULING 4, #818): the tick below the age bound (a tick at or above it would
      * never retire a generation before the bound does), the reader's memory bound a positive size, and the
-     * longest a generation can keep serving a snapshot — age bound + retire ceiling + one tick — within an hour
-     * of every protected day, so no reader can hold a snapshot the remover may already have expired.
+     * longest a generation can keep serving a snapshot within an hour of every protected day, so no reader can
+     * hold a snapshot the remover may already have expired.
+     *
+     * #818c (RULING 4 amended 2026-11-05) — that longest is `age bound + 2 × reaper delay + retire ceiling + one
+     * tick`: the reaper retires an over-age generation with no borrower within one [ReaperDelay] of its age bound,
+     * and hard-closes it within one more of its ceiling. The delay is [ReaperDelay.SECONDS], never typed here.
      */
     fun checkLakeReads(
         snapshot: ConfigSnapshot,
@@ -238,10 +244,12 @@ internal object LakeRules {
         val ceiling = retireCeilingSeconds(snapshot, violations) ?: return
         if (age == null || tick == null) return
         val window = days * SECONDS_PER_DAY / PROTECTION_SHARE_DIVISOR
-        if (age + ceiling + tick > window) {
+        val reaperDelay = ReaperDelay.SECONDS
+        if (age + 2 * reaperDelay + ceiling + tick > window) {
             violations +=
-                "$MAX_GENERATION_AGE_SECONDS ($age) + the retire ceiling ($ceiling) + $FRESHNESS_TICK_SECONDS ($tick) " +
-                "must not exceed $PROTECTION_DAYS × 86400 / 24 ($window) (§3.36 — a reader never outlives the protection)."
+                "$MAX_GENERATION_AGE_SECONDS ($age) + 2 × the reaper delay ($reaperDelay) + the retire ceiling ($ceiling) + " +
+                "$FRESHNESS_TICK_SECONDS ($tick) must not exceed $PROTECTION_DAYS × 86400 / 24 ($window) " +
+                "(§3.36 — a reader never outlives the protection)."
         }
     }
 

@@ -1,5 +1,6 @@
 package co.datapipelines.config
 
+import co.datapipelines.web.config.ReaperDelay
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
@@ -132,19 +133,31 @@ class LakeRulesTest {
     }
 
     @Test
-    fun `age bound plus retire ceiling plus tick fits an hour of every protected day - record 10 ruling 4`() {
-        // One protected day = 3600 s. Shipped ceiling = node timeout 60 + 30 = 90; tick 60.
-        // 3450 + 90 + 60 = 3600 is admitted (≤); 3451 refuses, naming the age bound and the ceiling it used.
-        enabled(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to "3450") shouldContainExactly emptyList()
-        val refused = enabled(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to "3451").single()
+    fun `age bound plus twice the reaper delay plus retire ceiling plus tick fits an hour of every protected day`() {
+        // Record §10 RULING 4 as amended 2026-11-05 (#818c). One protected day = 3600 s. Reaper delay 260 (the
+        // scheduling layer's derived constant); shipped ceiling = node timeout 60 + 30 = 90; tick 60.
+        // 2930 + 2 × 260 + 90 + 60 = 3600 is admitted (≤); 2931 refuses, naming every term it used.
+        enabled(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to "2930") shouldContainExactly emptyList()
+        val overBoundary = enabled(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to "2931")
+        overBoundary shouldHaveSize 1
+        val refused = overBoundary.single()
         refused shouldStartWith LakeRules.MAX_GENERATION_AGE_SECONDS
+        refused shouldContain "2 × the reaper delay (260)"
         refused shouldContain "retire ceiling (90)"
         refused shouldContain "(3600)"
     }
 
     @Test
+    fun `the reads rule reads the reaper delay from the scheduling layer - never a typed copy of it`() {
+        // #818c: ReaperDelayDerivationTest pins ReaperDelay.SECONDS to the jobs; this pins LakeRules to the constant.
+        val source = repoFile("modules/app/src/main/kotlin/co/datapipelines/config/LakeRules.kt").readText()
+        source shouldContain "ReaperDelay.SECONDS"
+        Regex("\\b${ReaperDelay.SECONDS}L?\\b").findAll(source).map { it.value }.toList() shouldContainExactly emptyList()
+    }
+
+    @Test
     fun `the retire ceiling is read the way datasources derives it`() {
-        val atBoundary = mapOf(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to "3450")
+        val atBoundary = mapOf(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to "2930")
 
         fun judged(snapshot: ConfigSnapshot): List<String> =
             ConfigValidator
@@ -156,7 +169,9 @@ class LakeRulesTest {
         val base = ConfigSnapshots.valid()
         judged(base) shouldContainExactly emptyList()
         // A longer node timeout raises the derived ceiling: 61 + 30 = 91 tips the sum over.
-        judged(base.copy(executorNodeQueryTimeoutSeconds = "61")).single() shouldContain "retire ceiling (91)"
+        val longerNodeTimeout = judged(base.copy(executorNodeQueryTimeoutSeconds = "61"))
+        longerNodeTimeout shouldHaveSize 1
+        longerNodeTimeout.single() shouldContain "retire ceiling (91)"
         // An explicit ceiling wins over the derivation, in both directions.
         judged(base.copy(executorNodeQueryTimeoutSeconds = "61", datasourcesRetireCeilingSeconds = "90")) shouldContainExactly emptyList()
         judged(base.copy(datasourcesRetireCeilingSeconds = "91")).single() shouldContain "retire ceiling (91)"
@@ -169,10 +184,14 @@ class LakeRulesTest {
         return PLACEHOLDER_DEFAULT.find(raw)?.groupValues?.get(1) ?: raw
     }
 
+    private fun repoFile(relative: String): File {
+        val root = generateSequence(File(".").absoluteFile) { it.parentFile }.first { File(it, "settings.gradle.kts").isFile }
+        return File(root, relative).also { check(it.isFile) { "missing $relative" } }
+    }
+
     private val yaml: Map<String, Any?> by lazy {
-        val file = generateSequence(File(".").absoluteFile) { it.parentFile }.first { File(it, "settings.gradle.kts").isFile }
         YamlPropertySourceLoader()
-            .load("application.yml", FileSystemResource(File(file, "modules/app/src/main/resources/application.yml")))
+            .load("application.yml", FileSystemResource(repoFile("modules/app/src/main/resources/application.yml")))
             .filterIsInstance<EnumerablePropertySource<*>>()
             .flatMap { source -> source.propertyNames.map { it to source.getProperty(it) } }
             .toMap()

@@ -2,22 +2,13 @@ package co.datapipelines.web.config
 
 import co.datapipelines.application.datasources.ManagedLakeTableRepository
 import co.datapipelines.auth.AuditProperties
-import co.datapipelines.auth.User
-import co.datapipelines.auth.UserService
-import co.datapipelines.datasources.DatasourceGrantRepository
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.ManagedLakeCatalog
-import co.datapipelines.datasources.ManagedLakeSync
 import co.datapipelines.executor.ExecutorConfig
-import co.datapipelines.lake.LakeBootCheck
-import co.datapipelines.lake.LakeProperties
-import co.datapipelines.lake.definitions.LakeApplyRepository
 import co.datapipelines.parameters.ParametersConfig
 import co.datapipelines.visualization.DashboardRuntimeConfig
 import co.datapipelines.web.dashboards.runtime.DashboardRuntimeConfiguration
-import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainAll
-import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.shouldBe
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
@@ -26,13 +17,8 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.beans.factory.support.StaticListableBeanFactory
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
-import java.sql.Connection
-import java.sql.PreparedStatement
-import java.sql.ResultSet
 import java.time.Instant
-import java.time.OffsetDateTime
 import java.util.UUID
-import javax.sql.DataSource
 
 /**
  * #326 — the four `@Scheduled` jobs' metadata statements carry their bounds AS THE APPLICATION BUILDS
@@ -58,7 +44,7 @@ import javax.sql.DataSource
  * then cancels a held statement on the real scheduler is `ManagedLakeReadsE2eTest`'s.
  */
 class ScheduledJobsStatementBoundsTest {
-    private val recording = RecordingDataSource()
+    private val recording = RecordingTimeoutDataSource(LAKE)
     private val jdbc = NamedParameterJdbcTemplate(recording)
 
     @Test
@@ -205,82 +191,10 @@ class ScheduledJobsStatementBoundsTest {
         recording.everyTimeout().size shouldBe 3
     }
 
-    /**
-     * Hands out relaxed JDBC doubles and records, per prepared statement, its SQL and the
-     * `queryTimeout` set on it ([UNBOUNDED] when none was). A query answers one row: one column, the
-     * database clock for the audit cutoff, a `(table, column)` pair for the keys purge's FK list, an
-     * `id` for the housekeeping sweeps' `RETURNING id`.
-     */
-    private class RecordingDataSource : DataSource by mockk(relaxed = true) {
-        private val statements = mutableListOf<Pair<String, IntArray>>()
+    /** The production registrar over the unbounded template (the shared fixture). */
+    private fun registrar(): ManagedLakeDatasourceRegistrar = scheduledJobsRegistrar(jdbc, LAKE_PROPERTIES)
 
-        override fun getConnection(): Connection =
-            mockk(relaxed = true) {
-                every { prepareStatement(any<String>()) } answers { statement(firstArg()) }
-            }
-
-        private fun statement(sql: String): PreparedStatement {
-            val timeout = intArrayOf(UNBOUNDED)
-            statements += sql to timeout
-            return mockk(relaxed = true) {
-                every { setQueryTimeout(any()) } answers { timeout[0] = firstArg() }
-                every { executeUpdate() } returns 0
-                every { executeQuery() } answers { oneRow() }
-            }
-        }
-
-        private fun oneRow(): ResultSet {
-            var rows = 1
-            return mockk(relaxed = true) {
-                every { next() } answers { rows-- > 0 }
-                every { metaData.columnCount } returns 1
-                every { getObject(1, OffsetDateTime::class.java) } returns OffsetDateTime.now()
-                every { getString("referencing_table") } returns "executions"
-                every { getString("referencing_column") } returns "executed_by"
-                every { getObject("id", UUID::class.java) } returns UUID.randomUUID()
-                every { getArray("namespace").array } returns arrayOf(LAKE, "sales")
-            }
-        }
-
-        /** The one statement whose SQL starts with [prefix] (after trimming); its recorded timeout. */
-        fun timeoutOf(prefix: String): Int {
-            val matching = statements.filter { (sql, _) -> sql.trim().startsWith(prefix) }
-            withClue(
-                "statements sent: ${statements.map {
-                    it.first
-                        .trim()
-                        .lineSequence()
-                        .first()
-                }}",
-            ) {
-                matching.shouldNotBeEmpty()
-                matching.map { it.second[0] }.toSet().size shouldBe 1
-            }
-            return matching.first().second[0]
-        }
-
-        fun everyTimeout(): Set<Int> = statements.map { it.second[0] }.toSet()
-
-        fun statementCount(): Int = statements.size
-
-        fun clear() = statements.clear()
-    }
-
-    /** The production registrar over the unbounded template, its other collaborators answering the boot. */
-    private fun registrar(): ManagedLakeDatasourceRegistrar {
-        val actor = UUID.randomUUID()
-        return ManagedLakeDatasourceRegistrar(
-            lakeProperties = providerOf(LAKE_PROPERTIES),
-            registry = mockk { every { syncManagedLake(any(), actor) } returns ManagedLakeSync.UNCHANGED },
-            grants = DatasourceGrantRepository(jdbc),
-            applyRepository = StaticListableBeanFactory().getBeanProvider(LakeApplyRepository::class.java),
-            userService = mockk<UserService> { every { provisionSystemActor() } returns mockk<User> { every { id } returns actor } },
-            bootCheck = LakeCatalogStartupCheck(StaticListableBeanFactory().getBeanProvider(LakeBootCheck::class.java)),
-        )
-    }
-
-    private inline fun <reified T : Any> providerOf(bean: T): ObjectProvider<T> =
-        StaticListableBeanFactory(mapOf("bean" to bean)).getBeanProvider(T::class.java)
+    private inline fun <reified T : Any> providerOf(bean: T): ObjectProvider<T> = beanProviderOf(bean)
 
     private companion object {
         /** #326: the sweep's bound — two-thirds of its 15 s cadence. */
@@ -308,18 +222,8 @@ class ScheduledJobsStatementBoundsTest {
         /** #818b A: the freshness tick's bound, two statements of it inside the 5 s reaper's cadence each. */
         const val FRESHNESS_BOUND = 5
 
-        const val LAKE = "lake"
+        const val LAKE = SCHEDULED_JOBS_TEST_LAKE
 
-        val LAKE_PROPERTIES =
-            LakeProperties(
-                enabled = true,
-                storage =
-                    LakeProperties.Storage(
-                        bucket = "dp-lake",
-                        region = "us-east-1",
-                        endpoint = "http://minio:9000",
-                        pathStyle = true,
-                    ),
-            )
+        val LAKE_PROPERTIES = SCHEDULED_JOBS_TEST_LAKE_PROPERTIES
     }
 }
