@@ -207,7 +207,7 @@ class DriverVersionSpecDriftTest {
                         Regex("""^duckdb(?:/[\w.]+)?\t$VER\t"""),
                     ),
                 short = { it.split('.').take(3).joinToString(".") },
-                renderedBy = Regex("""facts\.duckdbVersion|DuckDbVersion\.CURRENT|\$\{duckdb_core\}"""),
+                renderedBy = Regex("""facts\.duckdbVersion|DuckDbVersion\.CURRENT|\$\{duckdb_core\}|[$]duckdbCore\b"""),
             )
 
         val H2 =
