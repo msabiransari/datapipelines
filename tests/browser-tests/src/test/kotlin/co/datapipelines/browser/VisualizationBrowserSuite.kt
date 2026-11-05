@@ -1,6 +1,5 @@
 package co.datapipelines.browser
 
-import com.microsoft.playwright.Page
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 
@@ -80,15 +79,10 @@ abstract class VisualizationBrowserSuite : DashboardBrowserSuite() {
                 "SELECT w.id, u.id, '$role' FROM workspaces w, users u WHERE w.name = '$workspace' AND u.email = '$email'",
         )
         val session = newSession()
-        val memberPage = session.page
-        memberPage.navigate("$baseUrl/login")
-        memberPage.fill("#login-email", member.email)
-        memberPage.fill("#login-password", member.oneTimePassword)
-        memberPage.click("form button[type=submit]")
-        memberPage.waitForURL("**/dashboard")
-        memberPage.waitForSelector("#workspace-switcher")
-        memberPage.selectOption("#workspace-switcher", arrayOf(workspace), Page.SelectOptionOptions().setForce(true))
-        memberPage.waitForFunction("() => document.querySelector('.app-ws b')?.textContent?.trim() === '$workspace'")
+        // #831: the suite's own login, landing and switch (#761's checked phases), not copies.
+        login(session.page, member.email, member.oneTimePassword)
+        landOnDashboard(session.page)
+        enterWorkspace(session.page, workspace)
         return session
     }
 
