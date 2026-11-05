@@ -95,12 +95,6 @@
   background: var(--brand);
 }
 
-html.dp-splitting-x,
-html.dp-splitting-x * {
-  cursor: col-resize !important;
-  user-select: none !important;
-}
-
 /* No reduced-motion rule for the grip: motion.css's `*` block already zeroes every
    transition-duration with `!important` (see the note in pipeline-editor.css). */
 
