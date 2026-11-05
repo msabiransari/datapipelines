@@ -1,9 +1,9 @@
 # Module Structure Specification
 
-**Status:** v1.12 (frozen contract — additive-only changes after this point)
+**Status:** v1.13 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** (all other specs — this spec operationalizes them into code structure)
-**Last updated:** 2026-11-04
+**Last updated:** 2026-11-05
 
 ---
 
@@ -797,6 +797,7 @@ build's `allowedInternalDependencies` map carries the same closed set).
 kotlin = "<stable>"
 spring-boot = "<stable>"
 jackson = "<BOM or stable>"
+flyway = "<BOM or stable>"
 
 [libraries]
 kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }
