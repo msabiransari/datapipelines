@@ -272,7 +272,11 @@ class CapturingSseEmitter : SseEmitter(0L) {
  */
 fun pipelineServiceOver(
     pipelines: co.datapipelines.pipeline.PipelineRepository,
-    validator: co.datapipelines.pipeline.PipelineValidator = io.mockk.mockk(),
+    validator: co.datapipelines.pipeline.PipelineValidator =
+        io.mockk.mockk {
+            // These default fixtures contain no managed-lake writes; feature tests supply real registry facts.
+            io.mockk.every { writesManagedLake(any(), any()) } returns false
+        },
     authoring: co.datapipelines.pipeline.AuthoringGuard = co.datapipelines.pipeline.AuthoringGuard(true),
     templateVersions: co.datapipelines.pipeline.TemplateVersionStatuses =
         co.datapipelines.pipeline.TemplateVersionStatuses { _, _, _ -> null },

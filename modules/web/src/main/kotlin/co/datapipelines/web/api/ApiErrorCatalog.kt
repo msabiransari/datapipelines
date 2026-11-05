@@ -145,6 +145,7 @@ object ApiErrorCatalog {
     private val EXCEPTIONS: Map<String, HttpStatus> =
         mapOf(
             PipelineErrorCodes.Lake.DELIVERY_INVALID_KEY to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_FORBIDDEN to HttpStatus.FORBIDDEN,
             PipelineErrorCodes.Lake.APPEND_RECIPE_EXISTS to HttpStatus.INTERNAL_SERVER_ERROR,
             PipelineErrorCodes.Lake.APPEND_RECIPE_WRITE_FAILED to HttpStatus.SERVICE_UNAVAILABLE,
             PipelineErrorCodes.Lake.DELIVERY_INCOMPLETE to HttpStatus.CONFLICT,
@@ -638,6 +639,7 @@ object ApiErrorCatalog {
 
     private val USER_MESSAGE_OVERRIDES: Map<String, String> =
         mapOf(
+            PipelineErrorCodes.Lake.APPEND_FORBIDDEN to "Your current role cannot append deliveries to the lake.",
             PipelineErrorCodes.Lake.APPEND_RECIPE_EXISTS to
                 "This publication attempt has a conflicting recovery record. Report this execution for investigation.",
             PipelineErrorCodes.Lake.APPEND_RECIPE_WRITE_FAILED to

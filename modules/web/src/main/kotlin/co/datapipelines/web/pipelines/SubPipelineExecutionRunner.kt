@@ -300,6 +300,7 @@ class SubPipelineExecutionRunner(
         // scheduled composition resolves its bindings (TODAY / YESTERDAY) on the parent's
         // logical time, never on the child's own start instant.
         reference = ctx.reference,
+        lakeAppendGrant = ctx.lakeAppendGrant,
         pipelineAdmission = ctx.pipelineAdmission,
     )
 

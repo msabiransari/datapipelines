@@ -82,8 +82,8 @@ class PipelineServiceIntegrationTest {
     private fun serviceWith(
         authoring: AuthoringGuard,
         draftTemplates: ExclusiveDraftTemplates = emptyDraftTemplates(),
+        validator: PipelineValidator = Fixtures.validator(),
     ): PipelineService {
-        val validator = Fixtures.validator()
         // Per-ID, not one answer for everything: a BLANK id is not a template at all
         // (a CALCULATOR or PIPELINE node's empty default ref), and the registry's honest
         // answer for it is "no such version". Without that distinction the
@@ -101,6 +101,137 @@ class PipelineServiceIntegrationTest {
             templateStatuses = statuses,
         )
     }
+
+    @Test
+    fun `managed write metadata is saved with the draft and changes without entering the portable body`() {
+        val managed = serviceWith(AuthoringGuard(true), validator = managedValidator())
+        val body = lakeBody("test/managed", append = true)
+        val saved = managed.create(WORKSPACE_ID, serializer.write(body), owner, WriteSurface.SESSION)
+        val snapshot = requireNotNull(repository.findExecutionSnapshot(WORKSPACE_ID, saved.record.id, 1))
+        snapshot.writesManagedLake shouldBe true
+        snapshot.status shouldBe PipelineVersionStatus.DRAFT
+        snapshot.bodyJson.contains("writes_managed_lake") shouldBe false
+        repository.recordManagedLakeWrites(
+            WORKSPACE_ID,
+            saved.record.id,
+            1,
+            serializer.write(lakeBody("test/managed", false)),
+            false,
+        ) shouldBe
+            0
+        repository.recordManagedLakeWrites(UUID.randomUUID(), saved.record.id, 1, snapshot.bodyJson, false) shouldBe 0
+        repository.findExecutionSnapshot(UUID.randomUUID(), saved.record.id, 1) shouldBe null
+        requireNotNull(repository.findExecutionSnapshot(WORKSPACE_ID, saved.record.id, 1)).writesManagedLake shouldBe true
+        managed.update(
+            WORKSPACE_ID,
+            saved.record.id,
+            serializer.write(lakeBody("test/managed", false)),
+            snapshot.bodyHash,
+            owner,
+            WriteSurface.SESSION,
+        )
+        requireNotNull(repository.findExecutionSnapshot(WORKSPACE_ID, saved.record.id, 1)).writesManagedLake shouldBe false
+    }
+
+    @Test
+    fun `execute rechecks a mutable child instead of trusting either direction of a stale parent cache`() {
+        val managed = serviceWith(AuthoringGuard(true), validator = managedValidator())
+        val childBody = lakeBody("test/child", append = false)
+        val child = managed.create(WORKSPACE_ID, serializer.write(childBody), owner, WriteSurface.SESSION)
+        val parentBody =
+            Fixtures.pipeline(
+                name = "test/parent",
+                nodes =
+                    listOf(
+                        Fixtures
+                            .node(
+                                type = NodeType.PIPELINE,
+                            ).copy(source = "", template = TemplateRef(), pipeline = PipelineNodeRef("test/child", 1)),
+                    ),
+            )
+        val parent = managed.create(WORKSPACE_ID, serializer.write(parentBody), owner, WriteSurface.SESSION)
+        requireNotNull(repository.findExecutionSnapshot(WORKSPACE_ID, parent.record.id, 1)).writesManagedLake shouldBe false
+        val childSnapshot = requireNotNull(repository.findExecutionSnapshot(WORKSPACE_ID, child.record.id, 1))
+        managed.update(
+            WORKSPACE_ID,
+            child.record.id,
+            serializer.write(lakeBody("test/child", true)),
+            childSnapshot.bodyHash,
+            owner,
+            WriteSurface.SESSION,
+        )
+        requireNotNull(managed.findExecutable(WORKSPACE_ID, ReadLens.Everything, parent.record, 1)).writesManagedLake shouldBe true
+        val parentSnapshot = requireNotNull(repository.findExecutionSnapshot(WORKSPACE_ID, parent.record.id, 1))
+        parentSnapshot.writesManagedLake shouldBe false
+        managed.update(WORKSPACE_ID, parent.record.id, serializer.write(parentBody), parentSnapshot.bodyHash, owner, WriteSurface.SESSION)
+        requireNotNull(repository.findExecutionSnapshot(WORKSPACE_ID, parent.record.id, 1)).writesManagedLake shouldBe true
+        val changedChild = requireNotNull(repository.findExecutionSnapshot(WORKSPACE_ID, child.record.id, 1))
+        managed.update(WORKSPACE_ID, child.record.id, serializer.write(childBody), changedChild.bodyHash, owner, WriteSurface.SESSION)
+        requireNotNull(managed.findExecutable(WORKSPACE_ID, ReadLens.Everything, parent.record, 1)).writesManagedLake shouldBe false
+    }
+
+    @Test
+    fun `body and managed write metadata roll back together in the metadata transaction`() {
+        val managed = serviceWith(AuthoringGuard(true), validator = managedValidator())
+        val transactions =
+            org.springframework.transaction.support.TransactionTemplate(
+                org.springframework.jdbc.datasource
+                    .DataSourceTransactionManager(requireNotNull(jdbc.jdbcTemplate.dataSource)),
+            )
+        shouldThrow<PlannedLakeRollback> {
+            transactions.executeWithoutResult {
+                val saved = managed.create(WORKSPACE_ID, serializer.write(lakeBody("test/rollback", true)), owner, WriteSurface.SESSION)
+                requireNotNull(repository.findExecutionSnapshot(WORKSPACE_ID, saved.record.id, 1)).writesManagedLake shouldBe true
+                throw PlannedLakeRollback()
+            }
+        }
+        repository.findByNameAnyStatus(WORKSPACE_ID, "test/rollback") shouldBe null
+    }
+
+    private fun managedValidator(): PipelineValidator =
+        Fixtures.validator(
+            datasources =
+                DatasourceRegistry { name, _ ->
+                    if (name ==
+                        "managed"
+                    ) {
+                        DatasourceFacts(co.datapipelines.typesystem.Dialect.LAKE, readonly = true, managedLake = true)
+                    } else {
+                        null
+                    }
+                },
+            templates = StubTemplates(defaultLookup = TemplateLookup.Found(co.datapipelines.typesystem.Dialect.DUCKDB)),
+            pipelines =
+                PipelineResolver { workspace, name, version ->
+                    repository.findByNameAnyStatus(workspace, name)?.let { record ->
+                        repository.findExecutionSnapshot(workspace, record.id, version)?.let { snapshot ->
+                            ResolvedPipeline(PipelineDeserializer().readOrThrow(snapshot.bodyJson), false, snapshot.status)
+                        }
+                    }
+                },
+            pipelineNames = PipelineNames { workspace, name -> repository.findByNameAnyStatus(workspace, name) != null },
+        )
+
+    private fun lakeBody(
+        name: String,
+        append: Boolean,
+    ): Pipeline {
+        val land =
+            Fixtures
+                .node(id = "land", source = "tempdb", output = NodeOutput.Tempdb("landed"))
+                .copy(delivery = DeliveryRef("feed", "batch"))
+        val sink =
+            Fixtures
+                .node(id = "append", source = "tempdb", dependsOn = listOf("land"))
+                .copy(output = NodeOutput.Datasource("managed", "sales.orders", WriteMode.APPEND))
+        return Fixtures.pipeline(
+            name = name,
+            nodes = if (append) listOf(land, sink) else listOf(land),
+            settings = PipelineSettings(tempdb = TempdbSettings(engine = co.datapipelines.typesystem.StagingEngine.DUCKDB)),
+        )
+    }
+
+    private class PlannedLakeRollback : RuntimeException()
 
     /** #320: the dashboard port, recording each question — there is none by default on purpose; this one answers [dashboardPins]. */
     private fun recordingDashboards(): PipelineVersionConsumers =

@@ -148,6 +148,8 @@ data class NodeExecutionContext(
      * fixture is unchanged.
      */
     val operations: NodeOperations = NodeOperations(),
+    /** The root's checked append authority, inherited without deriving anything from [userId]. */
+    val lakeAppendGrant: co.datapipelines.pipeline.LakeAppendGrant? = null,
     /** The root surface's admission check, retained through every composed child execution. */
     val pipelineAdmission: ((Pipeline, UUID, Int) -> Unit)? = null,
 )

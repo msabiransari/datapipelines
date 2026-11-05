@@ -284,9 +284,11 @@ class SubPipelineExecutionRunnerTest {
             stubRegistry()
             val stub = ExecutorStub()
 
-            val result = runner(stub).run(pipelineNode(), context())
+            val grant = co.datapipelines.pipeline.LakeAppendGrant(parentUserId, "session", Instant.EPOCH)
+            val result = runner(stub).run(pipelineNode(), context().copy(lakeAppendGrant = grant))
 
             val request = stub.captured.single()
+            request.lakeAppendGrant shouldBe grant
             request.pipelineId shouldBe childRecordId
             request.pipelineVersion shouldBe 4
             request.userId shouldBe parentUserId

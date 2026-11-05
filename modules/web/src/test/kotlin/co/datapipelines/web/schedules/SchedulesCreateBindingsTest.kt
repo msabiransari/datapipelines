@@ -126,6 +126,7 @@ class SchedulesCreateBindingsTest {
                     every { query(any<String>(), any<Map<String, Any?>>(), any<RowMapper<Pair<UUID, String>>>()) } returns emptyList()
                 },
             ),
+            ScheduleLakeAppendAuthorization(pipelines, pipelineService),
         )
 
     @BeforeEach

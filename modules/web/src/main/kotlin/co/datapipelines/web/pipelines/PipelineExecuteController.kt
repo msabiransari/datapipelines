@@ -97,6 +97,12 @@ class PipelineExecuteController(
                 pipelineId = id,
                 pipelineVersion = version,
                 pipeline = executable.pipeline,
+                lakeAppendGrant =
+                    co.datapipelines.application.LakeAppendAuthorization.grant(
+                        principal,
+                        executable.writesManagedLake,
+                        java.time.Instant.now(),
+                    ),
                 principal = principal,
                 parameters = parameters,
                 parametersJson = parametersJson,

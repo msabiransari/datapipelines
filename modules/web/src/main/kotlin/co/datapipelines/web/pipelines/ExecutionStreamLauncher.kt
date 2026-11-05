@@ -65,6 +65,7 @@ data class ExecuteLaunch(
     /** The client's `DP-Result-Page-Rows` (R-EP4) — how many rows `data_ready` carries inline. */
     val resultPageRows: Int? = null,
     val idempotencyKey: String?,
+    val lakeAppendGrant: co.datapipelines.pipeline.LakeAppendGrant? = null,
 ) {
     /** The surface-free half this launch carries into `application` (056/D6). */
     internal fun toLaunch(): ExecutionLaunch =
@@ -357,6 +358,7 @@ class ExecutionStreamLauncher(
                         correlationId = request.correlationId,
                         triggeredVia = ExecutionTrigger.REST,
                         executedByKeyKind = request.principal.executedByKeyKind(),
+                        lakeAppendGrant = request.lakeAppendGrant,
                         executionId = executionId,
                     ),
                 )

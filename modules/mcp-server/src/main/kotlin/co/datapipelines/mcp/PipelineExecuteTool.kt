@@ -182,6 +182,12 @@ class PipelineExecuteTool(
                 pipelineId = id,
                 pipelineVersion = version,
                 pipeline = executable.pipeline,
+                lakeAppendGrant =
+                    co.datapipelines.application.LakeAppendAuthorization.grant(
+                        ctx.principal,
+                        executable.writesManagedLake,
+                        java.time.Instant.now(),
+                    ),
                 userId = ctx.principal.userId,
                 // The key's pinned workspace — the record was resolved in it two lines up
                 // (025 A5): the execution runs where the pipeline lives.

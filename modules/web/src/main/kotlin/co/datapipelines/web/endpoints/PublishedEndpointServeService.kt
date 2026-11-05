@@ -217,6 +217,12 @@ class PublishedEndpointServeService(
                 pipelineId = endpoint.pipelineId,
                 pipelineVersion = version.version,
                 pipeline = version.pipeline,
+                lakeAppendGrant =
+                    co.datapipelines.application.LakeAppendAuthorization.grant(
+                        principal,
+                        version.writesManagedLake,
+                        java.time.Instant.now(),
+                    ),
                 userId = principal.userId,
                 workspaceId = endpoint.workspaceId,
                 parameters = validated.parameters,

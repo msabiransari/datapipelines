@@ -44,6 +44,14 @@ import org.springframework.core.env.Environment
  */
 @Configuration
 class SchedulerWebConfiguration {
+    @Bean
+    fun scheduleLakeAppendAuthorization(
+        pipelines: PipelineRepository,
+        pipelineService: PipelineService,
+    ): co.datapipelines.web.schedules.ScheduleLakeAppendAuthorization =
+        co.datapipelines.web.schedules
+            .ScheduleLakeAppendAuthorization(pipelines, pipelineService)
+
     /** The system identity's id — read once: the row never changes (auth.md §4.5). */
     @Bean
     fun schedulerSystemActor(users: UserService): SystemActorSource {
