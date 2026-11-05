@@ -22,6 +22,22 @@ class AppendColumnCheckTest {
     private val checker = AppendColumnCheck()
 
     @Test
+    fun `column validation stops at the callers cancellation or deadline during its scan`() {
+        var checks = 0
+        val failure =
+            shouldThrow<java.util.concurrent.CancellationException> {
+                checker.check(
+                    input(listOf(Column("id", "INTEGER")), listOf(listOf(1), listOf(2), listOf(3))),
+                    schema(Types.IntegerType.get(), required = true),
+                ) {
+                    if (++checks == 3) throw java.util.concurrent.CancellationException("Stopped by caller.")
+                }
+            }
+        checks shouldBe 3
+        failure.message shouldBe "Stopped by caller."
+    }
+
+    @Test
     fun `columns bind case insensitively in target field order and missing optional columns become null`() {
         val schema =
             Schema(

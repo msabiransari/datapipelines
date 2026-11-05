@@ -398,6 +398,7 @@ iceberg-data = { module = "org.apache.iceberg:iceberg-data", version.ref = "iceb
 hadoop-client-api = { module = "org.apache.hadoop:hadoop-client-api", version.ref = "hadoop" }
 hadoop-client-runtime = { module = "org.apache.hadoop:hadoop-client-runtime", version.ref = "hadoop" }
 parquet-column = { module = "org.apache.parquet:parquet-column", version.ref = "parquet" }
+parquet-format-structures = { module = "org.apache.parquet:parquet-format-structures", version.ref = "parquet" }
 # [upstream: apache/iceberg#18744 — TEMPORARY] iceberg-aws 1.12.0 declares the AWS SDK compileOnly, yet
 # S3FileIO.initialize loads kms.model.EncryptionAlgorithmSpec and sts.model.Tag through the eager
 # AwsProperties (E11 #777 F3). runtimeOnly in modules/lake at the SDK pin; DROP both when an Iceberg

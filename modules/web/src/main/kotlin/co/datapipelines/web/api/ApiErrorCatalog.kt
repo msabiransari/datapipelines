@@ -151,6 +151,7 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Lake.APPEND_MISSING_REQUIRED_COLUMN to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Lake.APPEND_NULL_IN_REQUIRED to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Lake.APPEND_TYPE_MISMATCH to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_TOO_MANY_PARTITIONS to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Lake.APPEND_RECIPE_EXISTS to HttpStatus.INTERNAL_SERVER_ERROR,
             PipelineErrorCodes.Lake.APPEND_RECIPE_WRITE_FAILED to HttpStatus.SERVICE_UNAVAILABLE,
             PipelineErrorCodes.Lake.DELIVERY_INCOMPLETE to HttpStatus.CONFLICT,
@@ -651,6 +652,7 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Lake.APPEND_NULL_IN_REQUIRED to
                 "The staged result has null values in required columns; details contain every count.",
             PipelineErrorCodes.Lake.APPEND_TYPE_MISMATCH to "A staged native type cannot be stored without narrowing or coercion.",
+            PipelineErrorCodes.Lake.APPEND_TOO_MANY_PARTITIONS to "The append exceeds the configured open partition limit.",
             PipelineErrorCodes.Lake.APPEND_RECIPE_EXISTS to
                 "This publication attempt has a conflicting recovery record. Report this execution for investigation.",
             PipelineErrorCodes.Lake.APPEND_RECIPE_WRITE_FAILED to

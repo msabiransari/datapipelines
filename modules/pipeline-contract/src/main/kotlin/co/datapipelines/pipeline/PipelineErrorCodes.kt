@@ -2034,6 +2034,7 @@ object PipelineErrorCodes {
         const val APPEND_MISSING_REQUIRED_COLUMN = "lake.append.missing_required_column"
         const val APPEND_NULL_IN_REQUIRED = "lake.append.null_in_required"
         const val APPEND_TYPE_MISMATCH = "lake.append.type_mismatch"
+        const val APPEND_TOO_MANY_PARTITIONS = "lake.append.too_many_partitions"
         const val APPEND_RECIPE_EXISTS = "lake.append.recipe_exists"
         const val APPEND_RECIPE_WRITE_FAILED = "lake.append.recipe_write_failed"
         const val DELIVERY_INVALID_KEY = "lake.delivery.invalid_key"

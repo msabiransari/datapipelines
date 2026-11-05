@@ -15,12 +15,14 @@ data class AppendColumnBinding(
     val field: Types.NestedField,
     val sourceIndex: Int?,
     val sourceType: Type.PrimitiveType?,
+    val nativeTypeName: String? = null,
 )
 
 /** Field ids and schema order come from the applied Iceberg schema, never the incoming cursor's positions. */
 data class AppendColumnPlan(
     val schema: Schema,
     val bindings: List<AppendColumnBinding>,
+    val rowCount: Long = 0,
 )
 
 /**
@@ -35,14 +37,19 @@ class AppendColumnCheck {
     fun check(
         input: LakeAppendInput,
         schema: Schema,
+        checkActive: () -> Unit = {},
     ): AppendColumnPlan {
+        checkActive()
         var result: AppendColumnPlan? = null
         input.scan { rows ->
             check(result == null) { "An append scan must supply exactly one cursor." }
             val plan = plan(rows.metaData, schema)
             val required = plan.bindings.filter { it.field.isRequired }
             val nulls = linkedMapOf<String, Long>()
+            var rowCount = 0L
             while (rows.next()) {
+                checkActive()
+                rowCount++
                 required.forEach { binding ->
                     if (rows.getObject(requireNotNull(binding.sourceIndex)) == null) {
                         nulls.merge(binding.field.name(), 1L, Long::plus)
@@ -50,8 +57,9 @@ class AppendColumnCheck {
                 }
             }
             if (nulls.isNotEmpty()) refuse(PipelineErrorCodes.Lake.APPEND_NULL_IN_REQUIRED, mapOf("null_counts" to nulls))
-            result = plan
+            result = plan.copy(rowCount = rowCount)
         }
+        checkActive()
         return requireNotNull(result) { "An append scan did not supply its cursor." }
     }
 
@@ -81,7 +89,7 @@ class AppendColumnCheck {
         if (source != null && (!field.type().isPrimitiveType || !TypeUtil.isPromotionAllowed(source, field.type().asPrimitiveType()))) {
             refuse(PipelineErrorCodes.Lake.APPEND_TYPE_MISMATCH, mapOf("column" to field.name(), "source_type" to name))
         }
-        return AppendColumnBinding(field, index, source)
+        return AppendColumnBinding(field, index, source, name.substringBefore('(').trim())
     }
 
     private fun nativeType(

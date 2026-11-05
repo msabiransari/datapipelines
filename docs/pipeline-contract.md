@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.81 (revised — see Change Log)
+**Status:** v1.82 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-11-05
@@ -1707,6 +1707,7 @@ The `lake.definition.*` rows (#798, dp-lake P3; [lake.md](lake.md)) are the mana
 | `lake.append.missing_required_column` | 400 | The staged result omits a required managed table column. |
 | `lake.append.null_in_required` | 400 | The staged result has null values in required columns; details contain every count. |
 | `lake.append.type_mismatch` | 400 | A staged native type cannot be stored without narrowing or coercion. |
+| `lake.append.too_many_partitions` | 400 | The append would open more distinct output partitions than admitted. It stops before opening the excess partition, commits nothing, and retains already written files for maintenance. |
 | `lake.append.recipe_exists` | 500 | An attempt's immutable recipe key already exists. Bug signal: the PUT is not retried or overwritten; catalog publication has not started. |
 | `lake.append.forbidden` | 403 | The effective principal lacks `lake.append`; key authority comes from the key's own role, never its creator's identity or current role. |
 | `lake.append.recipe_write_failed` | 503 | The immutable recipe could not be written before the admission-fixed deadline. No catalog publication; storage messages and causes are stripped. |
@@ -1986,6 +1987,7 @@ Out of scope for v1.1, tracked for future:
 | 2026-11-05 | v1.79 | 799 (#799) | §13.25 registers the effective-principal lake append permission refusal. |
 | 2026-11-05 | v1.80 | 799 (#799) | §13.25 adds strict append column-name, required-value and native-type refusals before data files are opened. |
 | 2026-11-05 | v1.81 | 799 (#799) | §13.25 pins column-name comparison to DuckDB’s ASCII identifier semantics; non-ASCII names cannot alias managed ASCII fields through Unicode folding. |
+| 2026-11-05 | v1.82 | 799 (#799) | §13.25 adds the partition fanout bound for uncommitted Parquet append files. |
 | 2026-11-04 | v1.76 | 799 (#799) trusted listing | §13.25 adds six delivery key/listing/manifest refusal codes, including retryable incomplete and unavailable-store outcomes; SDK messages and causes stay private. |
 | 2026-11-04 | v1.75 | 799 (#799) | Delivery node block, managed-only qualified append targets, and nine §13.25 structure refusals. Appends require one delivery and a transitive dependency barrier over all non-append nodes; rejects-producing scripts must be strict. External readonly datasources retain their refusal. |
 | 2026-11-04 | v1.74 | 780 (#780) script-invariants docs | §13.18's two script rows say what the code does: `pool_exhausted` names both refusal paths (the full admission bound, and an admitted evaluation that waited its whole wall clock for a running slot); `invariants_too_large` states the read-back's COMBINED count — written outputs and rejects plus table inputs, row mode adding the streamed input and a caller output's buffered rows and rejects. No code, code count or permission change. — Renumbered at merge after #810. |
