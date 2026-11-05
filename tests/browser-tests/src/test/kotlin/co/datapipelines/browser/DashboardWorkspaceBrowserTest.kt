@@ -139,7 +139,17 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
         }
         // A dock crushed to its two borders (2 px) is "visible" to a height > 0 check; the pane the
         // person reads must keep the splitter's floor, and the board row its own (splitter.js).
-        if (height <= 800) {
+        assertDockDefault(readings, shortWindow = height <= 800)
+        withClue("the board row is under its floor: $readings") {
+            (readings["layout"] as Number).toDouble() shouldBeGreaterThanOrEqual BOARD_FLOOR
+        }
+    }
+
+    private fun assertDockDefault(
+        readings: Map<*, *>,
+        shortWindow: Boolean,
+    ) {
+        if (shortWindow) {
             withClue("the short-window default did not protect the board: $readings") {
                 readings["collapsed"] shouldBe true
                 (readings["body"] as Number).toDouble() shouldBe 0.0
@@ -150,9 +160,6 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
             withClue("the dock's pane is under its floor: $readings") {
                 (readings["body"] as Number).toDouble() shouldBeGreaterThanOrEqual DOCK_MIN
             }
-        }
-        withClue("the board row is under its floor: $readings") {
-            (readings["layout"] as Number).toDouble() shouldBeGreaterThanOrEqual BOARD_FLOOR
         }
     }
 
