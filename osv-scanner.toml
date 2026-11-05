@@ -65,15 +65,15 @@ ignoreUntil = 2027-02-15
 #    — on every web module's runtime classpath. Exploitable only when the app
 #    renders through XsltView behind a `/**` mapping with an unspecified view
 #    name; the sources carry no XsltView, XsltViewResolver or XSLT at all
-#    (git grep, 2026-10-05) and Spring Boot never auto-configures one. No OSS
-#    6.2.x fix exists (6.2.19 and Boot 3.5.16 are the newest on their lines);
-#    the only fix is Spring Framework 7.0.9, a Boot 4 migration. Short expiry
-#    on purpose: re-triage or fix before it lapses (#461).
+#    (re-triaged 2026-11-05). The 6.2.20 fix is enterprise-only; the OSS
+#    fix is Spring Framework 7.0.9. Owner ruling 2026-11-05: this is the LAST
+#    renewal. SpringAdvisoryExemptionsTest guards the absence; #834 migrates
+#    to Boot 4.1 / Framework 7 before 2026-12-05 (#461).
 
 [[IgnoredVulns]]
 id = "GHSA-pc63-qcmh-9cmg" # spring-webmvc 6.2.19 — XsltView never configured, no 6.2.x fix; owner ruling (triaged 2026-10-05, #461)
-reason = "XsltView is never configured (no XsltView/XsltViewResolver/XSLT in the sources); no fixed 6.2.x exists, the only fix is Spring 7.0.9 (Boot 4) — tracked in #461"
-ignoreUntil = 2026-11-05
+reason = "Re-triaged 2026-11-05; owner ruling 2026-11-05: XsltView/XsltViewResolver/XSLT configuration is absent and guarded by SpringAdvisoryExemptionsTest. Final renewal; #834 migrates to Boot 4.1 / Framework 7 before expiry; no further renewal (#461)."
+ignoreUntil = 2026-12-05
 
 #  * spring-webmvc 6.2.19 (CRITICAL 9.8, CVE-2026-47890, SSE stream corruption
 #    with view fragments, CWE-93) — reviewed into the GitHub database
@@ -84,12 +84,14 @@ ignoreUntil = 2026-11-05
 #    RefreshStream, ParameterEvaluationStream) passes a Jackson-serialised
 #    String with MediaType.APPLICATION_JSON, or a constant comment; no
 #    ModelAndView, FragmentsRendering or reactive return type reaches an SSE
-#    response, and spring-webflux is on no lockfile (git grep, 2026-10-08).
+#    response, and spring-webflux is on no lockfile (re-triaged 2026-11-05).
 #    No OSS 6.2.x fix exists (6.2.20 is enterprise-only); the only fix is
 #    Spring Framework 7.0.9, the same Boot 4 migration as the XsltView entry
-#    above. Same expiry, same tracker (#461).
+#    above. Owner ruling 2026-11-05: LAST renewal, guarded by
+#    SpringAdvisoryExemptionsTest; #834 replaces the dependency line before
+#    2026-12-05. Same expiry, same tracker (#461).
 
 [[IgnoredVulns]]
 id = "GHSA-j9f9-w8pj-32f8" # spring-webmvc 6.2.19 — no view fragments over SSE, no 6.2.x OSS fix; owner ruling (triaged 2026-10-08, #461)
-reason = "No view fragment is ever sent over SSE (every SseEmitter payload is serialised JSON or a comment; no ModelAndView/FragmentsRendering on a stream, no webflux); no OSS 6.2.x fix exists, the only fix is Spring 7.0.9 (Boot 4) — tracked in #461"
-ignoreUntil = 2026-11-05
+reason = "Re-triaged 2026-11-05; owner ruling 2026-11-05: SSE sends serialize JSON or constant comments, with no ModelAndView/FragmentsRendering or locked WebFlux; guarded by SpringAdvisoryExemptionsTest. Final renewal; #834 migrates before expiry; no further renewal (#461)."
+ignoreUntil = 2026-12-05
