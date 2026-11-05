@@ -496,6 +496,32 @@ case "$args" in
       rd=("$ROOT"/.pregate-logs/runs/*)
       : > "${rd[0]}/2"
     fi
+    # #773: a test worker HotSpot's own handler kills (exit value 134) leaves its report under
+    # the module's build/hs_err; an unhandled SIGSEGV (139) leaves none. The report carries an
+    # environment section the pregate must never print.
+    if [ "$mode" = crash ]; then
+      mkdir -p "$ROOT/modules/auth/build/hs_err"
+      cat > "$ROOT/modules/auth/build/hs_err/hs_err_pid4242.log" <<'HSERR'
+#
+# A fatal error has been detected by the Java Runtime Environment:
+#
+#  SIGSEGV (0xb) at pc=0x00007f3a1c2d3e4f, pid=4242, tid=4243
+#
+# JRE version: OpenJDK Runtime Environment (21.0.12+7) (build 21.0.12+7-LTS)
+# Problematic frame:
+# C  [libduckdb_java.so+0x1234]
+#
+---------------  S Y S T E M  ---------------
+Environment Variables:
+FIXTURE_ENV_SENTINEL=report-environment-never-printed
+HSERR
+      echo "Process 'Gradle Test Executor 7' finished with non-zero exit value 134"
+      exit 1
+    fi
+    if [ "$mode" = crash-139 ]; then
+      echo "Process 'Gradle Test Executor 7' finished with non-zero exit value 139"
+      exit 1
+    fi
     [ "$mode" != fail-2 ] || exit 82
     [ "$mode" != covered-fail ] || exit 82
     [ "$mode" = fail ] && exit 1
@@ -519,20 +545,67 @@ STANDIN
   chmod +x "$F/gradlew"
 }
 
+# #797: the stand-in for scripts/vuln-scan.sh at <fixture>/scripts/vuln-scan.sh — never the
+# real scanner, never the network. It records every invocation (the marker that proves the
+# stage ran or did not) and exits by <fixture>/.scan-mode under vuln-scan.sh's EXIT CONTRACT:
+# clean|findings|error|offline → 0|1|2|200, the offline sentinel read from the REAL
+# scripts/lib/scan-tools.sh the fixture carries. Any other mode is refused with 64.
+pgres::_write_scan_standin() {
+  local F="$1"
+  cat > "$F/scripts/vuln-scan.sh" <<'SCANSTANDIN'
+#!/usr/bin/env bash
+set -u
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/scripts/lib/scan-tools.sh"
+printf '%q ' "$0" "$@" >> "$ROOT/vuln-scan-calls.log"; printf '\n' >> "$ROOT/vuln-scan-calls.log"
+mode="$(cat "$ROOT/.scan-mode" 2>/dev/null || echo clean)"
+echo "vuln-scan: osv-scanner (fixture stand-in) over the committed lockfiles"
+case "$mode" in
+  clean) echo 'No issues found'; exit 0 ;;
+  findings)
+    echo '| OSV URL                          | CVSS | ECOSYSTEM | PACKAGE                 | VERSION | SOURCE                       |'
+    echo '| https://osv.dev/GHSA-fixt-ure0-0001 | 7.5  | Maven     | org.example:fixture-lib | 1.0.0   | modules/auth/gradle.lockfile |'
+    exit 1 ;;
+  error) echo 'vuln-scan: FAIL — osv-scanner exited 128 while online (fixture stand-in)' >&2; exit 2 ;;
+  offline)
+    echo 'vuln-scan: WARNING — osv.dev unreachable (fixture stand-in); vulnerability scan SKIPPED (fail-soft).' >&2
+    exit "$SCAN_EXIT_OFFLINE" ;;
+esac
+echo "scan stand-in refused mode: $mode" >&2
+exit 64
+SCANSTANDIN
+  chmod +x "$F/scripts/vuln-scan.sh"
+}
+
+# pgres::_fixture_deps <fixture> <scan-mode> <file...> — sets the scan stand-in's mode and
+# changes each named dependency file in the working tree (each exists in the base commit).
+pgres::_fixture_deps() {
+  local F="$1" mode="$2" f; shift 2
+  printf '%s\n' "$mode" > "$F/.scan-mode"
+  for f in "$@"; do printf '# changed by the fixture\n' >> "$F/$f"; done
+}
+
 # Builds a throwaway git checkout whose diff touches modules/auth, modules/scripting and
-# a runnable tests/integration-tests class, and stages copies of the REAL scripts.
+# a runnable tests/integration-tests class, and stages copies of the REAL scripts. The base
+# commit also carries the three dependency-file kinds stage 0 triggers on (unchanged).
 pgres::_fixture() {
   local F="$1" mode="${2:-happy}"
   mkdir -p "$F/scripts" \
            "$F/modules/auth/src/main/kotlin/co/x" \
            "$F/modules/scripting/src/main/kotlin/co/x" \
            "$F/tests/integration-tests/src/test/kotlin/co/x" \
-           "$F/buildSrc/src/main/kotlin"
+           "$F/buildSrc/src/main/kotlin" \
+           "$F/gradle"
   cp "$PGRES_LIB_DIR/pregate.sh" "$PGRES_LIB_DIR/pregate-results-lib.sh" \
      "$PGRES_LIB_DIR/pregate-2b-lib.sh" "$PGRES_LIB_DIR/pregate-plan-lib.sh" "$PGRES_LIB_DIR/test-recount.sh" "$F/scripts/"
   mkdir -p "$F/scripts/lib"
-  cp "$PGRES_LIB_DIR/lib/verification-lock.sh" "$F/scripts/lib/"
-  printf 'build/\n.pregate-logs/\npregate-argv.log\npregate-quoted.log\npregate.out\n' > "$F/.gitignore"
+  cp "$PGRES_LIB_DIR/lib/verification-lock.sh" "$PGRES_LIB_DIR/lib/gate-stages.sh" \
+     "$PGRES_LIB_DIR/lib/scan-tools.sh" "$F/scripts/lib/"
+  pgres::_write_scan_standin "$F"
+  printf 'build/\n.pregate-logs/\npregate-argv.log\npregate-quoted.log\npregate.out\n.scan-mode\nvuln-scan-calls.log\n' > "$F/.gitignore"
+  printf '[versions]\nfixture = "1.0.0"\n' > "$F/gradle/libs.versions.toml"
+  printf '<verification-metadata/>\n' > "$F/gradle/verification-metadata.xml"
+  printf 'org.example:fixture-lib:1.0.0=runtimeClasspath\n' > "$F/modules/auth/gradle.lockfile"
   echo '// auth source' > "$F/modules/auth/src/main/kotlin/co/x/Auth.kt"
   echo '// scripting source' > "$F/modules/scripting/src/main/kotlin/co/x/Script.kt"
   echo '// auth build' > "$F/modules/auth/build.gradle.kts"
