@@ -29,8 +29,8 @@ class FixtureSetupWaitsBrowserTest : DashboardBrowserSuite() {
     /** Requests a plant holds open; aborted in `finally`, so none outlives its case. */
     private val held = mutableListOf<Route>()
 
-    /** The pipelines tree's own fetch only; an unparseable URL is simply not it. */
-    private val treeApi = Predicate<String> { url -> pathOf(url) == "/api/v1/pipelines/tree" }
+    /** The pipelines tree's own fetches only (a level, and `/search`); an unparseable URL is simply not one. */
+    private val treeApi = Predicate<String> { url -> pathOf(url)?.startsWith("/api/v1/pipelines/tree") == true }
 
     @ParameterizedTest
     @ValueSource(strings = ["dashboard", "schedules", "rest-tree", "second-page"])
@@ -204,7 +204,7 @@ class FixtureSetupWaitsBrowserTest : DashboardBrowserSuite() {
         val message = failure.shouldNameTheStep(expected, document = step == "registry")
         when (step) {
             "expand-level" -> message shouldContain "level=loading complete=false rows=0"
-            "search-results" -> message shouldContain "query=\"w831\" search="
+            "search-results" -> message shouldContain "query=\"w831\" search=loading complete=false rows=0"
         }
         println("831 rest tree $step: $message")
     }
