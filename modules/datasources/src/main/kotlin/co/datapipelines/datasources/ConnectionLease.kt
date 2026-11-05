@@ -180,7 +180,7 @@ private fun SQLException.directlyIsConnectionFailure(): Boolean =
 /**
  * The vendored sqlite-jdbc's `SQLiteException` extends plain `SQLException` with a **null
  * SQLState** (its sole constructor passes null for the state and `code & 0xFF` for the vendor
- * code — verified in the 3.49.1.0 bytecode), so a deleted or locked db file mid-read fails
+ * code — verified in the 3.49.1.0 bytecode, 2026-09-01), so a deleted or locked db file mid-read fails
  * every state-based branch. Classified instead by SQLite's own primary result codes on the
  * standard [SQLException.getErrorCode] — deliberately NOT a blanket "null SQLState means
  * down": a null-state SQLiteException with any other code stays a defect and propagates
@@ -203,7 +203,7 @@ private fun SQLException.isSqliteConnectionLoss(): Boolean =
  * code's DOUBLE representation: h2 carries its engine error code both as the SQLState STRING
  * and as the vendor code (`"90007"`/90007 — live-probed 2026-08-16), and the 90xxx class is
  * outside the SQL standard's class range, so no standard-state driver collides. Codes,
- * verified against the pinned h2 2.3.232 (live probe; `EmbeddedDialectBehaviorTest` re-pins
+ * verified against the pinned h2 2.3.232, 2026-09-01 (live probe; `EmbeddedDialectBehaviorTest` re-pins
  * the shape on every run):
  * 90007 = "The object is already closed" (connection closed),
  * 90098 = "Database is closed",
@@ -224,7 +224,7 @@ private fun SQLException.isH2ConnectionLoss(): Boolean =
  *   discriminator, and the exact-class test (`java.sql.SQLException` itself, not a subclass)
  *   keeps this from matching any driver's specific exception type. Live-probed 2026-08-16;
  *   both arms re-pinned in `EmbeddedDialectBehaviorTest`.
- * - sqlite-jdbc 3.49.1.0: a closed connection's `getCatalog()` throws exactly
+ * - sqlite-jdbc 3.49.1.0, 2026-09-01: a closed connection's `getCatalog()` throws exactly
  *   `"database connection closed"`, the same null-state plain-`SQLException` shape (its
  *   `getSchema()` returns hardcoded null instead of throwing — adapter KDoc).
  *

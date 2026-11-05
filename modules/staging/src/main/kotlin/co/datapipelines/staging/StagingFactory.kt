@@ -69,7 +69,7 @@ class EngineDispatchingStagingFactory(
  * `STG_ORDERS` and fails with SQLState 42S03 against the lowercase table. `DATABASE_TO_LOWER=TRUE`
  * is the setting that lower-folds unquoted identifiers, which is what makes §11.3's "table names
  * are lowercase by contract, so unquoted references to them work" actually true. Verified against
- * the pinned driver (2.3.232): with `MODE=PostgreSQL` alone the unquoted select fails 42S03; with
+ * the pinned driver (2.3.232, verified 2026-08-10): with `MODE=PostgreSQL` alone the unquoted select fails 42S03; with
  * this parameter it returns the row.
  *
  * It is hardcoded rather than exposed as config: it is a correctness invariant of the staged

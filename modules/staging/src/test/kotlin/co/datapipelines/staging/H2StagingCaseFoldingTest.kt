@@ -160,10 +160,10 @@ class H2StagingCaseFoldingTest {
     }
 
     private companion object {
-        /** H2 2.3.232's SQLState for "table not found" — the shape the shipped URL produced. */
+        /** H2 2.3.232's SQLState (verified 2026-08-10) for "table not found" — the shape the shipped URL produced. */
         const val TABLE_NOT_FOUND = "42S03"
 
-        /** H2 2.3.232's SQLState for "column not found". */
+        /** H2 2.3.232's SQLState (verified 2026-08-10) for "column not found". */
         const val COLUMN_NOT_FOUND = "42S22"
     }
 }

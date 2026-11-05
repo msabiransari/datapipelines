@@ -76,7 +76,7 @@ and detected statements described below. A bump follows these steps in order:
    in the allowlist. The notices build refuses an ARG that is not the catalog version's
    core, a reviewed core tag other than `v<ARG>`, and a `duckdb` or `duckdb/*` closure
    row naming another core (DEVELOPMENT.md's message list).
-6. **The guard's lists and inventory.** Run `DuckDbVersionSpecDriftTest`. Its red list
+6. **The guard's lists and inventory.** Run `DriverVersionSpecDriftTest` — it tracks all three driver rows (DuckDB, H2, SQLite), one procedure each. Its red list
    contains detected, non-allowlisted literals that name an old version without dated
    provenance: move each to the new version, or re-word it when the old version was
    the point. Its re-probe list names detected provenance notes and source locations
@@ -91,7 +91,7 @@ and detected statements described below. A bump follows these steps in order:
    #775) against the new driver and extensions. A changed result is a finding to resolve
    before the bump lands.
 8. **Prove it.** Run `:modules:app:generateThirdPartyNotices`, the buildSrc licence
-   fixtures, `DockerfileDuckDbExtensionPinTest` and `DuckDbVersionSpecDriftTest`, rebuild
+   fixtures, `DockerfileDuckDbExtensionPinTest` and `DriverVersionSpecDriftTest`, rebuild
    the jar, and prove one bad sum refuses the image build before building the restored
    pins successfully.
 

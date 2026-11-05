@@ -24,7 +24,7 @@ import co.datapipelines.typesystem.Dialect
  * | MSSQL | `mssql-jdbc-12.10.2.jre11.jar` | `SQLServerDriver{String,Boolean,Object}Property` |
  * | MYSQL | `mysql-connector-j-9.7.0.jar` | `com.mysql.cj.conf.PropertyKey` |
  * | DUCKDB | `duckdb_jdbc-1.5.5.1.jar` | `org.duckdb.DuckDBDriver` |
- * | SQLITE | `sqlite-jdbc-3.49.1.0.jar` | `org.sqlite.SQLiteConfig.Pragma` |
+ * | SQLITE | `sqlite-jdbc-3.49.1.0.jar` (verified 2026-08-09) | `org.sqlite.SQLiteConfig.Pragma` |
  * | ORACLE | `ojdbc11-23.7.0.25.01.jar` | `oracle.jdbc.OracleConnection` |
  *
  * **A driver upgrade must re-review its dialect's set** (§5.6). [DialectRefusalSetsTest] pins
@@ -201,7 +201,7 @@ internal object DialectRefusalSets {
     /**
      * H2 — `INIT` runs arbitrary SQL at connect (`RUNSCRIPT FROM '…'`); `RUNSCRIPT` is its verb.
      * `AUTO_SERVER=TRUE` makes the embedded engine start a TCP listener with `-tcpAllowOthers`
-     * (`org.h2.engine.Database`, 2.3.232) — an unannounced network port on the host, opened by a
+     * (`org.h2.engine.Database`, 2.3.232, verified 2026-09-22) — an unannounced network port on the host, opened by a
      * datasource row, is not a connection property but a deployment change.
      */
     val H2 = setOf("init", "runscript", "auto_server")
@@ -297,7 +297,7 @@ internal object DialectRefusalSets {
         )
 
     /**
-     * SQLite 3.49.1.0. `enable_load_extension` (the `LOAD_EXTENSION` pragma) lets a connection
+     * SQLite 3.49.1.0 (verified 2026-08-09). `enable_load_extension` (the `LOAD_EXTENSION` pragma) lets a connection
      * load a native extension — arbitrary code; `temp_store_directory` names a directory the
      * engine writes into.
      *
