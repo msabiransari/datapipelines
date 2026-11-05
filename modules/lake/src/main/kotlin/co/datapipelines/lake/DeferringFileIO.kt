@@ -19,6 +19,9 @@ import org.slf4j.LoggerFactory
  * Deliberately implements ONLY [FileIO]: the delegate's bulk and prefix operations (`SupportsBulkOperations`,
  * `SupportsPrefixOperations`) are hidden, so Iceberg's bulk-delete helpers fall back to [deleteFile] and are
  * deferred too.
+ *
+ * Every request records the key and throws: Iceberg cannot mistake a deferred request for a deletion.
+ * An explicit callback can queue a key for maintenance, whose later protected-graph check owns any actual removal.
  */
 class DeferringFileIO(
     private val delegate: FileIO,
@@ -33,8 +36,11 @@ class DeferringFileIO(
 
     override fun newOutputFile(path: String): OutputFile = delegate.newOutputFile(path)
 
-    /** Deferred: recorded through [onDeferredDelete], never executed. */
-    override fun deleteFile(path: String) = onDeferredDelete(path)
+    /** Recorded through [onDeferredDelete], then refused; no callback can turn this into a successful deletion. */
+    override fun deleteFile(path: String) {
+        onDeferredDelete(path)
+        throw LibraryDeleteRefusedException()
+    }
 
     override fun properties(): Map<String, String> = delegate.properties()
 
@@ -47,6 +53,13 @@ class DeferringFileIO(
         private val log = LoggerFactory.getLogger(DeferringFileIO::class.java)
 
         /** An object key in DP's own bucket — not user data and not a secret; the remover's input when P6 lands. */
-        fun logDeferredDelete(path: String) = log.warn("lake: deferred a library delete of {} to the remover", path)
+        fun logDeferredDelete(path: String) =
+            log.warn(
+                "event=lake.file.delete_refused path={} cause={} sql_state=none",
+                path,
+                LibraryDeleteRefusedException::class.java.simpleName,
+            )
     }
 }
+
+private class LibraryDeleteRefusedException : IllegalStateException("Library file deletion is reserved for lake maintenance.")
