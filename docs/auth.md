@@ -3,7 +3,7 @@
 **Status:** v3.62 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
-**Last updated:** 2026-11-03
+**Last updated:** 2026-11-05
 
 ---
 
@@ -813,7 +813,7 @@ POST /logout
 Cookie: dp_session=<jwt>
 ```
 
-Server clears `dp_session` cookie. The `auth.logout` audit row (§10.1) carries the identity the credential filters established — the person's `user_id` (a key's `key_id`), #802; a request whose session is already invalid is audited anonymously after the session filter has rejected it (`dp_session rejected`, §6.3). The JWT itself is stateless and not revoked server-side — but with the cookie cleared and the JWT gone from the client, the session is effectively dead. The OIDC provider's session is NOT terminated (user may need to sign out separately at Google/Microsoft if they want full logout).
+After the credential and workspace filters admit the request, the server clears the `dp_session` cookie. The `auth.logout` audit row (§10.1) carries the identity those filters established — the person's `user_id` (an admitted key's `key_id`), #802; a request whose session is already invalid is audited anonymously after the session filter has rejected it (`dp_session rejected`, §6.3). The existing credential and workspace refusals now precede logout too: an MCP key outside `/mcp` receives 403, a key with `DP-Workspace` receives 400, and a session requesting an inaccessible workspace receives 404. Those refused requests do not reach the logout handlers. The JWT itself is stateless and not revoked server-side — but with the cookie cleared and the JWT gone from the client, the session is effectively dead. The OIDC provider's session is NOT terminated (user may need to sign out separately at Google/Microsoft if they want full logout).
 
 Since #782, `POST /logout` carrying the browser-controlled `Sec-Fetch-Site: same-origin` attestation succeeds even when the rendered CSRF token is stale. Other attestations and requests without that header keep the double-submit requirement (§8.4). A refused plain browser form navigation renders the HTML 403 page with the fixed refusal message and correlation id; it expires no session cookie and sends no redirect. The CSRF page's **Reload the app** action uses `GET /dashboard` (which redirects an anonymous person to login), and **Log in** uses `GET /login`; both are full page loads, including after a refusal on a POST-only route.
 
