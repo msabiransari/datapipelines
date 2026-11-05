@@ -2028,6 +2028,8 @@ object PipelineErrorCodes {
      * column is `—`, `ApiErrorCatalog.NEVER_RETURNED_LIVE`); P8 brings the surfaces and their statuses.
      */
     object Lake {
+        const val APPEND_RECIPE_EXISTS = "lake.append.recipe_exists"
+        const val APPEND_RECIPE_WRITE_FAILED = "lake.append.recipe_write_failed"
         const val DELIVERY_INVALID_KEY = "lake.delivery.invalid_key"
         const val DELIVERY_INCOMPLETE = "lake.delivery.incomplete"
         const val DELIVERY_TOO_LARGE = "lake.delivery.too_large"
