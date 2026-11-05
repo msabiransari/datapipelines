@@ -80,6 +80,13 @@ class OidcLoginIntegrationTest {
 
     @BeforeEach
     fun aimOriginAtTheApp() {
+        // #802: the credential filters anchor ahead of LogoutFilter, which also moves the
+        // login rate limiter ahead of the OAuth2 handlers — this class's /oauth2/ and
+        // /login/oauth2/code requests are now METERED, and the per-IP window is shared by
+        // the whole context (AuthHttpBoundaryTest's exact-once case owns the same budget).
+        // A fresh window per case, the documented seam (034 F4), so an early 429 can never
+        // masquerade as a flow regression.
+        authFilters.loginRateLimit.resetWindowsForTest()
         origin.forwardTo(appPort)
     }
 
@@ -98,6 +105,8 @@ class OidcLoginIntegrationTest {
     @Autowired private lateinit var applicationContext: ApplicationContext
 
     @Autowired private lateinit var authProperties: AuthProperties
+
+    @Autowired private lateinit var authFilters: AuthFilters
 
     /**
      * The #686 wiring proof: Spring's login config must hand the OIDC authentication
