@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.76 (revised — see Change Log)
+**Status:** v1.77 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-11-04
+**Last updated:** 2026-11-05
 
 ---
 
@@ -594,12 +594,15 @@ Pipeline-level, not global, for the same reason §5.2 gives `settings.tempdb`: d
       "min_length": <int>, "max_length": <int>, // STRING (characters) and BINARY (decoded bytes); non-negative
       "pattern": "<regex>"                     // STRING; anchored (the whole value); at most 256 characters
     },
-    "cardinality": "SINGLE"       // optional (#194); SINGLE is the only value a pipeline accepts today (§6.2)
+    "cardinality": "SINGLE",      // optional (#194); SINGLE is the only value a pipeline accepts today (§6.2)
+    "redact_in_recipe": false      // optional (#799); true opts this parameter into recipe-only redaction
   }
 }
 ```
 
 `constraints` and `cardinality` are the parameter engine's declaration model ([parameter-engine record](superpowers/specs/2026-09-21-parameter-engine-design.md) §3.5, P28), shared so that a pipeline and a parameter set judge a value by the same `ParameterValueValidator` (`typesystem`). Both are omitted from a body that does not declare them, so bodies saved before 2026-09-26 serialise — and hash — unchanged.
+
+`redact_in_recipe` defaults to **false**. Only explicit `true` opts the parameter into recipe redaction: resolved values and defaults are represented as `<redacted>`, and exact replay is unavailable for that delivery. The marker protects the recovery recipe only; it does not add a secret logical type or promise encryption or masking on other surfaces. False is omitted from canonical JSON so legacy bodies and hashes remain unchanged.
 
 ### 6.2 Rules
 
@@ -1970,6 +1973,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-05 | v1.77 | 799 (#799), owner ruling | Optional `redact_in_recipe` parameter metadata defaults false and is omitted when false; true selects recipe-only redaction without changing the frozen logical types. |
 | 2026-11-04 | v1.76 | 799 (#799) trusted listing | §13.25 adds six delivery key/listing/manifest refusal codes, including retryable incomplete and unavailable-store outcomes; SDK messages and causes stay private. |
 | 2026-11-04 | v1.75 | 799 (#799) | Delivery node block, managed-only qualified append targets, and nine §13.25 structure refusals. Appends require one delivery and a transitive dependency barrier over all non-append nodes; rejects-producing scripts must be strict. External readonly datasources retain their refusal. |
 | 2026-11-04 | v1.74 | 780 (#780) script-invariants docs | §13.18's two script rows say what the code does: `pool_exhausted` names both refusal paths (the full admission bound, and an admitted evaluation that waited its whole wall clock for a running slot); `invariants_too_large` states the read-back's COMBINED count — written outputs and rejects plus table inputs, row mode adding the streamed input and a caller output's buffered rows and rejects. No code, code count or permission change. — Renumbered at merge after #810. |
