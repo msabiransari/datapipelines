@@ -805,6 +805,24 @@ thread stack reused after a GraalJS isolate thread, so every test JVM starts wit
 (`GLIBC_TUNABLES=glibc.pthread.stack_cache_size=0`, `ThreadStackReuseTest`; see the
 [GNU libc tunable documentation](https://sourceware.org/glibc/manual/2.35/html_node/POSIX-Thread-Tunables.html)).
 
+**What the scripts print for a crashed test JVM (#773).** A failed `scripts/gate.sh` step and a
+failed `scripts/pregate.sh` stage both call one helper, `gate_crash_explain` in
+`scripts/lib/gate-stages.sh`. When the step's log carries `finished with non-zero exit value N`, it
+prints `a test worker CRASHED (exit value N) — not a test failure`, then each report under
+`modules/*/build/hs_err/` or `tests/*/build/hs_err/` that is not older than the step's own start
+marker — the gate's `.gate-logs/<step>.log.started`, the pre-gate's
+`.pregate-logs/runs/<run-id>/stage-<id>.start` — as three lines: `crash report  module=<module>
+path=<path>`, the report's signal line (`#  SIGSEGV (0xb) …` or `#  Internal Error …`) and the line
+after `# Problematic frame:`. An mtime equal to the marker's counts: two files written within one
+coarse clock tick share an mtime, so `find -newer` would miss the report. Those lines are all
+the helper reads out of a report, each reduced to printable ASCII and cut at 240 characters. The
+rest of the report, which includes the JVM's environment variables, is never printed; open the
+file for it. With no report, it says why: exit 139 is an unhandled SIGSEGV, which leaves none;
+exit 134 is HotSpot's own abort, which writes one under `build/hs_err` only in a module that
+applies the conventions' `-XX:ErrorFile` (anywhere else, in the JVM's working directory). Older
+reports are counted (`older reports exist, not from this step: N`), never attributed or deleted.
+The pre-gate also keeps the lines in `stage-<id>.crash-reports.txt` beside the run's manifest.
+
 **The breach suite is a task of its own (#289).** `JsonataBreachTest` and, since #8,
 `JavaScriptBreachTest` (with `JavaScriptMeasurementsTest`, the JavaScript engine's costs) live in
 `modules/scripting/src/test/breach` and run ALONE in `:modules:scripting:breachSuite`, a 512m test
@@ -865,7 +883,19 @@ discovers no tests stays enabled. Unfiltered module checks and Gate A keep the g
 `main` when it exists, else `origin/main` — lanes are cut from local `main`, which runs ahead of
 `origin/main` while a batch waits for CI, so an `origin/main` base would plan that whole batch
 too, #757) runs, in a few minutes, exactly what a targeted test run cannot see and the full
-gate keeps finding two or three runs late: (1) `ktlintCheck detekt` plus the four root audits
+gate keeps finding two or three runs late: (0) when the diff (committed, staged, unstaged or
+untracked) changes a `gradle.lockfile`, `gradle/libs.versions.toml` or
+`gradle/verification-metadata.xml`, Gate A's dependency scan, `scripts/vuln-scan.sh` (§10.2), before
+any Gradle stage, with the gate's exit contract: `0` PASS; `1` FAIL, known vulnerabilities, the OSV
+table in the run directory's `0-deps-scan.log`; `200` skipped `reason=offline` — fail-soft by design
+as in the gate, printed as `!! SKIPPED — offline (… NOT a clean result …)` with the scanner's WARNING
+lines, and the outcome is unaffected; any other exit FAIL, no verdict, never a pass. The stage calls
+`https://api.osv.dev/`, and when the machine's scanner cache holds no osv-scanner yet it first downloads
+the pinned release from `github.com/google/osv-scanner/releases`. It scans the lockfiles git tracks, so
+a new lockfile not yet added to git triggers the stage without being scanned. With none of those
+files changed, the stage is skipped and says so (`0 deps-scan skipped — no dependency file changed`,
+manifest `reason=no-dependency-change`); `--plan` prints the decision (`deps-scan: run — <files>` or
+`deps-scan: skip — …`); (1) `ktlintCheck detekt` plus the four root audits
 (`composeEnvAudit`,
 `composeArgvSecretsAudit`, `verifyModuleDependencies`, `verifyVerificationMetadataDocs` — they hang
 off every module's `check`, so the gate's `build` reaches them before any test); (2) `check` of
@@ -899,7 +929,9 @@ the served-manual guards, the config-key drift tests (the list lives in the scri
 reads the whole tree or the docs is added there in the same commit). Iterate on its output,
 then deliver the lane for the lander's gate. It is not the gate: its exit code decides nothing
 about a merge. Every run appends its verdict line — `PRE-GATE PASS|FAIL`, the base, the merge-base, HEAD, the UTC time,
-the five stage exits, `snap`, `prune`, deferred work, elapsed time and the run id — to
+the six stage exits (`scan=` for stage 0, between `at=` and `lint=`; a stage skipped for no
+dependency change reads `scan=0`, and `scan=200` reads "scan not done here"), `snap`, `prune`,
+deferred work, elapsed time and the run id — to
 `.pregate-logs/0-verdict.log`, which is where the lander reads a delivered lane's verdict (the terminal is the only other place it is printed).
 Measured need (five lanes, 2026-09-19 to 21): 0–3 extra full gates each, all on lint,
 cross-cutting guards or foreign fixtures. This script passes `-Pdp.browser.ciPatience=true` to
@@ -1053,7 +1085,7 @@ every copied task directory with no exact `> Task :…` line in the stage log it
 `# NO-STATUS-LINE <repo-relative-task-directory>` (a missing log annotates every copied directory,
 and similarly-prefixed task names such as `test` and `testExtra` stay distinct), while the status
 lines themselves are preserved. A copy, provenance or manifest write failure refuses a PASS
-(`snap=1` in the verdict line, beside the unchanged five stage exits) even when every Gradle stage
+(`snap=1` in the verdict line, beside the unchanged six stage exits) even when every Gradle stage
 exited 0; it never turns a Gradle failure into success. A stage that ran but produced no XML is
 recorded (`files=0`): the recount searches `modules/*/build/test-results/**/*.xml`,
 `tests/*/build/test-results/**/*.xml`, and `TEST-*.xml` directly at the root, and exits 3 when
