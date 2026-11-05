@@ -569,7 +569,7 @@ switch-result phase with an aborted, a 403 and a 302 switch.
 create flow (`createWorkspace`, `createWorkspaceOn`, `createWorkspaceWithoutEntering`),
 `openBrowserTree` or `ensureTheme` raises an `AssertionError` from `BrowserSuite.named`, never
 Playwright's bare `TimeoutError`: `<the step> timed out — url=<where the page was>`, the step
-naming what it waited on (a selector, an address, a family) and never a typed value. The render
+naming what it waited on (a selector, an address, a family); login steps never name typed credentials. The render
 and init waits append the document's facts from the suite's one probe, `shellInitFacts` (URL,
 `readyState`, `__dpShellInit`): the login form's fields, the create form's first render and all
 four of `ensureTheme`'s waits. The browser tree's root-level wait appends the tree as the wait
