@@ -113,57 +113,6 @@ class DriverVersionSpecDriftTest {
         }
     }
 
-    @Test
-    fun `the core admits, captures and refuses by the documented rules`() {
-        val fixture =
-            listOf(
-                TrackedFile("a.kt", "// duckdb_jdbc 1.4.0 is old\n\n// measured on 1.4.0, nothing dated\n"),
-                TrackedFile("b.kt", "/**\n * verified 2026-01-02 against\n * the driver: on 1.4.0 it works\n */\n"),
-                TrackedFile("c.kt", "// probed 2026-01-02\n//\n// a new paragraph on 1.4.0\n"),
-                TrackedFile("d.md", "| 2026-01-02 | v1 | DuckDB 1.4.0 row |\n| x | y | DuckDB 1.4.0 no date, verified |\n"),
-                TrackedFile("e.md", "verified 2026-01-02\n1\n2\n3\n4\nDuckDB 1.4.0 five lines below\n"),
-                TrackedFile("f.kt", "val v = \"1.5.6.0\" // DuckDB 1.5.6 core\nx = 1.4.0.1\ny = 1.3.0\n"),
-                TrackedFile("h.kt", "// h2 1.4.0 named, so the h2 row captures it too\n"),
-                TrackedFile("i.kt", "// duckdb_jdbc 1.5.6.0 admitted as the pin\n"),
-                TrackedFile("lock/gradle.lockfile", "duckdb_jdbc:1.4.0=runtimeClasspath\nduckdb_jdbc:1.3.0=runtimeClasspath\n"),
-            )
-        val allow = listOf(AllowRow(Regex("""\.lockfile$"""), "build-managed"), AllowRow(Regex("""^none/"""), "stale"))
-        val catalog = mapOf(DUCKDB.alias to "1.5.6.0", H2.alias to "2.3.232")
-        val report = PinDrift.scan(listOf(DUCKDB, H2), catalog, fixture, allow)
-        // a.kt:1 and d.md:2 and e.md:6 name the engine (duckdb_jdbc / DuckDB) — resolved to the duckdb row,
-        // red once. a.kt:3 and c.kt:3 name no engine and both rows captured 1.4.0 — ambiguous, red for both.
-        report.red.map { "${it.path}:${it.line}" } shouldContainExactly
-            listOf(
-                "a.kt:1",
-                "a.kt:3",
-                "a.kt:3",
-                "c.kt:3",
-                "c.kt:3",
-                "d.md:2",
-                "e.md:6",
-                "h.kt:1",
-            ).sorted()
-        report.ambiguous shouldContainExactly
-            listOf(
-                "a.kt:3: 1.4.0 — ambiguous: rows duckdb-jdbc, h2 all claim it and no context on the line names the engine — " +
-                    "reword the line to name it",
-                "c.kt:3: 1.4.0 — ambiguous: rows duckdb-jdbc, h2 all claim it and no context on the line names the engine — " +
-                    "reword the line to name it",
-            )
-        report.provenance.map { "${it.path}:${it.line}" } shouldContainExactly listOf("b.kt:3", "b.kt:3", "d.md:1")
-        report.current.map { "${it.path}:${it.line}:${it.version}" } shouldContainExactly
-            listOf("f.kt:1:1.5.6.0", "f.kt:1:1.5.6", "i.kt:1:1.5.6.0")
-        withClue("1.4.0.1 is never captured, and 1.3.0 only on an allowlisted line, so the bare pass never seeks it") {
-            report.versions shouldBe setOf("1.4.0", "1.5.6.0", "1.5.6", "2.3.232")
-        }
-        withClue("each row classifies and counts its own literals") {
-            report.literalCountByRow shouldBe mapOf(DUCKDB.alias to 12, H2.alias to 4)
-        }
-        report.allowed.mapValues { (_, owned) -> owned.map { "${it.path}:${it.line}:${it.version}" } } shouldBe
-            mapOf("build-managed" to listOf("lock/gradle.lockfile:1:1.4.0", "lock/gradle.lockfile:2:1.3.0"))
-        report.staleAllow shouldContainExactly listOf("stale")
-    }
-
     private fun catalog(): Map<String, String> {
         val toml = repoFile("gradle/libs.versions.toml").readText()
         val duckdb =
@@ -224,7 +173,8 @@ class DriverVersionSpecDriftTest {
         return File(dir, relative).also { check(it.isFile) { "missing $relative" } }
     }
 
-    private companion object {
+    /** Internal so [PinDriftTest] runs the core's own cases on the REAL rows, never on copies of them. */
+    internal companion object {
         const val LICENCES = "buildSrc/src/main/kotlin/DuckDbExtensionLicenses.kt"
         const val MAX_BYTES = 4_000_000L
 
@@ -320,7 +270,7 @@ class DriverVersionSpecDriftTest {
                 ),
                 AllowRow(Regex("""^buildSrc/src/test/"""), "licence-read fixtures; ThirdPartyNoticesTest binds them to the real closures"),
                 AllowRow(
-                    Regex("""/(?:DriverVersionSpecDriftTest|PinDrift|DuckDbVersionTest|DriverVersionsTest)\.kt$"""),
+                    Regex("""/(?:DriverVersionSpecDriftTest|PinDrift|PinDriftTest|DuckDbVersionTest|DriverVersionsTest)\.kt$"""),
                     "version-parsing fixtures of the guard, its core and the token readers",
                 ),
                 AllowRow(

@@ -20,7 +20,8 @@ package co.datapipelines.config
  * context line names anywhere outside the allowlist is invisible.
  *
  * The window is the literal's paragraph — the run of lines with text once comment markers are stripped — bounded
- * to [WINDOW] lines above and below; a Markdown table row is its own window.
+ * to [WINDOW] lines above and below; a table row, in Markdown or inside a comment (a KDoc `* | … |`), is its own
+ * window. An allow row that owns nothing is reported by identity ([PinReport.staleAllow]), not by its reason.
  */
 internal object PinDrift {
     private const val WINDOW = 4
@@ -66,7 +67,7 @@ internal object PinDrift {
             current = rest.filter { it.version in admittedByRow.getValue(it.alias) },
             ambiguous = ambiguous,
             allowed = literals.mapNotNull { (literal, owner) -> owner?.let { it.reason to literal } }.groupBy({ it.first }, { it.second }),
-            staleAllow = allow.map { it.reason } - literals.mapNotNull { it.second?.reason }.toSet(),
+            staleAllow = allow.filter { row -> literals.none { (_, owner) -> owner === row } },
             rendered = rendered.distinct(),
         )
     }
@@ -140,13 +141,17 @@ internal object PinDrift {
         line: String,
     ): Sequence<String> = row.contexts.asSequence().flatMap { pattern -> pattern.findAll(line).map { it.groupValues[1] } }
 
-    /** A dated Change Log row, or a measurement word and a date in the literal's bounded paragraph. */
+    /**
+     * A dated Change Log row, or a measurement word and a date in the literal's bounded paragraph. The comment
+     * marker is stripped BEFORE the table-row test, so a KDoc or `#`-comment table row (`* | DUCKDB | … |`) is
+     * judged as a row — by its own cells — never by the dated row beside it (#826 review).
+     */
     private fun provenanced(
         lines: List<String>,
         index: Int,
     ): Boolean {
-        val line = lines[index]
-        if (line.trimStart().startsWith("|")) return DATED_ROW.containsMatchIn(line) || (WORD in line && DATE in line)
+        val line = lines[index].trim().replace(COMMENT, "").trimStart()
+        if (line.startsWith("|")) return DATED_ROW.containsMatchIn(line) || (WORD in line && DATE in line)
         var low = index
         while (low > 0 && index - low < WINDOW && hasText(lines[low - 1])) low--
         var high = index
@@ -178,7 +183,12 @@ internal data class PinRow(
     val renderedBy: Regex? = null,
 )
 
-/** A file (and, optionally, only its lines matching [line]) whose literals another owner keeps true, with the reason. */
+/**
+ * A file (and, optionally, only its lines matching [line]) whose literals another owner keeps true, with the reason.
+ *
+ * Staleness is per ROW OBJECT, never per reason: many rows share one reason (every in-flight lane's rows do), and a
+ * row that owns nothing is stale even while a sibling with the same reason still owns a literal.
+ */
 internal data class AllowRow(
     val path: Regex,
     val reason: String,
@@ -188,6 +198,9 @@ internal data class AllowRow(
         file: String,
         text: String,
     ): Boolean = path.containsMatchIn(file) && (line?.containsMatchIn(text) ?: true)
+
+    /** `<path>[:<line>] — <reason>`: the row as a reader finds it in the allowlist. */
+    override fun toString(): String = "${path.pattern}${line?.let { ":${it.pattern}" }.orEmpty()} — $reason"
 }
 
 internal data class TrackedFile(
@@ -219,7 +232,7 @@ internal data class PinReport(
     val current: List<Literal>,
     val ambiguous: List<String>,
     val allowed: Map<String, List<Literal>>,
-    val staleAllow: List<String>,
+    val staleAllow: List<AllowRow>,
     val rendered: List<String>,
 ) {
     /** The re-probe list a bump starts from: dated notes, then the pages that render the token. */
@@ -236,6 +249,7 @@ internal data class PinReport(
             rendered.forEach { append("  $it\n") }
             ambiguous.forEach { append("AMBIGUOUS $it\n") }
             allowed.forEach { (reason, owned) -> append("OWNED ${owned.size}: $reason\n") }
+            staleAllow.forEach { append("STALE $it\n") }
             red.forEach { append("RED $it\n") }
         }
 }
