@@ -58,7 +58,7 @@ class H2StagingPrivilegeTest {
         // …and it is not the bootstrap identity, which is what would make every refusal below
         // evaporate. The bootstrap connection was closed before this instance was handed over.
         // Case-insensitively: under the URL's DATABASE_TO_LOWER=TRUE, CURRENT_USER reports the
-        // sa login as 'sa' (measured on 2.3.232, 2026-08-10), so the bare `shouldNotBe "SA"` would pass even
+        // sa login as 'sa' (measured on 2.3.232), so the bare `shouldNotBe "SA"` would pass even
         // against a bootstrap session — a guard that can no longer fail.
         currentUser().uppercase() shouldNotBe "SA"
     }
@@ -96,7 +96,7 @@ class H2StagingPrivilegeTest {
     fun `the class-loading, server-property and connection-opening routes are refused too`() {
         // These three carry the weight of two acceptances: §9.5's class-loading claim, and the
         // decision to leave `sa` on an empty password — safe only while author SQL cannot open a
-        // connection. All are admin-gated in 2.3.232 (verified 2026-08-09); asserted so a driver upgrade that un-gates
+        // connection. All are admin-gated in 2.3.232; asserted so a driver upgrade that un-gates
         // one fails here instead of silently reopening the route.
         runBlocking { staging.execute("CREATE TABLE \"stg_trigger_host\" (\"id\" INTEGER)") }
 

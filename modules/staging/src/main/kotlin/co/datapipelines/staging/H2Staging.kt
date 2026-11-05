@@ -420,7 +420,7 @@ class H2Staging internal constructor(
      * H2's `SELECT MEMORY_USED()` is deliberately not used — it requires admin rights (SQLState
      * 90040) in the pinned driver, and every operational connection is a non-admin user by §9.5.
      * Nothing is lost by the substitution: `MEMORY_USED()` is itself "collect garbage, then
-     * report used heap", verified against 2.3.232, 2026-09-16 (both readings 14271 KB at the same instant).
+     * report used heap", verified against 2.3.232, 2026-08-09 (both readings 14271 KB at the same instant).
      *
      * Known limit, stated in §8.2: this is heap for the whole JVM, so with concurrent executions
      * every instance reads the same number and `max_memory_mb` acts as a shared ceiling rather

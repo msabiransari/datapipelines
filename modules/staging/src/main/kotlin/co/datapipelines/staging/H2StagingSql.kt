@@ -25,7 +25,7 @@ internal object H2StagingSql {
     private const val DATA_EXCEPTION_CLASS = "22"
 
     /**
-     * H2's SQLState for "object already exists". Read off the pinned driver (2.3.232, verified 2026-09-16) from a
+     * H2's SQLState for "object already exists". Read off the pinned driver (2.3.232) from a
      * real duplicate `CREATE TABLE` — `42S01`, vendor code 42101 — not recalled; the drift
      * test re-derives it the same way rather than trusting this constant.
      */
@@ -38,7 +38,7 @@ internal object H2StagingSql {
      * one (its `CASCADE`d owner takes it instead).
      *
      * **Every schema, not just `PUBLIC`.** The restricted user holds `ALTER ANY SCHEMA`, so
-     * author SQL can `CREATE SCHEMA` and `SET SCHEMA` (verified against 2.3.232, 2026-09-16) and park a
+     * author SQL can `CREATE SCHEMA` and `SET SCHEMA` (verified against 2.3.232) and park a
      * table outside `PUBLIC`. A `PUBLIC`-only projection would leave that table uncounted by
      * §10 and unreleased by the §3.4 belt.
      *
@@ -51,7 +51,7 @@ internal object H2StagingSql {
      * **The comparison is case-folded on purpose.** With `DATABASE_TO_LOWER=TRUE` in the URL
      * (see [H2StagingFactory]) H2 names its own schemas `information_schema` / `pg_catalog`,
      * so the bare upper-case literals match nothing: measured against the pinned driver
-     * (2.3.232, measured 2026-09-16), this projection returned **36** rows instead of 2. `UPPER(...)` keeps the
+     * (2.3.232), this projection returned **36** rows instead of 2. `UPPER(...)` keeps the
      * filter correct under either folding.
      */
     const val STAGED_TABLES =
