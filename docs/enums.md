@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.46 (living document — updated as enums evolve)
+**Status:** v1.47 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -1054,6 +1054,7 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these four and NULL. V3
 | `RefreshStatus` | [Dashboards §5](dashboards.md#5-the-runtime) (`visualization` declares it; §38 here is the wire table) | metadata-db (the V43 CHECK), rest-api §23.3, the dashboard runtime |
 | `EvaluationCaller`, `ParameterEvaluationStatus`, `QueryAttemptOutcome` | the [parameter-set workspace spec §2](superpowers/specs/2026-10-02-parameter-set-workspace-spec.md) (`parameters` declares them; §39–§41 here are the wire tables) | metadata-db (the V48 CHECKs), the History tab (ui-screens §4.23) |
 | `LakeTableStatus`, `LakeApplyState`, `LakeChangeClass` | [lake.md](lake.md) (`lake` declares them; §46–§48 here are the wire tables) | metadata-db (the V54 CHECKs), the lake surfaces (P8) |
+| `LakeDeliveryState`, `LakeDeliveryFailurePhase`, `LakeDeliveryAttemptOutcome` | metadata-db §4.53–§4.54 (`lake` declares them; §49–§51 here are the wire tables) | delivery landing, publication and settlement (the V55 CHECKs) |
 | `RendererKind`, `AssertionKind`, `TestRunStatus`, `DashboardObjectType`, `ActionScope`, `StateSetting`, `LayoutPosition` | the [dashboard implementation spec §3](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) (`visualization` declares them; §31–§37 here are the wire tables) | [Dashboards](dashboards.md), metadata-db (the V42 CHECK), rest-api and mcp-server (L1b) |
 
 ---
@@ -1192,10 +1193,50 @@ Computed, never stored on its own: the class of the change from the Iceberg tabl
 
 ---
 
+## 49. `LakeDeliveryState` — a permanent managed delivery
+
+Stored in `lake_deliveries.state` ([Metadata DB §4.53](metadata-db.md#453-lake_deliveries)). State changes are conditional on the previous state and the current operation id.
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `RECEIVED` | `RECEIVED` | Listed and claimed; publication has not started |
+| `PUBLISHING` | `PUBLISHING` | The append attempt has started under its table lease |
+| `PUBLISHED` | `PUBLISHED` | Commit returned normally or the permanent revision log proves publication |
+| `FAILED` | `FAILED` | A definite failure, with its phase; retry requires a fresh operation id |
+| `UNKNOWN` | `UNKNOWN` | Commit may have happened; settlement must establish the verdict before retry |
+
+---
+
+## 50. `LakeDeliveryFailurePhase` — where a delivery failed
+
+Stored in `lake_deliveries.failure_phase` ([Metadata DB §4.53](metadata-db.md#453-lake_deliveries)); NULL without a definite failure.
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `LISTING` | `listing` | Trusted manifest acquisition or target admission |
+| `STAGING` | `staging` | Delivery materialization, delivery SQL or post-read manifest comparison |
+| `VALIDATION` | `validation` | A later pipeline node failed before the publication barrier |
+| `PUBLISH` | `publish` | A definite negative publication verdict |
+
+---
+
+## 51. `LakeDeliveryAttemptOutcome` — one permanent publication attempt
+
+Stored in `lake_delivery_attempts.outcome` ([Metadata DB §4.54](metadata-db.md#454-lake_delivery_attempts)); NULL before an outcome is recorded. An UNKNOWN attempt may later be settled as PUBLISHED or FAILED; a concluded attempt is retained when the delivery is retried.
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `PUBLISHED` | `PUBLISHED` | This attempt committed |
+| `FAILED` | `FAILED` | This attempt definitely failed or was superseded before publication |
+| `UNKNOWN` | `UNKNOWN` | Its commit outcome awaits durable evidence and lease takeover |
+
+---
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-05 | v1.47 | 799 (#799) | New §49 delivery states, §50 failure phases and §51 attempt outcomes, matching V55's CHECKs and the Kotlin vocabularies. |
 | 2026-11-04 | v1.46 | 799 (#799) | §16 registers `lake.delivery.*` and `lake.append.*` domains for delivery and managed append structure/publication. |
 | 2026-11-04 | v1.45 | 798 (#798) | New **§46 `LakeTableStatus`**, **§47 `LakeApplyState`** and **§48 `LakeChangeClass`** (V54's two CHECKs and the supported-change policy's classes, held to their Kotlin enums by `LakeDefinitionEnumsSpecDriftTest`); **§15** gains the three lake definition audit events (`lake.definition.released` / `applied` / `apply_failed`, held by `LakeAuditEventsSpecDriftTest`); **§16** registers the `lake.definition.*` domain (pipeline-contract §13.25). Section numbers follow #778's §45; a lane merging after this one with its own §46 renumbers. |
 | 2026-11-02 | v1.42 | 778 (#778) | New **§45 `LakeScanStatus`** (`exact` / `partial` / `unscannable`, `lake_reference_scans.status`, V52) with the `reasons_json` kind words. |
