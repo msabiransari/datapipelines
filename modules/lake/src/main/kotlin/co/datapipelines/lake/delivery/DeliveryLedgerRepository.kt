@@ -145,15 +145,19 @@ class DeliveryLedgerRepository(
     }
 
     /** All attempts count, including earlier ones; the revision trigger is the only writer of commit evidence. */
-    fun committedEvidence(deliveryId: UUID): DeliveryCommitEvidence? =
+    fun committedEvidence(
+        deliveryId: UUID,
+        operationId: UUID? = null,
+    ): DeliveryCommitEvidence? =
         jdbc
             .query(
                 "SELECT r.operation_id, r.seq, r.metadata_location FROM lake_table_revisions r " +
                     "JOIN lake_delivery_attempts a ON a.operation_id = r.operation_id " +
                     "JOIN lake_deliveries d ON d.id = a.delivery_id JOIN lake_tables_managed t ON t.id = d.table_id " +
                     "JOIN lake_namespaces n ON n.id = t.namespace_id " +
-                    "WHERE d.id = :id AND r.namespace = n.name AND r.table_name = t.name ORDER BY r.seq DESC LIMIT 1",
-                mapOf("id" to deliveryId),
+                    "WHERE d.id = :id AND r.namespace = n.name AND r.table_name = t.name " +
+                    "AND (CAST(:op AS uuid) IS NULL OR r.operation_id = CAST(:op AS uuid)) ORDER BY r.seq DESC LIMIT 1",
+                mapOf("id" to deliveryId, "op" to operationId),
             ) { rs, _ ->
                 DeliveryCommitEvidence(rs.getObject("operation_id", UUID::class.java), rs.getLong("seq"), rs.getString("metadata_location"))
             }.singleOrNull()
