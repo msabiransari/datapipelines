@@ -144,6 +144,12 @@ object ApiErrorCatalog {
     /** Every code whose status differs from its family default (§13, rest-api §7.6). */
     private val EXCEPTIONS: Map<String, HttpStatus> =
         mapOf(
+            PipelineErrorCodes.Lake.DELIVERY_INVALID_KEY to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.DELIVERY_INCOMPLETE to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Lake.DELIVERY_TOO_LARGE to HttpStatus.PAYLOAD_TOO_LARGE,
+            PipelineErrorCodes.Lake.DELIVERY_UNSUPPORTED_FORMAT to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.DELIVERY_INVALID_MANIFEST to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.DELIVERY_LISTING_FAILED to HttpStatus.SERVICE_UNAVAILABLE,
             PipelineErrorCodes.Lake.DELIVERY_ONE_PER_PIPELINE to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Lake.APPEND_ONE_PER_TABLE to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Lake.APPEND_REQUIRES_DELIVERY to HttpStatus.BAD_REQUEST,
@@ -622,6 +628,8 @@ object ApiErrorCatalog {
             // #785 §13.25 — the managed lake's fence: another operation holds the table, or the catalog is
             // being restored. Never returned live in P2 (NEVER_RETURNED_LIVE); the line is the manual's.
             // #798 §13.25 — the definitions' family line, placed BEFORE `lake.` (the first matching prefix wins).
+            "lake.delivery." to "The delivery could not be read. Check its status and try again.",
+            "lake.append." to "The pipeline is not ready to append to the lake. Check its validation details.",
             "lake.definition." to "That table definition can't be changed this way. Check the definition and try again.",
             "lake." to "The lake is busy with another change to this table. Try again shortly.",
         )

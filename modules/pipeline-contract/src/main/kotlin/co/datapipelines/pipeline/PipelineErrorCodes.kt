@@ -2028,6 +2028,13 @@ object PipelineErrorCodes {
      * column is `—`, `ApiErrorCatalog.NEVER_RETURNED_LIVE`); P8 brings the surfaces and their statuses.
      */
     object Lake {
+        const val DELIVERY_INVALID_KEY = "lake.delivery.invalid_key"
+        const val DELIVERY_INCOMPLETE = "lake.delivery.incomplete"
+        const val DELIVERY_TOO_LARGE = "lake.delivery.too_large"
+        const val DELIVERY_UNSUPPORTED_FORMAT = "lake.delivery.unsupported_format"
+        const val DELIVERY_INVALID_MANIFEST = "lake.delivery.invalid_manifest"
+        const val DELIVERY_LISTING_FAILED = "lake.delivery.listing_failed"
+
         const val DELIVERY_ONE_PER_PIPELINE = "lake.delivery.one_per_pipeline"
         const val APPEND_ONE_PER_TABLE = "lake.append.one_per_table"
         const val APPEND_REQUIRES_DELIVERY = "lake.append.requires_delivery"

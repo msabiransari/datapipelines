@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.51 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.52 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-04
@@ -406,6 +406,14 @@ When `datapipelines.lake.enabled=true`, `LakeBootCheck` runs once after Flyway (
 
 The three audit events of the same lifecycle (`lake.definition.released`, `.applied`, `.apply_failed`, [Enums §15](enums.md#15-authauditevent--auth-audit-log-events)) are separate rows in `auth_audit_log`. A log line is not an audit row, and the audit row does not replace the log line.
 
+#### 3.4S Lake delivery, publication and settle events (#799)
+
+Delivery storage failures report the exception class and first SQLSTATE using §3.4G's safe shape. SDK messages, cause chains, credentials, storage endpoints and object paths are never logged by this boundary.
+
+| Level | Event | When | Fields |
+|---|---|---|---|
+| WARN | `lake.delivery.listing_failed` | The trusted S3 listing failed at the SDK boundary. The caller receives a fixed message with no SDK cause and may retry | `cause`, `sql_state` |
+
 ### 3.5 Log destination
 
 - **Stdout** by default — collected by container runtime (Docker / k8s) and shipped to the operator's log aggregator (CloudWatch, Stackdriver, Loki, ELK, etc.).
@@ -706,6 +714,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 | Date | Version | Author | Change |
 |---|---|---|---|
 | 2026-11-02 | v1.48 | 778 (#778) the lake reference index backfill | New **§3.4P**: the boot backfill's `lake.reference_index.backfill` (INFO, counts) and `lake.reference_index.backfill_failed` (WARN, version identity and exception class; no SQL, no parser message). |
+| 2026-11-04 | v1.52 | 799 (#799) trusted listing | New §3.4S records the safe `lake.delivery.listing_failed` SDK boundary event. |
 | 2026-11-02 | v1.49 | 785 (#785) managed lake boot check | New **§3.4Q** (numbered at merge after #778's §3.4P / v1.48): the `lake.boot.ok` INFO line and the five `lake.boot.*` refusal ids the after-Flyway boot check leads its startup failure with (defined here so a citation of one is checked; they are not log events). |
 | 2026-11-04 | v1.51 | 810 (#811) unclassified apply failure | **§3.4R** gains `lake.definition.apply_unclassified` (ERROR, `cause` + `sql_state`). It is logged where an unclassified failure of the commit step is caught, before the attempt's `apply_unknown` line, whose `code` is then `lake.definition.apply_unclassified`. |
 | 2026-11-03 | v1.50 | 798 (#798) lake table definition apply | New **§3.4R** (after #785's §3.4Q / v1.49): one line per apply or verify attempt that reached the table, with the events `lake.definition.applied` (INFO), `apply_failed` (WARN), `apply_deferred` (INFO, lease busy or back to pending), `apply_unknown` (WARN, the row stays applying) and `apply_superseded` (INFO). No body, location or storage value is logged. |

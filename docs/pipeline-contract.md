@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.75 (revised — see Change Log)
+**Status:** v1.76 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-11-04
@@ -1698,6 +1698,12 @@ The `lake.definition.*` rows (#798, dp-lake P3; [lake.md](lake.md)) are the mana
 
 | Code | HTTP | Description |
 |---|---|---|
+| `lake.delivery.invalid_key` | 400 | Delivery feed and resolved id must match `[a-z0-9_-]{1,64}` before any storage or SQL access. |
+| `lake.delivery.incomplete` | 409 | The exact empty `_done` marker is absent; retryable. |
+| `lake.delivery.too_large` | 413 | The trusted listing exceeds the configured delivery byte limit. |
+| `lake.delivery.unsupported_format` | 400 | Delivery data files must all be Parquet or all CSV; unknown or mixed extensions are refused. |
+| `lake.delivery.invalid_manifest` | 400 | The listing is invalid or has no data files: duplicate or out-of-prefix keys, invalid size or ETag, invalid marker, or broken pagination. |
+| `lake.delivery.listing_failed` | 503 | The object store could not be listed within the admission deadline; retryable. Storage error messages and causes are not exposed. |
 | `lake.delivery.one_per_pipeline` | 400 | A pipeline declares more than one delivery node. |
 | `lake.append.one_per_table` | 400 | Multiple append nodes target the same managed table. |
 | `lake.append.requires_delivery` | 400 | Managed lake append requires a delivery node. |
@@ -1964,6 +1970,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-04 | v1.76 | 799 (#799) trusted listing | §13.25 adds six delivery key/listing/manifest refusal codes, including retryable incomplete and unavailable-store outcomes; SDK messages and causes stay private. |
 | 2026-11-04 | v1.75 | 799 (#799) | Delivery node block, managed-only qualified append targets, and nine §13.25 structure refusals. Appends require one delivery and a transitive dependency barrier over all non-append nodes; rejects-producing scripts must be strict. External readonly datasources retain their refusal. |
 | 2026-11-04 | v1.74 | 780 (#780) script-invariants docs | §13.18's two script rows say what the code does: `pool_exhausted` names both refusal paths (the full admission bound, and an admitted evaluation that waited its whole wall clock for a running slot); `invariants_too_large` states the read-back's COMBINED count — written outputs and rejects plus table inputs, row mode adding the streamed input and a caller output's buffered rows and rejects. No code, code count or permission change. — Renumbered at merge after #810. |
 | 2026-11-04 | v1.73 | 810 (#811) | §13.25 gains `lake.definition.apply_unclassified` (`—`): an unclassified failure of the apply's commit step is returned as the release's apply outcome, and the row stays `applying` for `verifyApplying`. Failures outside that step can still propagate after the release commits (#822). |
