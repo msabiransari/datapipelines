@@ -6,6 +6,7 @@ import co.datapipelines.datasources.pooling.ConnectionPool
 import co.datapipelines.datasources.pooling.ConnectionPoolManager
 import co.datapipelines.datasources.pooling.LakeViewInit
 import co.datapipelines.datasources.pooling.ManagedLakeGeneration
+import co.datapipelines.datasources.pooling.PoolCloser
 import co.datapipelines.datasources.pooling.PoolLifecycleMetrics
 import co.datapipelines.datasources.pooling.ReapOutcome
 import co.datapipelines.persistence.FailureShape
@@ -114,6 +115,12 @@ class DefaultDatasourceRegistry(
     private val managedLake: ManagedLakeCatalog = ManagedLakeCatalog.NONE,
     /** #818 RULING 4 item 1 — `reads.max-generation-age-seconds`; null when no lake is configured. */
     private val maxGenerationAge: Duration? = null,
+    /**
+     * #818d (record §10 RULING 4 amended, item 6) — who closes a pool the reaper's pass has taken off its retiring
+     * queue, forwarded to the pool manager. The assembling layer injects the deadline closer (the `dp-pool-close`
+     * threads); the default closes on the caller's thread, this module's tests and a plain library caller.
+     */
+    private val poolCloser: PoolCloser = PoolCloser.SYNCHRONOUS,
 ) : DatasourceRegistry {
     private val log = org.slf4j.LoggerFactory.getLogger(DefaultDatasourceRegistry::class.java)
 
@@ -182,6 +189,7 @@ class DefaultDatasourceRegistry(
             },
             retireCeiling = retireCeiling,
             maxGenerationAge = maxGenerationAge,
+            closer = poolCloser,
             metrics = poolMetrics,
         )
 

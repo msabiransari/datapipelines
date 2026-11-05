@@ -1,7 +1,13 @@
 package co.datapipelines.datasources
 
+import co.datapipelines.datasources.pooling.ConnectionPoolManager
 import co.datapipelines.datasources.pooling.HikariConnectionPool
+import co.datapipelines.datasources.pooling.LakeInstanceDataSource
+import co.datapipelines.datasources.pooling.LakeInstanceOwner
 import co.datapipelines.typesystem.Dialect
+import com.zaxxer.hikari.HikariConfig
+import com.zaxxer.hikari.HikariDataSource
+import com.zaxxer.hikari.util.DriverDataSource
 import io.kotest.assertions.withClue
 import io.kotest.matchers.longs.shouldBeLessThanOrEqual
 import io.kotest.matchers.nulls.shouldNotBeNull
@@ -30,10 +36,13 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
 import java.time.Instant
+import java.util.Properties
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import javax.sql.DataSource
 
 /**
  * #818b D (dp-lake record §10, proof (c)) — an EXECUTING query on a retired managed generation is stopped by the
@@ -46,7 +55,7 @@ import java.util.concurrent.atomic.AtomicReference
  * and the "it is executing" evidence is that thread's CPU time rising between two reads before the retirement.
  *
  * Then the generation is retired (the registry's own entry point), the ceiling passes, and the test calls the
- * production reaper ([DefaultDatasourceRegistry.reapRetiredPools], the same call the `dp-scheduled` reaper makes).
+ * production reaper ([DefaultDatasourceRegistry.reapRetiredPools], the same call the `dp-reaper` reaper makes).
  * The query must end within [TERMINATION_BOUND] of the reap call. What else could end it is ruled out: the query
  * has no statement timeout (`Statement.setQueryTimeout` is never called), the test never interrupts the
  * thread, and the cleanup that cancels the statement runs only after the assertion.
@@ -63,6 +72,9 @@ import java.util.concurrent.atomic.AtomicReference
  * old characterization is dropped: the lease path's retirement is `ConnectionPoolManagerGenerationAgeTest`'s, and a
  * borrower here would only hide whether the reaper retired on its own. Falsified by removing the retirement from
  * `ConnectionPoolManager.reapRetiring`: the first reap then retires nothing.
+ *
+ * The third case is #818d's (record §10 RULING 4, second amendment, item 6): proof (c) where Hikari's shutdown cannot
+ * reach the reader in time, a connection creation hung in the pool's `getConnection` — see its own KDoc.
  */
 @Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -206,6 +218,96 @@ class ManagedLakeActiveQueryCloseIntegrationTest {
     }
 
     /**
+     * #818d — proof (c) with Hikari's shutdown held: a connection creation hangs in the pool's `getConnection` (a
+     * stand-in over the generation's [LakeInstanceDataSource] that blocks once armed), so `HikariPool.shutdown()`
+     * first waits on its add-connection executor for the pool's login timeout, which Hikari derives from
+     * `connectionTimeout` — here [HUNG_CONNECTION_TIMEOUT], longer than [ReaderTermination.SECONDS], as a datasource's
+     * own pool setting may make it — before it aborts any leased connection. The reader is the engine's own work (an
+     * in-memory range sum on a duplicate of the generation's owner: minutes of CPU) on a real lease, seen executing
+     * by its thread's CPU time. The pool is retired in a real [ConnectionPoolManager] with a zero ceiling, and the pass
+     * hands the close to a thread of its own, as the application's deadline closer does.
+     *
+     * The query must end within [ReaderTermination.SECONDS] of the pass: interrupt-first reaches it before Hikari's
+     * first wait. Falsified by removing interrupt-first from `HikariConnectionPool.close`: the reader then waits behind
+     * the hung creation, and the bound passes with the query still running.
+     */
+    @Test
+    @Suppress("LongMethod") // one timeline is the witness: lease, executing, hung creation, pass, end
+    fun `a reader stops within reader-termination of the close while Hikari's shutdown waits on a hung creation - proof c`() {
+        val creationEntered = CountDownLatch(1)
+        val releaseCreation = CountDownLatch(1)
+        val armed = AtomicBoolean(false)
+        val owner = LakeInstanceOwner.open(duckdbMemory(), HUNG) {}
+        val lakeSource = LakeInstanceDataSource(owner, sessionInit = emptyList())
+        val standIn =
+            object : DataSource by lakeSource {
+                override fun getConnection(): java.sql.Connection {
+                    if (armed.get()) {
+                        creationEntered.countDown()
+                        releaseCreation.await()
+                    }
+                    return lakeSource.connection
+                }
+            }
+        val pool = HikariConnectionPool(HUNG, hungHikari(standIn), owner, Dialect.LAKE)
+        val manager =
+            ConnectionPoolManager(
+                poolFactory = { pool },
+                retireCeiling = Duration.ZERO,
+                closer = { retired -> Thread(retired::close, "test-pool-close").apply { isDaemon = true }.start() },
+            )
+        manager.poolFor(Datasource(name = HUNG, displayName = HUNG, dialect = Dialect.LAKE, jdbcUrl = "jdbc:duckdb::memory:"))
+        val lease = pool.leaseConnection()
+        val statement = pool.poolConnectionOf(lease).unwrap(java.sql.Connection::class.java).prepareStatement(ENGINE_QUERY)
+        val run = RunningQuery(statement)
+        try {
+            run.start()
+            val cpu = awaitExecuting(run)
+            armed.set(true)
+            Thread({ runCatching { pool.leaseConnection() } }, "test-borrower").apply { isDaemon = true }.start()
+            withClue("Hikari's creator must be inside the hung getConnection") {
+                creationEntered.await(CREATION_WAIT.toMillis(), TimeUnit.MILLISECONDS) shouldBe true
+            }
+            manager.retire(HUNG) shouldBe true
+            val passStarted = Instant.now()
+            val outcome = manager.reapRetiring()
+            val ended = run.ended.await(ReaderTermination.SECONDS, TimeUnit.SECONDS)
+            val endedAt = run.endedAt.get()
+            println(
+                "HUNG_CREATION_CLOSE executing_cpu_ns=$cpu pass_started=$passStarted hard_closed=${outcome.hardClosed} " +
+                    "ended=$endedAt hikari_closed=${pool.isClosed} outcome=${run.outcome.get()}",
+            )
+            withClue("the reader must stop within reader-termination (${ReaderTermination.SECONDS} s) of the pass") {
+                outcome.hardClosed shouldBe 1
+                ended shouldBe true
+                Duration.between(passStarted, endedAt.shouldNotBeNull()).seconds shouldBeLessThanOrEqual ReaderTermination.SECONDS
+                run.outcome.get().startsWith("failed:") shouldBe true
+            }
+        } finally {
+            // Cleanup only after the assertion: the hung creation is released and a planted (running) query cancelled.
+            releaseCreation.countDown()
+            runCatching { statement.cancel() }
+            run.thread.join(CLEANUP_JOIN_MS)
+            runCatching { lease.close() }
+            manager.close()
+        }
+    }
+
+    private fun duckdbMemory(): DataSource = DriverDataSource("jdbc:duckdb::memory:", "org.duckdb.DuckDBDriver", Properties(), null, null)
+
+    private fun hungHikari(source: DataSource): HikariDataSource =
+        HikariDataSource(
+            HikariConfig().apply {
+                dataSource = source
+                minimumIdle = 0
+                maximumPoolSize = 2
+                connectionTimeout = HUNG_CONNECTION_TIMEOUT.toMillis()
+                initializationFailTimeout = -1 // no connection at construction: the test drives every creation
+                poolName = HUNG
+            },
+        )
+
+    /**
      * Returns the CPU nanoseconds the query's thread has burned once two reads [EXECUTING_CPU_GAP] apart show it
      * rising by at least [EXECUTING_CPU_MIN] while the statement has not returned: the engine is executing on it,
      * not waiting on the store. (The driver's own progress counter reads 0 here: the engine's progress tracking is
@@ -316,6 +418,14 @@ class ManagedLakeActiveQueryCloseIntegrationTest {
         const val DEADLINE_MARGIN_MS = 250L
         const val CLEANUP_JOIN_MS = 30_000L
         const val MESSAGE_CHARS = 200
+
+        /** #818d's hung-creation case: its own generation name and the engine-only reader. */
+        const val HUNG = "lake_hung_creation"
+        const val ENGINE_QUERY = "SELECT sum(i) FROM range(1000000000000) t(i)"
+
+        /** Longer than reader-termination, so a reader left to Hikari's shutdown would outlive the bound. */
+        val HUNG_CONNECTION_TIMEOUT: Duration = Duration.ofSeconds(ReaderTermination.SECONDS + 60)
+        val CREATION_WAIT: Duration = Duration.ofSeconds(10)
 
         @Container
         @JvmStatic

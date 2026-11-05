@@ -79,19 +79,36 @@ interface ConnectionPool : AutoCloseable {
      * and to the freshness tick (design record §10, RULING 4).
      */
     val managedGeneration: ManagedLakeGeneration? get() = null
+
+    /**
+     * #818d — the identity of the instance generation this pool owns ([LakeInstanceOwner.generation]), carried in the
+     * closer's `datasource.pool_close_stuck` line; null for a pool that owns no instance (every non-LAKE pool).
+     */
+    val generation: String? get() = null
 }
 
 /**
  * 152 — the resource a pool generation OWNS beyond its physical connections: for a LAKE pool
  * the retained [LakeInstanceOwner] whose DuckDB instance every physical connection is a
- * duplicate of. The pool drives it through exactly two calls, in this order and from ONE
+ * duplicate of. The pool drives it through exactly three calls, in this order and from ONE
  * caller: [retire] as shutdown begins (no NEW physical connection may join the generation from
  * here on — one that is mid-creation closes itself instead of being handed to a pool that is
- * closing), then [close] after the Hikari pool has fully shut down.
+ * closing), then [interruptReaders] (#818d — every reader stops before Hikari's shutdown can make it
+ * wait), then [close] after the Hikari pool has fully shut down.
  */
 interface PoolInstanceOwner : AutoCloseable {
+    /** This generation's identity for log lines; null when the owner has none. */
+    val generation: String? get() = null
+
     /** Shutdown has begun: refuse every further physical connection; existing ones are Hikari's to abort. Never throws. */
     fun retire()
+
+    /**
+     * #818d (record §10 item 6) — interrupt first: stop every running reader of this generation NOW, before Hikari's
+     * `shutdown()` runs its connection-creation wait. Returns how many physical handles it reached. Never throws and
+     * never waits for a reader to stop. The default reaches nothing (an owner with no handles of its own).
+     */
+    fun interruptReaders(): Int = 0
 
     /**
      * Release the generation's resources after Hikari has shut down. Never throws: the caller is
@@ -242,20 +259,32 @@ class HikariConnectionPool(
     override val activeConnections: Int
         get() = if (dataSource.isClosed) 0 else dataSource.hikariPoolMXBean.activeConnections
 
+    /** #818d — the owner's generation, for the closer's stuck-close line; null without an owner. */
+    override val generation: String? get() = instanceOwner?.generation
+
     /**
-     * Retire the owner, Hikari shutdown — it waits (bounded by the DataSource's login timeout,
-     * which Hikari itself sets from `connectionTimeout`) for a physical connection mid-creation,
-     * then aborts the leases still out once its shutdown grace expires (the existing §5.2
-     * hard-close policy) — then the owner's release, which closes every physical handle the
-     * generation still owns (one Hikari abandoned at that ceiling included: a duplicate does not
-     * outlive its generation) and the retained connection. Neither step throws: Hikari's close
-     * contains its own failures, and [PoolInstanceOwner.close] contains the driver's, so this
-     * method is safe inside [ConnectionPoolManager.close]'s and the reaper's loops over every
-     * pool. No lock is held across any of it: the losing caller does not wait, it returns.
+     * Retire the owner, then **interrupt first** (#818d, record §10 item 6: every physical handle of
+     * the generation is put into its own close, which interrupts the running DuckDB query before
+     * anything else — [PoolInstanceOwner.interruptReaders]), then Hikari shutdown — it waits
+     * (bounded by the DataSource's login timeout, which Hikari itself sets from
+     * `connectionTimeout`) for a physical connection mid-creation, then aborts the leases still
+     * out once its shutdown grace expires (the existing §5.2 hard-close policy) — then the owner's
+     * release, which closes every physical handle the generation still owns (one Hikari abandoned
+     * at that ceiling included: a duplicate does not outlive its generation) and the retained
+     * connection. The interrupt comes BEFORE Hikari's shutdown because that shutdown's first act
+     * is `addConnectionExecutor.awaitTermination(loginTimeout)` (HikariCP 6.3.3, read off the
+     * bytecode), and a reader must never wait behind a stuck connection creation. Hikari's later
+     * abort of a handle the interrupt already closed is harmless: the driver refuses `abort`,
+     * Hikari falls back to `close()`, and a handle mid-close or closed returns at once
+     * (`TrackedDuplicate`). No step throws: Hikari's close contains its own failures, and the
+     * owner contains the driver's, so this method is safe inside [ConnectionPoolManager.close]'s
+     * loop and on the closer's threads. No lock is held across any of it: the losing caller does
+     * not wait, it returns.
      */
     override fun close() {
         if (!closing.compareAndSet(false, true)) return
         instanceOwner?.retire()
+        instanceOwner?.interruptReaders()
         try {
             dataSource.close()
         } finally {
@@ -294,6 +323,18 @@ interface PoolLifecycleMetrics {
         datasourceName: String,
         activeConnections: Int,
     )
+
+    /**
+     * #818d — `datapipelines.datasource.pool.close_stuck{datasource_name}`: a close handed to the closer was still
+     * running at `PoolCloser.DEADLINE_SECONDS`. Defaulted so an implementation that predates it keeps compiling.
+     */
+    fun poolCloseStuck(datasourceName: String) = Unit
+
+    /**
+     * #818d — `datapipelines.datasource.pool.reaper_pass_slow`: one reaper pass ran longer than its stated bound
+     * (`ReaperDelay.PASS_BOUND_SECONDS`). Untagged: the pass is per instance, not per datasource.
+     */
+    fun reaperPassSlow() = Unit
 
     companion object {
         val NONE =
@@ -378,6 +419,14 @@ class ConnectionPoolManager(
      * aged out.
      */
     private val maxGenerationAge: Duration? = null,
+    /**
+     * #818d (record §10 RULING 4 amended, item 6) — who runs the closes [reapRetiring] decides on. The pass hands
+     * each one here and never waits for it. [PoolCloser.SYNCHRONOUS] (the default: library callers, this module's
+     * tests) closes on the caller's thread; the assembling layer injects the `dp-pool-close` closer. NOT last: a
+     * `fun interface` would accept the `ConnectionPoolManager { ds -> … }` trailing lambda by SAM conversion (see
+     * [metrics]). [close] (application shutdown) never uses it.
+     */
+    private val closer: PoolCloser = PoolCloser.SYNCHRONOUS,
     /**
      * LAST on purpose, and not a function type: Kotlin's trailing-lambda form binds to the last
      * parameter, so with a `() -> Instant` there the long-standing
@@ -535,11 +584,18 @@ class ConnectionPoolManager(
 
     /**
      * The reaper's pass: first retires every managed lake generation past its age bound
-     * ([retireExpiredGenerations], #818c), then closes every retiring pool that has drained, plus every one
-     * whose ceiling has passed.
+     * ([retireExpiredGenerations], #818c), then hands to [closer] every retiring pool that has drained, plus every
+     * one whose ceiling has passed.
      *
      * Driven by the assembling layer's scheduled tick (one per instance). Idempotent and cheap:
      * with no managed generation and nothing retiring it walks the live map and reads one empty queue.
+     *
+     * #818d (record §10 item 6) — **the pass decides; it never closes.** Its whole work is a clock comparison per
+     * live pool, a walk of the retiring queue reading each pool's in-memory active count, a compare-and-remove per
+     * retirement (whose soft evict only schedules Hikari's idle closes on Hikari's own executor) and a hand-off per
+     * pool to close. No statement, no close, no lock held across I/O — so its duration is a property of this code,
+     * not of a database or a driver (`ReaperDelay.PASS_BOUND_SECONDS`, measured). A pool leaves the queue BEFORE it
+     * is handed off, so a slow close can never be handed off twice.
      */
     fun reapRetiring(): ReapOutcome {
         val expired = retireExpiredGenerations()
@@ -554,7 +610,7 @@ class ConnectionPoolManager(
             when {
                 active == 0 -> {
                     entries.remove()
-                    entry.pool.close()
+                    closer.close(entry.pool)
                     drained++
                 }
 
@@ -567,7 +623,7 @@ class ConnectionPoolManager(
                         active,
                         retireCeiling.seconds,
                     )
-                    entry.pool.close()
+                    closer.close(entry.pool)
                     metrics.poolHardClosed(entry.pool.name, active)
                     hardClosed++
                 }
@@ -589,6 +645,10 @@ class ConnectionPoolManager(
      * Closes every pool, live and retiring — application shutdown, where the gentle path has no
      * value: `ExecutionDrainLifecycle` has already cancelled the live statements by the time
      * this runs, and the JVM is going away regardless.
+     *
+     * #818d — synchronous on the caller's thread, NOT through [closer]: this is not the reaper's path, and a shutdown
+     * that returned before its pools closed would release the context with generations still open. Each close is
+     * still interrupt-first ([HikariConnectionPool.close]).
      */
     override fun close() {
         pools.keys.toList().forEach { name -> pools.remove(name)?.pool?.close() }

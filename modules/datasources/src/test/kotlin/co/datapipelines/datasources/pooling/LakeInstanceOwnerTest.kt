@@ -6,7 +6,9 @@ import com.zaxxer.hikari.util.DriverDataSource
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldStartWith
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
 import java.sql.Connection
@@ -14,6 +16,9 @@ import java.sql.SQLException
 import java.sql.SQLFeatureNotSupportedException
 import java.sql.SQLNonTransientConnectionException
 import java.util.Properties
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import javax.sql.DataSource
 
 /**
@@ -132,7 +137,7 @@ class LakeInstanceOwnerTest {
     }
 
     @Test
-    fun `the pool closes Hikari first and the owner second - exactly once`() {
+    fun `the pool retires, interrupts every reader, closes Hikari, then releases the owner - exactly once`() {
         val closeOrder = mutableListOf<String>()
         val hikari =
             HikariDataSource(
@@ -147,6 +152,12 @@ class LakeInstanceOwnerTest {
                     closeOrder += "retired"
                 }
 
+                // #818d interrupt-first: before Hikari's shutdown, whose first act is a wait on connection creation.
+                override fun interruptReaders(): Int {
+                    closeOrder += if (hikari.isClosed) "interrupted-AFTER-hikari" else "interrupted-before-hikari"
+                    return 0
+                }
+
                 override fun close() {
                     closeOrder += if (hikari.isClosed) "owner-after-hikari" else "owner-BEFORE-hikari"
                 }
@@ -157,7 +168,7 @@ class LakeInstanceOwnerTest {
         pool.close()
 
         assertAll(
-            { closeOrder shouldBe listOf("retired", "owner-after-hikari") },
+            { closeOrder shouldBe listOf("retired", "interrupted-before-hikari", "owner-after-hikari") },
             { pool.isClosed shouldBe true },
         )
     }
@@ -245,6 +256,138 @@ class LakeInstanceOwnerTest {
         }
     }
 
+    /**
+     * #818d (record §10 item 6) — interrupt-first reaches THIS generation's readers only: a reader of a second
+     * generation, running the same kind of statement at the same moment, keeps running. On the real driver: the
+     * interrupted reader's statement ends with the driver's exception within seconds, never at the end of its scan.
+     */
+    @Test
+    fun `interrupt-first stops this generation's reader and leaves another generation's reader running`() {
+        val first = LakeInstanceOwner.open(driver(), "lake_interrupt_a") {}
+        val second = LakeInstanceOwner.open(driver(), "lake_interrupt_b") {}
+        val firstReader = LongReader(first.duplicate())
+        val secondReader = LongReader(second.duplicate())
+        firstReader.awaitRunning()
+        secondReader.awaitRunning()
+
+        val logged = capturingLogs { first.interruptReaders() shouldBe 1 }
+
+        assertAll(
+            { withClue("this generation's reader stopped") { firstReader.awaitEnd(READER_STOP_SECONDS) shouldBe true } },
+            { firstReader.failure shouldNotBe null },
+            { withClue("the other generation's reader is untouched") { secondReader.isRunning shouldBe true } },
+            { second.liveDuplicates shouldBe 1 },
+            { first.liveDuplicates shouldBe 0 },
+            {
+                logged.count {
+                    it.startsWith("event=lake.instance_readers_interrupted datasource=lake_interrupt_a generation=${first.generation}")
+                } shouldBe 1
+            },
+            { logged.none { "lake_interrupt_b" in it } shouldBe true },
+        )
+        second.interruptReaders()
+        secondReader.awaitEnd(READER_STOP_SECONDS) shouldBe true
+        first.close()
+        second.close()
+    }
+
+    /**
+     * #818d — a handle interrupt-first put into its close is `CLOSING` when the generation's release reaches it: the
+     * release reports it `IN_FLIGHT` and does not close it a second time; the close in flight finishes it and the
+     * registry forgets it. The duplicate's close blocks on a latch the test owns (a reader still stopping).
+     */
+    @Test
+    fun `a handle mid-close at the release is in flight - never closed twice`() {
+        val releaseClose = CountDownLatch(1)
+        val closes = AtomicInteger()
+        val instance = driver().connection
+        val retained =
+            FaultyConnection(instance).also { owner ->
+                owner.onDuplicate = {
+                    val duplicate = instance.javaClass.getMethod("duplicate").invoke(instance) as Connection
+                    FaultyConnection(duplicate, onClose = {
+                        closes.incrementAndGet()
+                        releaseClose.await()
+                        duplicate.close()
+                    })
+                }
+            }
+        val owner = ownerOf(retained)
+        owner.duplicate()
+        val launched = mutableListOf<Thread>()
+
+        owner.interruptReaders({ name, task -> launched += Thread(task, name).apply { start() } }, settleMillis = 0)
+        awaitUntil { closes.get() == 1 }
+        val logged = capturingLogs { owner.close() }
+        releaseClose.countDown()
+        launched.forEach { it.join(TimeUnit.SECONDS.toMillis(READER_STOP_SECONDS)) }
+
+        assertAll(
+            { logged.count { it.startsWith("event=lake.instance_handles_closed") && " in_flight=1 " in it } shouldBe 1 },
+            { closes.get() shouldBe 1 },
+            { owner.liveDuplicates shouldBe 0 },
+            { launched.single().name shouldStartWith LakeInstanceOwner.INTERRUPT_THREAD_PREFIX + owner.generation },
+        )
+    }
+
+    @Test
+    fun `interrupt-first with no handle reaches nothing and logs nothing`() {
+        val owner = LakeInstanceOwner.open(driver(), "lake_interrupt_idle") {}
+        owner.use {
+            val logged = capturingLogs { owner.interruptReaders() shouldBe 0 }
+            logged.none { it.startsWith("event=lake.instance_readers_interrupted") } shouldBe true
+        }
+    }
+
+    /** A statement that runs for minutes unless interrupted, on its own daemon thread. */
+    private class LongReader(
+        private val connection: Connection,
+    ) {
+        private val started = CountDownLatch(1)
+        private val ended = CountDownLatch(1)
+
+        @Volatile var failure: Throwable? = null
+            private set
+
+        private val thread =
+            Thread {
+                try {
+                    connection.createStatement().use { st ->
+                        started.countDown()
+                        st.executeQuery(LONG_SCAN).use { it.next() }
+                    }
+                } catch (
+                    @Suppress("TooGenericExceptionCaught") e: Exception,
+                ) {
+                    failure = e
+                } finally {
+                    started.countDown()
+                    ended.countDown()
+                }
+            }.apply {
+                isDaemon = true
+                start()
+            }
+
+        val isRunning: Boolean get() = thread.isAlive
+
+        fun awaitRunning() {
+            started.await(READER_STOP_SECONDS, TimeUnit.SECONDS) shouldBe true
+            Thread.sleep(STATEMENT_START_MILLIS)
+            withClue("the long scan is still running before the interrupt") { thread.isAlive shouldBe true }
+        }
+
+        fun awaitEnd(seconds: Long): Boolean = ended.await(seconds, TimeUnit.SECONDS)
+    }
+
+    private fun awaitUntil(condition: () -> Boolean) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(READER_STOP_SECONDS)
+        while (!condition()) {
+            check(System.nanoTime() < deadline) { "condition not reached" }
+            Thread.sleep(POLL_MILLIS)
+        }
+    }
+
     private fun ownerOf(connection: Connection): LakeInstanceOwner =
         LakeInstanceOwner.open(
             object : DataSource by driver() {
@@ -282,4 +425,12 @@ class LakeInstanceOwnerTest {
                 rs.getInt(1)
             }
         }
+
+    private companion object {
+        /** About 10^12 rows summed: minutes of scan on any box, so an end within seconds is the interrupt's. */
+        const val LONG_SCAN = "SELECT sum(i) FROM range(1000000000000) t(i)"
+        const val READER_STOP_SECONDS = 10L
+        const val STATEMENT_START_MILLIS = 300L
+        const val POLL_MILLIS = 10L
+    }
 }
