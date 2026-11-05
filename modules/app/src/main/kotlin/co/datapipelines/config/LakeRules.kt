@@ -1,6 +1,7 @@
 package co.datapipelines.config
 
 import co.datapipelines.web.config.DatasourcesProperties
+import co.datapipelines.web.config.ReaderTerminationTerm
 import co.datapipelines.web.config.ReaperDelay
 import org.springframework.boot.convert.DurationStyle
 import org.springframework.util.unit.DataSize
@@ -21,10 +22,12 @@ import java.time.Duration
  *   scratch-bytes` ([checkLakeAdmission]);
  * - every other number positive, the maintenance window `HH:MM-HH:MM` ([checkLakeBounds]);
  * - `freshness-tick-seconds < max-generation-age-seconds`, `reads.memory-limit` a positive size, and
- *   `max-generation-age + 2 × reaper-delay + retire-ceiling + freshness-tick ≤ protection-days × 86400 / 24`
- *   (record §10 RULING 4 as amended 2026-11-05, #818 P5 / #818c) ([checkLakeReads]). The retire ceiling is the one
- *   `datasources` applies: `retire-ceiling-seconds` when set, else `node-query-timeout-seconds + 30` (datasources.md
- *   §5.2). The reaper delay is no key: [ReaperDelay.SECONDS], derived from the scheduling layer and pinned there.
+ *   `max-generation-age + 2 × reaper-delay + retire-ceiling + reader-termination + freshness-tick ≤
+ *   protection-days × 86400 / 24` (record §10 RULING 4 as amended, #818 P5 / #818c / #818d) ([checkLakeReads]). The
+ *   retire ceiling is the one `datasources` applies: `retire-ceiling-seconds` when set, else
+ *   `node-query-timeout-seconds + 30` (datasources.md §5.2). Neither derived term is a key: the reaper delay is
+ *   [ReaperDelay.SECONDS] (the scheduling layer) and the reader termination [ReaderTerminationTerm.SECONDS] (the LAKE
+ *   adapter's HTTP bounds), each derived and pinned where it is produced.
  *
  * Deferred, with the lane that consumes the input: `scratch-bytes ≤ the pod's /tmp limit` and the cgroup memory
  * sum to P1/P6 (the sum's amendment adds keys that do not exist yet, and E10b is its acceptance — owner
@@ -228,6 +231,11 @@ internal object LakeRules {
      * #818c (RULING 4 amended 2026-11-05) — that longest is `age bound + 2 × reaper delay + retire ceiling + one
      * tick`: the reaper retires an over-age generation with no borrower within one [ReaperDelay] of its age bound,
      * and hard-closes it within one more of its ceiling. The delay is [ReaperDelay.SECONDS], never typed here.
+     *
+     * #818d (RULING 4, second amendment, #835) — and the hard close is not the reader's end: the rule adds
+     * `reader-termination`, the longest from the hard close's start to the last reader's query stopping (interrupt
+     * first, then the object-store request chain the LAKE adapter's HTTP bounds allow). It is
+     * [ReaderTerminationTerm.SECONDS], a code-derived constant like the delay, never typed here and never a key.
      */
     fun checkLakeReads(
         snapshot: ConfigSnapshot,
@@ -245,11 +253,12 @@ internal object LakeRules {
         if (age == null || tick == null) return
         val window = days * SECONDS_PER_DAY / PROTECTION_SHARE_DIVISOR
         val reaperDelay = ReaperDelay.SECONDS
-        if (age + 2 * reaperDelay + ceiling + tick > window) {
+        val readerTermination = ReaderTerminationTerm.SECONDS
+        if (age + 2 * reaperDelay + ceiling + readerTermination + tick > window) {
             violations +=
                 "$MAX_GENERATION_AGE_SECONDS ($age) + 2 × the reaper delay ($reaperDelay) + the retire ceiling ($ceiling) + " +
-                "$FRESHNESS_TICK_SECONDS ($tick) must not exceed $PROTECTION_DAYS × 86400 / 24 ($window) " +
-                "(§3.36 — a reader never outlives the protection)."
+                "the reader termination ($readerTermination) + $FRESHNESS_TICK_SECONDS ($tick) must not exceed " +
+                "$PROTECTION_DAYS × 86400 / 24 ($window) (§3.36 — a reader never outlives the protection)."
         }
     }
 

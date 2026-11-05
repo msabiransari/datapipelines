@@ -6,6 +6,7 @@ import co.datapipelines.DatapipelinesApplication
 import co.datapipelines.integration.E2eSession.asSession
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.throwables.shouldThrowAny
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContain
@@ -29,13 +30,17 @@ import org.junit.jupiter.api.assertAll
 import org.junit.jupiter.api.assertTimeoutPreemptively
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.beans.factory.config.BeanDefinitionCustomizer
 import org.springframework.boot.builder.SpringApplicationBuilder
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.context.ApplicationContext
+import org.springframework.context.ApplicationContextInitializer
 import org.springframework.context.ConfigurableApplicationContext
+import org.springframework.context.support.GenericApplicationContext
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
+import org.testcontainers.DockerClientFactory
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.wait.strategy.Wait
 import org.testcontainers.utility.DockerImageName
@@ -47,6 +52,7 @@ import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.S3Configuration
 import java.lang.management.ManagementFactory
+import java.lang.reflect.Proxy
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -61,7 +67,9 @@ import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
+import java.util.function.Supplier
 import kotlin.io.path.isRegularFile
 import kotlin.io.path.name
 import kotlin.io.path.relativeTo
@@ -91,8 +99,11 @@ import kotlin.io.path.relativeTo
  * - **F** (#818b B): lifecycle moves, each judged against the generation the lease came from (F's tick and age
  *   bound are both longer than the test, so only an explicit retire builds a new one).
  * - **H** (#818c C, record §10 RULING 4 amended 2026-11-05): an executing reader on a generation nobody borrows from
- *   again is retired by the real `dp-scheduled` reaper past its age bound and hard-closed past its ceiling, inside
- *   `age + 2 × reaper delay + ceiling`.
+ *   again is retired by the real reaper (on `dp-reaper` since #818d) past its age bound and hard-closed past its
+ *   ceiling, inside `age + 2 × reaper delay + ceiling + reader termination`.
+ * - **I1–I3** (#818d, record §10 RULING 4, second amendment): the same timeline under adverse conditions on the real
+ *   scheduler — the metadata pool exhausted, the metadata Postgres paused, and the first generation's close held —
+ *   each still inside the bound, because the reaper owns its thread and hands every close away.
  *
  * E, F and G each connect under their own `ApplicationName`, so `pg_stat_activity` attributes a statement to one
  * instance; A and B keep ticking against the same database meanwhile, which is why every lock watcher filters on it.
@@ -456,11 +467,12 @@ class ManagedLakeReadsE2eTest {
 
     /**
      * #818c C — the bound observed on the real scheduler, for the case no lease ever re-judges: H's one lease runs a
-     * cross join that takes minutes, and nothing borrows from H again. Its `dp-scheduled` reaper must retire the
+     * cross join that takes minutes, and nothing borrows from H again. Its reaper (`dp-reaper`) must retire the
      * generation past the age bound (the `trigger=reaper` line, H's own by its `max_age_seconds`) and hard-close it
      * past H's ceiling (H's `ceiling_seconds`), which ends the query. The tight fits, age + one cadence + slack and
      * ceiling + one cadence + slack on a quiet thread, make the falsification (no retirement in the reaper's pass)
-     * red within seconds; the bound the record states, age + 2 × reaper delay + ceiling, is asserted too.
+     * red within seconds; the bound the record states, age + 2 × reaper delay + ceiling + reader termination (#818d),
+     * is asserted too.
      *
      * What else could end the query is ruled out: it completes in minutes (the outcome must be a failure, and it was
      * seen burning CPU first); its statement has no timeout; the test never interrupts its thread; the cleanup cancel
@@ -507,7 +519,7 @@ class ManagedLakeReadsE2eTest {
                 val reaperCounts = linesOf(capture, "event=lake.reaper_retired")
                 val stale = linesOf(capture, "event=lake.generation_stale")
                 val catalogAfter = registryLocation()
-                val bound = Duration.ofSeconds(H_MAX_AGE_SECONDS + 2 * REAPER_DELAY_SECONDS + H_CEILING_SECONDS)
+                val bound = lifetimeBound()
                 println(
                     "REAPER_BOUND_E2E built=$builtAt executing_cpu_ns=$cpu statement_timeout=$timeout " +
                         "age_s=$H_MAX_AGE_SECONDS ceiling_s=$H_CEILING_SECONDS tick_s=$H_TICK_SECONDS " +
@@ -521,7 +533,7 @@ class ManagedLakeReadsE2eTest {
                     { withClue("the statement carries no timeout of its own") { timeout shouldBe 0 } },
                     { withClue("one reaper retirement of H's generation, past its age bound") { expired.size shouldBe 1 } },
                     { expired.single().text shouldContain "trigger=reaper" },
-                    { expired.single().thread shouldBe "dp-scheduled" },
+                    { expired.single().thread shouldBe REAPER_THREAD },
                     { (expired.single().at >= builtAt.plusSeconds(H_MAX_AGE_SECONDS)) shouldBe true },
                     { reaperCounts.any { "generations=" in it.text && it.at >= expired.single().at } shouldBe true },
                     { withClue("retired while the query still ran: the lease was held") { runningAfterRetire shouldBe true } },
@@ -544,6 +556,298 @@ class ManagedLakeReadsE2eTest {
             logger.detachAppender(capture)
             capture.stop()
             reader.close()
+        }
+    }
+
+    /**
+     * #818d I1 (record §10 RULING 4, second amendment, item 5) — H's timeline with the instance's metadata pool
+     * exhausted: once the reader is executing, the test leases every connection of the instance's metadata
+     * `HikariDataSource`, so each sibling job on `dp-scheduled` waits out the pool's connection timeout. The reaper
+     * issues no statement and owns `dp-reaper`, so it still retires the generation within one cadence of its age bound
+     * and closes it within one cadence of its ceiling. Non-vacuity: the pool's MXBean must show a thread waiting for a
+     * connection while the condition holds — a job really was blocked. Red with the reaper's `scheduler` attribute
+     * removed: the reaper then queues behind those waits.
+     */
+    @Test
+    @Order(16)
+    fun `I1 - with the metadata pool exhausted the reaper still retires and closes an executing reader's generation in bound`() {
+        val reader = bootReaderProfile(APP_I1)
+        try {
+            val metadataPool = reader.getBean("dataSource") as HikariDataSource
+            reapedUnderAdversity(reader, "I1 metadata pool exhausted") {
+                val held = (1..metadataPool.maximumPoolSize).map { metadataPool.connection }
+                Adversity(
+                    release = { held.forEach { runCatching { it.close() } } },
+                    witness = { metadataPool.hikariPoolMXBean.threadsAwaitingConnection },
+                )
+            }
+        } finally {
+            reader.close()
+        }
+    }
+
+    /**
+     * #818d I2 — H's timeline with the metadata Postgres PAUSED (`docker pause` of this JVM's own Postgres container, not
+     * a reused one): every statement any job sends hangs on its socket, which no statement timeout can end (#818d's
+     * follow-up on the metadata pool's own timeouts). The reaper still retires and closes in bound. Non-vacuity: the
+     * instance's metadata pool must show a connection in use while paused — a job's statement stuck on the socket. The
+     * container is unpaused in `finally`, before anything else touches the database. Red with the reaper's
+     * `scheduler` attribute removed: the reaper then waits behind a statement that never returns.
+     */
+    @Test
+    @Order(17)
+    fun `I2 - with the metadata Postgres paused the reaper still retires and closes an executing reader's generation in bound`() {
+        val reader = bootReaderProfile(APP_I2)
+        try {
+            val metadataPool = reader.getBean("dataSource") as HikariDataSource
+            val docker = DockerClientFactory.instance().client()
+            val container = SharedE2e.postgres.containerId
+            reapedUnderAdversity(reader, "I2 metadata Postgres paused") {
+                docker.pauseContainerCmd(container).exec()
+                Adversity(
+                    release = { docker.unpauseContainerCmd(container).exec() },
+                    witness = { metadataPool.hikariPoolMXBean.activeConnections },
+                )
+            }
+        } finally {
+            reader.close()
+        }
+    }
+
+    /**
+     * #818d I3 (item 6) — a close that does not return must cost a `dp-pool-close` thread, never a reap. The instance
+     * boots with a test seam on its `PoolCloser` ([DelayFirstManagedClose]): the FIRST managed generation handed to
+     * the closer is passed on to the production closer wrapped so that its close waits on a latch the test holds.
+     * Gen 1 is leased once and returned; the reaper retires it at its age bound and hands its close away, where it
+     * hangs. Gen 2 is then built by a lease that runs the long reader: the reaper must retire and hard-close gen 2 in
+     * bound while gen 1's close is still hung, and `datasource.pool_close_stuck` must name gen 1 once, no earlier than
+     * the deadline after its hand-off. Red with the synchronous close restored (the reaper then hangs in gen 1's close
+     * and never reaches gen 2), and with the `scheduler` attribute removed (the retirement lines' thread).
+     */
+    @Test
+    @Order(18)
+    @Suppress("LongMethod") // one timeline on the real scheduler is the witness; its instants are asserted together
+    fun `I3 - a first close that never returns does not delay the next generation's retirement or close`() {
+        val release = CountDownLatch(1)
+        val seam = DelayFirstManagedClose(release)
+        val reader = bootReaderProfile(APP_I3, initializers = listOf(seam.initializer()))
+        val logger = LoggerFactory.getLogger(PRODUCT_LOGGERS) as Logger
+        val capture = SnapshotListAppender()
+        logger.addAppender(capture)
+        try {
+            leaseManaged(reader).close()
+            val gen1BuiltAt = generationBuiltAt(reader).shouldNotBeNull()
+            val gen1RetireBy = gen1BuiltAt.plusSeconds(H_MAX_AGE_SECONDS + REAPER_CADENCE_SECONDS + BOUND_SLACK_SECONDS)
+            awaitUntil(gen1RetireBy, "gen 1 retired and handed off") {
+                seam.handedOffAt.get() != null
+            }
+            val handedOffAt = seam.handedOffAt.get().shouldNotBeNull()
+            val lease = leaseManaged(reader)
+            val builtAt = generationBuiltAt(reader).shouldNotBeNull()
+            val statement = lease.prepareStatement(H_LONG_QUERY)
+            val run = LongRead(statement)
+            try {
+                run.start()
+                awaitBurning(run)
+                val timeline = observeRetirementAndClose(reader, capture, run, builtAt, "I3 first close held")
+                val stuckBy = handedOffAt.plusSeconds(POOL_CLOSE_DEADLINE_SECONDS + STUCK_SLACK_SECONDS)
+                awaitUntil(stuckBy, "the stuck close is reported") { linesOf(capture, "event=datasource.pool_close_stuck").isNotEmpty() }
+                val stuck = linesOf(capture, "event=datasource.pool_close_stuck")
+                println(
+                    "I3_TIMELINE gen1_built=$gen1BuiltAt gen1_handed_off=$handedOffAt gen1=${seam.generation.get()} " +
+                        "gen1_close_released=${release.count == 0L} ${timeline.text} " +
+                        "stuck=${stuck.map { "${it.at} ${it.thread} ${it.text}" }}",
+                )
+                assertAll(
+                    { timeline.assertInBound() },
+                    { withClue("gen 1's close was still held when gen 2 closed") { release.count shouldBe 1L } },
+                    { stuck.size shouldBe 1 },
+                    { stuck.single().text shouldContain "datasource=$LAKE generation=${seam.generation.get()} " },
+                    { (stuck.single().at >= handedOffAt.plusSeconds(POOL_CLOSE_DEADLINE_SECONDS)) shouldBe true },
+                )
+            } finally {
+                runCatching { statement.cancel() }
+                run.thread.join(CLEANUP_JOIN_MS)
+                runCatching { lease.close() }
+            }
+        } finally {
+            release.countDown()
+            logger.detachAppender(capture)
+            capture.stop()
+            reader.close()
+        }
+    }
+
+    /** H's profile (short age, tick, ceiling) under its own `ApplicationName`. */
+    private fun bootReaderProfile(
+        application: String,
+        initializers: List<ApplicationContextInitializer<ConfigurableApplicationContext>> = emptyList(),
+    ): ConfigurableApplicationContext =
+        boot(
+            maxAgeSeconds = H_MAX_AGE_SECONDS,
+            tickSeconds = H_TICK_SECONDS,
+            application = application,
+            extra = listOf("datapipelines.datasources.retire-ceiling-seconds" to H_CEILING_SECONDS.toString()),
+            initializers = initializers,
+        )
+
+    /** An adverse condition: how to undo it, and a sample proving it held (the largest sample must be at least 1). */
+    private class Adversity(
+        val release: () -> Unit,
+        val witness: () -> Int,
+    )
+
+    /**
+     * H's timeline with [apply]'s condition imposed once the reader is executing and released only after the
+     * assertions: the reaper retires the generation within one cadence (plus slack) of its age bound and hard-closes it
+     * within one cadence of its ceiling, both on `dp-reaper`, and the query ends inside the lifetime bound.
+     */
+    private fun reapedUnderAdversity(
+        reader: ConfigurableApplicationContext,
+        label: String,
+        apply: () -> Adversity,
+    ) {
+        val logger = LoggerFactory.getLogger(PRODUCT_LOGGERS) as Logger
+        val capture = SnapshotListAppender()
+        logger.addAppender(capture)
+        val lease = leaseManaged(reader)
+        val builtAt = generationBuiltAt(reader).shouldNotBeNull()
+        val statement = lease.prepareStatement(H_LONG_QUERY)
+        val run = LongRead(statement)
+        var adversity: Adversity? = null
+        val witnessed = AtomicInteger()
+        try {
+            run.start()
+            awaitBurning(run)
+            val held = apply()
+            adversity = held
+            val sampler =
+                Thread({
+                    while (!Thread.currentThread().isInterrupted) {
+                        witnessed.accumulateAndGet(held.witness(), ::maxOf)
+                        runCatching { Thread.sleep(WATCH_MILLIS) }.onFailure { return@Thread }
+                    }
+                }, "test-adversity-witness").apply {
+                    isDaemon = true
+                    start()
+                }
+            val timeline = observeRetirementAndClose(reader, capture, run, builtAt, label)
+            sampler.interrupt()
+            println("ADVERSE_REAP $label witness_max=${witnessed.get()} ${timeline.text}")
+            assertAll(
+                { timeline.assertInBound() },
+                { withClue("$label: the condition must have held a job (witness ≥ 1)") { witnessed.get() shouldBeGreaterThanOrEqual 1 } },
+            )
+        } finally {
+            adversity?.release?.invoke()
+            runCatching { statement.cancel() }
+            run.thread.join(CLEANUP_JOIN_MS)
+            runCatching { lease.close() }
+            logger.detachAppender(capture)
+            capture.stop()
+        }
+    }
+
+    /** What [observeRetirementAndClose] saw; [assertInBound] is H's tight fits and the record's bound. */
+    private inner class ReapTimeline(
+        val builtAt: Instant,
+        val expired: List<Line>,
+        val hardClosed: List<Line>,
+        val ended: Boolean,
+        val run: LongRead,
+        val label: String,
+    ) {
+        val text: String
+            get() =
+                "built=$builtAt expired=${expired.map { "${it.at} ${it.thread}" }} " +
+                    "hard_closed=${hardClosed.map { "${it.at} ${it.thread}" }} " +
+                    "ended=${run.endedAt.get()} outcome=${run.outcome.get()} bound=${lifetimeBound()}"
+
+        fun assertInBound() {
+            withClue("$label: $text") {
+                expired.size shouldBe 1
+                expired.single().thread shouldBe REAPER_THREAD
+                (expired.single().at >= builtAt.plusSeconds(H_MAX_AGE_SECONDS)) shouldBe true
+                hardClosed.size shouldBe 1
+                hardClosed.single().thread shouldBe REAPER_THREAD
+                ended shouldBe true
+                run.outcome.get().startsWith("failed:") shouldBe true
+                Duration.between(builtAt, run.endedAt.get().shouldNotBeNull()).toMillis() shouldBeLessThanOrEqual lifetimeBound().toMillis()
+            }
+        }
+    }
+
+    /** Waits for the reaper's retirement of the generation built at [builtAt], then for the close to end [run]. */
+    private fun observeRetirementAndClose(
+        reader: ConfigurableApplicationContext,
+        capture: SnapshotListAppender,
+        run: LongRead,
+        builtAt: Instant,
+        label: String,
+    ): ReapTimeline {
+        val retireBy = builtAt.plusSeconds(H_MAX_AGE_SECONDS + REAPER_CADENCE_SECONDS + BOUND_SLACK_SECONDS)
+        awaitUntil(retireBy, "$label: the reaper retires the generation with no lease") { generationBuiltAt(reader) == null }
+        val expired =
+            linesOf(capture, "event=lake.generation_expired").filter {
+                "max_age_seconds=$H_MAX_AGE_SECONDS " in it.text && "trigger=reaper" in it.text && it.at >= builtAt
+            }
+        val retiredAt = expired.firstOrNull()?.at ?: Instant.now()
+        val closeBy = retiredAt.plusSeconds(H_CEILING_SECONDS + REAPER_CADENCE_SECONDS + BOUND_SLACK_SECONDS)
+        val ended = run.ended.await(Duration.between(Instant.now(), closeBy).toMillis().coerceAtLeast(0), TimeUnit.MILLISECONDS)
+        val hardClosed =
+            linesOf(capture, "event=datasource.pool_hard_closed").filter {
+                "ceiling_seconds=$H_CEILING_SECONDS " in it.text && it.at >= builtAt
+            }
+        return ReapTimeline(builtAt, expired, hardClosed, ended, run, label)
+    }
+
+    /** The record's bound from a generation's build to its last reader stopping: age + 2 × delay + ceiling + termination. */
+    private fun lifetimeBound(): Duration =
+        Duration.ofSeconds(H_MAX_AGE_SECONDS + 2 * REAPER_DELAY_SECONDS + H_CEILING_SECONDS + READER_TERMINATION_SECONDS)
+
+    /**
+     * I3's test seam: the application's `PoolCloser`, decorated. The first managed generation handed to it goes on to
+     * the production closer (the `poolCloser` bean) wrapped so its close first waits for [release]; every other pool
+     * goes on unchanged. Registered `@Primary`, so `DomainConfiguration.datasourceRegistry` takes it. Built from JDK
+     * proxies because this module compiles against `app` only (the pool and closer types live in `datasources`).
+     */
+    private class DelayFirstManagedClose(
+        private val release: CountDownLatch,
+    ) {
+        val handedOffAt = AtomicReference<Instant?>(null)
+        val generation = AtomicReference<String?>(null)
+        private val poolType = Class.forName(POOL_TYPE)
+        private val closerType = Class.forName(CLOSER_TYPE)
+
+        fun initializer(): ApplicationContextInitializer<ConfigurableApplicationContext> =
+            ApplicationContextInitializer { context ->
+                @Suppress("UNCHECKED_CAST")
+                (context as GenericApplicationContext).registerBean(
+                    "delayFirstManagedClose",
+                    closerType as Class<Any>,
+                    Supplier { closer(context) },
+                    BeanDefinitionCustomizer { it.isPrimary = true },
+                )
+            }
+
+        private fun closer(context: ApplicationContext): Any =
+            Proxy.newProxyInstance(closerType.classLoader, arrayOf(closerType)) { proxy, method, args ->
+                when (method.name) {
+                    "close" -> closerType.getMethod("close", poolType).invoke(context.getBean("poolCloser"), delayedIfFirst(args!![0]))
+                    "hashCode" -> System.identityHashCode(proxy)
+                    "equals" -> proxy === args?.get(0)
+                    else -> "DelayFirstManagedClose"
+                }
+            }
+
+        private fun delayedIfFirst(pool: Any): Any {
+            val managed = poolType.getMethod("getManagedGeneration").invoke(pool) != null
+            if (!managed || !generation.compareAndSet(null, poolType.getMethod("getGeneration").invoke(pool) as String?)) return pool
+            handedOffAt.set(Instant.now())
+            return Proxy.newProxyInstance(poolType.classLoader, arrayOf(poolType)) { _, method, args ->
+                if (method.name == "close" && method.parameterCount == 0) release.await()
+                method.invoke(pool, *(args ?: emptyArray()))
+            }
         }
     }
 
@@ -1086,7 +1390,8 @@ class ManagedLakeReadsE2eTest {
 
         /**
          * H (#818c C): a short age bound and ceiling, so the test crosses both in seconds, the tick below the age (the
-         * binder refuses one at or above it). LakeRules admits it: 12 + 2 × 260 + 6 + 10 ≤ 7 × 3600.
+         * binder refuses one at or above it). LakeRules admits it: 12 + 2 × 7 + 6 + 92 + 10 = 134 ≤ 7 × 3600 (#818d).
+         * I1–I3 run the same profile.
          */
         private const val H_MAX_AGE_SECONDS = 12L
         private const val H_TICK_SECONDS = 10L
@@ -1096,8 +1401,26 @@ class ManagedLakeReadsE2eTest {
         /** The shipped `protection-days` (7) × 86400 / 24: the window LakeRules holds H's sum to. */
         private const val H_PROTECTION_WINDOW_SECONDS = 7L * 3600L
 
-        /** The reaper delay the record's bound adds twice; integration-tests cannot see web's constant, so a literal. */
-        private const val REAPER_DELAY_SECONDS = 260L
+        /**
+         * The reaper delay the record's bound adds twice (#818d: cadence 5 + 2 × pass bound 1); integration-tests
+         * cannot see web's constant, so a literal, never read back from the class under test.
+         */
+        private const val REAPER_DELAY_SECONDS = 7L
+
+        /** #818d — the reader-termination term (`ReaderTermination.SECONDS` in datasources), a literal for the same reason. */
+        private const val READER_TERMINATION_SECONDS = 92L
+
+        /** #818d — the per-close deadline (`PoolCloser.DEADLINE_SECONDS`), a literal; I3 waits for its WARN. */
+        private const val POOL_CLOSE_DEADLINE_SECONDS = 65L
+
+        /** #818d — the reaper's own thread, and the jobs' shared one, by the spec's names. */
+        private const val REAPER_THREAD = "dp-reaper"
+        private const val APP_I1 = "dp818-i1"
+        private const val APP_I2 = "dp818-i2"
+        private const val APP_I3 = "dp818-i3"
+        private const val STUCK_SLACK_SECONDS = 10L
+        private const val POOL_TYPE = "co.datapipelines.datasources.pooling.ConnectionPool"
+        private const val CLOSER_TYPE = "co.datapipelines.datasources.pooling.PoolCloser"
 
         /** 2 000⁴ rows: minutes of work, so nothing but the close can end it inside the bound. */
         private const val H_TRIPS = "$LAKE.sales.trips"
@@ -1236,13 +1559,14 @@ class ManagedLakeReadsE2eTest {
             application: String? = null,
             recordTicks: Boolean = false,
             extra: List<Pair<String, String>> = emptyList(),
+            initializers: List<ApplicationContextInitializer<ConfigurableApplicationContext>> = emptyList(),
         ): ConfigurableApplicationContext {
             val sources =
                 listOfNotNull(
                     DatapipelinesApplication::class.java,
                     ScheduledJobsSchedulerE2eTest.TickRecorderConfiguration::class.java.takeIf { recordTicks },
                 )
-            return SpringApplicationBuilder(*sources.toTypedArray()).run(
+            return SpringApplicationBuilder(*sources.toTypedArray()).initializers(*initializers.toTypedArray()).run(
                 "--server.port=0",
                 *(bootProperties(maxAgeSeconds, tickSeconds, name, enabled, application) + extra)
                     .map { (k, v) -> "--$k=$v" }

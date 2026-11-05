@@ -1,7 +1,9 @@
 package co.datapipelines.web.config
 
+import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.pooling.PoolLifecycleMetrics
 import co.datapipelines.datasources.pooling.ReapOutcome
 import co.datapipelines.web.capturingLogEvents
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -11,6 +13,7 @@ import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
+import org.springframework.scheduling.annotation.Scheduled
 
 /**
  * #818c (record §10 RULING 4 amended 2026-11-05, item 3) — the reaper pass logs the count of managed generations it
@@ -40,6 +43,57 @@ class DatasourcePoolReaperSchedulerTest {
 
         events.shouldBeEmpty()
         verify(exactly = 1) { datasources.reapRetiredPools() }
+    }
+
+    @Test
+    fun `a pass over its bound logs one WARN with its elapsed time and counts it - #818d`() {
+        val metrics = SlowPassMetrics()
+        val scheduler = DatasourcePoolReaperScheduler(registryReaping(ReapOutcome(0, 0, 0)), metrics)
+        val over = DatasourcePoolReaperScheduler.PASS_BOUND_MILLIS + 1
+
+        val events = capturingLogEvents(logger) { scheduler.passMeasured(over) }
+
+        events.map { it.level to it.formattedMessage.substringBefore(" message=") } shouldBe
+            listOf(Level.WARN to "event=datasource.reaper_pass_slow elapsed_ms=$over bound_ms=1000")
+        metrics.slow shouldBe 1
+    }
+
+    @Test
+    fun `a pass at or under its bound is silent and uncounted - #818d`() {
+        val metrics = SlowPassMetrics()
+        val scheduler = DatasourcePoolReaperScheduler(registryReaping(ReapOutcome(0, 0, 0)), metrics)
+
+        val events =
+            capturingLogEvents(logger) {
+                scheduler.passMeasured(0)
+                scheduler.passMeasured(DatasourcePoolReaperScheduler.PASS_BOUND_MILLIS)
+            }
+
+        events.shouldBeEmpty()
+        metrics.slow shouldBe 0
+    }
+
+    @Test
+    fun `the reaper names the dp-reaper scheduler, and only it - #818d`() {
+        val scheduled = DatasourcePoolReaperScheduler::class.java.getMethod("reap").getAnnotation(Scheduled::class.java)
+
+        scheduled.scheduler shouldBe PoolReaperTaskScheduler.BEAN_NAME
+        PoolReaperTaskScheduler.THREAD_NAME shouldBe "dp-reaper"
+    }
+
+    private class SlowPassMetrics : PoolLifecycleMetrics {
+        var slow = 0
+
+        override fun poolRetired(datasourceName: String) = Unit
+
+        override fun poolHardClosed(
+            datasourceName: String,
+            activeConnections: Int,
+        ) = Unit
+
+        override fun reaperPassSlow() {
+            slow++
+        }
     }
 
     private fun registryReaping(outcome: ReapOutcome): DatasourceRegistry = mockk { every { reapRetiredPools() } returns outcome }

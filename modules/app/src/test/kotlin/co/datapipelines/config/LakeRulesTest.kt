@@ -1,5 +1,6 @@
 package co.datapipelines.config
 
+import co.datapipelines.web.config.ReaderTerminationTerm
 import co.datapipelines.web.config.ReaperDelay
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldHaveSize
@@ -133,31 +134,41 @@ class LakeRulesTest {
     }
 
     @Test
-    fun `age bound plus twice the reaper delay plus retire ceiling plus tick fits an hour of every protected day`() {
-        // Record §10 RULING 4 as amended 2026-11-05 (#818c). One protected day = 3600 s. Reaper delay 260 (the
-        // scheduling layer's derived constant); shipped ceiling = node timeout 60 + 30 = 90; tick 60.
-        // 2930 + 2 × 260 + 90 + 60 = 3600 is admitted (≤); 2931 refuses, naming every term it used.
-        enabled(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to "2930") shouldContainExactly emptyList()
-        val overBoundary = enabled(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to "2931")
+    fun `age bound plus twice the reaper delay plus ceiling plus reader termination plus tick fits an hour of every protected day`() {
+        // Record §10 RULING 4, second amendment (#818d, #835). One protected day = 3600 s. Reaper delay 7 and reader
+        // termination 92 (the derived constants); shipped ceiling = node timeout 60 + 30 = 90; tick 60.
+        // 3344 + 2 × 7 + 90 + 92 + 60 = 3600 is admitted (≤); 3345 refuses, naming every term it used.
+        enabled(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to "3344") shouldContainExactly emptyList()
+        val overBoundary = enabled(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to "3345")
         overBoundary shouldHaveSize 1
         val refused = overBoundary.single()
         refused shouldStartWith LakeRules.MAX_GENERATION_AGE_SECONDS
-        refused shouldContain "2 × the reaper delay (260)"
+        refused shouldContain "2 × the reaper delay (7)"
         refused shouldContain "retire ceiling (90)"
+        refused shouldContain "the reader termination (92)"
         refused shouldContain "(3600)"
     }
 
     @Test
-    fun `the reads rule reads the reaper delay from the scheduling layer - never a typed copy of it`() {
-        // #818c: ReaperDelayDerivationTest pins ReaperDelay.SECONDS to the jobs; this pins LakeRules to the constant.
-        val source = repoFile("modules/app/src/main/kotlin/co/datapipelines/config/LakeRules.kt").readText()
+    fun `the reads rule reads both derived terms from their constants - never a typed copy of either`() {
+        // #818c/#818d: ReaperDelayDerivationTest and ReaderTerminationDerivationTest pin the constants; this pins
+        // LakeRules to them. Comments are removed first: prose (a `§7` cross-reference) is not a typed copy.
+        val source =
+            repoFile("modules/app/src/main/kotlin/co/datapipelines/config/LakeRules.kt")
+                .readText()
+                .replace(Regex("(?s)/\\*.*?\\*/"), "")
+                .lines()
+                .joinToString("\n") { it.substringBefore("//") }
         source shouldContain "ReaperDelay.SECONDS"
-        Regex("\\b${ReaperDelay.SECONDS}L?\\b").findAll(source).map { it.value }.toList() shouldContainExactly emptyList()
+        source shouldContain "ReaderTerminationTerm.SECONDS"
+        listOf(ReaperDelay.SECONDS, ReaderTerminationTerm.SECONDS).forEach { constant ->
+            Regex("\\b${constant}L?\\b").findAll(source).map { it.value }.toList() shouldContainExactly emptyList()
+        }
     }
 
     @Test
     fun `the retire ceiling is read the way datasources derives it`() {
-        val atBoundary = mapOf(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to "2930")
+        val atBoundary = mapOf(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to "3344")
 
         fun judged(snapshot: ConfigSnapshot): List<String> =
             ConfigValidator

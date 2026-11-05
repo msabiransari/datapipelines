@@ -314,7 +314,7 @@ class DomainConfiguration {
     @Bean
     // Ten collaborators: 089's registry + extension directory met 094's pool metrics + ceiling
     // and 109's view-outcome recorder at the merge; #818 adds the managed lake read and the
-    // generation age bound. Each is a distinct seam the registry owns; splitting the bean would
+    // generation age bound, #818d the reaper's pool closer. Each is a distinct seam the registry owns; splitting the bean would
     // hide the wiring this class exists to make explicit (§8.4).
     @Suppress("LongParameterList")
     fun datasourceRegistry(
@@ -331,6 +331,7 @@ class DomainConfiguration {
         executorProperties: ExecutorProperties,
         managedLake: co.datapipelines.datasources.ManagedLakeCatalog,
         lakeProperties: org.springframework.beans.factory.ObjectProvider<co.datapipelines.lake.LakeProperties>,
+        poolCloser: co.datapipelines.datasources.pooling.PoolCloser,
     ): DatasourceRegistry =
         DefaultDatasourceRegistry(
             repository = repository,
@@ -379,6 +380,9 @@ class DomainConfiguration {
                     ?.reads
                     ?.maxGenerationAgeSeconds
                     ?.let(java.time.Duration::ofSeconds),
+            // #818d (record §10 RULING 4 amended, item 6): the reaper hands each close to the `dp-pool-close`
+            // threads (`PoolReaperSchedulingConfiguration.poolCloser`); application shutdown still closes in place.
+            poolCloser = poolCloser,
         )
 
     /**
