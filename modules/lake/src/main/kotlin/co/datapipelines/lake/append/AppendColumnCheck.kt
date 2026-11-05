@@ -24,7 +24,8 @@ data class AppendColumnPlan(
 )
 
 /**
- * Strict DuckDB-to-Iceberg binding (§8 step 4). Native types are inspected before canonical string fallbacks
+ * Strict DuckDB-to-Iceberg binding (§8 step 4). Names use DuckDB's ASCII case comparison.
+ * Native types are inspected before canonical string fallbacks
  * could hide nested values, UUIDs, 128-bit overflow or timezone loss. Only Iceberg promotions are admitted.
  * DuckDB staging is fixed to UTC; its unzoned timestamps therefore denote UTC instants. Nanosecond timestamp
  * and zoned time types are refused because the managed schema cannot represent their full precision/zone.
@@ -97,7 +98,10 @@ class AppendColumnCheck {
         refuse(PipelineErrorCodes.Lake.APPEND_TYPE_MISMATCH, mapOf("source_type" to base))
     }
 
-    private fun folded(name: String) = name.lowercase(Locale.ROOT)
+    private fun folded(name: String): String =
+        buildString(name.length) {
+            name.forEach { append(if (it in 'A'..'Z') it.lowercaseChar() else it) }
+        }
 
     private fun refuse(
         code: String,

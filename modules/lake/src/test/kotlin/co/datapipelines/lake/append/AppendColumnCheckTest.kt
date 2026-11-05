@@ -124,6 +124,18 @@ class AppendColumnCheckTest {
         }.code shouldBe PipelineErrorCodes.Lake.APPEND_TYPE_MISMATCH
     }
 
+    @ParameterizedTest
+    @MethodSource("nonAsciiIdentifiers")
+    fun `non ASCII names cannot alias an ASCII managed field through Unicode case folding`(names: Pair<String, String>) {
+        val target = Schema(Types.NestedField.optional(1, names.second, Types.IntegerType.get()))
+        val failure =
+            shouldThrow<DatapipelinesException> {
+                checker.check(input(listOf(Column(names.first, "INTEGER"))), target)
+            }
+        failure.code shouldBe PipelineErrorCodes.Lake.APPEND_UNKNOWN_COLUMN
+        failure.details["columns"] shouldBe listOf(names.first)
+    }
+
     @Test
     fun `a declared precision beyond Iceberg or an impossible scale is refused`() {
         listOf(Column("id", "DECIMAL", 39, 0), Column("id", "DECIMAL", 0, 0), Column("id", "DECIMAL", 12, 13)).forEach { column ->
@@ -192,6 +204,9 @@ class AppendColumnCheckTest {
                 add(Column("id", "DECIMAL(12,2)", 12, 2) to Types.DecimalType.of(12, 2))
                 add(Column("id", "DECIMAL", 12, 2) to Types.DecimalType.of(18, 2))
             }
+
+        @JvmStatic
+        fun nonAsciiIdentifiers(): List<Pair<String, String>> = listOf("K" to "k", "İ" to "i", "ı" to "i", "ſ" to "s")
 
         @JvmStatic
         fun incompatible(): List<Pair<Column, Type.PrimitiveType>> =

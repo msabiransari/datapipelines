@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.80 (revised — see Change Log)
+**Status:** v1.81 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-11-05
@@ -1703,7 +1703,7 @@ The `lake.definition.*` rows (#798, dp-lake P3; [lake.md](lake.md)) are the mana
 |---|---|---|
 | `lake.delivery.invalid_key` | 400 | Delivery feed and resolved id must match `[a-z0-9_-]{1,64}` before any storage or SQL access. |
 | `lake.append.ambiguous_column` | 400 | The staged result has column names that differ only by case. |
-| `lake.append.unknown_column` | 400 | The staged result contains a column outside the managed table schema. |
+| `lake.append.unknown_column` | 400 | The staged result contains a column outside the managed table schema. Name comparison follows DuckDB: ASCII case only, without Unicode normalization. |
 | `lake.append.missing_required_column` | 400 | The staged result omits a required managed table column. |
 | `lake.append.null_in_required` | 400 | The staged result has null values in required columns; details contain every count. |
 | `lake.append.type_mismatch` | 400 | A staged native type cannot be stored without narrowing or coercion. |
@@ -1985,6 +1985,7 @@ Out of scope for v1.1, tracked for future:
 | 2026-11-05 | v1.78 | 799 (#799) | §13.25 adds immutable recipe conflict and storage-write refusals; a recipe is conditionally written before catalog publication and never overwritten. |
 | 2026-11-05 | v1.79 | 799 (#799) | §13.25 registers the effective-principal lake append permission refusal. |
 | 2026-11-05 | v1.80 | 799 (#799) | §13.25 adds strict append column-name, required-value and native-type refusals before data files are opened. |
+| 2026-11-05 | v1.81 | 799 (#799) | §13.25 pins column-name comparison to DuckDB’s ASCII identifier semantics; non-ASCII names cannot alias managed ASCII fields through Unicode folding. |
 | 2026-11-04 | v1.76 | 799 (#799) trusted listing | §13.25 adds six delivery key/listing/manifest refusal codes, including retryable incomplete and unavailable-store outcomes; SDK messages and causes stay private. |
 | 2026-11-04 | v1.75 | 799 (#799) | Delivery node block, managed-only qualified append targets, and nine §13.25 structure refusals. Appends require one delivery and a transitive dependency barrier over all non-append nodes; rejects-producing scripts must be strict. External readonly datasources retain their refusal. |
 | 2026-11-04 | v1.74 | 780 (#780) script-invariants docs | §13.18's two script rows say what the code does: `pool_exhausted` names both refusal paths (the full admission bound, and an admitted evaluation that waited its whole wall clock for a running slot); `invariants_too_large` states the read-back's COMBINED count — written outputs and rejects plus table inputs, row mode adding the streamed input and a caller output's buffered rows and rejects. No code, code count or permission change. — Renumbered at merge after #810. |
