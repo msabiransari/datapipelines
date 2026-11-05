@@ -378,7 +378,7 @@ class H2StagingPoolLifecycleTest {
     private companion object {
         const val TIMEOUT_MS = 10_000L
 
-        /** H2's "Admin rights are required", read off the pinned driver (2.3.232). */
+        /** H2's "Admin rights are required", read off the pinned driver (2.3.232, verified 2026-09-16). */
         const val ADMIN_REQUIRED = "90040"
     }
 }

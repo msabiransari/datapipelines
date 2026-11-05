@@ -107,7 +107,7 @@ object H2EgressMapper {
      *
      * `DECFLOAT` is H2 2.x's exact, arbitrary-scale decimal: the precision argument
      * counts digits, and values keep whatever scale they carry. Measured on the pinned
-     * H2 (2.3.232): `ResultSetMetaData` reports a `DECFLOAT(100000)` column as
+     * H2 (2.3.232, 2026-09-08): `ResultSetMetaData` reports a `DECFLOAT(100000)` column as
      * `Types.NUMERIC` at precision 100000 (so the read path and the §6 ceiling
      * round-trip rule are unchanged), `getObject` yields a `BigDecimal`, and a
      * `BigDecimal` bound via [Types.DECIMAL] round-trips with every fraction intact.

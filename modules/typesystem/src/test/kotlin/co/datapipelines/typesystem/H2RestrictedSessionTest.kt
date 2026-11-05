@@ -15,7 +15,7 @@ import java.util.UUID
 
 /**
  * The two-phase de-privileged open (staging.md §9.5, 186) driven directly against the pinned
- * H2 driver (2.3.232) — the module's own guard for the helper `staging` and `datasources`
+ * H2 driver (2.3.232, verified 2026-09-21) — the module's own guard for the helper `staging` and `datasources`
  * share. The behavioural refusals it enables (FILE_READ/CREATE ALIAS answering 90040) are
  * pinned by the callers' suites (`H2StagingPrivilegeTest`, `SqlProbeScratchContainmentTest`,
  * `H2InProcessPoolTest`); this pins the MECHANICS: the restricted identity, the grants, the

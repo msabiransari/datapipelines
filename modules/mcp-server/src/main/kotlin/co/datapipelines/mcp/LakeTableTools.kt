@@ -3,6 +3,7 @@ package co.datapipelines.mcp
 import co.datapipelines.application.datasources.LakeTableRegistryService
 import co.datapipelines.application.datasources.toWireMap
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.DuckDbVersion
 import co.datapipelines.executor.ExecutorJson
 import io.modelcontextprotocol.spec.McpSchema
 
@@ -26,10 +27,16 @@ import io.modelcontextprotocol.spec.McpSchema
 /**
  * `lake_tables_register` (mcp-server.md §6.2.29) — register one table on a LAKE datasource.
  * Permission: `lake_table.manage`. Mutating.
+ *
+ * [duckdbCore] is the engine version the description states, rendered from the build's pin
+ * ([DuckDbVersion]'s current core, the same default as `DocContext.duckdbCore`) — a parameter so a
+ * render test can pass a sentinel and prove the sentence is rendered from the token, never
+ * typed (#829). Production wiring never passes it.
  */
 class LakeTablesRegisterTool(
     private val datasources: DatasourceRegistry,
     private val lakeTables: LakeTableRegistryService,
+    private val duckdbCore: String = DuckDbVersion.CURRENT.core,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -40,7 +47,7 @@ class LakeTablesRegisterTool(
                     "'acme.analytics' shorthand), table, format (parquet | iceberg) and location are required; " +
                     "partition_column is optional. The location is s3://bucket/prefix/ (parquet: a directory or " +
                     "glob; iceberg: the table's CURRENT metadata file, e.g. " +
-                    "s3://bucket/table/metadata/00042-<uuid>.metadata.json — DuckDB 1.5.5 cannot scan a " +
+                    "s3://bucket/table/metadata/00042-<uuid>.metadata.json — DuckDB $duckdbCore cannot scan a " +
                     "pyiceberg table by its root, so register the file, and re-register it when the table " +
                     "commits) or a file:// path — no other scheme, and " +
                     "no quotes, backslashes, whitespace or control characters (it is interpolated into the " +

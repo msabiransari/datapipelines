@@ -51,7 +51,7 @@ name, `FROM acme.analytics.events_by_day`.
 metadata file — `s3://bucket/table/metadata/00042-<uuid>.metadata.json`. A table that still
 receives commits gets a new metadata file per commit: re-register to follow it.
 
-**Pruning — the working rules, measured first-hand on DuckDB 1.5.5, until a new measurement
+**Pruning — the working rules, measured first-hand on DuckDB 1.5.5, 2026-09-09, until a new measurement
 replaces them.** The table listing and `datasources_get_table_stats` expose a registered
 `partition_column` (also an index entry of kind `partition` in stats); `null` means no
 registered partition key — it does not tell you the file count, prove the physical layout, or

@@ -1274,8 +1274,8 @@ Measured 2026-09-07 against the pinned drivers. "In flight" is a cancel issued w
 
 | Dialect | Driver | In flight | Before registration | Re-measured every gate |
 |---|---|---|---|---|
-| H2 | com.h2database:h2 2.3.232 | honoured (~0.79 s) | **dropped** | yes |
-| SQLite | org.xerial:sqlite-jdbc 3.49.1.0 | honoured (~0.87 s) | **dropped** | yes |
+| H2 | com.h2database:h2 2.3.232 | honoured (measured 2026-09-07, ~0.79 s) | **dropped** | yes |
+| SQLite | org.xerial:sqlite-jdbc 3.49.1.0 | honoured (measured 2026-09-07, ~0.87 s) | **dropped** | yes |
 | DuckDB | org.duckdb:duckdb_jdbc 1.5.5.1 | honoured (~0.79 s) | **dropped** | yes |
 | MySQL | com.mysql:mysql-connector-j 9.7.0 | honoured (0.90 / 0.79 / 0.78 s) | **dropped** | no — see below |
 | Postgres | org.postgresql:postgresql 42.7.13 | honoured (0.97 s) | **dropped** | no — see below |
