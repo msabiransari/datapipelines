@@ -17,7 +17,7 @@ the GROUP BY expression to the identical SELECT expression when it contains a pa
 marker — `Column "x.amount" must be in the GROUP BY list` (SQLState 90016), a lie that sends
 you chasing the wrong fix. Compute the classified value in a derived table (`FROM (SELECT
 CASE ... :threshold ... END AS bucket ...) x`) and `GROUP BY x.bucket` — a plain column
-always matches. Measured on H2 2.3.232.
+always matches. Measured on H2 2.3.232, 2026-09-04.
 
 ### 6.2 DECIMAL ÷ DECIMAL in H2
 
@@ -26,7 +26,7 @@ arithmetic collapses result scale (a `DECIMAL(·,2)/DECIMAL(·,0)` division can 
 scale-0): `SUM(distance)/SUM(seconds)*3600` returned **0** where the true answer was ~12, and
 `100.0 * part / whole` rounded to one decimal. Cast every ratio operand: `CAST(SUM(x) AS
 DOUBLE) / NULLIF(CAST(SUM(y) AS DOUBLE), 0)`. Verified empirically against the pinned driver
-2.3.232 — plain DECIMAL gave 2448.00 where DOUBLE gave the correct 2456.81.
+2.3.232, 2026-09-04 — plain DECIMAL gave 2448.00 where DOUBLE gave the correct 2456.81.
 
 ### 6.3 H2 names `VALUES` columns `C1, C2, …` — and `rows` is reserved on MySQL/DuckDB
 
@@ -80,7 +80,7 @@ in a branch that never runs. When it trips, the execution returns `pipeline.node
 ("Pipeline aborted: node <id> failed") and your text is the message of the LAST `caused_by`
 entry (`For input string: "guard: found 1"`). The whole run aborts even if nothing depends on
 the guard, so give it `depends_on` only to order it; a passing guard stages one row you ignore.
-Measured on H2 2.3.232.
+Measured on H2 2.3.232, 2026-10-02.
 
 ### 6.7 A library cannot hold a literal list in a top-level `<#assign>`
 
@@ -108,6 +108,6 @@ statement ... expected "identifier"` (SQLState 42001) — and so do `hour`, `use
 `current_date`; `date` and a non-word such as `yr` are accepted. Quoting works but is a trap:
 `AS "year"` keeps the lower-case name, and a later bare `SELECT year` from that staged table
 is a syntax error again. Choose a non-reserved alias (`yr`, `mo`, `dy`, `val`, `k`) in every
-tempdb node and in every table a downstream node reads. Measured on H2 2.3.232 with
+tempdb node and in every table a downstream node reads. Measured on H2 2.3.232, 2026-10-02, with
 `sql_probe {"name": "tempdb"}`; the nine refused and two accepted words above are the whole
 list measured, not a catalogue of the engine's reserved words.

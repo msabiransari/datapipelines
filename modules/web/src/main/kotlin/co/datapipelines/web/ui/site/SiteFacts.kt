@@ -60,7 +60,7 @@ data class SiteFacts(
     /**
      * #781 — the bundled `duckdb_jdbc` version the jar ships, as the build resolved it ([DuckDbVersion]).
      * A sentence that states an engine behaviour names the version through this token, never a literal;
-     * at a driver bump `DuckDbVersionSpecDriftTest` lists every page that renders it for a re-probe.
+     * at a driver bump `DriverVersionSpecDriftTest` lists every page that renders it for a re-probe.
      */
     val duckdbVersion: String,
 ) {

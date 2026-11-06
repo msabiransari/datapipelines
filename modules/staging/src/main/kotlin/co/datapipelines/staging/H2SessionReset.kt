@@ -36,7 +36,7 @@ internal data class SessionDefaults(
 }
 
 /**
- * Lease-return sanitation, verified against the pinned driver (2.3.232): what a pooled
+ * Lease-return sanitation, verified against the pinned driver (2.3.232, 2026-09-16): what a pooled
  * connection carries between leases unless something undoes it, and how each is undone.
  *
  * ## Why this exists at all
@@ -64,7 +64,7 @@ internal data class SessionDefaults(
  *   `SCHEMA_SEARCH_PATH`, `TIME ZONE` — `InformationSchemaTable.sessionState`), so this is a
  *   catalog enumeration, not a parser over SQL text; the `STATE_COMMAND` column is never read.
  * - **`QUERY_TIMEOUT` and `LOCK_TIMEOUT`** back to the driver's session defaults (`0` and
- *   `2000` ms on 2.3.232 — `Constants.INITIAL_LOCK_TIMEOUT`). Neither appears in
+ *   `2000` ms on 2.3.232, verified 2026-09-16 — `Constants.INITIAL_LOCK_TIMEOUT`). Neither appears in
  *   `SESSION_STATE`, and a leaked `SET QUERY_TIMEOUT` would bound the next node's batched
  *   inserts, which set no statement-level timeout of their own.
  *
@@ -110,7 +110,7 @@ internal object H2SessionReset {
     /**
      * The session's own report of what it carries. Under the restricted user this is the
      * session's view only — H2 shows every session its own state, and no admin right is needed
-     * (verified on 2.3.232).
+     * (verified on 2.3.232, 2026-09-16).
      */
     private fun readSessionState(connection: Connection): List<String> =
         connection.createStatement().use { st ->

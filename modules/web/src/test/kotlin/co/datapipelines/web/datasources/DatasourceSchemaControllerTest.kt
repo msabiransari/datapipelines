@@ -413,7 +413,7 @@ class DatasourceSchemaControllerTest {
 
     @Test
     fun `connection loss with a NON-08 state during the current-schema read is the catalogued 502 - not a raw 500`() {
-        // R5 F1 shape (a) through the FULL web path: h2 2.3.232 reports a closed connection
+        // R5 F1 shape (a) through the FULL web path: h2 2.3.232 (verified 2026-08-16) reports a closed connection
         // OBJECT as JdbcSQLNonTransientException state 90007 — neither an 08 state nor a
         // connection-exception subclass, so the 08-family classifier cannot see it. Round 4's
         // narrowed catch let it propagate RAW past every translator (raw 500). The

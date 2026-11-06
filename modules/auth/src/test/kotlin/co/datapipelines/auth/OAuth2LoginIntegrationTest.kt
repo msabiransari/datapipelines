@@ -55,6 +55,8 @@ class OAuth2LoginIntegrationTest {
 
     @Autowired private lateinit var authorizedClientRepository: OAuth2AuthorizedClientRepository
 
+    @Autowired private lateinit var authFilters: AuthFilters
+
     private val base: String get() = "http://localhost:${origin.originPort}"
 
     private val jar = mutableMapOf<String, String>()
@@ -71,6 +73,13 @@ class OAuth2LoginIntegrationTest {
 
     @BeforeEach
     fun freshBrowser() {
+        // #802: the credential filters anchor ahead of LogoutFilter, which also moves the
+        // login rate limiter ahead of the OAuth2 handlers — this class's /oauth2/ and
+        // /login/oauth2/code requests are now METERED, and the per-IP window is shared by
+        // the whole context (AuthHttpBoundaryTest's exact-once case owns the same budget).
+        // A fresh window per case, the documented seam (034 F4), so an early 429 can never
+        // masquerade as a flow regression.
+        authFilters.loginRateLimit.resetWindowsForTest()
         origin.forwardTo(appPort)
         jar.clear()
         setCookieNames.clear()

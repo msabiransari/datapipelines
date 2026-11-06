@@ -1,9 +1,9 @@
 # Module Structure Specification
 
-**Status:** v1.12 (frozen contract — additive-only changes after this point)
+**Status:** v1.13 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** (all other specs — this spec operationalizes them into code structure)
-**Last updated:** 2026-11-04
+**Last updated:** 2026-11-05
 
 ---
 
@@ -791,61 +791,37 @@ build's `allowedInternalDependencies` map carries the same closed set).
 
 ```toml
 [versions]
-kotlin = "1.9.24"
-spring-boot = "3.3.2"
-kotlinx-coroutines = "1.8.1"
-jackson = "2.17.2"
-flyway = "10.17.0"
-slf4j = "2.0.13"
-logback = "1.5.6"
-freemarker = "2.3.33"
-hikari = "5.1.0"
-postgresql = "42.7.3"
-mssql-jdbc = "12.6.1.jre11"
-mysql-connector-j = "8.4.0"
-h2 = "2.2.224"
-duckdb-jdbc = "1.0.0"
-sqlite-jdbc = "3.46.1.0"
-ojdbc11 = "23.4.0.24.114"
-argon2-jvm = "2.11"
-jjwt = "0.12.6"
-micrometer = "1.13.2"
-spring-boot-starter-test = "3.3.2"
-testcontainers = "1.20.1"
-mcp-sdk = "0.10.0"
-htmx = "2.0.0"
-junit-jupiter = "5.10.2"
-mockk = "1.13.12"
-kotest = "5.9.1"
+# SHAPE ONLY (#827): the values are deliberately NOT reproduced here — this excerpt went
+# stale while reading as authority. `gradle/libs.versions.toml` is the one place a version
+# literal lives; review the catalog (and bump drivers) there.
+kotlin = "<stable>"
+spring-boot = "<stable>"
+jackson = "<BOM or stable>"
+flyway = "<BOM or stable>"
 
 [libraries]
 kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }
-kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
 jackson-module-kotlin = { module = "com.fasterxml.jackson.module:jackson-module-kotlin", version.ref = "jackson" }
 # ... (every dependency declared here, used by ref from build.gradle.kts files)
 
 spring-boot-starter-web = { module = "org.springframework.boot:spring-boot-starter-web", version.ref = "spring-boot" }
-spring-boot-starter-jdbc = { module = "org.springframework.boot:spring-boot-starter-jdbc", version.ref = "spring-boot" }
-spring-boot-starter-data-redis = { module = "org.springframework.boot:spring-boot-starter-data-redis", version.ref = "spring-boot" }
-spring-boot-starter-oauth2-client = { module = "org.springframework.boot:spring-boot-starter-oauth2-client", version.ref = "spring-boot" }
 
 # Flyway — `app` module only (§3.1 rule 2). Since Flyway 10 the Postgres support is a
 # separate artifact; flyway-core alone cannot migrate a Postgres target.
 flyway-core = { module = "org.flywaydb:flyway-core", version.ref = "flyway" }
 flyway-database-postgresql = { module = "org.flywaydb:flyway-database-postgresql", version.ref = "flyway" }
-# etc.
 ```
 
 **Redis client:** no explicit entry — `spring-boot-starter-data-redis` brings **Lettuce** as its default client, version-managed by the Spring Boot BOM. Adding a second, separately-pinned Lettuce entry would let it drift from the BOM; if Jedis is ever wanted instead, that is an explicit exclusion + dependency, and a spec change here.
 
-> **Gate G2 — RESOLVED 2026-08-07** (lockfile sub-item closed 2026-08-15, §7.6). Every entry was resolved against `repo1.maven.org` `maven-metadata.xml`, pre-releases rejected, and BOM-managed artifacts (verified by parsing `spring-boot-dependencies:3.5.16` + its 43 imported BOMs) declared version-less. **`gradle/libs.versions.toml` is now the ratified source of truth for versions; the table above is historical.** Anchor decisions: Spring Boot 3.5.16 (4.x exists but §11.1 freezes 3.x for v1), Kotlin 2.4.10 (with an empirically-verified conflict-resolution win over the BOM's kotlin-bom 1.9.25 — see the toml comment). `gradle.lockfile` (transitive pinning) landed 2026-08-15 per §7.6. The original G2 procedure is retained below for future catalog changes:
+> **Gate G2 — RESOLVED 2026-08-07** (lockfile sub-item closed 2026-08-15, §7.6). Every entry was resolved against `repo1.maven.org` `maven-metadata.xml`, pre-releases rejected, and BOM-managed artifacts (verified by parsing `spring-boot-dependencies:3.5.16` + its 43 imported BOMs) declared version-less. **`gradle/libs.versions.toml` is now the ratified source of truth for versions; the excerpt above is shape-only (#827).** Anchor decisions: Spring Boot 3.5.16 (4.x exists but §11.1 freezes 3.x for v1), Kotlin 2.4.10 (with an empirically-verified conflict-resolution win over the BOM's kotlin-bom 1.9.25 — see the toml comment). `gradle.lockfile` (transitive pinning) landed 2026-08-15 per §7.6. The original G2 procedure is retained below for future catalog changes:
 > 1. Resolve the current stable release: `curl -s 'https://search.maven.org/solrsearch/select?q=g:"org.flywaydb"+AND+a:"flyway-core"&core=gav&rows=5&wt=json' | jq -r '.response.docs[].v'` (repeat per artifact; or run `./gradlew dependencyUpdates` once the build exists).
 > 2. Reject anything that is not a released stable version — **no ranges, no `+`, no `latest.release`, no SNAPSHOT, no RC/M/beta** (§6.1, and the project-wide version-pinning rule).
 > 3. Check BOM-managed artifacts are **not** pinned here at all: anything the `spring-boot` BOM manages (Jackson, Micrometer, Lettuce, HikariCP, the Spring modules) takes its version from the BOM. A local pin that disagrees with the BOM is a silent runtime-incompatibility source.
 > 4. Verify JDK 21 compatibility for each pinned artifact, then commit `gradle.lockfile` (§6.1) in the same commit as the catalog.
 > 5. Record the date the catalog was verified in the change log below.
 >
-> This gate is the reason the versions above are safe to leave stale: they are explicitly labelled unverified, so nobody builds on them believing otherwise.
+> The excerpt is shape-only on purpose: `gradle/libs.versions.toml` is the one place a version literal lives, so a catalog review (or a driver bump) cannot be misled by a stale copy of this page.
 
 ### 6.1 Versioning rules
 
@@ -1315,6 +1291,7 @@ Before considering the module structure "ready":
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-04 | v1.13 | 827 (#826) | §6's catalog excerpt is SHAPE ONLY — the literal versions are gone (they had staled while reading as authority: the excerpt carried kotlin 1.9.24 / spring-boot 3.3.2 / a then-current duckdb-jdbc line, against the toml's ratified values). `gradle/libs.versions.toml` is the one place a version literal lives; the G2 note and §6.1 say so. No dependency, module or code change. |
 | 2026-11-04 | v1.12 | 798 (#798, dp-lake P3) | `lake` declares `auth` (§4.1 diagram edge, §4.2 note, §5.21; the §4.2 row already allowed it) for `AuditEventSink`; §5.21 gains the table definitions' public API ([Lake](lake.md)). No new module, no new external dependency. |
 | 2026-11-04 | v1.11 | 795 (#795, dp-lake P1) | §5.5 `staging`: external dependency `org.duckdb:duckdb_jdbc` and the DuckDB staging engine's public classes ([Staging §8.5](staging.md#85-the-duckdb-engine)). No new internal edge: `StagingEngine` moved into `typesystem`, which `staging` already depends on. Renumbered at merge after #816’s v1.10. |
 | 2026-11-03 | v1.10 | 816 (#816) | §5.1: `typesystem` gains the package `co.datapipelines.typesystem.jdbc` — the TEMPORARY raw-text author-SQL guard and its JDBC decorator ([Datasources §5.8](datasources.md#58-the-author-sql-guard-on-duckdb-and-lake-leases-temporary-816)), shared by `datasources` and DuckDB `staging`. No dependency edge changes. Additive. |

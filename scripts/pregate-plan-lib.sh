@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Read-only plan shared by preview and execution. Commands are arrays, never eval'd.
 # Requires pregate-2b-lib.sh; callers cd to the checkout root first.
+# The stage order, ONE list: the plan prints it and pregate.sh executes it.
+PG_STAGES=(0 1 2 2b 3 4)
 pgplan::build() {
   local base="$1" m cf plan argv main_mb all main_files
   PG_COVERED=()
@@ -27,6 +29,14 @@ pgplan::build() {
     fi
   fi
   PG_MODULES=(); PG_TEST_MODULES=(); PG_DEFERRED=(); PG_ROOTS2=(); PG_ROOTS2B=()
+  # Stage 0 (#797): a diff that changes the resolved dependency set — any gradle.lockfile, the
+  # version catalog or the verification metadata — runs Gate A's OSV scan before lint, so a
+  # vulnerable transitive the lane introduced fails here and not at the batch gate. The scan
+  # itself reads every committed lockfile; these paths only decide WHETHER it runs.
+  mapfile -t PG_DEPS_FILES < <(printf '%s\n' "$PG_FILES" \
+    | sed -nE '/(^|\/)gradle\.lockfile$|^gradle\/libs\.versions\.toml$|^gradle\/verification-metadata\.xml$/p')
+  PG_0=()
+  [ "${#PG_DEPS_FILES[@]}" -eq 0 ] || PG_0=(./scripts/vuln-scan.sh)
   # buildSrc is its own build, which the bare ktlintCheck/detekt never reach (#724): its lint
   # rides this invocation by task path, under the root's dependency verification.
   PG_1=(ktlintCheck detekt :buildSrc:ktlintCheck :buildSrc:detekt composeEnvAudit composeArgvSecretsAudit verifyModuleDependencies verifyVerificationMetadataDocs --continue)
@@ -122,6 +132,7 @@ declare -A PG_COVERED=()
 pgplan::args() {
   local -n dest="$2"
   case "$1" in
+    0) dest=("${PG_0[@]}"); return 0 ;; # not Gradle: no PG_COMMON
     1) dest=("${PG_1[@]}") ;; 2) dest=("${PG_2[@]}") ;;
     2b) dest=("${PG_2B[@]}") ;; 3) dest=("${PG_3[@]}") ;;
     4) dest=("${PG_4[@]}") ;; *) return 2 ;;
@@ -131,8 +142,19 @@ pgplan::args() {
 pgplan::command() {
   local stage="$1"; shift
   printf 'stage=%s command=' "$stage"
-  if [ "$#" -eq 0 ]; then printf '(none)'; else printf '%q ' ./gradlew "$@"; fi
+  if [ "$#" -eq 0 ]; then printf '(none)'
+  elif [ "$stage" = 0 ]; then printf '%q ' "$@"
+  else printf '%q ' ./gradlew "$@"; fi
   printf '\n'
+}
+# The stage-0 trigger decision, one line, shared by --plan and the run's PLAN.txt.
+pgplan::deps_decision() {
+  if [ "${#PG_DEPS_FILES[@]}" -eq 0 ]; then
+    printf 'deps-scan: skip — no dependency file changed (gradle.lockfile, gradle/libs.versions.toml, gradle/verification-metadata.xml)\n'
+  else
+    local joined; joined="$(printf '%s, ' "${PG_DEPS_FILES[@]}")"
+    printf 'deps-scan: run — %s\n' "${joined%, }"
+  fi
 }
 pgplan::print() {
   printf 'base=%s%s resolved-base=%s merge-base=%s head=%s\n' "$PG_BASE" "${PG_BASE_SOURCE:+ ($PG_BASE_SOURCE)}" "$PG_BASE_SHA" "$PG_MB" "$PG_HEAD"
@@ -144,6 +166,7 @@ pgplan::print() {
   printf 'deferred=%s\n' "${PG_DEFERRED[*]:-none}"
   printf 'guards (omission conditional on successful fresh unfiltered stage-2 retained XML):\n'
   for m in "${PG_GUARD_MODULES[@]}"; do printf '%s %s\n' "$m" "${GUARDS[$m]}"; done
-  printf 'stage order: 1 2 2b 3 4\n'
-  for stage in 1 2 2b 3 4; do pgplan::args "$stage" args; pgplan::command "$stage" "${args[@]}"; done
+  pgplan::deps_decision
+  printf 'stage order: %s\n' "${PG_STAGES[*]}"
+  for stage in "${PG_STAGES[@]}"; do pgplan::args "$stage" args; pgplan::command "$stage" "${args[@]}"; done
 }

@@ -32,7 +32,7 @@ import java.sql.SQLException
  * ## What the restricted user can and cannot do
  *
  * The created user is non-admin, so every host-reaching function is refused with SQLState
- * `90040` ("Admin rights are required", pinned against H2 2.3.232 by `H2StagingPrivilegeTest`):
+ * `90040` ("Admin rights are required", pinned against H2 2.3.232 (verified 2026-09-21) by `H2StagingPrivilegeTest`):
  * `FILE_READ`, `FILE_WRITE`, `CSVREAD`, `CSVWRITE`, `CREATE ALIAS`, `RUNSCRIPT`, `LINK_SCHEMA`,
  * `CREATE TRIGGER … AS`, `SET` of server properties, and the self-escalation routes
  * `ALTER USER … ADMIN TRUE` / `CREATE USER`. Grants beyond that baseline are the CALLER's
