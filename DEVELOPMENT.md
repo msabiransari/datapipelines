@@ -1344,6 +1344,24 @@ Guards beyond lint/static analysis. Each tool below is pinned exactly, and every
 guard has been proven able to fail — the buildSrc guard tests in-tree are
 those proofs, and a new guard lands with its own.
 
+`ElvisBoundMatcherGuardTest` scans Kotlin test sources under `modules`, `tests` and
+`buildSrc` (excluding build output and its own fixture source), and runs in pregate
+stage 3. It rejects Kotest matchers bound to an Elvis fallback: group the resolved
+value, `(count ?: 0) shouldBe 0`, or assert on a local value. The text scan masks
+line and nested block comments, escaped and raw strings, character literals,
+and backtick identifiers, keeping literal value placeholders to preserve statement
+boundaries. It ignores regex-group punctuation `(?:` and SQL casts `?::`, joins lines
+starting with `.`, `?:`, `?.`, `&&`, `||` or a `should…` matcher, and tracks
+parentheses, braces and brackets. Semicolons separate statements. Its birth
+inventory held 1,558 test files, 851 Elvis-bearing lines (including 237 regex-group
+and 54 SQL-cast lines), and 29 same-line matcher candidates: one bypass, 27 grouped,
+and one safe qualified call. Floors require 1,400 files, 700 raw Elvis occurrences
+and 20 classified grouped forms; the birth tree had 919 raw occurrences. Raw
+counts include masked text, while grouped
+counts come from code. Detection limits: reflection, aliased or backtick-escaped matcher names,
+string template expressions, and following lines without a continuation prefix
+are unsupported. These are lexical checks, not a Kotlin precedence parser.
+
 #### Coverage (Kover)
 
 ```bash
