@@ -1228,6 +1228,103 @@ test("connection loss retains content, marks pending stale, offers Retry, and th
   assert.ok(retry, "recover(retry) started a refresh");
 });
 
+test("a never-admissible saturated 429 offers no recovery: no retry flag, no recover intent, the key named", async () => {
+  const notifications = [];
+  const fetchImpl = fakeFetch();
+  fetchImpl.on("/runtime/visualizations", () =>
+    fetchImpl.json(
+      {
+        error: {
+          code: "dashboard.refresh.saturated",
+          message: "This dashboard needs 5 distinct executions per refresh, and this instance admits at most 2 (datapipelines.executor.max-concurrent-executions-per-instance). It is never admissible here until an operator raises that setting.",
+          details: {
+            retry_after_seconds: 30,
+            reason: "never_admissible",
+            invocations: 5,
+            ceiling: 2,
+            key: "datapipelines.executor.max-concurrent-executions-per-instance",
+          },
+        },
+      },
+      429,
+    ),
+  );
+  const { instance, adapter } = await boot({ fetch: fetchImpl, initOptions: { onNotification: (n) => notifications.push(n) } });
+  await instance.refresh({ scope: "all" });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  const refusal = notifications.find((n) => n.code === "dashboard.refresh.saturated");
+  assert.ok(refusal, "the refusal was published: " + notifications.map((n) => n.code).join("|"));
+  assert.equal(refusal.scope, "refresh");
+  assert.equal(refusal.retryable, false, "a never-admissible refusal is not retryable");
+  assert.equal(refusal.recover, null, "a never-admissible refusal offers no recovery");
+  assert.ok(
+    refusal.message.indexOf("datapipelines.executor.max-concurrent-executions-per-instance") !== -1,
+    "the sentence names the key: " + refusal.message,
+  );
+  assert.ok(
+    refusal.message.indexOf("the refresh stream failed") === -1,
+    "the refusal is not the generic stream-failure sentence: " + refusal.message,
+  );
+  assert.ok(adapter.log.includes("status:chart:ready:stale"), "the interrupt still marks pending targets stale: " + adapter.log.join("|"));
+});
+
+test("a busy saturated 429 still offers Retry (the pin: only never_admissible loses its recovery)", async () => {
+  const notifications = [];
+  const fetchImpl = fakeFetch();
+  fetchImpl.on("/runtime/visualizations", () =>
+    fetchImpl.json(
+      {
+        error: {
+          code: "dashboard.refresh.saturated",
+          message: "This instance has no room for another refresh right now. Try again shortly.",
+          details: { retry_after_seconds: 30, reason: "busy" },
+        },
+      },
+      429,
+    ),
+  );
+  const { instance } = await boot({ fetch: fetchImpl, initOptions: { onNotification: (n) => notifications.push(n) } });
+  await instance.refresh({ scope: "all" });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  const refusal = notifications.find((n) => n.code === "dashboard.refresh.saturated");
+  assert.ok(refusal, "the refusal was published: " + notifications.map((n) => n.code).join("|"));
+  assert.equal(refusal.retryable, true, "a busy refusal is retryable");
+  assert.equal(refusal.recover, "retry", "a busy refusal offers Retry");
+});
+
+test("a busy refusal then a never-admissible one publish twice - neither deduplicates the other away", async () => {
+  const notifications = [];
+  const fetchImpl = fakeFetch();
+  const answers = [
+    { retry_after_seconds: 30, reason: "busy" },
+    {
+      retry_after_seconds: 30,
+      reason: "never_admissible",
+      invocations: 5,
+      ceiling: 2,
+      key: "datapipelines.executor.max-concurrent-executions-per-instance",
+    },
+  ];
+  let attempt = 0;
+  fetchImpl.on("/runtime/visualizations", () => {
+    const details = answers[Math.min(attempt, answers.length - 1)];
+    attempt += 1;
+    return fetchImpl.json({ error: { code: "dashboard.refresh.saturated", message: "saturated", details } }, 429);
+  });
+  const { instance } = await boot({ fetch: fetchImpl, initOptions: { onNotification: (n) => notifications.push(n) } });
+  await instance.refresh({ scope: "all" });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  await instance.refresh({ scope: "all" });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  const refusals = notifications.filter((n) => n.code === "dashboard.refresh.saturated");
+  assert.equal(refusals.length, 2, "both refusals reached the sink: " + JSON.stringify(refusals.map((n) => [n.retryable, n.recover])));
+  const busy = refusals.find((n) => n.retryable === true);
+  const never = refusals.find((n) => n.retryable === false);
+  assert.ok(busy && never, "one refusal of each reason: " + JSON.stringify(refusals.map((n) => [n.retryable, n.recover])));
+  assert.equal(busy.recover, "retry");
+  assert.equal(never.recover, null);
+});
+
 test("dispose closes the stream, aborts a running refresh, unmarks the container, and late frames change nothing", async () => {
   const fetchImpl = fakeFetch();
   let cancelled = false;

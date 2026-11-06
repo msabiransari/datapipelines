@@ -428,7 +428,12 @@
       var details = { status: response.status, durationMs: self._env.now() - started };
       if (payload && payload.error && payload.error.details) details.server = payload.error.details;
       var error = self._fail(code, payload && payload.error && payload.error.message ? payload.error.message : code, details);
-      error.retryable = response.status >= 500 || response.status === 429;
+      // A 429 is retryable — except the never-admissible saturated refusal (#771): the server's
+      // own details say retrying cannot succeed until an operator raises the named setting, so
+      // the flag tells that truth to any consumer (the visible offer is decided downstream).
+      var retryable = response.status >= 500 || response.status === 429;
+      if (retryable && details.server && details.server.reason === "never_admissible") retryable = false;
+      error.retryable = retryable;
       if (response.status === 409 && code === "dashboard.runtime.configuration_stale") {
         error.configurationStale = true;
       }
@@ -1585,14 +1590,33 @@
   DashboardInstance.prototype._onStreamFailure = function (refreshId, error) {
     var refresh = this._refreshes[refreshId];
     if (!refresh || refresh.ended) return;
+    var server = error && error.details && error.details.server;
+    if (server && server.reason === "never_admissible") {
+      // #771 — a never-admissible refusal cannot succeed on retry: the board offers NO recovery,
+      // and the message is the runtime's own fixed sentence naming the configuration key — never
+      // the error body's (§5.4's sentence rule; the key is the one server value it carries).
+      var key = server.key ? String(server.key) : "an unnamed setting";
+      this._interrupt(
+        refreshId,
+        error.code || "transport.status_429",
+        "this dashboard needs more executions per refresh than this instance admits (" +
+          key +
+          "); retrying cannot succeed until an operator raises that setting",
+        { retryable: false, recover: null },
+      );
+      return;
+    }
     this._interrupt(refreshId, error && error.code ? error.code : "transport.network", "the refresh stream failed");
   };
 
   /**
    * Connection loss (D45): retain content, report the interruption for the still-pending targets,
    * offer Retry. Completed targets stay completed; nothing restarts or replays automatically.
+   * `outcome` is optional (#771): absent, or `{retryable: true}`, the interruption keeps the
+   * Retry offer; only a refusal that cannot succeed on retry passes `{retryable: false,
+   * recover: null}` — no other caller does.
    */
-  DashboardInstance.prototype._interrupt = function (refreshId, code, message) {
+  DashboardInstance.prototype._interrupt = function (refreshId, code, message, outcome) {
     var refresh = this._refreshes[refreshId];
     if (!refresh || refresh.ended) return;
     refresh.ended = true;
@@ -1620,8 +1644,8 @@
       severity: "error",
       code: code,
       message: message,
-      retryable: true,
-      recover: "retry",
+      retryable: !outcome || outcome.retryable !== false,
+      recover: !outcome || outcome.recover === undefined ? "retry" : outcome.recover,
       refreshId: refreshId,
       pending: pending,
     });

@@ -276,10 +276,9 @@
    * PURE: init.js measures, this decides.
    */
   function defaultState(canvasIfOpen, collapseBelow, remembered) {
-    if (remembered !== null && remembered !== undefined) return OPEN;
-    if (typeof canvasIfOpen !== "number" || !isFinite(canvasIfOpen)) return OPEN;
-    if (typeof collapseBelow !== "number" || !isFinite(collapseBelow)) return OPEN;
-    return canvasIfOpen < collapseBelow ? COLLAPSED : OPEN;
+    // Look up at call time: the editor loads dock.js before the parser-blocking splitter.
+    var splitter = typeof module !== "undefined" && module.exports ? require("../splitter.js") : window.DpSplitter;
+    return splitter.dockDefault(canvasIfOpen, collapseBelow, remembered);
   }
 
   var api = {

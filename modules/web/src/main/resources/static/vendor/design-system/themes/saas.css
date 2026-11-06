@@ -26,10 +26,10 @@
   --_text-success:            #047857;
   --_text-warning:            #92400e;
 
-  --_border-default:          #949497;
-  --_border-hover:            #8f8f93;
+  --_border-default:          #8c8c8f;
+  --_border-hover:            #8c8c8f;
   --_border-focus:            #888890;
-  --_border-subtle:           #b6b6b8;
+  --_border-subtle:           #acacae;
   --_border-danger:           #fecaca;
 
   --_accent-primary:          #4f46e5;

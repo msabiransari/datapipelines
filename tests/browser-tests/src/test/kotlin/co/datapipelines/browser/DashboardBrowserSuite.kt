@@ -63,7 +63,7 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         val user = seedLocalUser(uniqueEmail("$slug-" + suffix()), generatedPassword("pw"), mustChange = false)
         seededEmail = user.email
         login(user.email, user.oneTimePassword)
-        page.waitForURL("**/dashboard")
+        landOnDashboard()
         createWorkspace(slug + suffix())
         return slug + suffix()
     }
@@ -201,7 +201,9 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
     }
 
     protected fun openHost(dashboardId: String) {
-        page.navigate("$baseUrl/test/dashboards/host?id=$dashboardId")
+        named(page, "the dashboard host page navigation ($baseUrl/test/dashboards/host?id=$dashboardId)") {
+            page.navigate("$baseUrl/test/dashboards/host?id=$dashboardId")
+        }
         try {
             page.waitForFunction("() => window.__dp && (window.__dp.ready || window.__dp.code)")
         } catch (timeout: Exception) {
@@ -611,8 +613,12 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
     /** The suite's own Postgres as the source — the 151 convention; in-page fetch with the CSRF pair. */
     @Suppress("UNCHECKED_CAST")
     protected fun registerSourceDatasource(): String {
-        page.navigate("$baseUrl/datasources")
-        page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+        named(page, "the datasources page navigation ($baseUrl/datasources)") {
+            page.navigate("$baseUrl/datasources")
+        }
+        named(page, "the datasources page's network idle ($baseUrl/datasources)", ::shellInitFacts) {
+            page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+        }
         val name = "dbr-src-" + suffix()
         val failures =
             page.evaluate(
@@ -863,11 +869,16 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         status: String,
     ) {
         require(refreshIds.isNotEmpty()) { "a status wait needs at least one refresh id" }
-        page.waitForCondition {
-            // Read every requested id before deciding; a ready prefix is not a ready list.
-            val observations = refreshIds.map { id -> readRefreshObservation(board, id) }
-            observations.zip(refreshIds).all { (observation, id) ->
-                observation["http"] == 200 && observation["id"] == id && observation["status"] == status
+        // #831: the last read is the red's facts — http, id and status per row, never a body.
+        var last: List<Map<*, *>> = emptyList()
+        named(page, "the refresh rows of board $board reaching status=$status (${refreshIds.size} ids)", { "last read=$last" }) {
+            page.waitForCondition {
+                // Read every requested id before deciding; a ready prefix is not a ready list.
+                val observations = refreshIds.map { id -> readRefreshObservation(board, id) }
+                last = observations
+                observations.zip(refreshIds).all { (observation, id) ->
+                    observation["http"] == 200 && observation["id"] == id && observation["status"] == status
+                }
             }
         }
     }
@@ -878,9 +889,13 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         refreshId: String,
         status: String,
     ) {
-        page.waitForCondition {
-            val observation = readRefreshObservation(board, refreshId)
-            observation["http"] == 200 && observation["id"] == refreshId && observation["status"] == status
+        var last: Map<*, *>? = null
+        named(page, "the refresh row $refreshId of board $board reaching status=$status", { "last read=$last" }) {
+            page.waitForCondition {
+                val observation = readRefreshObservation(board, refreshId)
+                last = observation
+                observation["http"] == 200 && observation["id"] == refreshId && observation["status"] == status
+            }
         }
     }
 
@@ -1000,13 +1015,29 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         occurrence: String,
         state: String,
     ) {
-        page.waitForFunction(
-            """() => (function () {
-              const el = document.querySelector('[data-dp-viz="$occurrence"] .dp-dashboard-status');
-              return el ? el.getAttribute('data-dp-state') : null;
-            })() === "$state"""",
-        )
+        val chip = "[data-dp-viz=\"$occurrence\"] .dp-dashboard-status"
+        named(page, "the status chip ($chip) reaching data-dp-state=$state", { chipFacts(it, chip) }) {
+            page.waitForFunction(
+                """() => (function () {
+                  const el = document.querySelector('[data-dp-viz="$occurrence"] .dp-dashboard-status');
+                  return el ? el.getAttribute('data-dp-state') : null;
+                })() === "$state"""",
+            )
+        }
     }
+
+    /** #831: the chip as [chipStateIs] left it — absent, or its state attribute; read defensively. */
+    private fun chipFacts(
+        on: Page,
+        chip: String,
+    ): String =
+        runCatching {
+            on.evaluate(
+                "sel => { const el = document.querySelector(sel);" +
+                    " return el ? 'chip data-dp-state=' + el.getAttribute('data-dp-state') : 'chip=absent'; }",
+                chip,
+            ) as String
+        }.getOrElse { "the chip probe itself failed: $it" }
 
     /**
      * One visualization's status chip does NOT read [state] — the settled-state check, called AFTER

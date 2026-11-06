@@ -191,6 +191,9 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
      80 px, so 160 px). splitter.js names the same number (BOARD_FLOOR) for the drag's ceiling;
      the browser suites measure both sides. */
   --dp-board-floor: calc(var(--dashboard-row-unit) * 2);
+  /* #800 — the 160px floor plus a 160px drag margin: the editor's number, one mental
+     model for both docks. PX ONLY: dashboards-page.js reads this with parseFloat. */
+  --dp-board-auto-collapse-below: 320px;
   /* #783 — the activity dock's pane height, the DEFAULT: splitter.js writes the person's
      height onto the ROOT (an inline custom property, which outranks this declaration),
      remembers it under `dp.pane.board-dock` and restores it before first paint; a
@@ -879,50 +882,15 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
   display: none;
 }
 
-/* #783 — the resize handle, the editor's grip (pipeline-editor.css `.pe-dock-splitter`, the
-   same app.css tokens): a strip straddling the dock's top border with a visible pill at rest
-   (`--border-default`, the 3:1 boundary role, #609) and brand on hover, focus and drag.
-   `touch-action: none` lets a touch drag reach the handle instead of scrolling the page. */
+/* #801 — app.css paints the shared handle; this page only places it at the dock border. */
 .dp-board-dock-splitter {
   position: absolute;
-  top: calc((var(--app-splitter-strip) - 1px) / -2);
-  left: 0;
-  right: 0;
-  height: var(--app-splitter-strip);
   z-index: 3;
-  display: grid;
-  place-items: center;
-  cursor: row-resize;
-  user-select: none;
-  touch-action: none;
-}
-
-.dp-board-dock-splitter::after {
-  content: "";
-  width: var(--app-splitter-grip-w);
-  height: var(--app-splitter-grip-h);
-  border-radius: var(--radius-pill);
-  background: var(--border-default);
-  transition: background var(--duration-normal);
-}
-
-.dp-board-dock-splitter:hover::after,
-.dp-board-dock-splitter:focus-visible::after,
-.dp-board-dock.is-dragging .dp-board-dock-splitter::after {
-  background: var(--brand);
 }
 
 /* A collapsed dock has no pane to size: the handle would drag one nobody can see (D2). */
 .dp-board-dock[data-dp-dock-collapsed] .dp-board-dock-splitter {
   display: none;
-}
-
-/* The whole document takes the resize cursor during a drag (pipeline-editor.css declares
-   the same `html.dp-splitting-y` rule; that sheet loads only on the editor). */
-html.dp-splitting-y,
-html.dp-splitting-y * {
-  cursor: row-resize !important;
-  user-select: none !important;
 }
 
 .dp-board-dock-head {

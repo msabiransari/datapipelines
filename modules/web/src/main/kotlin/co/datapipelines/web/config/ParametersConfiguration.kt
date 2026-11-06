@@ -147,8 +147,8 @@ class ParametersConfiguration {
             .ParameterSetTransferService(sets, repository, templates, templateImport)
 
     /**
-     * `parameters.selectors.abandoned` (record §11) — the pool's abandoned-statement count as a
-     * gauge, the `script.evaluations.abandoned` shape. The scrape ALSO calls
+     * `datapipelines.parameters.selectors.abandoned` (record §11) — the pool's abandoned-statement count as a
+     * gauge, the `datapipelines.script.evaluations.abandoned` shape. The scrape ALSO calls
      * [SelectorPool.abandonedThreadsAlive] (the 194c security pass, observation 4): the prune
      * runs with every scrape, so an abandoned worker's dead `Thread` object is released by the
      * next metrics read instead of accumulating for the process's life.
@@ -165,7 +165,7 @@ class ParametersConfiguration {
         meters: MeterRegistry,
     ): Gauge =
         Gauge
-            .builder("parameters.selectors.abandoned") {
+            .builder("datapipelines.parameters.selectors.abandoned") {
                 pool.abandonedThreadsAlive() // prune the dead worker threads with the scrape
                 pool.abandoned.sum().toDouble()
             }.description(GAUGE_DESCRIPTION)

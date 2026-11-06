@@ -314,6 +314,7 @@ class RuntimeSupportTest {
         metrics.refreshEnded(RefreshStatus.COMPLETED, Duration.ofMillis(750))
         metrics.refreshEnded(RefreshStatus.ABORTED, Duration.ofMillis(5))
         metrics.refused(DashboardMetrics.REASON_SATURATED)
+        metrics.refused(DashboardMetrics.REASON_NEVER_ADMISSIBLE)
 
         registry.counter(DashboardMetrics.REFRESHES, "status", "COMPLETED").count() shouldBe 2.0
         registry.counter(DashboardMetrics.REFRESHES, "status", "ABORTED").count() shouldBe 1.0
@@ -325,6 +326,7 @@ class RuntimeSupportTest {
             ).totalTime(java.util.concurrent.TimeUnit.MILLISECONDS) shouldBe
             1000.0
         registry.counter(DashboardMetrics.REFRESHES_REFUSED, "reason", "saturated").count() shouldBe 1.0
+        registry.counter(DashboardMetrics.REFRESHES_REFUSED, "reason", "never_admissible").count() shouldBe 1.0
         registry.get(DashboardMetrics.REFRESHES_ACTIVE).gauge().value() shouldBe 0.0
         val held = (runBlocking { admission.admit(UUID.randomUUID(), executions = 1) } as AdmissionResult.Admitted).admission
         registry.get(DashboardMetrics.REFRESHES_ACTIVE).gauge().value() shouldBe 1.0

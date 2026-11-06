@@ -52,6 +52,15 @@
 
   var STEP = 16;
   var SHIFT_STEP = 64;
+  var OPEN = "open";
+  var COLLAPSED = "collapsed";
+
+  /** Default shared by both docks: a remembered height wins; an unknown measurement opens. */
+  function dockDefault(paneIfOpen, collapseBelow, remembered) {
+    if (remembered !== null && remembered !== undefined) return OPEN;
+    if (!num(paneIfOpen) || !num(collapseBelow)) return OPEN;
+    return paneIfOpen < collapseBelow ? COLLAPSED : OPEN;
+  }
 
   /** The one sentence every handle carries as `title` and `aria-description` (141 §C). */
   var RESIZE_HINT = "Drag to resize · double-click to reset";
@@ -191,9 +200,8 @@
 
   /**
    * Bind one splitter handle. The shared contract is the `data-splitter="<pane key>"`
-   * attribute, not a class: `app.css` belongs to another lane this round, so each pane's own
-   * stylesheet paints its own handle (`.pe-dock-splitter`, `.tplx-splitter`) and the marker is
-   * what this module finds them by.
+   * attribute. Both docks use app.css's shared handle class; the explorer keeps its own
+   * geometry. The marker is what this module finds them by.
    *
    * `opts`: { handle, pane, axis, invert, prop, storageKey, container, label,
    *           bounds: () => ({min, max}), onChange: (size) => void }
@@ -516,6 +524,9 @@
       prop: "--dp-dock-pane-h",
       storageKey: KEYS.boardDock,
       label: "Resize the activity dock",
+      onChange: function () {
+        dock.dispatchEvent(new window.CustomEvent("dp:dock-resize"));
+      },
       bounds: function () {
         return boardDockBounds(measure(region, "y"), paneHeight());
       },
@@ -607,6 +618,9 @@
   }
 
   var api = {
+    dockDefault: dockDefault,
+    OPEN: OPEN,
+    COLLAPSED: COLLAPSED,
     readStored: readStored,
     sizeFor: sizeFor,
     stepFor: stepFor,

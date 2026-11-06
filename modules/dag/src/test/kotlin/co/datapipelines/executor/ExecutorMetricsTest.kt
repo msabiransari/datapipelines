@@ -221,7 +221,7 @@ class ExecutorMetricsTest {
             ).use { h ->
                 h.executor.execute(Fixtures.request(Fixtures.pipeline(nodes))).status shouldBe ExecutionStatus.SUCCESS
 
-                registry.find(ExecutorMetrics.STAGING_ROWS).counter()?.count() ?: 0.0 shouldBe 0.0
+                (registry.find(ExecutorMetrics.STAGING_ROWS).counter()?.count() ?: 0.0) shouldBe 0.0
             }
         }
 
