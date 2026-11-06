@@ -98,7 +98,7 @@ The boundaries with this product's real blast radius (record §8, ordered by B7)
 | V12.2 | HTTPS with external-facing services | manual | As V12.1. | §8 |
 | V12.3 | Service-to-service communication security | manual | M3; datasource connection TLS is per datasource. | §8 |
 | V13.1 | Configuration documentation | covered | configuration.md, drift-tested by the config-key spec-drift tests; `ConfigValidatorTest`. | §8 |
-| V13.2 | Backend communication configuration | partial | The management port binds loopback and its one endpoint refuses anonymous callers (`EntryInventoryE2eTest`, auth.md §8.6); M1, M3. | §4, §8 |
+| V13.2 | Backend communication configuration | partial | The management port binds loopback by default and is the boundary for its two endpoints, `health` and `prometheus`, which answer anonymously there; every other management path needs a session and no `/actuator` path is reachable on the application port (`EntryInventoryE2eTest`, `ApplicationSmokeTest`, `ManagementEndpointMatcherTest`, auth.md §8.6); M1, M3. | §4, §8 |
 | V13.3 | Secret management | partial | pre-commit staged hook + CI full-history job (`secret-scan.yml`, #691); "no credential through an agent" (auth.md, changelog v2.13). Not assessed as a whole. | §8 |
 | V13.4 | Unintended information leakage | partial | No stack trace on any public route (`PublicContractE2eTest`); the error envelope (`AuthErrorWriterTest`); nothing under `/actuator` on the application port (`EntryInventoryE2eTest`). | §8 |
 | V14.1 | Data protection documentation | outstanding | Not assessed. | §8 |

@@ -1,25 +1,35 @@
 package co.datapipelines
 
 import co.datapipelines.config.SharedRedis
+import co.datapipelines.metrics.MeterCatalogue
 import co.datapipelines.web.ratelimit.RateLimiter
 import co.datapipelines.web.ratelimit.RedisRateLimiter
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldNotBeBlank
 import io.kotest.matchers.string.shouldNotContain
+import io.kotest.matchers.string.shouldStartWith
 import io.kotest.matchers.types.shouldBeInstanceOf
+import io.micrometer.core.instrument.MeterRegistry
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.client.TestRestTemplate
+import org.springframework.boot.test.web.server.LocalManagementPort
 import org.springframework.context.ApplicationContext
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
 import java.security.SecureRandom
 import java.util.Base64
 
@@ -45,7 +55,14 @@ import java.util.Base64
  * values would be the back door through which literal secrets returned to the repository
  * after the 2026-08-07 HIGH-2 finding. The secrets below are generated per-run and never
  * written down. [ApplicationHardenedSmokeTest] is the other posture's boot.
+ *
+ * `@AutoConfigureObservability(tracing = false)`: a Spring Boot test switches metrics export
+ * OFF by default (`management.defaults.metrics.export.enabled=false`), which would leave the
+ * Prometheus registry and its scrape endpoint unbuilt. Production keeps Boot's default (on), so
+ * the smoke boot re-enables export to boot the shipped registry shape (#708). Tracing stays off:
+ * the application ships no tracer (observability.md §5).
  */
+@AutoConfigureObservability(tracing = false)
 @SpringBootTest(
     classes = [DatapipelinesApplication::class],
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -56,6 +73,21 @@ class ApplicationSmokeTest {
 
     @Autowired
     private lateinit var applicationContext: ApplicationContext
+
+    @Autowired
+    private lateinit var meterRegistry: MeterRegistry
+
+    @LocalManagementPort
+    private var managementPort: Int = 0
+
+    private val http: HttpClient = HttpClient.newHttpClient()
+
+    /** A plain anonymous GET on loopback — no session, no TestRestTemplate defaults. */
+    private fun get(
+        port: Int,
+        path: String,
+    ): HttpResponse<String> =
+        http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port$path")).GET().build(), HttpResponse.BodyHandlers.ofString())
 
     private val mapper = ObjectMapper()
 
@@ -184,6 +216,83 @@ class ApplicationSmokeTest {
     }
 
     /**
+     * #708 / #231 item 1 (failure-flow record §17 row 11): the MANAGEMENT port serves the Prometheus scrape and
+     * health ANONYMOUSLY — the port is the boundary, not a credential (observability.md §4.2) — while the
+     * application port keeps every `/actuator` path closed (the case above). Read over plain HTTP with no
+     * session, from the port Boot reports for the management child context (`@LocalManagementPort`).
+     *
+     * The index is pinned to exactly `health` and `prometheus` (the `-path` template links are the same
+     * endpoints, as in `EntryInventoryE2eTest`), so widening `exposure.include` is a red here, not a silent
+     * change. `datapipelines_executions_concurrent` is the execution-slot gauge registered at boot (#569);
+     * the two abandoned gauges prove A.3's prefix on the wire.
+     */
+    @Test
+    fun `the management port serves prometheus and health anonymously - and only those two endpoints`() {
+        val index = get(managementPort, "/actuator")
+        withClue("anonymous GET /actuator on the management port: ${index.body()}") { index.statusCode() shouldBe 200 }
+        println("event=scrape.evidence management_index=${index.body()}")
+        val links =
+            mapper
+                .readTree(index.body())["_links"]
+                .fieldNames()
+                .asSequence()
+                .filterNot { it.endsWith("-path") }
+                .toSortedSet()
+        links shouldBe sortedSetOf("self", "health", "prometheus")
+
+        get(managementPort, "/actuator/health").statusCode() shouldBe 200
+
+        val scrape = get(managementPort, "/actuator/prometheus")
+        scrape.statusCode() shouldBe 200
+        scrape.headers().firstValue("Content-Type").orElse("") shouldStartWith "text/plain"
+        val series = scrape.body().lines().filterNot { it.startsWith("#") }
+        println(
+            "event=scrape.evidence head=\n" +
+                scrape
+                    .body()
+                    .lines()
+                    .take(SCRAPE_EVIDENCE_LINES)
+                    .joinToString("\n"),
+        )
+        listOf(
+            "datapipelines_executions_concurrent",
+            "datapipelines_script_evaluations_abandoned",
+            "datapipelines_parameters_selectors_abandoned",
+        ).forEach { family ->
+            withClue("a `$family` series in the anonymous scrape") {
+                series.any { it.startsWith("$family ") || it.startsWith("$family{") } shouldBe true
+            }
+        }
+
+        // An endpoint the index does not list is refused anonymously on the management port, and the
+        // application port answers neither the scrape nor the index (status recorded in the evidence).
+        val appScrape = rest.getForEntity("/actuator/prometheus", String::class.java).statusCode
+        val managementEnv = get(managementPort, "/actuator/env").statusCode()
+        println("event=scrape.evidence app_port_actuator_prometheus=${appScrape.value()} management_env=$managementEnv")
+        appScrape.is2xxSuccessful shouldBe false
+        managementEnv shouldBe 401
+    }
+
+    /**
+     * #708 (failure-flow record §13): the booted registry is the second reader of `MeterCatalogueParityTest`'s
+     * static sweep. Every `datapipelines.*` meter the running application holds must be in the swept set — a
+     * registration form the sweep does not recognise is red here as soon as its meter is eager — and so has an
+     * observability.md §4.1 row.
+     */
+    @Test
+    fun `every datapipelines meter the booted registry holds is in the swept catalogue`() {
+        val runtime =
+            meterRegistry.meters
+                .map { it.id.name }
+                .filter { it.startsWith(MeterCatalogue.PREFIX) }
+                .toSortedSet()
+        val swept = MeterCatalogue.codedSites().mapNotNull { it.name }.toSet()
+        println("event=meter.catalogue runtime=${runtime.size} ${runtime.joinToString(",")}")
+        withClue("meters registered at runtime that the static sweep did not find") { (runtime - swept).toList() shouldBe emptyList() }
+        runtime.size shouldBeGreaterThanOrEqual RUNTIME_METER_FLOOR
+    }
+
+    /**
      * The composition wiring (design 2026-08-13-pipeline-node-type §4.1), asserted at the bean
      * graph the assembled app actually boots: the `SubPipelineRunner` port and the
      * repository-backed `PipelineResolver` must both exist, or a PIPELINE node would fail closed
@@ -219,6 +328,12 @@ class ApplicationSmokeTest {
         const val STRING_REDIS_TEMPLATE = "org.springframework.data.redis.core.StringRedisTemplate"
 
         private const val SECRET_BYTES = 32
+
+        /** The scrape's first lines printed as lane evidence (#708). */
+        private const val SCRAPE_EVIDENCE_LINES = 20
+
+        /** The eagerly-registered `datapipelines.*` meters a booted app holds (gauges and eager counters). */
+        private const val RUNTIME_METER_FLOOR = 10
 
         /**
          * In-process OIDC discovery (auth.md §5.2) for the configured providers — the

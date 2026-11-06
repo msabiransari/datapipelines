@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.52 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.53 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-06
@@ -347,7 +347,7 @@ The parameter-set evaluation history ([REST API §21.5](rest-api.md#215-the-obse
 | INFO | `parameter.evaluations_purged` | The retention step deleted finished evaluation records (nothing is logged for an empty tick); the plural twin of `dashboard.refreshes_purged` | `count`, `retention_days` |
 | WARN | `parameter.evaluation_retention_failed` | The retention DELETE threw, or was cancelled at its bound (`sql_state=57014`; the 25 s `RETENTION_STATEMENT_TIMEOUT_SECONDS`, #636) — the batch is one statement, so a cancel deletes nothing; the next tick retries. Counted as `datapipelines.scheduled_jobs.tick_failed{job=parameter_evaluation_retention}` (§4.1) | `error`, `sql_state` |
 | WARN | `parameter.evaluation_retention_incomplete` | A retention batch came back full (a backlog): records older than the cutoff remain and the next tick takes the next batch | `count`, `message` |
-| ERROR | `parameter.selector_statement_abandoned` | The evaluate's await was cancelled (its `withTimeout` deadline, or the caller — #375's disconnect-grace abort, a shutdown) while the selector statement still ran; the statement is cancelled best-effort, its connection discarded, the worker keeps its slot until the driver returns (`parameters.selectors.abandoned` counts it). One line, no stack trace, never the SQL or a bind | `set`, `parameter`, `datasource`, `cause` (`deadline`/`caller`) |
+| ERROR | `parameter.selector_statement_abandoned` | The evaluate's await was cancelled (its `withTimeout` deadline, or the caller — #375's disconnect-grace abort, a shutdown) while the selector statement still ran; the statement is cancelled best-effort, its connection discarded, the worker keeps its slot until the driver returns (`datapipelines.parameters.selectors.abandoned` counts it). One line, no stack trace, never the SQL or a bind | `set`, `parameter`, `datasource`, `cause` (`deadline`/`caller`) |
 
 #### 3.4N The audit retention events (#310, #443)
 
@@ -434,27 +434,19 @@ Tag sets below are the complete, normative set for each metric — adding a tag 
 | `datapipelines.nodes.duration` | timer | `pipeline_id`, `node_id`, `source` | Per-node duration |
 | `datapipelines.nodes.rows_out` | counter | `pipeline_id`, `node_id` | Rows emitted by node |
 | `datapipelines.staging.rows` | counter | (none) | Total rows staged across all executions |
-| `datapipelines.staging.bytes` | counter | (none) | Total bytes staged |
-| `datapipelines.staging.active_tables` | gauge | (none) | Current H2 tables across all in-flight executions |
-| `datapipelines.datasource.pool.active` | gauge | `datasource_name` | Active connections in pool |
-| `datapipelines.datasource.pool.pending` | gauge | `datasource_name` | Threads waiting for a connection |
-| `datapipelines.datasource.pool.timeout_total` | counter | `datasource_name` | Pool-acquisition timeouts |
+| `datapipelines.script.evaluations.abandoned` | gauge | (none) | (#708 renamed from the un-prefixed `script.evaluations.abandoned`) Script evaluations abandoned past their wall clock plus `datapipelines.script.abandon-grace-seconds` ([Configuration §3.28](configuration.md)): the evaluation pool's bulkhead keeps the thread's slot until it really ends, and each one also logs at ERROR ([DAG executor §5.3](dag-executor.md#53-concurrency-controls)). A cumulative count over the process's life; any rise means a runaway script outlived its budget |
+| `datapipelines.parameters.selectors.abandoned` | gauge | (none) | (#708 renamed from the un-prefixed `parameters.selectors.abandoned`) Selector statements abandoned at their evaluate's deadline — cancelled best-effort, the connection discarded, the worker keeping its slot until the driver returns; each one also logs `parameter.selector_statement_abandoned` (§3.4M). A cumulative count over the process's life; a scrape also releases the dead worker threads |
 | `datapipelines.datasource.pool.retired` | counter | `datasource_name` | Pools taken out of the live map by an edit, a delete, a peer's invalidation message or a reconcile ([Datasources §5.2](datasources.md#52-pool-lifecycle)). One increment per retirement, not per connection |
 | `datapipelines.datasource.pool.hard_closed` | counter | `datasource_name` | Retired pools closed at the `retire-ceiling-seconds` ceiling with connections **still out** — a statement outlived the ceiling and lost its connection. A subset of `retired`; a non-zero rate means either a genuinely hung query or a ceiling set below what this deployment's statements really take. Each one also logs the §3.4A `datasource.pool_hard_closed` WARN |
-| `datapipelines.templates.render.duration` | timer | `template_id`, `template_version` | Template render time |
-| `datapipelines.templates.cache.hits` | counter | (none) | Template cache hits |
-| `datapipelines.templates.cache.misses` | counter | (none) | Template cache misses |
 | `http.server.requests` | timer | `method`, `uri`, `status`, `outcome` | HTTP request duration. **Spring Boot's own metric — unprefixed.** `uri` is the templated path (`/api/v1/executions/{id}`), never the expanded one. |
 | `datapipelines.dashboard.refreshes` | counter | `status` (`COMPLETED`/`PARTIAL`/`FAILED`/`ABORTED`/`TIMED_OUT`) | (#10 L2) Dashboard refreshes by terminal status, counted when the refresh ends ([Dashboards §5](dashboards.md#5-the-runtime)). A refresh refused at admission is not one — see `…refresh.refused` |
 | `datapipelines.dashboard.refresh.duration` | timer | `status` | A refresh's wall-clock time from admission to its terminal row |
 | `datapipelines.dashboard.refresh.refused` | counter | `reason` (`saturated`/`never_admissible`/`stream_limit`) | Refreshes refused before they started: `saturated` is the busy `429 dashboard.refresh.saturated` (no room now, or the start marker at its bound; no row written), `never_admissible` the 429 whose `details.reason` is `never_admissible` — retrying cannot succeed until an operator raises the named setting (#771) — and `stream_limit` the per-user stream cap |
 | `datapipelines.dashboard.refreshes.active` | gauge | (none) | Refreshes admitted and not yet ended on THIS instance (the admission counters are JVM-local, [Configuration §3.34](configuration.md)) |
 | `datapipelines.dashboard.executions.reserved` | gauge | (none) | Dashboard executions reserved by those refreshes, against `max-concurrent-dashboard-executions-per-instance` |
-| `datapipelines.mcp.tool.calls` | counter | `tool_name`, `status` | MCP tool invocations |
 | `datapipelines.promotion.lens.inventory` | counter | `outcome` (`hit`/`miss`/`unreachable`) | The promoter lens's inventory reads (178, §3.4D): `hit` served from the per-workspace cache window, `miss` probed the target and got an inventory, `unreachable` probed and failed (the failure is then cached for the window, so `unreachable` counts windows, not reads). A steady `unreachable` rate with no `miss` is a dead target; `hit`/`miss` ≫ 1 is the cache doing its job |
-| `datapipelines.auth.login.attempts` | counter | `outcome` (`success`/`domain_not_allowed`/`user_inactive`/`oidc_error`) | Login attempts. Outcomes mirror the audit events in [Auth §10.1](auth.md#101-events). There is **no** lockout outcome: authentication is OIDC-only, the product stores no local passwords, and no lockout mechanism exists to count. |
-| `datapipelines.auth.api_key.validations` | counter | `outcome` (success/invalid/expired/revoked) | API key validations |
 | `datapipelines.auth.login_rate_limit.saturated` | counter | (none) | Login rate-limit admissions made with the tracked-client table FULL — the limiter's fail-open branch ([Auth §11.5](auth.md#115-other-auth-configuration-keys)). The table is bounded at 10,000 client addresses; past that a new client is admitted unmetered rather than the map grown, so a spoofed-IP flood cannot exhaust the heap. Registered eagerly, so a healthy deployment reports `0` rather than an absent series. Any sustained non-zero rate means the login surface is unmetered for new clients right now. No tags: it is one closed condition, and §4.3 forbids inventing a dimension that is not a bounded set |
+| `datapipelines.web.endpoint_key_budget.saturated` | counter | (none) | (#224; documented by #708) The serve path's per-key request budget ([Configuration §3.22](configuration.md)) admitting a NEW `api_caller` key unmetered because its tracked-key table is FULL — the budget's fail-open branch, the `login_rate_limit.saturated` shape. The table is bounded at 10,000 key ids; at the ceiling rolled-over windows are swept first, and only a table still full counts here. Each one also logs `event=endpoint.key_budget_table_saturated`. Registered eagerly, so a deployment reports `0` rather than an absent series; any non-zero rate means new keys are reaching published endpoints without a budget. No tags: one closed condition |
 | `datapipelines.audit.retention.purged` | counter | (none) | `audit_log` rows deleted by the audit-log retention job (§7, #310) — the sum of every tick's `purged=`, a batch that failed mid-tick included (its committed rows are gone). Registered when the job is built, so a deployment reports `0` rather than an absent series. The steady-state rate is roughly the write rate a retention window ago; a flat line on a deployment older than `datapipelines.audit.retention-days` means the job is not running |
 
 **Result delivery, SSE and idempotency** ([REST API §7](rest-api.md#7-result-delivery), D9):
@@ -464,8 +456,6 @@ Tag sets below are the complete, normative set for each metric — adding a tag 
 | `datapipelines.result.bytes_written` | counter | (none) | Bytes materialized into the Redis result store. Paired with `result.max-size-bytes` — the ratio of writes near the cap is the signal that a deployment is using result delivery as a bulk-data path (an explicit NOT-goal). |
 | `datapipelines.result.writes` | counter | `outcome` (`stored`/`too_large`/`storage_unavailable`) | Result-store write attempts; the failure outcomes correspond 1:1 to `result.too_large` and `result.storage_unavailable`. |
 | `datapipelines.result.cursor.reads` | counter | `format` (json/arrow/csv), `outcome` (`hit`/`expired`/`not_found`) | Cursor endpoint reads. `expired` rising relative to `hit` means the TTL is set too low for how clients actually page. |
-| `datapipelines.result.expiries` | counter | (none) | Results that reached TTL without ever being read past the inline first page. |
-| `datapipelines.result.size` | distribution summary | (none) | Result size in bytes — percentiles inform `result.max-size-bytes` tuning. |
 | `datapipelines.sse.streams.active` | gauge | (none) | Currently-open SSE execution streams |
 | `datapipelines.sse.stream.duration` | timer | `close_reason` (`completed`/`failed`/`aborted`/`client_disconnect`/`revoked`/`expired`) | Lifetime of an SSE stream. `client_disconnect` here is what feeds the disconnect-grace cancellation path (D7). `revoked` (#230, security-assurance P4) is a stream cut by the subscriber-authority re-judgement — a policy cut whose execution deliberately KEEPS running, never a disconnect, so the cancellation path never sees it. `expired` (#263) is the same policy cut where the refusal was the subscriber's validated token passing its `exp` — the same final comment and the same kept-running execution, a different credential fact, so an expired token is never counted as a standing revocation or a disconnect. The timer covers the LIVE stream; the log-served streams (the §10.3 replay and the idempotent-retry follow) record no duration, and carry the same reason in their cut's log line instead — `close_reason=expired` or `close_reason=revoked`, from the one verdict that refused (#293). |
 | `datapipelines.idempotency.cache.hits` | counter | (none) | Requests served from a stored idempotent response |
@@ -499,10 +489,11 @@ Tag sets below are the complete, normative set for each metric — adding a tag 
 
 ### 4.2 Exposure
 
-- Micrometer's Prometheus endpoint at `/actuator/prometheus` — served on a **separate management port** (`management.server.port`, framework wiring key), never on the application port. Scrapers reach it over the cluster-internal network; it is NOT in auth.md §8.3's public list and no `/actuator` path is reachable on the app port without auth. Rationale (2026-08-07 security review MEDIUM-7): §4.3's metric tags include `pipeline_id`, `datasource_name` and `template_id` — an unauthenticated metrics endpoint on the app port would publish the internal inventory that §6's bare-UP/DOWN health design exists to protect.
+- Micrometer's Prometheus endpoint at `/actuator/prometheus` (`micrometer-registry-prometheus`, in `app` since #708) — served on a **separate management port** (`management.server.port`, framework wiring key), never on the application port. The management port exposes exactly two endpoints, `health` and `prometheus` (`management.endpoints.web.exposure.include`), and both answer **anonymously there**: the port, not a credential, is the boundary (#231 item 1, decided by the [failure-flow and telemetry record](superpowers/specs/2026-10-25-failure-flow-and-telemetry-design.md) §17 row 11). It binds `127.0.0.1` unless an operator sets `management.server.address` ([configuration.md §3.14](configuration.md#314-framework-wiring-keys)); the Kubernetes opt-open pairs it with Service/NetworkPolicy isolation ([deployment.md §9](deployment.md)). A scraper therefore carries no key — a key in a scrape config would outlive every rotation discipline. The permit is scoped to the management context, to `GET`/`HEAD`, and to the index plus those two paths ([auth.md §8.6.1](auth.md)); it is NOT in auth.md §8.3's public list, every other management path still needs a session, and no `/actuator` path is reachable on the app port. Rationale for the separate port (2026-08-07 security review MEDIUM-7): §4.3's metric tags include `pipeline_id`, `datasource_name` and `template_id` — an unauthenticated metrics endpoint on the app port would publish the internal inventory that §6's bare-UP/DOWN health design exists to protect.
+- Cardinality: the `executions.*` and `nodes.*` meters carry `pipeline_id` (and `node_id`), so the scrape holds per-pipeline series — bounded by the catalogue the deployment stores (§4.3), and growing with it. Budget the scraper's series limit for the pipeline count, not for a constant.
 - Note the asymmetry: `/health`, `/ready` and `/info` are served at the **root** of the application port, not under `/actuator` and not under `/api/v1` (§6).
 - Other backends (Datadog, New Relic, CloudWatch) selectable via Micrometer registry config.
-- Actuator/management exposure is configured with Spring Boot's own `management.*` keys — datapipelines defines no key of its own for it ([configuration.md §3.14](configuration.md#314-framework-wiring-keys) registers those framework paths; [§3.15](configuration.md#315-observability) holds this product's own observability keys).
+- Actuator/management exposure is configured with Spring Boot's own `management.*` keys (`management.server.port`, `management.server.address`, `management.endpoints.web.exposure.include`) — datapipelines defines no key of its own for it ([configuration.md §3.14](configuration.md#314-framework-wiring-keys) registers those framework paths; [§3.15](configuration.md#315-observability) holds this product's own observability keys).
 
 ### 4.3 Cardinality discipline
 
@@ -516,6 +507,8 @@ High-cardinality tags avoided:
 ---
 
 ## 5. Tracing
+
+Not provided. Deferred — see the failure-flow record §12 (`docs/superpowers/specs/2026-10-25-failure-flow-and-telemetry-design.md`); the sections below describe the design that would return with it.
 
 ### 5.1 OpenTelemetry
 
@@ -596,7 +589,7 @@ Bare values only — no hostnames, no paths, same discipline as `/health` (§6.4
 
 ### 6.4 Actuator security
 
-Only `/health`, `/ready` and `/info` are exposed without auth on the application port — nothing under `/actuator` is routable there. `/actuator/health` (and, with the metrics registry, `/actuator/prometheus`) is exposed on the separate management port only (§4.2), confined to the cluster network by deployment topology; every other actuator endpoint is disabled. Health output carries no credential, hostname or JDBC URL — component values are bare `UP`/`DOWN` strings precisely so an unauthenticated probe surface cannot leak topology (§9.2).
+Only `/health`, `/ready` and `/info` are exposed without auth on the application port — nothing under `/actuator` is routable there. `/actuator/health` and `/actuator/prometheus` are served anonymously on the management port; the port, not a credential, is the boundary (§4.2) — it binds loopback by default and is confined to the cluster network by deployment topology; every other actuator endpoint is disabled, and the index's links are the only other anonymous read. Health output carries no credential, hostname or JDBC URL — component values are bare `UP`/`DOWN` strings precisely so an unauthenticated probe surface cannot leak topology (§9.2).
 
 ---
 
@@ -648,15 +641,13 @@ A client disconnect is not an uncaught exception (#562): when the client has gon
 | Key | What it controls here |
 |---|---|
 | `datapipelines.observability.logging.format` | `json` (§3.1) vs human-readable console (§3.5, dev). Bound at startup (#337): resolved before logging initialises, the value set is closed, and an unknown value refuses startup. |
-| `datapipelines.observability.tracing.enabled` | Whether the OpenTelemetry SDK and exporter are wired at all (§5). Declared and not wired — the export is #270's deferred part. |
-| `datapipelines.observability.tracing.endpoint` | OTLP collector endpoint (§5.3) — the standard `OTEL_EXPORTER_OTLP_ENDPOINT` env var |
 
 Two families deliberately have **no** datapipelines-namespaced key, because their frameworks already own the surface and duplicating it would create a second authority:
 
 - **Log levels** — Spring Boot's own `logging.level.*` (e.g. `logging.level.co.datapipelines.dag=DEBUG`). §3.2 states which levels carry which meaning.
-- **Actuator/Prometheus exposure and path** — Spring Boot's `management.*` (§4.2).
+- **Actuator/Prometheus exposure and path** — Spring Boot's `management.*` (§4.2): `management.server.port`, `management.server.address` and `management.endpoints.web.exposure.include`, registered in [configuration.md §3.14](configuration.md#314-framework-wiring-keys).
 
-Sampling rates (§5.4) are set with the OpenTelemetry SDK's own `otel.traces.sampler.*` properties.
+Sampling rates (§5.4) would be set with the OpenTelemetry SDK's own `otel.traces.sampler.*` properties — deferred with §5; the application reads no tracing key today.
 
 ### 9.2 Redaction — normative
 
@@ -705,6 +696,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-06 | v1.53 | #708 the Prometheus scrape | **§4.1 is cut to the meters that exist** (the failure-flow and telemetry record §7, §17 row 13): the 13 documented-only rows are deleted — `staging.bytes`, `staging.active_tables`, `datasource.pool.active`/`.pending`/`.timeout_total`, `templates.render.duration`, `templates.cache.hits`/`.misses`, `mcp.tool.calls`, `auth.login.attempts`, `auth.api_key.validations`, `result.expiries`, `result.size` — and `datapipelines.web.endpoint_key_budget.saturated` gains its row; the two gauges `script.evaluations.abandoned` and `parameters.selectors.abandoned` are renamed under the `datapipelines.` prefix. `MeterCatalogueParityTest` now holds §4.1 to the code both ways (43 coded names + `http.server.requests` = 44 rows at lane delivery). **§4.2 / §6.4**: `micrometer-registry-prometheus` ships; `health` and `prometheus` answer anonymously on the management port (#231 item 1, record §17 row 11), with the per-pipeline cardinality note. **§5**: one sentence — tracing is not provided, deferred (record §12). **§9.1**: the two `tracing.*` keys are removed (record §17 row 12, no deprecation window). |
 | 2026-11-05 | v1.52 | 771 (#771) the never-admissible refusal counts under its own reason | **§4.1** `datapipelines.dashboard.refresh.refused` gains the `never_admissible` value of its `reason` tag: #762's once-never-admissible 429 now counts under `reason=never_admissible`, the busy refusal under `saturated` alone — one series per reason, no new tag or counter. **§3.4J**'s `dashboard.refresh_never_admissible` row names the new tag value. |
 | 2026-11-02 | v1.48 | 778 (#778) the lake reference index backfill | New **§3.4P**: the boot backfill's `lake.reference_index.backfill` (INFO, counts) and `lake.reference_index.backfill_failed` (WARN, version identity and exception class; no SQL, no parser message). |
 | 2026-11-02 | v1.49 | 785 (#785) managed lake boot check | New **§3.4Q** (numbered at merge after #778's §3.4P / v1.48): the `lake.boot.ok` INFO line and the five `lake.boot.*` refusal ids the after-Flyway boot check leads its startup failure with (defined here so a citation of one is checked; they are not log events). |
