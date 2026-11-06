@@ -1714,9 +1714,15 @@ entries are SECRET-targeted and path-scoped with `condition = "AND"`
 secret co-located with an allowlisted token still fires), each with a reason +
 date comment, and the config EXTENDS the gitleaks default ruleset (a bare
 custom config silently replaces it — that mistake was made and caught here).
-The full-history scan runs by hand and is expected to exit 0 on `main`; a
-finding in a committed test fixture is triaged with a path + exact-value
-allowlist entry, never by reshaping the fixture's history.
+CI runs the full-history scan and `scripts/secret-scan-selftest.sh` on every
+push to `main`/`next` and every pull request (`.github/workflows/secret-scan.yml`);
+`secret-scan` is the required check on `main` (the owner adds it to the ruleset
+before the first promotion). The pre-commit hook remains the local staged-change
+check. Full-history scans use Git mode only (#686): directory scans can skip an
+entire path despite an AND allowlist. The self-test proves default-rule detection,
+admission of a triaged fixture, and detection of a different generated value on
+the same line at the same path. A finding in a committed test fixture is triaged
+with a path + exact-value allowlist entry, never by reshaping the fixture's history.
 
 #### Container scanning (trivy)
 

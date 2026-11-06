@@ -89,8 +89,8 @@
 #                                   procedure (its own header), not a per-PR stage.
 #   container-scan.sh / vuln-scan.sh network-dependent scanner stages; run locally or
 #                                   as a scheduled job when the owner wants them.
-#   secret-scan.sh                  needs the gitleaks binary; the pre-push hook is
-#                                   the enforcement point (DEVELOPMENT.md).
+#   secret-scan.sh                  pre-commit scans staged changes; secret-scan.yml
+#                                   scans full history on push/PR (required on main).
 #
 # Branch protection (E3, owner-owned — see the 025 handback): require `gate` on main,
 # PRs only. `integration` and `cold-verify` are strong signals but slower; requiring
