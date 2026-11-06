@@ -21,8 +21,12 @@ internal object EditorRunFixtures {
         baseUrl: String,
         name: String,
     ): List<String> {
-        page.navigate("$baseUrl/datasources")
-        page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+        namedWait(page, "the datasources page navigation ($baseUrl/datasources)") {
+            page.navigate("$baseUrl/datasources")
+        }
+        namedWait(page, "the datasources page's network idle ($baseUrl/datasources)", ::documentFacts) {
+            page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+        }
         return page.evaluate(
             """async (args) => {
               const headers = JSON.parse(document.body.getAttribute('hx-headers') || '{}');

@@ -19,14 +19,18 @@ abstract class SchedulesBrowserSuite : BrowserSuite() {
     protected fun ready(slug: String): String {
         val user = seedLocalUser(uniqueEmail("$slug-" + suffix()), generatedPassword("pw"), mustChange = false)
         login(user.email, user.oneTimePassword)
-        page.waitForURL("**/dashboard")
+        landOnDashboard()
         createWorkspace("$slug" + suffix())
         return slug + suffix()
     }
 
     protected fun openSchedules(query: String = "") {
-        page.navigate("$baseUrl/schedules$query")
-        page.locator("#schedule-list:not([aria-busy])").waitFor()
+        named(page, "the schedules page navigation ($baseUrl/schedules$query)") {
+            page.navigate("$baseUrl/schedules$query")
+        }
+        named(page, "the schedule list's first settle (#schedule-list:not([aria-busy]))", ::shellInitFacts) {
+            page.locator("#schedule-list:not([aria-busy])").waitFor()
+        }
     }
 
     protected fun leaf(name: String) = page.locator("#schedule-tree-pane [data-leaf-name='$name']")

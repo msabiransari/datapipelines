@@ -107,17 +107,38 @@ abstract class BrowserSuite {
     protected fun login(
         email: String,
         password: String,
+    ) = login(page, email, password)
+
+    /**
+     * [login] on an explicit page (#831) — a fixture signing in a SECOND session (a promoter or
+     * a member beside the admin) drives the identical form, with the identical named steps,
+     * instead of a hand-rolled copy whose waits time out bare.
+     */
+    protected fun login(
+        on: Page,
+        email: String,
+        password: String,
     ) {
-        named(page, "the login page navigation ($baseUrl/login)") {
-            page.navigate("$baseUrl/login")
+        named(on, "the login page navigation ($baseUrl/login)") {
+            on.navigate("$baseUrl/login")
         }
-        named(page, "the login form's fields (#login-email, #login-password on $baseUrl/login)", ::shellInitFacts) {
-            page.fill("#login-email", email)
-            page.fill("#login-password", password)
+        named(on, "the login form's fields (#login-email, #login-password on $baseUrl/login)", ::shellInitFacts) {
+            on.fill("#login-email", email)
+            on.fill("#login-password", password)
         }
-        named(page, "the login form's submit button ('form button[type=submit]' on $baseUrl/login)") {
-            page.click("form button[type=submit]")
+        named(on, "the login form's submit button ('form button[type=submit]' on $baseUrl/login)") {
+            on.click("form button[type=submit]")
         }
+    }
+
+    /**
+     * #831: the redirect a successful [login] ends in, as the derived fixtures wait for it — [named],
+     * so a login that never lands reads as the landing step and the page it stayed on (the login
+     * form, typically), not as a bare timeout. The test classes' own copies of this wait are a
+     * separate sweep.
+     */
+    protected fun landOnDashboard(on: Page = page) {
+        named(on, "the post-login landing (**/dashboard)") { on.waitForURL("**/dashboard") }
     }
 
     /**
@@ -129,23 +150,15 @@ abstract class BrowserSuite {
      * render or init wait passes [shellInitFacts]). It is read defensively, so a probe that
      * throws can never replace the named red. It sits BEFORE [block] on purpose: callers pass
      * the block as a trailing lambda, which Kotlin binds to the LAST function-typed parameter.
+     *
+     * #831: the body is [namedWait], which the suite's support objects call directly.
      */
     protected fun named(
         on: Page,
         what: String,
         facts: ((Page) -> String)? = null,
         block: () -> Unit,
-    ) {
-        try {
-            block()
-        } catch (e: com.microsoft.playwright.PlaywrightException) {
-            if (e.message?.contains("Timeout") == true) {
-                val held = facts?.let { probe -> " — " + runCatching { probe(on) }.getOrElse { "the facts probe itself failed: $it" } }
-                throw AssertionError("$what timed out — url=${on.url()}${held.orEmpty()}", e)
-            }
-            throw e
-        }
-    }
+    ) = namedWait(on, what, facts, block)
 
     /**
      * #554: shows [family]'s panel of the resource browser on [on] and waits for its root level.
@@ -416,15 +429,10 @@ abstract class BrowserSuite {
      * The in-document facts of a shell-init wait — url, document readiness, the flag — read
      * defensively, because a page mid-navigation refuses evaluate. ONE probe for the suite:
      * [enterWorkspace]'s render and init phases (#761) and AppShellBrowserTest's own waits (#717).
+     *
+     * #831: the body is [documentFacts], so the suite's support objects print the same facts.
      */
-    protected fun shellInitFacts(on: Page): String =
-        runCatching {
-            on.evaluate(
-                "() => 'url=' + location.href + " +
-                    "' readyState=' + document.readyState + " +
-                    "' __dpShellInit=' + String(window.__dpShellInit)",
-            ) as String
-        }.getOrElse { "the document probe itself failed: $it" }
+    protected fun shellInitFacts(on: Page): String = documentFacts(on)
 
     /**
      * #761: [enterWorkspace]'s steps, in order. A red names the phase that did not finish — [label]
@@ -872,3 +880,42 @@ abstract class BrowserSuite {
         }
     }
 }
+
+/**
+ * The body of [BrowserSuite.named] (#355, #825), lifted to the file's top level by #831 so the
+ * suite's support OBJECTS — which cannot call a protected member — raise the identical red: one
+ * implementation, no copy. Runs [block]; a Playwright timeout becomes an AssertionError reading
+ * `<what> timed out — url=<where the page was>`, plus ` — <facts>` when [facts] is given (read
+ * defensively, so a probe that throws never replaces the named red); anything else is rethrown.
+ * [facts] sits BEFORE [block]: callers pass the block as a trailing lambda.
+ */
+internal fun namedWait(
+    on: Page,
+    what: String,
+    facts: ((Page) -> String)? = null,
+    block: () -> Unit,
+) {
+    try {
+        block()
+    } catch (e: PlaywrightException) {
+        if (e.message?.contains("Timeout") == true) {
+            val held = facts?.let { probe -> " — " + runCatching { probe(on) }.getOrElse { "the facts probe itself failed: $it" } }
+            throw AssertionError("$what timed out — url=${on.url()}${held.orEmpty()}", e)
+        }
+        throw e
+    }
+}
+
+/**
+ * The body of [BrowserSuite.shellInitFacts] (#761), lifted by #831 beside [namedWait] so a support
+ * object's render or init wait carries the same document facts — url, document readiness, the
+ * shell's init flag — read defensively, because a page mid-navigation refuses evaluate.
+ */
+internal fun documentFacts(on: Page): String =
+    runCatching {
+        on.evaluate(
+            "() => 'url=' + location.href + " +
+                "' readyState=' + document.readyState + " +
+                "' __dpShellInit=' + String(window.__dpShellInit)",
+        ) as String
+    }.getOrElse { "the document probe itself failed: $it" }

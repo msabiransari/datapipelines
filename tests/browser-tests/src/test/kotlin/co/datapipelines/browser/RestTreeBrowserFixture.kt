@@ -1,5 +1,6 @@
 package co.datapipelines.browser
 
+import com.microsoft.playwright.Page
 import io.kotest.matchers.shouldBe
 
 /** Shared real-application fixtures for the REST tree witnesses; each case creates its own workspace. */
@@ -9,10 +10,12 @@ abstract class RestTreeBrowserFixture : BrowserSuite() {
     protected fun readyTree() {
         val user = seedLocalUser(uniqueEmail(generatedPassword("tree")), generatedPassword("pw"), mustChange = false)
         login(user.email, user.oneTimePassword)
-        page.waitForURL("**/dashboard")
+        landOnDashboard()
         createWorkspace("tree-" + generatedPassword("ws").lowercase())
         page.setViewportSize(1440, 900)
-        page.waitForFunction("() => window.DatapipelinesSidebarTrees instanceof Map")
+        named(page, "the resource browser's tree registry (window.DatapipelinesSidebarTrees)", ::shellInitFacts) {
+            page.waitForFunction("() => window.DatapipelinesSidebarTrees instanceof Map")
+        }
     }
 
     protected fun api(
@@ -61,20 +64,67 @@ abstract class RestTreeBrowserFixture : BrowserSuite() {
     protected fun leaf(path: String) = "$panel a[title='$path']"
 
     protected fun expand(path: String) {
-        page.click("${folder(path)} > .dp-tree-line button")
-        page.waitForFunction(
-            "key => window.DatapipelinesSidebarTrees.get('pipelines').state.levels.get(key)?.complete",
-            "folder:$path",
-        )
+        named(page, "the pipelines tree's expand button for folder $path (${folder(path)} > .dp-tree-line button)") {
+            page.click("${folder(path)} > .dp-tree-line button")
+        }
+        named(page, "the pipelines tree's level for folder $path (folder:$path)", { levelFacts(it, "folder:$path") }) {
+            page.waitForFunction(
+                "key => window.DatapipelinesSidebarTrees.get('pipelines').state.levels.get(key)?.complete",
+                "folder:$path",
+            )
+        }
     }
 
     protected fun search(value: String) {
-        page.fill("$panel input[type=search]", value)
-        page.waitForFunction(
-            "value => {const s=window.DatapipelinesSidebarTrees.get('pipelines').state; return s.query===value && s.search.complete}",
-            value,
-        )
+        named(page, "the pipelines tree's search field ($panel input[type=search])") {
+            page.fill("$panel input[type=search]", value)
+        }
+        named(page, "the pipelines tree's search results (query '$value')", { searchFacts(it) }) {
+            page.waitForFunction(
+                "value => {const s=window.DatapipelinesSidebarTrees.get('pipelines').state; return s.query===value && s.search.complete}",
+                value,
+            )
+        }
     }
+
+    /** #831: one tree level as its wait left it — status, completion, row count, error sentence; no row content. */
+    private fun levelFacts(
+        on: Page,
+        key: String,
+    ): String =
+        treeProbe(
+            on,
+            """
+            key => {
+              const level = window.DatapipelinesSidebarTrees?.get('pipelines')?.state.levels.get(key);
+              if (!level) return 'level=absent';
+              return 'level=' + level.status + ' complete=' + level.complete + ' rows=' + level.nodes.size +
+                (level.error ? ' error=' + level.error.message : '');
+            }
+            """.trimIndent(),
+            key,
+        )
+
+    /** #831: the search as its wait left it — the query the tree holds and the search level's state. */
+    private fun searchFacts(on: Page): String =
+        treeProbe(
+            on,
+            """
+            () => {
+              const state = window.DatapipelinesSidebarTrees?.get('pipelines')?.state;
+              if (!state) return 'tree=absent';
+              const s = state.search;
+              return 'query=' + JSON.stringify(state.query) + ' search=' + s.status + ' complete=' + s.complete + ' rows=' + s.nodes.size;
+            }
+            """.trimIndent(),
+            null,
+        )
+
+    private fun treeProbe(
+        on: Page,
+        script: String,
+        arg: Any?,
+    ): String = runCatching { on.evaluate(script, arg) as String }.getOrElse { "the tree probe itself failed: $it" }
 
     protected fun closedRoot() {
         page.locator("$panel [aria-expanded=true]").count() shouldBe 0
