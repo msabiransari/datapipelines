@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries and Publication
 
-**Status:** v1.4 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append)
+**Status:** v1.5 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append, bounded settlement)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -343,9 +343,11 @@ only a live lease, capped by the admitted deadline; loss, deadline or cancellati
 ## 8. Settlement and recovery
 
 Permanent `lake_table_revisions` rows, joined with delivery attempts, are the commit evidence. Snapshot expiry
-cannot erase it. `DeliverySettler.settle(tableId, deadline)` runs after publication and before retrying an
-unresolved delivery. A live lease stays unresolved. For a dead PUBLISHING/UNKNOWN attempt, the settler first
-takes over the table lease, waiting out the fence transaction, then reads the revision log in a **separate
+cannot erase it. A request settles only the delivery it waits on, through
+`DeliverySettler.settleDelivery(deliveryId, deadline)`: after its own publication, and before retrying a delivery key
+whose earlier attempt is unresolved; the sweep settles the rest of the table. A live lease stays unresolved. For a
+dead PUBLISHING/UNKNOWN attempt, the settler first takes over the table lease, waiting out the fence transaction,
+then reads the revision log in a **separate
 statement**: evidence means PUBLISHED, absence means FAILED(publish). A lock timeout leaves it unresolved;
 expiry alone never establishes failure. Conditional state and operation predicates protect newer attempts.
 
@@ -353,11 +355,28 @@ Normal execution cleanup marks unstarted RECEIVED attempts FAILED with listing, 
 After a crash, the sweep does so once the execution is terminal or gone. An unknown attempt is never treated
 as safe to retry solely because its worker stopped. Recipes and data files remain for recovery/maintenance.
 
-The `LakeSettlementScheduler` ticks every 60 seconds in normal mode, visiting a rotating page of up to 100
-managed tables within a ten-second work budget. Each statement has a dedicated five-second timeout; a final
-statement may overrun the work budget. It settles deliveries, verifies P3 `applying` rows, repairs semantics
-under a table lease only when their applied definition differs, and records `lake_control.last_sweep_at`.
-Restoring and replaying modes keep the sweep silent. Large catalogs may require several ticks for a full pass.
+The `LakeSettlementScheduler` starts a tick 60 seconds after the previous one ends, in normal mode. A tick visits a
+rotating page of up to 100 managed tables and, per table, one page of up to 50 unsettled deliveries after that
+table's row cursor, under a ten-second work budget. The budget is minted from the database clock with a JVM
+monotonic mirror: its work checks read the mirror and send no statement, while every lease and verdict still compares
+against the database clock. It is checked before the protection page, the table page, each table (before and after
+the table's mode read), each delivery and each statement group inside it, and before the projection repair, the P3
+`applying` verification and the semantics repair. Once the budget is spent nothing new starts. What still runs is the
+statement group under way, the release of a lease that group took over (or a refused takeover's deadline comparison)
+and the `last_sweep_at` heartbeat. Every statement has a dedicated five-second timeout, so settlement's own work ends
+at most **20 seconds** after the budget: four statements, namely a lease acquire's two, its release or comparison, and
+the heartbeat. A tick cannot promise less on a stalled server, where every statement it started runs to its timeout;
+commits and connection checkouts are not statements and are bounded only by the pool's and driver's settings. An
+`applying` verification or semantics repair that started inside the budget runs to its end, including an Iceberg
+metadata read with no application-level timeout (#843).
+
+The row cursor passes over live, busy and failing deliveries and wraps when a page comes back short, so deliveries
+behind them are reached on a later tick. Cursors are held in memory; after a restart each table starts again at its
+first unsettled delivery. Large backlogs drain across ticks at up to 50 deliveries per table per tick: when every page
+fits the budget, a table's N unsettled deliveries are all visited within ⌈N/50⌉ + 1 of its turns, and a pass over
+more than 100 tables takes several ticks. The sweep settles deliveries, verifies P3 `applying` rows, repairs semantics
+under a table lease only when their applied definition differs, and records `lake_control.last_sweep_at`. Restoring
+and replaying modes keep the sweep silent.
 
 The sweep finalizes protection only for committed, visible supersessions, using the observation statement's
 `now() + protection_interval`; NULL remains protected until observed. It never lowers an existing deadline.
@@ -369,6 +388,7 @@ nothing. The authoritative catalog remains the source for managed reads; the reg
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-06 | v1.5 | 799b (#799) | Settlement work is bounded per tick (§8): a page of 50 deliveries per table behind an in-memory row cursor, the ten-second budget checked before every step, delivery and statement group, and a stated overrun of at most 20 seconds. A request settles only the delivery it waits on. The applying verification and semantics repair keep a separate clause (#843). |
 | 2026-11-05 | v1.4 | 799 (#799) | Deliveries, publication and settlement (§6–§8), including sender immutability, admission and physical resource ownership, the validation barrier, effective authority, immutable recipes, opt-in redaction default false, permanent commit evidence and bounded normal-mode recovery. |
 | 2026-11-04 | v1.3 | 810 merge review | §3 distinguishes the polling horizon from the final row-lock wait, which can overrun either the lease wait or the caller's deadline by one lock timeout. |
 | 2026-11-04 | v1.2 | 810 (#810, #811, #812) | Drift has an exit: a definition whose shape equals the live table applies as one commit that sets only `dp.definition.version` (§2 row, §3 row, §4 rule 2). An unclassified failure of the commit step leaves the row `applying` as `lake.definition.apply_unclassified`, and the release returns that outcome (§3 row and paragraph). A lease takeover waits at most the catalog lock timeout on a lease row another transaction holds, then counts as busy (§3 "One attempt" and "Crash between commit and stamp"). |

@@ -18,7 +18,11 @@ class LakeSettlementSchedulingConfiguration {
     fun lakeSettlementScheduler(runtime: LakeAppendRuntime): LakeSettlementScheduler = LakeSettlementScheduler(runtime.sweep)
 }
 
-/** Runs on the application's existing scheduler, with a finite rotating page and a ten-second work budget. */
+/**
+ * Runs on the application's existing scheduler, one tick 60 seconds after the previous one ends. A tick visits
+ * a rotating page of managed tables and, per table, a bounded page of unsettled deliveries under a ten-second work budget
+ * checked before every step; settlement's own work ends at most 20 seconds past it (docs/lake.md §8, `LakeSettlementSweep`).
+ */
 class LakeSettlementScheduler(
     private val sweep: LakeSettlementSweep,
 ) {
