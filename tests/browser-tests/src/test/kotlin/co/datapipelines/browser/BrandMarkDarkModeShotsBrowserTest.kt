@@ -76,7 +76,7 @@ class BrandMarkDarkModeShotsBrowserTest : DashboardBrowserSuite() {
         measurements["selected"] shouldBe "rgb(48, 57, 83)"
         measurements["bodyText"] shouldBe "rgb(233, 236, 242)"
         measurements["indicator"] shouldBe "rgb(126, 144, 238)"
-        measurements["boundary"] shouldBe "rgb(104, 115, 134)"
+        measurements["boundary"] shouldBe "rgb(111, 122, 141)"
         measurements["violations"] shouldBe emptyList<String>()
     }
 
