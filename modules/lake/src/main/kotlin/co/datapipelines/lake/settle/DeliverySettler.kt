@@ -19,11 +19,12 @@ import java.util.UUID
  * takeover must finish before the separate revision-log read. Caller supplies its fixed deadline.
  * All injected SQL collaborators, including [leases], must use dedicated bounded JDBC templates.
  *
- * Per-tick work bound (§8b, lane 799b): the work [SettleBudget] is consulted before every row (that is, before the row's
- * first observation), before every later statement group inside it — the RECEIVED conclusion; the PUBLISHING takeover,
- * evidence read and conclusion — and before the projection repair. Once it is spent no new statement group starts; the
- * group already running finishes under its own statement timeouts (the longest, a lease acquire, is two statements plus
- * a deadline comparison when refused), and a takeover already taken is still released (one statement).
+ * Per-tick work bound (§8b, lanes 799b and 799c): the work [SettleBudget] is consulted before the target read, before the
+ * page read, before every row (that is, before the row's first observation), before every later statement group inside
+ * it — the RECEIVED conclusion; the PUBLISHING takeover, evidence read and conclusion — and before the projection
+ * repair. Once it is spent no new statement group starts; the group already running ends under its own timeouts (a lease
+ * acquire is a five-second transaction, then a deadline comparison when refused), and a takeover already taken is still
+ * released (one statement).
  */
 class DeliverySettler(
     private val observations: DeliverySettlementRepository,
@@ -37,7 +38,7 @@ class DeliverySettler(
      * Busy/live attempts stay unsettled and are passed over. A failing row ends the page with [SettlementDeferred],
      * whose progress resumes after that row; the projection repair runs only while [budget] remains.
      */
-    @Suppress("TooGenericExceptionCaught") // A failed repair is reported with the page's cursor, never swallowed.
+    @Suppress("TooGenericExceptionCaught", "ReturnCount") // A failed repair keeps the page's cursor; a spent budget exits early.
     fun settle(
         tableId: UUID,
         budget: SettleBudget,
@@ -46,7 +47,9 @@ class DeliverySettler(
     ): SettleProgress {
         require(limit > 0) { "settlement page must be positive: $limit" }
         requireOwnStatements()
+        if (budget.expired()) return SettleProgress(0, 0, afterId)
         val target = observations.target(tableId) ?: return SettleProgress(0, 0, null)
+        if (budget.expired()) return SettleProgress(0, 0, afterId)
         val page = deliveries.unsettled(tableId, afterId, limit)
         val walked = walk(target, page, budget, afterId)
         val progress = if (walked.complete && page.size < limit) walked.progress.copy(resumeAfter = null) else walked.progress

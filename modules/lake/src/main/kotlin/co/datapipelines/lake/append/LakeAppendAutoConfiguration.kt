@@ -18,6 +18,7 @@ import co.datapipelines.lake.delivery.LakeStagingStorage
 import co.datapipelines.lake.delivery.TrustedDeliveryListing
 import co.datapipelines.lake.settle.DeliverySettlementRepository
 import co.datapipelines.lake.settle.DeliverySettler
+import co.datapipelines.lake.settle.LakeMetadataReads
 import co.datapipelines.lake.settle.LakeProjectionRepair
 import co.datapipelines.lake.settle.LakeSemanticsRepair
 import co.datapipelines.lake.settle.LakeSettlementSweep
@@ -47,10 +48,11 @@ class LakeAppendRuntime(
     invalidation: LakeProjectionInvalidation,
     registry: DatasourceRegistry,
     audit: AuditEventSink,
-) {
+) : AutoCloseable {
     private val jdbc = statements(dataSource)
     private val named = NamedParameterJdbcTemplate(jdbc)
     private val transaction = TransactionTemplate(transactionManager).apply { timeout = STATEMENT_TIMEOUT_SECONDS }
+    private val metadata = LakeMetadataReads(named, properties.name, catalogs::metadataFileIo)
     private val leases = LakeLeases(jdbc, lockTimeout = Duration.ofSeconds(properties.catalog.lockTimeoutSeconds))
     private val definitions = LakeDefinitionRepository(named)
     private val deliveries = DeliveryLedgerRepository(named)
@@ -77,7 +79,8 @@ class LakeAppendRuntime(
                 transaction,
                 audit,
             ),
-            LakeSemanticsRepair(named, transaction, DeliverySettlementRepository(named), definitions, leases, catalogs),
+            LakeSemanticsRepair(named, transaction, DeliverySettlementRepository(named), definitions, leases, metadata),
+            metadata,
         )
     private val publisher =
         LakeWritebackRunner(
@@ -107,6 +110,12 @@ class LakeAppendRuntime(
             publisher,
             registry,
         )
+
+    /**
+     * Destroys the tick's metadata thread with the context. Spring calls this after the scheduler that runs the tick has
+     * stopped, so no tick is left to submit to it; a read still stuck on its socket is its daemon thread's alone.
+     */
+    override fun close() = metadata.close()
 
     companion object {
         const val STATEMENT_TIMEOUT_SECONDS = 5

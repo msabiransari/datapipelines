@@ -21,7 +21,8 @@ class LakeSettlementSchedulingConfiguration {
 /**
  * Runs on the application's existing scheduler, one tick 60 seconds after the previous one ends. A tick visits
  * a rotating page of managed tables and, per table, a bounded page of unsettled deliveries under a ten-second work budget
- * checked before every step; settlement's own work ends at most 20 seconds past it (docs/lake.md §8, `LakeSettlementSweep`).
+ * checked before every statement group; the tick ends at most 16 seconds past it, whatever the object store does, because
+ * its metadata read leaves this thread (docs/lake.md §8, `LakeSettlementSweep`).
  */
 class LakeSettlementScheduler(
     private val sweep: LakeSettlementSweep,

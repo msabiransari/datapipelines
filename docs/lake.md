@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries and Publication
 
-**Status:** v1.5 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append, bounded settlement)
+**Status:** v1.6 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append, bounded settlement, whole-tick bound)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -360,16 +360,38 @@ rotating page of up to 100 managed tables and, per table, one page of up to 50 u
 table's row cursor, under a ten-second work budget. The budget is minted from the database clock with a JVM
 monotonic mirror: its work checks read the mirror and send no statement, while every lease and verdict still compares
 against the database clock. It is checked before the protection page, the table page, each table (before and after
-the table's mode read), each delivery and each statement group inside it, and before the projection repair, the P3
-`applying` verification and the semantics repair. Once the budget is spent nothing new starts. What still runs is the
-statement group under way, the release of a lease that group took over (or a refused takeover's deadline comparison)
-and the `last_sweep_at` heartbeat. Every statement has a dedicated five-second timeout, so settlement's own work ends
-at most **20 seconds** after the budget: four statements, namely a lease acquire's two, its release or comparison, and
-the heartbeat. A tick cannot promise less on a stalled server, where every statement it started runs to its timeout;
+the table's mode read), the table's target and delivery page reads, each delivery and each statement group inside it,
+the projection repair, and every statement group inside the P3 `applying` verification and the semantics repair. Once
+the budget is spent nothing new starts: a verification or repair stopped this way reaches no verdict and stamps
+nothing, releases any lease it took and leaves its row for a later tick.
+
+**A tick ends at most 16 seconds after its budget**, with PostgreSQL answering and the default Redis timeouts:
+
+| Part of the overrun | At most | Why |
+|---|---|---|
+| The unit in flight at the deadline | 6 s | A statement group's or lease acquire's five-second transaction. Spring rounds a transaction's remaining time up to whole seconds for each statement, so five seconds can run to almost six. Whichever timer ends a lease acquire's wait, its lock timeout or this one, the acquire answers busy with the row unchanged. |
+| The statement that must follow it | 5 s | The release of a lease that unit holds, or a refused takeover's deadline comparison. A takeover that was refused holds no lease and releases nothing. |
+| The `last_sweep_at` heartbeat | 5 s | One statement with its own five-second timeout. |
+
+The tick's first mode read runs before the budget is minted, so a tick's whole wall clock is at most 31 seconds: 5, then
+10, then 16. A projection repair in flight at the deadline holds no lease: its transaction is followed by one
+invalidation publish, at most 2 s by `datapipelines.redis.command-timeout`'s default and 2 s more to reconnect, and the
+heartbeat, 15 s in all. Raising those Redis timeouts widens that one path.
+
+The Iceberg metadata read leaves the tick's thread. Verification and repair read the table's `metadata_location` from
+the catalog row with a five-second statement, open no catalog session, and read the metadata JSON on one dedicated
+daemon thread, `dp-lake-metadata`, waiting at most what remains of the budget. So an object store that stops answering
+adds nothing to the 16 seconds. A read that outlives the wait is abandoned and counted
+(`lake.settle.metadata_read_stuck`). It holds no lease and no database connection. It leaves that thread on one socket;
+the store client's socket timeout, ten seconds, ends it on a stalled store, and on a store that trickles bytes under
+that timeout it runs until the file ends, which nothing here bounds. While it runs, every table's verification and
+repair are deferred on every tick without sending a read: the one thread is the cap, so one stuck read delays
+verification for the whole lake, while deliveries keep settling. Its result is discarded, and a later tick reads again.
+
+A tick cannot promise more than this. Against a stalled PostgreSQL every statement it started runs to its timeout;
 commits and connection checkouts are not statements and are bounded only by the pool's and driver's settings, and
-against a server that accepts and never answers, a timeout's cancel does not end the blocked read (#837). An
-`applying` verification or semantics repair that started inside the budget runs to its end, including an Iceberg
-metadata read with no application-level timeout (#843).
+against a server that accepts and never answers, a timeout's cancel does not end the blocked read (#837). A healthy
+tick still reads the store once per table for the semantics repair's version check.
 
 The row cursor passes over live, busy and failing deliveries and wraps when a page comes back short, so deliveries
 behind them are reached on a later tick. Cursors are held in memory; after a restart each table starts again at its
@@ -389,6 +411,7 @@ nothing. The authoritative catalog remains the source for managed reads; the reg
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-06 | v1.6 | 799c (#799, #843) | The settlement tick is bounded as a whole (§8): the budget is checked inside verification and the semantics repair, the Iceberg metadata read leaves the tick's thread and opens no catalog session, one lease acquire is a five-second transaction, and the stated overrun is 16 seconds, derived term by term; a stuck read defers verification for every table until it ends. |
 | 2026-11-06 | v1.5 | 799b (#799) | Settlement work is bounded per tick (§8): a page of 50 deliveries per table behind an in-memory row cursor, the ten-second budget checked before every step, delivery and statement group, and a stated overrun of at most 20 seconds. A request settles only the delivery it waits on. The applying verification and semantics repair keep a separate clause (#843); the 20 seconds assume the pool hands out connections and the server answers its cancels (#837). |
 | 2026-11-05 | v1.4 | 799 (#799) | Deliveries, publication and settlement (§6–§8), including sender immutability, admission and physical resource ownership, the validation barrier, effective authority, immutable recipes, opt-in redaction default false, permanent commit evidence and bounded normal-mode recovery. |
 | 2026-11-04 | v1.3 | 810 merge review | §3 distinguishes the polling horizon from the final row-lock wait, which can overrun either the lease wait or the caller's deadline by one lock timeout. |

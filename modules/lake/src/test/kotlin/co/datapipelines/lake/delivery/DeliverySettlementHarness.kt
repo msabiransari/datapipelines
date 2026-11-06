@@ -1,8 +1,6 @@
 package co.datapipelines.lake.delivery
 
-import co.datapipelines.lake.LakeCatalogs
 import co.datapipelines.lake.LakeLeases
-import co.datapipelines.lake.LakeProperties
 import co.datapipelines.lake.LakeTableProperties
 import co.datapipelines.lake.LakeTestDb
 import co.datapipelines.lake.LeaseHandle
@@ -16,6 +14,7 @@ import co.datapipelines.lake.definitions.LakeDefinitionRepository
 import co.datapipelines.lake.definitions.RecordingAuditSink
 import co.datapipelines.lake.settle.DeliverySettlementRepository
 import co.datapipelines.lake.settle.DeliverySettler
+import co.datapipelines.lake.settle.LakeMetadataReads
 import co.datapipelines.lake.settle.LakeProjectionRepair
 import co.datapipelines.lake.settle.LakeSemanticsRepair
 import co.datapipelines.lake.settle.LakeSettlementSweep
@@ -60,6 +59,7 @@ internal class DeliverySettlementHarness(
     val ledger = DeliveryLedger(repository, transaction, audit)
     val tableId: UUID = UUID.randomUUID()
     val actor: UUID = UUID.fromString("00000000-0000-0000-0000-000000000799")
+    private val openReads = mutableListOf<LakeMetadataReads>()
 
     fun reset() {
         resetDatabase()
@@ -90,52 +90,32 @@ internal class DeliverySettlementHarness(
 
     /**
      * The production sweep over this harness's tables. They carry no applied definition and no APPLYING attempt, so
-     * the applier and the semantics repair return before opening a catalog; the strict catalog double proves it.
+     * the applier and the semantics repair return before reading any metadata; the store that refuses proves it.
      * [budgets] mints each tick's budget (production's by default); pass it by name.
      */
     fun sweep(
         leases: LakeLeases = leases(),
         budgets: () -> SettleBudget = { SettleBudget.startingNow(leases, LakeSettlementSweep.SWEEP_BUDGET) },
-    ): LakeSettlementSweep {
-        val definitions = LakeDefinitionRepository(named)
-        val catalogs = mockk<LakeCatalogs>()
-        return LakeSettlementSweep(
-            named,
-            leases,
-            settler(leases),
-            LakeDefinitionApplier(
-                definitions,
-                LakeApplyRepository(named),
-                LakeApplyLeases(leases, Duration.ZERO),
-                catalogs,
-                "lake799",
-                transaction,
-                audit,
-            ),
-            LakeSemanticsRepair(named, transaction, observations, definitions, leases, catalogs),
-            budgets = budgets,
-        )
-    }
+    ): LakeSettlementSweep = graph(leases, budgets) { error("these tables never reach a metadata read") }
 
     /**
      * The production sweep over tables that DO reach verification and repair (B.0), with [io] as the object store the
-     * metadata read meets. Pass [budgets] by name.
+     * metadata read meets. The catalog stays the strict double: a catalog session on the sweep path fails the case.
+     * Pass [budgets] by name.
      */
     fun stallableSweep(
         io: FileIO,
         leases: LakeLeases = leases(),
         budgets: () -> SettleBudget = { SettleBudget.startingNow(leases, LakeSettlementSweep.SWEEP_BUDGET) },
+    ): LakeSettlementSweep = graph(leases, budgets) { io }
+
+    private fun graph(
+        leases: LakeLeases,
+        budgets: () -> SettleBudget,
+        store: () -> FileIO,
     ): LakeSettlementSweep {
         val definitions = LakeDefinitionRepository(named)
-        val catalogs =
-            LakeCatalogs(
-                LakeProperties(
-                    enabled = true,
-                    name = LAKE,
-                    storage = LakeProperties.Storage(bucket = LAKE, region = LakeCatalogs.DEFAULT_SIGNING_REGION, pathStyle = true),
-                ),
-                LakeTestDb.catalogDatabase(),
-            ) { io }
+        val reads = LakeMetadataReads(named, LAKE, store).also(openReads::add)
         return LakeSettlementSweep(
             named,
             leases,
@@ -144,21 +124,35 @@ internal class DeliverySettlementHarness(
                 definitions,
                 LakeApplyRepository(named),
                 LakeApplyLeases(leases, Duration.ZERO),
-                catalogs,
+                mockk(),
                 LAKE,
                 transaction,
                 audit,
             ),
-            LakeSemanticsRepair(named, transaction, observations, definitions, leases, catalogs),
+            LakeSemanticsRepair(named, transaction, observations, definitions, leases, reads),
+            reads,
             budgets = budgets,
         )
     }
 
     /** A work budget a case controls: [expired] answers every check; its deadline is a minute away on the database clock. */
-    fun budget(expired: () -> Boolean): SettleBudget = SettleBudget(leases().catalogNowPlus(Duration.ofMinutes(1)), expired)
+    fun budget(expired: () -> Boolean): SettleBudget =
+        SettleBudget(leases().catalogNowPlus(Duration.ofMinutes(1)), expired) { Duration.ofMinutes(1) }
+
+    /**
+     * Waits for the latest sweep's abandoned read to be over, not only its stream closed: the read's own thread still
+     * parses after the close. Called between ticks, as `stuck()` is only ever called by one tick at a time.
+     */
+    fun noStuckReadWithin(millis: Long): Boolean {
+        val end = System.nanoTime() + Duration.ofMillis(millis).toNanos()
+        while (openReads.last().stuck() && System.nanoTime() < end) {
+            Thread.sleep(POLL_MILLIS)
+        }
+        return !openReads.last().stuck()
+    }
 
     /** Ends what a case's sweeps left running. */
-    fun close() = Unit
+    fun close() = openReads.forEach(LakeMetadataReads::close)
 
     /** Version 1 of [table]'s definition, released and current; the row is `pending` (P3's landing without its apply). */
     fun releaseDefinition(table: UUID = tableId) {
@@ -314,6 +308,7 @@ internal class DeliverySettlementHarness(
     companion object {
         /** The harness's `catalog_name`. */
         const val LAKE = "lake799"
+        private const val POLL_MILLIS = 10L
     }
 }
 

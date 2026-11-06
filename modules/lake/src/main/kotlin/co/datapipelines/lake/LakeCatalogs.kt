@@ -80,6 +80,12 @@ class LakeCatalogs(
     }
 
     /**
+     * The object-store client alone, for a read that needs neither a catalog session nor a lease (the settlement tick's
+     * metadata read, record §8b). The caller closes it. Deletes stay deferred, as on every FileIO of the lake.
+     */
+    fun metadataFileIo(): FileIO = DeferringFileIO(fileIoFactory(catalogProperties()))
+
+    /**
      * The catalog's properties: the JDBC URI (the pool ignores it and connects with [CatalogDatabase]; the
      * library requires the key), the warehouse, no DDL, and S3FileIO's keys. Holds the
      * S3 secret when one is configured — never logged, never returned to a caller.
@@ -96,6 +102,8 @@ class LakeCatalogs(
             put(S3_PATH_STYLE, storage.pathStyle.toString())
             put(CLIENT_REGION, storage.region.ifBlank { DEFAULT_SIGNING_REGION })
             put(HTTP_CLIENT_TYPE, "urlconnection")
+            put(HTTP_CONNECTION_TIMEOUT_MS, STORE_CONNECTION_TIMEOUT_MILLIS.toString())
+            put(HTTP_SOCKET_TIMEOUT_MS, STORE_SOCKET_TIMEOUT_MILLIS.toString())
             if (storage.endpoint.isNotBlank()) put(S3_ENDPOINT, storage.endpoint)
             if (storage.hasStaticCredentials) {
                 put(S3_ACCESS_KEY_ID, storage.accessKey)
@@ -118,6 +126,18 @@ class LakeCatalogs(
         private const val S3_SECRET_ACCESS_KEY = "s3.secret-access-key"
         private const val CLIENT_REGION = "client.region"
         private const val HTTP_CLIENT_TYPE = "http-client.type"
+        private const val HTTP_CONNECTION_TIMEOUT_MS = "http-client.urlconnection.connection-timeout-ms"
+        private const val HTTP_SOCKET_TIMEOUT_MS = "http-client.urlconnection.socket-timeout-ms"
+
+        /** The SDK's own default, stated so it cannot drift: a longer one would only loosen the bound (record §8b, D4). */
+        const val STORE_CONNECTION_TIMEOUT_MILLIS = 2_000L
+
+        /**
+         * Tighter than the SDK's 30 s and equal to the settlement tick's budget, so a store that stops answering ends the
+         * read the tick abandoned. A store trickling bytes under this bound is not ended by it (docs/lake.md §8). Every
+         * FileIO of the lake carries it: a slow write fails before its pointer swap, clean, and is retried by its caller.
+         */
+        const val STORE_SOCKET_TIMEOUT_MILLIS = 10_000L
 
         /**
          * The SigV4 region when only an endpoint is configured (an S3-compatible store; `LakeRules` admits

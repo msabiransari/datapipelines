@@ -14,9 +14,13 @@ import java.util.UUID
 class SettleBudget internal constructor(
     val deadline: Instant,
     private val isExpired: () -> Boolean,
+    private val left: () -> Duration,
 ) {
     /** True once the budget is spent: no new row, statement group or repair may start. */
     fun expired(): Boolean = isExpired()
+
+    /** What is left of the budget on the same mirror, zero when spent: how long the tick may wait for work off its thread. */
+    fun remaining(): Duration = left()
 
     companion object {
         /** A deadline further away than this bounds only the work mirror at this length; verdicts keep the full deadline. */
@@ -47,10 +51,20 @@ class SettleBudget internal constructor(
             remaining: Duration,
         ): SettleBudget {
             val end = minted + if (remaining.isNegative) 0L else minOf(remaining, MAX_MIRROR).toNanos()
-            return SettleBudget(deadline) { System.nanoTime() - end >= 0 }
+            return SettleBudget(
+                deadline,
+                { System.nanoTime() - end >= 0 },
+                { Duration.ofNanos(maxOf(end - System.nanoTime(), 0L)) },
+            )
         }
     }
 }
+
+/**
+ * Why a verification or a semantics repair stopped with no verdict, its row untouched for a later tick: the tick's
+ * budget was spent, or the metadata read could not be waited for (D4). An exception is the third cause the sweep counts.
+ */
+enum class SettleDeferCause { BUDGET, STUCK_READ }
 
 /**
  * What one settlement page did: [visited] rows whose work finished, [changed] of them moved to a terminal state.

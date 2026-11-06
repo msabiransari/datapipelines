@@ -7,6 +7,7 @@ import co.datapipelines.lake.LakeTestDb
 import co.datapipelines.lake.settle.LakeSettlementSweep
 import co.datapipelines.lake.settle.SettleBudget
 import co.datapipelines.lake.settle.SettleProgress
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainOnly
 import io.kotest.matchers.ints.shouldBeLessThanOrEqual
 import io.kotest.matchers.longs.shouldBeLessThanOrEqual
@@ -56,8 +57,8 @@ class SettlementWorkBoundIntegrationTest {
     fun `B1 an expired budget settles nothing and a fresh one settles with its strict audit`() {
         val row = h.receive()
         settleUntil(Instant.EPOCH) shouldBe 0
-        // The before-row check: the spent budget starts no row, so not even the row's first observation is sent.
-        sql.tables() shouldBe listOf("lake_tables_managed", "lake_deliveries")
+        // The check before the target read: a spent budget sends nothing at all, so no row's observation either.
+        sql.executed shouldBe emptyList()
         h.repository.find(row.id)?.state shouldBe LakeDeliveryState.RECEIVED
         h.attemptOutcome(row) shouldBe null
         h.audit.events shouldBe emptyList()
@@ -170,24 +171,53 @@ class SettlementWorkBoundIntegrationTest {
     @Test
     fun `every sweep step checks the budget and a spent budget starts no later step`() {
         val row = h.receive()
-        val sent = mutableMapOf<Int, List<String>>()
-        for (spentAt in 1..SWEEP_CHECKS) {
+        val sent = mutableMapOf<String, List<String>>()
+        for ((step, spentAt) in STEPS_TO_THE_ROW) {
             h.sweep(budgets = { spentAtCheck(spentAt) }).runOnce()
-            sent[spentAt] = sql.executed.map(::groupOf)
+            sent[step] = sql.executed.map(::groupOf)
             h.repository.find(row.id)?.state shouldBe LakeDeliveryState.RECEIVED
         }
-        // 1 before the protection page, 2 before the table page, 3 before the table's mode read, 4 after it, 5 before the row.
         sent shouldBe
             mapOf(
-                1 to listOf("heartbeat"),
-                2 to listOf("protection", "heartbeat"),
-                3 to listOf("protection", "tables", "heartbeat"),
-                4 to listOf("protection", "tables", "mode", "heartbeat"),
-                5 to listOf("protection", "tables", "mode", "target", "page", "heartbeat"),
+                "before protection" to listOf("heartbeat"),
+                "before tables" to listOf("protection", "heartbeat"),
+                "before mode" to listOf("protection", "tables", "heartbeat"),
+                "after mode" to listOf("protection", "tables", "mode", "heartbeat"),
+                "before target" to listOf("protection", "tables", "mode", "heartbeat"),
+                "before page" to listOf("protection", "tables", "mode", "target", "heartbeat"),
+                "before row" to listOf("protection", "tables", "mode", "target", "page", "heartbeat"),
             )
-        sweepLines() shouldBe List(SWEEP_CHECKS - 1) { "tables=0 rows=0 changed=0 exhausted=true" } +
-            "tables=1 rows=0 changed=0 exhausted=true"
+        sweepLines() shouldBe List(STEPS_BEFORE_THE_TABLE) { "tables=0 rows=0 changed=0 exhausted=true" } +
+            List(STEPS_TO_THE_ROW.size - STEPS_BEFORE_THE_TABLE) { "tables=1 rows=0 changed=0 exhausted=true" }
         h.audit.events shouldBe emptyList()
+    }
+
+    @Test
+    fun `the steps after a table's rows check the budget too and the tick has no unnamed check`() {
+        val sent = mutableMapOf<String, List<String>>()
+        for ((step, spentAt) in STEPS_AFTER_THE_ROWS) {
+            h.sweep(budgets = { spentAtCheck(spentAt) }).runOnce()
+            sent[step] = sql.executed.map(::groupOf)
+        }
+        val toThePage = listOf("protection", "tables", "mode", "target", "page")
+        sent shouldBe
+            mapOf(
+                "before projection" to toThePage + "heartbeat",
+                "before verification" to toThePage + "projection" + "heartbeat",
+                "before repair" to toThePage + "projection" + "find_table" + "heartbeat",
+            )
+
+        var checks = 0
+        h
+            .sweep(
+                budgets = {
+                    recorded {
+                        checks++
+                        false
+                    }
+                },
+            ).runOnce()
+        withClue("every check is named above; the last one is the tick's exhausted flag") { checks shouldBe SWEEP_CHECKS + 1 }
     }
 
     @Test
@@ -210,7 +240,7 @@ class SettlementWorkBoundIntegrationTest {
     @Test
     fun `a RECEIVED row whose budget is spent after its observation is not concluded`() {
         val row = h.receive()
-        h.settler().settle(h.tableId, spentAtCheck(2), null, PAGE) shouldBe SettleProgress(0, 0, null)
+        h.settler().settle(h.tableId, spentAtCheck(CONCLUSION_CHECK), null, PAGE) shouldBe SettleProgress(0, 0, null)
         sql.executed.any { "pipeline_executions" in it } shouldBe true
         sql.executed.none { it.startsWith("UPDATE lake_deliveries") } shouldBe true
         h.repository.find(row.id)?.state shouldBe LakeDeliveryState.RECEIVED
@@ -229,13 +259,16 @@ class SettlementWorkBoundIntegrationTest {
             h.repository.find(row.id)?.state shouldBe LakeDeliveryState.PUBLISHING
             h.jdbc.queryForObject("SELECT count(*) FROM lake_leases", Int::class.java) shouldBe 0
         }
-        // 1 before the row: no observation. 2 before the takeover. 3 before the evidence read. 4 before the conclusion.
-        sent.mapValues { (_, statements) -> statements.map(::groupOf).filterNot { it == "target" || it == "page" } } shouldBe
+        // 1 before the target, 2 before the page, 3 before the row: no observation. 4 before the takeover. 5 before the
+        // evidence read. 6 before the conclusion.
+        sent.mapValues { (_, statements) -> statements.map(::groupOf) } shouldBe
             mapOf(
                 1 to emptyList(),
-                2 to listOf("observation"),
-                3 to listOf("observation", "lock_timeout", "takeover", "release"),
-                4 to listOf("observation", "lock_timeout", "takeover", "evidence", "release"),
+                2 to listOf("target"),
+                3 to listOf("target", "page"),
+                4 to listOf("target", "page", "observation"),
+                5 to listOf("target", "page", "observation", "lock_timeout", "takeover", "release"),
+                6 to listOf("target", "page", "observation", "lock_timeout", "takeover", "evidence", "release"),
             )
         h.audit.events shouldBe emptyList()
 
@@ -246,8 +279,8 @@ class SettlementWorkBoundIntegrationTest {
 
     @Test
     fun `the projection repair does not start once the budget is spent`() {
-        h.settler().settle(h.tableId, spentAtCheck(1), null, PAGE) shouldBe SettleProgress(0, 0, null)
-        sql.executed.none { it.startsWith(REPAIR) } shouldBe true
+        h.settler().settle(h.tableId, spentAtCheck(PROJECTION_CHECK), null, PAGE) shouldBe SettleProgress(0, 0, null)
+        sql.executed.map(::groupOf) shouldBe listOf("target", "page")
         h.settler().settle(h.tableId, fresh(), null, PAGE) shouldBe SettleProgress(0, 0, null)
         sql.executed.count { it.startsWith(REPAIR) } shouldBe 1
     }
@@ -295,7 +328,7 @@ class SettlementWorkBoundIntegrationTest {
     }
 
     private fun recorded(expired: () -> Boolean): SettleBudget {
-        val budget = SettleBudget(h.leases().catalogNowPlus(Duration.ofMinutes(1)), expired)
+        val budget = h.budget(expired)
         sql.reset()
         return budget
     }
@@ -323,7 +356,7 @@ class SettlementWorkBoundIntegrationTest {
         lines.list
             .map { it.formattedMessage }
             .filter { it.startsWith("event=lake.settle.sweep ") }
-            .map { it.substringAfter("event=lake.settle.sweep ").substringBefore(" cause=") }
+            .map { it.substringAfter("event=lake.settle.sweep ").substringBefore(" deferred_") }
 
     private fun catalogClock(): Instant =
         requireNotNull(h.jdbc.queryForObject("SELECT clock_timestamp()", OffsetDateTime::class.java)).toInstant()
@@ -335,6 +368,7 @@ class SettlementWorkBoundIntegrationTest {
             statement.startsWith("SELECT id FROM lake_tables_managed") -> "tables"
             statement.startsWith("SELECT mode = ") -> "mode"
             statement.startsWith("UPDATE lake_control SET last_sweep_at") -> "heartbeat"
+            statement.startsWith("SELECT t.id, t.namespace_id") -> "find_table"
             statement.contains("FROM lake_tables_managed t") -> "target"
             statement.contains("FROM lake_deliveries WHERE table_id") -> "page"
             statement.startsWith("SELECT EXISTS (SELECT 1 FROM lake_leases") -> "observation"
@@ -342,6 +376,7 @@ class SettlementWorkBoundIntegrationTest {
             statement.startsWith("DELETE FROM lake_leases") -> "release"
             statement.contains("FROM lake_table_revisions r") -> "evidence"
             statement.startsWith("SELECT set_config('lock_timeout'") -> "lock_timeout"
+            statement.startsWith(REPAIR) -> "projection"
             else -> statement
         }
 
@@ -352,9 +387,6 @@ class SettlementWorkBoundIntegrationTest {
         val executed = mutableListOf<String>()
 
         fun reset() = executed.clear()
-
-        /** The relation each recorded statement reads from, in order. */
-        fun tables(): List<String> = executed.map { it.substringAfter(" FROM ").substringBefore(" ") }
 
         override fun getConnection(): Connection = connection(target.connection)
 
@@ -400,15 +432,29 @@ class SettlementWorkBoundIntegrationTest {
         const val PAGE = 50
         const val BACKLOG_PAGES = 3
         const val POISON_BACKLOG = 3
-        const val PUBLISHING_CHECKS = 4
-        const val SWEEP_CHECKS = 5
+        const val PUBLISHING_CHECKS = 6
+
+        /** In one settlement call: 1 before the target, 2 before the page, then the row, then its conclusion. */
+        const val CONCLUSION_CHECK = 4
+
+        /** In one settlement call over an empty page: 1 before the target, 2 before the page, 3 before the projection. */
+        const val PROJECTION_CHECK = 3
+
+        /** Every check of a tick over one table with no rows, in the order the tick meets them. */
+        const val SWEEP_CHECKS = 9
+        const val STEPS_BEFORE_THE_TABLE = 4
+        val STEPS_TO_THE_ROW =
+            listOf("before protection", "before tables", "before mode", "after mode", "before target", "before page", "before row")
+                .withIndex()
+                .associate { (index, step) -> step to index + 1 }
+        val STEPS_AFTER_THE_ROWS = mapOf("before projection" to 7, "before verification" to 8, "before repair" to 9)
         const val REPAIR = "INSERT INTO lake_tables (datasource_id"
 
         /**
-         * Production's tick budget and docs/lake.md §8's permitted overrun past it: four five-second statements (a lease
-         * acquire's two, its release or deadline comparison, and the heartbeat).
+         * Production's tick budget and docs/lake.md §8's permitted overrun past it, as literals so a changed number
+         * re-opens this file; `SettlementOverrunDerivationTest` derives the overrun from the source.
          */
         val SWEEP_BUDGET: Duration = Duration.ofSeconds(10)
-        val PERMITTED_OVERRUN: Duration = Duration.ofSeconds(20)
+        val PERMITTED_OVERRUN: Duration = Duration.ofSeconds(16)
     }
 }

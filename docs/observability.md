@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.55 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.56 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-06
@@ -424,7 +424,9 @@ Delivery storage failures report the exception class and first SQLSTATE using §
 | WARN | `lake.append.heartbeat_failed` | Periodic metadata renewal failed; the watch loses authority and later mutations stop | `operation_id`, `cause`, `sql_state` |
 | WARN | `lake.append.settlement_deferred` | Immediate settlement failed and leaves recovery to a later sweep | `delivery_id`, `operation_id`, `cause`, `sql_state` |
 | WARN | `lake.delivery.cleanup_deferred` | Pre-publication cleanup could not stamp every receipt; resources were released and terminal executions are sweepable | `execution_id`, `cause`, `sql_state` |
-| INFO | `lake.settle.sweep` | A normal-mode tick finished its rotating table page, or stopped where its work budget ran out | `tables` (managed tables visited), `rows` (deliveries visited), `changed` (deliveries moved to a terminal state), `exhausted` (the tick's budget was spent), `cause=none`, `sql_state=none` |
+| INFO | `lake.settle.sweep` | A normal-mode tick finished its rotating table page, or stopped where its work budget ran out | `tables` (managed tables visited), `rows` (deliveries visited), `changed` (deliveries moved to a terminal state), `exhausted` (the tick's budget was spent), `deferred_budget`, `deferred_stuck`, `deferred_failed` (the tables whose recovery stopped short because the budget was spent, a metadata read could not be waited for, or an exception), `cause=none`, `sql_state=none` |
+| WARN | `lake.settle.metadata_read_stuck` | A metadata read outlived the tick's budget and was abandoned on its own thread. It holds no lease and no connection; every table's verification and repair are deferred until it ends | `table_id`, `elapsed_ms`, `stuck_total` (abandoned reads since boot), `cause=none`, `sql_state=none` |
+| INFO | `lake.settle.metadata_read_ended` | A later tick found the abandoned read finished: its result was discarded and reads resume | `table_id`, `elapsed_ms` (the read's whole life), `cause`, `sql_state` (what it failed with, `none` when it completed) |
 | WARN | `lake.settle.deferred` | One table's recovery failed; later eligible tables/pages remain recoverable | `table_id`, `cause`, `sql_state` |
 | WARN | `lake.settle.sweep_deferred` | The bounded sweep failed outside an individual table, including a held control-row lock | `cause`, `sql_state` |
 | WARN | `lake.append.recipe_write_failed` | The immutable recipe PUT failed before catalog publication. No storage message or cause chain crosses the boundary | `cause`, `sql_state` |
@@ -734,6 +736,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 | 2026-11-05 | v1.53 | 799 (#799) immutable recipes | §3.4S records the sanitized recipe PUT failure; no SDK message, cause chain or storage configuration is logged. |
 | 2026-11-05 | v1.54 | 799 (#799) library deletion refusal | §3.4S records the production FileIO refusal and retained key, including Iceberg transaction cleanup after manifest merges. |
 | 2026-11-06 | v1.55 | 799b (#799) bounded settlement | §3.4S `lake.settle.sweep` gains `rows`, `changed` and `exhausted`: each tick's visited deliveries, terminal transitions and whether its work budget ran out ([Lake §8](lake.md#8-settlement-and-recovery)). No event added or renamed. |
+| 2026-11-06 | v1.56 | 799c (#799, #843) whole-tick settlement bound | §3.4S `lake.settle.sweep` gains `deferred_budget`, `deferred_stuck` and `deferred_failed`; new `lake.settle.metadata_read_stuck` and `lake.settle.metadata_read_ended` for the metadata read that left the tick's thread. |
 | 2026-11-02 | v1.49 | 785 (#785) managed lake boot check | New **§3.4Q** (numbered at merge after #778's §3.4P / v1.48): the `lake.boot.ok` INFO line and the five `lake.boot.*` refusal ids the after-Flyway boot check leads its startup failure with (defined here so a citation of one is checked; they are not log events). |
 | 2026-11-04 | v1.51 | 810 (#811) unclassified apply failure | **§3.4R** gains `lake.definition.apply_unclassified` (ERROR, `cause` + `sql_state`). It is logged where an unclassified failure of the commit step is caught, before the attempt's `apply_unknown` line, whose `code` is then `lake.definition.apply_unclassified`. |
 | 2026-11-03 | v1.50 | 798 (#798) lake table definition apply | New **§3.4R** (after #785's §3.4Q / v1.49): one line per apply or verify attempt that reached the table, with the events `lake.definition.applied` (INFO), `apply_failed` (WARN), `apply_deferred` (INFO, lease busy or back to pending), `apply_unknown` (WARN, the row stays applying) and `apply_superseded` (INFO). No body, location or storage value is logged. |

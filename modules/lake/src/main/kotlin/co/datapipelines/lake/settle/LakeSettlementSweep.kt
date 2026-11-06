@@ -2,6 +2,7 @@ package co.datapipelines.lake.settle
 
 import co.datapipelines.lake.LakeLeases
 import co.datapipelines.lake.LakeProperties
+import co.datapipelines.lake.definitions.LakeApplyOutcome
 import co.datapipelines.lake.definitions.LakeDefinitionApplier
 import co.datapipelines.persistence.FailureShape
 import org.slf4j.LoggerFactory
@@ -12,16 +13,16 @@ import java.util.UUID
 /**
  * Bounded normal-mode recovery; durable revisions remain protected until an observation sees their supersession.
  *
- * Per-tick work bound (record §8b; lane 799b): one [SettleBudget] of [SWEEP_BUDGET] per tick, minted after the tick's
- * first mode read and consulted before the protection page, the table page, every table (before and after its mode
- * read), every delivery row and statement group, the projection repair, the applying verification and the semantics
- * repair. A tick visits a rotating page of at most [PAGE_SIZE] managed tables and, per table, one keyset page of at most
- * [rowPage] unsettled deliveries after that table's row cursor (D1), which advances past visited rows — live, busy and
- * failing ones included — and wraps when a page comes back short. Once the budget is spent no new step starts; what
- * still runs is the statement group under way, the release of a lease it took over or the deadline comparison of a
- * refused takeover, and the `last_sweep_at` heartbeat: with five-second statement timeouts, at most 20 seconds past
- * the budget (docs/lake.md §8). A verification or semantics repair that started inside the budget runs to its end.
- * [rowPage] and [budgets] are test seams; pass [budgets] by name.
+ * Whole-tick bound (record §8b; owner ruling D3 (i), lane 799c): one [SettleBudget] of [SWEEP_BUDGET] per tick, minted
+ * after the tick's first mode read and consulted before the protection page, the table page, every table (before and
+ * after its mode read) and every statement group of the delivery settlement, the projection repair, the applying
+ * verification and the semantics repair. A tick visits a rotating page of at most [PAGE_SIZE] managed tables and, per
+ * table, one keyset page of at most [rowPage] unsettled deliveries after that table's row cursor (D1), which advances
+ * past visited rows — live, busy and failing ones included — and wraps when a page comes back short. Once the budget is
+ * spent no new statement group starts; what still runs is the unit under way, the release of a lease it took over or the
+ * deadline comparison of a refused takeover, and the `last_sweep_at` heartbeat: at most [PERMITTED_OVERRUN] past the
+ * budget (docs/lake.md §8). The Iceberg metadata read leaves the tick's thread ([LakeMetadataReads]), so an object store
+ * that stops answering adds nothing to that number. [rowPage] and [budgets] are test seams; pass [budgets] by name.
  */
 class LakeSettlementSweep(
     private val jdbc: NamedParameterJdbcTemplate,
@@ -29,6 +30,7 @@ class LakeSettlementSweep(
     private val settler: DeliverySettler,
     private val applier: LakeDefinitionApplier,
     private val semantics: LakeSemanticsRepair,
+    private val metadata: LakeMetadataReads,
     private val rowPage: Int = SETTLE_PAGE_SIZE,
     private val budgets: () -> SettleBudget = { SettleBudget.startingNow(leases, SWEEP_BUDGET) },
 ) {
@@ -55,10 +57,11 @@ class LakeSettlementSweep(
         var visited = 0
         var rows = 0
         var changed = 0
+        val deferred = DeferredTables()
         for (table in tables.orEmpty()) {
             // Checked again after the mode read: that statement may be the one that spent the budget.
             if (budget.expired() || !normal() || budget.expired()) break
-            val progress = recover(table, budget)
+            val progress = recover(table, budget, deferred)
             if (rowCursors.containsKey(table)) cursorsSeen += table
             rows += progress.visited
             changed += progress.changed
@@ -76,11 +79,15 @@ class LakeSettlementSweep(
             mapOf("mode" to LakeProperties.MODE_NORMAL),
         )
         log.info(
-            "event=lake.settle.sweep tables={} rows={} changed={} exhausted={} cause=none sql_state=none",
+            "event=lake.settle.sweep tables={} rows={} changed={} exhausted={} deferred_budget={} deferred_stuck={} " +
+                "deferred_failed={} cause=none sql_state=none",
             visited,
             rows,
             changed,
             exhausted,
+            deferred.budget,
+            deferred.stuck,
+            deferred.failed,
         )
     }
 
@@ -108,19 +115,22 @@ class LakeSettlementSweep(
     private fun recover(
         table: UUID,
         budget: SettleBudget,
+        tally: DeferredTables,
     ): SettleProgress {
         var progress = SettleProgress(0, 0, rowCursors[table])
         try {
             progress = settler.settle(table, budget, rowCursors[table], rowPage)
             advance(table, progress)
-            if (!budget.expired()) applier.verifyApplying(table, budget.deadline)
-            if (!budget.expired()) semantics.repair(table, budget.deadline)
+            val verified = applier.verifyApplying(table, budget, metadata)
+            tally.count((verified as? LakeApplyOutcome.Deferred)?.cause ?: semantics.repair(table, budget))
         } catch (deferred: SettlementDeferred) {
             progress = deferred.progress
             advance(table, progress)
             logDeferred(table, deferred.cause ?: deferred)
+            tally.failed++
         } catch (failure: Exception) {
             logDeferred(table, failure)
+            tally.failed++
         }
         return progress
     }
@@ -156,6 +166,21 @@ class LakeSettlementSweep(
             Boolean::class.java,
         ) == true
 
+    /** The tables of one tick whose recovery stopped short, by cause (observability §3.4S). */
+    private class DeferredTables {
+        var budget = 0
+        var stuck = 0
+        var failed = 0
+
+        fun count(cause: SettleDeferCause?) {
+            when (cause) {
+                SettleDeferCause.BUDGET -> budget++
+                SettleDeferCause.STUCK_READ -> stuck++
+                null -> Unit
+            }
+        }
+    }
+
     companion object {
         /** Managed tables per tick. */
         const val PAGE_SIZE = 100
@@ -170,6 +195,14 @@ class LakeSettlementSweep(
 
         /** The tick's work budget, minted from the database clock with its monotonic mirror (D2). */
         val SWEEP_BUDGET: Duration = Duration.ofSeconds(10)
+
+        /**
+         * How far past [SWEEP_BUDGET] a tick can end (docs/lake.md §8): the largest unit in flight at the deadline, then
+         * the statement that must follow it, then the heartbeat. A five-second transaction runs to 6 s, because Spring
+         * rounds its remaining time UP to whole seconds for each statement; a release or a refused takeover's deadline
+         * comparison is 5 s, and so is the heartbeat. `SettlementOverrunDerivationTest` pins each term to its source.
+         */
+        val PERMITTED_OVERRUN: Duration = Duration.ofSeconds(16)
 
         private val log = LoggerFactory.getLogger(LakeSettlementSweep::class.java)
     }

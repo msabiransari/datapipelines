@@ -222,7 +222,7 @@ class LakeDefinitionApplyIntegrationTest {
         val dead = UUID.randomUUID()
         h.applies.markApplying(id, 2, dead) shouldBe 1
         val before = h.revisions(NS, T)
-        val none = h.applier.verifyApplying(id, deadline())
+        val none = h.verifyApplying(id)
         println("(v) no-revision verify: revisions $before -> ${h.revisions(NS, T)}, outcome = $none")
         none shouldBe LakeApplyOutcome.Pending(null)
         h.table(id).applyState shouldBe LakeApplyState.PENDING
@@ -233,7 +233,7 @@ class LakeDefinitionApplyIntegrationTest {
         crash.armed shouldBe false
         h.table(id).applyState shouldBe LakeApplyState.APPLYING
         val committed = h.revisions(NS, T)
-        val verified = h.applier.verifyApplying(id, deadline())
+        val verified = h.verifyApplying(id)
         println("(v) revision verify: revisions $before -> $committed -> ${h.revisions(NS, T)}, outcome = $verified")
         verified shouldBe LakeApplyOutcome.Applied(2, committed = true)
         committed shouldBe before + 1
@@ -255,7 +255,7 @@ class LakeDefinitionApplyIntegrationTest {
         h.landWithoutApply(id, v2.version)
         val live = LakeTestDb.lease(LeaseKind.TABLE, "$NS.$T")
         h.applies.markApplying(id, 2, live.operationId) shouldBe 1
-        h.applier.verifyApplying(id, deadline()) shouldBe LakeApplyOutcome.Busy(LakeApplyLeases.REASON_TABLE)
+        h.verifyApplying(id) shouldBe LakeApplyOutcome.Busy(LakeApplyLeases.REASON_TABLE)
         h.table(id).applyState shouldBe LakeApplyState.APPLYING
         LakeTestDb.leases.release(live.operationId)
     }

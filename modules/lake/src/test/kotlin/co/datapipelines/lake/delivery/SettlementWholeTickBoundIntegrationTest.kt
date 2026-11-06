@@ -84,7 +84,7 @@ class SettlementWholeTickBoundIntegrationTest {
 
         io.mode = ScriptedFileIo.Mode.HEALTHY
         io.release()
-        withClue("the abandoned read ends once the store answers") { io.awaitReadsEnded(1, WAIT_MILLIS).shouldBeTrue() }
+        withClue("the abandoned read ends once the store answers") { h.noStuckReadWithin(WAIT_MILLIS).shouldBeTrue() }
         nothingHeldAndNothingStamped(attempt, LakeApplyState.APPLYING)
 
         val third = tick(sweep, io, LakeSettlementSweep.SWEEP_BUDGET)
@@ -114,7 +114,7 @@ class SettlementWholeTickBoundIntegrationTest {
 
         io.mode = ScriptedFileIo.Mode.HEALTHY
         io.release()
-        io.awaitReadsEnded(1, WAIT_MILLIS).shouldBeTrue()
+        h.noStuckReadWithin(WAIT_MILLIS).shouldBeTrue()
         semanticsRows() shouldBe 0
         tick(sweep, io, SHORT_BUDGET)
         semanticsRows() shouldBeGreaterThan 0
@@ -170,7 +170,7 @@ class SettlementWholeTickBoundIntegrationTest {
 
         io.mode = ScriptedFileIo.Mode.HEALTHY
         io.release()
-        io.awaitReadsEnded(1, WAIT_MILLIS).shouldBeTrue()
+        h.noStuckReadWithin(WAIT_MILLIS).shouldBeTrue()
         nothingHeldAndNothingStamped(attempt, LakeApplyState.APPLYING)
         tick(sweep, io, SHORT_BUDGET)
         h.applyState() shouldBe LakeApplyState.APPLIED

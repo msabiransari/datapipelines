@@ -21,7 +21,7 @@ class ProtectionObservationIntegrationTest {
             LakeTestDb.leases.release(initial.operationId)
         }
         val lease = LakeTestDb.lease(LeaseKind.TABLE, "settle.orders")
-        val sweep = LakeSettlementSweep(h.named, h.leases(), h.settler(), mockk(), mockk())
+        val sweep = LakeSettlementSweep(h.named, h.leases(), h.settler(), mockk(), mockk(), mockk())
         try {
             h.fencedConnection(lease).use { connection ->
                 connection.autoCommit = false

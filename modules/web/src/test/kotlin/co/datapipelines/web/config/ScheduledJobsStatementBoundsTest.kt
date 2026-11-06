@@ -58,6 +58,7 @@ class ScheduledJobsStatementBoundsTest {
                 mockk(),
                 mockk(),
                 mockk(),
+                mockk(),
             )
         sweep.finalizeProtection()
         sweep.runOnce() // Recording result says non-normal: the mode guard itself still executes SQL.

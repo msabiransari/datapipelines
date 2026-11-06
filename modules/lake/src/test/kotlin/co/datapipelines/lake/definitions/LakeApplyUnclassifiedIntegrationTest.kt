@@ -68,7 +68,7 @@ class LakeApplyUnclassifiedIntegrationTest {
         afterRelease shouldBe before
         val attempt = landingStands(id)
 
-        val verified = h.applier.verifyApplying(id, deadline())
+        val verified = h.verifyApplying(id)
         println("(811 not landed) verify = $verified; revisions ${h.revisions(NS, T)}")
         verified shouldBe LakeApplyOutcome.Pending(null)
         // `pending` keeps the last attempt's operation id (finishPending moves only the state).
@@ -91,7 +91,7 @@ class LakeApplyUnclassifiedIntegrationTest {
         afterRelease shouldBe before + 1
         landingStands(id)
 
-        val verified = h.applier.verifyApplying(id, deadline())
+        val verified = h.verifyApplying(id)
         println("(811 landed) verify = $verified; revisions ${h.revisions(NS, T)}")
         verified shouldBe LakeApplyOutcome.Applied(2, committed = true)
         h.table(id).let { (it.applyState to it.appliedVersionHere) shouldBe (LakeApplyState.APPLIED to 2) }

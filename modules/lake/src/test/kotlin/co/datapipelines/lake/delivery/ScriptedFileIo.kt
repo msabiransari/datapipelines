@@ -4,6 +4,7 @@ import org.apache.iceberg.io.FileIO
 import org.apache.iceberg.io.InputFile
 import org.apache.iceberg.io.OutputFile
 import org.apache.iceberg.io.SeekableInputStream
+import java.io.IOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -18,7 +19,7 @@ internal class ScriptedFileIo(
     private val bytes: ByteArray,
     @Volatile var mode: Mode = Mode.HEALTHY,
 ) : FileIO {
-    enum class Mode { HEALTHY, STALL, TRICKLE }
+    enum class Mode { HEALTHY, STALL, TRICKLE, FAIL }
 
     private val released = CountDownLatch(1)
 
@@ -29,21 +30,17 @@ internal class ScriptedFileIo(
     val readsEnded = AtomicInteger()
     val bytesServed = AtomicLong()
 
+    /** How many times the client itself was closed. */
+    val closes = AtomicInteger()
+
     /** The thread that entered the latest stream: the read's own thread, never asked of a live store. */
     @Volatile
     var readerThread: Thread? = null
 
     fun release() = released.countDown()
 
-    fun awaitReadsEnded(
-        count: Int,
-        millis: Long,
-    ): Boolean {
-        val end = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(millis)
-        while (readsEnded.get() < count && System.nanoTime() < end) {
-            Thread.sleep(POLL_MILLIS)
-        }
-        return readsEnded.get() >= count
+    override fun close() {
+        closes.incrementAndGet()
     }
 
     override fun newInputFile(path: String): InputFile = ScriptedInput(path)
@@ -84,7 +81,10 @@ internal class ScriptedFileIo(
                 Mode.HEALTHY -> Unit
                 Mode.STALL -> awaitReleaseIgnoringInterrupts()
                 Mode.TRICKLE -> pauseWhileTrickling()
+                Mode.FAIL -> throw IOException("the scripted store refused the read")
             }
+            // A stalled read released into a failing store fails as it wakes.
+            if (mode == Mode.FAIL) throw IOException("the scripted store failed the read")
             if (position >= bytes.size) return -1
             bytesServed.incrementAndGet()
             return bytes[position++].toInt() and BYTE_MASK
@@ -115,7 +115,6 @@ internal class ScriptedFileIo(
 
     private companion object {
         const val BYTE_MASK = 0xFF
-        const val POLL_MILLIS = 10L
         const val TRICKLE_MILLIS = 100L
     }
 }

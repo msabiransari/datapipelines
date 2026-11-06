@@ -511,7 +511,7 @@ class ArchitectureGuardTest {
          * `ScheduleService` only, which is deliberately NOT in this list. #376: the evaluation history's
          * stale sweep and retention (steps of the retention tick) — the History tab READS the records, never
          * the jobs that close and delete them.
-         * #799's conditional lake recovery and its runtime aggregate are internal jobs too.
+         * #799's conditional lake recovery, its runtime aggregate and its metadata read are internal jobs too.
          */
         val JOB_SERVICE =
             Regex(
@@ -519,7 +519,7 @@ class ArchitectureGuardTest {
                     "DatasourcePoolReaperScheduler|ExecutionEventRetentionScheduler|AuditLogRetention|" +
                     "ScheduleDispatcher|ScheduledRunWorker|RunReconciler|ScheduleNotifier|SchedulerTasks|SchedulerAdmission|" +
                     "ParameterEvaluationSweeper|ParameterEvaluationRetention|" +
-                    "LakeSettlementScheduler|LakeSettlementSweep|LakeAppendRuntime)\\b",
+                    "LakeSettlementScheduler|LakeSettlementSweep|LakeMetadataReads|LakeAppendRuntime)\\b",
             )
 
         /** The ordinary evaluate's call sites (spec §4.5) — the REST route, the dashboard runtime, the MCP tool. */

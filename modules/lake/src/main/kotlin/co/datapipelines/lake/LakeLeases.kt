@@ -87,9 +87,15 @@ class LakeLeases(
         require(lockTimeout.toMillis() <= Int.MAX_VALUE) { "lease lock timeout must fit PostgreSQL's lock_timeout: $lockTimeout" }
     }
 
-    /** The acquire's own transaction, on the same DataSource as [jdbc] so its statements share one connection. */
+    /**
+     * The acquire's own transaction, on the same DataSource as [jdbc] so its statements share one connection. Bounded as
+     * a whole (record §8b, D5): whichever timer ends a lock wait, [lockTimeout] or this one, the acquire answers Busy with
+     * the row unchanged, so a lock wait longer than this bound is cut to it. `deadline_at` stays the only authority over a
+     * lease's life.
+     */
     private val acquireTransaction =
         TransactionTemplate(DataSourceTransactionManager(requireNotNull(jdbc.dataSource) { "the lease JdbcTemplate has no DataSource" }))
+            .apply { timeout = ACQUIRE_TRANSACTION_SECONDS }
 
     /** `lock_timeout` as PostgreSQL reads it: whole milliseconds. */
     private val lockTimeoutSetting = "${lockTimeout.toMillis()}ms"
@@ -130,7 +136,7 @@ class LakeLeases(
                         ).singleOrNull()
                 }
             } catch (e: DataAccessException) {
-                if (FailureShape.sqlState(e) == SQLSTATE_LOCK_NOT_AVAILABLE) return LeaseOutcome.Busy
+                if (FailureShape.sqlState(e) in ACQUIRE_WAIT_ENDED) return LeaseOutcome.Busy
                 throw e
             }
         if (token != null) return LeaseOutcome.Acquired(LeaseHandle(kind, name, operationId, token))
@@ -171,6 +177,14 @@ class LakeLeases(
 
         /** `lock_not_available`: a lock wait reached `lock_timeout`. */
         const val SQLSTATE_LOCK_NOT_AVAILABLE = "55P03"
+
+        /** `query_canceled`: the acquire transaction's timer ended the statement; the transaction rolled back. */
+        private const val SQLSTATE_QUERY_CANCELED = "57014"
+
+        private val ACQUIRE_WAIT_ENDED = setOf(SQLSTATE_LOCK_NOT_AVAILABLE, SQLSTATE_QUERY_CANCELED)
+
+        /** One acquire's transaction bound: the lease statements' own five seconds (record §8b, D5). */
+        const val ACQUIRE_TRANSACTION_SECONDS = 5
 
         /** `lock_timeout` for the current transaction only (`is_local = true`); the value is bound. */
         private const val LOCAL_LOCK_TIMEOUT_SQL = "SELECT set_config('lock_timeout', ?, true)"
