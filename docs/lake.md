@@ -366,7 +366,8 @@ statement group under way, the release of a lease that group took over (or a ref
 and the `last_sweep_at` heartbeat. Every statement has a dedicated five-second timeout, so settlement's own work ends
 at most **20 seconds** after the budget: four statements, namely a lease acquire's two, its release or comparison, and
 the heartbeat. A tick cannot promise less on a stalled server, where every statement it started runs to its timeout;
-commits and connection checkouts are not statements and are bounded only by the pool's and driver's settings. An
+commits and connection checkouts are not statements and are bounded only by the pool's and driver's settings, and
+against a server that accepts and never answers, a timeout's cancel does not end the blocked read (#837). An
 `applying` verification or semantics repair that started inside the budget runs to its end, including an Iceberg
 metadata read with no application-level timeout (#843).
 
@@ -388,7 +389,7 @@ nothing. The authoritative catalog remains the source for managed reads; the reg
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-06 | v1.5 | 799b (#799) | Settlement work is bounded per tick (§8): a page of 50 deliveries per table behind an in-memory row cursor, the ten-second budget checked before every step, delivery and statement group, and a stated overrun of at most 20 seconds. A request settles only the delivery it waits on. The applying verification and semantics repair keep a separate clause (#843). |
+| 2026-11-06 | v1.5 | 799b (#799) | Settlement work is bounded per tick (§8): a page of 50 deliveries per table behind an in-memory row cursor, the ten-second budget checked before every step, delivery and statement group, and a stated overrun of at most 20 seconds. A request settles only the delivery it waits on. The applying verification and semantics repair keep a separate clause (#843); the 20 seconds assume the pool hands out connections and the server answers its cancels (#837). |
 | 2026-11-05 | v1.4 | 799 (#799) | Deliveries, publication and settlement (§6–§8), including sender immutability, admission and physical resource ownership, the validation barrier, effective authority, immutable recipes, opt-in redaction default false, permanent commit evidence and bounded normal-mode recovery. |
 | 2026-11-04 | v1.3 | 810 merge review | §3 distinguishes the polling horizon from the final row-lock wait, which can overrun either the lease wait or the caller's deadline by one lock timeout. |
 | 2026-11-04 | v1.2 | 810 (#810, #811, #812) | Drift has an exit: a definition whose shape equals the live table applies as one commit that sets only `dp.definition.version` (§2 row, §3 row, §4 rule 2). An unclassified failure of the commit step leaves the row `applying` as `lake.definition.apply_unclassified`, and the release returns that outcome (§3 row and paragraph). A lease takeover waits at most the catalog lock timeout on a lease row another transaction holds, then counts as busy (§3 "One attempt" and "Crash between commit and stamp"). |
