@@ -531,8 +531,9 @@ class MembershipBoundKeysE2eTest {
      * refreshed row fragment ABOVE the notice and that row carries the new user's full
      * UUID in its `title` (admin-user-row.html th:title); #370's batch parsed the whole
      * body with an UNANCHORED regex, which matched such a UUID window about one id in 668
-     * (#616) — the fixture then signed in with a UUID fragment and the member's first
-     * login read `error=credentials` with `failed=1` (issue #389's only unexplained red).
+     * (#616). Such a misparse could explain issue #389's first-login refusal with
+     * `error=credentials` and `failed=1`; its original response was not retained,
+     * so the cause of that historical failure remains unproven.
      * The anchored token regex stays as the second fence (#616).
      */
     private fun parseOneTimeGrant(body: String): OneTimeGrant {
