@@ -8,8 +8,8 @@ import java.time.Duration
 
 /**
  * The dashboard runtime's instruments (observability.md §4.1) — tag values from closed sets only (§4.3): `status` is a
- * [RefreshStatus], `reason` one of [REASON_SATURATED] / [REASON_STREAM_LIMIT]. No dashboard, user or refresh id ever
- * becomes a tag.
+ * [RefreshStatus], `reason` one of [REASON_SATURATED] / [REASON_NEVER_ADMISSIBLE] / [REASON_STREAM_LIMIT]. No dashboard,
+ * user or refresh id ever becomes a tag.
  */
 class DashboardMetrics(
     private val registry: MeterRegistry,
@@ -35,7 +35,12 @@ class DashboardMetrics(
         registry.timer(REFRESH_DURATION, "status", status.name).record(duration)
     }
 
-    /** A refresh refused before it started: `saturated` (429, no room) or `stream_limit` (the per-user stream cap). */
+    /**
+     * A refresh refused before it started: `saturated` (the busy 429 — no room now, or the start
+     * marker at its bound), `never_admissible` (the 429 whose `details.reason` is
+     * `never_admissible` — no operator action, no retry can succeed) or `stream_limit` (the
+     * per-user stream cap).
+     */
     fun refused(reason: String) {
         registry.counter(REFRESHES_REFUSED, "reason", reason).increment()
     }
@@ -47,6 +52,7 @@ class DashboardMetrics(
         const val REFRESHES_ACTIVE = "datapipelines.dashboard.refreshes.active"
         const val EXECUTIONS_RESERVED = "datapipelines.dashboard.executions.reserved"
         const val REASON_SATURATED = "saturated"
+        const val REASON_NEVER_ADMISSIBLE = "never_admissible"
         const val REASON_STREAM_LIMIT = "stream_limit"
     }
 }

@@ -259,7 +259,7 @@ class DashboardRuntime internal constructor(
         resolved: ResolvedDashboard,
         result: AdmissionResult.NeverAdmissible,
     ): ApiException {
-        metrics.refused(DashboardMetrics.REASON_SATURATED)
+        metrics.refused(DashboardMetrics.REASON_NEVER_ADMISSIBLE)
         log.warn(
             "event=dashboard.refresh_never_admissible workspace_id={} dashboard_id={} invocations={} ceiling={} key={}",
             workspaceId,
