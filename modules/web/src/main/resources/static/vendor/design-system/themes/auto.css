@@ -29,10 +29,10 @@
   --_text-success:            #14532d;
   --_text-warning:            #854d0e;
 
-  --_border-default:          #8f939d;
-  --_border-hover:            #8a909c;
+  --_border-default:          #868993;
+  --_border-hover:            #848995;
   --_border-focus:            #81899a;
-  --_border-subtle:           #b4b6bc;
+  --_border-subtle:           #a8a9af;
   --_border-danger:           #fecaca;
 
   --_accent-primary:          #0f1d40;
@@ -93,7 +93,7 @@
     --_text-success:            #8cd4b1;
     --_text-warning:            #e4bd7c;
 
-    --_border-default:          #687386;
+    --_border-default:          #6f7a8d;
     --_border-hover:            #748096;
     --_border-focus:            #7e90ee;
     --_border-subtle:           #616772;
