@@ -131,6 +131,9 @@ class LakeMetadataReadsIntegrationTest {
         io.mode = ScriptedFileIo.Mode.FAIL
         io.release()
         withClue("the read's thread ends once the store answers") { awaitOver(reads).shouldBeTrue() }
+        withClue("a refused read was never queued behind the stuck one: only this read ever reached the store") {
+            io.streamsEntered.get() shouldBe 1
+        }
 
         val ended = lines.messages().single { it.startsWith(ENDED) }
         ended shouldContain "table_id=${h.tableId}"
