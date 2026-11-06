@@ -359,7 +359,7 @@ class SettlementWorkBoundIntegrationTest {
         override fun getConnection(): Connection = connection(target.connection)
 
         private fun connection(raw: Connection): Connection =
-            proxy(raw, Connection::class.java) { method, args ->
+            proxy(Connection::class.java) { method, args ->
                 val result = invoke(raw, method, args)
                 when (method.name) {
                     "prepareStatement" -> statement(result as PreparedStatement, PreparedStatement::class.java, args?.get(0) as String)
@@ -373,13 +373,12 @@ class SettlementWorkBoundIntegrationTest {
             type: Class<S>,
             prepared: String?,
         ): S =
-            proxy(raw, type) { method, args ->
+            proxy(type) { method, args ->
                 if (method.name.startsWith("execute")) executed += prepared ?: (args?.firstOrNull() as? String ?: method.name)
                 invoke(raw, method, args)
             }
 
         private fun <T> proxy(
-            raw: T,
             type: Class<T>,
             handler: (java.lang.reflect.Method, Array<Any?>?) -> Any?,
         ): T = type.cast(Proxy.newProxyInstance(javaClass.classLoader, arrayOf(type)) { _, method, args -> handler(method, args) })
