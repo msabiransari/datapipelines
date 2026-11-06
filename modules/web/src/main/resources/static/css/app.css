@@ -140,6 +140,58 @@
   --app-splitter-grip-h: 3px;
 }
 
+/* #801 — both dock handles share geometry, ink and interaction states. Page classes
+   place the strip against their pane border and hide it while the pane is collapsed. */
+.app-splitter {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  background: none;
+  user-select: none;
+  touch-action: none;
+}
+
+.app-splitter--y {
+  top: calc((var(--app-splitter-strip) - 1px) / -2);
+  left: 0;
+  right: 0;
+  height: var(--app-splitter-strip);
+  cursor: row-resize;
+}
+
+.app-splitter::after {
+  content: "";
+  width: var(--app-splitter-grip-w);
+  height: var(--app-splitter-grip-h);
+  border-radius: var(--radius-pill);
+  background: var(--border-default);
+  transition: background var(--duration-normal);
+}
+
+.app-splitter:hover::after,
+.app-splitter:focus-visible::after,
+.is-dragging > .app-splitter::after {
+  background: var(--brand);
+}
+
+/* A discrete resize and a captured drag must both follow the pointer immediately. */
+.is-dragging:has(> .app-splitter) {
+  transition: none;
+}
+
+html.dp-splitting-y,
+html.dp-splitting-y * {
+  cursor: row-resize !important;
+  user-select: none !important;
+}
+
+html.dp-splitting-x,
+html.dp-splitting-x * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
 /* Application-level semantic tokens — derive from design system, never hardcoded hex */
 :root {
   /* #503 — the main track's floor; #554: the resource browser's maximum leaves it (record §4). */

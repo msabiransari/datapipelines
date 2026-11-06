@@ -271,6 +271,69 @@
     var severitySelect = dock.querySelector('[data-dp-dock-filter="severity"]');
     var kindSelect = dock.querySelector('[data-dp-dock-filter="kind"]');
     var stick = true;
+    var touched = false;
+    var autoCollapsed = false;
+    var collapseButton = dock.querySelector("[data-dp-dock-collapse]");
+    var defaultObserver = null;
+
+    function touchDock() {
+      touched = true;
+      autoCollapsed = false;
+      if (defaultObserver) defaultObserver.disconnect();
+    }
+
+    function setCollapsed(collapsed) {
+      if (collapsed) dock.setAttribute("data-dp-dock-collapsed", "");
+      else dock.removeAttribute("data-dp-dock-collapsed");
+      if (collapseButton) collapseButton.setAttribute("aria-expanded", String(!collapsed));
+    }
+
+    function applyDockDefault() {
+      var splitter = window.DpSplitter;
+      var layout = scope.querySelector(".dp-board-layout");
+      var head = dock.querySelector(".dp-board-dock-head");
+      if (touched || !splitter || !boardPage || !layout || !head) return;
+      // The region shared by board and dock is stable when the body folds. Subtract the
+      // measured head (it wraps on short widths), border, gap and DEFAULT body height.
+      // Never subtract the default from the board row alone: collapse has already grown it.
+      if (boardPage.getBoundingClientRect().height <= 0) return;
+      var css = window.getComputedStyle(boardPage);
+      var dockCss = window.getComputedStyle(dock);
+      var gap = parseFloat(css.rowGap);
+      var sharedHeight = dock.getBoundingClientRect().bottom - layout.getBoundingClientRect().top;
+      var boardIfOpen = sharedHeight - head.getBoundingClientRect().height - gap
+        - parseFloat(dockCss.borderTopWidth) - parseFloat(dockCss.borderBottomWidth)
+        - parseFloat(css.getPropertyValue("--dp-dock-pane-h"));
+      var remembered = splitter.readStored(splitter.KEYS.boardDock);
+      var state = splitter.dockDefault(boardIfOpen, parseFloat(css.getPropertyValue("--dp-board-auto-collapse-below")), remembered);
+      if (state === splitter.COLLAPSED) {
+        autoCollapsed = true;
+        setCollapsed(true);
+      } else if (autoCollapsed) {
+        autoCollapsed = false;
+        setCollapsed(false);
+      } else if (!dock.hasAttribute("data-dp-dock-collapsed")) {
+        setCollapsed(false);
+      }
+    }
+
+    listen(dock, "dp:dock-resize", touchDock);
+    // A deliberate board action is the editor's Run gesture: surface an automatic fold
+    // so its outcome/refusal is readable, while preserving a fold the person chose.
+    if (filtersPanel) listen(filtersPanel, "click", function (event) {
+      var target = event.target;
+      if (!target || typeof target.closest !== "function" || !target.closest(".dp-dashboard-action-control")) return;
+      if (autoCollapsed) setCollapsed(false);
+      touchDock();
+    });
+    applyDockDefault();
+    if (boardPage && typeof window.ResizeObserver === "function") {
+      defaultObserver = new window.ResizeObserver(applyDockDefault);
+      defaultObserver.observe(boardPage);
+      defaultObserver.observe(dock.querySelector(".dp-board-dock-head"));
+      defaultObserver.observe(boardPage.querySelector(".dp-board-toolbar"));
+      cleanups.push(function () { defaultObserver.disconnect(); });
+    }
 
     function timeText(at) {
       var d = new Date(Number(at) || 0);
@@ -363,6 +426,8 @@
     for (var t = 0; t < tabs.length; t++) {
       (function (tab) {
         tab.addEventListener("click", function () {
+          touchDock();
+          setCollapsed(false);
           switchTab(tab.getAttribute("data-dp-dock-tab"));
         });
       })(tabs[t]);
@@ -381,13 +446,10 @@
       });
     }
 
-    var collapseButton = dock.querySelector("[data-dp-dock-collapse]");
     if (collapseButton) {
       collapseButton.addEventListener("click", function () {
-        var collapsed = dock.hasAttribute("data-dp-dock-collapsed");
-        if (collapsed) dock.removeAttribute("data-dp-dock-collapsed");
-        else dock.setAttribute("data-dp-dock-collapsed", "");
-        collapseButton.setAttribute("aria-expanded", String(!collapsed));
+        touchDock();
+        setCollapsed(!dock.hasAttribute("data-dp-dock-collapsed"));
       });
     }
 

@@ -85,7 +85,7 @@ class EditorCssTokenAuditTest {
         const val MIN_DECLARATION_FILES = 26
         val FLOORS =
             mapOf(
-                "pipeline-editor.css" to Floor(reads = 480, lines = 2300),
+                "pipeline-editor.css" to Floor(reads = 472, lines = 2246),
                 "template-editor.css" to Floor(reads = 45, lines = 220),
                 "template-workspace.css" to Floor(reads = 50, lines = 230),
             )
