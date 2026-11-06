@@ -30,7 +30,9 @@ internal object PlotlyColorbarProbe {
         caseSection: String,
     ) {
         val selector = "$caseSection .js-plotly-plot rect.cbfill"
-        page.waitForSelector(selector, Page.WaitForSelectorOptions().setState(WaitForSelectorState.ATTACHED))
+        namedWait(page, "the colorbar's fill rectangles of $where ($selector, attached)", ::documentFacts) {
+            page.waitForSelector(selector, Page.WaitForSelectorOptions().setState(WaitForSelectorState.ATTACHED))
+        }
         page.waitForTimeout(SETTLE_MS)
 
         @Suppress("UNCHECKED_CAST")

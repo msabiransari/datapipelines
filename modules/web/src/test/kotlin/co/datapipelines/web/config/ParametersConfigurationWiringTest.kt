@@ -25,7 +25,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
  * builds the runner, the evaluator and the ONE `SelectorPool` from one `ParametersConfig`
  * (C27 — three constructions from one config is what keeps the statement-level and
  * evaluate-level limits from disagreeing), every frozen collaborator resolves, and the
- * `parameters.selectors.abandoned` gauge scrapes a REAL pool over a REAL registry (the
+ * `datapipelines.parameters.selectors.abandoned` gauge scrapes a REAL pool over a REAL registry (the
  * 194c pass, observation 4: the scrape is also the dead-thread prune's only caller — a
  * strict mock would make a missing call unobservable, so the pool here is real).
  */
@@ -81,7 +81,7 @@ class ParametersConfigurationWiringTest {
         configuration.parametersSelectorsAbandonedGauge(pool, meters)
 
         pool.abandoned.increment()
-        val gauge = meters.get("parameters.selectors.abandoned").gauge()
+        val gauge = meters.get("datapipelines.parameters.selectors.abandoned").gauge()
         gauge.value() shouldBe 1.0
 
         // Observation 4 (194c security pass): the scrape is the prune's caller. Plant a DEAD

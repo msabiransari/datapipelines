@@ -87,6 +87,29 @@ class VendoredNonTextContrastTest {
         (contrastRatio("#374151", "#111827")!! < 3.0) shouldBe true
     }
 
+    @Test
+    fun `the audit contract pins all twenty border pairs and selection in upstream order`() {
+        NON_TEXT_PAIRS.size shouldBe 21
+        val borderNames =
+            listOf("Default", "Hover", "Focus", "Subtle").flatMap { role ->
+                listOf("Page", "Default", "Raised", "Inset", "Hover").map { surface ->
+                    "Border $role on Surface $surface"
+                }
+            }
+        NON_TEXT_PAIRS.map { it.name } shouldBe borderNames + "Surface Selected vs Surface Default"
+    }
+
+    @Test
+    fun `the 0_4_0 light boundaries fail on the page in all seven affected themes`() {
+        val oldBorders = listOf("#8e94a1", "#938e86", "#90968f", "#669bb8", "#8f939d", "#949497", "#8f939d")
+        val oldPages = listOf("#f8f9fb", "#f5f3ee", "#f5f7f4", "#f0f9ff", "#f4f6f8", "#fafafa", "#f4f6f8")
+        val pair = NON_TEXT_PAIRS.single { it.name == "Border Default on Surface Page" }
+        oldBorders.zip(oldPages).forEach { (border, page) ->
+            val ratio = requireNotNull(contrastRatio(border, page))
+            (ratio < pair.min) shouldBe true
+        }
+    }
+
     // ------------------------------------------------------------------ the vendored files
 
     private fun vendoredThemes(): List<Pair<String, List<Pair<String, Map<String, String>>>>> {
@@ -159,10 +182,26 @@ class VendoredNonTextContrastTest {
         /** scripts/audit-contrast.js's NON_TEXT_PAIRS (WCAG 1.4.11 floors), translated. */
         val NON_TEXT_PAIRS =
             listOf(
+                NonTextPair("Border Default on Surface Page", "border-default", "surface-page", 3.0),
                 NonTextPair("Border Default on Surface Default", "border-default", "surface-default", 3.0),
+                NonTextPair("Border Default on Surface Raised", "border-default", "surface-raised", 3.0),
+                NonTextPair("Border Default on Surface Inset", "border-default", "surface-inset", 3.0),
+                NonTextPair("Border Default on Surface Hover", "border-default", "surface-hover", 3.0),
+                NonTextPair("Border Hover on Surface Page", "border-hover", "surface-page", 3.0),
                 NonTextPair("Border Hover on Surface Default", "border-hover", "surface-default", 3.0),
+                NonTextPair("Border Hover on Surface Raised", "border-hover", "surface-raised", 3.0),
+                NonTextPair("Border Hover on Surface Inset", "border-hover", "surface-inset", 3.0),
+                NonTextPair("Border Hover on Surface Hover", "border-hover", "surface-hover", 3.0),
+                NonTextPair("Border Focus on Surface Page", "border-focus", "surface-page", 3.0),
                 NonTextPair("Border Focus on Surface Default", "border-focus", "surface-default", 3.0),
+                NonTextPair("Border Focus on Surface Raised", "border-focus", "surface-raised", 3.0),
+                NonTextPair("Border Focus on Surface Inset", "border-focus", "surface-inset", 3.0),
+                NonTextPair("Border Focus on Surface Hover", "border-focus", "surface-hover", 3.0),
+                NonTextPair("Border Subtle on Surface Page", "border-subtle", "surface-page", 2.0),
                 NonTextPair("Border Subtle on Surface Default", "border-subtle", "surface-default", 2.0),
+                NonTextPair("Border Subtle on Surface Raised", "border-subtle", "surface-raised", 2.0),
+                NonTextPair("Border Subtle on Surface Inset", "border-subtle", "surface-inset", 2.0),
+                NonTextPair("Border Subtle on Surface Hover", "border-subtle", "surface-hover", 2.0),
                 NonTextPair("Surface Selected vs Surface Default", "surface-selected", "surface-default", 1.5),
             )
 

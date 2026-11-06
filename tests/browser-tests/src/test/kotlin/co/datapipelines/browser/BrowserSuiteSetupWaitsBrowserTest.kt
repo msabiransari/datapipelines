@@ -257,26 +257,6 @@ class BrowserSuiteSetupWaitsBrowserTest : BrowserSuite() {
         BrowserSuite.actionTimeoutMillis(System.getenv("CI"), System.getProperty(BrowserSuite.CI_PATIENCE_PROPERTY))
             ?: PLAYWRIGHT_DEFAULT_TIMEOUT_MS
 
-    /**
-     * The named shape (#355, #825), asserted step-first so a missing wrapper reds HERE with
-     * Playwright's bare text: the step and `url=` lead; a render or init wait carries the document's
-     * readiness; the cause is Playwright's timeout, kept for the trace, never the message; no cookie.
-     */
-    private fun Throwable.shouldNameTheStep(
-        step: String,
-        document: Boolean,
-    ): String {
-        val text = requireNotNull(message)
-        text shouldContain "$step timed out — url="
-        if (document) text shouldContain "readyState="
-        text shouldNotContain "TimeoutError"
-        text shouldNotContain "dp_session"
-        text shouldNotContain "dp_csrf"
-        this.shouldBeInstanceOf<AssertionError>()
-        cause.shouldBeInstanceOf<TimeoutError>()
-        return text
-    }
-
     private fun releaseHeld() {
         held.forEach { route -> runCatching { route.abort() }.onFailure { println("825 held route already settled: $it") } }
         held.clear()
@@ -334,4 +314,26 @@ class BrowserSuiteSetupWaitsBrowserTest : BrowserSuite() {
                 "<input name=\"name\"><button type=\"submit\" disabled>Create</button></form>"
         const val NO_THEME_LINK = "<!doctype html><title>825 planted page</title><main>no theme link</main>"
     }
+}
+
+/**
+ * The named shape (#355, #825), asserted step-first so a missing wrapper reds HERE with
+ * Playwright's bare text: the step and `url=` lead; a render or init wait carries the document's
+ * readiness; the cause is Playwright's timeout, kept for the trace, never the message; no cookie.
+ *
+ * #831: top-level and internal so FixtureSetupWaitsBrowserTest asserts the identical shape.
+ */
+internal fun Throwable.shouldNameTheStep(
+    step: String,
+    document: Boolean,
+): String {
+    val text = requireNotNull(message)
+    text shouldContain "$step timed out — url="
+    if (document) text shouldContain "readyState="
+    text shouldNotContain "TimeoutError"
+    text shouldNotContain "dp_session"
+    text shouldNotContain "dp_csrf"
+    this.shouldBeInstanceOf<AssertionError>()
+    cause.shouldBeInstanceOf<TimeoutError>()
+    return text
 }

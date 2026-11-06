@@ -9,6 +9,8 @@ import io.kotest.matchers.doubles.shouldBeLessThan
 import io.kotest.matchers.doubles.shouldBeLessThanOrEqual
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -37,11 +39,16 @@ class DashboardDockResizeBrowserTest : DashboardBrowserSuite() {
      * and the toolbar is not a row), the 1512x982 reference, and the board open on its Board tab.
      * [remembered] is written to `dp.pane.board-dock` before the board's first load.
      */
-    private fun openBoard(remembered: Int? = null) {
+    private fun openBoard(
+        remembered: Int? = null,
+        width: Int = REFERENCE_W,
+        height: Int = REFERENCE_H,
+        filters: Boolean = false,
+    ) {
         val root = ready("dp783r")
-        val board = seedBoardWithGrid(root)
+        val board = if (filters) seedParameterisedBoard(root) else seedBoardWithGrid(root)
         if (remembered != null) page.evaluate("v => localStorage.setItem('$STORAGE_KEY', String(v))", remembered)
-        page.setViewportSize(REFERENCE_W, REFERENCE_H)
+        page.setViewportSize(width, height)
         boardUrl = "$baseUrl/dashboards/$board"
         page.navigate(boardUrl)
         boardReady()
@@ -66,9 +73,22 @@ class DashboardDockResizeBrowserTest : DashboardBrowserSuite() {
           const layout = document.querySelector('.dp-board-layout');
           const handle = document.querySelector('[data-splitter="board-dock"]');
           const main = document.getElementById('app-main');
+          const page = document.querySelector('.dp-board-page');
+          const pageCss = getComputedStyle(page);
+          const head = dock.querySelector('.dp-board-dock-head');
+          const toolbar = page.querySelector('.dp-board-toolbar');
+          const dockCss = getComputedStyle(dock);
+          const boardIfOpen = page.getBoundingClientRect().height - toolbar.getBoundingClientRect().height
+            - 2 * parseFloat(pageCss.rowGap) - head.getBoundingClientRect().height
+            - parseFloat(dockCss.borderTopWidth) - parseFloat(dockCss.borderBottomWidth)
+            - parseFloat(pageCss.getPropertyValue('--dp-dock-pane-h'));
           const hr = handle ? handle.getBoundingClientRect() : null;
           const hit = hr && hr.height > 0 ? document.elementFromPoint(hr.x + hr.width / 2, hr.y + hr.height / 2) : null;
           return {
+            boardIfOpen: boardIfOpen,
+            threshold: parseFloat(pageCss.getPropertyValue('--dp-board-auto-collapse-below')),
+            drawer: getComputedStyle(toolbar).display !== 'none',
+            expanded: dock.querySelector('[data-dp-dock-collapse]').getAttribute('aria-expanded'),
             paneH: body.getBoundingClientRect().height,
             layoutH: layout.getBoundingClientRect().height,
             prop: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dp-dock-pane-h')),
@@ -116,6 +136,108 @@ class DashboardDockResizeBrowserTest : DashboardBrowserSuite() {
     private fun shot(name: String) = page.screenshot(Page.ScreenshotOptions().setPath(shotDir().resolve("783-$name.png")))
 
     private fun shotDir(): Path = Paths.get("build", "browser-evidence").also { Files.createDirectories(it) }
+
+    @ParameterizedTest
+    @ValueSource(booleans = [false, true])
+    fun `#800 - a short window starts collapsed in both filters states`(filters: Boolean) {
+        startTrace()
+        openBoard(width = SHORT_W, height = SHORT_H, filters = filters)
+        val r = read()
+        println("800-start|filters=$filters|${SHORT_W}x$SHORT_H|$r")
+        r["drawer"] shouldBe filters
+        withClue("the default did not collapse the dock: $r") { r["collapsed"] shouldBe true }
+        r["expanded"] shouldBe "false"
+        r["stored"] shouldBe null
+        r.d("boardIfOpen") shouldBeLessThan r.d("threshold")
+        r.d("layoutH") shouldBeGreaterThanOrEqual r.d("threshold")
+        r.d("paneH") shouldBe 0.0
+        r.d("handleH") shouldBe 0.0
+        shot("800-start-$filters")
+    }
+
+    @Test
+    fun `#800 - the reference starts open at 200px`() {
+        startTrace()
+        openBoard()
+        val r = read()
+        println("800-reference|${REFERENCE_W}x$REFERENCE_H|$r")
+        r["collapsed"] shouldBe false
+        r["expanded"] shouldBe "true"
+        r.d("boardIfOpen") shouldBeGreaterThanOrEqual r.d("threshold")
+        near(r.d("paneH"), DEFAULT_PANE) shouldBe true
+    }
+
+    @Test
+    fun `#800 - a remembered height keeps the short window open`() {
+        startTrace()
+        openBoard(remembered = REMEMBERED, width = SHORT_W, height = SHORT_H)
+        val r = read()
+        println("800-remembered|${SHORT_W}x$SHORT_H|$r")
+        r["collapsed"] shouldBe false
+        r["expanded"] shouldBe "true"
+        r["stored"] shouldBe REMEMBERED.toString()
+        r.d("layoutH") shouldBeGreaterThanOrEqual BOARD_FLOOR
+    }
+
+    @Test
+    fun `#800 - untouched follows the window and a tab click freezes it`() {
+        startTrace()
+        openBoard()
+        read()["collapsed"] shouldBe false
+        page.setViewportSize(SHORT_W, SHORT_H)
+        page.waitForSelector("#dp-board-dock[data-dp-dock-collapsed]")
+        println("800-untouched-short|${read()}")
+        page.setViewportSize(REFERENCE_W, REFERENCE_H)
+        page.waitForSelector("#dp-board-dock:not([data-dp-dock-collapsed])")
+        page.setViewportSize(SHORT_W, SHORT_H)
+        page.waitForSelector("#dp-board-dock[data-dp-dock-collapsed]")
+        page.click("#dp-board-dock-tab-events")
+        page.waitForSelector("#dp-board-dock:not([data-dp-dock-collapsed])")
+        read()["expanded"] shouldBe "true"
+        page.setViewportSize(REFERENCE_W, REFERENCE_H)
+        boardReady()
+        page.setViewportSize(SHORT_W, SHORT_H)
+        boardReady()
+        withClue("the window overrode a tab click: ${read()}") { read()["collapsed"] shouldBe false }
+    }
+
+    @Test
+    fun `#800 - a splitter gesture freezes the default even after reset forgets the height`() {
+        startTrace()
+        openBoard()
+        val grip = page.locator("[data-splitter='board-dock']")
+        grip.focus()
+        grip.press("ArrowUp")
+        grip.dblclick()
+        read()["stored"] shouldBe null
+        page.setViewportSize(SHORT_W, SHORT_H)
+        boardReady()
+        withClue("the window overrode a splitter gesture: ${read()}") { read()["collapsed"] shouldBe false }
+    }
+
+    @Test
+    fun `#800 - a board action opens an automatic fold and preserves the persons fold`() {
+        startTrace()
+        val board = seedBoardWithGrid(ready("dp800action"))
+        sql(
+            "UPDATE dashboard_versions SET body_json = jsonb_set(body_json, '{action_controls}', " +
+                """'[{"name":"apply","type":"action_control","action":"refresh_all","label":"Apply"}]'::jsonb) """ +
+                "WHERE dashboard_id = '$board'::uuid",
+        )
+        page.setViewportSize(SHORT_W, SHORT_H)
+        page.navigate("$baseUrl/dashboards/$board")
+        boardReady()
+        read()["collapsed"] shouldBe true
+        page.click("#dp-board-filters-trigger")
+        page.click(".dp-dashboard-action-control")
+        read()["collapsed"] shouldBe false
+        page.click("#dp-board-filters-close")
+        page.click("[data-dp-dock-collapse]")
+        read()["collapsed"] shouldBe true
+        page.click("#dp-board-filters-trigger")
+        page.click(".dp-dashboard-action-control")
+        withClue("a board action undid the person's collapse: ${read()}") { read()["collapsed"] shouldBe true }
+    }
 
     @Test
     fun `the grip is a labelled separator a pointer hits at its centre, over a pane at its 200px default`() {
@@ -395,5 +517,7 @@ class DashboardDockResizeBrowserTest : DashboardBrowserSuite() {
 
         const val REFERENCE_W = 1512
         const val REFERENCE_H = 982
+        const val SHORT_W = 1280
+        const val SHORT_H = 720
     }
 }

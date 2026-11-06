@@ -68,8 +68,10 @@ internal object OverviewHomeBrowserSupport {
         page: Page,
         selector: String,
     ) {
-        page.click(selector)
-        page.waitForFunction("() => document.querySelector('dialog[data-overview-dialog]').open")
+        namedWait(page, "the overview dialog's open control ($selector)") { page.click(selector) }
+        namedWait(page, "the overview dialog's opening (dialog[data-overview-dialog] open, via $selector)", ::documentFacts) {
+            page.waitForFunction("() => document.querySelector('dialog[data-overview-dialog]').open")
+        }
     }
 
     /** The foot's info button opens the definitions section; Escape closes the dialog and focus returns to the button. */
@@ -83,7 +85,9 @@ internal object OverviewHomeBrowserSupport {
         page.locator("[data-dialog-section='prompt']").isVisible shouldBe false
         page.locator("[data-dialog-section='definitions']").innerText() shouldContain "These four groups total $total."
         page.keyboard().press("Escape")
-        page.waitForFunction("() => !document.querySelector('dialog[data-overview-dialog]').open")
+        namedWait(page, "the overview dialog's close on Escape (dialog[data-overview-dialog] not open)", ::documentFacts) {
+            page.waitForFunction("() => !document.querySelector('dialog[data-overview-dialog]').open")
+        }
         page.evaluate("() => document.activeElement?.getAttribute('data-open')") shouldBe "definitions"
     }
 
@@ -101,22 +105,38 @@ internal object OverviewHomeBrowserSupport {
             themeOn(page, mode)
             (listOf(WIDE to WIDE_H) + additionalViewports + (PHONE to PHONE_H)).forEach { (width, height) ->
                 page.setViewportSize(width, height)
-                page.reload()
-                page.waitForSelector("[data-overview-summary]")
+                reloadSummary(page, "$width x $height, $mode")
                 page.evaluate("() => document.fonts.ready")
                 page.screenshot(Page.ScreenshotOptions().setPath(SHOTS.resolve("$family-$width-$mode.png")))
                 // The shell scrolls an inner container, so an element shot paints only the viewport's band: the whole
                 // page is a second shot with the viewport grown to the overview root's full height.
                 val full = (page.evaluate(FULL_HEIGHT) as Number).toInt()
                 page.setViewportSize(width, maxOf(height, full))
-                page.waitForSelector("[data-overview-summary]")
+                awaitSummary(page, "$width x ${maxOf(height, full)}, $mode, grown to the full height")
                 page.screenshot(Page.ScreenshotOptions().setPath(SHOTS.resolve("$family-$width-$mode-content.png")))
             }
         }
         themeOn(page, "light")
         page.setViewportSize(WIDE, WIDE_H)
-        page.reload()
-        page.waitForSelector("[data-overview-summary]")
+        reloadSummary(page, "$WIDE x $WIDE_H, light, the closing state")
+    }
+
+    /** #831: the evidence loop's reload, then the summary's render, each named with the shot it serves. */
+    private fun reloadSummary(
+        page: Page,
+        shot: String,
+    ) {
+        namedWait(page, "the overview page reload (${page.url()}, $shot)") { page.reload() }
+        awaitSummary(page, shot)
+    }
+
+    private fun awaitSummary(
+        page: Page,
+        shot: String,
+    ) {
+        namedWait(page, "the overview summary's render ([data-overview-summary], $shot)", ::documentFacts) {
+            page.waitForSelector("[data-overview-summary]")
+        }
     }
 
     /** The shared theme switch: the stored theme wins over an emulated colour scheme, so flip the top bar's toggle. */
@@ -125,10 +145,21 @@ internal object OverviewHomeBrowserSupport {
         mode: String,
     ) {
         val wanted = "/themes/$mode.css"
-        val current = page.locator("#theme-link").first().getAttribute("href") ?: ""
+        // #831: BrowserSuite.ensureTheme's four named steps (#825), the same text, on this copy.
+        var current = ""
+        namedWait(page, "the #theme-link href read (wanted $wanted)", ::documentFacts) {
+            current = page.locator("#theme-link").first().getAttribute("href") ?: ""
+        }
         if (current.contains(wanted)) return
-        page.waitForResponse("**/partials/profile/theme") { page.locator("#mode-toggle").click() }
-        page.waitForFunction("() => document.getElementById('theme-link').getAttribute('href').includes('$wanted')")
-        page.locator("html[data-theme='$mode']").waitFor()
+        val swap = "wanted $wanted, current href $current"
+        namedWait(page, "the theme PATCH response ($swap)", ::documentFacts) {
+            page.waitForResponse("**/partials/profile/theme") { page.locator("#mode-toggle").click() }
+        }
+        namedWait(page, "the #theme-link swap ($swap)", ::documentFacts) {
+            page.waitForFunction("() => document.getElementById('theme-link').getAttribute('href').includes('$wanted')")
+        }
+        namedWait(page, "the html[data-theme='$mode'] update ($swap)", ::documentFacts) {
+            page.locator("html[data-theme='$mode']").waitFor()
+        }
     }
 }

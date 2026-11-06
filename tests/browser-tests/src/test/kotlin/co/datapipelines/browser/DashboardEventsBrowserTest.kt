@@ -72,6 +72,8 @@ class DashboardEventsBrowserTest : DashboardBrowserSuite() {
         startTrace()
         val root = ready("dpevt2")
         val board = seedBoard(root)
+        // Keep this collapse/keyboard contract at an open default; #800 owns short-window starts.
+        desktopBoard(height = 982)
         openBoard(board)
         page.waitForFunction("() => window.__dpPage && window.__dpPage.ready")
         page.waitForFunction("() => window.__dpPage.notifications.some(function (n) { return n.code === 'refresh.completed'; })")

@@ -576,7 +576,13 @@ four of `ensureTheme`'s waits. The browser tree's root-level wait appends the tr
 left it (mounted families, level count, the root level's status, completion, rows and error
 sentence) before those facts. `BrowserSuiteSetupWaitsBrowserTest` pins every wrapper with a
 planted failure (a held route, a planted page, a removed control) at a 5 s bound, then runs the
-helper's real path with the plant gone.
+helper's real path with the plant gone. The derived fixtures (`DashboardBrowserSuite`,
+`ParameterSetBrowserSuite`, `SchedulesBrowserSuite`, `VisualizationBrowserSuite`,
+`RestTreeBrowserFixture`) and the support objects (`OverviewHomeBrowserSupport`,
+`EditorRunFixtures`, `PlotlyColorbarProbe`, through the top-level `namedWait`) name their waits
+the same way, second sessions sign in through `login(on, …)` and `landOnDashboard(on)`, and
+`FixtureSetupWaitsBrowserTest` pins each wrapper (#831); a change to `BrowserSuite` or to any of
+these runs the FULL browser suite locally before handback (the #456 rule).
 
 ```bash
 # The marketing site's screenshots, produced by a script rather than by hand (070 §C).
@@ -834,8 +840,13 @@ of their own; a filtered `:modules:scripting:test` no longer touches it, and
 recount's `test-results/**` glob counts them; `verifyBreachSuiteExecuted` is its zero-test
 guard. A red there reads one of two ways, both named in the XML and the report: a prediction
 that no longer holds (reconcile the doc), or a `SKIPPED` row — the case could not start with the
-headroom the calibration needs, an environment verdict to re-run, not a bound. The worker itself
-no longer dies of a heap event: everything after a bomb runs inside the suite's OOM guard.
+headroom the calibration needs, an environment verdict to re-run, not a bound. Before either
+corpus starts, the harness instantiates the post-bomb exception and row classes and exercises
+the report writer once per JVM, preventing their first class initialisation under heap pressure.
+The classification and bookkeeping guard records direct `OutOfMemoryError` and
+`ExceptionInInitializerError` / `NoClassDefFoundError` whose cause chain contains one as UNBOUNDED
+after waiting for headroom; unrelated linkage errors propagate. An OOM inside JUnit itself
+remains outside this guard and can still kill the worker.
 
 **Focused iteration with existing tasks.** Run the exact module-qualified test task and
 class (or `Class.method`) while editing. For example, this existing auth guard can run alone:
@@ -1338,6 +1349,24 @@ Guards beyond lint/static analysis. Each tool below is pinned exactly, and every
 guard has been proven able to fail — the buildSrc guard tests in-tree are
 those proofs, and a new guard lands with its own.
 
+`ElvisBoundMatcherGuardTest` scans Kotlin test sources under `modules`, `tests` and
+`buildSrc` (excluding build output and its own fixture source), and runs in pregate
+stage 3. It rejects Kotest matchers bound to an Elvis fallback: group the resolved
+value, `(count ?: 0) shouldBe 0`, or assert on a local value. The text scan masks
+line and nested block comments, escaped and raw strings, character literals,
+and backtick identifiers, keeping literal value placeholders to preserve statement
+boundaries. It ignores regex-group punctuation `(?:` and SQL casts `?::`, joins lines
+starting with `.`, `?:`, `?.`, `&&`, `||` or a `should…` matcher, and tracks
+parentheses, braces and brackets. Semicolons separate statements. Its birth
+inventory held 1,558 test files, 851 Elvis-bearing lines (including 237 regex-group
+and 54 SQL-cast lines), and 29 same-line matcher candidates: one bypass, 27 grouped,
+and one safe qualified call. Floors require 1,400 files, 700 raw Elvis occurrences
+and 20 classified grouped forms; the birth tree had 919 raw occurrences. Raw
+counts include masked text, while grouped
+counts come from code. Detection limits: reflection, aliased or backtick-escaped matcher names,
+string template expressions, and following lines without a continuation prefix
+are unsupported. These are lexical checks, not a Kotlin precedence parser.
+
 #### Coverage (Kover)
 
 ```bash
@@ -1690,9 +1719,15 @@ entries are SECRET-targeted and path-scoped with `condition = "AND"`
 secret co-located with an allowlisted token still fires), each with a reason +
 date comment, and the config EXTENDS the gitleaks default ruleset (a bare
 custom config silently replaces it — that mistake was made and caught here).
-The full-history scan runs by hand and is expected to exit 0 on `main`; a
-finding in a committed test fixture is triaged with a path + exact-value
-allowlist entry, never by reshaping the fixture's history.
+CI runs the full-history scan and `scripts/secret-scan-selftest.sh` on every
+push to `main`/`next` and every pull request (`.github/workflows/secret-scan.yml`);
+`secret-scan` is the required check on `main` (the owner adds it to the ruleset
+before the first promotion). The pre-commit hook remains the local staged-change
+check. Full-history scans use Git mode only (#686): directory scans can skip an
+entire path despite an AND allowlist. The self-test proves default-rule detection,
+admission of a triaged fixture, and detection of a different generated value on
+the same line at the same path. A finding in a committed test fixture is triaged
+with a path + exact-value allowlist entry, never by reshaping the fixture's history.
 
 #### Container scanning (trivy)
 
