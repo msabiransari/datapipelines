@@ -73,6 +73,17 @@ class LakeMetadataReadsIntegrationTest {
     }
 
     @Test
+    fun `a row whose conclusion keeps failing counts its table as failed`() {
+        val row = h.backlog(1).single()
+        // The attempt is already terminal, so the ledger's conclusion refuses and rolls back.
+        h.jdbc.update("UPDATE lake_delivery_attempts SET outcome = 'FAILED', ended_at = now() WHERE operation_id = ?", row.operationId)
+
+        h.sweep().runOnce()
+
+        sweepLine() shouldContain "deferred_budget=0 deferred_stuck=0 deferred_failed=1"
+    }
+
+    @Test
     fun `a read the store fails counts as failed, keeps the row and refuses no successor`() {
         h.applyingWithEvidence()
         val io = ScriptedFileIo(h.metadataJson(), ScriptedFileIo.Mode.FAIL)
