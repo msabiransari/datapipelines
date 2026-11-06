@@ -2,6 +2,7 @@ package co.datapipelines.lake.delivery
 
 import ch.qos.logback.classic.Logger
 import co.datapipelines.lake.LakeTestDb
+import co.datapipelines.lake.LeaseKind
 import co.datapipelines.lake.definitions.LakeApplyState
 import co.datapipelines.lake.definitions.LakeAuditEvents
 import co.datapipelines.lake.settle.LakeSettlementSweep
@@ -125,7 +126,7 @@ class SettlementWholeTickBoundIntegrationTest {
     fun `while a read is stuck no table takes a verification lease and deliveries still settle`() {
         val other = h.addTable("returns")
         h.staleSemantics()
-        h.staleSemantics(other, "returns")
+        h.applyingWithEvidence(other, "returns")
         val io = ScriptedFileIo(h.metadataJson(), ScriptedFileIo.Mode.STALL)
         val sweep = h.stallableSweep(io, budgets = shortBudget())
 
@@ -174,6 +175,25 @@ class SettlementWholeTickBoundIntegrationTest {
         nothingHeldAndNothingStamped(attempt, LakeApplyState.APPLYING)
         tick(sweep, io, SHORT_BUDGET)
         h.applyState() shouldBe LakeApplyState.APPLIED
+    }
+
+    @Test
+    fun `a verification refused its takeover holds no lease and sends no release, so the overrun has no such term`() {
+        val attempt = h.applyingWithEvidence()
+        val holder = LakeTestDb.lease(LeaseKind.TABLE, "settle.orders")
+        val io = ScriptedFileIo(h.metadataJson())
+        sql.reset()
+
+        tick(h.stallableSweep(io, budgets = { h.budget { false } }), io, LakeSettlementSweep.SWEEP_BUDGET)
+
+        withClue("the verification was refused; the repair has no applied version to read and takes no lease") {
+            sql.executed.count { it.startsWith(TAKEOVER) } shouldBe 1
+        }
+        sql.executed.count { it.startsWith("DELETE FROM lake_leases") } shouldBe 0
+        h.applyState() shouldBe LakeApplyState.APPLYING
+        h.jdbc.queryForObject("SELECT apply_operation_id FROM lake_tables_managed WHERE id = ?", UUID::class.java, h.tableId) shouldBe attempt
+        io.streamsEntered.get() shouldBe 0
+        LakeTestDb.leases.release(holder.operationId)
     }
 
     @Test

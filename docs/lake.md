@@ -382,9 +382,10 @@ The Iceberg metadata read leaves the tick's thread. Verification and repair read
 the catalog row with a five-second statement, open no catalog session, and read the metadata JSON on one dedicated
 daemon thread, `dp-lake-metadata`, waiting at most what remains of the budget. So an object store that stops answering
 adds nothing to the 16 seconds. A read that outlives the wait is abandoned and counted
-(`lake.settle.metadata_read_stuck`). It holds no lease and no database connection. It leaves that thread on one socket;
-the store client's socket timeout, ten seconds, ends it on a stalled store, and on a store that trickles bytes under
-that timeout it runs until the file ends, which nothing here bounds. While it runs, every table's verification and
+(`lake.settle.metadata_read_stuck`). It holds no lease and no database connection. It leaves that thread on one socket.
+On a stalled store the client's ten-second socket timeout ends each attempt, and six attempts end the read after about
+a minute (measured at 62 s). On a store that trickles bytes under that timeout it runs until the file ends, which
+nothing here bounds. While it runs, every table's verification and
 repair are deferred on every tick without sending a read: the one thread is the cap, so one stuck read delays
 verification for the whole lake, while deliveries keep settling. Its result is discarded, and a later tick reads again.
 

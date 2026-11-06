@@ -112,6 +112,10 @@ class LakeMetadataReadsIntegrationTest {
             LakeMetadataRead.Deferred(SettleDeferCause.STUCK_READ)
         reads.stuck().shouldBeTrue()
         lines.messages().none { it.startsWith(ENDED) }.shouldBeTrue()
+        withClue("the class itself refuses a second read, whatever its caller checked") {
+            read(reads, h.budget { false }) shouldBe LakeMetadataRead.Deferred(SettleDeferCause.STUCK_READ)
+            io.streamsEntered.get() shouldBe 1
+        }
 
         io.mode = ScriptedFileIo.Mode.FAIL
         io.release()

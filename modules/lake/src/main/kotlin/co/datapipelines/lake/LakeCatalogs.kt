@@ -134,8 +134,9 @@ class LakeCatalogs(
 
         /**
          * Tighter than the SDK's 30 s and equal to the settlement tick's budget, so a store that stops answering ends the
-         * read the tick abandoned. A store trickling bytes under this bound is not ended by it (docs/lake.md §8). Every
-         * FileIO of the lake carries it: a slow write fails before its pointer swap, clean, and is retried by its caller.
+         * read the tick abandoned: six SDK attempts, about a minute (measured, 799c). A store trickling bytes under this
+         * bound is not ended by it (docs/lake.md §8). Every FileIO of the lake carries it: a write that stalls this long
+         * fails before its pointer swap, clean.
          */
         const val STORE_SOCKET_TIMEOUT_MILLIS = 10_000L
 
