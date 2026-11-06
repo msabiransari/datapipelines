@@ -576,7 +576,13 @@ four of `ensureTheme`'s waits. The browser tree's root-level wait appends the tr
 left it (mounted families, level count, the root level's status, completion, rows and error
 sentence) before those facts. `BrowserSuiteSetupWaitsBrowserTest` pins every wrapper with a
 planted failure (a held route, a planted page, a removed control) at a 5 s bound, then runs the
-helper's real path with the plant gone.
+helper's real path with the plant gone. The derived fixtures (`DashboardBrowserSuite`,
+`ParameterSetBrowserSuite`, `SchedulesBrowserSuite`, `VisualizationBrowserSuite`,
+`RestTreeBrowserFixture`) and the support objects (`OverviewHomeBrowserSupport`,
+`EditorRunFixtures`, `PlotlyColorbarProbe`, through the top-level `namedWait`) name their waits
+the same way, second sessions sign in through `login(on, …)` and `landOnDashboard(on)`, and
+`FixtureSetupWaitsBrowserTest` pins each wrapper (#831); a change to `BrowserSuite` or to any of
+these runs the FULL browser suite locally before handback (the #456 rule).
 
 ```bash
 # The marketing site's screenshots, produced by a script rather than by hand (070 §C).
@@ -805,6 +811,24 @@ thread stack reused after a GraalJS isolate thread, so every test JVM starts wit
 (`GLIBC_TUNABLES=glibc.pthread.stack_cache_size=0`, `ThreadStackReuseTest`; see the
 [GNU libc tunable documentation](https://sourceware.org/glibc/manual/2.35/html_node/POSIX-Thread-Tunables.html)).
 
+**What the scripts print for a crashed test JVM (#773).** A failed `scripts/gate.sh` step and a
+failed `scripts/pregate.sh` stage both call one helper, `gate_crash_explain` in
+`scripts/lib/gate-stages.sh`. When the step's log carries `finished with non-zero exit value N`, it
+prints `a test worker CRASHED (exit value N) — not a test failure`, then each report under
+`modules/*/build/hs_err/` or `tests/*/build/hs_err/` that is not older than the step's own start
+marker — the gate's `.gate-logs/<step>.log.started`, the pre-gate's
+`.pregate-logs/runs/<run-id>/stage-<id>.start` — as three lines: `crash report  module=<module>
+path=<path>`, the report's signal line (`#  SIGSEGV (0xb) …` or `#  Internal Error …`) and the line
+after `# Problematic frame:`. An mtime equal to the marker's counts: two files written within one
+coarse clock tick share an mtime, so `find -newer` would miss the report. Those lines are all
+the helper reads out of a report, each reduced to printable ASCII and cut at 240 characters. The
+rest of the report, which includes the JVM's environment variables, is never printed; open the
+file for it. With no report, it says why: exit 139 is an unhandled SIGSEGV, which leaves none;
+exit 134 is HotSpot's own abort, which writes one under `build/hs_err` only in a module that
+applies the conventions' `-XX:ErrorFile` (anywhere else, in the JVM's working directory). Older
+reports are counted (`older reports exist, not from this step: N`), never attributed or deleted.
+The pre-gate also keeps the lines in `stage-<id>.crash-reports.txt` beside the run's manifest.
+
 **The breach suite is a task of its own (#289).** `JsonataBreachTest` and, since #8,
 `JavaScriptBreachTest` (with `JavaScriptMeasurementsTest`, the JavaScript engine's costs) live in
 `modules/scripting/src/test/breach` and run ALONE in `:modules:scripting:breachSuite`, a 512m test
@@ -816,8 +840,13 @@ of their own; a filtered `:modules:scripting:test` no longer touches it, and
 recount's `test-results/**` glob counts them; `verifyBreachSuiteExecuted` is its zero-test
 guard. A red there reads one of two ways, both named in the XML and the report: a prediction
 that no longer holds (reconcile the doc), or a `SKIPPED` row — the case could not start with the
-headroom the calibration needs, an environment verdict to re-run, not a bound. The worker itself
-no longer dies of a heap event: everything after a bomb runs inside the suite's OOM guard.
+headroom the calibration needs, an environment verdict to re-run, not a bound. Before either
+corpus starts, the harness instantiates the post-bomb exception and row classes and exercises
+the report writer once per JVM, preventing their first class initialisation under heap pressure.
+The classification and bookkeeping guard records direct `OutOfMemoryError` and
+`ExceptionInInitializerError` / `NoClassDefFoundError` whose cause chain contains one as UNBOUNDED
+after waiting for headroom; unrelated linkage errors propagate. An OOM inside JUnit itself
+remains outside this guard and can still kill the worker.
 
 **Focused iteration with existing tasks.** Run the exact module-qualified test task and
 class (or `Class.method`) while editing. For example, this existing auth guard can run alone:
@@ -865,7 +894,19 @@ discovers no tests stays enabled. Unfiltered module checks and Gate A keep the g
 `main` when it exists, else `origin/main` — lanes are cut from local `main`, which runs ahead of
 `origin/main` while a batch waits for CI, so an `origin/main` base would plan that whole batch
 too, #757) runs, in a few minutes, exactly what a targeted test run cannot see and the full
-gate keeps finding two or three runs late: (1) `ktlintCheck detekt` plus the four root audits
+gate keeps finding two or three runs late: (0) when the diff (committed, staged, unstaged or
+untracked) changes a `gradle.lockfile`, `gradle/libs.versions.toml` or
+`gradle/verification-metadata.xml`, Gate A's dependency scan, `scripts/vuln-scan.sh` (§10.2), before
+any Gradle stage, with the gate's exit contract: `0` PASS; `1` FAIL, known vulnerabilities, the OSV
+table in the run directory's `0-deps-scan.log`; `200` skipped `reason=offline` — fail-soft by design
+as in the gate, printed as `!! SKIPPED — offline (… NOT a clean result …)` with the scanner's WARNING
+lines, and the outcome is unaffected; any other exit FAIL, no verdict, never a pass. The stage calls
+`https://api.osv.dev/`, and when the machine's scanner cache holds no osv-scanner yet it first downloads
+the pinned release from `github.com/google/osv-scanner/releases`. It scans the lockfiles git tracks, so
+a new lockfile not yet added to git triggers the stage without being scanned. With none of those
+files changed, the stage is skipped and says so (`0 deps-scan skipped — no dependency file changed`,
+manifest `reason=no-dependency-change`); `--plan` prints the decision (`deps-scan: run — <files>` or
+`deps-scan: skip — …`); (1) `ktlintCheck detekt` plus the four root audits
 (`composeEnvAudit`,
 `composeArgvSecretsAudit`, `verifyModuleDependencies`, `verifyVerificationMetadataDocs` — they hang
 off every module's `check`, so the gate's `build` reaches them before any test); (2) `check` of
@@ -899,7 +940,9 @@ the served-manual guards, the config-key drift tests (the list lives in the scri
 reads the whole tree or the docs is added there in the same commit). Iterate on its output,
 then deliver the lane for the lander's gate. It is not the gate: its exit code decides nothing
 about a merge. Every run appends its verdict line — `PRE-GATE PASS|FAIL`, the base, the merge-base, HEAD, the UTC time,
-the five stage exits, `snap`, `prune`, deferred work, elapsed time and the run id — to
+the six stage exits (`scan=` for stage 0, between `at=` and `lint=`; a stage skipped for no
+dependency change reads `scan=0`, and `scan=200` reads "scan not done here"), `snap`, `prune`,
+deferred work, elapsed time and the run id — to
 `.pregate-logs/0-verdict.log`, which is where the lander reads a delivered lane's verdict (the terminal is the only other place it is printed).
 Measured need (five lanes, 2026-09-19 to 21): 0–3 extra full gates each, all on lint,
 cross-cutting guards or foreign fixtures. This script passes `-Pdp.browser.ciPatience=true` to
@@ -1053,7 +1096,7 @@ every copied task directory with no exact `> Task :…` line in the stage log it
 `# NO-STATUS-LINE <repo-relative-task-directory>` (a missing log annotates every copied directory,
 and similarly-prefixed task names such as `test` and `testExtra` stay distinct), while the status
 lines themselves are preserved. A copy, provenance or manifest write failure refuses a PASS
-(`snap=1` in the verdict line, beside the unchanged five stage exits) even when every Gradle stage
+(`snap=1` in the verdict line, beside the unchanged six stage exits) even when every Gradle stage
 exited 0; it never turns a Gradle failure into success. A stage that ran but produced no XML is
 recorded (`files=0`): the recount searches `modules/*/build/test-results/**/*.xml`,
 `tests/*/build/test-results/**/*.xml`, and `TEST-*.xml` directly at the root, and exits 3 when
@@ -1305,6 +1348,24 @@ The design record is
 Guards beyond lint/static analysis. Each tool below is pinned exactly, and every
 guard has been proven able to fail — the buildSrc guard tests in-tree are
 those proofs, and a new guard lands with its own.
+
+`ElvisBoundMatcherGuardTest` scans Kotlin test sources under `modules`, `tests` and
+`buildSrc` (excluding build output and its own fixture source), and runs in pregate
+stage 3. It rejects Kotest matchers bound to an Elvis fallback: group the resolved
+value, `(count ?: 0) shouldBe 0`, or assert on a local value. The text scan masks
+line and nested block comments, escaped and raw strings, character literals,
+and backtick identifiers, keeping literal value placeholders to preserve statement
+boundaries. It ignores regex-group punctuation `(?:` and SQL casts `?::`, joins lines
+starting with `.`, `?:`, `?.`, `&&`, `||` or a `should…` matcher, and tracks
+parentheses, braces and brackets. Semicolons separate statements. Its birth
+inventory held 1,558 test files, 851 Elvis-bearing lines (including 237 regex-group
+and 54 SQL-cast lines), and 29 same-line matcher candidates: one bypass, 27 grouped,
+and one safe qualified call. Floors require 1,400 files, 700 raw Elvis occurrences
+and 20 classified grouped forms; the birth tree had 919 raw occurrences. Raw
+counts include masked text, while grouped
+counts come from code. Detection limits: reflection, aliased or backtick-escaped matcher names,
+string template expressions, and following lines without a continuation prefix
+are unsupported. These are lexical checks, not a Kotlin precedence parser.
 
 #### Coverage (Kover)
 
@@ -1658,9 +1719,15 @@ entries are SECRET-targeted and path-scoped with `condition = "AND"`
 secret co-located with an allowlisted token still fires), each with a reason +
 date comment, and the config EXTENDS the gitleaks default ruleset (a bare
 custom config silently replaces it — that mistake was made and caught here).
-The full-history scan runs by hand and is expected to exit 0 on `main`; a
-finding in a committed test fixture is triaged with a path + exact-value
-allowlist entry, never by reshaping the fixture's history.
+CI runs the full-history scan and `scripts/secret-scan-selftest.sh` on every
+push to `main`/`next` and every pull request (`.github/workflows/secret-scan.yml`);
+`secret-scan` is the required check on `main` (the owner adds it to the ruleset
+before the first promotion). The pre-commit hook remains the local staged-change
+check. Full-history scans use Git mode only (#686): directory scans can skip an
+entire path despite an AND allowlist. The self-test proves default-rule detection,
+admission of a triaged fixture, and detection of a different generated value on
+the same line at the same path. A finding in a committed test fixture is triaged
+with a path + exact-value allowlist entry, never by reshaping the fixture's history.
 
 #### Container scanning (trivy)
 

@@ -1,8 +1,8 @@
 # Configuration Reference
 
-**Status:** v1.78 (operator reference; source-traced configuration authority)
+**Status:** v1.79 (operator reference; source-traced configuration authority)
 **Owner:** datapipelines.co core
-**Last updated:** 2026-11-05
+**Last updated:** 2026-11-06
 
 ---
 
@@ -252,23 +252,21 @@ These framework key paths appear in `application.yml` as internal wiring. They a
 | `db-scheduler.shutdown-max-wait` | Delegates to the scheduler shutdown budget in §3.29, adding `s`. |
 | `db-scheduler.table-name` | `scheduled_tasks`: metadata table used by the scheduler library. |
 | `db-scheduler.immediate-execution-enabled` | `true`: wake the local scheduler when an execution is scheduled. |
-| `management.endpoints.web.exposure.include` | `"health"` — served on the **management port** only; `prometheus` joins it when the metrics registry lands ([Observability §6.4](observability.md#64-actuator-security)). **Must not be set to `""` or `exclude: "*"`:** Spring's `@ConditionalOnAvailableEndpoint` keys bean creation off exposure, so an empty include falls back to Boot's default set (re-exposing health on whatever port serves actuator), and excluding everything deletes the `HealthEndpoint` bean the root `/health` controller injects — context startup fails outright. |
+| `management.endpoints.web.exposure.include` | `"health,prometheus"` — served on the **management port** only, both anonymously there: the port, not a credential, is the boundary ([Observability §4.2](observability.md#42-exposure), [§6.4](observability.md#64-actuator-security)). Widening it does not widen the anonymous surface — the permit names the two paths (auth.md §8.6.1), so any further endpoint needs a session. **Must not be set to `""` or `exclude: "*"`:** Spring's `@ConditionalOnAvailableEndpoint` keys bean creation off exposure, so an empty include falls back to Boot's default set (re-exposing health on whatever port serves actuator), and excluding everything deletes the `HealthEndpoint` bean the root `/health` controller injects — context startup fails outright. |
 | `management.health.diskspace.enabled` | `false` — the health contract has no disk component ([REST API §11.1](rest-api.md#111-health-check)) |
 
 **Operator-tunable exception:**
 
 | YAML path | Env var | Default | Description |
 |---|---|---|---|
-| `management.server.port` | `MANAGEMENT_SERVER_PORT` | `9090` | Separate management port serving `/actuator/health` (and later `/actuator/prometheus`) — never publish it; nothing actuator is routable on the application port. |
+| `management.server.port` | `MANAGEMENT_SERVER_PORT` | `9090` | Separate management port serving `/actuator/health` and `/actuator/prometheus`, both anonymously ([Observability §4.2](observability.md#42-exposure)) — never publish it; nothing actuator is routable on the application port. |
 | `management.server.address` | `MANAGEMENT_SERVER_ADDRESS` | `127.0.0.1` | **Loopback by default** — the management surface is silently-public on no deployment shape. Kubernetes scraping (scraper → pod IP) requires explicitly setting `0.0.0.0`, paired with a NetworkPolicy limiting management-port access to the declared scraper peers ([Deployment §9](deployment.md#9-security-hardening-checklist-deployment)). Explicit opt-open, never default-open. The reference Helm chart ships this opt-open as the `management` block (chart 0.2.1): `management.expose` pins `0.0.0.0` and the management port, and `management.networkPolicy.enabled` adds a complete ingress NetworkPolicy: the scraper rule plus a required app-port declaration (`management.networkPolicy.appIngress.from` or an explicit `allowAll: true`). Its allowances are unioned with every other policy selecting the pods — [Deployment §6.4](deployment.md#64-kubernetes-recommended-for-production). |
 
 ### 3.15 Observability
 
 | YAML path | Env var | Default | Description |
 |---|---|---|---|
-| `datapipelines.observability.tracing.enabled` | `DATAPIPELINES_OBSERVABILITY_TRACING_ENABLED` | `false` | **Reserved; currently no runtime effect.** Shipped in YAML and deployment forwarding, but there is no property consumer, tracing bridge or OpenTelemetry exporter dependency in the application. Setting `true` does not enable tracing. |
-| `datapipelines.observability.tracing.endpoint` | `OTEL_EXPORTER_OTLP_ENDPOINT` | (none) | **Reserved; currently no runtime effect.** This proposed collector setting has no YAML mapping or application reader. It does not configure an exporter in this build. |
-| `datapipelines.observability.logging.format` | `DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT` | `json` (application); `console` in `defaults.env` | Log output format — the closed set `json` \| `console` ([Observability §3.1](observability.md#31-format)). **Bound at startup (#337)**: resolved before logging initialises, and an unknown value refuses startup with the offending value named. `console` is the human-readable development output (`defaults.env` ships it for local runs); `json` is the structured §3.1 line a log collector parses (raw Compose interpolation falls back to `json`; `app.sh` loads `defaults.env`, which supplies `console`, until the operator overrides it). `json` also switches Spring's startup banner off, so stdout carries JSON lines only; `console` keeps it (#337-b). |
+| `datapipelines.observability.logging.format` | `DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT` | `json` (prod), `console` (dev) | Log output format — the closed set `json` \| `console` ([Observability §3.1](observability.md#31-format)). **Bound at startup (#337)**: resolved before logging initialises, and an unknown value refuses startup with the offending value named. `console` is the human-readable development output (`defaults.env` ships it for local runs); `json` is the structured §3.1 line a log collector parses (compose passes `json`, the VPS included, until an operator sets the env otherwise). `json` also switches Spring's startup banner off, so stdout carries JSON lines only; `console` keeps it (#337-b). |
 
 ### 3.16 Pipelines
 
@@ -510,7 +508,7 @@ The budgets every script evaluation runs under — the save/release test suite o
 | `datapipelines.script.suite-timeout-seconds` | `60` | Positive deadline checked **before starting each test case** in the save/release suite, starting after script/invariant compilation. It does not interrupt a case already running or reject an overrun after the final case; each evaluation retains its own budget and abandonment grace |
 | `datapipelines.script.pool-size` | `4` | Positive cap on concurrently running script evaluations in this process; abandoned workers keep their running slot until their thread ends |
 | `datapipelines.script.pool-queue` | `64` | Evaluations admitted in total, running plus waiting — never "the wait queue" (the bulkhead holds an abandoned evaluation's slot until its thread ends). Must be at least `pool-size` |
-| `datapipelines.script.abandon-grace-seconds` | `30` | Grace past the wall clock before an evaluation is abandoned, counted (`script.evaluations.abandoned`) and logged at ERROR. Must be ≥ 1 (§7) |
+| `datapipelines.script.abandon-grace-seconds` | `30` | Grace past the wall clock before an evaluation is abandoned, counted (the abandoned-evaluations gauge, [observability.md §4.1](observability.md#41-metric-naming)) and logged at ERROR. Must be ≥ 1 (§7) |
 | `datapipelines.script.max-input-rows` | `100000` | Row cap, two bounds by path. At `templates_evaluate` and in the save/release suite, the `rows` batch and each table input are capped before any evaluation (`pipeline.script.input_too_large`). At run, a `table`/`value` node counts each table input before loading it (same code); a `row` node streams its single input with no row cap of its own; and the same key bounds the declared invariants' read-back — the written outputs and rejects plus the table inputs (row mode adds the streamed input and, for a caller output, its buffered rows and rejects) TOGETHER, refused as `pipeline.script.invariants_too_large` (§13.18, 7c) |
 | `datapipelines.script.max-value-bytes` | `1048576` | Cap on a value/object output (the record §4.3's value-cap code, §13.18, 7c) — a Context value is not a table |
 | `datapipelines.script.max-string-bytes` | `1048576` | Positive UTF-8 byte cap on a string checked by the script type gate, including typed inputs and returned rows/values (the same §4.3 code, with the row number where applicable) |
@@ -798,7 +796,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: "health"
+        include: "health,prometheus"   # both anonymous on this port; never "" and never exclude:"*" — see §3.14
   health:
     diskspace:
       enabled: false
@@ -943,8 +941,6 @@ datapipelines:
     retention-days: ${DATAPIPELINES_AUDIT_RETENTION_DAYS:365}
 
   observability:
-    tracing:
-      enabled: ${DATAPIPELINES_OBSERVABILITY_TRACING_ENABLED:false}
     logging:
       format: ${DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT:json}
 
@@ -1442,9 +1438,10 @@ The Helm input reference already lives in the commented `deploy/helm/datapipelin
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-05 | v1.78 | 818d (#818) managed reader lifetime enforced | §3.36: the reaper runs on its own `dp-reaper` thread; the freshness tick stays on `dp-scheduled`. §7 reads rule: the reaper delay is now 7 s and the rule gains the reader termination (92 s, derived from the LAKE adapter's HTTP request bounds, not a key); the refusal prints six numbers. No key, default or template change. |
-| 2026-11-05 | v1.77 | 818c (#818) managed reader lifetime | §3.36 `reads.max-generation-age-seconds`: the pool reaper also retires an over-age generation nobody leases from. §7 reads rule gains 2 × the reaper delay (260 s, derived, not a key); the refusal prints it. No key, default or template change. |
-| 2026-11-04 | v1.76 | #818 dp-lake P5 managed reads | §3.36: new key `reads.memory-limit` (thirty-two keys); `reads.*` rows say what each bounds; the reader pair's row states the credential order and that read-only is an operator contract DP cannot verify. §5 template gains the key. §7 gains the reads rule (tick below the age bound; age + retire ceiling + tick within an hour of each protected day) and the `lake.boot.datasource_name_taken` refusal. §8 traces the P5 consumers. |
+| 2026-11-05 | v1.79 | 818d (#818) managed reader lifetime enforced | §3.36: the reaper runs on its own `dp-reaper` thread; the freshness tick stays on `dp-scheduled`. §7 reads rule: the reaper delay is now 7 s and the rule gains the reader termination (92 s, derived from the LAKE adapter's HTTP request bounds, not a key); the refusal prints six numbers. No key, default or template change. |
+| 2026-11-05 | v1.78 | 818c (#818) managed reader lifetime | §3.36 `reads.max-generation-age-seconds`: the pool reaper also retires an over-age generation nobody leases from. §7 reads rule gains 2 × the reaper delay (260 s, derived, not a key); the refusal prints it. No key, default or template change. |
+| 2026-11-04 | v1.77 | #818 dp-lake P5 managed reads | §3.36: new key `reads.memory-limit` (thirty-two keys); `reads.*` rows say what each bounds; the reader pair's row states the credential order and that read-only is an operator contract DP cannot verify. §5 template gains the key. §7 gains the reads rule (tick below the age bound; age + retire ceiling + tick within an hour of each protected day) and the `lake.boot.datasource_name_taken` refusal. §8 traces the P5 consumers. |
+| 2026-11-06 | v1.76 | #708 the Prometheus scrape | §3.14: `management.endpoints.web.exposure.include` is `"health,prometheus"`, both served anonymously on the management port (#231 item 1, the failure-flow and telemetry record §17 row 11), and the `management.server.port` row says so. §3.15: the two tracing keys (`tracing.enabled` and `tracing.endpoint` under the observability prefix — the latter read from the standard OTLP endpoint variable) are removed with no deprecation window (record §17 row 12 — declared and never wired; tracing is deferred, record §12), here and in the yml excerpt; §5's template follows both. `ObservabilityConfigKeysSpecDriftTest` holds §3.15, the three operator-facing `management.*` rows and §5's template to `application.yml`. §3.28's `abandon-grace-seconds` points at the renamed abandoned-evaluations gauge in observability.md §4.1 rather than spelling its name: a full `datapipelines.script.` meter name reads as a config key to `ScriptConfigKeysSpecDriftTest`. |
 | 2026-11-04 | v1.75 | #780 script-invariants docs | **§3.28 says what the code does**: the intro states the ONE shared pool (every SCRIPT node of every execution, each row-mode batch and each invariant an evaluation), the immediate admission vs the wall-clock slot wait, and the fail-fast that aborts siblings on a pool refusal; the `max-input-rows` row states both bounds by path — evaluate/test caps the `rows` batch and each table input before evaluation, run caps table/value inputs before loading while a `row` input streams uncapped, and the invariants' read-back is bounded on the COMBINED count (outputs + rejects + inputs, row mode adding the streamed input and a caller output's buffered rows). No key, default or template change. — Renumbered at merge after #810. |
 | 2026-11-04 | v1.74 | 810 (#812) | §3.36 `catalog.lock-timeout-seconds` also bounds a lease acquire's wait on a lease row another transaction holds; the acquire then counts as busy. |
 | 2026-11-02 | v1.73 | #785 landing, security pass F2 | §3.36 `storage.endpoint`: a URL carrying userinfo, a query or a fragment is refused at startup (only scheme + host were checked); the row says so. |

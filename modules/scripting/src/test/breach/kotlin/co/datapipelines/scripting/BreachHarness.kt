@@ -4,6 +4,7 @@ import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import java.nio.file.Files
 import java.nio.file.Path
+import java.time.Duration
 
 /** A breach case's outcome (transform-nodes design §4.5): the three the record names, plus the environment's verdict. */
 internal enum class BreachOutcome { REFUSED, BOUNDED, UNBOUNDED, SKIPPED }
@@ -19,7 +20,7 @@ internal data class BreachRow(
 
 /**
  * The mechanics every breach suite shares (#289, extracted for the JavaScript suite in #8 lane 8a):
- * the 512m JVM check, the per-case headroom check, the `OutOfMemoryError` guard around everything
+ * the 512m JVM check and preload, the per-case headroom check, the OOM/linkage guard around everything
  * after the bomb, and the report. A suite supplies only its corpus and how one case is classified.
  *
  * **Why the guard** (CI run 36365034218, 2026-09-28, a 2-vCPU runner): an `OutOfMemoryError`
@@ -63,10 +64,36 @@ internal object BreachHarness {
         "OutOfMemoryError on the test thread after the bomb (classification or bookkeeping); recorded once the heap drained"
 
     /**
+     * Instantiate the post-bomb paths before any bomb, once per JVM. A class whose initialiser
+     * runs out of heap stays erroneous for the JVM's lifetime: catching the first OOM cannot
+     * repair later timeouts. Constructors warm their companion and formatting paths too.
+     * Exercise the real report writer so its first use is also outside the exhausted heap.
+     */
+    private val postBombClasses by lazy {
+        val exceptions =
+            listOf(
+                ScriptingException("warmup", "warmup"),
+                ScriptTimeoutException(Duration.ZERO, "warmup"),
+                ScriptEvaluationException("warmup"),
+                ScriptSyntaxException(1, 1, "warmup"),
+                ScriptPoolExhaustedException(1, 1),
+            ) + ScriptResourceLimitException.Kind.entries.map { ScriptResourceLimitException(it, "warmup") }
+        val rows = BreachOutcome.entries.map { BreachRow("warmup", it, TEST_THREAD_BLOWOUT, 0, 0) }
+        val report = writeReport(".breach-warmup.md", "warmup", rows)
+        Files.readAllLines(report)
+        Files.delete(report)
+        println(
+            "breach warmup: " + exceptions.map { it.javaClass.simpleName }.distinct().joinToString() +
+                ", BreachRow, BreachOutcome, report writer (path, formatting, Files read/write)",
+        )
+    }
+
+    /**
      * The corpus is calibrated for a 512m JVM: a larger heap lets the big cases complete, a
      * smaller one blows the small ones — either way the table would lie. Refuse to measure.
      */
     fun requireCalibratedHeap() {
+        postBombClasses
         val maxHeapMb = Runtime.getRuntime().maxMemory() / MB
         withClue("the breach suite runs in breachSuite's own ${HEAP_MB}m JVM; this JVM's max heap is $maxHeapMb MB") {
             (maxHeapMb in HEAP_FLOOR_MB..HEAP_MB) shouldBe true
@@ -75,7 +102,8 @@ internal object BreachHarness {
 
     /**
      * Measures one case: the headroom check, then [classify] (the bomb and everything after it,
-     * given the heap in use before it and the start instant) inside the `OutOfMemoryError` guard.
+     * given the heap in use before it and the start instant) inside the OOM/linkage guard.
+     * Both suites let linkage errors escape their classification catches to this boundary.
      */
     fun measure(
         case: String,
@@ -103,15 +131,42 @@ internal object BreachHarness {
         ) {
             // The heap blew on THIS thread after the bomb: the heap event is the outcome. Nothing
             // is allocated until the heap has drained; the row's numbers are read after it has.
-            awaitHeadroom()
-            BreachRow(
-                case,
-                BreachOutcome.UNBOUNDED,
-                TEST_THREAD_BLOWOUT,
-                (System.nanoTime() - start) / NANOS_PER_SECOND,
-                usedHeapMb() - heapBefore,
-            )
+            heapBlowoutRow(case, start, heapBefore)
+        } catch (err: ExceptionInInitializerError) {
+            if (!causedByHeapBlowout(err)) throw err
+            heapBlowoutRow(case, start, heapBefore)
+        } catch (err: NoClassDefFoundError) {
+            if (!causedByHeapBlowout(err)) throw err
+            heapBlowoutRow(case, start, heapBefore)
         }
+    }
+
+    /** Walk without allocating a collection while the heap may still be exhausted. */
+    private fun causedByHeapBlowout(error: Throwable): Boolean {
+        var current: Throwable? = error
+        // Throwable causes can cycle; a bounded walk keeps an unrelated linkage error loud.
+        repeat(MAX_CAUSE_DEPTH) {
+            if (current is OutOfMemoryError) return true
+            current = current?.cause ?: return false
+        }
+        return false
+    }
+
+    private const val MAX_CAUSE_DEPTH = 64
+
+    private fun heapBlowoutRow(
+        case: String,
+        start: Long,
+        heapBefore: Long,
+    ): BreachRow {
+        awaitHeadroom()
+        return BreachRow(
+            case,
+            BreachOutcome.UNBOUNDED,
+            TEST_THREAD_BLOWOUT,
+            (System.nanoTime() - start) / NANOS_PER_SECOND,
+            usedHeapMb() - heapBefore,
+        )
     }
 
     /** Writes `modules/scripting/build/reports/[fileName]`: a title, the five columns, one line per row. */

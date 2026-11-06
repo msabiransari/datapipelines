@@ -1573,70 +1573,16 @@
   position: relative;
 }
 
-/* ---- The resize handle (104 §B) ----
- * The owner's report: "it has a fixed height. You can min/max it but cannot change the
- * height." A 9px strip straddling the dock's top border, with a centred grip. The grip was
- * transparent at rest until 141 §C — a resize nobody can see is a resize nobody uses — so
- * it is now a visible pill (`--border-default`, the 3:1 boundary token) at rest and brand on
- * hover/focus/drag. It is
- * NOT the native `resize` corner the tree pane used to carry: that handle sits at the
- * bottom-right of the pane, which is where nobody looks for a divider (§C).
- *
- * `touch-action: none` is what makes the pointer events reach us on a touch screen instead
- * of being consumed as a scroll gesture. */
+/* #801 — the shared handle's geometry, ink and drag transition live in app.css.
+   The editor only places the strip at the dock's top border. */
 .pe-dock-splitter {
   position: absolute;
-  user-select: none;
-  /* #783: the lengths are app.css's shared grip tokens (9px strip, 40 x 3 pill), unchanged. */
-  top: calc((var(--app-splitter-strip) - 1px) / -2);
-  left: 0;
-  right: 0;
-  height: var(--app-splitter-strip);
   z-index: 3;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: none;
-  background: none;
-  cursor: row-resize;
-  touch-action: none;
-}
-
-.pe-dock-splitter::after {
-  content: "";
-  width: var(--app-splitter-grip-w);
-  height: var(--app-splitter-grip-h);
-  border-radius: var(--radius-pill, 999px);
-  background: var(--border-default);
-  transition: background var(--pe-transition);
-}
-
-.pe-dock-splitter:hover::after,
-.pe-dock-splitter:focus-visible::after,
-.pe-dock.is-dragging .pe-dock-splitter::after {
-  background: var(--brand);
 }
 
 /* A collapsed dock has no height to give: the handle would drag a pane nobody can see. */
 .pe-dock-collapsed .pe-dock-splitter {
   display: none;
-}
-
-/* §D — the row transition must NOT run during a drag: a dock that eases toward the pointer
-   lags it by 200ms and reads as a broken handle. It is switched off for the duration and
-   back on at pointerup, which is also the only motion `prefers-reduced-motion` users would
-   have seen here. */
-.pe-dock.is-dragging {
-  transition: none;
-}
-
-/* The whole document takes the resize cursor while a drag is in flight — the pointer is
-   captured by the handle and travels over the canvas, and a canvas that shows a grab cursor
-   mid-resize is the same lie as a lagging pane. */
-html.dp-splitting-y,
-html.dp-splitting-y * {
-  cursor: row-resize !important;
-  user-select: none !important;
 }
 
 /* §D's reduced-motion half needs NO rule here, and a rule here would be a LIE: the vendored
@@ -1645,7 +1591,7 @@ html.dp-splitting-y * {
    of ours could never win against that `!important` — it would read as protection while doing
    nothing, which is worse than no rule at all. Measured under Playwright's reduced-motion
    emulation: the dock's `transition-duration` computes to 1e-05s, and
-   `PipelineEditorDockResizeBrowserTest` asserts that. The `is-dragging` switch above is the
+   `PipelineEditorDockResizeBrowserTest` asserts that. The shared `is-dragging` switch is the
    part that IS ours: it covers the default (motion-allowed) case, where a 200ms row
    transition would make the pane lag the pointer. */
 

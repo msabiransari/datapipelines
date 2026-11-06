@@ -114,6 +114,8 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
                     dock: rect(dock), region: rect(region), main: rect(main),
                     body: document.querySelector('[data-dp-dock-body]').getBoundingClientRect().height,
                     layout: document.querySelector('.dp-board-layout').getBoundingClientRect().height,
+                    collapsed: dock.hasAttribute('data-dp-dock-collapsed'),
+                    threshold: parseFloat(getComputedStyle(document.querySelector('.dp-board-page')).getPropertyValue('--dp-board-auto-collapse-below')),
                     drawer: getComputedStyle(document.querySelector('.dp-board-toolbar')).display !== 'none',
                     filtersState: document.querySelector('.dp-board-page').getAttribute('data-dp-filters') };
                 }""",
@@ -137,11 +139,27 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
         }
         // A dock crushed to its two borders (2 px) is "visible" to a height > 0 check; the pane the
         // person reads must keep the splitter's floor, and the board row its own (splitter.js).
-        withClue("the dock's pane is under its floor: $readings") {
-            (readings["body"] as Number).toDouble() shouldBeGreaterThanOrEqual DOCK_MIN
-        }
+        assertDockDefault(readings, shortWindow = height <= 800)
         withClue("the board row is under its floor: $readings") {
             (readings["layout"] as Number).toDouble() shouldBeGreaterThanOrEqual BOARD_FLOOR
+        }
+    }
+
+    private fun assertDockDefault(
+        readings: Map<*, *>,
+        shortWindow: Boolean,
+    ) {
+        if (shortWindow) {
+            withClue("the short-window default did not protect the board: $readings") {
+                readings["collapsed"] shouldBe true
+                (readings["body"] as Number).toDouble() shouldBe 0.0
+                (readings["layout"] as Number).toDouble() shouldBeGreaterThanOrEqual
+                    (readings["threshold"] as Number).toDouble()
+            }
+        } else {
+            withClue("the dock's pane is under its floor: $readings") {
+                (readings["body"] as Number).toDouble() shouldBeGreaterThanOrEqual DOCK_MIN
+            }
         }
     }
 

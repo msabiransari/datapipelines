@@ -1,9 +1,9 @@
 # DAG Executor Specification
 
-**Status:** v1.36 (revised — see Change Log)
+**Status:** v1.37 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract spec](pipeline-contract.md), [Templates spec](templates.md), [Datasources spec](datasources.md), [Staging spec](staging.md)
-**Last updated:** 2026-11-04 (#780)
+**Last updated:** 2026-11-06
 
 ---
 
@@ -598,7 +598,7 @@ node lands (7c). What is already true and binding:
   evaluation gets its OWN daemon thread
   (`script-eval-N`) — a thread whose evaluation outlives its budget is abandoned by its caller
   (the JSONata engine never reads `Thread.interrupted()`), logged at ERROR, counted
-  (`script.evaluations.abandoned` is the record's meter name) and never handed new work —
+  (`datapipelines.script.evaluations.abandoned`) and never handed new work —
   and it **keeps its slot until it ends**: the thread, not the caller, returns the permits, so
   at most `size` evaluation threads are alive at any moment, abandoned ones included. A caller
   waits for a slot at most its own wall clock, then gets the pool-exhausted refusal. This is the
@@ -1641,6 +1641,7 @@ document a customer can read before they need it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-06 | v1.37 | #708 the Prometheus scrape | §5.3: the abandoned-evaluation gauge is `datapipelines.script.evaluations.abandoned` — renamed from the un-prefixed `script.evaluations.abandoned`, which broke observability §4.1's `datapipelines.` prefix rule (the failure-flow and telemetry record §7). The meter is unchanged otherwise. |
 | 2026-11-04 | v1.36 | #780 script-invariants docs | §4's pool bullet points at configuration §3.28 for the configured bounds (the stale "4/64 design defaults; 7c lands the configuration block" and "the catalog row arrives with that lane" are gone) and names `pipeline.script.pool_exhausted`; §5.4's invariant paragraph states the read-back bound's COMBINED count — rows + rejects + table inputs, row mode adding the streamed input and a caller output's buffered rows and rejects — and records the known gap (a `table` caller output's gated rows are not counted). No behaviour change. |
 | 2026-10-25 | v1.35 | #711 | The ambient-read table names JSONata's `$random()` / `$shuffle()` refusals, including `$eval` and aliases. |
 | 2026-10-22 | v1.34 | 8b (#8) | §5.3 documents both engines, the per-engine bounds and structured console logging. |

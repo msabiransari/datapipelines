@@ -26,6 +26,17 @@ function load() {
 
 const S = load();
 
+test("dock defaults are shared: the threshold, remembered zero and unmeasurable input", () => {
+  assert.equal(S.dockDefault(319.9, 320, null), S.COLLAPSED);
+  assert.equal(S.dockDefault(320, 320, null), S.OPEN);
+  assert.equal(S.dockDefault(100, 320, 0), S.OPEN);
+  assert.equal(S.dockDefault(100, 320, undefined), S.COLLAPSED);
+  for (const invalid of [NaN, Infinity, undefined, null, "100"]) {
+    assert.equal(S.dockDefault(invalid, 320, null), S.OPEN);
+    assert.equal(S.dockDefault(100, invalid, null), S.OPEN);
+  }
+});
+
 /* ------------------------------------------------------------------ sizeFor */
 
 test("x axis: the size follows the pointer's dx from where the drag started", () => {

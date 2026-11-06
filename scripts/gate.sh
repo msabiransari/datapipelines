@@ -138,13 +138,19 @@ GATE_BUILD_BROWSER_ARGS=(-x :tests:browser-tests:test -x :tests:browser-tests:ve
 
 run() { # run <logfile> <args...>  → echoes exit code, never pipes gradle
   local log="$1"; shift
+  # The invocation's start marker (<log>.started): a HotSpot report not older than it is
+  # this invocation's (#773, gate_crash_reports). A marker that cannot be written leaves
+  # the crash lines unattributed; it never changes the invocation's exit.
+  : > "$log.started"
   ./gradlew "$@" "${GATE_EXTRA_ARGS[@]}" 9>&- 10>&- 11>&- > "$log" 2>&1
   echo $?
 }
 
 # A crash is not a test failure — gate_crashed() detects the signatures we
 # have actually seen (scripts/lib/gate-stages.sh, shared with the buildSrc
-# stage below).
+# stage below). gate_crash_explain() then names a crashed test JVM's HotSpot
+# report (module, path, signal and frame lines only) or says why there is none
+# (#773, DEVELOPMENT.md §9.4) — the same helper pregate.sh calls.
 
 fails=0; crashes=0; skips=0
 
@@ -167,6 +173,7 @@ for i in $(seq 1 "$CYCLES"); do
         crashes=$((crashes + 1))
         echo "  cycle $i  $name  EXIT=$code  ** TOOLING CRASH — no verdict, not a test failure **"
         grep -m1 -oE '(NoSuchFileException|EOFException|OutOfMemoryError)[^ ]*' "$logf" | sed 's/^/        /'
+        gate_crash_explain "$logf" "$logf.started" "$ROOT" | sed 's/^/        /'
       else
         echo "  cycle $i  $name  EXIT=$code  (genuine failure)"
       fi
@@ -239,6 +246,7 @@ case "$bverdict" in
     fails=$((fails + 1)); crashes=$((crashes + 1))
     echo "  buildSrc tests  EXIT=$btest  ** TOOLING CRASH — no verdict, not a test failure **"
     grep -m1 -oE '(NoSuchFileException|EOFException|OutOfMemoryError)[^ ]*' "$LOGDIR/buildsrc-test.log" | sed 's/^/        /'
+    gate_crash_explain "$LOGDIR/buildsrc-test.log" "$LOGDIR/buildsrc-test.log.started" "$ROOT" | sed 's/^/        /'
     ;;
   skip)
     skips=$((skips + 1))
@@ -313,6 +321,7 @@ case "$sec_verdict" in
     if [ "$sec" -ne 0 ] && gate_crashed "$LOGDIR/security-assurance.log"; then
       crashes=$((crashes + 1))
       echo "  security-assurance  EXIT=$sec  ** TOOLING CRASH — no verdict, not a test failure **"
+      gate_crash_explain "$LOGDIR/security-assurance.log" "$LOGDIR/security-assurance.log.started" "$ROOT" | sed 's/^/        /'
     else
       echo "  security-assurance  EXIT=$sec  (${sec_verdict#FAIL }; log: $LOGDIR/security-assurance.log)"
     fi

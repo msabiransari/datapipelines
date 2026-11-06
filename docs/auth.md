@@ -1,9 +1,9 @@
 # Auth & Security Specification
 
-**Status:** v3.64 (revised — see Change Log)
+**Status:** v3.66 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
-**Last updated:** 2026-11-05
+**Last updated:** 2026-11-06
 
 ---
 
@@ -813,7 +813,7 @@ POST /logout
 Cookie: dp_session=<jwt>
 ```
 
-Server clears `dp_session` cookie. The JWT itself is stateless and not revoked server-side — but with the cookie cleared and the JWT gone from the client, the session is effectively dead. The OIDC provider's session is NOT terminated (user may need to sign out separately at Google/Microsoft if they want full logout).
+After the credential and workspace filters admit the request, the server clears the `dp_session` cookie. The `auth.logout` audit row (§10.1) carries the identity those filters established — the person's `user_id` (an admitted key's `key_id`), #802; a request whose session is already invalid is audited anonymously after the session filter has rejected it (`dp_session rejected`, §6.3). The existing credential and workspace refusals now precede logout too: an MCP key outside `/mcp` receives 403, a key with `DP-Workspace` receives 400, and a session requesting an inaccessible workspace receives 404. Those refused requests do not reach the logout handlers. The JWT itself is stateless and not revoked server-side — but with the cookie cleared and the JWT gone from the client, the session is effectively dead. The OIDC provider's session is NOT terminated (user may need to sign out separately at Google/Microsoft if they want full logout).
 
 Since #782, `POST /logout` carrying the browser-controlled `Sec-Fetch-Site: same-origin` attestation succeeds even when the rendered CSRF token is stale. Other attestations and requests without that header keep the double-submit requirement (§8.4). A refused plain browser form navigation renders the HTML 403 page with the fixed refusal message and correlation id; it expires no session cookie and sends no redirect. The CSRF page's **Reload the app** action uses `GET /dashboard` (which redirects an anonymous person to login), and **Log in** uses `GET /login`; both are full page loads, including after a refusal on a POST-only route.
 
@@ -1158,7 +1158,10 @@ class SecurityConfig(
         if (oidcConfigured) configureOidcLogin(http)   // + OidcSignedInBounceFilter (090)
 
         http
-            .addFilterBefore(filters.jwt, UsernamePasswordAuthenticationFilter::class.java)
+            // #802: the session filter anchors ahead of LogoutFilter, so POST /logout is
+            // authenticated BEFORE the logout runs — the auth.logout row carries the
+            // principal the credential produced (§6.5) instead of the anonymous marker.
+            .addFilterBefore(filters.jwt, LogoutFilter::class.java)
             .addFilterBefore(filters.apiKey, JwtAuthenticationFilter::class.java)
             .addFilterBefore(filters.loginRateLimit, ApiKeyFilter::class.java)
             .addFilterBefore(filters.promotionServerKey, LoginRateLimitFilter::class.java)
@@ -1196,19 +1199,21 @@ class SecurityConfig(
  5. ApiKeyFilter                    — checks DP-API-Key header (or Bearer dpk_ on /mcp); if present, validates and sets SecurityContext
  6. JwtAuthenticationFilter         — checks dp_session cookie; DECLINES when ApiKeyFilter stashed a rejection (§8.4); skips /mcp entirely
  7. WorkspaceResolutionFilter       — resolves the active workspace onto the principal (§5.6): DP-Workspace switch or claim/pin, membership-checked
- 8. OAuth2LoginAuthenticationFilter — handles /oauth2/** and /login/oauth2/code/** redirects (wired only when a provider is configured)
- 9. AuthorizationFilter             — checks the §8.3 allowlist, then authenticated() for everything else
-10. ForcedPasswordChangeInterceptor — §5A.4, every handler except EXCLUDE_PATTERNS
-11. ScopeInterceptor (MVC)          — kind confinement (§7.7), then @RequiredScope; default-deny for unannotated handlers outside the §8.3 allowlist;
+ 8. LogoutFilter                    — POST /logout only: clears dp_session and writes the auth.logout audit row; the credential filters have already
+                                      run, so the row carries the principal they produced (#802, §6.5)
+ 9. OAuth2LoginAuthenticationFilter — handles /oauth2/** and /login/oauth2/code/** redirects (wired only when a provider is configured)
+10. AuthorizationFilter             — checks the §8.3 allowlist, then authenticated() for everything else
+11. ForcedPasswordChangeInterceptor — §5A.4, every handler except EXCLUDE_PATTERNS
+12. ScopeInterceptor (MVC)          — kind confinement (§7.7), then @RequiredScope; default-deny for unannotated handlers outside the §8.3 allowlist;
                                       an ASYNC re-dispatch passes untouched — the REQUEST dispatch judged it (§8.3, #404)
-12. Controller                      — handles the request
+13. Controller                      — handles the request
 ```
 
 If neither API key nor JWT is present (and the path requires auth), the AuthorizationFilter routes to the entry point, which splits by client shape (T31): a request whose `Accept` includes `text/html` — a browser navigating a UI route — gets a `302` to `/login` (the `Location` is a relative header, never `sendRedirect`'s Host-derived absolute URL); `/api/**` and `/mcp` NEVER redirect (their 401 JSON envelope is contract, byte-pinned), and non-HTML clients (`curl`'s `Accept: */*`, JSON API callers) keep the exact current envelope whatever path they hit. If authenticated but scope insufficient, the ScopeInterceptor returns `403`.
 
 A streaming response's completion (an SSE emitter, a CSV body) re-enters the servlet as an
 ASYNC dispatch. Steps 5–7 are `OncePerRequestFilter`s that skip it, so its `SecurityContext` is
-empty; step 9 permits it by dispatcher type, step 10 finds no principal and passes, and step 11
+empty; step 10 permits it by dispatcher type, step 11 finds no principal and passes, and step 12
 returns at once. The handler is not invoked again on that dispatch
 — only the result or exception the REQUEST dispatch's handler produced is rendered, by the
 `@ControllerAdvice` — so nothing new is authorized and the D-R8 audit row stays one per request.
@@ -1230,7 +1235,7 @@ Two things are deliberately **not** rows in this table:
   re-dispatch of a request the REQUEST dispatch already authenticated and authorized is not
   re-authorized from an empty `SecurityContext`. Without it every completed SSE stream dies
   as Access Denied on its completion dispatch. `ScopeInterceptor` holds the same premise for
-  the ASYNC dispatch (§8.2 step 11): until v3.40 it judged the re-dispatch against the empty
+  the ASYNC dispatch (§8.2 step 12): until v3.40 it judged the re-dispatch against the empty
   context, so a stream completed with an error BEFORE its first frame answered
   `401 auth.api_key.missing` in place of the error's envelope — the execute route's
   `429 pipeline.execution.concurrency_limit` and the idempotent retry's never-started
@@ -1353,16 +1358,16 @@ Handler methods are not listed here: §7.6 is their reviewed table (B3 — one t
 | security-chain | `chain 1 #04` | `HeaderWriterFilter` | `any request` | The security headers, written eagerly (§8.1, `SecurityHeaders`). | yes | Constant per request; key and session checks read the §11.4 cache. |
 | security-chain | `chain 1 #05` | `CorsFilter` | `any request` | Spring Security's CORS hook — the same single-origin configuration. | yes | Constant per request; key and session checks read the §11.4 cache. |
 | security-chain | `chain 1 #06` | `CsrfFilter` | `any request` | The `dp_csrf` double-submit on state-changing cookie requests (§8.4); exempt by credential: an API key, and the two routes whose only credential is a header no cookie stands in for — the promotion route's server key and the test screenshot upload's capability (#353); and since #782 by attestation: a logout the browser says came from the app's own page (`Sec-Fetch-Site: same-origin`, §8.4). | yes | Constant per request; key and session checks read the §11.4 cache. |
-| security-chain | `chain 1 #07` | `LogoutFilter` | `any request` | `POST /logout`: clears the session cookie and audits (§6.5). | yes | Constant per request; key and session checks read the §11.4 cache. |
-| security-chain | `chain 1 #08` | `OidcSignedInBounceFilter` | `any request` | A signed-in visitor never starts a new authorization ceremony at `/oauth2/authorization/*`. | yes | Constant per request; key and session checks read the §11.4 cache. |
-| security-chain | `chain 1 #09` | `OAuth2AuthorizationRequestRedirectFilter` | `any request` | `/oauth2/authorization/{provider}`: the redirect to the identity provider (§5.4). | yes | Constant per request; key and session checks read the §11.4 cache. |
-| security-chain | `chain 1 #10` | `OAuth2LoginAuthenticationFilter` | `any request` | `/login/oauth2/code/{provider}`: the OIDC callback (§5.4–5.5). | yes | Constant per request; key and session checks read the §11.4 cache. |
-| security-chain | `chain 1 #11` | `PromotionServerKeyFilter` | `any request` | `/api/v1/promotion/**` only: the promotion credential gate (§7.7, §10.6); inert elsewhere. | yes | Constant per request; key and session checks read the §11.4 cache. |
-| security-chain | `chain 1 #12` | `LoginRateLimitFilter` | `any request` | `/login` and `/oauth2/` only: the per-client-IP damper (§11.5). | yes | Constant per request; key and session checks read the §11.4 cache. |
-| security-chain | `chain 1 #13` | `ApiKeyFilter` | `any request` | `DP-API-Key` (or `Bearer dpk_` on `/mcp`): validates the key and sets the principal (§7.3). | yes | Constant per request; key and session checks read the §11.4 cache. |
-| security-chain | `chain 1 #14` | `JwtAuthenticationFilter` | `any request` | The `dp_session` cookie: validates the session and sets the principal (§6.3). | yes | Constant per request; key and session checks read the §11.4 cache. |
+| security-chain | `chain 1 #07` | `PromotionServerKeyFilter` | `any request` | `/api/v1/promotion/**` only: the promotion credential gate (§7.7, §10.6); inert elsewhere. | yes | Constant per request; key and session checks read the §11.4 cache. |
+| security-chain | `chain 1 #08` | `LoginRateLimitFilter` | `any request` | `/login` and `/oauth2/` only: the per-client-IP damper (§11.5). | yes | Constant per request; key and session checks read the §11.4 cache. |
+| security-chain | `chain 1 #09` | `ApiKeyFilter` | `any request` | `DP-API-Key` (or `Bearer dpk_` on `/mcp`): validates the key and sets the principal (§7.3). | yes | Constant per request; key and session checks read the §11.4 cache. |
+| security-chain | `chain 1 #10` | `JwtAuthenticationFilter` | `any request` | The `dp_session` cookie: validates the session and sets the principal (§6.3). | yes | Constant per request; key and session checks read the §11.4 cache. |
+| security-chain | `chain 1 #11` | `WorkspaceResolutionFilter` | `any request` | Resolves the active workspace onto the principal (§5.6). | yes | Constant per request; key and session checks read the §11.4 cache. |
+| security-chain | `chain 1 #12` | `LogoutFilter` | `any request` | `POST /logout`: clears the session cookie and audits (§6.5). | yes | Constant per request; key and session checks read the §11.4 cache. |
+| security-chain | `chain 1 #13` | `OidcSignedInBounceFilter` | `any request` | A signed-in visitor never starts a new authorization ceremony at `/oauth2/authorization/*`. | yes | Constant per request; key and session checks read the §11.4 cache. |
+| security-chain | `chain 1 #14` | `OAuth2AuthorizationRequestRedirectFilter` | `any request` | `/oauth2/authorization/{provider}`: the redirect to the identity provider (§5.4). | yes | Constant per request; key and session checks read the §11.4 cache. |
 | scheduled | `DashboardRefreshSweepScheduler#sweep` | `fixedDelay` | `every PT1M` | Closes a `RUNNING` dashboard refresh that outlived its longest possible deadline plus one abort poll as `TIMED_OUT` — the instance holding it died ([Metadata DB §8.4](metadata-db.md#84-stale-dashboard-refresh-sweep), #10 L2). | no | One idempotent guarded `UPDATE` per tick (`AND status = 'RUNNING'`); on the jobs' one `dp-scheduled` thread, ticks never overlap. |
-| security-chain | `chain 1 #15` | `WorkspaceResolutionFilter` | `any request` | Resolves the active workspace onto the principal (§5.6). | yes | Constant per request; key and session checks read the §11.4 cache. |
+| security-chain | `chain 1 #15` | `OAuth2LoginAuthenticationFilter` | `any request` | `/login/oauth2/code/{provider}`: the OIDC callback (§5.4–5.5). | yes | Constant per request; key and session checks read the §11.4 cache. |
 | security-chain | `chain 1 #16` | `RequestCacheAwareFilter` | `any request` | Spring Security's saved-request hook (no session: nothing is saved). | yes | Constant per request; key and session checks read the §11.4 cache. |
 | security-chain | `chain 1 #17` | `SecurityContextHolderAwareRequestFilter` | `any request` | Exposes the principal through the servlet request API. | yes | Constant per request; key and session checks read the §11.4 cache. |
 | security-chain | `chain 1 #18` | `AnonymousAuthenticationFilter` | `any request` | Marks a request with no credential anonymous, so the §8.3 allowlist can admit it. | yes | Constant per request; key and session checks read the §11.4 cache. |
@@ -1385,8 +1390,9 @@ Handler methods are not listed here: §7.6 is their reviewed table (B3 — one t
 | scheduler-task | `schedule-notifier` | `recurring` | `every PT10S` | #442b: sends the schedule notices the run transitions queued (`schedule_notification_deliveries`, [Scheduler §2.3](scheduler.md#23-notification-settings-442)) through the shared SMTP transport, one message per recipient, re-checking the enable flag and the recipient-domain allowlist at send. Never changes a run. | no | At most `notifications.batch-size` (20) deliveries per tick, one `FOR UPDATE SKIP LOCKED` claim each, every statement bounded (30 s); the SMTP timeouts bound each send. |
 | scheduler-task | `schedule-run` | `one-time` | `one instance per recorded run` | Admits one run: capacity, preparation, the start claim, the launch through the executor — as the system identity, never a request's principal. | no | One run per delivery; returns once the execution's record exists (it never holds a thread for the run). |
 | port | `server.port` | `listening socket` | `bound to *` | The application port: every handler, `/mcp`, the site and the published endpoints. | yes | Tomcat's thread and connection limits. |
-| port | `management.server.port` | `listening socket` | `bound to 127.0.0.1` | Actuator only, on loopback by default ([Configuration §3.14](configuration.md#314-framework-wiring-keys)); nothing under `/actuator` is routable on the application port. | yes | Tomcat's limits; one endpoint exposed. |
-| actuator | `health` | `management endpoint` | `/actuator/health · anonymous 401` | The one exposed actuator endpoint (`management.endpoints.web.exposure.include: health`). The application's security chain guards the management context too, so an anonymous caller is refused; orchestrator probes use `/health` and `/ready` on the application port (§8.3). | yes | The health indicators' own timeouts. |
+| port | `management.server.port` | `listening socket` | `bound to 127.0.0.1` | Actuator only, on loopback by default ([Configuration §3.14](configuration.md#314-framework-wiring-keys)); nothing under `/actuator` is routable on the application port. | yes | Tomcat's limits; two endpoints exposed. |
+| actuator | `health` | `management endpoint` | `/actuator/health · anonymous 200` | One of the two exposed actuator endpoints (`management.endpoints.web.exposure.include: health,prometheus`). Anonymous on the management port only: the port, not a credential, is the boundary (#231, [Observability §4.2](observability.md#42-exposure)) — `ManagementEndpointMatcher` permits `GET`/`HEAD` of the index and the two exposed paths in the management context and nowhere else, so every other management path still needs a session and the same paths stay refused on the application port. Orchestrator probes still use `/health` and `/ready` on the application port (§8.3). | yes | The health indicators' own timeouts. |
+| actuator | `prometheus` | `management endpoint` | `/actuator/prometheus · anonymous 200` | The Prometheus scrape (#708), the meters of [Observability §4.1](observability.md#41-metric-naming) in the text exposition format. Anonymous on the management port for the same reason as `health`: a scraper carries no key that would outlive rotation. | yes | One registry snapshot per scrape; series bounded by §4.1's tag rules. |
 
 **The public contract:** one row per [§8.3](#83-public-endpoints-no-auth-required) glob, its reason exactly as `PublicPaths` states it. `PublicContractE2eTest` holds the running application to it. Every handler under a public glob is named in the row of the FIRST glob, in declaration order, that covers it. A row names only handlers that are registered: `resources` for the static-resource handler, `filter:<Class>` for a security-chain endpoint. The rows and `PublicPaths` are the same set of globs, reason for reason. An anonymous GET of the probe answers the row's status, never with a stack trace and never with a session cookie. An anonymous POST, PUT and DELETE on the probe (with a matching CSRF pair, so the refusal measured is the route's) are `refused` (403, 404 or 405). The exceptions: the row names the suites that own those verbs (`own E2E:` — the login and OIDC flows are tested where they live, and the test checks that those suites exist), or states that every verb gets the GET's answer (`same answer:`). The "principal · write · content" cell is the reviewed claim; no test measures datastore writes here (the record's slice B effect witnesses will).
 
@@ -1879,7 +1885,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 - [ ] API keys hashed with Argon2id, never stored plaintext.
 - [ ] Session cookies `HttpOnly`, `Secure`, `SameSite=Lax` (§5.5 — Strict is unusable with an IdP redirect chain; CSRF, not SameSite, is the control).
 - [ ] CSRF protection on all state-changing UI endpoints.
-- [ ] No `/actuator/*` path reachable without auth on the application port; `/actuator/prometheus` served only on the separate management port ([Observability §4.2](observability.md#42-exposure)). Root `/health`, `/ready`, `/info` are the only public probes.
+- [ ] No `/actuator/*` path reachable on the application port; `/actuator/health` and `/actuator/prometheus` answer anonymously only on the separate management port, every other management path needs a session ([Observability §4.2](observability.md#42-exposure)). Root `/health`, `/ready`, `/info` are the application port's only public probes.
 - [ ] All auth events audited.
 - [ ] All traffic over TLS.
 - [ ] OIDC redirect URI locked to the deployment's exact domain (not `localhost` in production).
@@ -1917,9 +1923,11 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-05 | v3.64 | 818c (#818) managed reader lifetime | **§8.6.1**, the `DatasourcePoolReaperScheduler#reap` row: its pass first retires managed lake generations past their age bound, statement-free and at most one per managed datasource. No new route, tool, permission or role. |
-| 2026-11-04 | v3.63 | 818b (#818) managed reads corrections | **§8.6.1**, the `ManagedLakeFreshnessScheduler#tick` row: its catalog read and grant `INSERT` each carry a 5 s statement timeout, the system actor is the boot's, and a failed step is one WARN. No new route, tool or role. |
-| 2026-11-04 | v3.62 | #818 dp-lake P5 managed reads | **§8.6.1: one scheduled row, `ManagedLakeFreshnessScheduler#tick`** (`fixedDelay`, every `reads.freshness-tick-seconds`, first after one interval; not reachable from a request). No new route, tool, permission or role cell: the managed lake datasource is created by the server at boot and read under the existing datasource grants. |
+| 2026-11-05 | v3.66 | 818c (#818) managed reader lifetime | **§8.6.1**, the `DatasourcePoolReaperScheduler#reap` row: its pass first retires managed lake generations past their age bound, statement-free and at most one per managed datasource. No new route, tool, permission or role. |
+| 2026-11-04 | v3.65 | 818b (#818) managed reads corrections | **§8.6.1**, the `ManagedLakeFreshnessScheduler#tick` row: its catalog read and grant `INSERT` each carry a 5 s statement timeout, the system actor is the boot's, and a failed step is one WARN. No new route, tool or role. |
+| 2026-11-04 | v3.64 | #818 dp-lake P5 managed reads | **§8.6.1: one scheduled row, `ManagedLakeFreshnessScheduler#tick`** (`fixedDelay`, every `reads.freshness-tick-seconds`, first after one interval; not reachable from a request). No new route, tool, permission or role cell: the managed lake datasource is created by the server at boot and read under the existing datasource grants. |
+| 2026-11-06 | v3.63 | #708 the Prometheus scrape | **§8.6.1: the management port serves two endpoints, both anonymous** (#231 item 1, decided by the failure-flow and telemetry record §17 row 11): `actuator health` is now `anonymous 200`, and a new `actuator prometheus` row (`/actuator/prometheus · anonymous 200`). The permit is `ManagementEndpointMatcher` in the security chain — the management context only, `GET`/`HEAD`, the index and the two exposed paths — never a §8.3 `PublicPaths` entry, so the application port still refuses every `/actuator` path. §13's checklist line follows. |
+| 2026-11-05 | v3.62 | #802 logout audit identity | **§8.1 excerpt, §8.2, §8.6.1: the credential filters anchor ahead of `LogoutFilter`** — `JwtAuthenticationFilter` now runs before `POST /logout`, so the `auth.logout` audit row carries the principal the credential produced (the person's `user_id`, a key's `key_id`, §6.5) instead of the anonymous marker (#802); a logout carrying an invalid session is rejected by the session filter (`dp_session rejected`) and audited anonymously, clearing nothing new. **§8.2:** `LogoutFilter` joins the per-request list as step 8, after the credential filters and before the OAuth2 step; former steps 8–12 renumber to 9–13, and the §8.3 prose's step citations follow — the v3.40 change-log row's "step 11" names what is now step 12. **§8.6.1:** the `security-chain` rows #07–#15 move to the measured runtime order (`EntryInventoryE2eTest`); no purpose or bounded cell changes. No route, permission or role change. |
 | 2026-11-03 | v3.61 | #782 the logout CSRF exemption and the browser-shaped refusal | **§8 sketch and §8.4: a third CSRF exemption, attestation-scoped** — `POST /logout` carrying the browser's `Sec-Fetch-Site: same-origin` (`LogoutSameOriginMatcher`) succeeds on any token state (a stale tab whose `dp_csrf` was re-minted logs out and lands on the login page); same-site, cross-site and un-attested logouts keep the full token requirement, and fetch-metadata headers are browser-set, so a hostile page cannot forge the attestation. **§8.4 and §9 (`auth.csrf.invalid`): the refusal's browser shape** — a refused plain form navigation (Accept admits text/html, no `HX-Request`, not a machine surface) forwards to the error/403 page with the refusal's fixed user message and the correlation id; machine surfaces, htmx partials and non-HTML callers keep the §13.7 envelope, and the refusal of a logout clears nothing (no session expiry, no redirect). **§8.6:** the `CsrfFilter` row's description names the attestation exemption; no row, route, permission or role change. |
 | 2026-10-25 | v3.60 | #704 audit strict in a transaction | **§10.1A:** a store failure of an audit INSERT inside the caller's transaction propagates — the transaction rolls back and the request is refused with the generic 500 envelope (no new code); outside a transaction the #266b swallow stays. The transactional table row and the Failures paragraph are split by direction; the strict release rows are the same rule. No route, row, role cell or configuration key change. |
 | 2026-10-24 | v3.59 | #517 release dependencies, core (S1) | **§7.6:** the `pipeline.release` cell — a release also flips every dependency the plan selects, each under its own family's `*.release`. **§10.1A:** the release rows are strict: written by `StrictReleaseAuditSink` in the release transaction, never caught; unavailable audit storage refuses the release. |

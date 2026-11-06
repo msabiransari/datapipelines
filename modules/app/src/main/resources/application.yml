@@ -75,7 +75,7 @@ server:
 
 # Actuator: the HealthEndpoint bean backs the root-level /health, /ready and /info
 # controllers (observability.md §6). NO /actuator path is reachable on the
-# application port (§6.4); /actuator/prometheus arrives later on the SEPARATE
+# application port (§6.4); /actuator/prometheus is served on the SEPARATE
 # management port (§4.2), never here.
 management:
   # SEPARATE MANAGEMENT PORT (observability.md §4.2). This is the mechanism that
@@ -108,9 +108,12 @@ management:
   endpoints:
     web:
       exposure:
-        # On the management port only, reachable from the cluster-internal network.
-        # /actuator/prometheus joins this list with the metrics registry.
-        include: "health"
+        # On the management port only (loopback-bound above), where both are ANONYMOUS: the
+        # port is the boundary, not a credential (#231, observability.md §4.2; the permit is
+        # SecurityConfig's management-context matcher, never a PublicPaths entry). `prometheus`
+        # is the scrape of the Micrometer registry `modules/app` ships (#708).
+        # ApplicationSmokeTest asserts the actuator index lists exactly these two.
+        include: "health,prometheus"
   health:
     # observability.md §6.1: nothing in this architecture writes to local disk, so
     # a disk-space signal would restart a perfectly healthy pod.
@@ -375,8 +378,6 @@ datapipelines:
     retention-days: ${DATAPIPELINES_AUDIT_RETENTION_DAYS:365}
 
   observability:
-    tracing:
-      enabled: ${DATAPIPELINES_OBSERVABILITY_TRACING_ENABLED:false}
     logging:
       format: ${DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT:json}
 

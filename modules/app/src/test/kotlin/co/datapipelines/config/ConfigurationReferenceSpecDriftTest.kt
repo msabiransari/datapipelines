@@ -71,15 +71,11 @@ class ConfigurationReferenceSpecDriftTest {
     }
 
     @Test
-    fun `documented application rows still have a declaration or an explicit reserved status`() {
+    fun `documented application rows still have a declaration`() {
         val known = inventory.bindings().values.flatten() + inventory.directKeys()
         val rows = inventory.rows(doc.substringBefore("## 4.")).filter { it.startsWith("datapipelines.") }
-        val reserved = setOf("datapipelines.observability.tracing.endpoint", "datapipelines.observability.tracing.enabled")
-        reserved.forEach { key ->
-            doc.lineSequence().single { it.startsWith("| `$key` |") }.contains("**Reserved; currently no runtime effect.**") shouldBe true
-        }
         rows
-            .filterNot { it in reserved || inventory.covered(it, known.toSet()) || known.any { key -> inventory.covered(key, setOf(it)) } }
+            .filterNot { inventory.covered(it, known.toSet()) || known.any { key -> inventory.covered(key, setOf(it)) } }
             .sorted() shouldContainExactly emptyList()
     }
 

@@ -13,7 +13,7 @@ import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequest
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestResolver
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepository
 import org.springframework.security.web.SecurityFilterChain
-import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter
+import org.springframework.security.web.authentication.logout.LogoutFilter
 import org.springframework.security.web.authentication.session.NullAuthenticatedSessionStrategy
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler
@@ -30,11 +30,14 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
  * Filter order, as actually assembled: Spring's `CsrfFilter` (registered at its own
  * position in the chain, ahead of everything added below) → [PromotionServerKeyFilter] →
  * [LoginRateLimitFilter] →
- * [ApiKeyFilter] → [JwtAuthenticationFilter] → [WorkspaceResolutionFilter] → OAuth2
+ * [ApiKeyFilter] → [JwtAuthenticationFilter] → [WorkspaceResolutionFilter] →
+ * `LogoutFilter` → OAuth2
  * login → authorization, and then
- * [ScopeInterceptor] on the MVC pipeline once a handler has been resolved. The three
+ * [ScopeInterceptor] on the MVC pipeline once a handler has been resolved. The
  * `addFilterBefore` calls below read in the reverse of the resulting order, which is
- * why this list is spelled out rather than inferred. The server is STATELESS; the
+ * why this list is spelled out rather than inferred — and #802 is why the session
+ * filter anchors ahead of `LogoutFilter`: a logout must be AUTHENTICATED before it
+ * runs, or the audit row carries nobody (§6.5). The server is STATELESS; the
  * OIDC authorization request is carried in a signed cookie
  * ([CookieOAuth2AuthorizationRequestRepository]) rather than a server session.
  *
@@ -142,6 +145,13 @@ class SecurityConfig(
                 // as Access Denied on the completion dispatch and the container aborts
                 // the (already committed) response mid-chunk.
                 auth.dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
+                // #231 item 1 (failure-flow record §17 row 11): on the MANAGEMENT port — loopback-bound by
+                // default; NetworkPolicy/Service isolation documented in deployment.md §9 — the actuator
+                // index, `/actuator/health` and `/actuator/prometheus` are anonymous: the port, not a
+                // credential, is the boundary. Never a `PublicPaths` entry — this is not an application-port
+                // contract (auth.md §8.3); the matcher never matches a request the application port serves
+                // ([ManagementEndpointMatcher]'s KDoc says why it is not Boot's `EndpointRequest`).
+                auth.requestMatchers(ManagementEndpointMatcher()).permitAll()
                 // The permitAll allowlist lives in [PublicPaths] (096 §A, review F1): one row
                 // per pattern WITH the sentence that justifies it, frozen by `PublicPathsTest`,
                 // walked against every request mapping by `PublicRouteWalkerTest`, and rendered
@@ -161,7 +171,10 @@ class SecurityConfig(
         }
 
         http
-            .addFilterBefore(filters.jwt, UsernamePasswordAuthenticationFilter::class.java)
+            // #802: the session filter anchors ahead of LogoutFilter, so POST /logout is
+            // authenticated BEFORE the logout runs — the auth.logout row carries the
+            // principal the credential produced (§6.5) instead of the anonymous marker.
+            .addFilterBefore(filters.jwt, LogoutFilter::class.java)
             .addFilterBefore(filters.apiKey, JwtAuthenticationFilter::class.java)
             .addFilterBefore(filters.loginRateLimit, ApiKeyFilter::class.java)
             // versioning §10.6 — the promotion peer's gate, ahead of every credential filter:
@@ -209,10 +222,10 @@ class SecurityConfig(
      * ([NoStoreAuthorizedClientRepository]).
      */
     private fun configureOidcLogin(http: HttpSecurity) {
-        // 090 §C — ahead of the authorization redirect, which Spring Security orders BEFORE
-        // `UsernamePasswordAuthenticationFilter` and therefore before this chain's own
-        // credential filters. Installed only here, with the rest of the OIDC wiring: a
-        // deployment with no providers has no authorization endpoint to guard.
+        // 090 §C — ahead of the authorization redirect, which sits AFTER this chain's own
+        // credential filters (#802 anchored them ahead of `LogoutFilter`, and Spring orders
+        // the redirect after `LogoutFilter`). Installed only here, with the rest of the
+        // OIDC wiring: a deployment with no providers has no authorization endpoint to guard.
         http.addFilterBefore(filters.oidcSignedInBounce, OAuth2AuthorizationRequestRedirectFilter::class.java)
         http.oauth2Login { oauth ->
             oauth.successHandler(oidcSuccessHandler)

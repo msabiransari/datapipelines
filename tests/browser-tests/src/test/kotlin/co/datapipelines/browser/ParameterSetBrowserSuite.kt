@@ -140,21 +140,10 @@ abstract class ParameterSetBrowserSuite : DashboardBrowserSuite() {
             )
         seedMembership(workspaceName, user.email, role = "promoter")
         val promoter = newSession()
-        promoter.page.navigate("$baseUrl/login")
-        promoter.page.fill("#login-email", user.email)
-        promoter.page.fill("#login-password", user.oneTimePassword)
-        promoter.page.click("form button[type=submit]")
-        promoter.page.waitForURL("**/dashboard")
-        promoter.page.evaluate(
-            """async (name) => {
-              const csrf = document.cookie.match(/(?:^|;\s*)dp_csrf=([^;]*)/);
-              await fetch('/workspace/switch?name=' + encodeURIComponent(name), {
-                method: 'POST', credentials: 'same-origin',
-                headers: { 'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : '' },
-              });
-            }""",
-            workspaceName,
-        )
+        // #831: the suite's own login, landing and switch (#761's checked phases), not copies.
+        login(promoter.page, user.email, user.oneTimePassword)
+        landOnDashboard(promoter.page)
+        enterWorkspace(promoter.page, workspaceName)
         return promoter
     }
 
