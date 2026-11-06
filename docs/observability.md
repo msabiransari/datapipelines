@@ -1,9 +1,9 @@
 # Observability Specification
 
-**Status:** v1.51 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.52 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-11-04
+**Last updated:** 2026-11-06
 
 ---
 
