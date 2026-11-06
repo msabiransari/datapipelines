@@ -78,6 +78,43 @@ class MeterCatalogueParityTest {
     }
 
     @Test
+    fun `computed arguments and constant initializers remain unresolved sites`() {
+        val arguments =
+            listOf(
+                "\"datapipelines.base\" + suffix",
+                "NAME + suffix",
+                "(NAME)",
+                "makeName()",
+                "if (ready) NAME else OTHER",
+                "name = NAME",
+                "::name",
+                "\"\"\"datapipelines.raw\"\"\"",
+                "\"datapipelines.base\"\n + suffix",
+            )
+        arguments.forEach { argument ->
+            val source = "const val NAME = \"datapipelines.base\"; registry.counter($argument)"
+            withClue(argument) {
+                MeterCatalogue.sites("X.kt", source, emptyMap()).map { it.name } shouldBe listOf(null)
+            }
+        }
+        val initializers =
+            listOf(
+                "\"datapipelines.base\" + \".ghost\"",
+                "\"datapipelines.base\"\n + \".ghost\"",
+                "\"datapipelines.base\".trim()",
+                "\"datapipelines.base\" as String",
+            )
+        initializers.forEach { initializer ->
+            val owner = "object Owner { const val NAME = $initializer }"
+            val source = "registry.counter(Owner.NAME)"
+            withClue(initializer) {
+                MeterCatalogue.sites("X.kt", source, mapOf("Owner" to owner)).map { it.name } shouldBe listOf(null)
+                MeterCatalogue.sites("Owner.kt", "$owner\nregistry.counter(NAME)", emptyMap()).map { it.name } shouldBe listOf(null)
+            }
+        }
+    }
+
+    @Test
     fun `the documented side reads only the first cell of §4_1's table rows`() {
         val doc =
             """
@@ -133,7 +170,7 @@ internal object MeterCatalogue {
             .findAll(code)
             .map { match ->
                 val line = code.substring(0, match.range.first).count { it == '\n' } + 1
-                Site("$path:$line ${match.value.trim()}", resolve(match.groupValues[1], code, owners))
+                Site("$path:$line ${match.value.trim()}", resolveArgument(code, match.range.last + 1, owners))
             }.toList()
     }
 
@@ -148,6 +185,16 @@ internal object MeterCatalogue {
             .toSortedSet()
     }
 
+    /** Discover calls independently of their arguments: unsupported syntax must leave an unresolved site. */
+    private fun resolveArgument(
+        code: String,
+        start: Int,
+        owners: Map<String, String>,
+    ): String? {
+        val argument = ARGUMENT.find(code, start)?.takeIf { it.range.first == start } ?: return null
+        return resolve(argument.groupValues[1], code, owners)
+    }
+
     private fun resolve(
         argument: String,
         code: String,
@@ -158,10 +205,28 @@ internal object MeterCatalogue {
         val owner = argument.substringBeforeLast('.', missingDelimiterValue = "")
         val constant = argument.substringAfterLast('.')
         val source = if (owner.isEmpty()) code else owners[owner.substringAfterLast('.')]?.let(::stripComments) ?: return null
-        return Regex("""const\s+val\s+${Regex.escape(constant)}\s*(?::\s*String\s*)?=\s*"([^"$]+)"""")
-            .findAll(source)
-            .map { it.groupValues[1] }
-            .singleOrNull()
+        val declarations =
+            Regex("""const\s+val\s+${Regex.escape(constant)}\s*(?::\s*String\s*)?=\s*""")
+                .findAll(source)
+                .toList()
+        return declarations.singleOrNull()?.let { constantLiteral(source, it.range.last + 1) }
+    }
+
+    /**
+     * A const initializer must end after its literal, not merely begin with one. At a newline, accept only
+     * a following declaration (or closing brace); operators, calls and unsupported syntax fail closed.
+     */
+    private fun constantLiteral(
+        source: String,
+        start: Int,
+    ): String? {
+        val literal = LITERAL.find(source, start)?.takeIf { it.range.first == start } ?: return null
+        val tail = source.substring(literal.range.last + 1)
+        val next = tail.trimStart()
+        val boundary =
+            next.isEmpty() || next.startsWith(';') || next.startsWith('}') ||
+                ('\n' in tail.takeWhile { it.isWhitespace() } && DECLARATION.containsMatchIn(next))
+        return literal.groupValues[1].takeIf { boundary }
     }
 
     /** Block comments and whole-line `//` comments; a `//` inside a string literal (a URL) is left alone. */
@@ -185,8 +250,10 @@ internal object MeterCatalogue {
         return dir
     }
 
-    /** `.builder(`/`.counter(`/`.timer(`/`.gauge(`/`.summary(` and the first argument, possibly on the next line. */
-    private val REGISTRATION = Regex("""\.(?:builder|counter|timer|gauge|summary)\(\s*("(?:[^"\\]|\\.)*"|[A-Za-z_][\w.]*)""")
+    /** Find every call first; a supported argument must consume everything up to its comma or closing parenthesis. */
+    private val REGISTRATION = Regex("""\.(?:builder|counter|timer|gauge|summary)\s*\(""")
+    private val ARGUMENT = Regex("""\s*("(?:[^"\\]|\\.)*"|[A-Za-z_][\w.]*)\s*(?=[,)])""")
+    private val DECLARATION = Regex("""^(?:(?:const|val|var|fun|class|object|private|internal|public|protected|companion|init)\b|@)""")
     private val LITERAL = Regex(""""([^"$\\]+)"""")
     private val BLOCK_COMMENT = Regex("""(?s)/\*.*?\*/""")
     private val SECTION_41 = Regex("""(?ms)^### 4\.1\b.*?(?=^### 4\.2\b)""")
