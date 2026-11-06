@@ -24,6 +24,7 @@ import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
+import java.net.SocketTimeoutException
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -36,7 +37,11 @@ import java.util.concurrent.atomic.AtomicLong
 
 /** The real application's embedded Tomcat, default drain bound and production filter, with synthetic uploads. */
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
-@SpringBootTest(classes = [DatapipelinesApplication::class], webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(
+    classes = [DatapipelinesApplication::class],
+    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+    properties = ["server.tomcat.connection-timeout=5s", "datapipelines.web.max-request-bytes=4194304"],
+)
 class ScreenshotUploadTransportTest {
     @LocalServerPort
     private var port = 0
@@ -83,6 +88,138 @@ class ScreenshotUploadTransportTest {
         forcedClose(LARGE_BODY)
     }
 
+    @Test
+    fun `561 trickling refused screenshot closes within budget plus connector timeout`() {
+        val socket = openTrickle(PATH)
+        socket.use {
+            val ticker = trickle(listOf(socket))
+            val started = System.nanoTime()
+            try {
+                socket.getInputStream().readAllBytes()
+                val elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+                println("event=drain.trickle.closed elapsed_ms=$elapsed bound_ms=$TRICKLE_BOUND_MS")
+                elapsed shouldBeLessThan TRICKLE_BOUND_MS.toLong()
+            } finally {
+                ticker.shutdownNow()
+            }
+        }
+    }
+
+    @Test
+    fun `559 platform cap plus margin reaches the forced write before read client`() {
+        // This context uses a 4 MiB platform cap: the issue's 4 MiB + 1 reproduction is inside its 6 MiB bound.
+        forcedLosingSide(CAP + 1, PLATFORM_PATH)
+    }
+
+    @Test
+    fun `559 huge platform declaration still closes after bounded swallow`() {
+        forcedClose(LARGE_BODY, PLATFORM_PATH)
+    }
+
+    @Test
+    fun `561 saturated plain close measurement and saturation meter`() {
+        val before = saturationCount()
+        val sockets = mutableListOf<Socket>()
+        try {
+            repeat(8) { sockets += openTrickle(if (it % 2 == 0) PATH else PLATFORM_PATH) }
+            // Each 413 is flushed from inside the admitted drain before it waits on its first byte.
+            val ninth = openTrickle(PLATFORM_PATH, readRefusal = false)
+            sockets += ninth
+            val ticker = trickle(sockets)
+            val started = System.nanoTime()
+            val busyBefore = busyThreads()
+            try {
+                val closed =
+                    try {
+                        ninth.getInputStream().readAllBytes()
+                        true
+                    } catch (_: SocketTimeoutException) {
+                        false
+                    }
+                val elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+                println(
+                    "event=drain.plain-close.measurement elapsed_ms=$elapsed closed=$closed " +
+                        "busy_start=$busyBefore busy_end=${busyThreads()}",
+                )
+            } finally {
+                ticker.shutdownNow()
+            }
+            ninth.soTimeout = SOCKET_TIMEOUT
+            val stopped = System.nanoTime()
+            try {
+                ninth.getInputStream().readAllBytes()
+                println("event=drain.plain-close.idle closed=true idle_ms=${TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - stopped)}")
+            } catch (_: IOException) {
+                println(
+                    "event=drain.plain-close.idle read_failed=true idle_ms=${TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - stopped)}",
+                )
+            }
+            (saturationCount() - before >= 1.0) shouldBe true
+            println("event=drain.saturation.count delta=${saturationCount() - before}")
+        } finally {
+            sockets.forEach { it.close() }
+        }
+    }
+
+    /** Read the application's registry without adding an integration-module dependency. */
+    private fun saturationCount(): Double {
+        val registry = context.getBean(Class.forName("io.micrometer.core.instrument.MeterRegistry"))
+        val search = registry.javaClass.getMethod("find", String::class.java).invoke(registry, "datapipelines.web.request_body_drain")
+        val tagged = search.javaClass.getMethod("tag", String::class.java, String::class.java).invoke(search, "outcome", "saturated")
+        val counters = tagged.javaClass.getMethod("counters").invoke(tagged) as Collection<*>
+        return counters.sumOf { counter ->
+            checkNotNull(counter).javaClass.getMethod("count").invoke(counter) as Double
+        }
+    }
+
+    private fun busyThreads(): Int = connectorEndpoint().let { it.javaClass.getMethod("getCurrentThreadsBusy").invoke(it) as Int }
+
+    private fun openTrickle(
+        path: String,
+        readRefusal: Boolean = true,
+    ): Socket {
+        val socket = Socket("127.0.0.1", port)
+        try {
+            socket.soTimeout = TRICKLE_BOUND_MS
+            val size = CAP + 1
+            socket.getOutputStream().write(
+                "POST $path HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/octet-stream\r\nContent-Length: $size\r\n\r\n"
+                    .toByteArray(Charsets.US_ASCII),
+            )
+            socket.getOutputStream().flush()
+            if (!readRefusal) return socket
+            val input = socket.getInputStream()
+            val header = ByteArrayOutputStream()
+            while (!header.toString(Charsets.US_ASCII).endsWith("\r\n\r\n")) {
+                val byte = input.read()
+                check(byte >= 0) { "closed before refusal headers" }
+                header.write(byte)
+            }
+            val text = header.toString(Charsets.US_ASCII)
+            text.startsWith("HTTP/1.1 413") shouldBe true
+            // Start trickling as soon as the 413 headers arrive. Response chunk framing can be
+            // completed only when Tomcat finishes the request; waiting for it would test idle timeout.
+            return socket
+        } catch (error: Exception) {
+            socket.close()
+            throw error
+        }
+    }
+
+    private fun trickle(sockets: List<Socket>): java.util.concurrent.ScheduledExecutorService =
+        Executors.newSingleThreadScheduledExecutor().apply {
+            scheduleAtFixedRate({
+                sockets.forEach { socket ->
+                    try {
+                        socket.getOutputStream().write(0)
+                        socket.getOutputStream().flush()
+                    } catch (_: IOException) {
+                        // The close under observation ended this writer.
+                    }
+                }
+            }, 0, 1, TimeUnit.SECONDS)
+        }
+
     /**
      * #467: the losing interleaving, forced. [HeldResponseRelay] withholds the server's response from the client until
      * the server has closed; if that close came before the whole declared body was forwarded, or was a reset, the relay
@@ -90,7 +227,10 @@ class ScreenshotUploadTransportTest {
      * took the 413. The server's small receive buffer bounds what the kernels can hold unread, so the relay's count
      * decides "before the whole body" without a clock.
      */
-    private fun forcedLosingSide(size: Int) {
+    private fun forcedLosingSide(
+        size: Int,
+        path: String = PATH,
+    ) {
         val body = SizedBody(size)
         withServerReceiveBuffer(FORCED_RECEIVE_BUFFER) {
             HeldResponseRelay(port).use { relay ->
@@ -98,12 +238,12 @@ class ScreenshotUploadTransportTest {
                     val response =
                         ScreenshotUploadTransport.post(
                             relay.port,
-                            PATH,
+                            path,
                             HttpRequest.BodyPublishers.fromPublisher(HttpRequest.BodyPublishers.ofInputStream { body }, size.toLong()),
                         )
                     response.statusCode shouldBe 413
-                    response.jsonPath().getString("error.code") shouldBe "visualization.test.screenshot_too_large"
-                    response.jsonPath().getInt("error.details.cap_bytes") shouldBe CAP
+                    response.jsonPath().getString("error.code") shouldBe refusalCode(path)
+                    response.jsonPath().getInt(if (path == PATH) "error.details.cap_bytes" else "error.details.limit_bytes") shouldBe CAP
                 } finally {
                     relay.await()
                     println("event=transport.forced declared=$size supplied=${body.readBytes} ${relay.events()}")
@@ -128,7 +268,10 @@ class ScreenshotUploadTransportTest {
      * writer met the reset), a race the runner could lose (CI 39053309921); the losing side is the documented one, so
      * it is the asserted one.
      */
-    private fun forcedClose(size: Int) {
+    private fun forcedClose(
+        size: Int,
+        path: String = PATH,
+    ) {
         swallowCap() shouldBe SWALLOW_CAP
         val body = SizedBody(size)
         withServerReceiveBuffer(FORCED_RECEIVE_BUFFER) {
@@ -140,7 +283,7 @@ class ScreenshotUploadTransportTest {
                             val response =
                                 ScreenshotUploadTransport.post(
                                     relay.port,
-                                    PATH,
+                                    path,
                                     HttpRequest.BodyPublishers.fromPublisher(
                                         HttpRequest.BodyPublishers.ofInputStream { body },
                                         size.toLong(),
@@ -167,7 +310,7 @@ class ScreenshotUploadTransportTest {
                 relay.heldStatus.startsWith("HTTP/1.1 413") shouldBe true
                 // The code is judged only when the whole envelope survived the close; a truncated one is logged above.
                 if (relay.closeKind == "FIN") {
-                    Regex("\"code\"\\s*:\\s*\"visualization.test.screenshot_too_large\"").containsMatchIn(relay.heldBody) shouldBe true
+                    Regex("\"code\"\\s*:\\s*\"${Regex.escape(refusalCode(path))}\"").containsMatchIn(relay.heldBody) shouldBe true
                 }
                 println("event=transport.forced-close.held close_kind=${relay.closeKind} body=${relay.heldBody.take(400)}")
                 // The read was bounded: the route did NOT drain to the bound — red if DRAIN_BYTES ever covers this size.
@@ -184,6 +327,9 @@ class ScreenshotUploadTransportTest {
             }
         }
     }
+
+    private fun refusalCode(path: String): String =
+        if (path == PATH) "visualization.test.screenshot_too_large" else "request.body_too_large"
 
     private fun declaredRefusal(size: Int) {
         swallowCap() shouldBe SWALLOW_CAP
@@ -457,12 +603,8 @@ class ScreenshotUploadTransportTest {
         bytes: Int,
         block: () -> Unit,
     ) {
-        val protocol = protocolHandler()
-        val getEndpoint =
-            generateSequence<Class<*>>(protocol.javaClass) { it.superclass }
-                .firstNotNullOf { type -> type.declaredMethods.firstOrNull { it.name == "getEndpoint" && it.parameterCount == 0 } }
-                .apply { isAccessible = true }
-        val socketProperties = getEndpoint.invoke(protocol).let { it.javaClass.getMethod("getSocketProperties").invoke(it) }
+        val endpoint = connectorEndpoint()
+        val socketProperties = endpoint.javaClass.getMethod("getSocketProperties").invoke(endpoint)
         val field = socketProperties.javaClass.getDeclaredField("rxBufSize").apply { isAccessible = true }
         val previous = field.get(socketProperties)
         field.set(socketProperties, bytes)
@@ -471,6 +613,15 @@ class ScreenshotUploadTransportTest {
         } finally {
             field.set(socketProperties, previous)
         }
+    }
+
+    private fun connectorEndpoint(): Any {
+        val protocol = protocolHandler()
+        val method =
+            generateSequence<Class<*>>(protocol.javaClass) { it.superclass }
+                .firstNotNullOf { type -> type.declaredMethods.firstOrNull { it.name == "getEndpoint" && it.parameterCount == 0 } }
+                .apply { isAccessible = true }
+        return method.invoke(protocol)
     }
 
     /** The module exposes app alone at compile time; inspect the actual runtime connector without adding a dependency. */
@@ -528,6 +679,8 @@ class ScreenshotUploadTransportTest {
         const val ABANDONED_BODY = 1024 * 1024 * 1024
         const val BUFFER_SIZE = 8192
         const val SOCKET_TIMEOUT = 10000
+        const val TRICKLE_BOUND_MS = 20000
+        const val PLATFORM_PATH = "/api/v1/pipelines"
         const val TARGET_ID = "00000000-0000-0000-0000-000000000451"
         const val PATH = "/api/v1/visualizations/$TARGET_ID/tests/sessions/$TARGET_ID/screenshot"
         val JWT_SECRET = E2eSession.newSecret()

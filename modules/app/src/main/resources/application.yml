@@ -64,13 +64,12 @@ server:
     # also closes the Host-header-poisoned absolute redirect. Pinned by the redirect
     # assertions in LocalLoginE2eTest / LocalAdminSeedE2eTest / MailNoticesE2eTest.
     use-relative-redirects: true
-    # #279 (configuration.md §3.13): how much of a REFUSED request body Tomcat may drain
-    # before closing the connection. The request-body cap (`datapipelines.web.max-request-bytes`,
-    # §3.31) refuses an over-cap body without reading the rest; this bounds the swallow that
-    # keeps a keep-alive connection usable when the remainder is small and closes it when it
-    # is not — an abandoned over-cap upload costs the connection, never the server. The
-    # screenshot upload route drains its own refused declaration up to its cap + 2 MiB first
-    # (#467, RequestBodyCapFilter), so that connection closes after the client's last byte.
+    # #279 / #559 / #561 (configuration.md §3.13): Tomcat's refused-body swallow.
+    # The filter first drains screenshots up to 6 MiB, platform bodies up to their cap + 2 MiB,
+    # sharing eight permits and a 10 s budget. A blocking read can add the connector timeout
+    # (60 s default): 70 s per filter drain, 560 thread-seconds for eight. Fixed code bounds;
+    # this key does not move them. Expired, saturated and above-bound requests fall back to
+    # this swallow, which has no total time budget for a trickling sender.
     max-swallow-size: ${SERVER_TOMCAT_MAX_SWALLOW_SIZE:2MB}
 
 # Actuator: the HealthEndpoint bean backs the root-level /health, /ready and /info

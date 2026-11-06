@@ -1,6 +1,6 @@
 # Auth & Security Specification
 
-**Status:** v3.63 (revised — see Change Log)
+**Status:** v3.64 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
 **Last updated:** 2026-11-06
@@ -1193,20 +1193,21 @@ class SecurityConfig(
 
 ```
  1. CORS filter                     — a container filter ahead of the security chain (one origin = auth.base-url; unset ⇒ no CORS)
- 2. CSRF filter                     — validates dp_csrf on state-changing requests; exemption follows the CREDENTIAL (§8.4), never the path
- 3. PromotionServerKeyFilter        — /api/v1/promotion/** only: the DP-Promotion-Key gate (§10.6). Inert everywhere else
- 4. LoginRateLimitFilter            — /login and /oauth2/ only: per-client-IP damper, 429 rate_limit.exceeded (§11.5)
- 5. ApiKeyFilter                    — checks DP-API-Key header (or Bearer dpk_ on /mcp); if present, validates and sets SecurityContext
- 6. JwtAuthenticationFilter         — checks dp_session cookie; DECLINES when ApiKeyFilter stashed a rejection (§8.4); skips /mcp entirely
- 7. WorkspaceResolutionFilter       — resolves the active workspace onto the principal (§5.6): DP-Workspace switch or claim/pin, membership-checked
- 8. LogoutFilter                    — POST /logout only: clears dp_session and writes the auth.logout audit row; the credential filters have already
+ 2. RequestBodyCapFilter             — /api/v1 and /mcp: pre-auth body cap, bounded refused-body drain (§8.6)
+ 3. CSRF filter                     — validates dp_csrf on state-changing requests; exemption follows the CREDENTIAL (§8.4), never the path
+ 4. PromotionServerKeyFilter        — /api/v1/promotion/** only: the DP-Promotion-Key gate (§10.6). Inert everywhere else
+ 5. LoginRateLimitFilter            — /login and /oauth2/ only: per-client-IP damper, 429 rate_limit.exceeded (§11.5)
+ 6. ApiKeyFilter                    — checks DP-API-Key header (or Bearer dpk_ on /mcp); if present, validates and sets SecurityContext
+ 7. JwtAuthenticationFilter         — checks dp_session cookie; DECLINES when ApiKeyFilter stashed a rejection (§8.4); skips /mcp entirely
+ 8. WorkspaceResolutionFilter       — resolves the active workspace onto the principal (§5.6): DP-Workspace switch or claim/pin, membership-checked
+ 9. LogoutFilter                    — POST /logout only: clears dp_session and writes the auth.logout audit row; the credential filters have already
                                       run, so the row carries the principal they produced (#802, §6.5)
- 9. OAuth2LoginAuthenticationFilter — handles /oauth2/** and /login/oauth2/code/** redirects (wired only when a provider is configured)
-10. AuthorizationFilter             — checks the §8.3 allowlist, then authenticated() for everything else
-11. ForcedPasswordChangeInterceptor — §5A.4, every handler except EXCLUDE_PATTERNS
-12. ScopeInterceptor (MVC)          — kind confinement (§7.7), then @RequiredScope; default-deny for unannotated handlers outside the §8.3 allowlist;
+10. OAuth2LoginAuthenticationFilter — handles /oauth2/** and /login/oauth2/code/** redirects (wired only when a provider is configured)
+11. AuthorizationFilter             — checks the §8.3 allowlist, then authenticated() for everything else
+12. ForcedPasswordChangeInterceptor — §5A.4, every handler except EXCLUDE_PATTERNS
+13. ScopeInterceptor (MVC)          — kind confinement (§7.7), then @RequiredScope; default-deny for unannotated handlers outside the §8.3 allowlist;
                                       an ASYNC re-dispatch passes untouched — the REQUEST dispatch judged it (§8.3, #404)
-13. Controller                      — handles the request
+14. Controller                      — handles the request
 ```
 
 If neither API key nor JWT is present (and the path requires auth), the AuthorizationFilter routes to the entry point, which splits by client shape (T31): a request whose `Accept` includes `text/html` — a browser navigating a UI route — gets a `302` to `/login` (the `Location` is a relative header, never `sendRedirect`'s Host-derived absolute URL); `/api/**` and `/mcp` NEVER redirect (their 401 JSON envelope is contract, byte-pinned), and non-HTML clients (`curl`'s `Accept: */*`, JSON API callers) keep the exact current envelope whatever path they hit. If authenticated but scope insufficient, the ScopeInterceptor returns `403`.
@@ -1344,7 +1345,7 @@ Handler methods are not listed here: §7.6 is their reviewed table (B3 — one t
 | filter | `webMvcObservationFilter` | `ServerHttpObservationFilter` | `/* · order -2147483647` | Micrometer: the HTTP server observation (metrics) for every request. | yes | Constant per request. |
 | filter | `correlationIdFilterRegistration` | `CorrelationIdFilter` | `/* · order -2147483638` | Adopts or mints the correlation id, into the MDC and the response header ([Observability §3.3](observability.md#33-correlation-id-propagation)). | yes | Constant per request. |
 | filter | `corsFilterRegistration` | `CorsFilter` | `/* · order -2147483637` | CORS for the one configured origin, `auth.base-url` (§8.2 step 1); no origin configured, no CORS. | yes | Constant per request. |
-| filter | `requestBodyCapFilterRegistration` | `RequestBodyCapFilter` | `/api/v1/*, /mcp, /mcp/* · order -2147483636` | The platform's request-body cap (#279): a body over `datapipelines.web.max-request-bytes` refused `413 request.body_too_large` before the chain and before any parser reads it (pipeline-contract §13.21). ONE route exemption (#353): `POST /api/v1/visualizations/{id}/tests/sessions/{sessionId}/screenshot` carries a raw PNG/WebP body under its OWN 4 MiB cap (the session service's constant), refused `413 visualization.test.screenshot_too_large` by the same two paths — never the platform's cap, and no other route moves. | yes | The cap bounds the read; the counting stream never pulls past it. The one bounded exception: after a declared-over-cap screenshot's 413 the filter discards up to 6 MiB of that body so its connection closes cleanly (#467). |
+| filter | `requestBodyCapFilterRegistration` | `RequestBodyCapFilter` | `/api/v1/*, /mcp, /mcp/* · order -2147483636` | The platform's request-body cap (#279): a body over `datapipelines.web.max-request-bytes` refused `413 request.body_too_large` before the chain and before any parser reads it (pipeline-contract §13.21). ONE route exemption (#353): `POST /api/v1/visualizations/{id}/tests/sessions/{sessionId}/screenshot` carries a raw PNG/WebP body under its OWN 4 MiB cap (the session service's constant), refused `413 visualization.test.screenshot_too_large` by the same two paths — never the platform's cap, and no other route moves. | yes | The counting stream bounds accepted bodies. After a declared-over-cap 413, screenshots drain up to 6 MiB; platform routes drain up to their effective cap + 2 MiB (#559, #561). The filter shares eight refuse-at-once drain permits across screenshots and platform routes, with a 10 s monotonic budget checked after every read. An in-progress read still waits for the connector timeout (60 s by default): each filter drain can hold a thread for up to 10 + 60 = 70 s, or 8 × 70 = 560 thread-seconds for eight concurrent drains. These fixed code bounds are not configuration keys. Saturation, expiry and declarations above the byte bound fall back to Tomcat's own swallow, which has no total time budget and is outside the filter-drain bound. |
 | filter | `formContentFilter` | `OrderedFormContentFilter` | `/* · order -9900` | Spring Boot: form bodies on PUT, PATCH and DELETE. | yes | The body the container already bounds. |
 | filter | `requestContextFilter` | `OrderedRequestContextFilter` | `/* · order -105` | Spring Boot: binds the request to its thread for request-scoped lookups. | yes | Constant per request. |
 | filter | `springSecurityFilterChain` | `DelegatingFilterProxyRegistrationBean$1` | `/* · order -100` | Delegates to Spring Security's filter chain — the `security-chain` rows below. | yes | The chain's. |
@@ -1922,6 +1923,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-06 | v3.64 | #561 + #559 refused-body bounds | §8.2 includes the pre-auth filter; §8.6 bounds both refused-body drains by bytes, 10 s plus connector timeout, and eight shared permits (70 s per drain / 560 thread-seconds with the default 60 s timeout). Plain-close Tomcat swallowing remains outside that bound. No action or role changes. |
 | 2026-11-06 | v3.63 | #708 the Prometheus scrape | **§8.6.1: the management port serves two endpoints, both anonymous** (#231 item 1, decided by the failure-flow and telemetry record §17 row 11): `actuator health` is now `anonymous 200`, and a new `actuator prometheus` row (`/actuator/prometheus · anonymous 200`). The permit is `ManagementEndpointMatcher` in the security chain — the management context only, `GET`/`HEAD`, the index and the two exposed paths — never a §8.3 `PublicPaths` entry, so the application port still refuses every `/actuator` path. §13's checklist line follows. |
 | 2026-11-05 | v3.62 | #802 logout audit identity | **§8.1 excerpt, §8.2, §8.6.1: the credential filters anchor ahead of `LogoutFilter`** — `JwtAuthenticationFilter` now runs before `POST /logout`, so the `auth.logout` audit row carries the principal the credential produced (the person's `user_id`, a key's `key_id`, §6.5) instead of the anonymous marker (#802); a logout carrying an invalid session is rejected by the session filter (`dp_session rejected`) and audited anonymously, clearing nothing new. **§8.2:** `LogoutFilter` joins the per-request list as step 8, after the credential filters and before the OAuth2 step; former steps 8–12 renumber to 9–13, and the §8.3 prose's step citations follow — the v3.40 change-log row's "step 11" names what is now step 12. **§8.6.1:** the `security-chain` rows #07–#15 move to the measured runtime order (`EntryInventoryE2eTest`); no purpose or bounded cell changes. No route, permission or role change. |
 | 2026-11-03 | v3.61 | #782 the logout CSRF exemption and the browser-shaped refusal | **§8 sketch and §8.4: a third CSRF exemption, attestation-scoped** — `POST /logout` carrying the browser's `Sec-Fetch-Site: same-origin` (`LogoutSameOriginMatcher`) succeeds on any token state (a stale tab whose `dp_csrf` was re-minted logs out and lands on the login page); same-site, cross-site and un-attested logouts keep the full token requirement, and fetch-metadata headers are browser-set, so a hostile page cannot forge the attestation. **§8.4 and §9 (`auth.csrf.invalid`): the refusal's browser shape** — a refused plain form navigation (Accept admits text/html, no `HX-Request`, not a machine surface) forwards to the error/403 page with the refusal's fixed user message and the correlation id; machine surfaces, htmx partials and non-HTML callers keep the §13.7 envelope, and the refusal of a logout clears nothing (no session expiry, no redirect). **§8.6:** the `CsrfFilter` row's description names the attestation exemption; no row, route, permission or role change. |

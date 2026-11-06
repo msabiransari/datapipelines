@@ -14,6 +14,7 @@ import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import jakarta.servlet.FilterChain
 import jakarta.servlet.ReadListener
 import jakarta.servlet.ServletInputStream
@@ -25,10 +26,16 @@ import org.slf4j.MDC
 import org.springframework.mock.web.MockFilterChain
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
+import java.io.IOException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.Semaphore
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * The platform's request-body cap (#279, pipeline-contract §13.21): a declared `Content-Length`
- * over the cap is refused unread; a chunked body is refused by the counting wrapper at the byte
+ * over the cap is refused before the chain; a chunked body is refused by the counting wrapper at the byte
  * past the cap, without the underlying stream ever being pulled past it; a body at the cap
  * passes; and the refusal is the §4.2 envelope carrying the correlation id — written by the
  * filter when the marker escapes the chain, and by [ApiExceptionHandler.onBodyTooLarge] on REST
@@ -38,13 +45,14 @@ class RequestBodyCapFilterTest {
     /** The binder's own floor (§3.31) — the properties class enforces the window, so a unit test uses it. */
     private val cap = RequestLimits.MIN_REQUEST_BYTES
     private val response = MockHttpServletResponse()
-    private val filter = RequestBodyCapFilter(RequestLimitsProperties(maxRequestBytes = cap), errorWriter())
+    private val meters = SimpleMeterRegistry()
+    private val filter = RequestBodyCapFilter(RequestLimitsProperties(maxRequestBytes = cap), errorWriter(), meters)
 
     @AfterEach
     fun clearMdc() = MDC.remove(AuthErrorWriter.MDC_KEY)
 
     @Test
-    fun `a Content-Length one byte over the cap is refused unread`() {
+    fun `a Content-Length one byte over the cap is refused before the chain`() {
         val request = postRequest(ByteArray(cap.toInt() + 1))
         val chain = MockFilterChain()
 
@@ -179,7 +187,7 @@ class RequestBodyCapFilterTest {
     }
 
     @Test
-    fun `the screenshot route refuses 4 MiB + 1 declared unread - with its own code, never the platform's`() {
+    fun `the screenshot route refuses 4 MiB + 1 declared before the chain - with its own code, never the platform's`() {
         val request = screenshotRequest(ByteArray(SCREENSHOT_CAP + 1))
         val chain = MockFilterChain()
 
@@ -235,6 +243,163 @@ class RequestBodyCapFilterTest {
             MockFilterChain(),
         )
         put.contentAsString shouldContain PipelineErrorCodes.Request.BODY_TOO_LARGE
+    }
+
+    @Test
+    fun `561 budget stops a byte per second drain on both routes`() {
+        listOf(SCREENSHOT_PATH, "/api/v1/pipelines", "/mcp").forEach { path ->
+            val clock = AtomicLong()
+            val registry = SimpleMeterRegistry()
+            val bounded = RequestBodyCapFilter(RequestLimitsProperties(maxRequestBytes = cap), errorWriter(), registry, clock::get)
+            val stream =
+                DrainStream {
+                    clock.addAndGet(TimeUnit.SECONDS.toNanos(1))
+                    0
+                }
+            bounded.doFilter(drainRequest(path, stream), MockHttpServletResponse(), MockFilterChain())
+            println("event=drain.unit.budget path=$path reads=${stream.reads.get()}")
+            (stream.reads.get() <= 11) shouldBe true
+            drainCount(registry, "expired", path) shouldBe 1.0
+            availablePermits(bounded) shouldBe 8
+        }
+    }
+
+    @Test
+    fun `561 eight drains share permits across routes and the ninth never reads`() {
+        val workers = Executors.newFixedThreadPool(9)
+        val entered = CountDownLatch(8)
+        val releaseOne = CountDownLatch(1)
+        val releaseRest = CountDownLatch(1)
+        val streams =
+            (0 until 8).map { index ->
+                DrainStream {
+                    entered.countDown()
+                    check((if (index == 0) releaseOne else releaseRest).await(10, TimeUnit.SECONDS))
+                    -1
+                }
+            }
+        val pending =
+            streams.mapIndexed { index, stream ->
+                workers.submit {
+                    filter.doFilter(
+                        drainRequest(if (index % 2 == 0) SCREENSHOT_PATH else "/api/v1/pipelines", stream),
+                        MockHttpServletResponse(),
+                        MockFilterChain(),
+                    )
+                }
+            }
+        try {
+            entered.await(5, TimeUnit.SECONDS) shouldBe true
+            val ninth = DrainStream { -1 }
+            // Bounded future keeps an unconditional-entry mutation from hanging the suite.
+            workers
+                .submit {
+                    filter.doFilter(drainRequest(SCREENSHOT_PATH, ninth), MockHttpServletResponse(), MockFilterChain())
+                }.get(5, TimeUnit.SECONDS)
+            println("event=drain.unit.permit ninth_reads=${ninth.reads.get()}")
+            ninth.reads.get() shouldBe 0
+            drainCount(meters, "saturated", SCREENSHOT_PATH) shouldBe 1.0
+            availablePermits(filter) shouldBe 0
+            releaseOne.countDown()
+            pending.first().get(5, TimeUnit.SECONDS)
+            availablePermits(filter) shouldBe 1
+            val tenth = DrainStream { -1 }
+            filter.doFilter(drainRequest("/mcp", tenth), MockHttpServletResponse(), MockFilterChain())
+            tenth.reads.get() shouldBe 1
+            availablePermits(filter) shouldBe 1
+        } finally {
+            releaseOne.countDown()
+            releaseRest.countDown()
+            workers.shutdown()
+            workers.awaitTermination(10, TimeUnit.SECONDS) shouldBe true
+        }
+        pending.forEach { it.get(1, TimeUnit.SECONDS) }
+        availablePermits(filter) shouldBe 8
+    }
+
+    @Test
+    fun `561 IO failure and flush failure return their permits`() {
+        val stream = DrainStream { throw IOException("synthetic disconnect") }
+        filter.doFilter(drainRequest(SCREENSHOT_PATH, stream), MockHttpServletResponse(), MockFilterChain())
+        availablePermits(filter) shouldBe 8
+        drainCount(meters, "client_gone", SCREENSHOT_PATH) shouldBe 1.0
+        val brokenResponse =
+            object : MockHttpServletResponse() {
+                override fun flushBuffer() = throw IOException("synthetic flush failure")
+            }
+        filter.doFilter(drainRequest("/mcp", DrainStream { -1 }), brokenResponse, MockFilterChain())
+        availablePermits(filter) shouldBe 8
+        drainCount(meters, "client_gone", "/mcp") shouldBe 1.0
+    }
+
+    @Test
+    fun `561 exact byte bounds complete and count once on both routes`() {
+        listOf(SCREENSHOT_PATH to 6L * 1024 * 1024, "/api/v1/pipelines" to cap + 2L * 1024 * 1024).forEach { (path, bound) ->
+            val stream = RecordingStream(ByteArray(bound.toInt()))
+            filter.doFilter(drainRequest(path, stream, bound), MockHttpServletResponse(), MockFilterChain())
+            stream.maxPulled shouldBe bound
+            drainCount(meters, "completed", path) shouldBe 1.0
+            availablePermits(filter) shouldBe 8
+        }
+    }
+
+    @Test
+    fun `561 above each byte bound does not open or count a drain`() {
+        listOf(SCREENSHOT_PATH, "/api/v1/pipelines").forEach { path ->
+            val stream = DrainStream { -1 }
+            filter.doFilter(drainRequest(path, stream, 64L * 1024 * 1024), MockHttpServletResponse(), MockFilterChain())
+            stream.reads.get() shouldBe 0
+        }
+        meters.meters.sumOf { (it as io.micrometer.core.instrument.Counter).count() } shouldBe 0.0
+    }
+
+    private fun availablePermits(bounded: RequestBodyCapFilter): Int =
+        RequestBodyCapFilter::class.java.declaredFields.single { it.type == Semaphore::class.java }.let { field ->
+            field.isAccessible = true
+            (field.get(bounded) as Semaphore).availablePermits()
+        }
+
+    private fun drainCount(
+        registry: SimpleMeterRegistry,
+        outcome: String,
+        path: String,
+    ): Double =
+        registry
+            .find("datapipelines.web.request_body_drain")
+            .tags("outcome", outcome, "route", if (path == SCREENSHOT_PATH) "screenshot" else "platform")
+            .counter()
+            ?.count() ?: 0.0
+
+    private fun drainRequest(
+        path: String,
+        stream: ServletInputStream,
+        declared: Long? = null,
+    ): HttpServletRequest =
+        object : HttpServletRequestWrapper(MockHttpServletRequest("POST", path)) {
+            override fun getContentLengthLong(): Long = declared ?: if (path == SCREENSHOT_PATH) SCREENSHOT_CAP + 1L else cap + 1L
+
+            override fun getInputStream(): ServletInputStream = stream
+        }
+
+    /** One byte per bulk read; finite even when the base loop has no deadline. */
+    private class DrainStream(
+        private val next: () -> Int,
+    ) : ServletInputStream() {
+        val reads = AtomicLong()
+
+        override fun read(): Int = if (reads.incrementAndGet() <= 100 * 1024) next() else -1
+
+        override fun read(
+            b: ByteArray,
+            off: Int,
+            len: Int,
+        ): Int = if (read() < 0) -1 else 1
+
+        override fun isFinished(): Boolean = false
+
+        override fun isReady(): Boolean = true
+
+        override fun setReadListener(listener: ReadListener?) = throw UnsupportedOperationException()
     }
 
     private fun screenshotRequest(body: ByteArray): HttpServletRequest =
