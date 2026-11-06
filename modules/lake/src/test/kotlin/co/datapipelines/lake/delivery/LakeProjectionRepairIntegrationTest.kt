@@ -110,7 +110,7 @@ class LakeProjectionRepairIntegrationTest {
     fun `settle repairs a committed projection even with no unsettled delivery rows`() {
         register()
         pointer("one")
-        h.settler().settle(h.tableId, h.leases().catalogNowPlus(java.time.Duration.ofMinutes(1))) shouldBe 0
+        h.settler().settlePage(h.leases(), h.tableId, h.leases().catalogNowPlus(java.time.Duration.ofMinutes(1))) shouldBe 0
         location() shouldBe path("one")
         count() shouldBe 1
     }

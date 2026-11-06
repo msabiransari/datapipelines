@@ -242,7 +242,7 @@ class LakeWritebackRunner(
             logFailure("event=lake.append.lease_release_failed delivery_id={} operation_id={} cause={} sql_state={}", request, failure)
         }
         try {
-            settler.settle(request.delivery.tableId, request.deadline)
+            settler.settleDelivery(request.delivery.id, request.deadline)
         } catch (failure: Exception) {
             logFailure("event=lake.append.settlement_deferred delivery_id={} operation_id={} cause={} sql_state={}", request, failure)
         }

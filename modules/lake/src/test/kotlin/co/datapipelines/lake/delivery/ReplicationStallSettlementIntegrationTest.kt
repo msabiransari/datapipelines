@@ -85,12 +85,12 @@ class ReplicationStallSettlementIntegrationTest {
                             ) == true
                         }
                         // Visibility does not release the FOR SHARE fence lock. Takeover still times out.
-                        h.settler(leases).settle(h.tableId, leases.catalogNowPlus(Duration.ofSeconds(5))) shouldBe 0
+                        h.settler(leases).settlePage(leases, h.tableId, leases.catalogNowPlus(Duration.ofSeconds(5))) shouldBe 0
                         h.repository.find(row.id)?.state shouldBe LakeDeliveryState.UNKNOWN
                         commit.isDone shouldBe false
                         releaseReplication(source)
                         commit.get(10, TimeUnit.SECONDS)
-                        h.settler(leases).settle(h.tableId, leases.catalogNowPlus(Duration.ofSeconds(5))) shouldBe 1
+                        h.settler(leases).settlePage(leases, h.tableId, leases.catalogNowPlus(Duration.ofSeconds(5))) shouldBe 1
                         h.repository.find(row.id)?.state shouldBe LakeDeliveryState.PUBLISHED
                         h.attemptOutcome(row) shouldBe "PUBLISHED"
                         h.jdbc.queryForObject(

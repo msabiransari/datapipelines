@@ -35,11 +35,22 @@ class DeliveryLedgerRepository(
             jdbc.queryForObject("SELECT restore_epoch FROM lake_control WHERE id = 1", emptyMap<String, Any>(), UUID::class.java),
         )
 
-    /** Candidates only; the settling actor must separately establish lease ownership before a negative verdict. */
-    fun unsettled(tableId: UUID): List<LakeDelivery> =
+    /**
+     * Candidates only; the settling actor must separately establish lease ownership before a negative verdict.
+     * One keyset page (record §8b, lane 799b): at most [limit] rows with an id after [afterId] (from the first row when
+     * null) in id order, reading only the columns [ROW] maps — never `manifest_json`, which settlement does not read.
+     */
+    fun unsettled(
+        tableId: UUID,
+        afterId: UUID?,
+        limit: Int,
+    ): List<LakeDelivery> =
         jdbc.query(
-            "SELECT * FROM lake_deliveries WHERE table_id = :table AND state IN ('RECEIVED', 'PUBLISHING', 'UNKNOWN') ORDER BY id",
-            mapOf("table" to tableId),
+            "SELECT id, table_id, feed, delivery_id, fingerprint, state, operation_id, execution_id, pipeline_id, received_at, " +
+                "metadata_location_after FROM lake_deliveries " +
+                "WHERE table_id = :table AND state IN ('RECEIVED', 'PUBLISHING', 'UNKNOWN') " +
+                "AND (CAST(:after AS uuid) IS NULL OR id > CAST(:after AS uuid)) ORDER BY id LIMIT :limit",
+            mapOf("table" to tableId, "after" to afterId, "limit" to limit),
             ROW,
         )
 

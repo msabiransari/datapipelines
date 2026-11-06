@@ -5,6 +5,7 @@ import co.datapipelines.lake.LeaseKind
 import co.datapipelines.lake.LeaseOutcome
 import co.datapipelines.lake.delivery.LakeDeliveryState
 import co.datapipelines.lake.delivery.ReceiveDelivery
+import co.datapipelines.lake.delivery.settlePage
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.Test
@@ -20,7 +21,7 @@ class AppendCrashBoundaryIntegrationTest {
         LakeMinio.client().use { client ->
             h.withRequest { request, _ ->
                 h.deliveries.find(request.delivery.id)?.state shouldBe LakeDeliveryState.RECEIVED
-                h.settler.settle(request.delivery.tableId, request.deadline) shouldBe 1
+                h.settler.settlePage(h.leases, request.delivery.tableId, request.deadline) shouldBe 1
                 h.deliveries.find(request.delivery.id)?.state shouldBe LakeDeliveryState.FAILED
                 val next = retry(h, request)
                 h.runner(client).publish(next) {} shouldBe 3L
@@ -63,7 +64,7 @@ class AppendCrashBoundaryIntegrationTest {
                     "UPDATE lake_leases SET expires_at = now() - interval '1 second' WHERE operation_id = ?",
                     request.delivery.operationId,
                 )
-                h.settler.settle(request.delivery.tableId, request.deadline) shouldBe 1
+                h.settler.settlePage(h.leases, request.delivery.tableId, request.deadline) shouldBe 1
                 h.deliveries.find(request.delivery.id)?.state shouldBe LakeDeliveryState.FAILED
                 h.deliveries.committedEvidence(request.delivery.id, request.delivery.operationId) shouldBe null
                 val next = retry(h, request)

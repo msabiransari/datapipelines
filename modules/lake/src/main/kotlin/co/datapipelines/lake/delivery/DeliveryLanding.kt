@@ -74,7 +74,7 @@ class DeliveryLanding(
         val request = ReceiveDelivery(table.id, manifest, UUID.randomUUID(), executionId, pipelineId)
         var receipt = ledger.receive(request)
         if (receipt is DeliveryReceipt.NeedsSettlement) {
-            settler.settle(table.id, deadline)
+            settler.settleDelivery(receipt.delivery.id, deadline)
             receipt = ledger.receive(request)
         }
         return when (receipt) {

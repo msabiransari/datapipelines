@@ -25,7 +25,7 @@ class DeliverySettlerIntegrationTest {
         val row = h.unknown()
         val lease = LakeTestDb.lease(LeaseKind.TABLE, "settle.orders", operationId = row.operationId)
         h.jdbc.update("UPDATE lake_leases SET expires_at = now() - interval '1 second' WHERE operation_id = ?", row.operationId)
-        h.settler().settle(h.tableId, deadline()) shouldBe 1
+        h.settler().settlePage(h.leases(), h.tableId, deadline()) shouldBe 1
         h.repository.find(row.id)?.state shouldBe LakeDeliveryState.FAILED
         h.attemptOutcome(row) shouldBe "FAILED"
         h.fencedConnection(lease).use { connection -> shouldThrow<SQLException> { h.insertPointer(connection) }.sqlState shouldBe "DP001" }
@@ -37,7 +37,7 @@ class DeliverySettlerIntegrationTest {
         val row = h.unknown()
         val lease = LakeTestDb.lease(LeaseKind.TABLE, "settle.orders", operationId = row.operationId)
         try {
-            h.settler().settle(h.tableId, deadline()) shouldBe 0
+            h.settler().settlePage(h.leases(), h.tableId, deadline()) shouldBe 0
             h.repository.find(row.id)?.state shouldBe LakeDeliveryState.UNKNOWN
             h.attemptOutcome(row) shouldBe "UNKNOWN"
             h.jdbc.queryForObject("SELECT operation_id FROM lake_leases WHERE name = 'settle.orders'", java.util.UUID::class.java) shouldBe
@@ -55,13 +55,13 @@ class DeliverySettlerIntegrationTest {
             holder.autoCommit = false
             h.insertPointer(holder) shouldBe 1
             await("lease expiry by the catalog clock") { !h.observations.attemptLeaseLive(target(), row.operationId) }
-            h.settler().settle(h.tableId, deadline()) shouldBe 0
+            h.settler().settlePage(h.leases(), h.tableId, deadline()) shouldBe 0
             h.repository.find(row.id)?.state shouldBe LakeDeliveryState.UNKNOWN
             h.attemptOutcome(row) shouldBe "UNKNOWN"
             h.repository.committedEvidence(row.id) shouldBe null
             holder.commit()
         }
-        h.settler().settle(h.tableId, deadline()) shouldBe 1
+        h.settler().settlePage(h.leases(), h.tableId, deadline()) shouldBe 1
         h.repository.find(row.id)?.state shouldBe LakeDeliveryState.PUBLISHED
         h.attemptOutcome(row) shouldBe "PUBLISHED"
     }
@@ -75,7 +75,7 @@ class DeliverySettlerIntegrationTest {
             holder.autoCommit = false
             h.insertPointer(holder) shouldBe 1
             await("lease expiry by the catalog clock") { !h.observations.attemptLeaseLive(target(), row.operationId) }
-            val pending = CompletableFuture.supplyAsync { settler.settle(h.tableId, deadline()) }
+            val pending = CompletableFuture.supplyAsync { settler.settlePage(h.leases(), h.tableId, deadline()) }
             try {
                 await("the takeover waiting on the fence's FOR SHARE") {
                     h.jdbc.queryForObject(
@@ -102,7 +102,7 @@ class DeliverySettlerIntegrationTest {
     @Test
     fun `received rows for ended or retained-away executions fail before publication`() {
         val row = h.receive()
-        h.settler().settle(h.tableId, deadline()) shouldBe 1
+        h.settler().settlePage(h.leases(), h.tableId, deadline()) shouldBe 1
         h.repository.find(row.id)?.state shouldBe LakeDeliveryState.FAILED
         h.attemptOutcome(row) shouldBe "FAILED"
         h.jdbc.queryForObject("SELECT failure_phase FROM lake_deliveries WHERE id = ?", String::class.java, row.id) shouldBe "validation"
@@ -111,7 +111,9 @@ class DeliverySettlerIntegrationTest {
     @Test
     fun `settlement refuses a surrounding transaction with a potentially stale snapshot`() {
         h.receive()
-        shouldThrow<IllegalStateException> { h.transaction.executeWithoutResult { h.settler().settle(h.tableId, deadline()) } }
+        shouldThrow<IllegalStateException> {
+            h.transaction.executeWithoutResult { h.settler().settlePage(h.leases(), h.tableId, deadline()) }
+        }
     }
 
     private fun target() = requireNotNull(h.observations.target(h.tableId))

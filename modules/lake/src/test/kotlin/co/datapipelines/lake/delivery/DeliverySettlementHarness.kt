@@ -15,6 +15,7 @@ import co.datapipelines.lake.settle.DeliverySettler
 import co.datapipelines.lake.settle.LakeProjectionRepair
 import co.datapipelines.lake.settle.LakeSemanticsRepair
 import co.datapipelines.lake.settle.LakeSettlementSweep
+import co.datapipelines.lake.settle.SettleBudget
 import io.mockk.mockk
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
@@ -22,6 +23,7 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
 import java.sql.Connection
 import java.time.Duration
+import java.time.Instant
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -63,11 +65,23 @@ internal class DeliverySettlementHarness(
     fun settler(leases: LakeLeases = leases()): DeliverySettler =
         DeliverySettler(observations, repository, ledger, leases, LakeProjectionRepair(named, transaction, "lake799") {})
 
+    /** Another managed table in the harness's namespace; [tableId] stays the default for every helper. */
+    fun addTable(name: String): UUID {
+        val definitions = LakeDefinitionRepository(named)
+        val id = UUID.randomUUID()
+        check(definitions.insertTable(id, definitions.namespaceId("settle", actor), name, "{}", actor))
+        return id
+    }
+
     /**
-     * The production sweep over this harness's table. Its tables carry no applied definition and no APPLYING attempt, so
+     * The production sweep over this harness's tables. They carry no applied definition and no APPLYING attempt, so
      * the applier and the semantics repair return before opening a catalog; the strict catalog double proves it.
+     * [budgets] mints each tick's budget (production's by default); pass it by name.
      */
-    fun sweep(leases: LakeLeases = leases()): LakeSettlementSweep {
+    fun sweep(
+        leases: LakeLeases = leases(),
+        budgets: () -> SettleBudget = { SettleBudget.startingNow(leases, LakeSettlementSweep.SWEEP_BUDGET) },
+    ): LakeSettlementSweep {
         val definitions = LakeDefinitionRepository(named)
         val catalogs = mockk<LakeCatalogs>()
         return LakeSettlementSweep(
@@ -84,15 +98,19 @@ internal class DeliverySettlementHarness(
                 audit,
             ),
             LakeSemanticsRepair(named, transaction, observations, definitions, leases, catalogs),
+            budgets = budgets,
         )
     }
 
     /** One RECEIVED delivery; its random execution id has no RUNNING execution row, so settlement sees it ended. */
-    fun receive(key: DeliveryKey = DeliveryKey("orders", "one")): LakeDelivery =
+    fun receive(
+        key: DeliveryKey = DeliveryKey("orders", "one"),
+        table: UUID = tableId,
+    ): LakeDelivery =
         ledger
             .receive(
                 ReceiveDelivery(
-                    tableId,
+                    table,
                     DeliveryManifest(
                         key,
                         emptyList(),
@@ -108,9 +126,12 @@ internal class DeliverySettlementHarness(
             ).delivery
 
     /** [n] RECEIVED deliveries with ended executions, distinct keys, returned in PostgreSQL's `ORDER BY id`. */
-    fun backlog(n: Int): List<LakeDelivery> {
-        repeat(n) { receive(DeliveryKey("orders", "backlog-$it")) }
-        return byId()
+    fun backlog(
+        n: Int,
+        table: UUID = tableId,
+    ): List<LakeDelivery> {
+        repeat(n) { receive(DeliveryKey("orders", "backlog-$it"), table) }
+        return byId(table)
     }
 
     /**
@@ -124,9 +145,9 @@ internal class DeliverySettlementHarness(
     }
 
     /** Every unsettled or settled delivery of this table in PostgreSQL's uuid order (JVM `UUID.compareTo` differs). */
-    fun byId(): List<LakeDelivery> =
+    fun byId(table: UUID = tableId): List<LakeDelivery> =
         jdbc
-            .queryForList("SELECT id FROM lake_deliveries WHERE table_id = ? ORDER BY id", UUID::class.java, tableId)
+            .queryForList("SELECT id FROM lake_deliveries WHERE table_id = ? ORDER BY id", UUID::class.java, table)
             .map { requireNotNull(repository.find(it)) }
 
     fun unknown(): LakeDelivery {
@@ -162,3 +183,14 @@ internal class DeliverySettlementHarness(
             row.operationId,
         )
 }
+
+/**
+ * The pre-799b pins' settlement call: one page of [tableId]'s unsettled deliveries from its first row, under a budget
+ * that ends at the database-clock [deadline] ([leases] reads that clock). Answers how many rows it changed; the pins
+ * hold far fewer rows than a page, so the page is the whole table for them.
+ */
+internal fun DeliverySettler.settlePage(
+    leases: LakeLeases,
+    tableId: UUID,
+    deadline: Instant,
+): Int = settle(tableId, SettleBudget.until(leases, deadline), null, LakeSettlementSweep.SETTLE_PAGE_SIZE).changed
