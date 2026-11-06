@@ -834,8 +834,13 @@ of their own; a filtered `:modules:scripting:test` no longer touches it, and
 recount's `test-results/**` glob counts them; `verifyBreachSuiteExecuted` is its zero-test
 guard. A red there reads one of two ways, both named in the XML and the report: a prediction
 that no longer holds (reconcile the doc), or a `SKIPPED` row — the case could not start with the
-headroom the calibration needs, an environment verdict to re-run, not a bound. The worker itself
-no longer dies of a heap event: everything after a bomb runs inside the suite's OOM guard.
+headroom the calibration needs, an environment verdict to re-run, not a bound. Before either
+corpus starts, the harness instantiates the post-bomb exception and row classes and exercises
+the report writer once per JVM, preventing their first class initialisation under heap pressure.
+The classification and bookkeeping guard records direct `OutOfMemoryError` and
+`ExceptionInInitializerError` / `NoClassDefFoundError` whose cause chain contains one as UNBOUNDED
+after waiting for headroom; unrelated linkage errors propagate. An OOM inside JUnit itself
+remains outside this guard and can still kill the worker.
 
 **Focused iteration with existing tasks.** Run the exact module-qualified test task and
 class (or `Class.method`) while editing. For example, this existing auth guard can run alone:
