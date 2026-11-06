@@ -448,7 +448,7 @@ grep -q 'SNAPSHOT-FAILED' "$rd/MANIFEST.txt" || fail 'snapshot failure missing'
 grep -q '^PRE-GATE FAIL.*mod=0.*snap=1' "$X/.pregate-logs/0-verdict.log" || fail 'snapshot failure overwrote Gradle exit'
 ok 'snapshot failure refuses PASS and stops later stages'
 
-# Exact provenance + complete live guard cases save four auth selections (31 → 27).
+# Exact provenance + complete live guard cases save four auth selections (32 → 28).
 for mode in covered cached helper missing-xml missing-line ambiguous skipped covered-fail malformed partial failed-xml; do
   X="$T/guards-$mode"; pgres::_fixture "$X" "$mode"
   rc=0; run_fixture "$X" --continue-on-failure || rc=$?
@@ -460,7 +460,7 @@ for mode in covered cached helper missing-xml missing-line ambiguous skipped cov
     [[ "$guard_cmd" != *co.datapipelines.auth.ScopeMatrixSpecDriftTest* ]] || fail 'covered auth guards repeated'
     grep -q 'covered module=:modules:auth.*stage=2 evidence=2/modules/auth/' "$rd/GUARD-COVERAGE.txt" || fail 'covering evidence missing'
     count="$(printf '%s\n' "$guard_cmd" | awk '{for(i=1;i<=NF;i++)if($i=="--tests")n++}END{print n}')"
-    [ "$count" -eq 27 ] || fail 'unexpected guard count after covering auth'
+    [ "$count" -eq 28 ] || fail 'unexpected guard count after covering auth'
     # Compare against an observed baseline recording from the identical fixture.
     B="$T/guards-baseline"; pgres::_fixture "$B" "$mode"
     cat >> "$B/scripts/pregate-results-lib.sh" <<'BASELINE'
@@ -468,7 +468,7 @@ pgres::guards_covered() { return 1; }
 BASELINE
     run_fixture "$B" || fail 'recording baseline red'
     baseline="$(sed -n '/co.datapipelines.integration.ArchitectureGuardTest/p' "$B/pregate-argv.log" | awk '{for(i=1;i<=NF;i++)if($i=="--tests")n++}END{print n}')"
-    [ "$baseline" -eq 31 ] || fail 'baseline inventory not 31'
+    [ "$baseline" -eq 32 ] || fail 'baseline inventory not 32'
     echo "  guard selections observed: baseline=$baseline optimized=$count (same stage-2 coverage)"
   else
     [[ "$guard_cmd" == *co.datapipelines.auth.ScopeMatrixSpecDriftTest* ]] || fail "unsafe guard omission: $mode"
