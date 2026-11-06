@@ -2,12 +2,16 @@ package co.datapipelines.lake.delivery
 
 import co.datapipelines.lake.LakeCatalogs
 import co.datapipelines.lake.LakeLeases
+import co.datapipelines.lake.LakeProperties
+import co.datapipelines.lake.LakeTableProperties
 import co.datapipelines.lake.LakeTestDb
 import co.datapipelines.lake.LeaseHandle
 import co.datapipelines.lake.LeaseKind
 import co.datapipelines.lake.definitions.LakeApplyLeases
 import co.datapipelines.lake.definitions.LakeApplyRepository
+import co.datapipelines.lake.definitions.LakeApplyState
 import co.datapipelines.lake.definitions.LakeDefinitionApplier
+import co.datapipelines.lake.definitions.LakeDefinitionFixtures
 import co.datapipelines.lake.definitions.LakeDefinitionRepository
 import co.datapipelines.lake.definitions.RecordingAuditSink
 import co.datapipelines.lake.settle.DeliverySettlementRepository
@@ -16,10 +20,18 @@ import co.datapipelines.lake.settle.LakeProjectionRepair
 import co.datapipelines.lake.settle.LakeSemanticsRepair
 import co.datapipelines.lake.settle.LakeSettlementSweep
 import co.datapipelines.lake.settle.SettleBudget
+import co.datapipelines.pipeline.WriteSurface
 import io.mockk.mockk
+import org.apache.iceberg.PartitionSpec
+import org.apache.iceberg.Schema
+import org.apache.iceberg.TableMetadata
+import org.apache.iceberg.TableMetadataParser
+import org.apache.iceberg.io.FileIO
+import org.apache.iceberg.types.Types
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
+import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.TransactionTemplate
 import java.sql.Connection
 import java.time.Duration
@@ -35,12 +47,15 @@ internal class DeliverySettlementHarness(
     dataSource: DataSource = LakeTestDb.dataSource,
     private val resetDatabase: () -> Unit = LakeTestDb::reset,
     private val connect: () -> Connection = { LakeTestDb.connect() },
+    statementTimeoutSeconds: Int = 2,
+    /** Production's 5 s when a case measures the allowance; unbounded otherwise. */
+    transactionTimeoutSeconds: Int = TransactionDefinition.TIMEOUT_DEFAULT,
 ) {
-    val jdbc = JdbcTemplate(dataSource).apply { queryTimeout = 2 }
+    val jdbc = JdbcTemplate(dataSource).apply { queryTimeout = statementTimeoutSeconds }
     val named = NamedParameterJdbcTemplate(jdbc)
     val repository = DeliveryLedgerRepository(named)
     val observations = DeliverySettlementRepository(named)
-    val transaction = TransactionTemplate(DataSourceTransactionManager(dataSource))
+    val transaction = TransactionTemplate(DataSourceTransactionManager(dataSource)).apply { timeout = transactionTimeoutSeconds }
     val audit = RecordingAuditSink()
     val ledger = DeliveryLedger(repository, transaction, audit)
     val tableId: UUID = UUID.randomUUID()
@@ -100,6 +115,119 @@ internal class DeliverySettlementHarness(
             LakeSemanticsRepair(named, transaction, observations, definitions, leases, catalogs),
             budgets = budgets,
         )
+    }
+
+    /**
+     * The production sweep over tables that DO reach verification and repair (B.0), with [io] as the object store the
+     * metadata read meets. Pass [budgets] by name.
+     */
+    fun stallableSweep(
+        io: FileIO,
+        leases: LakeLeases = leases(),
+        budgets: () -> SettleBudget = { SettleBudget.startingNow(leases, LakeSettlementSweep.SWEEP_BUDGET) },
+    ): LakeSettlementSweep {
+        val definitions = LakeDefinitionRepository(named)
+        val catalogs =
+            LakeCatalogs(
+                LakeProperties(
+                    enabled = true,
+                    name = LAKE,
+                    storage = LakeProperties.Storage(bucket = LAKE, region = LakeCatalogs.DEFAULT_SIGNING_REGION, pathStyle = true),
+                ),
+                LakeTestDb.catalogDatabase(),
+            ) { io }
+        return LakeSettlementSweep(
+            named,
+            leases,
+            settler(leases),
+            LakeDefinitionApplier(
+                definitions,
+                LakeApplyRepository(named),
+                LakeApplyLeases(leases, Duration.ZERO),
+                catalogs,
+                LAKE,
+                transaction,
+                audit,
+            ),
+            LakeSemanticsRepair(named, transaction, observations, definitions, leases, catalogs),
+            budgets = budgets,
+        )
+    }
+
+    /** A work budget a case controls: [expired] answers every check; its deadline is a minute away on the database clock. */
+    fun budget(expired: () -> Boolean): SettleBudget = SettleBudget(leases().catalogNowPlus(Duration.ofMinutes(1)), expired)
+
+    /** Ends what a case's sweeps left running. */
+    fun close() = Unit
+
+    /** Version 1 of [table]'s definition, released and current; the row is `pending` (P3's landing without its apply). */
+    fun releaseDefinition(table: UUID = tableId) {
+        val definitions = LakeDefinitionRepository(named)
+        checkNotNull(definitions.insertDraft(table, 1, LakeDefinitionFixtures.ORDERS_V1, actor, WriteSurface.SESSION))
+        check(definitions.releaseDraft(table, 1, null, actor) == 1)
+        check(definitions.pointAtRelease(table, 1) == 1)
+    }
+
+    /**
+     * [table] is `applying` an attempt that died after committing: the row names the attempt, the catalog row and its
+     * revision carry the attempt's operation id, no lease is live. The shape verification settles. Answers the attempt.
+     */
+    fun applyingWithEvidence(
+        table: UUID = tableId,
+        name: String = "orders",
+    ): UUID {
+        releaseDefinition(table)
+        val attempt = UUID.randomUUID()
+        check(LakeApplyRepository(named).markApplying(table, 1, attempt) == 1)
+        commitPointer(name, attempt)
+        return attempt
+    }
+
+    /**
+     * [table] is `applied` at version 1 with no semantics rows: its applied definition differs from
+     * `lake_column_semantics`, the shape the semantics repair rebuilds.
+     */
+    fun staleSemantics(
+        table: UUID = tableId,
+        name: String = "orders",
+    ) {
+        val attempt = applyingWithEvidence(table, name)
+        check(LakeApplyRepository(named).finishApplied(table, 1, attempt) == 1)
+    }
+
+    fun applyState(table: UUID = tableId): LakeApplyState? = LakeDefinitionRepository(named).findTable(table)?.applyState
+
+    /** The JSON of a table at definition [version]: what the store answers for the catalog row's location. */
+    fun metadataJson(version: Int = 1): ByteArray =
+        TableMetadataParser
+            .toJson(
+                TableMetadata.newTableMetadata(
+                    Schema(Types.NestedField.required(1, "id", Types.LongType.get())),
+                    PartitionSpec.unpartitioned(),
+                    "s3://$LAKE/settle/orders",
+                    mapOf(LakeTableProperties.DEFINITION_VERSION to version.toString()),
+                ),
+            ).toByteArray()
+
+    /** The catalog row and revision of [name], committed by the attempt [attempt] under its fence, the lease then gone. */
+    private fun commitPointer(
+        name: String,
+        attempt: UUID,
+    ) {
+        val lease = LakeTestDb.lease(LeaseKind.TABLE, "settle.$name", operationId = attempt)
+        fencedConnection(lease).use { connection ->
+            connection
+                .prepareStatement(
+                    "INSERT INTO iceberg_tables (catalog_name, table_namespace, table_name, metadata_location, iceberg_type) " +
+                        "VALUES (?, 'settle', ?, ?, 'TABLE')",
+                ).use { statement ->
+                    statement.setString(1, LAKE)
+                    statement.setString(2, name)
+                    statement.setString(3, "s3://$LAKE/settle/$name/metadata/00001.metadata.json")
+                    check(statement.executeUpdate() == 1)
+                }
+        }
+        LakeTestDb.leases.release(attempt)
     }
 
     /** One RECEIVED delivery; its random execution id has no RUNNING execution row, so settlement sees it ended. */
@@ -182,6 +310,11 @@ internal class DeliverySettlementHarness(
             String::class.java,
             row.operationId,
         )
+
+    companion object {
+        /** The harness's `catalog_name`. */
+        const val LAKE = "lake799"
+    }
 }
 
 /**

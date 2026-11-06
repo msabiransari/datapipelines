@@ -1,12 +1,15 @@
 package co.datapipelines.lake
 
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.longs.shouldBeGreaterThanOrEqual
+import io.kotest.matchers.longs.shouldBeLessThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Duration
@@ -163,6 +166,38 @@ class LakeLeasesIntegrationTest {
         lease.toString().contains(lease.token.toString()) shouldBe false
     }
 
+    @Test
+    fun `an acquire waiting on a held row ends at its transaction bound however long a lock wait it was given, and answers Busy`() {
+        val elapsed = acquireAgainstHeldRow(LakeLeases(JdbcTemplate(LakeTestDb.dataSource), lockTimeout = Duration.ofSeconds(12)))
+        println("case=D5-long-lock-wait elapsed_ms=${elapsed.toMillis()}")
+        elapsed.toMillis() shouldBeLessThanOrEqual ACQUIRE_BOUND.toMillis()
+        elapsed.toMillis() shouldBeGreaterThanOrEqual WAITED.toMillis()
+    }
+
+    @Test
+    fun `an acquire whose lock wait equals its transaction bound answers Busy whichever timer fires first`() {
+        val elapsed = acquireAgainstHeldRow(LakeLeases(JdbcTemplate(LakeTestDb.dataSource)))
+        println("case=D5-default-lock-wait elapsed_ms=${elapsed.toMillis()}")
+        elapsed.toMillis() shouldBeLessThanOrEqual ACQUIRE_BOUND.toMillis()
+    }
+
+    /** A takeover of an expired row another transaction holds (#812's shape): answers Busy, row unchanged; returns how long it took. */
+    private fun acquireAgainstHeldRow(waiting: LakeLeases): Duration {
+        val holder = LakeTestDb.lease(LeaseKind.TABLE, "sales.orders")
+        jdbc.update("UPDATE lake_leases SET expires_at = now() - interval '1 second'")
+        return LakeTestDb.connect().use { hold ->
+            hold.autoCommit = false
+            hold.createStatement().use { it.executeQuery("SELECT 1 FROM lake_leases WHERE name = 'sales.orders' FOR UPDATE").close() }
+            val started = System.nanoTime()
+            val outcome = waiting.acquire(LeaseKind.TABLE, "sales.orders", UUID.randomUUID(), MINUTE, leases.catalogNowPlus(HOUR), "test")
+            val elapsed = Duration.ofNanos(System.nanoTime() - started)
+            hold.rollback()
+            outcome shouldBe LeaseOutcome.Busy
+            jdbc.queryForObject("SELECT token FROM lake_leases", UUID::class.java) shouldBe holder.token
+            elapsed
+        }
+    }
+
     private fun acquire(
         name: String,
         operation: UUID,
@@ -174,5 +209,11 @@ class LakeLeasesIntegrationTest {
         val MINUTE: Duration = Duration.ofMinutes(1)
         val HOUR: Duration = Duration.ofHours(1)
         val PAST: Duration = Duration.ofSeconds(-10)
+
+        /** D5: five seconds, plus Spring's round-up of the transaction's remaining time and the timer's own latency. */
+        val ACQUIRE_BOUND: Duration = Duration.ofSeconds(6)
+
+        /** A floor: the row was really held, the acquire really waited on it. */
+        val WAITED: Duration = Duration.ofSeconds(4)
     }
 }
