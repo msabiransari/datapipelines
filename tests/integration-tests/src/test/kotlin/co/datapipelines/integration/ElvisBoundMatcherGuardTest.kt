@@ -9,22 +9,15 @@ import java.io.File
 import kotlin.time.measureTime
 
 /**
- * Refuses Kotest matchers swallowed by an Elvis fallback (#360), across all Kotlin test sources.
- * Root discovery follows OrderedTestAnnotationGuardTest; buildSrc tests are included too.
- *
- * Deliberately a text scan, without a parser dependency. Mask line/nested block comments, escaped
- * strings, raw strings, character literals and backtick identifiers, preserving newlines and offsets;
- * retain a value placeholder for literals so masking does not manufacture a trailing Elvis. Ignore regex-group
- * and Postgres-cast punctuation. Join continuation lines starting with a dot, Elvis, safe call,
- * boolean operator or matcher, plus open parentheses/brackets and trailing continuation operators.
- * Track parentheses, braces and brackets: closing a group opened before the Elvis makes a later
- * matcher safe. Semicolons end statements. Diagnostics retain the original statement and line.
- *
- * Limits: reflection, aliased/backtick-escaped matchers and string template expressions are unsupported;
- * an otherwise separate following line without a continuation prefix is a separate statement.
- * At birth the raw tree held 851 Elvis-bearing lines (including 237 regex-group and 54 SQL-cast
- * lines), and 29 same-line matcher candidates: one bypass, 27 grouped, one safe qualified call.
- * Raw occurrence floors measure the input surface; grouped counts measure the stripped classifier.
+ * Refuses matchers swallowed by Elvis fallbacks (#360); root discovery follows OrderedTestAnnotationGuardTest.
+ * Text scan: mask line/nested block comments, escaped/raw strings, chars, backtick identifiers, regex-group
+ * and SQL-cast punctuation; preserve offsets/newlines and literal placeholders that keep statement boundaries.
+ * Join dot/Elvis/safe-call/boolean/matcher continuations, open parentheses/brackets and trailing operators.
+ * Track parentheses/braces/brackets: a group closed before the matcher makes it safe; report source file/line.
+ * Limits: reflection, aliased/backtick-escaped matchers and string template expressions are unsupported.
+ * A following line without a continuation prefix is a separate statement; semicolons end statements.
+ * Birth: 851 Elvis-bearing lines (237 regex-group, 54 SQL-cast); 29 same-line matcher candidates:
+ * one bypass, 27 grouped, one safe qualified. Raw floors measure input; grouped counts measure classification.
  */
 class ElvisBoundMatcherGuardTest {
     @Test
@@ -92,7 +85,8 @@ class ElvisBoundMatcherGuardTest {
             }
         }
         println(
-            "Elvis inventory: files=${files.size} rawLines=$rawLines rawOccurrences=$rawSites codeOccurrences=$codeSites grouped=$grouped bypass=${offenders.size}",
+            "Elvis inventory: files=${files.size} rawLines=$rawLines rawOccurrences=$rawSites " +
+                "codeOccurrences=$codeSites grouped=$grouped bypass=${offenders.size}",
         )
         withClue("test-source file floor — empty or narrowed scans are not clean") {
             files.size shouldBeGreaterThanOrEqual FILE_FLOOR
@@ -120,104 +114,109 @@ class ElvisBoundMatcherGuardTest {
             val statement = code.substring(range)
             ELVIS.findAll(statement).forEach elvisLoop@{ elvis ->
                 val matcher = MATCHER.find(statement, elvis.range.last + 1) ?: return@elvisLoop
-                val depths = IntArray(3)
-                var closed = false
-                for (at in elvis.range.last + 1 until matcher.range.first) {
-                    when (statement[at]) {
-                        '(' -> depths[0]++
-                        ')' -> depths[0]--
-                        '{' -> depths[1]++
-                        '}' -> depths[1]--
-                        '[' -> depths[2]++
-                        ']' -> depths[2]--
-                    }
-                    if (depths.any { it < 0 }) closed = true
-                }
-                if (closed) grouped++ else bad += range.first + elvis.range.first
+                if (closesGroup(statement, elvis.range.last + 1, matcher.range.first)) grouped++ else bad += range.first + elvis.range.first
             }
         }
         return bad to grouped
     }
 
-    /** Mask non-code, retaining literal value placeholders and stable source positions for diagnostics. */
+    private fun closesGroup(
+        code: String,
+        from: Int,
+        to: Int,
+    ): Boolean {
+        val depths = IntArray(3)
+        for (at in from until to) {
+            when (code[at]) {
+                '(' -> depths[0]++
+                ')' -> depths[0]--
+                '{' -> depths[1]++
+                '}' -> depths[1]--
+                '[' -> depths[2]++
+                ']' -> depths[2]--
+            }
+            if (depths.any { it < 0 }) return true
+        }
+        return false
+    }
+
+    /** Mask non-code with stable offsets and literal placeholders that preserve statement boundaries. */
     private fun mask(source: String): String {
         val code = source.toCharArray()
         var at = 0
-
-        fun blank(end: Int) {
-            while (at < end) {
-                if (code[at] != '\n') code[at] = ' '
-                at++
-            }
-        }
         while (at < source.length) {
+            val span = nonCodeSpan(source, at)
+            if (span == null) {
+                at++
+                continue
+            }
+            for (index in at until span.first) {
+                if (code[index] != '\n') code[index] = ' '
+            }
+            code[at] = span.second
+            at = span.first
+        }
+        return String(code)
+    }
+
+    private fun nonCodeSpan(
+        source: String,
+        at: Int,
+    ): Pair<Int, Char>? =
+        when {
+            source.startsWith("//", at) -> closingEnd(source, at + 2, "\n") to ' '
+            source.startsWith("/*", at) -> blockEnd(source, at) to ' '
+            source.startsWith("\"\"\"", at) -> closingEnd(source, at + 3, "\"\"\"") to '0'
+            source[at] == '`' -> closingEnd(source, at + 1, "`") to 'v'
+            source[at] == '"' || source[at] == '\'' -> quotedEnd(source, at) to '0'
+            source.startsWith("(?:", at) || source.startsWith("?::", at) -> (at + 3) to ' '
+            else -> null
+        }
+
+    private fun closingEnd(
+        source: String,
+        from: Int,
+        delimiter: String,
+    ): Int {
+        val end = source.indexOf(delimiter, from)
+        return if (end < 0) source.length else end + delimiter.length
+    }
+
+    private fun blockEnd(
+        source: String,
+        at: Int,
+    ): Int {
+        var end = at + 2
+        var depth = 1
+        while (end < source.length && depth > 0) {
             when {
-                source.startsWith("//", at) -> {
-                    blank(source.indexOf('\n', at).let { if (it < 0) source.length else it })
+                source.startsWith("/*", end) -> {
+                    depth++
+                    end += 2
                 }
 
-                source.startsWith("/*", at) -> {
-                    var end = at + 2
-                    var depth = 1
-                    while (end < source.length && depth > 0) {
-                        when {
-                            source.startsWith("/*", end) -> {
-                                depth++
-                                end += 2
-                            }
-
-                            source.startsWith("*/", end) -> {
-                                depth--
-                                end += 2
-                            }
-
-                            else -> {
-                                end++
-                            }
-                        }
-                    }
-                    blank(end)
-                }
-
-                source.startsWith("\"\"\"", at) -> {
-                    val literal = at
-                    val end = source.indexOf("\"\"\"", at + 3)
-                    blank(if (end < 0) source.length else end + 3)
-                    code[literal] = '0'
-                }
-
-                source[at] == '`' -> {
-                    val literal = at
-                    val end = source.indexOf('`', at + 1)
-                    blank(if (end < 0) source.length else end + 1)
-                    code[literal] = 'v'
-                }
-
-                source[at] == '"' || source[at] == '\'' -> {
-                    val literal = at
-                    val quote = source[at]
-                    var end = at + 1
-                    while (end < source.length) {
-                        if (source[end] == '\\') {
-                            end = (end + 2).coerceAtMost(source.length)
-                            continue
-                        }
-                        if (source[end++] == quote) break
-                    }
-                    blank(end)
-                    code[literal] = '0'
-                }
-
-                source.startsWith("(?:", at) || source.startsWith("?::", at) -> {
-                    blank(at + 3)
+                source.startsWith("*/", end) -> {
+                    depth--
+                    end += 2
                 }
 
                 else -> {
-                    at++
+                    end++
                 }
             }
         }
-        return String(code)
+        return end
+    }
+
+    private fun quotedEnd(
+        source: String,
+        at: Int,
+    ): Int {
+        var end = at + 1
+        while (end < source.length && source[end] != source[at]) {
+            end += if (source[end] == '\\') 2 else 1
+        }
+        return (end + 1).coerceAtMost(source.length)
     }
 
     /** Logical statement ranges in the masked text, including continuation lines. */
@@ -234,15 +233,9 @@ class ElvisBoundMatcherGuardTest {
                 ']' -> brackets--
             }
             if (char != ';' && char != '\n') return@forEachIndexed
-            var nextAt = at + 1
-            while (nextAt < code.length && code[nextAt].isWhitespace()) nextAt++
-            val next = code.substring(nextAt, (nextAt + CONTINUATION_WINDOW).coerceAtMost(code.length))
-            val previous = code.substring(start, at).trimEnd()
-            if (char == ';' || (
-                    char == '\n' && parens <= 0 && brackets <= 0 &&
-                        !CONTINUATION.containsMatchIn(next) && !TRAILING.containsMatchIn(previous)
-                )
-            ) {
+            val openGroup = parens > 0 || brackets > 0
+            val lineEnd = char == '\n' && !openGroup && !joinsLine(code, start, at)
+            if (char == ';' || lineEnd) {
                 result += start until at
                 start = at + 1
                 parens = 0
@@ -251,6 +244,17 @@ class ElvisBoundMatcherGuardTest {
         }
         if (start < code.length) result += start until code.length
         return result
+    }
+
+    private fun joinsLine(
+        code: String,
+        start: Int,
+        at: Int,
+    ): Boolean {
+        var nextAt = at + 1
+        while (nextAt < code.length && code[nextAt].isWhitespace()) nextAt++
+        val next = code.substring(nextAt, (nextAt + CONTINUATION_WINDOW).coerceAtMost(code.length))
+        return CONTINUATION.containsMatchIn(next) || TRAILING.containsMatchIn(code.substring(start, at).trimEnd())
     }
 
     private fun testSourceFiles(): List<File> {
