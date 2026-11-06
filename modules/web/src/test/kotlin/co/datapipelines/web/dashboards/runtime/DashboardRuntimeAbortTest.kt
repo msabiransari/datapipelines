@@ -30,6 +30,7 @@ import co.datapipelines.visualization.RefreshStatus
 import co.datapipelines.web.api.ApiException
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -67,6 +68,12 @@ class DashboardRuntimeAbortTest {
     private val planner = mockk<RefreshPlanner>()
     private val config = DashboardRuntimeConfig()
 
+    // A REAL metrics instance (#772): the 429 cases read the reason tag each refusal counted
+    // under — a relaxed mockk would make a missing or mis-tagged count unobservable. JUnit's
+    // per-method lifecycle gives every test a fresh registry.
+    private val registry = SimpleMeterRegistry()
+    private val metrics = DashboardMetrics(registry)
+
     private val runtime =
         DashboardRuntime(
             resolver,
@@ -86,7 +93,7 @@ class DashboardRuntimeAbortTest {
             config,
             CoroutineScope(Dispatchers.Default),
             mockk(),
-            mockk(relaxed = true),
+            metrics,
             planner,
         )
 
@@ -260,6 +267,8 @@ class DashboardRuntimeAbortTest {
         thrown.code shouldBe DashboardErrorCodes.REFRESH_SATURATED
         thrown.details shouldBe mapOf("retry_after_seconds" to config.maxWaitSeconds, "reason" to "busy") // #762
         verify { startMarkers.clear(workspaceId, userId, refreshId) }
+        registry.counter(DashboardMetrics.REFRESHES_REFUSED, "reason", "saturated").count() shouldBe 1.0
+        registry.counter(DashboardMetrics.REFRESHES_REFUSED, "reason", "never_admissible").count() shouldBe 0.0
     }
 
     @Test
@@ -284,6 +293,8 @@ class DashboardRuntimeAbortTest {
         thrown.message shouldContain EXECUTOR_KEY
         verify(exactly = 0) { refreshes.insertRunning(any()) }
         verify { startMarkers.clear(workspaceId, userId, refreshId) }
+        registry.counter(DashboardMetrics.REFRESHES_REFUSED, "reason", "never_admissible").count() shouldBe 1.0
+        registry.counter(DashboardMetrics.REFRESHES_REFUSED, "reason", "saturated").count() shouldBe 0.0
     }
 
     @Test
@@ -312,6 +323,8 @@ class DashboardRuntimeAbortTest {
         thrown.code shouldBe DashboardErrorCodes.REFRESH_SATURATED
         thrown.details["reason"] shouldBe "busy" // #762: the marker bound is load, not configuration
         verify(exactly = 0) { startMarkers.clear(any(), any(), any()) }
+        registry.counter(DashboardMetrics.REFRESHES_REFUSED, "reason", "saturated").count() shouldBe 1.0
+        registry.counter(DashboardMetrics.REFRESHES_REFUSED, "reason", "never_admissible").count() shouldBe 0.0
     }
 
     @Test
