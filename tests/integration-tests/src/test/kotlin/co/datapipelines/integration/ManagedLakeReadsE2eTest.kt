@@ -62,6 +62,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.sql.Connection
 import java.sql.DriverManager
+import java.sql.SQLException
 import java.time.Duration
 import java.time.Instant
 import java.util.Base64
@@ -960,6 +961,97 @@ class ManagedLakeReadsE2eTest {
         }
     }
 
+    /**
+     * #833 — the read that BUILDS a managed generation (the catalog read, first in the view init) runs on the lease's
+     * thread inside `poolFor` and carries its own bound. Under a held catalog lock the rebuild is refused
+     * `lake.unavailable` by a statement cancel (SQLState 57014) within that bound, installs nothing, and the retired
+     * generation's held lease keeps serving meanwhile; once the lock goes, the next lease builds. The red run (no
+     * bound) is observed as the build still waiting at [BUILD_READ_RED_SECONDS], never as an unbounded wait.
+     */
+    @Test
+    @Order(24)
+    fun `#833 - a held catalog lock refuses the rebuild lake unavailable within its bound while the retired generation serves`() {
+        ensureReaderFixture()
+        val reader = boot(maxAgeSeconds = B_MAX_AGE_SECONDS, tickSeconds = LIFECYCLE_TICK_SECONDS, application = APP_833)
+        val lease = leaseManaged(reader)
+        try {
+            val served = countOnLease(lease)
+            retireManagedPool(reader) shouldBe true
+            metadata { lock ->
+                lock.autoCommit = false
+                lock.createStatement().use { it.execute("LOCK TABLE lake_tables_managed IN ACCESS EXCLUSIVE MODE") }
+                try {
+                    metadata { watcher -> rebuildUnderHeldLock(reader, lease, watcher, served) }
+                } finally {
+                    lock.rollback()
+                }
+            }
+            leaseManaged(reader).close()
+            generationBuiltAt(reader).shouldNotBeNull()
+        } finally {
+            runCatching { lease.close() }
+            reader.close()
+        }
+    }
+
+    private fun rebuildUnderHeldLock(
+        reader: ApplicationContext,
+        lease: Connection,
+        watcher: Connection,
+        served: Long,
+    ) {
+        val failure = AtomicReference<Throwable?>()
+        val failedAt = AtomicReference<Long?>()
+        val build =
+            Thread({
+                runCatching { leaseManaged(reader).close() }.onFailure {
+                    failedAt.set(System.nanoTime())
+                    failure.set(it)
+                }
+            }, "dp833-rebuild").apply {
+                isDaemon = true
+                start()
+            }
+        awaitTrue(Duration.ofSeconds(BUILD_READ_BOUND_SECONDS)) { waitingOnLock(watcher, CATALOG_READ_TEXT, APP_833) }
+        val queuedAt = System.nanoTime()
+        val servedWhileQueued = countOnLease(lease)
+        val countedAt = System.nanoTime()
+        build.join(Duration.ofSeconds(BUILD_READ_RED_SECONDS).toMillis())
+        val stillWaiting = build.isAlive
+        val causes = generateSequence(failure.get()) { it.cause }.toList()
+        val elapsedMs = failedAt.get()?.let { Duration.ofNanos(it - queuedAt).toMillis() }
+        println(
+            "BUILD_READ_BOUND queued_to_refused_ms=$elapsedMs still_waiting_after_${BUILD_READ_RED_SECONDS}s=$stillWaiting " +
+                "served=$served served_while_queued=$servedWhileQueued " +
+                "causes=${causes.joinToString(" <- ") { it.javaClass.simpleName + ":" + it.message?.take(CAUSE_PRINT_CHARS) }}",
+        )
+        withClue("the build read was still waiting on the held lock after ${BUILD_READ_RED_SECONDS}s: it carries no bound") {
+            stillWaiting shouldBe false
+        }
+        assertAll(
+            { elapsedMs.shouldNotBeNull() shouldBeInRange BUILD_READ_WINDOW_MS },
+            { causes.map { codeOf(it) } shouldContain "lake.unavailable" },
+            { causes.filterIsInstance<SQLException>().map { it.sqlState } shouldContain "57014" },
+            { generationBuiltAt(reader) shouldBe null },
+            { servedWhileQueued shouldBe served },
+            { (countedAt < failedAt.get().shouldNotBeNull()) shouldBe true },
+        )
+    }
+
+    private fun countOnLease(lease: Connection): Long =
+        lease.createStatement().use { st ->
+            st.executeQuery("SELECT count(*) FROM $H_TRIPS").use { rs ->
+                rs.next()
+                rs.getLong(1)
+            }
+        }
+
+    /** A `DatapipelinesException`'s code, by name (integration-tests reaches app only); null for any other throwable. */
+    private fun codeOf(error: Throwable): String? =
+        error.javaClass.methods
+            .firstOrNull { it.name == "getCode" && it.parameterCount == 0 }
+            ?.invoke(error) as? String
+
     /** Acceptance methods can also run alone during falsification. */
     private fun ensureReaderFixture() {
         val present =
@@ -1520,12 +1612,13 @@ class ManagedLakeReadsE2eTest {
     private fun waitingOnLock(
         watcher: Connection,
         statementText: String,
+        application: String = APP_G,
     ): Boolean =
         watcher
             .prepareStatement(
                 "SELECT count(*) FROM pg_stat_activity WHERE application_name = ? AND wait_event_type = 'Lock' AND query LIKE ?",
             ).use { ps ->
-                ps.setString(1, APP_G)
+                ps.setString(1, application)
                 ps.setString(2, statementText)
                 ps.executeQuery().use { rs ->
                     rs.next()
@@ -1889,6 +1982,16 @@ class ManagedLakeReadsE2eTest {
         private const val MESSAGE_CHARS = 200
         private const val APP_F = "dp818-f"
         private const val APP_G = "dp818-g"
+
+        /**
+         * #833: the build read's bound is the issue's 5 s, a literal (never read back from the class under test); the
+         * window is queued-to-refused like A's, and the red observation is bounded at 15 s.
+         */
+        private const val APP_833 = "dp833-build"
+        private const val BUILD_READ_BOUND_SECONDS = 5L
+        private const val BUILD_READ_RED_SECONDS = 15L
+        private val BUILD_READ_WINDOW_MS = (BUILD_READ_BOUND_SECONDS * 1000 - 1000)..((BUILD_READ_BOUND_SECONDS + BOUND_SLACK_SECONDS) * 1000)
+        private const val CAUSE_PRINT_CHARS = 160
         private val EXECUTION_BUDGET: Duration = Duration.ofSeconds(180)
 
         private const val MINIO_PORT = 9000
