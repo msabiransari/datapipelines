@@ -44,8 +44,9 @@ import kotlin.math.pow
  * therefore carries the dialect key [EGRESS_PROXY_KEY] (written by configuration, `datapipelines.lake.reads.egress-proxy`),
  * and [proxyStatement] points DuckDB's `http_proxy` at a proxy shipped with the deployment that resets every
  * object-store stream older than a fixed max-age. A cut transfer is an I/O error, which httpfs retries on a fresh
- * connection, so a reader against a store that trickles on every attempt ends within `(HTTP_RETRIES + 1) × max-age`
- * plus slack (probe A.0b, 2026-11-07: three cuts at a 20 s max-age ended the reader at 63.1 s). The `SET` is emitted
+ * connection, so a reader against a store that trickles on every attempt is cut once per attempt: its bound is
+ * [egressReaderEndByMillis], the ONE place the formula lives (the docs, the boot event and the acceptance E2E quote
+ * it). The bound is hygiene; the safety bound stays the reader lease (#818e). The `SET` is emitted
  * before the §15a lockdown, which then refuses `SET`/`RESET` of `http_proxy*` (probe A.0a). A temporary accommodation
  * until duckdb-httpfs#519 lands.
  */
@@ -86,8 +87,53 @@ object LakeHttpBounds {
     ): Long {
         val attempts = retries + 1L
         val timeouts = attempts * TIMEOUT_PHASES_PER_ATTEMPT * timeoutSeconds * MILLIS_PER_SECOND
-        val sleeps = (2..retries).sumOf { tries -> (retryWaitMillis * backoff.toDouble().pow(tries - 2)).toLong() }
-        return timeouts + sleeps
+        return timeouts + retrySleepsMillis(retries, retryWaitMillis, backoff)
+    }
+
+    /**
+     * Every sleep httpfs takes between attempts, milliseconds: `http_retry_wait_ms × http_retry_backoff^(tries − 2)` for
+     * `tries` from 2 to `retries` (see the engine's semantics above). With the [STATEMENTS] values: one sleep of 100.
+     */
+    fun retrySleepsMillis(
+        retries: Int = HTTP_RETRIES,
+        retryWaitMillis: Long = HTTP_RETRY_WAIT_MS,
+        backoff: Int = HTTP_RETRY_BACKOFF,
+    ): Long = (2..retries).sumOf { tries -> (retryWaitMillis * backoff.toDouble().pow(tries - 2)).toLong() }
+
+    /**
+     * #845 — the slack allowed per proxy cut, milliseconds. Measured: the proxy's reset lands 1.0 s after the max-age
+     * (probe A.0b, `notes/evidence/845-managed-reads-egress-proxy-max-age/a0b/`: end of stream at 21.0 s for a 20 s
+     * max-age; the acceptance E2E D.1: three cuts at a 35 s max-age ended the reader at 108.11 s = 3 × 36.0 s + the
+     * 0.1 s sleep). The second 1 s is an allowance, not a measurement: the fresh connection's setup through the proxy
+     * and scheduling on a loaded host. The store's own connect happens INSIDE the proxied stream, so it is already
+     * inside the max-age.
+     */
+    const val EGRESS_CUT_SLACK_MILLIS: Long = 2_000L
+
+    /**
+     * #845 — the slack term of [egressReaderEndByMillis]: one [EGRESS_CUT_SLACK_MILLIS] per attempt plus
+     * [retrySleepsMillis]. With the [STATEMENTS] values: `3 × 2 000 + 100 = 6 100`.
+     */
+    @JvmStatic
+    fun egressReaderSlackMillis(): Long = (HTTP_RETRIES + 1L) * EGRESS_CUT_SLACK_MILLIS + retrySleepsMillis()
+
+    /**
+     * #845 — when a managed reader against a store that trickles on EVERY attempt has ended, at the latest, measured
+     * from its first GET, milliseconds:
+     *
+     *     end-by = (http_retries + 1) × max-age + slack,   slack = [egressReaderSlackMillis]
+     *
+     * `http_retries` is [HTTP_RETRIES], the value [STATEMENTS] SETs on every LAKE engine that loads httpfs (not
+     * DuckDB's default), so the bound moves with the setting. Why it is not one max-age: a cut transfer is an I/O
+     * error and httpfs retries it on a fresh connection, which the proxy cuts again (probe A.0b: three GETs, each cut,
+     * the reader ended at 63.1 s for a 20 s max-age; the uncapped control was still reading at 80 s). With the
+     * shipped 960 s: `3 × 960 000 + 6 100 = 2 886 100` ms, about 48 minutes (`LakeHttpBoundsTest` pins it). A
+     * hygiene bound only; the reader lease is the safety bound.
+     */
+    @JvmStatic
+    fun egressReaderEndByMillis(maxAgeSeconds: Long): Long {
+        require(maxAgeSeconds > 0) { "the egress max-age must be positive" }
+        return (HTTP_RETRIES + 1L) * maxAgeSeconds * MILLIS_PER_SECOND + egressReaderSlackMillis()
     }
 
     /** #845: the managed LAKE datasource's dialect key naming its egress proxy, `host:port`. */

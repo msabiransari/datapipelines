@@ -342,6 +342,12 @@ internal object LakeRules {
      * before its own timeout ends it. Whether the proxy answers and declares that max-age is the boot check's
      * (`lake.boot.egress_proxy`), not configuration's.
      *
+     * The floor compares the max-age itself, NOT the derived reader end-by
+     * (`LakeHttpBounds.egressReaderEndByMillis`, (http_retries + 1) × max-age + slack): it protects a HEALTHY query,
+     * whose connection is never cut and so never retried, and one connection's age is what the proxy cuts. Comparing
+     * end-by would admit a max-age below the query timeout. End-by bounds only a trickled reader (hygiene); no rule
+     * compares it, because the reader lease, not this bound, is the safety premise (#818e).
+     *
      * Deliberately NOT named `check…`: it is a term of [checkLakeReads], not a new §7 rule, and
      * `ConfigValidatorCheckCountTest` counts `check*` declarations against `CHECK_COUNT`.
      */

@@ -38,6 +38,8 @@ import java.util.concurrent.TimeoutException
  *    (502–504) that carries no `x-amz-request-id` (the proxy's own reply, not the store's).
  *
  * Each exchange is bounded: [CONNECT_TIMEOUT_SECONDS] to connect, [RESPONSE_TIMEOUT_SECONDS] for the whole answer.
+ * The green line `event=lake.egress_proxy_verified` carries `reader_end_by_ms`, the bound a reader against a store
+ * that trickles on every attempt ends within, from [LakeHttpBounds.egressReaderEndByMillis] (never restated here).
  * A refusal is an [IllegalStateException] whose message leads with `lake.boot.egress_proxy` (configuration.md §7).
  */
 object ManagedLakeEgressCheck {
@@ -97,9 +99,12 @@ object ManagedLakeEgressCheck {
             refuse("the proxy $proxy cannot reach the store $store: it answered ${reached.statusCode()} itself")
         }
         log.info(
-            "event=lake.egress_proxy_verified proxy={} max_age_seconds={} store={} store_status={} duration_ms={}",
+            "event=lake.egress_proxy_verified proxy={} max_age_seconds={} reader_end_by_ms={} store={} store_status={} " +
+                "duration_ms={}",
             proxy,
             maxAge,
+            // The trickled reader's bound, from the one derivation (LakeHttpBounds.egressReaderEndByMillis).
+            LakeHttpBounds.egressReaderEndByMillis(maxAge),
             store,
             reached.statusCode(),
             (System.nanoTime() - started) / NANOS_PER_MILLI,
