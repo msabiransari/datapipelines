@@ -736,6 +736,11 @@ class ManagedLakeReadsE2eTest {
                 val generation = readerGeneration(reader)
                 val ids = readerRows().filterKeys { it == generation }
                 ids.isNotEmpty() shouldBe true
+                val expectedPins = readerViewLocations(reader)
+                expectedPins.isNotEmpty() shouldBe true
+                withClue("E1 pins match the generation view metadata locations") {
+                    readerPinLocations(generation) shouldBe expectedPins
+                }
                 installHeartbeatWitness()
                 proxy.arm()
                 run.start()
@@ -761,6 +766,7 @@ class ManagedLakeReadsE2eTest {
                 if (shutdown) contextClose?.isAlive shouldBe true
                 withClue("E1 every snapshot pin stays live by database clock during blocked close") { stillLive.keys shouldBe ids.keys }
                 stillLive.values.all { it } shouldBe true
+                readerPinLocations(generation) shouldBe expectedPins
                 val physicalCloses = Thread.getAllStackTraces().keys.filter { it.name.startsWith("dp-pool-interrupt-$generation-") }
                 withClue("E1 real physical close remains blocked") { physicalCloses.isNotEmpty() shouldBe true }
                 val beats = heartbeatWitness(generation, closeStarted)
@@ -996,14 +1002,53 @@ class ManagedLakeReadsE2eTest {
         println("READER_LEASE_INPUTS acquire_ms=$metadataAcquire ttl=$ttl")
     }
 
-    private fun readerGeneration(reader: ApplicationContext): UUID {
+    private fun readerPool(reader: ApplicationContext): Any {
         val registry = reader.getBean("datasourceRegistry")
         val type = Class.forName("co.datapipelines.datasources.DatasourceRegistry")
         val datasource = type.getMethod("get", String::class.java).invoke(registry, LAKE)
-        val pool = type.getMethod("poolFor", Class.forName("co.datapipelines.datasources.Datasource")).invoke(registry, datasource)
+        return requireNotNull(
+            type.getMethod("poolFor", Class.forName("co.datapipelines.datasources.Datasource")).invoke(registry, datasource),
+        )
+    }
+
+    private fun readerGeneration(reader: ApplicationContext): UUID {
+        val pool = readerPool(reader)
         val id = Class.forName("co.datapipelines.datasources.pooling.ConnectionPool").getMethod("getGeneration").invoke(pool) as String
         return UUID.fromString(id)
     }
+
+    private fun readerViewLocations(reader: ApplicationContext): Map<String, String> {
+        val generation =
+            Class
+                .forName(
+                    "co.datapipelines.datasources.pooling.ConnectionPool",
+                ).getMethod("getManagedGeneration")
+                .invoke(readerPool(reader))
+        val locations =
+            Class
+                .forName("co.datapipelines.datasources.pooling.ManagedLakeGeneration")
+                .getMethod("getLocations")
+                .invoke(requireNotNull(generation)) as Map<*, *>
+        return locations.entries
+            .mapNotNull { (name, location) ->
+                if (location == null) return@mapNotNull null
+                require(name is String && location is String)
+                name to location
+            }.toMap()
+    }
+
+    private fun readerPinLocations(generation: UUID): Map<String, String> =
+        metadata { connection ->
+            connection
+                .prepareStatement(
+                    "SELECT split_part(name,'@',1),pinned_metadata_location FROM lake_leases WHERE kind='reader' AND operation_id=?",
+                ).use { statement ->
+                    statement.setObject(1, generation)
+                    statement.executeQuery().use { rows ->
+                        buildMap { while (rows.next()) put("$LAKE.${rows.getString(1)}", rows.getString(2)) }
+                    }
+                }
+        }
 
     /** Independent database witness: only committed UPDATEs count, one transaction per keeper round. */
     private fun installHeartbeatWitness() {
