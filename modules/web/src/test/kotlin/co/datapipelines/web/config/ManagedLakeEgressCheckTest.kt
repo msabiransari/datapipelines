@@ -192,12 +192,12 @@ class ManagedLakeEgressCheckTest {
             val input = socket.getInputStream()
             val head = ByteArrayOutputStream()
             var last4 = 0
-            while (true) {
-                val b = input.read()
-                if (b == -1) break
+            var b = input.read()
+            while (b != -1) {
                 head.write(b)
                 last4 = (last4 shl 8) or b
-                if (last4 == CRLF_CRLF) break
+                // The head ends at the blank line; stop reading there (the body, if any, is not consumed).
+                b = if (last4 == CRLF_CRLF) -1 else input.read()
             }
             return head.toString(StandardCharsets.ISO_8859_1)
         }
