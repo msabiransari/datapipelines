@@ -446,8 +446,9 @@ leaves through that proxy (DuckDB's `http_proxy`, set before the generation's lo
 `reads.egress-max-age-seconds` whatever its activity and retires every keep-alive connection at the same age.
 A managed read's object-store connection lives at most `egress-max-age-seconds`; a trickling store is ended there. This
 is a hygiene bound, not a safety premise: reader leases are the safety premise. A healthy keep-alive connection older
-than the max-age is also cut, and the next request retries on a fresh one (`http_retries`). The bound is per connection,
-not per query. httpfs retries a cut transfer too, so a store that trickles on EVERY attempt ends a reader within about
+than the max-age is also cut, and the next request retries on a fresh one (`http_retries`); measured with DuckDB 1.5.5,
+a query's proxy connections close when the query ends, so within the max-age floor below a healthy query does not meet
+one. The bound is per connection, not per query. httpfs retries a cut transfer too, so a store that trickles on EVERY attempt ends a reader within about
 (`http_retries` + 1) × the max-age plus the retry sleeps: three connections, about 48 min with the shipped 960 s (measured
 at a 20 s max-age: three cut attempts, the reader ended at 63 s; without the cap it was still reading at 80 s). The
 max-age must be at least `datapipelines.executor.node-query-timeout-max-seconds` + 30 (startup refuses less), so a
