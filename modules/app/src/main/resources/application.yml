@@ -479,6 +479,10 @@ datapipelines:
   # deployment's datasources carry their own longer query_timeout_seconds.
   datasources:
     retire-ceiling-seconds: ${DATAPIPELINES_DATASOURCES_RETIRE_CEILING_SECONDS:}
+    # #824 (owner ruling 2026-11-07): the same ceiling for a retired MANAGED lake reader generation
+    # only. EMPTY = DERIVED — node-query-timeout-max-seconds + 30 (930 shipped): a managed node may
+    # raise its statement timeout up to that maximum. The lake's reads rule counts this ceiling.
+    managed-retire-ceiling-seconds: ${DATAPIPELINES_DATASOURCES_MANAGED_RETIRE_CEILING_SECONDS:}
     # §3.26 (186): the declared roots a file-backed in-process datasource (H2 `file:`/bare
     # path, SQLite, DuckDB file) must live under. EMPTY = refused for everyone — no
     # file-backed datasource is registrable until the deployment declares where they live.

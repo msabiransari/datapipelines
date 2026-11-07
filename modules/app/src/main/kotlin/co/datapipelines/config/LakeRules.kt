@@ -21,11 +21,12 @@ import java.time.Duration
  *   scratch-bytes` ([checkLakeAdmission]);
  * - every other number positive, the maintenance window `HH:MM-HH:MM` ([checkLakeBounds]);
  * - `freshness-tick-seconds < max-generation-age-seconds`, `reads.memory-limit` a positive size, and
- *   `max-generation-age + 2 × reaper-delay + retire-ceiling + freshness-tick ≤
+ *   `max-generation-age + 2 × reaper-delay + managed-retire-ceiling + freshness-tick ≤
  *   protection-days × 86400 / 24` (record §10 RULING 4 as amended, #818 P5 / #818c / #818d) ([checkLakeReads]). The
- *   retire ceiling is the one `datasources` applies: `retire-ceiling-seconds` when set, else
- *   `node-query-timeout-seconds + 30` (datasources.md §5.2). The reaper delay is a code constant, not a key:
- *   [ReaperDelay.SECONDS] (the scheduling layer) derived and pinned where it is produced.
+ *   ceiling is the one `datasources` applies to a retired MANAGED generation (#824, owner ruling 2026-11-07):
+ *   `managed-retire-ceiling-seconds` when set, else `node-query-timeout-max-seconds + 30` (datasources.md §5.2). The
+ *   reaper delay is a code constant, not a key: [ReaperDelay.SECONDS] (the scheduling layer) derived and pinned where
+ *   it is produced.
  *
  * Deferred, with the lane that consumes the input: `scratch-bytes ≤ the pod's /tmp limit` and the cgroup memory
  * sum to P1/P6 (the sum's amendment adds keys that do not exist yet, and E10b is its acceptance — owner
@@ -125,9 +126,6 @@ internal object LakeRules {
 
     /** §3.2's default for `node-query-timeout-max-seconds`, read when the key is unset (ConfigValidator's twin). */
     private const val DEFAULT_NODE_QUERY_TIMEOUT_MAX_SECONDS = 900L
-
-    /** §3.2's default for `node-query-timeout-seconds`, read when the key is unset (the executor's own default). */
-    private const val DEFAULT_NODE_QUERY_TIMEOUT_SECONDS = 60L
 
     /** The share of the protection window the read bounds may use (record §10 RULING 4: one hour of a 24-hour day). */
     private const val PROTECTION_SHARE_DIVISOR = 24L
@@ -244,36 +242,42 @@ internal object LakeRules {
             violations += "$FRESHNESS_TICK_SECONDS ($tick) must be below $MAX_GENERATION_AGE_SECONDS ($age) (§3.36)."
         }
         val days = value(snapshot, PROTECTION_DAYS).toLongOrNull()?.takeIf { it > 0 } ?: return // checkLakeRetention names it
-        val ceiling = retireCeilingSeconds(snapshot, violations) ?: return
+        val ceiling = managedRetireCeilingSeconds(snapshot, violations) ?: return
         if (age == null || tick == null) return
         val window = days * SECONDS_PER_DAY / PROTECTION_SHARE_DIVISOR
         val reaperDelay = ReaperDelay.SECONDS
         if (age + 2 * reaperDelay + ceiling + tick > window) {
             violations +=
-                "$MAX_GENERATION_AGE_SECONDS ($age) + 2 × the reaper delay ($reaperDelay) + the retire ceiling ($ceiling) + " +
+                "$MAX_GENERATION_AGE_SECONDS ($age) + 2 × the reaper delay ($reaperDelay) + the managed retire ceiling ($ceiling) + " +
                 "$FRESHNESS_TICK_SECONDS ($tick) must not exceed " +
                 "$PROTECTION_DAYS × 86400 / 24 ($window) (§3.36 — staleness bound; reader leases protect live readers)."
         }
     }
 
-    /** The ceiling `datasources` applies (datasources.md §5.2); a malformed explicit value is named here. */
-    private fun retireCeilingSeconds(
+    /**
+     * #824 — the ceiling `datasources` applies to a retired MANAGED generation (datasources.md §5.2,
+     * `DatasourcesProperties.managedCeiling`); a malformed explicit value is named here. The general
+     * `retire-ceiling-seconds` does not enter: it bounds every other retired pool, never a managed generation.
+     */
+    private fun managedRetireCeilingSeconds(
         snapshot: ConfigSnapshot,
         violations: MutableList<String>,
     ): Long? {
-        val explicit = snapshot.datasourcesRetireCeilingSeconds?.trim().orEmpty()
+        val explicit = snapshot.datasourcesManagedRetireCeilingSeconds?.trim().orEmpty()
         if (explicit.isNotEmpty()) {
             val parsed = explicit.toLongOrNull()?.takeIf { it > 0 }
-            if (parsed == null) violations += "datapipelines.datasources.retire-ceiling-seconds must be a positive whole number (§3.36)."
+            if (parsed == null) {
+                violations += "datapipelines.datasources.managed-retire-ceiling-seconds must be a positive whole number (§3.36)."
+            }
             return parsed
         }
-        // A malformed node timeout is named by the executor's own check; fall back to its default here.
-        val nodeTimeout =
-            snapshot.executorNodeQueryTimeoutSeconds
+        // A malformed maximum is named by the executor's own check; fall back to its default here.
+        val nodeTimeoutMax =
+            snapshot.executorNodeQueryTimeoutMaxSeconds
                 ?.trim()
                 ?.toLongOrNull()
-                ?.takeIf { it > 0 } ?: DEFAULT_NODE_QUERY_TIMEOUT_SECONDS
-        return nodeTimeout + DatasourcesProperties.CEILING_SLACK_SECONDS
+                ?.takeIf { it > 0 } ?: DEFAULT_NODE_QUERY_TIMEOUT_MAX_SECONDS
+        return nodeTimeoutMax + DatasourcesProperties.CEILING_SLACK_SECONDS
     }
 
     private fun usableEndpoint(endpoint: String): Boolean =

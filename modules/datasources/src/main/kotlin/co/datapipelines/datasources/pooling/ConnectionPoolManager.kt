@@ -654,7 +654,7 @@ class ConnectionPoolManager(
         name: String,
         retired: ConnectionPool,
     ) {
-        val ceiling = retireCeiling
+        val ceiling = if (retired.managedGeneration != null) managedRetireCeiling else retireCeiling
         retiring += RetiringPool(retired, deadline = clock().plus(ceiling), ceiling = ceiling)
         retired.softEvict()
         metrics.poolRetired(name)

@@ -898,8 +898,6 @@ class ConfigValidator(
                 executorMaxConcurrentGlobal = environment.getProperty("datapipelines.executor.max-concurrent-executions-global"),
                 executorMaxConcurrentPerInstance = environment.getProperty("datapipelines.executor.max-concurrent-executions-per-instance"),
                 executorNodeQueryTimeoutMaxSeconds = environment.getProperty("datapipelines.executor.node-query-timeout-max-seconds"),
-                executorNodeQueryTimeoutSeconds = environment.getProperty("datapipelines.executor.node-query-timeout-seconds"),
-                datasourcesRetireCeilingSeconds = environment.getProperty("datapipelines.datasources.retire-ceiling-seconds"),
                 datasourcesManagedRetireCeilingSeconds =
                     environment.getProperty("datapipelines.datasources.managed-retire-ceiling-seconds"),
                 executorNodeQueryTimeoutSecondsByDialect = executorNodeQueryTimeoutSecondsByDialect(environment),
@@ -1151,11 +1149,10 @@ internal data class ConfigSnapshot(
     val executorMaxConcurrentPerInstance: String? = null,
     /** §3.2 (156, #2) — raw string so a non-numeric value is a NAMED violation, not a binder crash. */
     val executorNodeQueryTimeoutMaxSeconds: String? = null,
-    /** §3.2 / §3.36 (#818) — raw; the retire ceiling's derivation input when `retire-ceiling-seconds` is unset. */
-    val executorNodeQueryTimeoutSeconds: String? = null,
-    /** §3.36 (#818) — `datapipelines.datasources.retire-ceiling-seconds`, raw; empty = derived (datasources.md §5.2). */
-    val datasourcesRetireCeilingSeconds: String? = null,
-    /** #824 test scaffolding: read by no rule until the fix. */
+    /**
+     * §3.36 (#824) — `datapipelines.datasources.managed-retire-ceiling-seconds`, raw; empty = derived from
+     * [executorNodeQueryTimeoutMaxSeconds] (datasources.md §5.2). The reads rule's ceiling term.
+     */
     val datasourcesManagedRetireCeilingSeconds: String? = null,
     /** §3.2 (156, #2) — the per-dialect map, raw values (`dialect wire -> seconds string`). */
     val executorNodeQueryTimeoutSecondsByDialect: Map<String, String> = emptyMap(),
@@ -1255,8 +1252,7 @@ internal data class ConfigSnapshot(
             "executorMaxConcurrentGlobal=$executorMaxConcurrentGlobal, " +
             "executorMaxConcurrentPerInstance=$executorMaxConcurrentPerInstance, " +
             "executorNodeQueryTimeoutMaxSeconds=$executorNodeQueryTimeoutMaxSeconds, " +
-            "executorNodeQueryTimeoutSeconds=$executorNodeQueryTimeoutSeconds, " +
-            "datasourcesRetireCeilingSeconds=$datasourcesRetireCeilingSeconds, " +
+            "datasourcesManagedRetireCeilingSeconds=$datasourcesManagedRetireCeilingSeconds, " +
             "executorNodeQueryTimeoutSecondsByDialect=$executorNodeQueryTimeoutSecondsByDialect, " +
             "stagingMaxMemoryMb=$stagingMaxMemoryMb, " +
             "maxHeapMb=$maxHeapMb, " +

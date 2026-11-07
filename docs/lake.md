@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries, Publication and Reads
 
-**Status:** v1.12 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases)
+**Status:** v1.13 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #824)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -435,8 +435,10 @@ still detects the changed catalog pointer independently of the projection.
 **The bound.** The pool reaper retires generations older than `reads.max-generation-age-seconds`,
 including generations with no later borrower. It runs on `dp-reaper`, every 5 s, and issues no statement.
 The reaper delay is 7 s (cadence plus twice its 1 s pass bound); closes run on `dp-pool-close` threads.
-Boot checks the staleness rule: age + 2 × reaper delay + retire ceiling + freshness tick must fit
-`retention.protection-days × 86400 / 24`. With shipped values: 900 + 14 + 90 + 60 = 1064 ≤ 25 200 s.
+Boot checks the staleness rule: age + 2 × reaper delay + managed retire ceiling + freshness tick must fit
+`retention.protection-days × 86400 / 24`. The managed retire ceiling is the one a retired managed generation is held to
+(`datapipelines.datasources.managed-retire-ceiling-seconds`, else `node-query-timeout-max-seconds` + 30; #824), not the
+general pool ceiling. With shipped values: 900 + 14 + 930 + 60 = 1904 ≤ 25 200 s.
 This bounds the age handed to new queries. Reader termination is not a safety premise: DuckDB's
 HTTP settings bound a silent store, but cannot bound a trickling response (duckdb-httpfs#519).
 
@@ -485,6 +487,7 @@ is an error. The same loss applies when the full protection-window deadline is r
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-07 | v1.13 | 833 (#824) managed retire ceiling | §9 "The bound.": the staleness rule's ceiling term is the managed retire ceiling (`managed-retire-ceiling-seconds`, else `node-query-timeout-max-seconds` + 30); shipped 900 + 14 + 930 + 60 = 1904 ≤ 25 200 s. |
 | 2026-11-07 | v1.12 | #818 merge review | §9 describes the now-integrated P4 projection-repair invalidation and its independent freshness-tick fallback. |
 | 2026-11-06 | v1.11 | 818e (#818) | §9: reader leases pin metadata revisions through physical close; five-term staleness rule, dedicated heartbeat, expiry/orphan consumer contract and stalled-metadata residual. |
 | 2026-11-05 | v1.10 | 818d (#818) | §9 "The bound.": the reaper runs on its own `dp-reaper` thread and hands each close to a close thread, so the reaper delay is 7 s; the bound and boot rule gain the reader termination (92 s, derived from the managed lake's object-store request bounds). |
