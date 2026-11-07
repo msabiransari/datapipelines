@@ -1214,8 +1214,8 @@ class SecurityConfig(
 If neither API key nor JWT is present (and the path requires auth), the AuthorizationFilter routes to the entry point, which splits by client shape (T31): a request whose `Accept` includes `text/html` — a browser navigating a UI route — gets a `302` to `/login` (the `Location` is a relative header, never `sendRedirect`'s Host-derived absolute URL); `/api/**` and `/mcp` NEVER redirect (their 401 JSON envelope is contract, byte-pinned), and non-HTML clients (`curl`'s `Accept: */*`, JSON API callers) keep the exact current envelope whatever path they hit. If authenticated but scope insufficient, the ScopeInterceptor returns `403`.
 
 A streaming response's completion (an SSE emitter, a CSV body) re-enters the servlet as an
-ASYNC dispatch. Steps 5–7 are `OncePerRequestFilter`s that skip it, so its `SecurityContext` is
-empty; step 10 permits it by dispatcher type, step 11 finds no principal and passes, and step 12
+ASYNC dispatch. Steps 6–8 are `OncePerRequestFilter`s that skip it, so its `SecurityContext` is
+empty; step 11 permits it by dispatcher type, step 12 finds no principal and passes, and step 13
 returns at once. The handler is not invoked again on that dispatch
 — only the result or exception the REQUEST dispatch's handler produced is rendered, by the
 `@ControllerAdvice` — so nothing new is authorized and the D-R8 audit row stays one per request.
@@ -1237,7 +1237,7 @@ Two things are deliberately **not** rows in this table:
   re-dispatch of a request the REQUEST dispatch already authenticated and authorized is not
   re-authorized from an empty `SecurityContext`. Without it every completed SSE stream dies
   as Access Denied on its completion dispatch. `ScopeInterceptor` holds the same premise for
-  the ASYNC dispatch (§8.2 step 12): until v3.40 it judged the re-dispatch against the empty
+  the ASYNC dispatch (§8.2 step 13): until v3.40 it judged the re-dispatch against the empty
   context, so a stream completed with an error BEFORE its first frame answered
   `401 auth.api_key.missing` in place of the error's envelope — the execute route's
   `429 pipeline.execution.concurrency_limit` and the idempotent retry's never-started
