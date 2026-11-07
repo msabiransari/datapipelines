@@ -34,6 +34,10 @@
 #   8. JVM code-loading environment names are refused, even if allowlisted.
 #   9. Every name outside DATAPIPELINES_* must have a FOREIGN_ALLOWLIST reason;
 #      entries no longer passed by compose are stale and fail too.
+#  10. ONE VALUE, TWO READERS (#845). A DATAPIPELINES_* placeholder WITH a default anywhere
+#      else in compose.yml (the egress proxy's rendered config reads the app's max-age) is
+#      a variable the app binds, and its default is application.yml's — so the proxy's cap
+#      and the app's configured cap cannot diverge on a default install.
 #
 # Values built by CONCATENATION (`${OTHER:+literal}${OTHER2:+,literal}`) are DERIVED,
 # not pass-throughs: the demo's bootstrap lists are assembled from the family ON
@@ -66,13 +70,16 @@ if [[ "${1:-}" == "--self-test" ]]; then
   # a foreign literal without an allowlist entry (3), a line the app never binds (4), a
   # variable dropped from defaults.env (5), a drifted commented mirror (6), and a posture
   # key given a `${VAR:-}` default instead of the valueless form (7), a refused JVM
-  # loader variable (8), and an unlisted foreign environment name (9).
+  # loader variable (8), an unlisted foreign environment name (9), and the egress
+  # proxy's config rendering a max-age default the app does not ship (10).
   python3 - "$tmp/$COMPOSE" "$tmp/$DEFAULTS_ENV" "$tmp/$SECRETS_EXAMPLE" <<'PY'
 import sys, re
 p, defaults, secrets_example = sys.argv[1], sys.argv[2], sys.argv[3]
 t = open(p).read()
 t = t.replace("DATAPIPELINES_AUDIT_RETENTION_DAYS:-365", "DATAPIPELINES_AUDIT_RETENTION_DAYS:-7")
 t = t.replace("      DATAPIPELINES_ORG_WEEK_START: ${DATAPIPELINES_ORG_WEEK_START:-monday}\n", "")
+t = t.replace("max_stream_duration: ${DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS:-960}s",
+              "max_stream_duration: ${DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS:-20}s")
 t = t.replace("      DATAPIPELINES_AUTH_COOKIE_SECURE:\n",
               "      DATAPIPELINES_AUTH_COOKIE_SECURE: ${DATAPIPELINES_AUTH_COOKIE_SECURE:-}\n")
 # INSIDE the service's environment block. Appending it at EOF put it outside the block
@@ -97,8 +104,8 @@ PY
   if [[ "$status" -ne 1 ]]; then
     echo "SELF-TEST FAILED: doctored audit exited $status, expected 1" >&2; exit 1
   fi
-  if ! grep -q '^  8 ' <<< "$output" || ! grep -q '^  9 ' <<< "$output"; then
-    echo "SELF-TEST FAILED: missing class-8 or class-9 failure" >&2; exit 1
+  if ! grep -q '^  8 ' <<< "$output" || ! grep -q '^  9 ' <<< "$output" || ! grep -q '^  10 ' <<< "$output"; then
+    echo "SELF-TEST FAILED: missing class-8, class-9 or class-10 failure" >&2; exit 1
   fi
   echo "self-test OK: doctored compose correctly fails the audit"; exit 0
 fi
@@ -185,6 +192,9 @@ DECLARED_OVERRIDES = {
     # resurrect the committed default and make the feature impossible to turn off under
     # compose. The default itself still mirrors application.yml's.
     "DATAPIPELINES_DEMO_API_KEY": "unset-fallback form (`-` not `:-`): an explicitly EMPTY value is the kill switch",
+    # #845 — the managed reads' egress proxy is the compose-internal SERVICE (egress-proxy:3128), the Redis host's
+    # precedent; application.yml ships it empty because a compose-less install has no proxy.
+    "DATAPIPELINES_LAKE_READS_EGRESS_PROXY": "compose-internal service name 'egress-proxy:3128'",
 }
 
 # Vars whose compose default deliberately mirrors the DOCKERFILE's ENV, not application.yml
@@ -410,6 +420,20 @@ for name in ("SAMPLE_BASE_URL", "SAMPLE_VERSION", "SAMPLE_TRADE_BASE_URL",
     if name not in defaults_active:
         failures.append(f"5 {defaults_env} is missing {name} — check-published.sh and the "
                         f"compose files read it from this file by name")
+
+# 10. ONE VALUE, TWO READERS (#845): every defaulted DATAPIPELINES_* placeholder OUTSIDE the
+# service's environment block (the egress proxy's rendered config) is a variable the app
+# binds, carrying application.yml's default. A placeholder with no default asserts none.
+outside_block = t[: svc.start(1)] + t[svc.end(1):]
+outside_defaults = re.findall(r"\$\{(DATAPIPELINES_[A-Z0-9_]+):?-([^}]*)\}", outside_block)
+for name, default in outside_defaults:
+    default = default.replace("$$", "$")
+    if name not in bound:
+        failures.append(f"10 compose reads {name} outside the datapipelines service, but application.yml never "
+                        f"binds it — a second reader of a value the app does not have")
+    elif default != bound[name]:
+        failures.append(f"10 compose renders {name} with default '{default}' outside the datapipelines service, but "
+                        f"application.yml ships '{bound[name]}' — the two readers of one value would diverge")
 
 if failures:
     print(f"compose-env-audit: {len(failures)} failure(s)")
