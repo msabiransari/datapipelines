@@ -1,6 +1,6 @@
 # Auth & Security Specification
 
-**Status:** v3.69 (revised — see Change Log)
+**Status:** v3.70 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
 **Last updated:** 2026-11-07
