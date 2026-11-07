@@ -448,9 +448,13 @@ A managed read's object-store connection lives at most `egress-max-age-seconds`;
 is a hygiene bound, not a safety premise: reader leases are the safety premise. A healthy keep-alive connection older
 than the max-age is also cut, and the next request retries on a fresh one (`http_retries`); measured with DuckDB 1.5.5,
 a query's proxy connections close when the query ends, so within the max-age floor below a healthy query does not meet
-one. The bound is per connection, not per query. httpfs retries a cut transfer too, so a store that trickles on EVERY attempt ends a reader within about
-(`http_retries` + 1) × the max-age plus the retry sleeps: three connections, about 48 min with the shipped 960 s (measured
-at a 20 s max-age: three cut attempts, the reader ended at 63 s; without the cap it was still reading at 80 s). The
+one. The bound is per connection, not per query. httpfs retries a cut transfer too, so a store that trickles on EVERY
+attempt ends a reader, counted from its first GET, by **end-by = (`http_retries` + 1) × max-age + slack**, where
+`http_retries` is the value the LAKE adapter SETs and slack is one per-cut allowance per attempt (the proxy's reset was
+measured landing 1.0 s after the max-age; the allowance adds 1 s for the fresh connection's setup) plus the sleeps
+between retries. The formula lives in one place, `LakeHttpBounds.egressReaderEndByMillis`, whose test pins the shipped figure, and the
+boot line `event=lake.egress_proxy_verified` prints it as `reader_end_by_ms` (measured at a 20 s max-age: three cut
+attempts, the reader ended at 63.1 s; without the cap it was still reading at 80 s). The
 max-age must be at least `datapipelines.executor.node-query-timeout-max-seconds` + 30 (startup refuses less), so a
 healthy response is never cut before its own query's timeout would have ended it. Boot refuses with
 `lake.boot.egress_proxy` when the proxy does not answer, declares a different max-age at `GET /dp-egress`, or cannot
@@ -506,7 +510,7 @@ is an error. The same loss applies when the full protection-window deadline is r
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-07 | v1.13 | #845 managed reads egress proxy | §9 "The egress proxy": the managed reads leave through a proxy that cuts each object-store connection at `reads.egress-max-age-seconds`, a hygiene bound and not a safety premise; httpfs's retries make a trickling store's reader bound about three times the max-age; the boot refusal; what the proxy sees; a temporary accommodation until duckdb-httpfs#519. The key table gains both keys. |
+| 2026-11-07 | v1.13 | #845 managed reads egress proxy | §9 "The egress proxy": the managed reads leave through a proxy that cuts each object-store connection at `reads.egress-max-age-seconds`, a hygiene bound and not a safety premise; httpfs's retries make a trickling store's reader bound (`http_retries` + 1) × max-age + slack, derived in one place (`LakeHttpBounds.egressReaderEndByMillis`) and printed at boot; the boot refusal; what the proxy sees; a temporary accommodation until duckdb-httpfs#519. The key table gains both keys. |
 | 2026-11-07 | v1.12 | #818 merge review | §9 describes the now-integrated P4 projection-repair invalidation and its independent freshness-tick fallback. |
 | 2026-11-06 | v1.11 | 818e (#818) | §9: reader leases pin metadata revisions through physical close; five-term staleness rule, dedicated heartbeat, expiry/orphan consumer contract and stalled-metadata residual. |
 | 2026-11-05 | v1.10 | 818d (#818) | §9 "The bound.": the reaper runs on its own `dp-reaper` thread and hands each close to a close thread, so the reaper delay is 7 s; the bound and boot rule gain the reader termination (92 s, derived from the managed lake's object-store request bounds). |
