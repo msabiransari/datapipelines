@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries, Publication and Reads
 
-**Status:** v1.11 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases)
+**Status:** v1.12 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -426,9 +426,11 @@ generation is replaced.
 | `deprecated` | Its view; the deprecation notice appears in the table listing's remarks |
 | `archived`, `purged`, no catalog row, no lifecycle row, or the lake disabled | No view. A node that names it is refused before it runs with `lake.table.unavailable` (409, `details.table` and `details.reason`) |
 
-**When it sees new data.** New data is visible to the next query on this server and within a minute on others. Until
-the lake write path (#799) retires the committing server's generation itself, the freshness tick bounds freshness on
-every server, the committing one included.
+**When it sees new data.** After a committed projection repair, the write path retires the local generation and
+publishes peer invalidation. Each server also compares its generation with the authoritative catalog on the configured
+fixed-delay freshness tick (60 s by default). The next query after retirement builds a new generation; queries already
+running retain their original snapshot and its reader pins. If post-publication repair is deferred, the freshness tick
+still detects the changed catalog pointer independently of the projection.
 
 **The bound.** The pool reaper retires generations older than `reads.max-generation-age-seconds`,
 including generations with no later borrower. It runs on `dp-reaper`, every 5 s, and issues no statement.
@@ -483,6 +485,7 @@ is an error. The same loss applies when the full protection-window deadline is r
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-07 | v1.12 | #818 merge review | §9 describes the now-integrated P4 projection-repair invalidation and its independent freshness-tick fallback. |
 | 2026-11-06 | v1.11 | 818e (#818) | §9: reader leases pin metadata revisions through physical close; five-term staleness rule, dedicated heartbeat, expiry/orphan consumer contract and stalled-metadata residual. |
 | 2026-11-05 | v1.10 | 818d (#818) | §9 "The bound.": the reaper runs on its own `dp-reaper` thread and hands each close to a close thread, so the reaper delay is 7 s; the bound and boot rule gain the reader termination (92 s, derived from the managed lake's object-store request bounds). |
 | 2026-11-05 | v1.9 | 818c (#818) | §9 "The bound.": the pool reaper retires an over-age generation nobody leases from, and the bound and boot rule gain 2 × the reaper delay (260 s, derived from the scheduled jobs). |
