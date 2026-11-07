@@ -172,7 +172,7 @@ class ReaderLeaseKeeper(
             live.forEach { (id, entry) ->
                 if (!entry.holdsHandles()) return@forEach
                 if ((renewed[id] ?: 0) == entry.count) {
-                    entry.renewedAtNanos = started
+                    confirmHeartbeat(entry, started)
                 } else if (entry.ready.get()) {
                     lost(id, entry, "short_heartbeat")
                 }
@@ -205,6 +205,15 @@ class ReaderLeaseKeeper(
         } finally {
             if (interrupted) Thread.currentThread().interrupt()
         }
+    }
+
+    private fun confirmHeartbeat(
+        entry: Entry,
+        started: Long,
+    ) {
+        entry.renewedAtNanos = started
+        // A loss racing publication must retry retirement even after a full successful heartbeat.
+        if (!entry.valid.get()) entry.retire()
     }
 
     private fun lost(

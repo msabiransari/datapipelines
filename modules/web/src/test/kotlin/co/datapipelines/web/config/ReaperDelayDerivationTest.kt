@@ -46,7 +46,7 @@ import java.util.concurrent.TimeUnit
  *
  * - (a) the sum, recomputed from the reaper's `@Scheduled` cadence and [ReaperDelay.PASS_BOUND_SECONDS];
  * - (b) the reaper is ALONE on `dp-reaper`: its `@Scheduled` names [PoolReaperTaskScheduler.BEAN_NAME], no other job
- *   names any scheduler, and the bean is that name with one daemon `dp-reaper` thread (the premise that removed the
+ *   names that scheduler, and the bean is that name with one daemon `dp-reaper` thread (the premise that removed the
  *   siblings' holds from the sum);
  * - (c) the pass issues no statement: the production reaper over a real [DefaultDatasourceRegistry] reaps drained
  *   and hard-closed pools without one call on any port the registry reaches the metadata database through;
@@ -55,8 +55,8 @@ import java.util.concurrent.TimeUnit
  *
  * The pass bound itself is measured (the fifth case): the production pass over 1 000 live pools and 100 retiring
  * entries handed to the production closer, its slowest of several rounds printed for the handback and asserted an
- * order of magnitude inside the bound. The classpath case keeps the job count honest: five `@Scheduled` methods, the
- * same five `ScheduledJobsSchedulerE2eTest` pins on the running application.
+ * order of magnitude inside the bound. The classpath case keeps the job count honest: six `@Scheduled` methods,
+ * including the reader keeper on its own scheduler, as `ScheduledJobsSchedulerE2eTest` pins on the running application.
  */
 class ReaperDelayDerivationTest {
     @Test
@@ -85,7 +85,8 @@ class ReaperDelayDerivationTest {
             withClue("@Scheduled methods and the scheduler each names: $schedulers") {
                 schedulers.size shouldBe JOB_COUNT
                 schedulers[REAPER] shouldBe PoolReaperTaskScheduler.BEAN_NAME
-                schedulers.filterKeys { it != REAPER }.values.toSet() shouldBe setOf("")
+                schedulers[READER] shouldBe ReaderLeaseKeeper.SCHEDULER
+                schedulers.filterKeys { it != REAPER && it != READER }.values.toSet() shouldBe setOf("")
             }
             beanMethod.getAnnotation(Bean::class.java).name.toList() shouldBe listOf(PoolReaperTaskScheduler.BEAN_NAME)
             (PoolReaperTaskScheduler.BEAN_NAME == DEFAULT_SCHEDULER_BEAN) shouldBe false
@@ -269,7 +270,7 @@ class ReaperDelayDerivationTest {
 
         /** Spring's registrar resolves an unnamed `@Scheduled` to the bean of this name (`ScheduledAnnotationBeanPostProcessor`). */
         const val DEFAULT_SCHEDULER_BEAN = "taskScheduler"
-        const val JOB_COUNT = 5
+        const val JOB_COUNT = 6
         const val EXPECTED_DELAY_SECONDS = 7L
         const val EXPECTED_DEADLINE_SECONDS = 65L
         const val HIKARI_DEFAULT_CONNECTION_TIMEOUT_SECONDS = 30L
@@ -283,8 +284,9 @@ class ReaperDelayDerivationTest {
         /** The assertion keeps an order of magnitude below the bound; the printed rounds are the measurement. */
         const val MEASURED_MARGIN = 10L
 
-        /** The reaper; the other four (stale sweep, freshness tick, retention, dashboard refresh) name no scheduler. */
+        /** The two dedicated jobs; the four shared jobs (sweep, freshness, retention, refresh) name no scheduler. */
         val REAPER = "${DatasourcePoolReaperScheduler::class.java.name}.${DatasourcePoolReaperScheduler::reap.name}"
+        val READER = "${ReaderLeaseKeeper::class.java.name}.${ReaderLeaseKeeper::heartbeat.name}"
 
         fun h2(name: String): Datasource = Datasource(name = name, displayName = name, dialect = Dialect.H2, jdbcUrl = "jdbc:h2:mem:$name")
 

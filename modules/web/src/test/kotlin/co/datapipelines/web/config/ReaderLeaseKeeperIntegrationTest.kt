@@ -147,6 +147,27 @@ class ReaderLeaseKeeperIntegrationTest {
         }
     }
 
+    @Test
+    fun `a recovered heartbeat retries retirement missed before publication without restoring admission`() {
+        val published = AtomicBoolean(false)
+        val built = Instant.now()
+        keeper.pin(id, "lake", mapOf("sales.orders" to LOCATION), built, physical::get, {
+            if (published.get()) retired.incrementAndGet()
+        }) shouldBe true
+        jdbc.update("DELETE FROM lake_leases WHERE operation_id=?", id)
+        keeper.heartbeat()
+        keeper.valid(id) shouldBe false
+        retired.get() shouldBe 0
+        // Restore the fixture's row to model a full successful round after the earlier loss.
+        leases.acquireReader("sales.orders@${leases.holderInstance}/$id", id, keeper.ttl, built.plus(Duration.ofDays(7)), LOCATION)
+        count() shouldBe 1L
+        published.set(true)
+        keeper.heartbeat()
+        retired.get() shouldBe 1
+        keeper.valid(id) shouldBe false
+        meters.get("datapipelines.lake.reader_lease.lost").counter().count() shouldBe 1.0
+    }
+
     private fun pin() {
         keeper.pin(id, "lake", mapOf("sales.orders" to LOCATION), Instant.now(), physical::get, { retired.incrementAndGet() }) shouldBe true
     }
