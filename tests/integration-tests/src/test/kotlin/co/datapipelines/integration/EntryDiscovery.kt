@@ -1,7 +1,10 @@
 package co.datapipelines.integration
 
+import org.springframework.beans.factory.ListableBeanFactory
 import org.springframework.context.ApplicationContext
+import org.springframework.context.ConfigurableApplicationContext
 import org.springframework.util.AntPathMatcher
+import java.time.Duration
 
 /**
  * **How the running application's entry points are read** — the handler discovery the role walk
@@ -166,6 +169,7 @@ internal object EntryDiscovery {
 internal object EntryContract {
     const val INVENTORY_MARKER = "**The entry inventory:**"
     const val PUBLIC_CONTRACT_MARKER = "**The public contract:**"
+    const val CONDITIONAL_INVENTORY_MARKER = "**The conditional entry inventory:**"
 
     /** One §8.6.1 row. [reachable] is the doc's "reachable from a request" cell: `yes` or `no`, nothing else. */
     data class InventoryRow(
@@ -178,6 +182,28 @@ internal object EntryContract {
         val bounded: String,
     ) {
         /** What the runtime must match exactly. */
+        val key: String get() = "$family | $name | $type | $pattern"
+    }
+
+    /**
+     * One row of §8.6.1's conditional table (#838): a registration the application holds only when
+     * [condition] — the property literal exactly as the configuration tests it — admits it. The
+     * default profile must hold NONE of these rows (`EntryInventoryE2eTest`); a profile suite holds
+     * its profile to the default inventory plus every row whose condition that profile admits
+     * (`LakeEnabledEntryInventoryE2eTest`). [reachable] is the doc's "reachable from a request"
+     * cell: `yes` or `no`, nothing else.
+     */
+    data class ConditionalRow(
+        val family: String,
+        val name: String,
+        val type: String,
+        val pattern: String,
+        val condition: String,
+        val purpose: String,
+        val reachable: Boolean,
+        val bounded: String,
+    ) {
+        /** What the runtime must match exactly — the same four cells as the default inventory's key. */
         val key: String get() = "$family | $name | $type | $pattern"
     }
 
@@ -201,6 +227,11 @@ internal object EntryContract {
     fun inventory(doc: String): List<InventoryRow> =
         rows(doc, INVENTORY_MARKER, INVENTORY_COLUMNS).map { c ->
             InventoryRow(c[0], c[1], c[2], c[3], c[4], yesNo(c[5], c), c[6])
+        }
+
+    fun conditionalInventory(doc: String): List<ConditionalRow> =
+        rows(doc, CONDITIONAL_INVENTORY_MARKER, CONDITIONAL_INVENTORY_COLUMNS).map { c ->
+            ConditionalRow(c[0], c[1], c[2], c[3], c[4], c[5], yesNo(c[6], c), c[7])
         }
 
     fun publicContract(doc: String): List<PublicRow> =
@@ -258,8 +289,248 @@ internal object EntryContract {
     }
 
     private const val INVENTORY_COLUMNS = 7
+    private const val CONDITIONAL_INVENTORY_COLUMNS = 8
     private const val PUBLIC_COLUMNS = 7
     private val CODE_SPAN = Regex("`([^`]+)`")
+}
+
+/**
+ * **What the running application registers in context** — the in-context families of auth.md
+ * §8.6.1, read off a live `ApplicationContext` by reflection: the servlet container's own servlet
+ * and filter registrations (with each filter's order from Spring Boot's sorted initializers), every
+ * filter of every Spring Security chain in the order the chain runs them, every handler mapping,
+ * every `@Scheduled` task and every db-scheduler `Task` bean. Lived inside `EntryInventoryE2eTest`
+ * until #838 needed the same readers for the lake-enabled profile
+ * (`LakeEnabledEntryInventoryE2eTest`); both suites compare what the application REGISTERS with
+ * what the reviewed docs say — the default profile to the default inventory and NONE of the
+ * conditional rows, the lake-enabled profile to the default inventory plus every conditional row
+ * whose condition it admits.
+ */
+internal object EntryRuntime {
+    /** One runtime entry, rendered exactly as its §8.6.1 row must read. */
+    data class Entry(
+        val family: String,
+        val name: String,
+        val type: String,
+        val pattern: String,
+    ) {
+        val key: String get() = "$family | $name | $type | $pattern"
+    }
+
+    fun servlets(context: ApplicationContext): List<Entry> {
+        val registrations = SERVLET_CONTEXT.getMethod("getServletRegistrations").invoke(servletContextOf(context)) as Map<*, *>
+        return registrations.map { (name, registration) ->
+            @Suppress("UNCHECKED_CAST")
+            val mappings = SERVLET_REGISTRATION.getMethod("getMappings").invoke(registration) as Collection<String>
+            Entry("servlet", name as String, className(registration!!), mappings.sorted().joinToString(", ").ifEmpty { "no mapping" })
+        }
+    }
+
+    /** Container filter registrations, each with the order Spring Boot's sorted initializers gave it (`container` when none did). */
+    fun filters(context: ApplicationContext): List<Entry> {
+        val registrations = SERVLET_CONTEXT.getMethod("getFilterRegistrations").invoke(servletContextOf(context)) as Map<*, *>
+        val orders = initializerOrders(context)
+        return registrations.map { (name, registration) ->
+            @Suppress("UNCHECKED_CAST")
+            val urls = FILTER_REGISTRATION.getMethod("getUrlPatternMappings").invoke(registration) as Collection<String>
+
+            @Suppress("UNCHECKED_CAST")
+            val servlets = FILTER_REGISTRATION.getMethod("getServletNameMappings").invoke(registration) as Collection<String>
+            val type = className(registration!!)
+            val mapped = (urls.sorted() + servlets.sorted().map { "servlet:$it" }).joinToString(", ")
+            Entry("filter", name as String, type, "$mapped · order ${orders[type] ?: "container"}")
+        }
+    }
+
+    /** `filter class -> order`, from `ServletContextInitializerBeans` — the sorted list Spring Boot registered from. */
+    private fun initializerOrders(context: ApplicationContext): Map<String, String> {
+        val beanFactory = (context as ConfigurableApplicationContext).beanFactory
+        val initializerBeans =
+            Class
+                .forName("org.springframework.boot.web.servlet.ServletContextInitializerBeans")
+                .getConstructor(ListableBeanFactory::class.java, emptyArray<Class<*>>().javaClass)
+                .newInstance(beanFactory, emptyArray<Class<*>>()) as Iterable<*>
+        return initializerBeans
+            .filter { FILTER_REGISTRATION_BEAN.isInstance(it) }
+            .associate { bean ->
+                val filter = FILTER_REGISTRATION_BEAN.getMethod("getFilter").invoke(bean)
+                simpleName(filter.javaClass) to REGISTRATION_BEAN.getMethod("getOrder").invoke(bean).toString()
+            }
+    }
+
+    /** Every filter of every Spring Security chain, in the order `FilterChainProxy` runs them. */
+    fun securityChain(context: ApplicationContext): List<Entry> {
+        val proxy = context.getBean("springSecurityFilterChain")
+        val chains = FILTER_CHAIN_PROXY.getMethod("getFilterChains").invoke(proxy) as List<*>
+        return chains.withIndex().flatMap { (chainIndex, chain) ->
+            val matcher = DEFAULT_SECURITY_FILTER_CHAIN.getMethod("getRequestMatcher").invoke(chain).toString()
+            val filters = SECURITY_FILTER_CHAIN.getMethod("getFilters").invoke(chain) as List<*>
+            filters.withIndex().map { (index, filter) ->
+                Entry("security-chain", "chain ${chainIndex + 1} #%02d".format(index + 1), simpleName(filter!!.javaClass), matcher)
+            }
+        }
+    }
+
+    /**
+     * Every `HandlerMapping` bean. The annotated-handler mapping is a pointer (its routes are §7.6's
+     * and §8.6.2's); a URL mapping lists its URL keys; a functional-route mapping says whether any
+     * route function exists. A mapping of any other kind fails: it is a new entry mechanism and needs
+     * its own adapter here before it ships (record §4).
+     */
+    fun handlerMappings(context: ApplicationContext): List<Entry> =
+        beansOf(context, HANDLER_MAPPING).map { (name, mapping) ->
+            val pattern =
+                when {
+                    REQUEST_MAPPING_HANDLER_MAPPING.isInstance(mapping) -> {
+                        "handler methods — auth.md §7.6 and §8.6.2"
+                    }
+
+                    REQUEST_MAPPING_INFO_HANDLER_MAPPING.isInstance(mapping) -> {
+                        // A second annotated-style mapping (actuator's additional health paths): its
+                        // mappings are listed here, because §7.6 knows only the application's handlers.
+                        val infos = REQUEST_MAPPING_INFO_HANDLER_MAPPING.getMethod("getHandlerMethods").invoke(mapping) as Map<*, *>
+                        infos.keys
+                            .map { it.toString() }
+                            .sorted()
+                            .joinToString(", ")
+                            .ifEmpty { "no mapping" }
+                    }
+
+                    URL_HANDLER_MAPPING.isInstance(mapping) -> {
+                        val keys = (URL_HANDLER_MAPPING.getMethod("getHandlerMap").invoke(mapping) as Map<*, *>).keys.map { it.toString() }
+                        val root =
+                            URL_HANDLER_MAPPING
+                                .getMethod("getRootHandler")
+                                .invoke(mapping)
+                                ?.let { listOf("(root)") }
+                                .orEmpty()
+                        (keys.sorted() + root).joinToString(", ").ifEmpty { "no URL" }
+                    }
+
+                    ROUTER_FUNCTION_MAPPING.isInstance(mapping) -> {
+                        val routes = ROUTER_FUNCTION_MAPPING.getMethod("getRouterFunction").invoke(mapping)
+                        if (routes == null) "no route function" else "route functions: $routes"
+                    }
+
+                    else -> {
+                        error("handler mapping '$name' (${mapping.javaClass.name}) is a kind this inventory cannot read — add its adapter")
+                    }
+                }
+            Entry("handler-mapping", name, simpleName(mapping.javaClass), pattern)
+        }
+
+    fun scheduledTasks(context: ApplicationContext): List<Entry> =
+        scheduled(context).map { (runnable, trigger) ->
+            val qualified = runnable.toString()
+            val name = qualified.substringBeforeLast('.').substringAfterLast('.') + "#" + qualified.substringAfterLast('.')
+            Entry("scheduled", name, trigger.first, trigger.second)
+        }
+
+    /**
+     * #9 — every db-scheduler `Task` bean the context holds (the scheduler's jobs), as
+     * `scheduler-task | <task name> | recurring|one-time | <schedule>`. Read by reflection: the
+     * library's types are not on this module's compile classpath (they stay behind `modules/scheduler`).
+     */
+    fun schedulerTasks(context: ApplicationContext): List<Entry> =
+        beansOf(context, SCHEDULER_TASK).values.map { task ->
+            val name = SCHEDULER_TASK.getMethod("getName").invoke(task) as String
+            if (RECURRING_TASK.isInstance(task)) {
+                // The library exposes neither a recurring task's schedule nor a FixedDelay's duration;
+                // both are private fields. A schedule of another shape renders as itself (and so
+                // fails the comparison until its row is written).
+                val schedule = RECURRING_TASK.getDeclaredField("schedule").apply { isAccessible = true }.get(task)
+                val rendered =
+                    if (FIXED_DELAY.isInstance(schedule)) {
+                        "every " + FIXED_DELAY.getDeclaredField("duration").apply { isAccessible = true }.get(schedule)
+                    } else {
+                        schedule.toString()
+                    }
+                Entry("scheduler-task", name, "recurring", rendered)
+            } else {
+                Entry("scheduler-task", name, "one-time", "one instance per recorded run")
+            }
+        }
+
+    /** The db-scheduler task beans' classes — the B5 check's subjects (`EntryInventoryE2eTest`). */
+    fun schedulerTaskBeanTypes(context: ApplicationContext): List<Class<*>> = beansOf(context, SCHEDULER_TASK).values.map { it.javaClass }
+
+    /** `(the task's runnable, (trigger kind, trigger rendering))` for every `@Scheduled` task the holders registered. */
+    private fun scheduled(context: ApplicationContext): List<Pair<Any, Pair<String, String>>> =
+        beansOf(context, SCHEDULED_TASK_HOLDER)
+            .values
+            .flatMap { holder ->
+                (SCHEDULED_TASK_HOLDER.getMethod("getScheduledTasks").invoke(holder) as Set<*>).map { scheduledTask ->
+                    val task = scheduledTask!!.javaClass.getMethod("getTask").invoke(scheduledTask)
+                    val runnable = TASK.getMethod("getRunnable").invoke(task)
+                    runnable to trigger(task)
+                }
+            }.distinctBy { it.first.toString() }
+
+    private fun trigger(task: Any): Pair<String, String> =
+        when {
+            INTERVAL_TASK.isInstance(task) -> {
+                val kind = if (task.javaClass.simpleName == "FixedRateTask") "fixedRate" else "fixedDelay"
+                val interval = INTERVAL_TASK.getMethod("getIntervalDuration").invoke(task) as Duration
+                val initial = INTERVAL_TASK.getMethod("getInitialDelayDuration").invoke(task) as Duration
+                kind to if (initial.isZero) "every $interval" else "every $interval, first after $initial"
+            }
+
+            CRON_TASK.isInstance(task) -> {
+                "cron" to CRON_TASK.getMethod("getExpression").invoke(task).toString()
+            }
+
+            else -> {
+                "trigger" to task.toString()
+            }
+        }
+
+    /** The classes whose methods the scheduled tasks run — the B5 check's subjects. */
+    fun scheduledTargets(context: ApplicationContext): List<Class<*>> =
+        scheduled(context).map { (runnable, _) ->
+            val qualified = runnable.toString()
+            Class.forName(qualified.substringBeforeLast('.'))
+        }
+
+    /** The classes of every registered request handler — a job's bean may be none of them (B5). */
+    fun handlerBeanTypes(context: ApplicationContext): Set<Class<*>> {
+        val mapping = context.getBean("requestMappingHandlerMapping")
+        val methods = mapping.javaClass.getMethod("getHandlerMethods").invoke(mapping) as Map<*, *>
+        return methods.values.map { it!!.javaClass.getMethod("getBeanType").invoke(it) as Class<*> }.toSet()
+    }
+
+    private fun servletContextOf(context: ApplicationContext): Any = context.javaClass.getMethod("getServletContext").invoke(context)
+
+    @Suppress("UNCHECKED_CAST")
+    private fun beansOf(context: ApplicationContext, type: Class<*>): Map<String, Any> = context.getBeansOfType(type as Class<Any>)
+
+    private fun className(registration: Any): String =
+        (REGISTRATION.getMethod("getClassName").invoke(registration) as String).substringAfterLast('.')
+
+    private fun simpleName(type: Class<*>): String = type.name.substringAfterLast('.')
+
+    private val SERVLET_CONTEXT: Class<*> = Class.forName("jakarta.servlet.ServletContext")
+    private val REGISTRATION: Class<*> = Class.forName("jakarta.servlet.Registration")
+    private val SERVLET_REGISTRATION: Class<*> = Class.forName("jakarta.servlet.ServletRegistration")
+    private val FILTER_REGISTRATION: Class<*> = Class.forName("jakarta.servlet.FilterRegistration")
+    private val REGISTRATION_BEAN: Class<*> = Class.forName("org.springframework.boot.web.servlet.RegistrationBean")
+    private val FILTER_REGISTRATION_BEAN: Class<*> = Class.forName("org.springframework.boot.web.servlet.AbstractFilterRegistrationBean")
+    private val SECURITY_FILTER_CHAIN: Class<*> = Class.forName("org.springframework.security.web.SecurityFilterChain")
+    private val FILTER_CHAIN_PROXY: Class<*> = Class.forName("org.springframework.security.web.FilterChainProxy")
+    private val DEFAULT_SECURITY_FILTER_CHAIN: Class<*> = Class.forName("org.springframework.security.web.DefaultSecurityFilterChain")
+    private val HANDLER_MAPPING: Class<*> = Class.forName("org.springframework.web.servlet.HandlerMapping")
+    private val REQUEST_MAPPING_HANDLER_MAPPING: Class<*> =
+        Class.forName("org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping")
+    private val REQUEST_MAPPING_INFO_HANDLER_MAPPING: Class<*> =
+        Class.forName("org.springframework.web.servlet.mvc.method.RequestMappingInfoHandlerMapping")
+    private val URL_HANDLER_MAPPING: Class<*> = Class.forName("org.springframework.web.servlet.handler.AbstractUrlHandlerMapping")
+    private val ROUTER_FUNCTION_MAPPING: Class<*> = Class.forName("org.springframework.web.servlet.function.support.RouterFunctionMapping")
+    private val SCHEDULED_TASK_HOLDER: Class<*> = Class.forName("org.springframework.scheduling.config.ScheduledTaskHolder")
+    private val TASK: Class<*> = Class.forName("org.springframework.scheduling.config.Task")
+    private val INTERVAL_TASK: Class<*> = Class.forName("org.springframework.scheduling.config.IntervalTask")
+    private val CRON_TASK: Class<*> = Class.forName("org.springframework.scheduling.config.CronTask")
+    private val SCHEDULER_TASK: Class<*> = Class.forName("com.github.kagkarlsson.scheduler.task.Task")
+    private val RECURRING_TASK: Class<*> = Class.forName("com.github.kagkarlsson.scheduler.task.helper.RecurringTask")
+    private val FIXED_DELAY: Class<*> = Class.forName("com.github.kagkarlsson.scheduler.task.schedule.FixedDelay")
 }
 
 /**
