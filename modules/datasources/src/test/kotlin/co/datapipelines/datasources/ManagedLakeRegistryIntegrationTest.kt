@@ -149,6 +149,32 @@ class ManagedLakeRegistryIntegrationTest {
         }
     }
 
+    /**
+     * #845 (B.3, the upgrade note): a release that adds `egress_proxy` to the configured row RESYNCs the stored row on
+     * its first boot (sameManagedShape compares the dialect map whole), retiring the pool built without the proxy;
+     * the next boot is UNCHANGED, and dropping the proxy from configuration RESYNCs again.
+     */
+    @Test
+    fun `845 - an egress proxy added by an upgrade re-syncs the row on the first boot, then is unchanged`() {
+        val registry = registry()
+        try {
+            registry.syncManagedLake(managed(), owner) shouldBe ManagedLakeSync.CREATED
+            val withoutProxy = registry.poolFor(registry.get(LAKE).shouldNotBeNull())
+
+            registry.syncManagedLake(managed(egressProxy = "egress-proxy:3128"), owner) shouldBe ManagedLakeSync.RESYNCED
+
+            assertAll(
+                { registry.get(LAKE).shouldNotBeNull().properties.dialect[LakeHttpBounds.EGRESS_PROXY_KEY] shouldBe "egress-proxy:3128" },
+                { registry.poolFor(registry.get(LAKE).shouldNotBeNull()) shouldNotBe withoutProxy },
+            )
+            registry.syncManagedLake(managed(egressProxy = "egress-proxy:3128"), owner) shouldBe ManagedLakeSync.UNCHANGED
+            registry.syncManagedLake(managed(), owner) shouldBe ManagedLakeSync.RESYNCED
+            registry.get(LAKE).shouldNotBeNull().properties.dialect.containsKey(LakeHttpBounds.EGRESS_PROXY_KEY) shouldBe false
+        } finally {
+            registry.shutdown()
+        }
+    }
+
     @Test
     fun `a live row that is not the managed one holds the name - NAME_TAKEN, and the row is untouched`() {
         val registry = registry()
@@ -504,7 +530,10 @@ class ManagedLakeRegistryIntegrationTest {
 
     // ------------------ fixtures
 
-    private fun managed(secret: String = READER_SECRET) =
+    private fun managed(
+        secret: String = READER_SECRET,
+        egressProxy: String? = null,
+    ) =
         Datasource(
             name = LAKE,
             displayName = "Managed lake",
@@ -524,7 +553,7 @@ class ManagedLakeRegistryIntegrationTest {
                             "endpoint" to "localhost:9",
                             "url_style" to "path",
                             "memory_limit" to "512MB",
-                        ),
+                        ) + listOfNotNull(egressProxy?.let { LakeHttpBounds.EGRESS_PROXY_KEY to it }),
                 ),
             isReadonly = true,
         )
