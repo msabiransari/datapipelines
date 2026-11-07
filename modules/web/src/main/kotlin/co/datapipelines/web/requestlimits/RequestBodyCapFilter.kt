@@ -356,7 +356,7 @@ class RequestBodyCapFilter(
          */
         val DRAIN_BYTES: Long = CAP_BYTES + DRAIN_MARGIN_BYTES
 
-        /** The default `server.tomcat.max-swallow-size`, 2 MiB: what Tomcat already reads of any refused body. */
+        /** Fixed 2 MiB margin: matches the default non-413 swallow limit but never tracks that setting. */
         const val DRAIN_MARGIN_BYTES: Long = 2L * 1024 * 1024
 
         /**
