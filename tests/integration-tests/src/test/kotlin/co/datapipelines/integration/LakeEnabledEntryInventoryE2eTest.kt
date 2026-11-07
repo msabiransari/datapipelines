@@ -10,8 +10,8 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.ApplicationContext
 import org.springframework.test.annotation.DirtiesContext
-import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.context.DynamicPropertyRegistry
+import org.springframework.test.context.DynamicPropertySource
 
 /**
  * **The lake-enabled profile is held to the default entry inventory plus every conditional row its
@@ -92,9 +92,11 @@ class LakeEnabledEntryInventoryE2eTest {
         withClue("lake-profile @Scheduled targets that are also request handlers") { reachable.map { it.name }.shouldBeEmpty() }
         // #9: a db-scheduler task bean is a job too — never a request handler.
         withClue("lake-profile db-scheduler task beans that are also request handlers") {
-            EntryRuntime.schedulerTaskBeanTypes(context)
+            EntryRuntime
+                .schedulerTaskBeanTypes(context)
                 .filter { task -> handlerTypes.any { it.isAssignableFrom(task) } }
-                .map { it.name }.shouldBeEmpty()
+                .map { it.name }
+                .shouldBeEmpty()
         }
         conditional.size shouldBeGreaterThanOrEqual CONDITIONAL_FLOOR
     }

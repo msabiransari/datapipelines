@@ -88,7 +88,9 @@ class EntryInventoryE2eTest : EntryAssuranceE2eBase() {
 
         // #838: a conditional row describes a registration its condition must admit — the default
         // profile, whose boot never sets the condition's property, must hold NONE of them.
-        withClue("conditional entry inventory rows registered in the default profile — a conditional entry appeared without its condition") {
+        withClue(
+            "conditional entry inventory rows registered in the default profile — a conditional entry appeared without its condition",
+        ) {
             conditionalInventory.map { it.key }.intersect(runtime.map { it.key }.toSet()).joinToString("\n") shouldBe ""
         }
 

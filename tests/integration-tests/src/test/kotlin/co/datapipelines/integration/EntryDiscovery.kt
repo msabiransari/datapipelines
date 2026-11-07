@@ -501,7 +501,10 @@ internal object EntryRuntime {
     private fun servletContextOf(context: ApplicationContext): Any = context.javaClass.getMethod("getServletContext").invoke(context)
 
     @Suppress("UNCHECKED_CAST")
-    private fun beansOf(context: ApplicationContext, type: Class<*>): Map<String, Any> = context.getBeansOfType(type as Class<Any>)
+    private fun beansOf(
+        context: ApplicationContext,
+        type: Class<*>,
+    ): Map<String, Any> = context.getBeansOfType(type as Class<Any>)
 
     private fun className(registration: Any): String =
         (REGISTRATION.getMethod("getClassName").invoke(registration) as String).substringAfterLast('.')
