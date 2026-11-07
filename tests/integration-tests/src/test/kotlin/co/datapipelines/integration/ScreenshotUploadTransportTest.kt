@@ -1,5 +1,6 @@
 package co.datapipelines.integration
 
+import ch.qos.logback.classic.Level
 import co.datapipelines.DatapipelinesApplication
 import io.kotest.matchers.comparables.shouldBeLessThan
 import io.kotest.matchers.shouldBe
@@ -8,7 +9,10 @@ import io.restassured.http.Header
 import io.restassured.http.Headers
 import io.restassured.response.Response
 import org.junit.jupiter.api.AfterAll
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
@@ -24,14 +28,16 @@ import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
-import java.net.SocketTimeoutException
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.sql.DriverManager
 import java.time.Duration
+import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.Executors
+import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
@@ -49,27 +55,56 @@ class ScreenshotUploadTransportTest {
     @Autowired
     private lateinit var context: ApplicationContext
 
+    private val rootLogger = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as ch.qos.logback.classic.Logger
+    private lateinit var refusalLogs: SnapshotListAppender
+
+    @BeforeEach
+    fun captureRefusalLogs() {
+        refusalLogs = SnapshotListAppender()
+        rootLogger.addAppender(refusalLogs)
+    }
+
+    @AfterEach
+    fun noRefusalErrorDispatch() {
+        try {
+            awaitIdleDrains()
+        } finally {
+            rootLogger.detachAppender(refusalLogs)
+            refusalLogs.stop()
+        }
+        val unexpected =
+            refusalLogs.events().filter {
+                it.level == Level.ERROR || it.formattedMessage.contains("DEFAULT DENY") || it.formattedMessage.contains("/error")
+            }
+        println("event=drain.refusal.unexpected_logs count=${unexpected.size}")
+        unexpected.map { it.loggerName + ": " + it.formattedMessage } shouldBe emptyList()
+    }
+
+    @Test
+    fun `561 running Tomcat context disables aborted upload swallowing`() {
+        val server = context.javaClass.getMethod("getWebServer").invoke(context)
+        val tomcat = server.javaClass.getMethod("getTomcat").invoke(server)
+        val host = tomcat.javaClass.getMethod("getHost").invoke(tomcat)
+        val children = host.javaClass.getMethod("findChildren").invoke(host) as Array<*>
+        val flags =
+            children.map { child ->
+                checkNotNull(child).javaClass.getMethod("getSwallowAbortedUploads").invoke(child) as Boolean
+            }
+        println("event=drain.context.swallow_aborted_uploads values=$flags")
+        flags shouldBe listOf(false)
+    }
+
     @Test
     fun `declared cap plus one receives the exact refusal with the default bounded drain`() {
         declaredRefusal(CAP + 1)
     }
 
     @Test
-    fun `abandoned gigabyte declaration closes after bounded swallow`() {
+    fun `abandoned gigabyte declaration closes without swallowing`() {
         swallowCap() shouldBe SWALLOW_CAP
-        Socket("127.0.0.1", port).use { socket ->
-            socket.soTimeout = SOCKET_TIMEOUT
-            val headers = "POST $PATH HTTP/1.1\r\nHost: localhost\r\nContent-Type: image/png\r\nContent-Length: $ABANDONED_BODY\r\n\r\n"
-            val output = socket.getOutputStream()
-            output.write(headers.toByteArray(Charsets.US_ASCII))
-            // Supply just beyond the default drain bound, abandoning the rest of the declaration.
-            output.write(ByteArray(SWALLOW_CAP + BUFFER_SIZE))
-            output.flush()
-            val response = socket.getInputStream().readAllBytes().toString(Charsets.UTF_8)
-            response.substringBefore("\r\n").split(' ')[1] shouldBe "413"
-            println(
-                "event=transport.abandoned declared=$ABANDONED_BODY supplied=${SWALLOW_CAP + BUFFER_SIZE} closed=true response=$response",
-            )
+        openTrickle(PATH, readRefusal = false, declared = ABANDONED_BODY).use { socket ->
+            val response = closedResponse(socket, SOCKET_TIMEOUT)
+            println("event=transport.abandoned declared=$ABANDONED_BODY supplied=0 closed=true response=$response")
         }
     }
 
@@ -90,15 +125,30 @@ class ScreenshotUploadTransportTest {
 
     @Test
     fun `561 trickling refused screenshot closes within budget plus connector timeout`() {
-        val socket = openTrickle(PATH)
-        socket.use {
+        val root = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as ch.qos.logback.classic.Logger
+        val events =
+            capturingLogEvents(root) {
+                openTrickle(PATH, readRefusal = false).use { socket ->
+                    val ticker = trickle(listOf(socket))
+                    try {
+                        closedResponse(socket, TRICKLE_BOUND_MS)
+                    } finally {
+                        ticker.shutdownNow()
+                    }
+                }
+            }
+        val errors = events.filter { it.level == Level.ERROR }
+        println("event=drain.close.error_logs count=${errors.size}")
+        events.any { it.formattedMessage.contains("event=request.body_drain_expired") } shouldBe true
+        errors.map { it.loggerName + ": " + it.formattedMessage } shouldBe emptyList()
+    }
+
+    @Test
+    fun `561 over-bound platform trickler closes within one read timeout and receives 413 first`() {
+        openTrickle(PLATFORM_PATH, readRefusal = false, declared = LARGE_BODY).use { socket ->
             val ticker = trickle(listOf(socket))
-            val started = System.nanoTime()
             try {
-                socket.getInputStream().readAllBytes()
-                val elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
-                println("event=drain.trickle.closed elapsed_ms=$elapsed bound_ms=$TRICKLE_BOUND_MS")
-                elapsed shouldBeLessThan TRICKLE_BOUND_MS.toLong()
+                closedResponse(socket, SOCKET_TIMEOUT)
             } finally {
                 ticker.shutdownNow()
             }
@@ -112,13 +162,14 @@ class ScreenshotUploadTransportTest {
     }
 
     @Test
-    fun `559 huge platform declaration still closes after bounded swallow`() {
+    fun `559 huge platform declaration closes without swallowing`() {
         forcedClose(LARGE_BODY, PLATFORM_PATH)
     }
 
     @Test
-    fun `561 saturated plain close measurement and saturation meter`() {
+    fun `561 saturated close measurement and saturation meter`() {
         val before = saturationCount()
+        val goneBefore = drainOutcomeCount("client_gone")
         val sockets = mutableListOf<Socket>()
         try {
             repeat(8) { sockets += openTrickle(if (it % 2 == 0) PATH else PLATFORM_PATH) }
@@ -129,43 +180,141 @@ class ScreenshotUploadTransportTest {
             val started = System.nanoTime()
             val busyBefore = busyThreads()
             try {
-                val closed =
-                    try {
-                        ninth.getInputStream().readAllBytes()
-                        true
-                    } catch (_: SocketTimeoutException) {
-                        false
-                    }
+                closedResponse(ninth, SOCKET_TIMEOUT)
                 val elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
                 println(
-                    "event=drain.plain-close.measurement elapsed_ms=$elapsed closed=$closed " +
+                    "event=drain.close.measurement elapsed_ms=$elapsed closed=true " +
                         "busy_start=$busyBefore busy_end=${busyThreads()}",
                 )
             } finally {
                 ticker.shutdownNow()
             }
-            ninth.soTimeout = SOCKET_TIMEOUT
-            val stopped = System.nanoTime()
-            try {
-                ninth.getInputStream().readAllBytes()
-                println("event=drain.plain-close.idle closed=true idle_ms=${TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - stopped)}")
-            } catch (_: IOException) {
-                println(
-                    "event=drain.plain-close.idle read_failed=true idle_ms=${TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - stopped)}",
-                )
-            }
             (saturationCount() - before >= 1.0) shouldBe true
             println("event=drain.saturation.count delta=${saturationCount() - before}")
         } finally {
-            sockets.forEach { it.close() }
+            resetClients(sockets.take(8))
+            sockets.drop(8).forEach { it.close() }
+        }
+        awaitIdleDrains()
+        (drainOutcomeCount("client_gone") - goneBefore) shouldBe 8.0
+        println("event=drain.abort.measured client_gone_delta=${drainOutcomeCount("client_gone") - goneBefore} busy=${busyThreads()}")
+    }
+
+    @Test
+    fun `561 eight reset clients are counted without error dispatch`() {
+        val before = drainOutcomeCount("client_gone")
+        val sockets = mutableListOf<Socket>()
+        try {
+            repeat(8) { sockets += openTrickle(if (it % 2 == 0) PATH else PLATFORM_PATH) }
+        } finally {
+            resetClients(sockets)
+        }
+        awaitIdleDrains()
+        (drainOutcomeCount("client_gone") - before) shouldBe 8.0
+        busyThreads() shouldBe 0
+        println("event=drain.abort.count client_gone_delta=${drainOutcomeCount("client_gone") - before} busy=${busyThreads()}")
+    }
+
+    @Test
+    fun `561 silent refused client times out without error dispatch`() {
+        val before = drainOutcomeCount("client_gone")
+        openTrickle(PATH, readRefusal = false).use { socket -> closedResponse(socket, SOCKET_TIMEOUT) }
+        awaitIdleDrains()
+        (drainOutcomeCount("client_gone") - before) shouldBe 1.0
+        println("event=drain.silent.count client_gone_delta=${drainOutcomeCount("client_gone") - before} busy=${busyThreads()}")
+    }
+
+    @Test
+    fun `561 unknown API path keeps the ordinary 404 envelope`() {
+        ensureNegativeActor()
+        val session = E2eSession.jwt(JWT_SECRET, negativePerson.toString(), "drain561@transport.test", workspace = "drain561")
+        val request =
+            HttpRequest
+                .newBuilder(URI.create("http://127.0.0.1:$port/api/v1/561-unknown-endpoint"))
+                .header("Cookie", E2eSession.cookieHeader(session))
+                .GET()
+                .build()
+        val answer = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
+        answer.statusCode() shouldBe 404
+        answer.body().contains("pipeline.execution.not_found") shouldBe true
+        answer.body().contains("endpoint_not_found") shouldBe true
+    }
+
+    private fun ensureNegativeActor() {
+        if (negativeSeeded) return
+        E2eClean.beforeSeeding()
+        DriverManager
+            .getConnection(SharedE2e.postgres.jdbcUrl, SharedE2e.postgres.username, SharedE2e.postgres.password)
+            .use { connection ->
+                insertSeed(
+                    connection,
+                    "INSERT INTO workspaces (id, name, display_name) VALUES (?, ?, ?)",
+                    negativeWorkspace,
+                    "drain561",
+                    "Drain 561",
+                )
+                insertSeed(
+                    connection,
+                    "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) " +
+                        "VALUES (?, ?, ?, ?, ?, TRUE, FALSE)",
+                    negativePerson,
+                    "drain561@transport.test",
+                    "Drain author",
+                    "test",
+                    negativePerson.toString(),
+                )
+                insertSeed(
+                    connection,
+                    "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES (?, ?, ?)",
+                    negativeWorkspace,
+                    negativePerson,
+                    "author",
+                )
+            }
+        negativeSeeded = true
+    }
+
+    private fun insertSeed(
+        connection: java.sql.Connection,
+        sql: String,
+        vararg values: Any,
+    ) {
+        connection.prepareStatement(sql).use { statement ->
+            values.forEachIndexed { index, value -> statement.setObject(index + 1, value) }
+            statement.executeUpdate()
         }
     }
 
+    private fun resetClients(sockets: List<Socket>) {
+        sockets.forEach {
+            it.setSoLinger(true, 0)
+            it.close()
+        }
+    }
+
+    /** Await actual permit release after closing sockets, following the stream suites' bounded condition poll. */
+    private fun awaitIdleDrains() {
+        val filter = context.getBean("requestBodyCapFilter")
+        val field =
+            filter.javaClass.declaredFields
+                .single { it.type == Semaphore::class.java }
+                .apply { isAccessible = true }
+        val permits = field.get(filter) as Semaphore
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(DRAIN_CLEANUP_MS)
+        while (permits.availablePermits() != 8 || busyThreads() != 0) {
+            check(System.nanoTime() < deadline) { "refused drains or container request cleanup did not finish" }
+            Thread.sleep(DRAIN_POLL_MS)
+        }
+        println("event=drain.cleanup permits=${permits.availablePermits()} busy_threads=${busyThreads()}")
+    }
+
     /** Read the application's registry without adding an integration-module dependency. */
-    private fun saturationCount(): Double {
+    private fun saturationCount(): Double = drainOutcomeCount("saturated")
+
+    private fun drainOutcomeCount(outcome: String): Double {
         val registry = context.getBean(Class.forName("io.micrometer.core.instrument.MeterRegistry"))
         val search = registry.javaClass.getMethod("find", String::class.java).invoke(registry, "datapipelines.web.request_body_drain")
-        val tagged = search.javaClass.getMethod("tag", String::class.java, String::class.java).invoke(search, "outcome", "saturated")
+        val tagged = search.javaClass.getMethod("tag", String::class.java, String::class.java).invoke(search, "outcome", outcome)
         val counters = tagged.javaClass.getMethod("counters").invoke(tagged) as Collection<*>
         return counters.sumOf { counter ->
             checkNotNull(counter).javaClass.getMethod("count").invoke(counter) as Double
@@ -177,13 +326,13 @@ class ScreenshotUploadTransportTest {
     private fun openTrickle(
         path: String,
         readRefusal: Boolean = true,
+        declared: Int = CAP + 1,
     ): Socket {
         val socket = Socket("127.0.0.1", port)
         try {
             socket.soTimeout = TRICKLE_BOUND_MS
-            val size = CAP + 1
             socket.getOutputStream().write(
-                "POST $path HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/octet-stream\r\nContent-Length: $size\r\n\r\n"
+                "POST $path HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/octet-stream\r\nContent-Length: $declared\r\n\r\n"
                     .toByteArray(Charsets.US_ASCII),
             )
             socket.getOutputStream().flush()
@@ -204,6 +353,36 @@ class ScreenshotUploadTransportTest {
             socket.close()
             throw error
         }
+    }
+
+    /** Read to FIN/RST under one total deadline; every refused close must send its 413 first. */
+    private fun closedResponse(
+        socket: Socket,
+        boundMs: Int,
+    ): String {
+        val started = System.nanoTime()
+        val deadline = started + TimeUnit.MILLISECONDS.toNanos(boundMs.toLong())
+        val received = ByteArrayOutputStream()
+        val buffer = ByteArray(BUFFER_SIZE)
+        var close = "FIN"
+        try {
+            while (true) {
+                val remaining = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime())
+                check(remaining > 0) { "refused socket outlived $boundMs ms" }
+                socket.soTimeout = remaining.coerceAtLeast(1).toInt()
+                val read = socket.getInputStream().read(buffer)
+                if (read < 0) break
+                received.write(buffer, 0, read)
+            }
+        } catch (_: SocketException) {
+            close = "RST"
+        }
+        val elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+        val text = received.toString(Charsets.UTF_8)
+        println("event=drain.close.received elapsed_ms=$elapsed bound_ms=$boundMs close=$close bytes=${received.size()}")
+        text.startsWith("HTTP/1.1 413") shouldBe true
+        elapsed shouldBeLessThan boundMs.toLong()
+        return text
     }
 
     private fun trickle(sockets: List<Socket>): java.util.concurrent.ScheduledExecutorService =
@@ -257,16 +436,11 @@ class ScreenshotUploadTransportTest {
     }
 
     /**
-     * #560: above the drain bound the LARGE upload case no longer samples the natural race — it forces the outcome the
-     * record documents (rest-api §22): the server's 413 is on the wire, the server closes after Tomcat's bounded
-     * swallow, and the client still writing meets the reset. Deterministic by count, not by clock: above the drain
-     * bound the route reads nothing and Tomcat swallows at most 2 MiB, so of a 64 MiB declaration the server reads
-     * only the swallow plus what the kernels buffer (the forced receive buffer, the relay's send buffer); the relay
-     * cannot forward what the server did not read, so at the close its forwarded count is a few MiB against the 64 MiB
-     * declaration and `early` is true by the count alone — the relay resets the client with the response still
-     * withheld, and the JDK client's send throws. The old case asserted the winning side (the 413 read before the
-     * writer met the reset), a race the runner could lose (CI 39053309921); the losing side is the documented one, so
-     * it is the asserted one.
+     * #560 / #561: above the byte bound, the filter flushes the 413 and returns without reading.
+     * The context's swallowAbortedUploads=false skips Tomcat's 413 swallow. The relay forces
+     * the losing writer's outcome: a close before the declared body is forwarded resets the
+     * client with the response withheld, although the 413 itself reached the relay first.
+     * Forwarding is limited by the forced receive buffer and the kernels' in-flight bytes.
      */
     private fun forcedClose(
         size: Int,
@@ -313,7 +487,7 @@ class ScreenshotUploadTransportTest {
                     Regex("\"code\"\\s*:\\s*\"${Regex.escape(refusalCode(path))}\"").containsMatchIn(relay.heldBody) shouldBe true
                 }
                 println("event=transport.forced-close.held close_kind=${relay.closeKind} body=${relay.heldBody.take(400)}")
-                // The read was bounded: the route did NOT drain to the bound — red if DRAIN_BYTES ever covers this size.
+                // Bounded in-flight bytes, with neither a filter drain nor a Tomcat 413 swallow.
                 relay.forwardedAtClose shouldBeLessThan DRAIN_BOUND.toLong()
                 relay.forwardedAtClose shouldBeLessThan size.toLong()
                 println(
@@ -679,10 +853,15 @@ class ScreenshotUploadTransportTest {
         const val ABANDONED_BODY = 1024 * 1024 * 1024
         const val BUFFER_SIZE = 8192
         const val SOCKET_TIMEOUT = 10000
+        const val DRAIN_CLEANUP_MS = 5000L
+        const val DRAIN_POLL_MS = 10L
         const val TRICKLE_BOUND_MS = 20000
         const val PLATFORM_PATH = "/api/v1/pipelines"
         const val TARGET_ID = "00000000-0000-0000-0000-000000000451"
         const val PATH = "/api/v1/visualizations/$TARGET_ID/tests/sessions/$TARGET_ID/screenshot"
+        private val negativeWorkspace = UUID.randomUUID()
+        private val negativePerson = UUID.randomUUID()
+        private var negativeSeeded = false
         val JWT_SECRET = E2eSession.newSecret()
         val ENCRYPTION_KEY = E2eSession.newSecret()
         val oidc = OidcDiscoveryStub()

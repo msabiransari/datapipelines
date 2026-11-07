@@ -11,12 +11,17 @@ import co.datapipelines.web.config.RequestLimitsProperties
 import io.micrometer.core.instrument.MeterRegistry
 import jakarta.servlet.FilterChain
 import jakarta.servlet.ReadListener
+import jakarta.servlet.RequestDispatcher
 import jakarta.servlet.ServletInputStream
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletRequestWrapper
 import jakarta.servlet.http.HttpServletResponse
+import org.apache.catalina.connector.Request
+import org.apache.catalina.connector.Response
+import org.apache.catalina.valves.ValveBase
 import org.slf4j.LoggerFactory
 import org.springframework.boot.autoconfigure.jackson.Jackson2ObjectMapperBuilderCustomizer
+import org.springframework.boot.web.embedded.tomcat.TomcatContextCustomizer
 import org.springframework.boot.web.servlet.FilterRegistrationBean
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -57,12 +62,15 @@ import java.util.concurrent.Semaphore
  * correlation id and the catalogued code, nothing else. Body-less methods (GET/HEAD/OPTIONS)
  * are skipped: there is nothing to count.
  *
- * `server.tomcat.max-swallow-size` (configuration.md §3.13) bounds how much of a refused body
- * Tomcat drains afterwards. Both routes first drain small declared refusals under fixed byte,
+ * `server.tomcat.max-swallow-size` (configuration.md §3.13) bounds Tomcat's swallow only for
+ * non-413 responses with unread bodies. Both routes drain small declared 413 refusals under fixed byte,
  * time and concurrency bounds (#467 / #559 / #561): screenshots up to 6 MiB, platform bodies up
  * to their effective cap + 2 MiB. A completed drain preserves the 413 for a write-then-read client.
  * The filter budget is 10 s plus one connector timeout (70 s default), with eight permits
- * (560 thread-seconds). Tomcat's later swallow has no total time budget for a trickling sender.
+ * (560 thread-seconds). Expired, saturated and over-bound declarations flush the 413 then close
+ * immediately: the context customizer disables Tomcat's aborted-upload swallow on every 413.
+ * Saturated/over-bound bodies are unread (at most one connector timeout); completed drains have no declared remainder, and
+ * client_gone ends in Tomcat's existing I/O-error cleanup; no 413 remainder is swallowed.
  */
 class RequestBodyCapFilter(
     private val limits: RequestLimitsProperties,
@@ -149,7 +157,9 @@ class RequestBodyCapFilter(
      * #467 / #559 / #561: flush the 413, then discard a small declared body so a write-then-read
      * client can receive it. Both routes share a nonblocking permit and a monotonic deadline.
      * A read already in progress still waits for the connector timeout; the deadline is checked
-     * after every returned read. On expiry/saturation the container's own swallow remains in force.
+     * after every returned read. Expiry, saturation and over-bound declarations flush the 413 then
+     * return normally; Tomcat's context flag closes every 413 without swallowing. Completed drains
+     * have no declared remainder; client_gone ends in Tomcat's existing I/O-error cleanup; no 413 remainder is swallowed.
      */
     private fun drainRefused(
         request: HttpServletRequest,
@@ -158,10 +168,14 @@ class RequestBodyCapFilter(
         bound: Long,
         route: DrainRoute,
     ) {
-        if (declared > bound) return
+        if (declared > bound) {
+            response.flushBuffer()
+            return
+        }
         val started = nanoTime()
         if (!drainPermits.tryAcquire()) {
             recordDrain(DrainOutcome.SATURATED, route, declared, 0, started)
+            response.flushBuffer()
             return
         }
         var readBytes = 0L
@@ -348,16 +362,24 @@ class RequestBodyCapFilter(
         /**
          * Fixed safety budget, not a configuration key (configuration.md §3.13's byte-bound precedent).
          * Checked between reads: an in-flight read can add the connector timeout (60 s default),
-         * hence 10 + 60 = 70 s per filter drain. Tomcat's later swallow is outside this bound.
+         * hence 10 + 60 = 70 s per expired drain, followed by a close without a container swallow.
          */
         val DRAIN_BUDGET: Duration = Duration.ofSeconds(10)
 
         /**
          * Both routes share eight refuse-at-once permits: at the default timeout, at most
          * 8 × (10 + 60) = 560 thread-seconds in concurrent filter drains. A fixed safety ceiling,
-         * not a configuration key; saturation falls back to Tomcat's existing swallow.
+         * not a configuration key; saturation flushes the 413 then Tomcat closes without a swallow.
          */
         const val MAX_CONCURRENT_DRAINS = 8
+
+        /**
+         * #561 / #559: fixed safety wiring, not an operator key (configuration.md §3.14).
+         * Request.finishRequest checks every 413; checkSwallowInput issues DISABLE_SWALLOW_INPUT,
+         * Http11Processor disables input swallowing, and endRequest skips InputFilter.end.
+         * statusDropsConnection(413) then closes the connection without an exception or error-page dispatch.
+         */
+        const val SWALLOW_ABORTED_UPLOADS = false
 
         private val PATH = Regex("^/api/v1/visualizations/[^/]+/tests/sessions/[^/]+/screenshot$")
 
@@ -374,9 +396,43 @@ class RequestBodyCapFilter(
     }
 }
 
+/**
+ * Catalina latches a failed body read before the filter's IOException catch. On that one
+ * already-committed 413 path, mark the error reported before StandardHostValve can include
+ * the error page. Keep the error flag visible; other statuses, uncommitted responses and
+ * non-I/O errors retain their normal container handling (#561 / #559).
+ */
+internal class RefusedBodyReadFailureValve : ValveBase(true) {
+    // Keep the owner's four-part transport boundary visible as one predicate; never broaden it.
+    @Suppress("ComplexCondition")
+    override fun invoke(
+        request: Request,
+        response: Response,
+    ) {
+        try {
+            next.invoke(request, response)
+        } finally {
+            if (response.status == HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE &&
+                response.isCommitted && response.isErrorReportRequired &&
+                request.getAttribute(RequestDispatcher.ERROR_EXCEPTION) is IOException
+            ) {
+                response.setErrorReported()
+            }
+        }
+    }
+}
+
 /** Wiring for the request-body cap (pipeline-contract §13.21, configuration.md §3.31). */
 @Configuration
 class RequestLimitsConfiguration {
+    /** Fixed context-wide 413 close wiring plus the narrow handled-read-failure valve. */
+    @Bean
+    fun refusedUploadCloseCustomizer(): TomcatContextCustomizer =
+        TomcatContextCustomizer { context ->
+            context.swallowAbortedUploads = RequestBodyCapFilter.ScreenshotUploadRoute.SWALLOW_ABORTED_UPLOADS
+            context.pipeline.addValve(RefusedBodyReadFailureValve())
+        }
+
     @Bean
     fun requestBodyCapFilter(
         limits: RequestLimitsProperties,

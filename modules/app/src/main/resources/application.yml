@@ -68,8 +68,11 @@ server:
     # The filter first drains screenshots up to 6 MiB, platform bodies up to their cap + 2 MiB,
     # sharing eight permits and a 10 s budget. A blocking read can add the connector timeout
     # (60 s default): 70 s per filter drain, 560 thread-seconds for eight. Fixed code bounds;
-    # this key does not move them. Expired, saturated and above-bound requests fall back to
-    # this swallow, which has no total time budget for a trickling sender.
+    # this key does not move them. A context customizer fixes swallowAbortedUploads=false:
+    # EVERY 413 closes without swallowing, throwing, or dispatching /error. Saturated and
+    # above-bound bodies are unread (at most one connector timeout). Completed drains have
+    # no declared remainder; client_gone has already failed I/O. This key applies only to
+    # non-413 responses with unread bodies (including skipped GET/HEAD/OPTIONS and other 4xx).
     max-swallow-size: ${SERVER_TOMCAT_MAX_SWALLOW_SIZE:2MB}
 
 # Actuator: the HealthEndpoint bean backs the root-level /health, /ready and /info

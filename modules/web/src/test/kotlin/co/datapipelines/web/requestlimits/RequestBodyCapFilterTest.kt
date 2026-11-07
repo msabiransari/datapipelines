@@ -261,6 +261,7 @@ class RequestBodyCapFilterTest {
             (stream.reads.get() <= 11) shouldBe true
             drainCount(registry, "expired", path) shouldBe 1.0
             availablePermits(bounded) shouldBe 8
+            drainCount(registry, "client_gone", path) shouldBe 0.0
         }
     }
 
@@ -347,7 +348,11 @@ class RequestBodyCapFilterTest {
     fun `561 above each byte bound does not open or count a drain`() {
         listOf(SCREENSHOT_PATH, "/api/v1/pipelines").forEach { path ->
             val stream = DrainStream { -1 }
-            filter.doFilter(drainRequest(path, stream, 64L * 1024 * 1024), MockHttpServletResponse(), MockFilterChain())
+            val refused = MockHttpServletResponse()
+            filter.doFilter(drainRequest(path, stream, 64L * 1024 * 1024), refused, MockFilterChain())
+            refused.isCommitted shouldBe true
+            refused.status shouldBe 413
+            availablePermits(filter) shouldBe 8
             stream.reads.get() shouldBe 0
         }
         meters.meters.sumOf { (it as io.micrometer.core.instrument.Counter).count() } shouldBe 0.0
