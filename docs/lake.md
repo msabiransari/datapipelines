@@ -1,10 +1,10 @@
-# The Managed Lake: Table Definitions
+# The Managed Lake: Definitions, Deliveries and Publication
 
-**Status:** v1.3 (#798, dp-lake P3; #810, #811, #812)
+**Status:** v1.6 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append, bounded settlement, whole-tick bound)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
-its Iceberg table to the released definition, which schema changes are applied, and the names involved. The design is
-the dp-lake design record (§5–§8); this document states the behaviour #798 built.
+its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
+immutable delivery. The design is the dp-lake design record (§5–§9); definitions are §1–§5 and delivery/append is §6–§8.
 
 **Scope at v1.0:** the definitions exist as a service in the `lake` module ([Module Structure §5.21](module-structure.md#521-lake)).
 No REST route, MCP tool or screen reaches them yet; the lake surfaces (P8) add them with their roles. The storage is
@@ -234,10 +234,187 @@ Both names are checked before any catalog call or SQL; a name outside the gramma
 
 ---
 
+## 6. Deliveries
+
+A delivery is one immutable folder under the configured landing prefix:
+`<landing-prefix>/<feed>/<delivery-id>/`. The sender uploads one or more CSV files or one or more Parquet
+files, then an **empty `_done` object last**. Mixing file formats is refused. Feed and delivery id each match
+`[a-z0-9_-]{1,64}`; neither can contain a slash. Keep source folders for at least the recovery protection window
+and enable bucket versioning. DP never moves or deletes landing objects.
+
+The guarantee requires the sender to leave the folder unchanged after `_done`. DP records a trusted,
+paginated S3 listing of exact keys, sizes and ETags; its fingerprint covers the sorted triples. It materializes
+only those exact objects into `delivery` and exposes their metadata as `delivery_files(key, size, etag)`.
+After the delivery node's SQL, DP lists again. A changed fingerprint fails as
+`lake.delivery.changed_during_read` with phase `staging`. This detects changes after reading; it is not an
+atomic conditional object read and cannot detect a sender changing an object and restoring its original ETag
+between observations. Versioning helps the operator investigate; this release does not pin reads to version ids.
+
+One pipeline may declare one delivery node, a DQL node using DuckDB tempdb:
+
+```yaml
+settings:
+  tempdb:
+    engine: DUCKDB
+nodes:
+  - id: land
+    type: DQL
+    source: tempdb
+    delivery: {feed: orders, id: "$batch_id"}
+    template: {id: ingestion/read_delivery.sql, version: 1}
+    output: {target: tempdb, table: staged_orders}
+```
+
+The template reads `FROM delivery`; author SQL never needs a path. `id` may be literal or the standard
+`$context_key` reference to a resolved parameter. The resolved value is validated before any S3 request.
+DP loads extensions and writer credentials on its trusted root, materializes the tables, then locks the
+database before author access. External reads and configuration changes remain refused on author connections.
+
+Admission holds one ingestion slot and reserves
+`max-delivery-bytes × staging-expansion-factor` scratch **before listing or opening the database**. Both share
+one `lease-wait-seconds` wait budget; exhaustion is retryable `lake.capacity.busy`. Oversize input is refused
+from the listing. The database closes at execution cleanup; a quarantined native lease keeps its scratch and
+ingestion slot until physical finalization. The PostgreSQL admission clock fixes the job deadline once;
+later lease acquisition and heartbeat do not extend it.
+
+The permanent ledger key is `(table, feed, delivery-id)`. The same fingerprint after PUBLISHED skips that
+table's append and reports **already published**. A different fingerprint under the same key always refuses
+`lake.delivery.changed`; corrected input needs a new delivery id. A FAILED delivery may retry with a fresh
+operation id; permanent attempts retain the older evidence. An unresolved live publication stays busy.
+Targets must be ACTIVE: DEPRECATED refuses ingestion, and ARCHIVED or PURGED is unavailable.
+
+## 7. Append publication
+
+Each target is a DQL/tempdb node with
+`output: {target: datasource, datasource: <managed-lake-name>, table: "namespace.table", mode: append}`.
+There is at most one append per target table; `replace` is refused. Every append's transitive `depends_on`
+must contain **every non-append node**, including the delivery and all validation nodes. A SCRIPT node with
+rejects must be strict. Append nodes may run in parallel with each other; publication is atomic per target
+table, not across several targets. An author who filters rows in SQL publishes the filtered result; those
+omitted rows cannot be published later under the same delivery id.
+
+The effective member or key role needs `lake.append` as well as execute permission. Authors, workspace admins,
+super admins and the system actor hold it; viewers and promoter keys do not. Entry points stamp the grant,
+children inherit it, schedule save checks it, and the runner refuses a missing grant before taking a lease.
+The grant never derives from the user id alone. Draft execution on an authoring server is permitted and its
+recipe records the actual draft body. Receivers may append to their applied definitions.
+
+The DAG evaluates author SQL once into a stable native result and preserves its original column labels and
+types. Under a TABLE lease, the runner conditionally claims RECEIVED → PUBLISHING and validates before creating files.
+Names match using DuckDB's ASCII case-insensitive identifier rule; ambiguous or extra columns are refused.
+Missing optional fields become null; missing required fields, required nulls and incompatible or narrowing
+types are refused. Decimal precision/scale must fit the applied Iceberg schema. Two scans of the stable result
+perform the required-null prepass and file writing without rerunning volatile author SQL.
+
+Files go under the table's `data/` prefix, using Zstandard Parquet, no declared sort order, and its applied
+partition transforms: identity, year, month, day, hour, bucket or truncate. Exceeding
+`max-open-partitions-per-append` fails. An empty result still creates a publication snapshot and permanent
+duplicate evidence, with no data file. The worker never deletes its files, even after a failure or unknown
+outcome. Every Iceberg FileIO refuses and records library deletion requests for later maintenance.
+
+Before committing, DP conditionally creates
+`<table-location>/dp/recipes/<feed>/<delivery-id>/<operation-id>.json` with `If-None-Match: *`.
+A precondition failure is `lake.append.recipe_exists`, a bug signal; DP neither overwrites nor retries that PUT.
+The recipe contains the trusted manifest/fingerprint, actual pipeline body/hash and version or draft marker,
+actual referenced template and child pipeline versions/hashes, resolved parameters, applied definition
+version/body, operation id, worker, time and restore epoch. Raw execute inputs do not invent parameter-set pins;
+the current execution request has no parameter-set provenance. The snapshot records the recipe key and SHA-256.
+
+Parameters support optional **`redact_in_recipe: false` by default**. Opting in replaces that parameter's resolved
+value, default/constraints and supplied child override with `<redacted>` in copied recipe content. Redaction
+does not mutate the executed body or its recorded hash; omitted/false metadata preserves legacy canonical hashes.
+`exact_replay_possible=false` and redacted paths identify recipes requiring
+operator-supplied inputs. This is declared-input redaction, not a scrubber for secrets placed in SQL text,
+descriptions or data. This parameter model has no separate secret logical type.
+
+The recipe's replay flag is also false when a parallel sibling has not resolved its templates yet;
+`unresolved_nodes` names those nodes. A recipe records only artifact hashes actually observed before publication,
+and never guesses a future draft's contents. Such a recipe needs directed reprocessing. Once every node has
+resolved, the flag can be true, provided no input was redacted. Recovery must still verify that every recorded
+artifact hash remains available; a draft reference can change after execution.
+
+Publication refreshes the table and checks permanent revision/attempt evidence before each bounded CAS retry.
+One Iceberg transaction appends all files and sets `dp.delivery.key`, `dp.operation.id`, `dp.recipe` and
+`dp.recipe.sha256`. A normal return stamps PUBLISHED. An in-memory CAS conflict may retry three times;
+classified authority refusals fail, while an unconfirmed commit stays UNKNOWN. Classification uses exception
+types and SQLSTATEs through the bounded cause chain, never localized messages. Periodic heartbeat preserves
+only a live lease, capped by the admitted deadline; loss, deadline or cancellation stops further mutations.
+
+## 8. Settlement and recovery
+
+Permanent `lake_table_revisions` rows, joined with delivery attempts, are the commit evidence. Snapshot expiry
+cannot erase it. A request settles only the delivery it waits on, through
+`DeliverySettler.settleDelivery(deliveryId, deadline)`: after its own publication, and before retrying a delivery key
+whose earlier attempt is unresolved; the sweep settles the rest of the table. A live lease stays unresolved. For a
+dead PUBLISHING/UNKNOWN attempt, the settler first takes over the table lease, waiting out the fence transaction,
+then reads the revision log in a **separate
+statement**: evidence means PUBLISHED, absence means FAILED(publish). A lock timeout leaves it unresolved;
+expiry alone never establishes failure. Conditional state and operation predicates protect newer attempts.
+
+Normal execution cleanup marks unstarted RECEIVED attempts FAILED with listing, staging or validation phase.
+After a crash, the sweep does so once the execution is terminal or gone. An unknown attempt is never treated
+as safe to retry solely because its worker stopped. Recipes and data files remain for recovery/maintenance.
+
+The `LakeSettlementScheduler` starts a tick 60 seconds after the previous one ends, in normal mode. A tick visits a
+rotating page of up to 100 managed tables and, per table, one page of up to 50 unsettled deliveries after that
+table's row cursor, under a ten-second work budget. The budget is minted from the database clock with a JVM
+monotonic mirror: its work checks read the mirror and send no statement, while every lease and verdict still compares
+against the database clock. It is checked before the protection page, the table page, each table (before and after
+the table's mode read), the table's target and delivery page reads, each delivery and each statement group inside it,
+the projection repair, and every statement group inside the P3 `applying` verification and the semantics repair. Once
+the budget is spent nothing new starts: a verification or repair stopped this way reaches no verdict and stamps
+nothing, releases any lease it took and leaves its row for a later tick.
+
+**A tick ends at most 16 seconds after its budget**, with PostgreSQL answering and the default Redis timeouts:
+
+| Part of the overrun | At most | Why |
+|---|---|---|
+| The unit in flight at the deadline | 6 s | A statement group's or lease acquire's five-second transaction. Spring rounds a transaction's remaining time up to whole seconds for each statement, so five seconds can run to almost six. Whichever timer ends a lease acquire's wait, its lock timeout or this one, the acquire answers busy with the row unchanged. |
+| The statement that must follow it | 5 s | The release of a lease that unit holds, or a refused takeover's deadline comparison. A takeover that was refused holds no lease and releases nothing. |
+| The `last_sweep_at` heartbeat | 5 s | One statement with its own five-second timeout. |
+
+The tick's first mode read runs before the budget is minted, so a tick's whole wall clock is at most 31 seconds: 5, then
+10, then 16. A projection repair in flight at the deadline holds no lease: its transaction is followed by one
+invalidation publish, at most 2 s by `datapipelines.redis.command-timeout`'s default and 2 s more to reconnect, and the
+heartbeat, 15 s in all. Raising those Redis timeouts widens that one path.
+
+The Iceberg metadata read leaves the tick's thread. Verification and repair read the table's `metadata_location` from
+the catalog row with a five-second statement, open no catalog session, and read the metadata JSON on one dedicated
+daemon thread, `dp-lake-metadata`, waiting at most what remains of the budget. So an object store that stops answering
+adds nothing to the 16 seconds. A read that outlives the wait is abandoned and counted
+(`lake.settle.metadata_read_stuck`). It holds no lease and no database connection. It leaves that thread on one socket.
+On a stalled store the client's ten-second socket timeout ends each attempt, and six attempts end the read after about
+a minute (measured at 62 s). On a store that trickles bytes under that timeout it runs until the file ends, which
+nothing here bounds. While it runs, every table's verification and
+repair are deferred on every tick without sending a read: the one thread is the cap, so one stuck read delays
+verification for the whole lake, while deliveries keep settling. Its result is discarded, and a later tick reads again.
+
+A tick cannot promise more than this. Against a stalled PostgreSQL every statement it started runs to its timeout;
+commits and connection checkouts are not statements and are bounded only by the pool's and driver's settings, and
+against a server that accepts and never answers, a timeout's cancel does not end the blocked read (#837). A healthy
+tick still reads the store once per table for the semantics repair's version check.
+
+The row cursor passes over live, busy and failing deliveries and wraps when a page comes back short, so deliveries
+behind them are reached on a later tick. Cursors are held in memory; after a restart each table starts again at its
+first unsettled delivery. Large backlogs drain across ticks at up to 50 deliveries per table per tick: when every page
+fits the budget, a table's N unsettled deliveries are all visited within ⌈N/50⌉ + 1 of its turns, and a pass over
+more than 100 tables takes several ticks. The sweep settles deliveries, verifies P3 `applying` rows, repairs semantics
+under a table lease only when their applied definition differs, and records `lake_control.last_sweep_at`. Restoring
+and replaying modes keep the sweep silent.
+
+The sweep finalizes protection only for committed, visible supersessions, using the observation statement's
+`now() + protection_interval`; NULL remains protected until observed. It never lowers an existing deadline.
+Registry repair uses P3's monotone revision-sequence upsert. A changed row bumps `datasources.updated_at` in
+the same transaction; local pool retirement and peer invalidation follow the commit. A no-op repair rebuilds
+nothing. The authoritative catalog remains the source for managed reads; the registry is its display projection.
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-06 | v1.6 | 799c (#799, #843) | The settlement tick is bounded as a whole (§8): the budget is checked inside verification and the semantics repair, the Iceberg metadata read leaves the tick's thread and opens no catalog session, one lease acquire is a five-second transaction, and the stated overrun is 16 seconds, derived term by term; a stuck read defers verification for every table until it ends. |
+| 2026-11-06 | v1.5 | 799b (#799) | Settlement work is bounded per tick (§8): a page of 50 deliveries per table behind an in-memory row cursor, the ten-second budget checked before every step, delivery and statement group, and a stated overrun of at most 20 seconds. A request settles only the delivery it waits on. The applying verification and semantics repair keep a separate clause (#843); the 20 seconds assume the pool hands out connections and the server answers its cancels (#837). |
+| 2026-11-05 | v1.4 | 799 (#799) | Deliveries, publication and settlement (§6–§8), including sender immutability, admission and physical resource ownership, the validation barrier, effective authority, immutable recipes, opt-in redaction default false, permanent commit evidence and bounded normal-mode recovery. |
 | 2026-11-04 | v1.3 | 810 merge review | §3 distinguishes the polling horizon from the final row-lock wait, which can overrun either the lease wait or the caller's deadline by one lock timeout. |
 | 2026-11-04 | v1.2 | 810 (#810, #811, #812) | Drift has an exit: a definition whose shape equals the live table applies as one commit that sets only `dp.definition.version` (§2 row, §3 row, §4 rule 2). An unclassified failure of the commit step leaves the row `applying` as `lake.definition.apply_unclassified`, and the release returns that outcome (§3 row and paragraph). A lease takeover waits at most the catalog lock timeout on a lease row another transaction holds, then counts as busy (§3 "One attempt" and "Crash between commit and stamp"). |
 | 2026-11-04 | v1.1 | 798 merge review | Serialize lifecycle eligibility with apply, refuse discard during any apply, require canonical partition parameters and complete JSON input; record the field-ID correction limitation (#820). |

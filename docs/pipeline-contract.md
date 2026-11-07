@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.74 (revised — see Change Log)
+**Status:** v1.83 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-11-04
+**Last updated:** 2026-11-05
 
 ---
 
@@ -343,6 +343,7 @@ Note: no `output` block. DML's side effect IS the output.
 | `context_key` | string | CALCULATOR nodes on a single-output kind; value-mode SCRIPT nodes | The Context key this node writes, per §6.1's `[a-z_][a-z0-9_]*`. Deliberately not called `output`: it names a value downstream nodes bind as `:context_key`, never a table. XOR with `context_keys` on a `CALCULATOR` node (§4.10); required on a value-mode `SCRIPT` node (§4.12); forbidden on every other type. |
 | `context_keys` | object | CALCULATOR nodes on a multi-output kind | The Context key each of the kind's named outputs is written to, as `{output name: context key}` — every declared output mapped, each key per §6.1. XOR with `context_key`; forbidden on every other type. See §4.10. |
 | `output` | object | conditional | Optional for `DQL` nodes — omitted means `{"target": "caller"}`. Forbidden for `DML` / `DDL` / `CALCULATOR` nodes. On `PIPELINE` nodes, permitted only when the pinned child has a caller node (§12.9). On `SCRIPT` nodes: required in `row`/`table` mode (`tempdb` or `caller`), forbidden in `value` mode (§4.12). See §4.7. |
+| `delivery` | object | no | DQL with source `tempdb` and DuckDB staging only: `{feed, id}` identifies the immutable landing folder. At most one per pipeline. Managed append requires it and depends transitively on all non-append nodes (§13.25). |
 | `depends_on` | array of string | yes | Parent node IDs. Empty array for source nodes. Must reference existing node IDs. No cycles. **Data flow only** — never an edge added to avoid contention between nodes; the executor owns scheduling (§4.11). |
 | `settings` | object | no | Per-node execution settings. v1 holds one key, `timeout_seconds` — this node's wall-clock deadline. See §4.11. |
 | `strict` | boolean | no | SCRIPT nodes only: fail the node when the rejects table is non-empty (`pipeline.script.rejects_strict`). Default `false` (partition — the rejects are written and the run continues). Legal only when the pinned contract declares rejects (§12.13). See §4.12. |
@@ -593,12 +594,15 @@ Pipeline-level, not global, for the same reason §5.2 gives `settings.tempdb`: d
       "min_length": <int>, "max_length": <int>, // STRING (characters) and BINARY (decoded bytes); non-negative
       "pattern": "<regex>"                     // STRING; anchored (the whole value); at most 256 characters
     },
-    "cardinality": "SINGLE"       // optional (#194); SINGLE is the only value a pipeline accepts today (§6.2)
+    "cardinality": "SINGLE",      // optional (#194); SINGLE is the only value a pipeline accepts today (§6.2)
+    "redact_in_recipe": false      // optional (#799); true opts this parameter into recipe-only redaction
   }
 }
 ```
 
 `constraints` and `cardinality` are the parameter engine's declaration model ([parameter-engine record](superpowers/specs/2026-09-21-parameter-engine-design.md) §3.5, P28), shared so that a pipeline and a parameter set judge a value by the same `ParameterValueValidator` (`typesystem`). Both are omitted from a body that does not declare them, so bodies saved before 2026-09-26 serialise — and hash — unchanged.
+
+`redact_in_recipe` defaults to **false**. Only explicit `true` opts the parameter into recipe redaction: resolved values and defaults are represented as `<redacted>`, and exact replay is unavailable for that delivery. The marker protects the recovery recipe only; it does not add a secret logical type or promise encryption or masking on other surfaces. False is omitted from canonical JSON so legacy bodies and hashes remain unchanged.
 
 ### 6.2 Rules
 
@@ -828,6 +832,7 @@ No node resolves to `caller`. The pipeline returns execution stats only; no `dat
 ### 10.1 Rules
 
 - Format: `[a-z0-9_]+`, length 1–63 (H2 identifier limits).
+- Managed lake datasource outputs use exactly `namespace.table`, each segment matching the identifier grammar; other output tables retain the single identifier grammar.
 - Uniqueness is **per namespace**: all `tempdb` `output.table` values must be unique among themselves (they share one staging database), and `datasource` `output.table` values must be unique per target datasource. A tempdb table and a write-back table may share a name; two write-backs to different datasources may share a name.
 - Must not be `tempdb` or any name starting and ending with `__` (reserved namespace).
 - **Recommended convention** (not enforced, but LLM prompts and UI defaults should follow):
@@ -892,7 +897,7 @@ Hard validation errors at write-time. Validation code: `pipeline.validation.forb
 - Absolute path: leading `/` or drive-letter pattern.
 - Environment literal: exact-match `dev`, `staging`, `prod`, `production` as a whole value.
 
-These heuristics are deliberately conservative (whole-value or prefix matches) — `stg_orders` containing "stg" is fine; a `source` of `pg-prod` is fine (it is a datasource *name*; the check applies to values that are not references into the datasource registry).
+These heuristics are deliberately conservative (whole-value or prefix matches) — `stg_orders` containing "stg" is fine; a `source` of `pg-prod` is fine (it is a datasource *name*; the check applies to values that are not references into the datasource registry). A valid `namespace.table` output for the configured managed lake is also a portable table reference and is exempt from the hostname heuristic; external datasource output tables retain the scan.
 
 ---
 
@@ -948,7 +953,7 @@ All checks run at pipeline create/update time. A pipeline that fails any check i
 | Code | Check |
 |---|---|
 | `pipeline.validation.unknown_datasource` | Every node `source` (except `tempdb`) AND every `output.datasource` exists in the env's datasource registry |
-| `pipeline.validation.datasource_readonly` | No write-shaped use names a readonly datasource: no `DML`/`DDL` node `source` and no `output.datasource` resolves to one flagged `is_readonly` (workspaces design 2026-08-16 §6, D6). The three and only three write shapes, each a distinct runtime raise site, checked as one rule; `details` carries the node id, the datasource name, and which shape fired (`dml_source` / `ddl_source` / `output_target`). DQL reads and everything `tempdb` are untouched — the check is on the use, never on the datasource alone |
+| `pipeline.validation.datasource_readonly` | Except for managed lake append governed by §13.25, no write-shaped use names a readonly datasource: no `DML`/`DDL` node `source` and no `output.datasource` resolves to one flagged `is_readonly` (workspaces design 2026-08-16 §6, D6). The three and only three write shapes, each a distinct runtime raise site, checked as one rule; `details` carries the node id, the datasource name, and which shape fired (`dml_source` / `ddl_source` / `output_target`). DQL reads and everything `tempdb` are untouched — the check is on the use, never on the datasource alone |
 
 ### 12.6 Template validations
 
@@ -1698,6 +1703,43 @@ The `lake.definition.*` rows (#798, dp-lake P3; [lake.md](lake.md)) are the mana
 
 | Code | HTTP | Description |
 |---|---|---|
+| `lake.delivery.invalid_key` | 400 | Delivery feed and resolved id must match `[a-z0-9_-]{1,64}` before any storage or SQL access. |
+| `lake.capacity.busy` | 503 | Ingestion slot and delivery-sized scratch could not both be reserved within the shared wait; retryable, before listing or opening staging. |
+| `lake.append.grant_missing` | 403 | Runtime backstop: the execution lacks the entry point's checked append grant; no table lease or publication starts. |
+| `lake.append.outcome_unknown` | 503 | Catalog publication is unconfirmed; retained files are never treated as evidence of failure, and settlement uses the permanent revision log. |
+| `lake.append.failed` | 500 | Publication failed before a more specific safe refusal was available. The permanent ledger records its outcome; library messages and causes stay private. |
+| `lake.append.provenance_missing` | 500 | The execution snapshot or applied definition body required for the immutable recipe is absent; no catalog publication starts. |
+| `lake.append.authority_lost` | 409 | The lease or catalog fence refused publication; retries require a fresh admitted attempt after settlement. |
+| `lake.commit.contended` | 409 | Bounded CAS attempts ended without commit evidence. The attempt failed in the publish phase; already written files remain. |
+| `lake.table.busy` | 409 | Another operation or an unconfirmed publication prevents this attempt; retryable after settlement. |
+| `lake.table.deprecated` | 409 | A deprecated managed table refuses delivery ingestion. |
+| `lake.table.unavailable` | 409 | The managed ingestion target is missing, archived or purged. This ledger-level refusal differs from the datasource read refusal `datasource.lake.table_unavailable`. |
+| `lake.delivery.changed` | 409 | The immutable delivery identity already has a different trusted fingerprint; a correction needs a new delivery id. |
+| `lake.delivery.changed_during_read` | 409 | The post-read trusted re-list differs from the original manifest; unpublished attempts fail in the staging phase. |
+| `lake.append.ambiguous_column` | 400 | The staged result has column names that differ only by case. |
+| `lake.append.unknown_column` | 400 | The staged result contains a column outside the managed table schema. Name comparison follows DuckDB: ASCII case only, without Unicode normalization. |
+| `lake.append.missing_required_column` | 400 | The staged result omits a required managed table column. |
+| `lake.append.null_in_required` | 400 | The staged result has null values in required columns; details contain every count. |
+| `lake.append.type_mismatch` | 400 | A staged native type cannot be stored without narrowing or coercion. |
+| `lake.append.too_many_partitions` | 400 | The append would open more distinct output partitions than admitted. It stops before opening the excess partition, commits nothing, and retains already written files for maintenance. |
+| `lake.append.recipe_exists` | 500 | An attempt's immutable recipe key already exists. Bug signal: the PUT is not retried or overwritten; catalog publication has not started. |
+| `lake.append.forbidden` | 403 | The effective principal lacks `lake.append`; key authority comes from the key's own role, never its creator's identity or current role. |
+| `lake.append.recipe_write_failed` | 503 | The immutable recipe could not be written before the admission-fixed deadline. No catalog publication; storage messages and causes are stripped. |
+| `lake.delivery.incomplete` | 409 | The exact empty `_done` marker is absent; retryable. |
+| `lake.delivery.too_large` | 413 | The trusted listing exceeds the configured delivery byte limit. |
+| `lake.delivery.unsupported_format` | 400 | Delivery data files must all be Parquet or all CSV; unknown or mixed extensions are refused. |
+| `lake.delivery.invalid_manifest` | 400 | The listing is invalid or has no data files: duplicate or out-of-prefix keys, invalid size or ETag, invalid marker, or broken pagination. |
+| `lake.delivery.listing_failed` | 503 | The object store could not be listed within the admission deadline; retryable. Storage error messages and causes are not exposed. |
+| `lake.delivery.admission_failed` | 503 | Delivery admission or its metadata transaction failed; retryable. Database error messages and causes are not exposed. |
+| `lake.delivery.one_per_pipeline` | 400 | A pipeline declares more than one delivery node. |
+| `lake.append.one_per_table` | 400 | Multiple append nodes target the same managed table. |
+| `lake.append.requires_delivery` | 400 | Managed lake append requires a delivery node. |
+| `lake.append.rejects_not_strict` | 400 | Every rejects-producing script in an append pipeline must be strict. |
+| `lake.append.invalid_node` | 400 | Managed append belongs to a DQL node with source tempdb. |
+| `lake.append.barrier` | 400 | Every append must transitively depend on every non-append node; details name missing dependencies. |
+| `lake.append.replace_refused` | 400 | Managed lake publication supports append only. |
+| `lake.delivery.invalid_node` | 400 | A delivery block belongs to a DQL node with source tempdb. |
+| `lake.delivery.requires_duckdb` | 400 | A delivery requires DuckDB staging. |
 | `lake.catalog.fenced` | — | SQLSTATE `DP001`: a catalog write without a lease token, with a token or operation that is not the live lease's, against a name the operation holds no lease on, or a rename without the source name's lease. Another operation holds the table, or this operation's lease expired or reached its deadline |
 | `lake.catalog.restoring` | — | SQLSTATE `DP002`: a catalog write while `lake_control.mode = 'restoring'` (the recovery procedure has the catalog) |
 | `lake.catalog.outcome_unknown` | — | the catalog connection failed (SQLSTATE class `08`) while a write was in flight, so the write may or may not have committed. DP never replays the statement (a replay can report a committed write as failed and let the library delete its files); the operation's settle step decides from the revision log. The catalog session that saw it refuses further work |
@@ -1955,6 +1997,15 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-05 | v1.77 | 799 (#799), owner ruling | Optional `redact_in_recipe` parameter metadata defaults false and is omitted when false; true selects recipe-only redaction without changing the frozen logical types. |
+| 2026-11-05 | v1.78 | 799 (#799) | §13.25 adds immutable recipe conflict and storage-write refusals; a recipe is conditionally written before catalog publication and never overwritten. |
+| 2026-11-05 | v1.79 | 799 (#799) | §13.25 registers the effective-principal lake append permission refusal. |
+| 2026-11-05 | v1.80 | 799 (#799) | §13.25 adds strict append column-name, required-value and native-type refusals before data files are opened. |
+| 2026-11-05 | v1.81 | 799 (#799) | §13.25 pins column-name comparison to DuckDB’s ASCII identifier semantics; non-ASCII names cannot alias managed ASCII fields through Unicode folding. |
+| 2026-11-05 | v1.82 | 799 (#799) | §13.25 adds the partition fanout bound for uncommitted Parquet append files. |
+| 2026-11-05 | v1.83 | 799 (#799) | §13.25 adds admission, target status and immutable delivery identity refusals. |
+| 2026-11-04 | v1.76 | 799 (#799) trusted listing | §13.25 adds six delivery key/listing/manifest refusal codes, including retryable incomplete and unavailable-store outcomes; SDK messages and causes stay private. |
+| 2026-11-04 | v1.75 | 799 (#799) | Delivery node block, managed-only qualified append targets, and nine §13.25 structure refusals. Appends require one delivery and a transitive dependency barrier over all non-append nodes; rejects-producing scripts must be strict. External readonly datasources retain their refusal. |
 | 2026-11-04 | v1.74 | 780 (#780) script-invariants docs | §13.18's two script rows say what the code does: `pool_exhausted` names both refusal paths (the full admission bound, and an admitted evaluation that waited its whole wall clock for a running slot); `invariants_too_large` states the read-back's COMBINED count — written outputs and rejects plus table inputs, row mode adding the streamed input and a caller output's buffered rows and rejects. No code, code count or permission change. — Renumbered at merge after #810. |
 | 2026-11-04 | v1.73 | 810 (#811) | §13.25 gains `lake.definition.apply_unclassified` (`—`): an unclassified failure of the apply's commit step is returned as the release's apply outcome, and the row stays `applying` for `verifyApplying`. Failures outside that step can still propagate after the release commits (#822). |
 | 2026-11-04 | v1.72 | 798 merge | §13.25 gains the managed lake definition lifecycle and apply refusal catalog, alongside its constants. |

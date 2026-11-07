@@ -17,7 +17,8 @@ import java.util.UUID
  * is fine (it is a datasource *name*; the check applies to values that are not references
  * into the datasource registry)". So a `source` or `output.datasource` that the environment
  * resolves is skipped — an unresolvable one is scanned, and also draws
- * `unknown_datasource` from §12.5.
+ * `unknown_datasource` from §12.5. A managed lake's validated qualified table identifier is
+ * a portable registry reference too; an external datasource's table keeps the scan.
  */
 internal object EnvPortabilityRule {
     fun check(
@@ -49,10 +50,15 @@ internal object EnvPortabilityRule {
             }
 
             is NodeOutput.Datasource -> {
-                if (!isRegistryReference(output.datasource, datasources, workspaceId)) {
+                val facts =
+                    if (output.datasource == NodeSource.TEMPDB_LITERAL) null else datasources.describe(output.datasource, workspaceId)
+                if (facts == null && output.datasource != NodeSource.TEMPDB_LITERAL) {
                     scan(output.datasource, "nodes[$index].output.datasource", into)
                 }
-                scan(output.table, "nodes[$index].output.table", into)
+                // A validated managed table reference is portable, even though its dot resembles a hostname.
+                val parts = output.table.split('.')
+                val managedReference = facts?.managedLake == true && parts.size == 2 && parts.all { IDENTIFIER.matches(it) }
+                if (!managedReference) scan(output.table, "nodes[$index].output.table", into)
             }
 
             NodeOutput.Caller, null -> {

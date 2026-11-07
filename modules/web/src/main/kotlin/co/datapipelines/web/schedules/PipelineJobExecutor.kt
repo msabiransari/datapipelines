@@ -1,5 +1,6 @@
 package co.datapipelines.web.schedules
 
+import co.datapipelines.application.LakeAppendAuthorization
 import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.application.pipelines.PipelineInputResolver
 import co.datapipelines.auth.AuthenticatedPrincipal
@@ -17,6 +18,7 @@ import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.executor.ExecutorConfig
 import co.datapipelines.persistence.FailureShape
+import co.datapipelines.pipeline.LakeExecutionMetadata
 import co.datapipelines.pipeline.ParameterBinder
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -47,6 +49,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.slf4j.LoggerFactory
 import java.time.Duration
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZoneOffset
@@ -305,6 +308,8 @@ class PipelineJobExecutor(
                 pipelineId = pipelineId,
                 pipelineVersion = version,
                 pipeline = executable.pipeline,
+                lakeExecutionMetadata = LakeExecutionMetadata.from(executable),
+                lakeAppendGrant = LakeAppendAuthorization.grant(principal, executable.writesManagedLake, Instant.now()),
                 userId = principal.userId,
                 workspaceId = workspace.id,
                 // The map frozen at preparation (R5): what was resolved then is what executes now.
@@ -497,37 +502,6 @@ class PipelineJobExecutor(
      * throw per distinct `details.reason`, so a caller is told exactly what to fix.
      */
     @Suppress("ThrowsCount")
-    private fun targetName(payload: JsonNode): String {
-        if (!payload.isObject) throw payloadInvalid("not_an_object", "The payload must be a JSON object.")
-        val unknown =
-            payload
-                .fieldNames()
-                .asSequence()
-                .filter { it !in PAYLOAD_FIELDS }
-                .toList()
-        if (unknown.isNotEmpty()) throw payloadInvalid("unknown_field", "Unknown payload field(s): ${unknown.joinToString()}.")
-        val name =
-            payload
-                .path("pipeline")
-                .takeIf { it.isTextual }
-                ?.asText()
-                ?.trim()
-        if (name.isNullOrEmpty()) throw payloadInvalid("pipeline_missing", "The payload names no pipeline (`pipeline`).")
-        if (!PipelineNameGrammar.matches(
-                name,
-            )
-        ) {
-            throw payloadInvalid("pipeline_name_invalid", "'${name.take(MAX_ECHO)}' is not a pipeline name.")
-        }
-        when (val selector = payload.path("version").takeIf { it.isTextual }?.asText()) {
-            VERSION_CURRENT -> Unit
-            "latest" -> throw payloadInvalid(VERSION_LATEST_REFUSED, "`latest` is not a version selector; use `current` (record §3.1).")
-            null -> throw payloadInvalid("version_missing", "The payload names no version selector; use `\"version\": \"current\"`.")
-            else -> throw payloadInvalid("version_unsupported", "'${selector.take(MAX_ECHO)}' is not supported; v1 accepts `current` only.")
-        }
-        return name
-    }
-
     private fun bind(
         pipeline: Pipeline,
         parameters: Map<String, JsonNode>,
@@ -666,12 +640,51 @@ class PipelineJobExecutor(
         message: String,
     ) = StartOutcome.NotStarted(reason, block, message)
 
-    private fun payloadInvalid(
-        reason: String,
-        message: String,
-    ) = ScheduleException(ScheduleErrorCodes.PAYLOAD_INVALID, message, mapOf("reason" to reason))
-
     companion object {
+        /** The shared save-time payload grammar, also used before an authority check. */
+        @Suppress("ThrowsCount") // each payload grammar refusal retains its established reason code
+        fun targetName(payload: JsonNode): String {
+            if (!payload.isObject) throw payloadInvalid("not_an_object", "The payload must be a JSON object.")
+            val unknown =
+                payload
+                    .fieldNames()
+                    .asSequence()
+                    .filter { it !in PAYLOAD_FIELDS }
+                    .toList()
+            if (unknown.isNotEmpty()) throw payloadInvalid("unknown_field", "Unknown payload field(s): ${unknown.joinToString()}.")
+            val name =
+                payload
+                    .path("pipeline")
+                    .takeIf { it.isTextual }
+                    ?.asText()
+                    ?.trim()
+            if (name.isNullOrEmpty()) throw payloadInvalid("pipeline_missing", "The payload names no pipeline (`pipeline`).")
+            if (!PipelineNameGrammar.matches(
+                    name,
+                )
+            ) {
+                throw payloadInvalid("pipeline_name_invalid", "'${name.take(MAX_ECHO)}' is not a pipeline name.")
+            }
+            when (val selector = payload.path("version").takeIf { it.isTextual }?.asText()) {
+                VERSION_CURRENT -> Unit
+
+                "latest" -> throw payloadInvalid(VERSION_LATEST_REFUSED, "`latest` is not a version selector; use `current` (record §3.1).")
+
+                null -> throw payloadInvalid("version_missing", "The payload names no version selector; use `\"version\": \"current\"`.")
+
+                else -> throw payloadInvalid(
+                    "version_unsupported",
+                    "'${selector.take(MAX_ECHO)}' is not supported; v1 accepts `current` only.",
+                )
+            }
+            return name
+        }
+
+        private fun payloadInvalid(
+            reason: String,
+            message: String,
+        ) = ScheduleException(ScheduleErrorCodes.PAYLOAD_INVALID, message, mapOf("reason" to reason))
+
         private val LOG = LoggerFactory.getLogger(PipelineJobExecutor::class.java)
 
         const val EXECUTOR_ID = "pipeline"

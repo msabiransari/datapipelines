@@ -1,2 +1,3 @@
 co.datapipelines.lake.LakeAutoConfiguration
 co.datapipelines.lake.definitions.LakeDefinitionsAutoConfiguration
+co.datapipelines.lake.append.LakeAppendAutoConfiguration

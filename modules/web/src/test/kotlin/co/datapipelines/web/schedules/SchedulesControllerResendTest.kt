@@ -73,6 +73,7 @@ class SchedulesControllerResendTest {
                     every { query(any<String>(), any<Map<String, Any?>>(), any<RowMapper<Pair<UUID, String>>>()) } returns emptyList()
                 },
             ),
+            mockk(relaxed = true),
         )
     private val user = UUID.randomUUID()
     private val workspace = UUID.randomUUID()

@@ -20,7 +20,7 @@ internal object StructuralRules {
         checkSchemaVersion(pipeline, into)
         checkName(pipeline, into)
         checkNodeIdentifiers(pipeline, into)
-        checkOutputTables(pipeline, into)
+        checkOutputTables(pipeline, datasources, workspaceId, into)
         EnvPortabilityRule.check(pipeline, datasources, workspaceId, into)
     }
 
@@ -118,6 +118,8 @@ internal object StructuralRules {
      */
     private fun checkOutputTables(
         pipeline: Pipeline,
+        datasources: DatasourceRegistry,
+        workspaceId: UUID,
         into: FailureCollector,
     ) {
         val namespaced = mutableMapOf<String, MutableList<String>>()
@@ -131,7 +133,26 @@ internal object StructuralRules {
                 }
 
                 is NodeOutput.Datasource -> {
-                    register(index, "datasource:${output.datasource.truncateForError()}", output.table, "output.table", namespaced, into)
+                    if (datasources.describe(output.datasource, workspaceId)?.managedLake == true) {
+                        val parts = output.table.split('.')
+                        if (parts.size != 2 || parts.any { !IDENTIFIER.matches(it) }) {
+                            into.add(
+                                Validation.INVALID_IDENTIFIER,
+                                "nodes[$index].output.table",
+                                "A managed lake output table must be namespace.table with each name matching [a-z0-9_]{1,63}.",
+                            )
+                        }
+                        namespaced.getOrPut("datasource:${output.datasource.truncateForError()}") { mutableListOf() } += output.table
+                    } else {
+                        register(
+                            index,
+                            "datasource:${output.datasource.truncateForError()}",
+                            output.table,
+                            "output.table",
+                            namespaced,
+                            into,
+                        )
+                    }
                 }
 
                 else -> {

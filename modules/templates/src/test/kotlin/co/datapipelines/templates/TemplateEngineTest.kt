@@ -54,6 +54,52 @@ class TemplateEngineTest {
     }
 
     @Test
+    fun `recipe lineage observes the exact pinned draft without rereading it or leaking across renders`() {
+        val first =
+            TemplateFixtures
+                .version("test/lineage.sql", body = "SELECT 1")
+                .copy(bodyHash = "a".repeat(64), status = PipelineVersionStatus.DRAFT)
+        val second = first.copy(body = "SELECT 2", bodyHash = "b".repeat(64))
+        val registry = mockk<TemplateRegistry>()
+        var reads = 0
+        every { registry.lookup("test/lineage.sql", 1) } answers { if (++reads == 1) first else second }
+        val e = TemplateEngine(registry, 50, 5_000, 1_000_000).also { engines += it }
+        val observed = ConcurrentLinkedQueue<Pair<String, String>>()
+        val ref = TemplateRef("test/lineage.sql", 1)
+        e.render(ref, emptyMap(), onReference = { used, hash -> observed += used.key to hash }) shouldBe "SELECT 1"
+        reads shouldBe 1
+        observed.toList() shouldBe listOf(ref.key to first.bodyHash)
+        e.render(ref, emptyMap(), onReference = { used, hash -> observed += used.key to hash }) shouldBe "SELECT 2"
+        reads shouldBe 2
+        observed.toList() shouldBe listOf(ref.key to first.bodyHash, ref.key to second.bodyHash)
+        e.render(ref, emptyMap()) shouldBe "SELECT 2"
+        observed.size shouldBe 2
+    }
+
+    @Test
+    fun `recipe lineage includes imported library contents when parsed trees are already cached`() {
+        val library =
+            TemplateFixtures
+                .version("test/lineage_lib.sql", isLibrary = true, body = "<#macro value>42</#macro>")
+                .copy(bodyHash = "c".repeat(64))
+        val root =
+            TemplateFixtures
+                .version(
+                    "test/lineage_main.sql",
+                    imports = listOf(TemplateImport(library.id, 1, "lib")),
+                    body = "SELECT <@lib.value/>",
+                ).copy(bodyHash = "d".repeat(64))
+        val e = engine(library, root)
+        val ref = TemplateRef(root.id, 1)
+        e.render(ref, emptyMap()) shouldBe "SELECT 42"
+        val parsed = e.parsedTemplates
+        val observed = ConcurrentLinkedQueue<Pair<String, String>>()
+        e.render(ref, emptyMap(), onReference = { used, hash -> observed += used.key to hash }) shouldBe "SELECT 42"
+        e.parsedTemplates shouldBe parsed
+        observed.toSet() shouldBe setOf(ref.key to root.bodyHash, "${library.id}@1" to library.bodyHash)
+    }
+
+    @Test
     fun `synthesizes an import prologue and calls a library macro`() {
         val lib =
             TemplateFixtures.version(

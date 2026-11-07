@@ -424,6 +424,52 @@ class PipelineRepository(
             ) { rs, _ -> rs.getString("body_json") }
             .singleOrNull()
 
+    /** The execute path reads body, lifecycle, hash and derived write metadata in one database snapshot. */
+    fun findExecutionSnapshot(
+        workspaceId: UUID,
+        pipelineId: UUID,
+        version: Int,
+    ): PipelineExecutionSnapshot? =
+        jdbc
+            .query(
+                "SELECT v.body_json::text AS body_json, v.body_hash, v.status, v.writes_managed_lake " +
+                    "FROM pipeline_versions v JOIN pipelines p ON p.id = v.pipeline_id " +
+                    "WHERE p.workspace_id = :workspaceId AND v.pipeline_id = :pipelineId AND v.version = :version",
+                mapOf("workspaceId" to workspaceId, "pipelineId" to pipelineId, "version" to version),
+            ) { rs, _ ->
+                PipelineExecutionSnapshot(
+                    rs.getString("body_json"),
+                    rs.getString("body_hash"),
+                    PipelineVersionStatus.fromWire(rs.getString("status")),
+                    rs.getBoolean("writes_managed_lake"),
+                )
+            }.singleOrNull()
+
+    /**
+     * Records a derived cache in the caller's save/import transaction, after its body write.
+     * Hash comparison prevents stamping a different body. This metadata is outside body_hash;
+     * execution rechecks mutable child references instead of trusting an older parent cache.
+     */
+    fun recordManagedLakeWrites(
+        workspaceId: UUID,
+        pipelineId: UUID,
+        version: Int,
+        bodyJson: String,
+        writesManagedLake: Boolean,
+    ): Int =
+        jdbc.update(
+            "UPDATE pipeline_versions v SET writes_managed_lake = :writes FROM pipelines p " +
+                "WHERE p.id = v.pipeline_id AND p.workspace_id = :workspaceId AND v.pipeline_id = :pipelineId " +
+                "AND v.version = :version AND v.body_hash = $BODY_HASH_EXPR",
+            mapOf(
+                "workspaceId" to workspaceId,
+                "pipelineId" to pipelineId,
+                "version" to version,
+                "bodyJson" to bodyJson,
+                "writes" to writesManagedLake,
+            ),
+        )
+
     /**
      * The body of the pipeline's current RELEASED version, or null when the pipeline is unknown
      * **or has never been released** (D55: creation lands a DRAFT, so `current_version` is null

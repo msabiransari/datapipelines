@@ -95,14 +95,14 @@ class LakeLeaseTakeoverIntegrationTest {
         h.applies.markApplying(id, 2, dead.operationId) shouldBe 1
         hold(dead)
         val started = System.nanoTime()
-        val outcome = bounded { h.applier.verifyApplying(id, deadline()) }
+        val outcome = bounded { h.verifyApplying(id) }
         println("(812 verify) outcome = $outcome after ${millisSince(started)}ms")
         outcome shouldBe LakeApplyOutcome.Busy(LakeApplyLeases.REASON_TABLE)
         h.table(id).let { (it.applyState to it.applyOperationId) shouldBe (LakeApplyState.APPLYING to dead.operationId) }
         tokenOf() shouldBe dead.token
 
         release()
-        h.applier.verifyApplying(id, deadline()) shouldBe LakeApplyOutcome.Pending(null)
+        h.verifyApplying(id) shouldBe LakeApplyOutcome.Pending(null)
     }
 
     @Test
@@ -166,8 +166,6 @@ class LakeLeaseTakeoverIntegrationTest {
 
     private fun tokenOf(): UUID? =
         h.jdbc.queryForObject("SELECT token FROM lake_leases WHERE kind = 'table' AND name = ?", UUID::class.java, NAME)
-
-    private fun deadline() = leases.catalogNowPlus(MINUTE)
 
     private fun millisSince(started: Long): Long = Duration.ofNanos(System.nanoTime() - started).toMillis()
 

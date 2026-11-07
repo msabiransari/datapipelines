@@ -6,6 +6,10 @@ import co.datapipelines.lake.LakeCatalogSession
 import co.datapipelines.lake.LakeCatalogs
 import co.datapipelines.lake.LakeNames
 import co.datapipelines.lake.LeaseOutcome
+import co.datapipelines.lake.settle.LakeMetadataRead
+import co.datapipelines.lake.settle.LakeMetadataReads
+import co.datapipelines.lake.settle.SettleBudget
+import co.datapipelines.lake.settle.SettleDeferCause
 import co.datapipelines.pipeline.PipelineErrorCodes
 import com.fasterxml.jackson.databind.json.JsonMapper
 import org.apache.iceberg.Table
@@ -88,12 +92,20 @@ class LakeDefinitionApplier(
      * Settles an `applying` row whose attempt is gone (lake.md §3): takes the TABLE lease over (a live holder means a
      * live attempt → [LakeApplyOutcome.Busy], row untouched), then reads the revision log for the attempt's operation
      * id in a separate statement: a revision → `applied` (+ projections), none → `pending`.
+     *
+     * The sweep's tick runs this (record §8b): [budget] is checked before every statement group, and a spent one answers
+     * [LakeApplyOutcome.Deferred] with the row untouched. The committed definition version comes from [metadata], off the
+     * tick's thread; no catalog session is opened. A read still stuck from an earlier tick defers this one before it takes
+     * a lease. A refused takeover issued no token, so it releases nothing: that statement is not in the tick's overrun.
      */
+    @Suppress("ReturnCount") // Each spent-budget check exits before its statement group.
     fun verifyApplying(
         tableId: UUID,
-        deadline: Instant,
+        budget: SettleBudget,
+        metadata: LakeMetadataReads,
         actor: UUID? = null,
     ): LakeApplyOutcome {
+        if (budget.expired()) return LakeApplyOutcome.Deferred(SettleDeferCause.BUDGET)
         val row = definitions.findTable(tableId) ?: throw LakeDefinitionErrors.notFound(tableId)
         val attemptId = row.applyOperationId
         if (row.applyState != LakeApplyState.APPLYING || attemptId == null) {
@@ -101,38 +113,52 @@ class LakeDefinitionApplier(
         }
         LakeNames.requireName(row.namespace)
         LakeNames.requireName(row.name)
+        if (metadata.stuck()) return LakeApplyOutcome.Deferred(SettleDeferCause.STUCK_READ)
+        if (budget.expired()) return LakeApplyOutcome.Deferred(SettleDeferCause.BUDGET)
         val operationId = UUID.randomUUID()
         val outcome =
-            try {
-                verifyLeased(row, attemptId, operationId, deadline, actor)
-            } finally {
-                leases.release(operationId)
+            when (val taken = leases.tryTable(row.namespace, row.name, operationId, budget.deadline, OPERATION_VERIFY)) {
+                is LeaseOutcome.Acquired -> {
+                    try {
+                        verifyLeased(row, attemptId, budget, metadata, actor)
+                    } finally {
+                        leases.release(operationId)
+                    }
+                }
+
+                LeaseOutcome.Busy -> {
+                    LakeApplyOutcome.Busy(LakeApplyLeases.REASON_TABLE)
+                }
+
+                LeaseOutcome.DeadlinePassed -> {
+                    LakeApplyOutcome.Busy(LakeApplyLeases.REASON_DEADLINE)
+                }
             }
         LakeApplyLog.ended(OPERATION_VERIFY, row, row.currentDefinitionVersion, attemptId, outcome)
         return outcome
     }
 
+    @Suppress("ReturnCount") // Each spent-budget check exits before its statement group; the caller releases the lease.
     private fun verifyLeased(
         row: LakeManagedTable,
         attemptId: UUID,
-        operationId: UUID,
-        deadline: Instant,
+        budget: SettleBudget,
+        metadata: LakeMetadataReads,
         actor: UUID?,
     ): LakeApplyOutcome {
-        val lease =
-            when (val o = leases.tryTable(row.namespace, row.name, operationId, deadline, OPERATION_VERIFY)) {
-                is LeaseOutcome.Acquired -> o.lease
-                LeaseOutcome.Busy -> return LakeApplyOutcome.Busy(LakeApplyLeases.REASON_TABLE)
-                LeaseOutcome.DeadlinePassed -> return LakeApplyOutcome.Busy(LakeApplyLeases.REASON_DEADLINE)
-            }
+        if (budget.expired()) return LakeApplyOutcome.Deferred(SettleDeferCause.BUDGET)
         if (!applies.revisionOf(row.namespace, row.name, attemptId)) {
+            if (budget.expired()) return LakeApplyOutcome.Deferred(SettleDeferCause.BUDGET)
             return if (applies.finishPending(row.id, attemptId) == 1) LakeApplyOutcome.Pending(null) else LakeApplyOutcome.Superseded
         }
         val applied =
-            catalogs.open(lease).use { session ->
-                LakeTableShape.definitionVersionOf(session.loadTable(row.namespace, row.name))
+            when (val read = metadata.definitionVersion(row.id, row.namespace, row.name, budget)) {
+                is LakeMetadataRead.Deferred -> return LakeApplyOutcome.Deferred(read.cause)
+                is LakeMetadataRead.Version -> read.version
             } ?: error("table ${row.namespace}.${row.name} was committed by $attemptId but names no definition version")
+        if (budget.expired()) return LakeApplyOutcome.Deferred(SettleDeferCause.BUDGET)
         val body = bodyOf(row.id, applied) ?: throw LakeDefinitionErrors.notFound(row.id, applied)
+        if (budget.expired()) return LakeApplyOutcome.Deferred(SettleDeferCause.BUDGET)
         return stampApplied(Attempt(row, applied, body, attemptId, actor), committed = true)
     }
 

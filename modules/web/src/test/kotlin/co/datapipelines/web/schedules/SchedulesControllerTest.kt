@@ -63,6 +63,7 @@ class SchedulesControllerTest {
     private val service = mockk<ScheduleService>()
     private val audit = RecordingAudit()
     private val mapper = ObjectMapper()
+    private val lakeAuthorization = mockk<ScheduleLakeAppendAuthorization>(relaxed = true)
     private val user = UUID.randomUUID()
     private val workspace = UUID.randomUUID()
     private val scheduleId = UUID.randomUUID()
@@ -80,7 +81,7 @@ class SchedulesControllerTest {
         // #442b — the deployment's computed delivery state; the default deployment's is off/disabled.
         every { service.notificationDelivery() } returns NotificationDeliveryState(DeliveryOffReason.DISABLED)
         actorNames = ActorNames(jdbc)
-        controller = SchedulesController(service, audit, mapper, actorNames)
+        controller = SchedulesController(service, audit, mapper, actorNames, lakeAuthorization)
     }
 
     @BeforeEach
@@ -269,6 +270,25 @@ class SchedulesControllerTest {
     }
 
     // ------------------------------------------------------------------------------ edit / delete
+
+    @Test
+    fun `a lake authority refusal prevents both create and update before persistence or audit`() {
+        // The persistence stand-ins would succeed if the guard were omitted: missing the check must be observable.
+        every { service.create(any(), any(), any(), any()) } returns Written(schedule(), replayed = false)
+        every { service.update(any(), any(), any(), any(), any()) } returns schedule()
+        every { lakeAuthorization.check(any(), any()) } throws
+            co.datapipelines.typesystem.DatapipelinesException(
+                co.datapipelines.pipeline.PipelineErrorCodes.Lake.APPEND_FORBIDDEN,
+                "Lake authority refused.",
+            )
+        shouldThrow<co.datapipelines.typesystem.DatapipelinesException> { controller.create(BODY, null) }
+            .code shouldBe co.datapipelines.pipeline.PipelineErrorCodes.Lake.APPEND_FORBIDDEN
+        shouldThrow<co.datapipelines.typesystem.DatapipelinesException> { controller.update(scheduleId, BODY, "3") }
+            .code shouldBe co.datapipelines.pipeline.PipelineErrorCodes.Lake.APPEND_FORBIDDEN
+        verify(exactly = 0) { service.create(any(), any(), any(), any()) }
+        verify(exactly = 0) { service.update(any(), any(), any(), any(), any()) }
+        audit.events.shouldBeEmpty()
+    }
 
     @Test
     fun `edit reads the revision from If-Match - bare, quoted or weak - and audits`() {

@@ -702,10 +702,12 @@ H="$T/crash-helper"; mkdir -p "$H/modules/web/build/hs_err" "$H/tests/integratio
 : > "$H/start"
 printf '#  Internal Error (fixture.cpp:1), pid=7, tid=8\n# Problematic frame:\n# V  [libjvm.so+0x7]\n' > "$H/tests/integration-tests/build/hs_err/hs_err_pid7.log"
 touch -r "$H/start" "$H/tests/integration-tests/build/hs_err/hs_err_pid7.log"
+# Creating a report can leave its directory newer than the marker; force that case (#853).
+touch -d '+1 second' "$H/tests/integration-tests/build/hs_err"
 printf '#  SIGBUS (0x7) at pc=0x2\nLINKED_REPORT_SENTINEL\n' > "$T/outside-report.log"
 ln -s "$T/outside-report.log" "$H/modules/web/build/hs_err/hs_err_pid9.log"
 helper_out="$(gate_crash_reports "$H/start" "$H")" || fail 'helper: an equal-mtime report was not attributed'
-[ -z "$(find "$H/tests/integration-tests/build/hs_err" -newer "$H/start")" ] || fail 'helper: the equal-mtime premise did not hold'
+[ -z "$(find "$H/tests/integration-tests/build/hs_err" -type f -newer "$H/start")" ] || fail 'helper: the equal-mtime premise did not hold'
 [[ "$helper_out" == *'module=integration-tests  path=tests/integration-tests/build/hs_err/hs_err_pid7.log'* ]] || fail "helper: tests/* report: $helper_out"
 [[ "$helper_out" == *'#  Internal Error (fixture.cpp:1), pid=7, tid=8'* && "$helper_out" == *'# V  [libjvm.so+0x7]'* ]] || fail 'helper: Internal Error lines'
 [[ "$helper_out" != *SIGBUS* && "$helper_out" != *hs_err_pid9* ]] || fail 'helper: followed a symlinked report'

@@ -1,5 +1,6 @@
 package co.datapipelines.lake.definitions
 
+import co.datapipelines.lake.settle.SettleDeferCause
 import co.datapipelines.pipeline.PipelineErrorCodes
 
 /**
@@ -54,6 +55,16 @@ sealed interface LakeApplyOutcome {
     data class NotApplicable(
         val state: LakeApplyState?,
         val currentVersion: Int?,
+    ) : LakeApplyOutcome {
+        override val code: String? = null
+    }
+
+    /**
+     * A sweep's verification stopped before its verdict ([cause]): no stamp, row untouched, lease released; the next
+     * tick resumes it. Counted on the sweep's line, never returned by the request path (§8b).
+     */
+    data class Deferred(
+        val cause: SettleDeferCause,
     ) : LakeApplyOutcome {
         override val code: String? = null
     }

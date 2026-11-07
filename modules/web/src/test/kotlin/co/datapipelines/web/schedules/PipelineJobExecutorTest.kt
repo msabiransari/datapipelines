@@ -373,7 +373,7 @@ class PipelineJobExecutorTest {
 
     @Test
     fun `start - the request carries the resolved parameters and the frozen reference`() {
-        val bound = executable("as_of_date" to LogicalType.DATE)
+        val bound = executable("as_of_date" to LogicalType.DATE).copy(writesManagedLake = true)
         every { pipelines.findById(workspace.id, bound.record.id) } returns bound.record
         every { pipelines.findVersionDetail(workspace.id, bound.record.id, 1) } returns detail()
         every { pipelineService.findExecutable(workspace.id, ReadLens.Everything, bound.record, 1) } returns bound
@@ -414,6 +414,9 @@ class PipelineJobExecutorTest {
         outcome.shouldBeInstanceOf<StartOutcome.Started>()
         captured!!.reference shouldBe ExecutionReference(Instant.parse("2026-09-23T03:55:00Z"), ZoneId.of("America/New_York"))
         captured!!.parameters["as_of_date"] shouldBe TextNode("2026-09-22")
+        val grant = requireNotNull(captured!!.lakeAppendGrant)
+        grant.grantedBy shouldBe captured!!.userId
+        grant.principalKind shouldBe "system"
     }
 
     @Test

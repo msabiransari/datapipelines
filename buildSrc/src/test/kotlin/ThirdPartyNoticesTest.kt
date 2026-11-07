@@ -31,6 +31,17 @@ class ThirdPartyNoticesTest {
     }
 
     @Test
+    fun `the upstream ThreeTen BSD spelling renders its recognised SPDX text`() {
+        val coordinate = "org.threeten:threeten-extra:1.7.1"
+        pom(coordinate, license("BSD 3-clause", "https://raw.githubusercontent.com/ThreeTen/threeten-extra/master/LICENSE.txt"))
+        val names = ThirdPartyLicenseAllowlist.mappings(mysql = false, oracle = false).filterKeys { it == "BSD 3-clause" }
+        val output = renderer().render(listOf(coordinate), names) { "BSD three-clause fixture text" }
+        assertTrue(output.contains("$coordinate — BSD-3-Clause (BSD 3-clause)"))
+        assertTrue(output.contains("===== BSD-3-Clause ====="))
+        assertTrue(output.contains("BSD three-clause fixture text"))
+    }
+
+    @Test
     fun `an inherited licence resolves through more than one parent`() {
         pom("example:child:1", parent("example", "parent", "1"))
         pom("example:parent:1", parent("example", "grandparent", "1"))

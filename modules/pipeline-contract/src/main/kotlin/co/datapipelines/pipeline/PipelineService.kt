@@ -150,6 +150,7 @@ open class PipelineService(
     data class ValidatedPipeline(
         val pipeline: Pipeline,
         val canonicalJson: String,
+        val writesManagedLake: Boolean = false,
     )
 
     /**
@@ -187,6 +188,9 @@ open class PipelineService(
         val version: Int,
         val bodyJson: String,
         val pipeline: Pipeline,
+        val bodyHash: String? = null,
+        val status: PipelineVersionStatus? = null,
+        val writesManagedLake: Boolean = false,
     )
 
     // -------------------------------------------------------------------------------------
@@ -210,7 +214,7 @@ open class PipelineService(
                 workspaceId,
                 allowDraftPipelineReferences = true,
             )
-        return ValidatedPipeline(pipeline, serializer.write(pipeline))
+        return ValidatedPipeline(pipeline, serializer.write(pipeline), validator.writesManagedLake(pipeline, workspaceId))
     }
 
     /**
@@ -256,6 +260,15 @@ open class PipelineService(
         // how a default or CHECK becomes invisible (metadata-db §6.1). It is the DRAFT detail
         // now, and it is BOTH the landed version and the draft pointer: one row, two roles.
         val draft = pipelines.findDraftDetail(workspaceId, record.id)
+        check(
+            pipelines.recordManagedLakeWrites(
+                workspaceId,
+                record.id,
+                requireNotNull(draft).version,
+                validated.canonicalJson,
+                validated.writesManagedLake,
+            ) == 1,
+        )
         return SavedPipeline(record, validated.canonicalJson, draft, draft)
     }
 
@@ -300,6 +313,15 @@ open class PipelineService(
         // A no-op reports the current RELEASED state and must NOT carry a draft pointer: nothing
         // was opened. Otherwise the pointer is the row just written — `PipelineDraftService`
         // returns the draft it created or overwrote, so there is nothing to re-read.
+        check(
+            pipelines.recordManagedLakeWrites(
+                workspaceId,
+                pipelineId,
+                written.version.version,
+                written.bodyJson,
+                validated.writesManagedLake,
+            ) == 1,
+        )
         val draft = written.version.takeIf { it.status != PipelineVersionStatus.RELEASED }
         return SavedPipeline(written.record, written.bodyJson, written.version, draft)
     }
@@ -612,11 +634,20 @@ open class PipelineService(
         // 178b: under a narrowing lens a version that is not RELEASED does not exist — the
         // same null an unknown number gets, so a status cannot be probed by number (the
         // checks partial reads through here with a caller-chosen version).
-        if (!lens.isEverything && pipelines.findVersionDetail(workspaceId, record.id, version)?.status != PipelineVersionStatus.RELEASED) {
+        val snapshot = pipelines.findExecutionSnapshot(workspaceId, record.id, version) ?: return null
+        if (!lens.isEverything && snapshot.status != PipelineVersionStatus.RELEASED) {
             return null
         }
-        val body = pipelines.findVersionBody(workspaceId, record.id, version) ?: return null
-        return ExecutablePipeline(record, version, body, deserializer.readOrThrow(body))
+        val pipeline = deserializer.readOrThrow(snapshot.bodyJson)
+        return ExecutablePipeline(
+            record,
+            version,
+            snapshot.bodyJson,
+            pipeline,
+            snapshot.bodyHash,
+            snapshot.status,
+            validator.writesManagedLake(pipeline, workspaceId),
+        )
     }
 
     // -------------------------------------------------------------------------------------

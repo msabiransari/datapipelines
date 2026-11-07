@@ -64,6 +64,7 @@ class SchedulesController(
     private val mapper: ObjectMapper,
     /** The people behind the ids a §20 object already carries (#261) — one batched read per response. */
     private val actorNames: ActorNames,
+    private val lakeAppendAuthorization: ScheduleLakeAppendAuthorization,
 ) {
     // ------------------------------------------------------------------------------ reads
 
@@ -175,7 +176,10 @@ class SchedulesController(
         @RequestHeader(value = WebHeaders.IDEMPOTENCY_KEY, required = false) idempotencyKey: String?,
     ): ResponseEntity<ApiResponse<Map<String, Any?>>> {
         val principal = currentPrincipal()
-        val written = schedules.create(workspaceOf(principal), principal.userId, requestOf(body), idempotencyKey)
+        val workspace = workspaceOf(principal)
+        val request = requestOf(body)
+        lakeAppendAuthorization.check(principal, request)
+        val written = schedules.create(workspace, principal.userId, request, idempotencyKey)
         if (!written.replayed) auditOf(principal, ScheduleAuditEvents.CREATED, written.value)
         return withEtag(written.value, if (written.replayed) HttpStatus.OK else HttpStatus.CREATED)
     }
@@ -189,7 +193,11 @@ class SchedulesController(
         @RequestHeader(value = IfMatchHeader.NAME, required = false) ifMatch: String?,
     ): ResponseEntity<ApiResponse<Map<String, Any?>>> {
         val principal = currentPrincipal()
-        val updated = schedules.update(workspaceOf(principal), id, principal.userId, revisionOf(ifMatch), requestOf(body))
+        val workspace = workspaceOf(principal)
+        val revision = revisionOf(ifMatch)
+        val request = requestOf(body)
+        lakeAppendAuthorization.check(principal, request)
+        val updated = schedules.update(workspace, id, principal.userId, revision, request)
         auditOf(principal, ScheduleAuditEvents.UPDATED, updated)
         return withEtag(updated, HttpStatus.OK)
     }

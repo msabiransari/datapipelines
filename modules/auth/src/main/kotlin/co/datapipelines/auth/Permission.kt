@@ -118,6 +118,7 @@ enum class Permission(
     DATASOURCE_MANAGE("datasource.manage"),
     DATASOURCE_GRANT("datasource.grant"),
     LAKE_TABLE_MANAGE("lake_table.manage"),
+    LAKE_APPEND("lake.append"),
 
     // §2.4 — published endpoints, semantics, reference
     ENDPOINT_READ("endpoint.read"),

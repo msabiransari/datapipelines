@@ -9,6 +9,10 @@ parameters must also declare `precision`** — omitting it fails the save with
 (omitted = unbounded). `required: true` and `default` are exclusive — a parameter with a
 default is optional by definition.
 
+Optional `redact_in_recipe` defaults to **false**. Set it to true to replace this parameter's values in a
+managed-lake recovery recipe with `<redacted>`; execution and binding stay the same. See the `lake` guide for
+the redaction boundary and the operator-supplied inputs required for replay.
+
 Minimal single-node pipeline (Postgres source, the single DQL node IS the caller node):
 
 ```json

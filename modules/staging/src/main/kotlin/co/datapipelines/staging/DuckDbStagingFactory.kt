@@ -27,13 +27,15 @@ import java.util.UUID
  *    `allow_persistent_secrets=false` and streamed results, then apply, in order: `memory_limit`,
  *    `temp_directory` (beside the file), `max_temp_directory_size` = the reservation, `threads`,
  *    `TimeZone = 'UTC'`, extension autoinstall/autoload and community extensions off,
- *    `enable_external_access = false`, and last `lock_configuration = true`.
+ *    optional DP-owned delivery initialization, `enable_external_access = false`, and last
+ *    `lock_configuration = true`.
  * 4. **Read the configuration back** in one SELECT on the locked root — the lock, external access
  *    off, `memory_limit` and `max_temp_directory_size` ([DuckDbConfigurationReadBack]); a database
  *    where any of them did not take is never handed out.
  *
  * Any failure after the reservation closes the root, deletes the files and releases the
- * reservation (`try`/`finally`), then surfaces as `creation_failed`. Every lease afterwards is a
+ * reservation (`try`/`finally`). Setup failures surface as `creation_failed`; sanitized trusted
+ * initialization refusals retain their domain code. Every lease afterwards is a
  * `duplicate()` of the locked root: it inherits the locked configuration and cannot change it
  * (measured, lane #795 probe 12 — `SET`, `RESET` and `SET lock_configuration = false` are refused).
  *
@@ -74,49 +76,56 @@ class DuckDbStagingFactory internal constructor(
     fun create(
         executionId: UUID,
         reservationBytes: Long,
-    ): Staging {
+    ): Staging = prepareDelivery(executionId, reservationBytes).open()
+
+    override fun prepareDelivery(
+        executionId: UUID,
+        reservationBytes: Long,
+    ): StagingPreparation {
         val reservation = budget.reserve(executionId, reservationBytes)
-        var handedOut = false
-        try {
-            val staging = open(executionId, reservation)
-            handedOut = true
-            return staging
-        } finally {
-            if (!handedOut) reservation.release()
-        }
+        return ReservedStagingPreparation(reservation) { initializer -> open(executionId, reservation, initializer) }
     }
 
     private fun open(
         executionId: UUID,
         reservation: ScratchReservation,
+        initializer: TrustedStagingInitializer,
     ): DuckDbStaging {
         val files = DuckDbStagingFiles(properties.scratchDir, executionId)
         var root: DuckDBConnection? = null
         var scratchValidated = false
-        // The open's own failures (driver, file system, a refused path) become `creation_failed`
-        // after the half-open database is abandoned; anything else propagates unchanged.
-        val failure: Exception =
-            try {
-                DuckDbStagingFiles.prepareScratchDir(properties.scratchDir)
-                scratchValidated = true
-                files.delete().forEach { (path, e) -> log.warn("stale DuckDB staging path {} could not be removed: {}", path, e.message) }
-                val opened = connect("$URL_PREFIX${files.database}", openProperties()).unwrap(DuckDBConnection::class.java)
-                root = opened
-                applyLockedConfiguration(opened, files, reservation.bytes)
-                val pool =
-                    DuckDbLeasePool(executionId, properties.maxConnections, opened::duplicate) {
-                        finalize(executionId, opened, files, reservation)
+        var handedOut = false
+        try {
+            val failure: Exception =
+                try {
+                    DuckDbStagingFiles.prepareScratchDir(properties.scratchDir)
+                    scratchValidated = true
+                    files.delete().forEach { (path, e) ->
+                        log.warn("stale DuckDB staging path {} could not be removed: {}", path, e.message)
                     }
-                return DuckDbStaging(executionId, pool, properties, files, reservation)
-            } catch (e: SQLException) {
-                e
-            } catch (e: IOException) {
-                e
-            } catch (e: IllegalArgumentException) {
-                e
-            }
-        if (scratchValidated) abandon(executionId, root, files)
-        throw creationFailed(executionId, failure)
+                    val opened = connect("$URL_PREFIX${files.database}", openProperties()).unwrap(DuckDBConnection::class.java)
+                    root = opened
+                    applyLockedConfiguration(opened, files, reservation.bytes, initializer, executionId)
+                    val pool =
+                        DuckDbLeasePool(executionId, properties.maxConnections, opened::duplicate) {
+                            finalize(executionId, opened, files, reservation)
+                        }
+                    val bytes = files.diskBytes()
+                    if (bytes > reservation.bytes) {
+                        throw StagingScratchLimitException(executionId, reservation.bytes, bytes, engineReading = null)
+                    }
+                    return DuckDbStaging(executionId, pool, properties, files, reservation).also { handedOut = true }
+                } catch (e: SQLException) {
+                    e
+                } catch (e: IOException) {
+                    e
+                } catch (e: IllegalArgumentException) {
+                    e
+                }
+            throw creationFailed(executionId, failure)
+        } finally {
+            if (!handedOut && scratchValidated) abandon(executionId, root, files)
+        }
     }
 
     private fun openProperties(): Properties =
@@ -131,6 +140,8 @@ class DuckDbStagingFactory internal constructor(
         root: Connection,
         files: DuckDbStagingFiles,
         reservationBytes: Long,
+        initializer: TrustedStagingInitializer,
+        executionId: UUID,
     ) {
         val settings =
             listOf(
@@ -142,10 +153,13 @@ class DuckDbStagingFactory internal constructor(
                 "SET autoinstall_known_extensions = false",
                 "SET autoload_known_extensions = false",
                 "SET allow_community_extensions = false",
-                "SET enable_external_access = false",
-                "SET lock_configuration = true",
             )
         root.createStatement().use { st -> settings.forEach { st.execute(it) } }
+        initializer.initializeSafely(root, executionId, log)
+        root.createStatement().use { st ->
+            st.execute("SET enable_external_access = false")
+            st.execute("SET lock_configuration = true")
+        }
         val readBack = DuckDbConfigurationReadBack.sql(properties.memoryLimitBytes, reservationBytes)
         val failed = root.createStatement().use { st -> st.executeQuery(readBack).use(DuckDbConfigurationReadBack::failures) }
         // Server log only (creationFailed): the caller gets the fixed text.

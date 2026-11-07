@@ -168,8 +168,9 @@ class TemplateEngine(
         ref: TemplateRef,
         context: Map<String, Any?>,
         maxOutputChars: Long = this.maxOutputChars,
+        onReference: (TemplateRef, String) -> Unit = { _, _ -> },
     ): String =
-        when (val outcome = execute(ref, context, maxOutputChars)) {
+        when (val outcome = execute(ref, context, maxOutputChars, onReference)) {
             is RenderOutcome.Success -> {
                 outcome.sql
             }
@@ -198,6 +199,7 @@ class TemplateEngine(
         ref: TemplateRef,
         context: Map<String, Any?>,
         maxOutputChars: Long = this.maxOutputChars,
+        onReference: (TemplateRef, String) -> Unit = { _, _ -> },
     ): RenderOutcome {
         val normalized = RenderContextNormalizer.normalize(context)
         // #337 (observability §3.3): the render runs on a template-render-N thread; it carries the
@@ -206,7 +208,7 @@ class TemplateEngine(
         val submitted = MdcTask.capture()
         val future: Future<String> =
             try {
-                workers.submit(MdcTask.wrap(submitted, Callable { renderNow(ref, normalized, maxOutputChars) }))
+                workers.submit(MdcTask.wrap(submitted, Callable { renderNow(ref, normalized, maxOutputChars, onReference) }))
             } catch (e: RejectedExecutionException) {
                 return RenderOutcome.Failed(
                     "render capacity exhausted ($MAX_CONCURRENT_RENDERS concurrent, " +
@@ -227,6 +229,13 @@ class TemplateEngine(
     }
 
     private fun renderNow(
+        ref: TemplateRef,
+        normalizedContext: Map<String, Any?>,
+        maxOutputChars: Long,
+        onReference: (TemplateRef, String) -> Unit,
+    ): String = loader.withReferenceObserver(onReference) { renderResolved(ref, normalizedContext, maxOutputChars) }
+
+    private fun renderResolved(
         ref: TemplateRef,
         normalizedContext: Map<String, Any?>,
         maxOutputChars: Long,

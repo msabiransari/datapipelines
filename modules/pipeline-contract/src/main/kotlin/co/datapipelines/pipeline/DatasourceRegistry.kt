@@ -67,11 +67,14 @@ fun interface DatasourceRegistry {
 }
 
 /**
- * The two registry facts a pipeline save validates against: the datasource's [dialect]
+ * The registry facts a pipeline save validates against: the datasource's [dialect]
  * (§12.6's template dialect check) and its [readonly] flag (workspaces design §6 — a
- * readonly datasource forbids the three write-shaped uses at save time).
+ * readonly datasource forbids the three write-shaped uses at save time). [managedLake] admits
+ * only the managed append exception; it must never be inferred from dialect alone.
  */
 data class DatasourceFacts(
     val dialect: Dialect,
     val readonly: Boolean = false,
+    /** True only for this deployment's configured managed lake, never an external lake. */
+    val managedLake: Boolean = false,
 )

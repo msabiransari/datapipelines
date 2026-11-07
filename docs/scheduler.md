@@ -1,10 +1,10 @@
 # Scheduler Specification
 
-**Status:** v1.10 (slices 1–4 of #9 — optional notification delivery implemented; the application credential remains pending)
+**Status:** v1.11 (slices 1–4 of #9 — optional notification delivery implemented; the application credential remains pending)
 **Owner:** datapipelines.co core
 **Depends on:** [REST API §20](rest-api.md#20-schedules), [Auth](auth.md), [DAG Executor](dag-executor.md), [Metadata DB §4.22–§4.25](metadata-db.md#422-schedules), [Configuration §3.29](configuration.md#329-scheduler-9)
 **Design record:** [scheduler design revision](superpowers/specs/2026-09-22-scheduler-design-revision.md) (ratified 2026-09-25) — the why; this page is the what
-**Last updated:** 2026-10-25
+**Last updated:** 2026-11-05
 
 ---
 
@@ -177,7 +177,7 @@ An `unknown` run is watched for 24 hours. If its execution later reports a real 
 
 A schedule fires as the **system identity** — the one `System` account every deployment provisions ([Auth §4.5](auth.md#45-the-system-service-account-r7)) — never as the person who created it. So a creator who is demoted to viewer, removed from the workspace or deactivated does not stop their schedules, and a schedule never gains or loses power when its creator's role changes.
 
-The system identity holds exactly three permissions, in every workspace: `pipeline.read`, `pipeline.execute` and `execution.read`. It holds no role, no instance permission and no credential: there is no API key, no session and no password for it, and a request that tried to present it is refused. Every launch still ASKS for `pipeline.execute` — a scheduled run is not exempt from permissions because it is internal.
+The system identity holds exactly four permissions, in every workspace: `pipeline.read`, `pipeline.execute`, `execution.read` and `lake.append`. A lake-writing pipeline additionally requires `lake.append` when its schedule is created or updated; launch checks the system actor’s own authority. It holds no role, no instance permission and no credential: there is no API key, no session and no password for it, and a request that tried to present it is refused. Every launch still ASKS for `pipeline.execute` — a scheduled run is not exempt from permissions because it is internal.
 
 What people may do (auth.md §7.6): every member **reads** schedules (a promoter through the promoter lens — the list pages over the schedules the lens admits, read in keyset windows so a create or delete between two windows neither duplicates nor drops a visible one, #257, #277); authors, workspace admins and super admins **create, edit, pause, resume, unblock, delete and Run now**. Executions a schedule fired are visible to every member with `execution.read`, not only to their executor — visibility, not ownership: cancelling one still needs `execution.cancel_all`.
 
@@ -233,6 +233,7 @@ People manage schedules on the **Schedules** page (`/schedules`, in the rail's O
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-05 | v1.11 | 799 (#799), ruling (c) | §6 adds lake append to the system actor’s fixed permission set; lake-writing schedule saves also require the caller’s lake append permission. |
 | 2026-10-25 | v1.10 | 442c (#442) | §2.3: notices use the run’s frozen target and reference timezone with known due/start/end and execution reference. §8.2: activation and rollback pointers. |
 | 2026-10-24 | v1.9 | 442b (#442) | §2.3: scheduler notification mail is delivered — off unless enabled (computed `on`/`off` + reason), one notice per selected transition written with it, one message per recipient with a fixed Message-ID, the four delivery states with bounded retries for provably-unsent sends only, `uncertain` never retried, re-checks at send, the resend (REST §20.13). §8.1: API mode sends no mail. §8.3: the three notification counters. §9: notifications struck through. |
 | 2026-10-19 | v1.8 | #584 | §8.4: the rail's Schedules item lands on the Schedules home (`/overview/schedules`, UI Screens §4.20a); the explorer at `/schedules` is its View all. No behaviour of the scheduler changes. |

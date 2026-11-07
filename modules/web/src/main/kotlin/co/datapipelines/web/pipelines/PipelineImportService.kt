@@ -152,6 +152,15 @@ class PipelineImportService(
             } else {
                 importNextLocal(workspaceId, requestedId, pipeline, canonical, actorId)
             }
+        check(
+            pipelines.recordManagedLakeWrites(
+                workspaceId,
+                imported.record.id,
+                imported.version,
+                canonical,
+                validator.writesManagedLake(pipeline, workspaceId),
+            ) == 1,
+        )
         observer.released(ReleasedVersion(workspaceId, ReleaseFamily.PIPELINE, imported.record.id, imported.version))
         return imported
     }

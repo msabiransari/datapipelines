@@ -36,9 +36,9 @@ dependencies {
     // thrift's @Generated, which has SOURCE retention: no class on this runtime classpath references it
     // (#785, scanned), and on the classpath it would switch on Spring's javax.annotation processing.
     implementation(libs.iceberg.parquet) { exclude(group = "javax.annotation", module = "javax.annotation-api") }
-    // iceberg-data (IcebergGenerics) is NOT declared: nothing in P2 compiles against it, and it drags
-    // orc-core + its stack onto the runtime classpath. GenericRecord ships in iceberg-core and
-    // GenericParquetWriter in iceberg-parquet. The alias stays in the catalog for the lane that needs it.
+    // P4 uses GenericFileWriterFactory for the partitioned Parquet writer. Its format registry lives
+    // in iceberg-data; the version is the existing Iceberg pin. Retain the annotation exclusion above.
+    implementation(libs.iceberg.data) { exclude(group = "javax.annotation", module = "javax.annotation-api") }
     // Iceberg's catalog connections are opened by the fenced pool through DriverManager (§8a).
     implementation(libs.postgresql)
     // The S3 client: S3FileIO's own (iceberg-aws declares the SDK compileOnly) and the boot check's
@@ -57,12 +57,16 @@ dependencies {
     // GenericParquetWriter's signature names parquet's MessageType; runtime brings it via iceberg-parquet.
     compileOnly(libs.parquet.column)
     testCompileOnly(libs.parquet.column)
+    // Inspect the actual file footer for zstd and row groups, at the existing runtime Parquet cohort.
+    testCompileOnly(libs.parquet.format.structures) { exclude(group = "javax.annotation", module = "javax.annotation-api") }
 
     // The catalog suites run against a real Postgres with the shipped migrations applied through plain
     // JDBC (§7.4; Flyway stays in `app`), and a MinIO container for S3FileIO and the boot check.
     testImplementation(libs.spring.boot.starter.test)
     testImplementation(libs.testcontainers.junit.jupiter)
     testImplementation(libs.testcontainers.postgresql)
+    // Actual materialized input cursors exercise unsigned widths and microsecond temporal values.
+    testRuntimeOnly(libs.duckdb.jdbc)
 }
 
 /** The AWS SDK HTTP clients this module does not use (see the awssdk-s3 dependency above). */

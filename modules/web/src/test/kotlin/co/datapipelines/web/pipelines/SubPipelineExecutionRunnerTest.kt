@@ -163,7 +163,13 @@ class SubPipelineExecutionRunnerTest {
 
     private fun stubRegistry(body: String = childBody) {
         every { pipelines.findByNameAnyStatus(any(), "test/monthly_revenue") } returns childRecord()
-        every { pipelines.findVersionBody(any(), childRecordId, 4) } returns body
+        every { pipelines.findExecutionSnapshot(any(), childRecordId, 4) } returns
+            co.datapipelines.pipeline.PipelineExecutionSnapshot(
+                body,
+                "a".repeat(64),
+                co.datapipelines.pipeline.PipelineVersionStatus.DRAFT,
+                false,
+            )
     }
 
     private fun pipelineNode(
@@ -284,9 +290,15 @@ class SubPipelineExecutionRunnerTest {
             stubRegistry()
             val stub = ExecutorStub()
 
-            val result = runner(stub).run(pipelineNode(), context())
+            val grant = co.datapipelines.pipeline.LakeAppendGrant(parentUserId, "session", Instant.EPOCH)
+            val result = runner(stub).run(pipelineNode(), context().copy(lakeAppendGrant = grant))
 
             val request = stub.captured.single()
+            request.lakeAppendGrant shouldBe grant
+            request.lakeExecutionMetadata?.bodyJson shouldBe childBody
+            request.lakeExecutionMetadata?.bodyHash shouldBe "a".repeat(64)
+            request.lakeExecutionMetadata?.draft shouldBe true
+            verify(exactly = 0) { pipelines.findVersionBody(any(), any(), any()) }
             request.pipelineId shouldBe childRecordId
             request.pipelineVersion shouldBe 4
             request.userId shouldBe parentUserId

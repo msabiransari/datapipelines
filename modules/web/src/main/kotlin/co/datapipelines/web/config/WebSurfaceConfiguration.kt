@@ -221,6 +221,7 @@ class WebSurfaceConfiguration {
     @Suppress("LongParameterList")
     @Bean
     fun subPipelineRunner(
+        lakeAppendPort: co.datapipelines.pipeline.LakeAppendPort? = null,
         scriptSupport: co.datapipelines.executor.ScriptSupport,
         pipelines: PipelineRepository,
         templateEngines: WorkspaceTemplateEngines,
@@ -244,6 +245,7 @@ class WebSurfaceConfiguration {
         eventRecorder: ExecutionEventRecorder,
     ): SubPipelineRunner =
         SubPipelineExecutionRunner(
+            lakeAppendPort = lakeAppendPort,
             pipelines = pipelines,
             templateEngines = templateEngines,
             datasourceRegistry = datasourceRegistry,
@@ -290,6 +292,7 @@ class WebSurfaceConfiguration {
     @Suppress("LongParameterList")
     @Bean
     fun executionStreamLauncher(
+        lakeAppendPort: co.datapipelines.pipeline.LakeAppendPort? = null,
         scriptSupport: co.datapipelines.executor.ScriptSupport,
         templateEngines: WorkspaceTemplateEngines,
         datasourceRegistry: DatasourceRegistry,
@@ -317,6 +320,7 @@ class WebSurfaceConfiguration {
         eventRecorder: ExecutionEventRecorder,
     ): ExecutionStreamLauncher =
         ExecutionStreamLauncher(
+            lakeAppendPort = lakeAppendPort,
             templateEngines = templateEngines,
             datasourceRegistry = datasourceRegistry,
             stagingFactory = stagingFactory,
@@ -355,6 +359,7 @@ class WebSurfaceConfiguration {
     @Suppress("LongParameterList")
     @Bean
     fun recordingExecutionRunner(
+        lakeAppendPort: co.datapipelines.pipeline.LakeAppendPort? = null,
         idempotencyStore: IdempotencyStore,
         scriptSupport: co.datapipelines.executor.ScriptSupport,
         templateEngines: WorkspaceTemplateEngines,
@@ -379,6 +384,7 @@ class WebSurfaceConfiguration {
         eventRecorder: ExecutionEventRecorder,
     ): RecordingExecutionRunner =
         RecordingExecutionRunner(
+            lakeAppendPort = lakeAppendPort,
             templateEngines = templateEngines,
             datasourceRegistry = datasourceRegistry,
             stagingFactory = stagingFactory,

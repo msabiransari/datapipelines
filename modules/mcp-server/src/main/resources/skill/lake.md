@@ -7,9 +7,28 @@ purpose: The data is Parquet or Iceberg on S3 rather than in a database.
 # Lake — querying object storage in place
 
 A **LAKE** datasource reads Parquet and Apache Iceberg tables on S3 or S3-compatible object
-storage **in place**, without a persistent bulk load into a warehouse, and it is **read-only**.
+storage **in place**, without a persistent bulk load into a warehouse. External LAKE datasources are **read-only**.
 DuckDB is the engine; the catalog is the server's own registry: a LAKE datasource exposes the
 tables you register. Querying still transfers data to the engine.
+
+## Appending a delivery to the managed lake
+
+The server's managed lake also accepts a pipeline delivery. Use `settings.tempdb.engine: DUCKDB` and one
+DQL node with `source: tempdb`, `delivery: {feed: "orders", id: "$batch_id"}`; its SQL reads `FROM delivery`,
+never an object path. The sender must upload CSV or Parquet files, then an empty `_done` object last, and leave
+that folder immutable. Feed and resolved id each match `[a-z0-9_-]{1,64}`.
+
+Each managed output is a DQL/tempdb node with
+`output: {target: datasource, datasource: <managed lake name>, table: "namespace.table", mode: append}`.
+Allow one append per table and make **every other node** an ancestor of every append via `depends_on`.
+This publication barrier includes validations and the delivery node. A SCRIPT with rejects must be strict.
+`replace` is refused. The effective role must be author, workspace admin or super admin; schedules use the system actor.
+Filtering rows in SQL is an authoring decision: the same delivery id cannot later publish the filtered-out rows.
+
+Parameter `redact_in_recipe` is optional and defaults to **false**. Set it to true for sensitive values that
+must become `<redacted>` in the immutable recipe; those recipes require operator-supplied values for replay.
+Redaction applies to declared inputs, not arbitrary secrets embedded in SQL, descriptions or row values.
+Execution, parameter binding and canonical hashing retain their normal behavior.
 
 ## The workflow
 

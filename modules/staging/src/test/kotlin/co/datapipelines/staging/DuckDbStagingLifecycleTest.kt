@@ -28,6 +28,8 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermissions
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * The DuckDB destruction guarantee (staging.md §3.4, §8.5), the twin of [H2StagingLifecycleTest]:
@@ -129,7 +131,14 @@ class DuckDbStagingLifecycleTest {
     @Test
     fun `close with a lease still out defers the deletion to that lease's return`() {
         val factory = duckFactory(scratch)
-        val staging = factory.open()
+        val preparation = factory.prepareDelivery(UUID.randomUUID(), factory.properties.defaultReservationBytes)
+        val staging = preparation.open()
+        val notifications = AtomicInteger()
+        val bytesAtRelease = AtomicLong(-1)
+        preparation.afterRelease {
+            bytesAtRelease.set(factory.budget.reservedBytes)
+            notifications.incrementAndGet()
+        }
         runBlocking {
             val inside = CompletableDeferred<Unit>()
             val release = CompletableDeferred<Unit>()
@@ -143,6 +152,8 @@ class DuckDbStagingLifecycleTest {
                 }
             inside.await()
             staging.close()
+            preparation.close()
+            notifications.get() shouldBe 0
             // close() did not wait, and did not pull the database from under the lease.
             pathsOf(scratch, staging.executionId) shouldContain "exec_${staging.executionId}.duckdb"
             factory.budget.reservedBytes shouldBe factory.properties.defaultReservationBytes
@@ -151,6 +162,10 @@ class DuckDbStagingLifecycleTest {
         }
         pathsOf(scratch, staging.executionId).shouldBeEmpty()
         factory.budget.reservedBytes shouldBe 0L
+        bytesAtRelease.get() shouldBe 0L
+        notifications.get() shouldBe 1
+        preparation.afterRelease { notifications.incrementAndGet() }
+        notifications.get() shouldBe 2
     }
 
     @Test

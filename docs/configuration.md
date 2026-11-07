@@ -1,8 +1,8 @@
 # Configuration Reference
 
-**Status:** v1.76 (operator reference; source-traced configuration authority)
+**Status:** v1.77 (operator reference; source-traced configuration authority)
 **Owner:** datapipelines.co core
-**Last updated:** 2026-11-06
+**Last updated:** 2026-11-07
 
 ---
 
@@ -733,7 +733,7 @@ the lanes named in their rows, so that one key set is documented and validated f
 | `datapipelines.lake.admission.max-open-partitions-per-append` | `64` | Partitions one append may write at once (P4). ≥ 1 |
 | `datapipelines.lake.admission.job-timeout` | `2h` | Every attempt's absolute deadline, fixed at admission and inherited by its leases (P4/P6). Enters the `orphan-grace-hours` rule |
 | `datapipelines.lake.admission.lease-wait-seconds` | `60` | How long an operation waits for a busy lease (P4/P6). Must be below `datapipelines.executor.node-query-timeout-max-seconds` (§3.2) |
-| `datapipelines.lake.catalog.lock-timeout-seconds` | `5` | `lock_timeout` on every catalog connection the lake opens (design record §8a), and the longest one lease acquire waits on a lease row another transaction holds before it counts as busy (#812; set for that acquire's transaction only, never on the shared pool). ≥ 1 |
+| `datapipelines.lake.catalog.lock-timeout-seconds` | `5` | `lock_timeout` on every catalog connection the lake opens (design record §8a), and on a lease acquire's own transaction, never on the shared pool (#812). An acquire answers busy when this lock timeout or its fixed five-second transaction timeout expires; Spring's whole-second rounding can add almost one second. Raising this setting does not lengthen that transaction cap (#799). ≥ 1 |
 | `datapipelines.lake.catalog.statement-timeout-seconds` | `30` | `statement_timeout` on every catalog connection the lake opens. ≥ 1; enters the `orphan-grace-hours` rule |
 | `datapipelines.lake.reads.max-generation-age-seconds` | `900` | A managed reader generation is retired at this age (P5). ≥ 1 |
 | `datapipelines.lake.reads.freshness-tick-seconds` | `60` | How often live reader generations are compared with the catalog rows (P5). ≥ 1 |
@@ -1436,6 +1436,7 @@ The Helm input reference already lives in the commented `deploy/helm/datapipelin
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-07 | v1.77 | #799 merge review | §3.24 states the fixed lease-acquire transaction cap alongside the configurable lock timeout and its Spring rounding allowance. |
 | 2026-11-06 | v1.76 | #708 the Prometheus scrape | §3.14: `management.endpoints.web.exposure.include` is `"health,prometheus"`, both served anonymously on the management port (#231 item 1, the failure-flow and telemetry record §17 row 11), and the `management.server.port` row says so. §3.15: the two tracing keys (`tracing.enabled` and `tracing.endpoint` under the observability prefix — the latter read from the standard OTLP endpoint variable) are removed with no deprecation window (record §17 row 12 — declared and never wired; tracing is deferred, record §12), here and in the yml excerpt; §5's template follows both. `ObservabilityConfigKeysSpecDriftTest` holds §3.15, the three operator-facing `management.*` rows and §5's template to `application.yml`. §3.28's `abandon-grace-seconds` points at the renamed abandoned-evaluations gauge in observability.md §4.1 rather than spelling its name: a full `datapipelines.script.` meter name reads as a config key to `ScriptConfigKeysSpecDriftTest`. |
 | 2026-11-04 | v1.75 | #780 script-invariants docs | **§3.28 says what the code does**: the intro states the ONE shared pool (every SCRIPT node of every execution, each row-mode batch and each invariant an evaluation), the immediate admission vs the wall-clock slot wait, and the fail-fast that aborts siblings on a pool refusal; the `max-input-rows` row states both bounds by path — evaluate/test caps the `rows` batch and each table input before evaluation, run caps table/value inputs before loading while a `row` input streams uncapped, and the invariants' read-back is bounded on the COMBINED count (outputs + rejects + inputs, row mode adding the streamed input and a caller output's buffered rows). No key, default or template change. — Renumbered at merge after #810. |
 | 2026-11-04 | v1.74 | 810 (#812) | §3.36 `catalog.lock-timeout-seconds` also bounds a lease acquire's wait on a lease row another transaction holds; the acquire then counts as busy. |

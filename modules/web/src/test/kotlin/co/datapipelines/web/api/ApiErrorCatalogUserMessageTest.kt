@@ -21,6 +21,17 @@ import org.junit.jupiter.api.Test
  */
 class ApiErrorCatalogUserMessageTest {
     @Test
+    fun `lake recipe refusals explain storage or investigation rather than pipeline validation`() {
+        val family = ApiErrorCatalog.userMessageFor("lake.append.no_such_code_probe")
+        val conflict = ApiErrorCatalog.userMessageFor(co.datapipelines.pipeline.PipelineErrorCodes.Lake.APPEND_RECIPE_EXISTS)
+        val unavailable = ApiErrorCatalog.userMessageFor(co.datapipelines.pipeline.PipelineErrorCodes.Lake.APPEND_RECIPE_WRITE_FAILED)
+        conflict shouldNotBe family
+        unavailable shouldNotBe family
+        conflict shouldContain "investigation"
+        unavailable shouldContain "storage"
+    }
+
+    @Test
     fun `every schedule code the form places at a field resolves to an override, not the family line`() {
         val fieldCodes =
             listOf(

@@ -86,6 +86,15 @@ class PipelineValidator(
     private val calculatorKinds: (String) -> CalculatorKind? = CalculatorRegistry::find,
 ) {
     /**
+     * Derived metadata outside the portable body. Execute admission rechecks it so an edited
+     * pinned child draft cannot hide a managed write behind its parent's older stored flag.
+     */
+    fun writesManagedLake(
+        pipeline: Pipeline,
+        workspaceId: java.util.UUID,
+    ): Boolean = ManagedLakeWrites(datasources, pipelines, maxCompositionDepth).writes(pipeline, workspaceId)
+
+    /**
      * Runs §12 against [pipeline] and returns every failure. [workspaceId] is the workspace
      * the pipeline is being saved into: its template, PIPELINE-node and datasource references
      * resolve there (design 2026-08-16-workspaces §3 — cross-workspace references do not exist
@@ -120,6 +129,7 @@ class PipelineValidator(
         // §12.13 AFTER §12.10 (7c, #7): the script rules read the writer map the calculator
         // rules establish — a value-mode SCRIPT's `context_key` is a writer of the same kind.
         ScriptRules.check(pipeline, orgContext, templates, workspaceId, collector, calculatorKinds)
+        LakeDeliveryRules.check(pipeline, datasources, workspaceId, collector)
         return collector.toResult()
     }
 

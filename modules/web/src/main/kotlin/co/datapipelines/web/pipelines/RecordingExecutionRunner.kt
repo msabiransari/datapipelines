@@ -113,6 +113,7 @@ class RecordingExecutionRunner(
      * [ExecutionStreamLauncher]; null only in module-slice wiring.
      */
     private val scriptSupport: co.datapipelines.executor.ScriptSupport? = null,
+    private val lakeAppendPort: co.datapipelines.pipeline.LakeAppendPort? = null,
     /**
      * #266 — the emitter's event recorder: the batched one in the application (PersistenceConfiguration),
      * null in module-slice wiring and unit tests, where the emitter's direct default applies.
@@ -213,5 +214,6 @@ class RecordingExecutionRunner(
             progress = executionProgress,
             subPipelineRunner = subPipelineRunner,
             scripts = scriptSupport,
+            lakeAppendPort = lakeAppendPort,
         )
 }

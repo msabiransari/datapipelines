@@ -25,7 +25,15 @@ import java.util.UUID
 
 class PipelineAuthoringToolsTest {
     private val pipelines = mockk<PipelineRepository>()
-    private val validator = mockk<PipelineValidator>()
+    private val validator =
+        mockk<PipelineValidator>().also {
+            every { it.writesManagedLake(any(), any()) } returns false
+        }
+
+    init {
+        every { pipelines.recordManagedLakeWrites(any(), any(), any(), any(), any()) } returns 1
+    }
+
     private val ctx = McpFixtures.ctx()
 
     private val args =
