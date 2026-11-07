@@ -796,28 +796,6 @@ class NodeRunner(
     }
 
     /**
-     * The inner 057 decorator: stamps the resolved dialect onto the failure record's node
-     * context, filling the whole context when the signal carries none yet. Rebuilding the
-     * signal (not mutating it — [MappedError] is immutable by design) preserves the original
-     * cause chain, which [PipelineExecutor.failNode] unwraps for the exception detail.
-     */
-    private fun decorateWithDialect(
-        error: Exception,
-        node: ExecutableNode,
-        dialect: Dialect,
-    ): Exception =
-        when (error) {
-            is NodeFailedSignal -> {
-                val context = error.error.node?.copy(dialect = dialect.name) ?: NodeErrorContext.of(node, dialect.name)
-                NodeFailedSignal(error.error.copy(node = context), error.cause ?: error)
-            }
-
-            else -> {
-                error
-            }
-        }
-
-    /**
      * Stamps [resolved]'s tier onto an escaping [NodeQueryTimeoutException] (156, #2) — the
      * cancellation handle that raises it knows only the statement's `queryTimeout`, never which
      * precedence tier resolved it; this call site does. Same "decorate only what is still null"
@@ -1146,6 +1124,28 @@ class NodeRunner(
         const val KB_PER_MB = 1024L
     }
 }
+
+/**
+ * The inner 057 decorator: stamps the resolved dialect onto the failure record's node
+ * context, filling the whole context when the signal carries none yet. Rebuilding the
+ * signal (not mutating it — [MappedError] is immutable by design) preserves the original
+ * cause chain, which [PipelineExecutor.failNode] unwraps for the exception detail.
+ */
+private fun decorateWithDialect(
+    error: Exception,
+    node: ExecutableNode,
+    dialect: Dialect,
+): Exception =
+    when (error) {
+        is NodeFailedSignal -> {
+            val context = error.error.node?.copy(dialect = dialect.name) ?: NodeErrorContext.of(node, dialect.name)
+            NodeFailedSignal(error.error.copy(node = context), error.cause ?: error)
+        }
+
+        else -> {
+            error
+        }
+    }
 
 /**
  * A node failure that already knows its catalog code — thrown by [NodeRunner], caught by
