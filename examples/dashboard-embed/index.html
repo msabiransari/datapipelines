@@ -1,0 +1,60 @@
+<!doctype html>
+<!--
+  The embedded-dashboard example: a static host page outside this app.
+
+  A host changes exactly THREE values:
+    1. data-dp-proxy-base   — YOUR relay's base (here the placeholder https://app.example.co/dp)
+    2. data-dp-dashboard-id — the dashboard's UUID (here the all-zero placeholder)
+    3. the theme sheet      — themes/light.css if you serve another theme
+
+  The dashboard key never appears in this file: the relay attaches it server-side
+  (examples/dashboard-proxy/). Run the relay behind your own authentication.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Embedded dashboard</title>
+
+    <!-- The design system's sheets, in this order: the tokens, the theme, the base
+         layers, then the application and dashboard styles that read them. -->
+    <link rel="stylesheet" href="/vendor/design-system/tokens.css" />
+    <link rel="stylesheet" href="/vendor/design-system/themes/light.css" />
+    <link rel="stylesheet" href="/vendor/design-system/base.css" />
+    <link rel="stylesheet" href="/vendor/design-system/primitives.css" />
+    <link rel="stylesheet" href="/css/app.css" />
+    <link rel="stylesheet" href="/css/dashboards.css" />
+    <link rel="stylesheet" href="/vendor/plotly/plotly.css" />
+
+    <!-- CSP-safe Plotly styling: Plotly checks for this empty template before it
+         injects inline styles; with it placed the chart rules come from plotly.css.
+         It must stand in <head> BEFORE any script. -->
+    <template id="plotly.js-style-global" class="no-inline-styles"></template>
+  </head>
+
+  <body>
+    <!-- The board container carries the two values a host configures. The sibling
+         div is the parameters pane (used when the dashboard has a parameter set). -->
+    <div
+      id="dashboard"
+      data-dp-embed
+      data-dp-proxy-base="https://app.example.co/dp"
+      data-dp-dashboard-id="00000000-0000-0000-0000-000000000000"
+      data-dp-parameters="parameters"
+    ></div>
+    <div id="parameters"></div>
+
+    <!-- Exactly one Plotly bundle: "3d" only when a pinned visualization is
+         scatter3d, surface or mesh3d; otherwise "2d". The attribute is the
+         declaration the runtime reads. -->
+    <script src="/vendor/plotly/plotly-2d.min.js" data-dp-plotly-bundle="2d"></script>
+
+    <!-- The runtime, then the renderer adapters for the kinds the dashboard uses,
+         then the boot glue. Each adapter registers its kind at script load. -->
+    <script src="/js/datapipelines-dashboard.js"></script>
+    <script src="/js/datapipelines-dashboard-plotly.js"></script>
+    <script src="/js/datapipelines-dashboard-table.js"></script>
+    <script src="/js/datapipelines-dashboard-kpi.js"></script>
+    <script src="embed.js"></script>
+  </body>
+</html>
