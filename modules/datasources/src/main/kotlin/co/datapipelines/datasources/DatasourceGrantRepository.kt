@@ -126,6 +126,30 @@ class DatasourceGrantRepository(
             MapSqlParameterSource().addValue("ws", workspaceId).addValue("by", grantedBy),
         )
 
+    /**
+     * #818 (dp-lake record D3: the lake is server-level) — grants [datasourceName] to every workspace
+     * that is not deleted. Returns how many grants were created; existing ones keep their original
+     * actor. ONE statement, so a workspace created between a read and a loop cannot be missed.
+     *
+     * Its only caller is the managed lake's registrar, at boot and on every freshness tick: no
+     * workspace-creation-time grant path exists, so a new workspace sees the managed lake within
+     * one tick.
+     */
+    fun grantToEveryWorkspace(
+        datasourceName: String,
+        grantedBy: UUID,
+    ): Int =
+        jdbc.update(
+            """
+            INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by)
+            SELECT :name, w.id, :by
+              FROM workspaces w
+             WHERE w.is_deleted = FALSE
+            ON CONFLICT (datasource_name, workspace_id) DO NOTHING
+            """.trimIndent(),
+            MapSqlParameterSource().addValue("name", datasourceName).addValue("by", grantedBy),
+        )
+
     /** Revokes the grant; false when there was none. Nothing about the datasource itself changes. */
     fun revoke(
         datasourceName: String,

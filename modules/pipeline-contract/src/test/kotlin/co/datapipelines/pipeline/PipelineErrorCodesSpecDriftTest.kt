@@ -180,6 +180,10 @@ class PipelineErrorCodesSpecDriftTest {
                 // 123 — the introspector's table-level not-found/forbidden, same two-segment shape.
                 PipelineErrorCodes.Datasource.TABLE_NOT_FOUND,
                 PipelineErrorCodes.Datasource.TABLE_FORBIDDEN,
+                // #818 — "managed" is a property of the datasource row itself, no entity dimension under it.
+                PipelineErrorCodes.Datasource.MANAGED,
+                // #818 §13.25 — the managed lake as a whole is what is unavailable; its table sibling has three.
+                PipelineErrorCodes.Lake.UNAVAILABLE,
                 // #279 §13.21 — the body itself is the refused thing; no entity dimension.
                 PipelineErrorCodes.Request.BODY_TOO_LARGE,
                 // #504b §13.21 — the search term itself is the refused thing; no entity dimension.

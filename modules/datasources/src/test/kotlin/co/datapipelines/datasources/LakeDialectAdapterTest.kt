@@ -154,6 +154,10 @@ class LakeDialectAdapterTest {
                 "CREATE OR REPLACE SECRET dp_lake (TYPE s3, PROVIDER credential_chain, REGION 'us-east-1')",
                 "SET memory_limit = '2048MB'",
                 "SET preserve_insertion_order = false",
+                "SET http_timeout = 10",
+                "SET http_retries = 2",
+                "SET http_retry_wait_ms = 100",
+                "SET http_retry_backoff = 4",
             )
     }
 
@@ -177,6 +181,10 @@ class LakeDialectAdapterTest {
                 "LOAD aws",
                 "SET memory_limit = '2048MB'",
                 "SET preserve_insertion_order = false",
+                "SET http_timeout = 10",
+                "SET http_retries = 2",
+                "SET http_retry_wait_ms = 100",
+                "SET http_retry_backoff = 4",
             )
     }
 
@@ -235,6 +243,10 @@ class LakeDialectAdapterTest {
                 "CREATE OR REPLACE SECRET dp_lake (TYPE s3, PROVIDER credential_chain, REGION 'us-east-1')",
                 "SET memory_limit = '2048MB'",
                 "SET preserve_insertion_order = false",
+                "SET http_timeout = 10",
+                "SET http_retries = 2",
+                "SET http_retry_wait_ms = 100",
+                "SET http_retry_backoff = 4",
             )
     }
 
@@ -254,6 +266,30 @@ class LakeDialectAdapterTest {
         init.filter { it.startsWith("LOAD") } shouldContainExactly
             listOf("LOAD httpfs", "LOAD aws", "LOAD avro", "LOAD iceberg")
         init.none { it.startsWith("INSTALL") } shouldBe true
+    }
+
+    /**
+     * #818d (record §10 item 7) — every engine that loads `httpfs` ends its setup with the object-store request bounds,
+     * literally these four, in this order, after the engine limits; one that loads nothing gets none (the settings do
+     * not exist before `httpfs`). Literal text on purpose: a change to a `LakeHttpBounds` constant must go red here
+     * and in the stalled-store integration test, never pass silently through a shared reference.
+     */
+    @Test
+    fun `an engine that loads httpfs ends its setup with the HTTP request bounds - every catalog kind, and only then`() {
+        val bounds =
+            listOf("SET http_timeout = 10", "SET http_retries = 2", "SET http_retry_wait_ms = 100", "SET http_retry_backoff = 4")
+        listOf("s3", "glue", "s3_tables", "rest").forEach { kind ->
+            withClue(kind) {
+                val init =
+                    lake.connectionInit(
+                        lakeDatasource(credentialKind = CredentialKind.NONE, dialectProperties = mapOf("catalog.kind" to kind)),
+                    )
+                init.takeLast(bounds.size) shouldContainExactly bounds
+                init[init.size - bounds.size - 1] shouldBe "SET preserve_insertion_order = false"
+            }
+        }
+        lake.connectionInit(attachLake()).none { it.startsWith("SET http_") } shouldBe true
+        LakeHttpBounds.STATEMENTS shouldContainExactly bounds
     }
 
     @Test

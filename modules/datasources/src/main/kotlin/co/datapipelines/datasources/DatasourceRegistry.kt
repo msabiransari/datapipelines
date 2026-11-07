@@ -1,8 +1,10 @@
 package co.datapipelines.datasources
 
 import co.datapipelines.datasources.pooling.ConnectionPool
+import co.datapipelines.datasources.pooling.ManagedLakeGeneration
 import co.datapipelines.datasources.pooling.ReapOutcome
 import co.datapipelines.typesystem.Dialect
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -142,6 +144,8 @@ interface DatasourceRegistry {
      * - neither authenticates → [CredentialResync.BOTH_FAILED]; the row is left alone. There
      *   is nothing to resync to, and overwriting a broken credential with another broken one
      *   would destroy the operator's value for nothing.
+     * - the row is the managed lake datasource (#818) → [CredentialResync.MANAGED_ROW] before
+     *   any probe; configuration owns its credential, so nothing is written.
      *
      * Every branch that probed records the outcome on the row (§8.1B), so the datasources
      * screen shows what happened without an execution having to fail first.
@@ -259,6 +263,31 @@ interface DatasourceRegistry {
      * registry with no lake catalog has no broken tables to report.
      */
     fun lakeBrokenTables(datasourceName: String): List<LakeBrokenTable> = emptyList()
+
+    /**
+     * #818 A1 — the boot registrar's privileged create-or-re-sync of the managed lake datasource
+     * ([Datasource.isManagedLake]); the only write path that may touch that row. Defaulted so fakes
+     * compile; only the production registry backs it.
+     */
+    fun syncManagedLake(
+        datasource: Datasource,
+        actor: UUID,
+    ): ManagedLakeSync = error("this registry cannot write the managed lake datasource")
+
+    /**
+     * #818 RULING 4 item 2 — the freshness tick: retire every live managed generation whose catalog
+     * moved since it was built, as read through [catalog]. The caller passes the read it can bound: the
+     * scheduled tick hands in a catalog over its own statement-bounded template (#818b A), so a catalog
+     * statement queued behind a lock ends at that bound instead of holding the scheduler thread the pool
+     * reaper shares. Returns how many were retired. Default 0.
+     */
+    fun refreshManagedGenerations(catalog: ManagedLakeCatalog): Int = 0
+
+    /** #818 — the instant [name]'s live pool was built (read before its factory call), or null when none is live. */
+    fun generationBuiltAt(name: String): Instant? = null
+
+    /** #818 — the catalog snapshot [name]'s live managed generation was built from, or null. */
+    fun liveManagedGeneration(name: String): ManagedLakeGeneration? = null
 }
 
 /**

@@ -1,5 +1,6 @@
 package co.datapipelines.config
 
+import co.datapipelines.web.config.ReaperDelay
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
@@ -122,15 +123,83 @@ class LakeRulesTest {
         enabled(LakeRules.STATEMENT_TIMEOUT_SECONDS to "0") shouldHaveSize 1
     }
 
+    @Test
+    fun `the freshness tick stays below the age bound and the reader memory is a positive size`() {
+        enabled(LakeRules.FRESHNESS_TICK_SECONDS to "900").single() shouldStartWith LakeRules.FRESHNESS_TICK_SECONDS
+        enabled(LakeRules.FRESHNESS_TICK_SECONDS to "899") shouldContainExactly emptyList()
+        enabled(LakeRules.READS_MEMORY_LIMIT to "0MB").single() shouldStartWith LakeRules.READS_MEMORY_LIMIT
+        enabled(LakeRules.READS_MEMORY_LIMIT to "plenty").single() shouldStartWith LakeRules.READS_MEMORY_LIMIT
+        enabled(LakeRules.READS_MEMORY_LIMIT to "2GB") shouldContainExactly emptyList()
+    }
+
+    @Test
+    fun `age bound plus twice the reaper delay plus ceiling plus tick fits an hour of every protected day`() {
+        // Record §10 third amendment (#818e). One protected day = 3600 s. Reaper delay 7;
+        // shipped ceiling = node timeout 60 + 30 = 90; tick 60. Reader termination is not a safety term.
+        // 3436 + 2 × 7 + 90 + 60 = 3600 is admitted (≤); 3437 refuses, naming every term it used.
+        enabled(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to "3436") shouldContainExactly emptyList()
+        val overBoundary = enabled(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to "3437")
+        overBoundary shouldHaveSize 1
+        val refused = overBoundary.single()
+        refused shouldStartWith LakeRules.MAX_GENERATION_AGE_SECONDS
+        refused shouldContain "2 × the reaper delay (7)"
+        refused shouldContain "retire ceiling (90)"
+        refused shouldContain "(3600)"
+    }
+
+    @Test
+    fun `the reads rule reads the derived delay from its constant - never a typed copy`() {
+        // #818c/#818d: ReaperDelayDerivationTest pins the delay; this pins
+        // LakeRules to them. Comments are removed first: prose (a `§7` cross-reference) is not a typed copy.
+        val source =
+            repoFile("modules/app/src/main/kotlin/co/datapipelines/config/LakeRules.kt")
+                .readText()
+                .replace(Regex("(?s)/\\*.*?\\*/"), "")
+                .lines()
+                .joinToString("\n") { it.substringBefore("//") }
+        source shouldContain "ReaperDelay.SECONDS"
+        listOf(ReaperDelay.SECONDS).forEach { constant ->
+            Regex("\\b${constant}L?\\b").findAll(source).map { it.value }.toList() shouldContainExactly emptyList()
+        }
+    }
+
+    @Test
+    fun `the retire ceiling is read the way datasources derives it`() {
+        val atBoundary = mapOf(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to "3436")
+
+        fun judged(snapshot: ConfigSnapshot): List<String> =
+            ConfigValidator
+                .validate(
+                    snapshot.copy(
+                        lake = shipped + mapOf(LakeRules.ENABLED to "true", LakeRules.BUCKET to "b", LakeRules.REGION to "r") + atBoundary,
+                    ),
+                ).violations
+        val base = ConfigSnapshots.valid()
+        judged(base) shouldContainExactly emptyList()
+        // A longer node timeout raises the derived ceiling: 61 + 30 = 91 tips the sum over.
+        val longerNodeTimeout = judged(base.copy(executorNodeQueryTimeoutSeconds = "61"))
+        longerNodeTimeout shouldHaveSize 1
+        longerNodeTimeout.single() shouldContain "retire ceiling (91)"
+        // An explicit ceiling wins over the derivation, in both directions.
+        judged(base.copy(executorNodeQueryTimeoutSeconds = "61", datasourcesRetireCeilingSeconds = "90")) shouldContainExactly emptyList()
+        judged(base.copy(datasourcesRetireCeilingSeconds = "91")).single() shouldContain "retire ceiling (91)"
+        judged(base.copy(datasourcesRetireCeilingSeconds = "soon")).single() shouldStartWith
+            "datapipelines.datasources.retire-ceiling-seconds"
+    }
+
     private fun defaultOf(key: String): String? {
         val raw = yaml[key]?.toString() ?: return null
         return PLACEHOLDER_DEFAULT.find(raw)?.groupValues?.get(1) ?: raw
     }
 
+    private fun repoFile(relative: String): File {
+        val root = generateSequence(File(".").absoluteFile) { it.parentFile }.first { File(it, "settings.gradle.kts").isFile }
+        return File(root, relative).also { check(it.isFile) { "missing $relative" } }
+    }
+
     private val yaml: Map<String, Any?> by lazy {
-        val file = generateSequence(File(".").absoluteFile) { it.parentFile }.first { File(it, "settings.gradle.kts").isFile }
         YamlPropertySourceLoader()
-            .load("application.yml", FileSystemResource(File(file, "modules/app/src/main/resources/application.yml")))
+            .load("application.yml", FileSystemResource(repoFile("modules/app/src/main/resources/application.yml")))
             .filterIsInstance<EnumerablePropertySource<*>>()
             .flatMap { source -> source.propertyNames.map { it to source.getProperty(it) } }
             .toMap()

@@ -1,6 +1,6 @@
-# The Managed Lake: Definitions, Deliveries and Publication
+# The Managed Lake: Definitions, Deliveries, Publication and Reads
 
-**Status:** v1.6 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append, bounded settlement, whole-tick bound)
+**Status:** v1.11 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -408,10 +408,86 @@ Registry repair uses P3's monotone revision-sequence upsert. A changed row bumps
 the same transaction; local pool retirement and peer invalidation follow the commit. A no-op repair rebuilds
 nothing. The authoritative catalog remains the source for managed reads; the registry is its display projection.
 
+## 9. Reads
+
+A managed table is read through the **managed lake datasource**, the one `LAKE` datasource DP creates from
+configuration when the lake is enabled ([Datasources §8C.10](datasources.md#8c10-the-managed-lake-datasource), #818,
+dp-lake P5). A query names a table `<lake>.<namespace>.<table>`, for example `warehouse.sales.orders` when
+`datapipelines.lake.name` is `warehouse`.
+
+**What a reader sees.** Each server reads through a generation: one DuckDB instance whose views were built from the
+Iceberg catalog rows at one instant. A query reads the snapshot its table's catalog row named at that instant. A table's
+state is read at that instant too: a table archived or restored afterwards keeps its old row below until the
+generation is replaced.
+
+| Table state | What a query sees |
+|---|---|
+| `active` | Its view |
+| `deprecated` | Its view; the deprecation notice appears in the table listing's remarks |
+| `archived`, `purged`, no catalog row, no lifecycle row, or the lake disabled | No view. A node that names it is refused before it runs with `lake.table.unavailable` (409, `details.table` and `details.reason`) |
+
+**When it sees new data.** New data is visible to the next query on this server and within a minute on others. Until
+the lake write path (#799) retires the committing server's generation itself, the freshness tick bounds freshness on
+every server, the committing one included.
+
+**The bound.** The pool reaper retires generations older than `reads.max-generation-age-seconds`,
+including generations with no later borrower. It runs on `dp-reaper`, every 5 s, and issues no statement.
+The reaper delay is 7 s (cadence plus twice its 1 s pass bound); closes run on `dp-pool-close` threads.
+Boot checks the staleness rule: age + 2 × reaper delay + retire ceiling + freshness tick must fit
+`retention.protection-days × 86400 / 24`. With shipped values: 900 + 14 + 90 + 60 = 1064 ≤ 25 200 s.
+This bounds the age handed to new queries. Reader termination is not a safety premise: DuckDB's
+HTTP settings bound a silent store, but cannot bound a trickling response (duckdb-httpfs#519).
+
+**Reader pins.** Before serving, a managed generation acquires one reader lease per available table,
+pinning the exact catalog metadata location its view reads. A failed pin refuses the build with
+`lake.unavailable`. Its UUID identifies the operation. A dedicated daemon thread, `dp-reader-lease`,
+heartbeats the instance's rows in one statement every 5 s while any physical handle remains, including
+handles retiring, closing or blocked in `close()`. Pins are released only after physical closure is
+confirmed. Graceful shutdown keeps the scheduler, scheduled-task registrar and metadata pool alive until every physical
+handle is confirmed closed, then releases its rows. A stuck native reader can therefore hold graceful shutdown;
+a killed process instead leaves rows that lapse at TTL.
+A dead process's rows lapse at TTL; expired or deadlined rows cannot renew. The deadline is
+the build instant plus the full protection window. A reader older than one twenty-fourth of that window
+logs `lake.reader_lease_overlong`; it stays pinned until its deadline or confirmed close.
+
+The TTL is derived from the metadata pool's actual acquisition timeout and the 5 s statement timeout:
+`previous statement tail + 2 × (cadence + acquire wait + statement timeout)`, 85 s for the shipped 30 s acquisition timeout.
+This covers a failed round followed by the next successful round under fixed-delay scheduling.
+New admission also checks the monotonic age of the last confirmed heartbeat, so a delayed keeper cannot admit a read after protection lapses.
+A short heartbeat or a failed round retires the generation, logs `lake.reader_lease_lost` and counts it;
+existing readers can continue. A round exceeding its cadence logs `lake.reader_lease_round_slow`.
+
+P6 must treat every live pinned metadata revision as protected regardless of `protected_until`.
+`ReaderPins.pinnedLocations` supplies its pins; `SnapshotExpiryFloor.compute` returns both the expiry
+floor (the minimum of now minus the window and every protected revision's current snapshot timestamp)
+and the protected revisions for the orphan walker. The remover itself belongs to P6.
+
+**Residual.** If an instance stays alive but cannot heartbeat for a full TTL, its pins lapse while
+its readers may still be reading. Expiry may then remove a snapshot such a reader holds and the reader
+fails with a missing-file error, never a wrong result: a planned scan names files, and a missing file
+is an error. The same loss applies when the full protection-window deadline is reached.
+
+**The operator knobs** ([Configuration §3.36](configuration.md#336-managed-lake-dp-lake-785)):
+
+| Key (`datapipelines.lake.`) | Default | Effect |
+|---|---|---|
+| `reads.max-generation-age-seconds` | `900` | The age bound. Lower means fresher reads and more rebuilds |
+| `reads.freshness-tick-seconds` | `60` | How often each server compares its generation with the catalog. Must be below the age bound |
+| `reads.memory-limit` | `512MB` | The memory each managed instance may use. It cannot spill to disk, so a query that needs more fails |
+| `storage.reader-access-key` / `reader-secret-key` | (empty) | A read-only key pair for the reads; without it the writer pair is used. Read-only is the operator's contract: DP cannot verify the pair's permissions |
+| `name` | `lake` | The managed datasource's name and the first part of every table name. A datasource already holding the name refuses the boot (`lake.boot.datasource_name_taken`) |
+
+---
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-06 | v1.11 | 818e (#818) | §9: reader leases pin metadata revisions through physical close; five-term staleness rule, dedicated heartbeat, expiry/orphan consumer contract and stalled-metadata residual. |
+| 2026-11-05 | v1.10 | 818d (#818) | §9 "The bound.": the reaper runs on its own `dp-reaper` thread and hands each close to a close thread, so the reaper delay is 7 s; the bound and boot rule gain the reader termination (92 s, derived from the managed lake's object-store request bounds). |
+| 2026-11-05 | v1.9 | 818c (#818) | §9 "The bound.": the pool reaper retires an over-age generation nobody leases from, and the bound and boot rule gain 2 × the reaper delay (260 s, derived from the scheduled jobs). |
+| 2026-11-04 | v1.8 | 818b (#818) | §9: a table's state, like its snapshot, is the one the reader's generation was built with. |
+| 2026-11-04 | v1.7 | 818 (#818) | New **§9 Reads**: what a reader sees per table state, when new data becomes visible (the committing-server half waits for #799), the age bound and the boot rule that keeps it inside the snapshot protection window, and the operator keys. |
 | 2026-11-06 | v1.6 | 799c (#799, #843) | The settlement tick is bounded as a whole (§8): the budget is checked inside verification and the semantics repair, the Iceberg metadata read leaves the tick's thread and opens no catalog session, one lease acquire is a five-second transaction, and the stated overrun is 16 seconds, derived term by term; a stuck read defers verification for every table until it ends. |
 | 2026-11-06 | v1.5 | 799b (#799) | Settlement work is bounded per tick (§8): a page of 50 deliveries per table behind an in-memory row cursor, the ten-second budget checked before every step, delivery and statement group, and a stated overrun of at most 20 seconds. A request settles only the delivery it waits on. The applying verification and semantics repair keep a separate clause (#843); the 20 seconds assume the pool hands out connections and the server answers its cancels (#837). |
 | 2026-11-05 | v1.4 | 799 (#799) | Deliveries, publication and settlement (§6–§8), including sender immutability, admission and physical resource ownership, the validation barrier, effective authority, immutable recipes, opt-in redaction default false, permanent commit evidence and bounded normal-mode recovery. |

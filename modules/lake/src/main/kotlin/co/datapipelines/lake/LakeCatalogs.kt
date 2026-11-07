@@ -216,7 +216,7 @@ class LakeCatalogSession internal constructor(
         }
     }
 
-    /** Loads `<namespace>.<table>` (a read: no lease is needed for it, but the session holds one). */
+    /** Loads `<namespace>.<table>`: no writer lease for the read; managed generations hold reader leases. */
     fun loadTable(
         namespace: String,
         table: String,

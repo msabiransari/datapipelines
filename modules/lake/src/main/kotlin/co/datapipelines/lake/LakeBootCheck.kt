@@ -163,6 +163,9 @@ class LakeBootCheck(
         CONTROL_ROW("lake.boot.control_row", "lake_control does not hold its one row"),
         STORAGE_UNREACHABLE("lake.boot.storage_unreachable", "the lake's object store is unreachable or refuses the writer"),
         CONDITIONAL_PUT("lake.boot.conditional_put", "the lake's object store does not honour If-None-Match: *"),
+
+        /** #818 (record §6): raised by the web layer's managed-datasource registrar, which runs after [verify]. */
+        DATASOURCE_NAME_TAKEN("lake.boot.datasource_name_taken", "a datasource that is not the managed lake holds the lake's name"),
     }
 
     companion object {

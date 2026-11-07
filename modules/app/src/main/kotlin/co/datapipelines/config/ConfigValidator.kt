@@ -72,8 +72,9 @@ class ConfigValidator(
          * 40 since #762 added `DashboardRuntimeRules.checkExecutorCeiling` (§3.34 — the executor's instance ceiling).
          * 44 since #785 added `LakeRules.checkLakeStorage`, `checkLakeRetention`, `checkLakeAdmission` and
          * `checkLakeBounds` (§3.36 — the managed lake, judged only when it is enabled).
+         * 45 since #818 added `LakeRules.checkLakeReads` (§3.36 — the managed reads' bounds, record §10 RULING 4).
          */
-        internal const val CHECK_COUNT = 44
+        internal const val CHECK_COUNT = 45
 
         /**
          * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
@@ -171,6 +172,7 @@ class ConfigValidator(
             LakeRules.checkLakeRetention(snapshot, violations)
             LakeRules.checkLakeAdmission(snapshot, violations)
             LakeRules.checkLakeBounds(snapshot, violations)
+            LakeRules.checkLakeReads(snapshot, violations)
             return ValidationReport(violations, warnings)
         }
 
@@ -896,6 +898,8 @@ class ConfigValidator(
                 executorMaxConcurrentGlobal = environment.getProperty("datapipelines.executor.max-concurrent-executions-global"),
                 executorMaxConcurrentPerInstance = environment.getProperty("datapipelines.executor.max-concurrent-executions-per-instance"),
                 executorNodeQueryTimeoutMaxSeconds = environment.getProperty("datapipelines.executor.node-query-timeout-max-seconds"),
+                executorNodeQueryTimeoutSeconds = environment.getProperty("datapipelines.executor.node-query-timeout-seconds"),
+                datasourcesRetireCeilingSeconds = environment.getProperty("datapipelines.datasources.retire-ceiling-seconds"),
                 executorNodeQueryTimeoutSecondsByDialect = executorNodeQueryTimeoutSecondsByDialect(environment),
                 stagingMaxMemoryMb = environment.getProperty("datapipelines.staging.h2.max-memory-mb"),
                 maxHeapMb = Runtime.getRuntime().maxMemory() / BYTES_PER_MB,
@@ -1145,6 +1149,10 @@ internal data class ConfigSnapshot(
     val executorMaxConcurrentPerInstance: String? = null,
     /** §3.2 (156, #2) — raw string so a non-numeric value is a NAMED violation, not a binder crash. */
     val executorNodeQueryTimeoutMaxSeconds: String? = null,
+    /** §3.2 / §3.36 (#818) — raw; the retire ceiling's derivation input when `retire-ceiling-seconds` is unset. */
+    val executorNodeQueryTimeoutSeconds: String? = null,
+    /** §3.36 (#818) — `datapipelines.datasources.retire-ceiling-seconds`, raw; empty = derived (datasources.md §5.2). */
+    val datasourcesRetireCeilingSeconds: String? = null,
     /** §3.2 (156, #2) — the per-dialect map, raw values (`dialect wire -> seconds string`). */
     val executorNodeQueryTimeoutSecondsByDialect: Map<String, String> = emptyMap(),
     /** §3.3 — the PER-EXECUTION tempdb budget, read here only for the §C pressure warning. */
@@ -1243,6 +1251,8 @@ internal data class ConfigSnapshot(
             "executorMaxConcurrentGlobal=$executorMaxConcurrentGlobal, " +
             "executorMaxConcurrentPerInstance=$executorMaxConcurrentPerInstance, " +
             "executorNodeQueryTimeoutMaxSeconds=$executorNodeQueryTimeoutMaxSeconds, " +
+            "executorNodeQueryTimeoutSeconds=$executorNodeQueryTimeoutSeconds, " +
+            "datasourcesRetireCeilingSeconds=$datasourcesRetireCeilingSeconds, " +
             "executorNodeQueryTimeoutSecondsByDialect=$executorNodeQueryTimeoutSecondsByDialect, " +
             "stagingMaxMemoryMb=$stagingMaxMemoryMb, " +
             "maxHeapMb=$maxHeapMb, " +

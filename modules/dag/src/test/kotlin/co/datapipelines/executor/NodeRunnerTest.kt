@@ -2,6 +2,8 @@ package co.datapipelines.executor
 
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.LakeBrokenTable
+import co.datapipelines.datasources.ManagedLakeTable
+import co.datapipelines.datasources.pooling.ManagedLakeGeneration
 import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.pipeline.NodeType
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -13,6 +15,7 @@ import co.datapipelines.templates.TemplateRenderException
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
@@ -38,6 +41,7 @@ import java.util.concurrent.CopyOnWriteArrayList
  * Every code path §14 lists: DQL with each output (tempdb / caller / datasource), DML, DDL;
  * success; template failure; connection failure; query failure; write-back failure.
  */
+@Suppress("LargeClass") // one runner contract over one H2 fixture pair; the managed-lake CONNECT cases share it (#818b)
 class NodeRunnerTest {
     private val executionId = UUID.randomUUID()
     private val staging: Staging = Fixtures.stagingFactory().create(executionId)
@@ -350,6 +354,88 @@ class NodeRunnerTest {
             failureOf(runner, Fixtures.node("read", source = "lakeds3")).code shouldNotBe
                 PipelineErrorCodes.Datasource.LAKE_TABLE_UNAVAILABLE
         }
+
+    // ------------------------------- managed lake: unavailable tables (#818, record §10)
+
+    @Test
+    fun `a node naming an archived managed table fails lake_table_unavailable at connect, with the reason`() =
+        runBlocking<Unit> {
+            val registry =
+                FakeDatasourceRegistry(
+                    mapOf("lake" to lakeDatasource("lake")),
+                    managedGenerations = mapOf("lake" to generation("lake", managedTable("lake", "orders", status = "archived"))),
+                )
+            val runner = runner(sql = "SELECT count(*) FROM lake.sales.orders", registry = registry)
+
+            val error = failureOf(runner, Fixtures.node("read", source = "lake"))
+
+            assertAll(
+                { error.code shouldBe PipelineErrorCodes.Lake.TABLE_UNAVAILABLE },
+                { error.details["table"] shouldBe "lake.sales.orders" },
+                { error.details["reason"] shouldBe "status archived" },
+                { error.details["datasource"] shouldBe "lake" },
+                // Judged on the pool's generation before the lease: no connection was leased.
+                { registry.leased.get() shouldBe 0 },
+            )
+        }
+
+    @Test
+    fun `quoted and bare spellings of an unavailable managed table are refused, a longer name is not`() =
+        runBlocking<Unit> {
+            val registry =
+                FakeDatasourceRegistry(
+                    mapOf("lake2" to lakeDatasource("lake2")),
+                    managedGenerations = mapOf("lake2" to generation("lake2", managedTable("lake", "orders", status = "purged"))),
+                )
+            listOf("SELECT * FROM \"lake\".\"sales\".\"orders\"", "SELECT * FROM orders", "SELECT * FROM \"orders\"").forEach { sql ->
+                withClue(sql) {
+                    failureOf(runner(sql = sql, registry = registry), Fixtures.node("read", source = "lake2")).code shouldBe
+                        PipelineErrorCodes.Lake.TABLE_UNAVAILABLE
+                }
+            }
+            failureOf(
+                runner(sql = "SELECT * FROM orders_v2", registry = registry),
+                Fixtures.node("read", source = "lake2"),
+            ).code shouldNotBe
+                PipelineErrorCodes.Lake.TABLE_UNAVAILABLE
+        }
+
+    @Test
+    fun `a deprecated managed table the generation serves is not refused - #818b B`() =
+        runBlocking<Unit> {
+            val registry =
+                FakeDatasourceRegistry(
+                    mapOf("lake3" to lakeDatasource("lake3")),
+                    managedGenerations =
+                        mapOf(
+                            "lake3" to generation("lake3", managedTable("lake3", "orders", status = "deprecated", deprecated = "use v2")),
+                        ),
+                )
+
+            // No refusal: the node reaches the in-memory engine, whose own error (no such view here) is not this check's.
+            failureOf(runner(sql = "SELECT count(*) FROM lake3.sales.orders", registry = registry), Fixtures.node("read", source = "lake3"))
+                .code shouldNotBe PipelineErrorCodes.Lake.TABLE_UNAVAILABLE
+            registry.leased.get() shouldBe 1
+        }
+
+    private fun generation(
+        lake: String,
+        vararg tables: ManagedLakeTable,
+    ) = ManagedLakeGeneration(lake, tables.toList())
+
+    private fun managedTable(
+        lake: String,
+        name: String,
+        status: String,
+        deprecated: String? = null,
+    ) = ManagedLakeTable(
+        namespace = listOf(lake, "sales"),
+        name = name,
+        format = "iceberg",
+        metadataLocation = "s3://dp-lake/sales/$name/metadata/00001-a.metadata.json",
+        status = status,
+        deprecationMessage = deprecated,
+    )
 
     // ------------ fail-closed semantics (044 F2/F3): the backstop's null/throw cases are REFUSALS
 

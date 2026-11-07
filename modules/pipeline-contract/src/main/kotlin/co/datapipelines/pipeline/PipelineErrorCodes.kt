@@ -768,6 +768,9 @@ object PipelineErrorCodes {
         const val WORKSPACE_FORBIDDEN = "datasource.validation.workspace_forbidden"
 
         const val IN_USE = "datasource.in_use"
+
+        /** #818 — an edit or delete of the managed lake datasource, which the server owns (§13.8). 409. */
+        const val MANAGED = "datasource.managed"
         const val NOT_FOUND = "datasource.not_found"
         const val DRIVER_NOT_LOADED = "datasource.driver_not_loaded"
 
@@ -2037,7 +2040,6 @@ object PipelineErrorCodes {
         const val COMMIT_CONTENDED = "lake.commit.contended"
         const val TABLE_BUSY = "lake.table.busy"
         const val TABLE_DEPRECATED = "lake.table.deprecated"
-        const val TABLE_UNAVAILABLE = "lake.table.unavailable"
         const val DELIVERY_CHANGED = "lake.delivery.changed"
         const val DELIVERY_CHANGED_DURING_READ = "lake.delivery.changed_during_read"
         const val APPEND_FORBIDDEN = "lake.append.forbidden"
@@ -2127,6 +2129,21 @@ object PipelineErrorCodes {
          * `failed`, and a release that reached it returns it as its apply outcome.
          */
         const val DEFINITION_APPLY_UNCLASSIFIED = "lake.definition.apply_unclassified"
+
+        // #818 (dp-lake P5) — the managed reads (§13.25, design record §10).
+
+        /**
+         * The managed lake datasource has no live generation and the catalog read a new one needs failed:
+         * no generation is built from an unverified read. 503; `details.cause` names the failure.
+         */
+        const val UNAVAILABLE = "lake.unavailable"
+
+        /**
+         * A managed table is unavailable for ingestion or has no view in the reader generation:
+         * archived, purged, unknown to the catalog, or the lake is disabled. 409; read details name
+         * the table and reason. Shared by the P4 delivery ledger and the P5 read gate.
+         */
+        const val TABLE_UNAVAILABLE = "lake.table.unavailable"
     }
 }
 

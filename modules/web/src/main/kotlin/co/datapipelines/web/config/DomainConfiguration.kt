@@ -313,21 +313,26 @@ class DomainConfiguration {
 
     @Bean
     // Ten collaborators: 089's registry + extension directory met 094's pool metrics + ceiling
-    // and 109's view-outcome recorder at the merge. Each is a distinct seam the registry owns;
-    // splitting the bean would hide the wiring this class exists to make explicit (§8.4).
+    // and 109's view-outcome recorder at the merge; #818 adds the managed lake read and the
+    // generation age bound, #818d the reaper's pool closer. Each is a distinct seam the registry owns; splitting the bean would
+    // hide the wiring this class exists to make explicit (§8.4).
     @Suppress("LongParameterList")
     fun datasourceRegistry(
         repository: DatasourceRepository,
         encryptor: CredentialEncryptor,
         references: DatasourceReferences,
         invalidation: PoolInvalidationPublisher,
-        lakeTables: LakeTableCatalog,
+        lakeTableRepository: co.datapipelines.application.datasources.LakeTableRepository,
         lakeViewRecorder: LakeViewOutcomeRecorder,
         environment: Environment,
         poolMetrics: PoolLifecycleMetrics,
         datasourcesProperties: DatasourcesProperties,
         fileRootsProperties: co.datapipelines.datasources.DatasourceFileRootsProperties,
         executorProperties: ExecutorProperties,
+        managedLake: co.datapipelines.datasources.ManagedLakeCatalog,
+        lakeProperties: org.springframework.beans.factory.ObjectProvider<co.datapipelines.lake.LakeProperties>,
+        poolCloser: co.datapipelines.datasources.pooling.PoolCloser,
+        generationPins: co.datapipelines.datasources.pooling.ManagedGenerationPins,
     ): DatasourceRegistry =
         DefaultDatasourceRegistry(
             repository = repository,
@@ -342,7 +347,9 @@ class DomainConfiguration {
             auditSink = DatasourceAuditSink.NONE,
             cache = DatasourceMetadataCache(),
             invalidation = invalidation,
-            lakeTables = lakeTables,
+            // #818b B: the registry PROJECTION, never the enriched `lakeTableCatalog` bean: a managed build reads the
+            // catalog once (its snapshot), and a node's CONNECT check reads no catalog (LakeConfiguration KDoc).
+            lakeTables = LakeConfiguration.projectionCatalog(lakeTableRepository),
             lakeViewRecorder = lakeViewRecorder,
             // configuration.md §3.25 (089 §D): the bundled DuckDB extension directory. Empty =
             // unset — the LAKE adapter keeps its explicit INSTALL+LOAD pairs (a bare `java -jar`
@@ -365,6 +372,19 @@ class DomainConfiguration {
             // §5.2: the retirement ceiling defaults to the node query timeout + 30 s, which is
             // why the two properties meet here rather than inside either binding class.
             retireCeiling = datasourcesProperties.ceiling(executorProperties.nodeQueryTimeoutSeconds),
+            // #818 (record §10 RULING 4): the managed reader generations' age bound, applied in the pool
+            // lookup. Unbound lake (disabled) = no bound; its managed rows then serve no view at all.
+            managedLake = managedLake,
+            maxGenerationAge =
+                lakeProperties.ifAvailable
+                    ?.takeIf { it.enabled }
+                    ?.reads
+                    ?.maxGenerationAgeSeconds
+                    ?.let(java.time.Duration::ofSeconds),
+            // #818d (record §10 RULING 4 amended, item 6): the reaper hands each close to the `dp-pool-close`
+            // threads (`PoolReaperSchedulingConfiguration.poolCloser`); application shutdown still closes in place.
+            poolCloser = poolCloser,
+            generationPins = generationPins,
         )
 
     /**

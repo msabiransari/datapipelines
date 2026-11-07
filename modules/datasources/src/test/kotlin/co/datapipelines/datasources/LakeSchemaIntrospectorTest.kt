@@ -181,6 +181,46 @@ class LakeSchemaIntrospectorTest {
      * typo only when its probe failed — the JDBC path had refused the same read since 123 §A.
      */
     @Test
+    fun `managed rows show their state in remarks - an archived table is marked, not omitted (#818)`() {
+        val active = LakeRegisteredTable(listOf("lake", "sales"), "orders", "iceberg", "s3://b/o", managed = true)
+        val deprecated =
+            active.copy(name = "orders_old", notice = "This table is deprecated since 2026-11-03. Use sales.orders instead.")
+        val archived = active.copy(name = "returns", unavailableReason = "status archived")
+        val (introspector, ds) = introspectorOver(listOf(active, deprecated, archived))
+
+        introspector.tables(ds).tables.map { it.name to it.remarks } shouldContainExactly
+            listOf(
+                "orders" to "iceberg",
+                "orders_old" to "iceberg; deprecated: This table is deprecated since 2026-11-03. Use sales.orders instead.",
+                "returns" to "iceberg; unavailable: status archived",
+            )
+    }
+
+    @Test
+    fun `columns of an unavailable managed table are refused with the reason, before any lease (#818)`() {
+        val archived =
+            LakeRegisteredTable(
+                listOf("lake", "sales"),
+                "returns",
+                "iceberg",
+                "s3://b/r",
+                managed = true,
+                unavailableReason = "status archived",
+            )
+        // No pool stubbed: a lease would fail the mock, so the refusal must come first.
+        val (introspector, ds) = introspectorOver(listOf(archived))
+
+        val error = shouldThrow<DatapipelinesException> { introspector.columns(ds, "returns", namespaceFilter = listOf("lake", "sales")) }
+
+        assertAll(
+            { error.code shouldBe ManagedLakeErrorCodes.TABLE_UNAVAILABLE },
+            { error.details["table"] shouldBe "lake.sales.returns" },
+            { error.details["reason"] shouldBe "status archived" },
+            { error.details["datasource"] shouldBe ds.name },
+        )
+    }
+
+    @Test
     fun `an unregistered table is refused as lake_table_not_found - a wild name carries no suggestion`() {
         val (introspector, ds) = introspectorOver(listOf(zoneDay, trips))
 

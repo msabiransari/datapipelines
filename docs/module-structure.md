@@ -1,6 +1,6 @@
 # Module Structure Specification
 
-**Status:** v1.14 (frozen contract — additive-only changes after this point)
+**Status:** v1.16 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** (all other specs — this spec operationalizes them into code structure)
 **Last updated:** 2026-11-06
@@ -430,7 +430,7 @@ No repository: tempdb lives and dies with one execution and is never persisted (
 - `EventEmitter` interface
 - `ExecutionEvent` sealed class
 - `ExecutionRepository` — `pipeline_executions`; `ExecutionEventRepository` — `execution_events` (durable 7-day record; the 1h Redis event log is `web`'s, §5.9)
-- `StaleExecutionSweeper` — the crash sweep's idempotent `UPDATE` (safe for every replica to run; no leader election by design). Its scheduling lives in `web` (§5.9): `web`'s `SweepSchedulingConfiguration` is the project's one `@EnableScheduling`/`@Scheduled` surface, introduced 2026-09-01 (036), and — since #316 — declares the scheduled jobs' own scheduler, `taskScheduler`: ONE daemon thread, `dp-scheduled`, that every `@Scheduled` job ticks on and nothing else uses. (Until #316 there was none, and Spring ran every job on the context's unique `ScheduledExecutorService` — the SSE log streamer's `dp-sse-log` thread, which serves replays.) Before 036, "no `@Scheduled`/Quartz/cron anywhere" was a verified property of the codebase — any NEW scheduled job is a lifecycle-surface change and belongs on this record.
+- `StaleExecutionSweeper` — the crash sweep's idempotent `UPDATE` (safe for every replica to run; no leader election by design). Its scheduling lives in `web` (§5.9): `web`'s `SweepSchedulingConfiguration` is the project's one `@EnableScheduling`/`@Scheduled` surface, introduced 2026-09-01 (036), and — since #316 — declares the scheduled jobs' own scheduler, `taskScheduler`: ONE daemon thread, `dp-scheduled`, that every `@Scheduled` job but the pool reaper ticks on and nothing else uses. The pool reaper alone names its own scheduler (`@Scheduled(scheduler = …)`): `web`'s `PoolReaperSchedulingConfiguration` declares `readerLeaseTaskScheduler` runs the metadata heartbeat on its own daemon `dp-reader-lease` thread (`PoolReaderLeaseConfiguration`); it does not delay the statement-free reaper. `poolReaperTaskScheduler`, one daemon thread `dp-reaper`, deliberately not named `taskScheduler` so the other jobs keep resolving to `dp-scheduled` (#818d, [Datasources §8C.10](datasources.md#8c10-the-managed-lake-datasource)). (Until #316 there was none, and Spring ran every job on the context's unique `ScheduledExecutorService` — the SSE log streamer's `dp-sse-log` thread, which serves replays.) Before 036, "no `@Scheduled`/Quartz/cron anywhere" was a verified property of the codebase — any NEW scheduled job is a lifecycle-surface change and belongs on this record.
 - `BoundedJdbc` — (#326) the one construction of a JDBC template whose every statement carries a `queryTimeout` (#311's lifecycle writes, the stale sweep's UPDATE, the retention's statements; `web` hands the auth jobs a template it built here, because `persistence` holds no JDBC, §5.19)
 - `ExecutionEventRetention` — the `execution_events` retention job (050/T60): one idempotent `DELETE` past the retention window, safe for every replica, never touching `pipeline_executions`. Scheduled by `web`'s `RetentionSchedulingConfiguration` (`@Scheduled`, fixed-delay 1h, on the jobs' single-thread scheduler, `dp-scheduled` — still exactly ONE `@EnableScheduling`).
 
@@ -1292,6 +1292,8 @@ Before considering the module structure "ready":
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-06 | v1.16 | 818e (#818) | §5.6: the dedicated reader-lease scheduler and its datasource port, without a module dependency change. |
+| 2026-11-05 | v1.15 | 818d (#818) | §5.6: the pool reaper ticks on its own scheduler, `poolReaperTaskScheduler` (one daemon thread, `dp-reaper`), declared in `web`'s `PoolReaperSchedulingConfiguration`; every other `@Scheduled` job stays on `dp-scheduled`. Still exactly one `@EnableScheduling`. No module or dependency change. |
 | 2026-11-06 | v1.14 | #708 | §5.10 `app` gains `micrometer-registry-prometheus` (`runtimeOnly`) — the registry is a deployment concern, so library modules keep `micrometer-core` only; §5.18's selector-pool line names the renamed gauge `datapipelines.parameters.selectors.abandoned` (the un-prefixed name broke observability §4.1's prefix rule). |
 | 2026-11-04 | v1.13 | 827 (#826) | §6's catalog excerpt is SHAPE ONLY — the literal versions are gone (they had staled while reading as authority: the excerpt carried kotlin 1.9.24 / spring-boot 3.3.2 / a then-current duckdb-jdbc line, against the toml's ratified values). `gradle/libs.versions.toml` is the one place a version literal lives; the G2 note and §6.1 say so. No dependency, module or code change. |
 | 2026-11-04 | v1.12 | 798 (#798, dp-lake P3) | `lake` declares `auth` (§4.1 diagram edge, §4.2 note, §5.21; the §4.2 row already allowed it) for `AuditEventSink`; §5.21 gains the table definitions' public API ([Lake](lake.md)). No new module, no new external dependency. |

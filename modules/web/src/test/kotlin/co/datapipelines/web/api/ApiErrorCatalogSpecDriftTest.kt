@@ -359,9 +359,11 @@ class ApiErrorCatalogSpecDriftTest {
          * commit as their `PipelineErrorCodes.Lake` constants. Re-derived from the document's own parse.
          * 437 → 438 with #811: §13.25 gains `lake.definition.apply_unclassified` (`—`, NEVER_RETURNED_LIVE), landed
          * in the SAME commit as its `PipelineErrorCodes.Lake` constant.
-         * #799 adds nine delivery/append structure refusals (400), bringing the count to 447; six listing codes bring it to 453.
+         * #799 adds the delivery/append refusals, bringing the count to 475.
+         * 475 → 477 with #818: datasource.managed and lake.unavailable. Both lanes share lake.table.unavailable.
+         * The merged document, constants and catalog rows carry the same union.
          */
-        const val SECTION_13_ROW_COUNT = 475
+        const val SECTION_13_ROW_COUNT = 477
 
         /**
          * §12's distinct validation codes.
