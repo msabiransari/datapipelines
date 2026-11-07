@@ -41,11 +41,13 @@
   join a large staged table to gets exactly that `DDL` node between its staging node and the
   join — one template per index, pinned like any other node's. 60 s → 5 s was the measured
   difference on a 2M-row join in one acceptance run.
-- **`depends_on` is data flow, nothing else.** A node depends on the nodes whose tables or
+- **`depends_on` expresses data flow and the managed-lake publication barrier.** A node depends on the nodes whose tables or
   context values it reads. Never add an edge to serialise work "to reduce load" or "avoid
   contention" — you make the critical path longer and hide the real problem. Independent nodes
   run in parallel by design. (Real miss: four source slices chained behind an unrelated lake
   read.)
+  For a managed-lake delivery, every append must also depend transitively on **every non-append node**, so a
+  slow failing validation cannot race a publication. Append nodes may run in parallel with each other.
 - **A timeout is a signal, not an obstacle.** A node that hits a timeout is usually doing too
   much work in the wrong place: pre-aggregate at the source, use a rollup table, filter
   earlier, read the plan. Only after that, and only when the data genuinely has a natural
@@ -59,8 +61,8 @@
   stats first, then use bound predicates on the partition key where they express the intended
   selection — bound parameters prune exactly like literals — and never build a `UNION ALL` of
   date-range branches to work around a sibling-column filter: that is N full walks in one
-  statement. The `lake` guide holds the measured read-path rules; this read-only datasource
-  cannot repartition or sort stored files, and tempdb `CREATE INDEX` does not index S3 data.
+  statement. The `lake` guide holds the measured read-path rules; the read path cannot
+  repartition or sort stored files, and tempdb `CREATE INDEX` does not index S3 data.
 - **Climb the ladder: probe → render → execute_node → full DAG.** `sql_probe` the exact
   SELECT against the source first — rows, `wall_ms`, and the EXPLAIN plan (captured before the
   run, so it survives the timeout it explains); then `templates_render`; then

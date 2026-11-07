@@ -240,6 +240,15 @@ private class WireValueScan(
         nodes.forEachIndexed { index, node ->
             scanNodeType(index, node)
             scanNodeOutput(index, node)
+            val delivery = node.path("delivery")
+            if (!delivery.isMissingNode && !delivery.isNull && !delivery.isObject) {
+                add(
+                    PipelineErrorCodes.Lake.DELIVERY_INVALID_NODE,
+                    "nodes[$index].delivery",
+                    "Delivery must be an object with feed and id fields.",
+                    emptyMap(),
+                )
+            }
         }
     }
 

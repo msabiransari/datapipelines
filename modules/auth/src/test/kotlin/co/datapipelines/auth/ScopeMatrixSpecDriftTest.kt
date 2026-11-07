@@ -106,7 +106,7 @@ class ScopeMatrixSpecDriftTest {
          * switch_version; the two imports landed with L1c, `dashboard.execute` with L2 and `dashboard.key.bind`
          * with L5), re-derived.
          */
-        const val PERMISSION_COUNT = 100
+        const val PERMISSION_COUNT = 101
 
         /** Documented rows with no code behind them yet — each one a decision the record made ahead of a surface. */
         val RESERVED_ROWS = listOf("Read the audit log — **reserved** (D12)")

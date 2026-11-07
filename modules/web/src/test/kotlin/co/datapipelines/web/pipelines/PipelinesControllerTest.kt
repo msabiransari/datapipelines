@@ -46,7 +46,15 @@ class PipelinesControllerTest {
             // the page's drafts in one batched call. These fixtures have none.
             every { it.findDrafts(any(), any()) } returns emptyMap()
         }
-    private val validator = mockk<PipelineValidator>()
+
+    init {
+        every { repository.recordManagedLakeWrites(any(), any(), any(), any(), any()) } returns 1
+    }
+
+    private val validator =
+        mockk<PipelineValidator>().also {
+            every { it.writesManagedLake(any(), any()) } returns false
+        }
     private val drafts = mockk<PipelineDraftService>()
     private val releases = mockk<PipelineReleaseService>()
 

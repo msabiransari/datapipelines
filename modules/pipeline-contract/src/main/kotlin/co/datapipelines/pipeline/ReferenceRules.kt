@@ -148,8 +148,9 @@ internal object ReferenceRules {
                 return
             }
         // Workspaces §6 shape 3: an output.target: "datasource" block names a write target for
-        // ANY node type (DQL write-back and PIPELINE alike) — readonly refuses it regardless.
-        if (facts.readonly) {
+        // ANY node type (DQL write-back and PIPELINE alike). The managed lake alone admits
+        // append; LakeDeliveryRules supplies its delivery/barrier checks. External lakes stay readonly.
+        if (facts.readonly && !(facts.managedLake && output.mode == WriteMode.APPEND)) {
             into.add(
                 Validation.DATASOURCE_READONLY,
                 "nodes[$index].output.datasource",

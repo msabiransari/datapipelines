@@ -6,6 +6,8 @@ import co.datapipelines.lake.LakeLeases
 import co.datapipelines.lake.LakeMinio
 import co.datapipelines.lake.LakeProperties
 import co.datapipelines.lake.LakeTestDb
+import co.datapipelines.lake.settle.LakeMetadataReads
+import co.datapipelines.lake.settle.SettleBudget
 import co.datapipelines.pipeline.AuthoringGuard
 import org.apache.iceberg.io.FileIO
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
@@ -66,6 +68,7 @@ internal class LakeDefinitionsHarness(
     val applies = LakeApplyRepository(named)
     val applyLeases = LakeApplyLeases(leases, leaseWait, Duration.ofMillis(POLL_MILLIS))
     val applier = LakeDefinitionApplier(definitions, applies, applyLeases, catalogs, properties.name, tx, audit, hooks)
+    private val metadataReads = LakeMetadataReads(named, properties.name, catalogs::metadataFileIo)
     val service =
         LakeDefinitionService(
             definitions = definitions,
@@ -79,6 +82,10 @@ internal class LakeDefinitionsHarness(
         )
 
     val actor: UUID = UUID.fromString("00000000-0000-0000-0000-000000000798")
+
+    /** The sweep's verification under a budget a case never spends (spent budgets: `SettlementWholeTickBoundIntegrationTest`). */
+    fun verifyApplying(id: UUID): LakeApplyOutcome =
+        applier.verifyApplying(id, SettleBudget.startingNow(leases, Duration.ofMinutes(1)), metadataReads)
 
     fun reset() {
         LakeTestDb.reset()

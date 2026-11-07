@@ -39,7 +39,15 @@ import java.util.UUID
 class PipelineTransferControllerTest {
     private val pipelines = mockk<PipelineRepository>()
     private val templates = mockk<TemplateRepository>()
-    private val validator = mockk<PipelineValidator>()
+
+    init {
+        every { pipelines.recordManagedLakeWrites(any(), any(), any(), any(), any()) } returns 1
+    }
+
+    private val validator =
+        mockk<PipelineValidator>().also {
+            every { it.writesManagedLake(any(), any()) } returns false
+        }
 
     // The import act now lives in PipelineImportService (extracted so the D9 seeder performs the
     // SAME import). The real service is used here, not a mock: these cases assert the import's

@@ -414,11 +414,23 @@ class DomainConfiguration {
      * the REST GET hot path keeps the cache.
      */
     @Bean
-    fun contractDatasourceRegistry(registry: DatasourceRegistry): ContractDatasourceRegistry =
+    fun contractDatasourceRegistry(
+        registry: DatasourceRegistry,
+        environment: Environment,
+    ): ContractDatasourceRegistry =
         ContractDatasourceRegistry { name, workspaceId ->
             // Every save is workspace-scoped, promotion included (136 §C / T285): the
             // visibility read is the grant predicate, and there is no workspace-less branch.
-            registry.getVisibleLive(name, workspaceId)?.let { DatasourceFacts(it.dialect, it.isReadonly) }
+            registry.getVisibleLive(name, workspaceId)?.let {
+                DatasourceFacts(
+                    it.dialect,
+                    it.isReadonly,
+                    managedLake =
+                        it.dialect == Dialect.LAKE &&
+                            environment.getProperty("${LakeProperties.PREFIX}.enabled", Boolean::class.java, false) &&
+                            name == environment.getProperty("${LakeProperties.PREFIX}.name", LakeProperties.DEFAULT_NAME),
+                )
+            }
         }
 
     /**

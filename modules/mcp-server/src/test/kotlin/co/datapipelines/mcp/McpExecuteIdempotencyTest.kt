@@ -13,7 +13,9 @@ import co.datapipelines.executor.PipelineExecutor
 import co.datapipelines.executor.ResultStore
 import co.datapipelines.executor.ResultUrlFactory
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.PipelineExecutionSnapshot
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
@@ -83,7 +85,8 @@ class McpExecuteIdempotencyTest {
 
     private fun storedPipeline() {
         every { repository.findById(any(), McpFixtures.PIPELINE_ID) } returns McpFixtures.pipelineRecord()
-        every { repository.findVersionBody(any(), McpFixtures.PIPELINE_ID, 1) } returns McpFixtures.pipelineBody()
+        every { repository.findExecutionSnapshot(any(), McpFixtures.PIPELINE_ID, 1) } returns
+            PipelineExecutionSnapshot(McpFixtures.pipelineBody(), "snapshot-hash", PipelineVersionStatus.RELEASED, false)
         coEvery { executor.execute(any()) } answers {
             val request = firstArg<ExecuteRequest>()
             executed += request

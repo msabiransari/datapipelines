@@ -1,7 +1,9 @@
 package co.datapipelines.staging
 
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.ReleaseNotifications
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -76,15 +78,24 @@ class ScratchReservation internal constructor(
     /** The reserved bytes; also the engine's `max_temp_directory_size` and the database's growth cap. */
     val bytes: Long,
     private val onRelease: (Long) -> Unit,
-) : AutoCloseable {
+) : AutoCloseable,
+    ReleaseNotifications {
     private val released = AtomicBoolean(false)
+    private val completion = CompletableFuture<Unit>()
 
     /** Returns the bytes to the aggregate; idempotent. */
     fun release() {
-        if (released.compareAndSet(false, true)) onRelease(bytes)
+        if (released.compareAndSet(false, true)) {
+            onRelease(bytes)
+            completion.complete(Unit)
+        }
     }
 
     override fun close() = release()
+
+    override fun afterRelease(callback: () -> Unit) {
+        completion.thenRun(callback)
+    }
 }
 
 /**

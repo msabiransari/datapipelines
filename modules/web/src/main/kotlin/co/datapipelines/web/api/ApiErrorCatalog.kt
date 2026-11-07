@@ -144,6 +144,43 @@ object ApiErrorCatalog {
     /** Every code whose status differs from its family default (§13, rest-api §7.6). */
     private val EXCEPTIONS: Map<String, HttpStatus> =
         mapOf(
+            PipelineErrorCodes.Lake.CAPACITY_BUSY to HttpStatus.SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Lake.APPEND_GRANT_MISSING to HttpStatus.FORBIDDEN,
+            PipelineErrorCodes.Lake.APPEND_OUTCOME_UNKNOWN to HttpStatus.SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Lake.APPEND_FAILED to HttpStatus.INTERNAL_SERVER_ERROR,
+            PipelineErrorCodes.Lake.APPEND_PROVENANCE_MISSING to HttpStatus.INTERNAL_SERVER_ERROR,
+            PipelineErrorCodes.Lake.APPEND_AUTHORITY_LOST to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Lake.COMMIT_CONTENDED to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Lake.TABLE_BUSY to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Lake.TABLE_DEPRECATED to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Lake.TABLE_UNAVAILABLE to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Lake.DELIVERY_CHANGED to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Lake.DELIVERY_CHANGED_DURING_READ to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Lake.DELIVERY_INVALID_KEY to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_FORBIDDEN to HttpStatus.FORBIDDEN,
+            PipelineErrorCodes.Lake.APPEND_AMBIGUOUS_COLUMN to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_UNKNOWN_COLUMN to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_MISSING_REQUIRED_COLUMN to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_NULL_IN_REQUIRED to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_TYPE_MISMATCH to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_TOO_MANY_PARTITIONS to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_RECIPE_EXISTS to HttpStatus.INTERNAL_SERVER_ERROR,
+            PipelineErrorCodes.Lake.APPEND_RECIPE_WRITE_FAILED to HttpStatus.SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Lake.DELIVERY_INCOMPLETE to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Lake.DELIVERY_TOO_LARGE to HttpStatus.PAYLOAD_TOO_LARGE,
+            PipelineErrorCodes.Lake.DELIVERY_UNSUPPORTED_FORMAT to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.DELIVERY_INVALID_MANIFEST to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.DELIVERY_LISTING_FAILED to HttpStatus.SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Lake.DELIVERY_ADMISSION_FAILED to HttpStatus.SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Lake.DELIVERY_ONE_PER_PIPELINE to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_ONE_PER_TABLE to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_REQUIRES_DELIVERY to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_REJECTS_NOT_STRICT to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_INVALID_NODE to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_BARRIER to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_REPLACE_REFUSED to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.DELIVERY_INVALID_NODE to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.DELIVERY_REQUIRES_DUCKDB to HttpStatus.BAD_REQUEST,
             // 091 §13.7: the one `auth.api_key.` code that is not 401. The credential is fine;
             // the ISSUANCE BODY named an expiry that is not usable, which is a 400.
             co.datapipelines.auth.AuthErrorCodes.API_KEY_EXPIRY_INVALID to HttpStatus.BAD_REQUEST,
@@ -613,12 +650,41 @@ object ApiErrorCatalog {
             // #785 §13.25 — the managed lake's fence: another operation holds the table, or the catalog is
             // being restored. Never returned live in P2 (NEVER_RETURNED_LIVE); the line is the manual's.
             // #798 §13.25 — the definitions' family line, placed BEFORE `lake.` (the first matching prefix wins).
+            "lake.delivery." to "The delivery could not be read. Check its status and try again.",
+            "lake.append." to "The pipeline is not ready to append to the lake. Check its validation details.",
             "lake.definition." to "That table definition can't be changed this way. Check the definition and try again.",
             "lake." to "The lake is busy with another change to this table. Try again shortly.",
         )
 
     private val USER_MESSAGE_OVERRIDES: Map<String, String> =
         mapOf(
+            PipelineErrorCodes.Lake.CAPACITY_BUSY to "Delivery capacity is busy. Retry when an ingestion slot and scratch are available.",
+            PipelineErrorCodes.Lake.APPEND_GRANT_MISSING to "The execution has no checked authority to append to the lake.",
+            PipelineErrorCodes.Lake.APPEND_OUTCOME_UNKNOWN to
+                "Publication is unconfirmed. Wait for settlement before retrying this delivery.",
+            PipelineErrorCodes.Lake.APPEND_FAILED to "The append failed. Inspect its recorded delivery outcome before retrying.",
+            PipelineErrorCodes.Lake.APPEND_PROVENANCE_MISSING to
+                "The execution lacks its required recovery provenance. Report this execution.",
+            PipelineErrorCodes.Lake.APPEND_AUTHORITY_LOST to "The append lost its lease authority. Retry after settlement.",
+            PipelineErrorCodes.Lake.COMMIT_CONTENDED to "The catalog remained contended. Retry the same immutable delivery.",
+            PipelineErrorCodes.Lake.TABLE_BUSY to "This table has an active or unconfirmed publication. Retry after settlement.",
+            PipelineErrorCodes.Lake.TABLE_DEPRECATED to "A deprecated table does not accept new deliveries.",
+            PipelineErrorCodes.Lake.TABLE_UNAVAILABLE to "The managed table is unavailable for ingestion.",
+            PipelineErrorCodes.Lake.DELIVERY_CHANGED to "This delivery id already names different files. Use a new id for corrected input.",
+            PipelineErrorCodes.Lake.DELIVERY_CHANGED_DURING_READ to
+                "The delivery changed while staging read it. Its files must be immutable.",
+            PipelineErrorCodes.Lake.APPEND_FORBIDDEN to "Your current role cannot append deliveries to the lake.",
+            PipelineErrorCodes.Lake.APPEND_AMBIGUOUS_COLUMN to "The staged result has column names that differ only by case.",
+            PipelineErrorCodes.Lake.APPEND_UNKNOWN_COLUMN to "The staged result contains a column outside the managed table schema.",
+            PipelineErrorCodes.Lake.APPEND_MISSING_REQUIRED_COLUMN to "The staged result omits a required managed table column.",
+            PipelineErrorCodes.Lake.APPEND_NULL_IN_REQUIRED to
+                "The staged result has null values in required columns; details contain every count.",
+            PipelineErrorCodes.Lake.APPEND_TYPE_MISMATCH to "A staged native type cannot be stored without narrowing or coercion.",
+            PipelineErrorCodes.Lake.APPEND_TOO_MANY_PARTITIONS to "The append exceeds the configured open partition limit.",
+            PipelineErrorCodes.Lake.APPEND_RECIPE_EXISTS to
+                "This publication attempt has a conflicting recovery record. Report this execution for investigation.",
+            PipelineErrorCodes.Lake.APPEND_RECIPE_WRITE_FAILED to
+                "The delivery's recovery record could not be stored. Retry when storage is available.",
             // #353 — the two screenshot refusals are about the IMAGE, not the session: the `visualization.test.`
             // family line ("start a new session") would send an agent to restart a run its upload can still finish.
             PipelineErrorCodes.Visualization.TEST_SCREENSHOT_TOO_LARGE to

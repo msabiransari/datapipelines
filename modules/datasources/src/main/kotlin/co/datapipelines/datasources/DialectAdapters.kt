@@ -668,10 +668,16 @@ class LakeDialectAdapter(
     override fun connectionInit(datasource: Datasource): List<String> =
         buildList {
             val dialectProperties = datasource.properties.dialect
-            addAll(extensionStatements(dialectProperties))
-            secretStatement(datasource, dialectProperties)?.let { add(it) }
+            addAll(storageInit(datasource))
             addAll(attachStatements(dialectProperties))
             addAll(limitStatements(datasource))
+        }
+
+    /** Trusted staging needs storage access while retaining its own memory and execution limits. */
+    fun storageInit(datasource: Datasource): List<String> =
+        buildList {
+            addAll(extensionStatements(datasource.properties.dialect))
+            secretStatement(datasource, datasource.properties.dialect)?.let { add(it) }
         }
 
     override fun validateDialectProperties(properties: Map<String, Any?>): ValidationResult {

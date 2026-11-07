@@ -84,6 +84,7 @@ class ChildVersionProbeIntegrationTest {
             mapOf("id" to actor, "email" to "u$actor@example.com", "sub" to "sub-$actor"),
         )
         val childBodiesValid = mockk<PipelineValidator>()
+        every { childBodiesValid.writesManagedLake(any(), any()) } returns false
         every { childBodiesValid.validate(any(), any(), any()) } returns ValidationResult.VALID
         every { childBodiesValid.validateOrThrow(any(), any(), any()) } answers { firstArg() }
         children = pipelineServiceOver(repository, validator = childBodiesValid)

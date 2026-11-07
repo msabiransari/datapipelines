@@ -294,8 +294,9 @@ enums_txt = texts.get("docs/enums.md", "")
 sec15 = re.search(r"^## 15\..*?(?=^## 16\.)", enums_txt, re.M | re.S)
 # `workspace` joined the audit namespaces in RBAC round 1 (member_added, member_removed,
 # member_flags_changed, deactivated, reactivated) — enums.md §15 remains the authority that
-# has to DEFINE one before any doc may cite it.
-events = set(re.findall(r"(?:auth|datasource|mcp|endpoint|pipeline|template|workspace|mail|schedule|visualization|dashboard|parameter_set)\.[a-z_]+(?:\.[a-z_]+)*",
+# has to DEFINE one before any doc may cite it. `lake` joins with delivery events (#799);
+# its definition events previously happened to share names with structured logs.
+events = set(re.findall(r"(?:auth|datasource|mcp|endpoint|pipeline|template|workspace|mail|schedule|visualization|dashboard|parameter_set|lake)\.[a-z_]+(?:\.[a-z_]+)*",
                         sec15.group(0) if sec15 else enums_txt))
 # auth.* events are also cited outside §15 (auth.md §10.1 etc.)
 events |= set(re.findall(r"auth\.[a-z_]+(?:\.[a-z_]+)*", enums_txt))

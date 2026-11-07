@@ -125,7 +125,10 @@ object McpFixtures {
      */
     fun pipelineService(
         pipelines: PipelineRepository,
-        validator: PipelineValidator = mockk(),
+        validator: PipelineValidator =
+            mockk<PipelineValidator>().apply {
+                io.mockk.every { writesManagedLake(any(), any()) } returns false
+            },
         authoring: AuthoringGuard = AuthoringGuard(true),
         templateVersions: TemplateVersionStatuses = TemplateVersionStatuses { _, _, _ -> null },
         drafts: PipelineDraftService = PipelineDraftService(pipelines, authoring),

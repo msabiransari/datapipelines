@@ -125,6 +125,12 @@ data class ExecuteRequest(
      * node's child request inherits it, so the family resolves bindings on one clock.
      */
     val reference: ExecutionReference? = null,
+    /** Stored body/hash/status from the same entry-point snapshot, for an immutable append recipe. */
+    val lakeExecutionMetadata: co.datapipelines.pipeline.LakeExecutionMetadata? = null,
+    /** Composed inputs also contribute to the parent's recipe; they retain their own execution collector. */
+    val inheritedLakeLineage: co.datapipelines.pipeline.LakeExecutionLineage? = null,
+    /** Established by the execute entry point from effective authority; never supplied by a caller payload. */
+    val lakeAppendGrant: co.datapipelines.pipeline.LakeAppendGrant? = null,
     /** Internal admission check inherited by children and applied to their exact loaded bodies. */
     val pipelineAdmission: ((Pipeline, UUID, Int) -> Unit)? = null,
 )

@@ -180,6 +180,7 @@ class FlywayMigrationIntegrationTest {
                 // #798 (V54) — managed lake table definitions: namespaces, managed tables, definition versions, the
                 // column-semantics projection, and lake_tables' origin / revision_seq.
                 "54|lake definitions|true",
+                "55|lake deliveries|true",
             )
     }
 
@@ -1596,8 +1597,8 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    @Suppress("LongMethod") // the inventory IS the assertion: one line per table of metadata-db §4 (51 after #778 + #785 + #798)
-    fun `creates exactly the fifty-one tables of metadata-db §4`() {
+    @Suppress("LongMethod") // the inventory IS the assertion: one line per table of metadata-db §4 (53 after #799)
+    fun `creates exactly the fifty-three tables of metadata-db §4`() {
         val tables =
             query(
                 """
@@ -1636,6 +1637,8 @@ class FlywayMigrationIntegrationTest {
                 "lake_tables_managed",
                 "lake_table_definition_versions",
                 "lake_column_semantics",
+                "lake_deliveries",
+                "lake_delivery_attempts",
                 // 118 (V25) — the learned semantic layer.
                 "learned_facts",
                 // 137 (V27) — the mail claim rows.
@@ -1750,6 +1753,12 @@ class FlywayMigrationIntegrationTest {
                 "lake_tables.lake_tables_pkey",
                 "lake_tables.uq_lake_tables_datasource_namespace_name",
                 // #798 (V54) — the four PKs, a namespace / table name each registered once, one DRAFT per table.
+                "lake_deliveries.lake_deliveries_pkey",
+                "lake_deliveries.uq_lake_deliveries_key",
+                "lake_deliveries.idx_lake_deliveries_unsettled",
+                "lake_delivery_attempts.lake_delivery_attempts_pkey",
+                "lake_delivery_attempts.lake_delivery_attempts_operation_id_key",
+                "lake_delivery_attempts.idx_lake_delivery_attempts_delivery",
                 "lake_column_semantics.lake_column_semantics_pkey",
                 "lake_namespaces.lake_namespaces_pkey",
                 "lake_namespaces.uq_lake_namespaces_name",
@@ -1942,6 +1951,14 @@ class FlywayMigrationIntegrationTest {
                 // description cap, lifecycle stamps and status (§4.48); `c` < `n` < `r`, so both sort before #778's rows.
                 "chk_lake_column_semantics_field",
                 "chk_lake_column_semantics_tags",
+                "chk_lake_deliveries_delivery_id",
+                "chk_lake_deliveries_failure_phase",
+                "chk_lake_deliveries_feed",
+                "chk_lake_deliveries_fingerprint",
+                "chk_lake_deliveries_replay_mode",
+                "chk_lake_deliveries_state",
+                "chk_lake_delivery_attempts_outcome",
+                "chk_lake_delivery_attempts_sha256",
                 "chk_lake_namespaces_description",
                 "chk_lake_namespaces_name",
                 "chk_lake_namespaces_stamps",

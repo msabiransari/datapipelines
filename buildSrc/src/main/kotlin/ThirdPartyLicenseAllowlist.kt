@@ -39,6 +39,8 @@ object ThirdPartyLicenseAllowlist {
             put("BSD-2-Clause", "BSD-2-Clause")
             put("BSD 2-Clause License", "BSD-2-Clause") // zstd-jni, via parquet-hadoop (#785).
             put("BSD-3-Clause", "BSD-3-Clause") // ASM.
+            // threeten-extra 1.7.1, via iceberg-data: upstream tag v1.7.1/LICENSE.txt is the three-clause BSD text.
+            put("BSD 3-clause", "BSD-3-Clause")
             // SPDX explicitly identifies EDL 1.0 as BSD-3-Clause; Jakarta's two spellings.
             put("EDL 1.0", "BSD-3-Clause")
             put("Eclipse Distribution License - v 1.0", "BSD-3-Clause")

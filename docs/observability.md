@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.53 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.56 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-06
@@ -404,7 +404,40 @@ When `datapipelines.lake.enabled=true`, `LakeBootCheck` runs once after Flyway (
 | ERROR | `lake.definition.apply_unclassified` | The apply's commit step failed with an exception that is not one of the catalog's refusals, so whether the commit landed is unknown. The row stays `applying`, and the attempt ends with `apply_unknown`. `operation` is always `lake.definition.apply` | `cause`, `sql_state` (the exception's class and first SQLSTATE, §3.4G; never its message or stack) |
 | INFO | `lake.definition.apply_superseded` | The attempt's conditional stamp changed no row, because a newer attempt owns the table. This attempt recorded nothing | — |
 
-The three audit events of the same lifecycle (`lake.definition.released`, `.applied`, `.apply_failed`, [Enums §15](enums.md#15-authauditevent--auth-audit-log-events)) are separate rows in `auth_audit_log`. A log line is not an audit row, and the audit row does not replace the log line.
+The three audit events of the same lifecycle (`lake.definition.released`, `.applied`, `.apply_failed`, [Enums §15](enums.md#15-authauditevent--auth-audit-log-events)) are separate rows in `audit_log`. A log line is not an audit row, and the audit row does not replace the log line.
+
+#### 3.4S Lake delivery, publication and settle events (#799)
+
+Delivery storage failures report the exception class and first SQLSTATE using §3.4G's safe shape. SDK messages, cause chains, credentials, storage endpoints and object paths are never logged by this boundary.
+
+| Level | Event | When | Fields |
+|---|---|---|---|
+| WARN | `lake.delivery.listing_failed` | The trusted S3 listing failed at the SDK boundary. The caller receives a fixed message with no SDK cause and may retry | `cause`, `sql_state` |
+| WARN | `lake.delivery.admission_failed` | Metadata admission failed before staging; safe fixed retryable refusal | `execution_id`, `cause`, `sql_state` |
+| INFO | `lake.delivery.landed` | Slot/scratch, trusted manifest and every target's ledger receipt were admitted | `execution_id`, `targets`, `files`, `bytes`, `deadline`, `cause=none`, `sql_state=none` |
+| INFO | `lake.delivery.already_published` | Permanent duplicate evidence skips this target's append | `delivery_id`, `operation_id`, `message="already published"`, `cause=none`, `sql_state=none` |
+| INFO | `lake.append.started` | Grant and table lease admitted the conditional PUBLISHING claim | `delivery_id`, `operation_id`, `table_id`, `deadline`, `cause=none`, `sql_state=none` |
+| INFO | `lake.delivery.concluded` | Delivery and attempt stamps committed together; zero-row stale transitions emit nothing | `table_id`, `delivery_id`, `operation_id`, `outcome`, `settled`, `cause=none`, `sql_state=none` |
+| WARN | `lake.append.failed` | Publication unwound after recording a safe failed/unknown verdict where possible | `delivery_id`, `operation_id`, `cause`, `sql_state` |
+| WARN | `lake.append.stamp_failed` | Outcome stamping failed; permanent revision evidence and the sweep recover the verdict | `delivery_id`, `operation_id`, `cause`, `sql_state` |
+| WARN | `lake.append.lease_release_failed` | Bounded lease release failed; expiry/takeover remains authoritative | `delivery_id`, `operation_id`, `cause`, `sql_state` |
+| WARN | `lake.append.heartbeat_failed` | Periodic metadata renewal failed; the watch loses authority and later mutations stop | `operation_id`, `cause`, `sql_state` |
+| WARN | `lake.append.settlement_deferred` | Immediate settlement failed and leaves recovery to a later sweep | `delivery_id`, `operation_id`, `cause`, `sql_state` |
+| WARN | `lake.delivery.cleanup_deferred` | Pre-publication cleanup could not stamp every receipt; resources were released and terminal executions are sweepable | `execution_id`, `cause`, `sql_state` |
+| INFO | `lake.settle.sweep` | A normal-mode tick finished its rotating table page, or stopped where its work budget ran out | `tables` (managed tables visited), `rows` (deliveries visited), `changed` (deliveries moved to a terminal state), `exhausted` (the tick's budget was spent), `deferred_budget`, `deferred_stuck`, `deferred_failed` (the tables whose recovery stopped short because the budget was spent, a metadata read could not be waited for, or an exception), `cause=none`, `sql_state=none` |
+| WARN | `lake.settle.metadata_read_stuck` | A metadata read outlived the tick's budget and was abandoned on its own thread. It holds no lease and no connection; every table's verification and repair are deferred until it ends | `table_id`, `elapsed_ms`, `stuck_total` (abandoned reads since boot), `cause=none`, `sql_state=none` |
+| INFO | `lake.settle.metadata_read_ended` | A later tick found the abandoned read finished: its result was discarded and reads resume | `table_id`, `elapsed_ms` (the read's whole life), `cause`, `sql_state` (what it failed with, `none` when it completed) |
+| WARN | `lake.settle.deferred` | One table's recovery failed; later eligible tables/pages remain recoverable | `table_id`, `cause`, `sql_state` |
+| WARN | `lake.settle.sweep_deferred` | The bounded sweep failed outside an individual table, including a held control-row lock | `cause`, `sql_state` |
+| WARN | `lake.append.recipe_write_failed` | The immutable recipe PUT failed before catalog publication. No storage message or cause chain crosses the boundary | `cause`, `sql_state` |
+| WARN | `lake.file.delete_refused` | Iceberg requested a file deletion. The production FileIO records the key and refuses it; files remain for the maintenance protected-graph check, including manifest-merge cleanup | `path`, `cause=LibraryDeleteRefusedException`, `sql_state=none` |
+
+`lake.delivery.published`, `.failed`, `.unknown` and `.settled` are separate audit events
+([Enums §15](enums.md#15-authauditevent--auth-audit-log-events)), written strictly in the same metadata transaction
+as their conditional state/attempt changes. Their details contain only `table_id`, `delivery_id`, `operation_id`
+and `outcome`. A lost acknowledgement can record UNKNOWN followed by PUBLISHED and SETTLED without a second CAS.
+Ingestion storage setup failures use the staging boundary's fixed message and log only execution id and class;
+generated secret SQL, credentials and driver messages never reach an execution event or recipe.
 
 ### 3.5 Log destination
 
@@ -699,6 +732,11 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 | 2026-11-06 | v1.53 | #708 the Prometheus scrape | **§4.1 is cut to the meters that exist** (the failure-flow and telemetry record §7, §17 row 13): the 13 documented-only rows are deleted — `staging.bytes`, `staging.active_tables`, `datasource.pool.active`/`.pending`/`.timeout_total`, `templates.render.duration`, `templates.cache.hits`/`.misses`, `mcp.tool.calls`, `auth.login.attempts`, `auth.api_key.validations`, `result.expiries`, `result.size` — and `datapipelines.web.endpoint_key_budget.saturated` gains its row; the two gauges `script.evaluations.abandoned` and `parameters.selectors.abandoned` are renamed under the `datapipelines.` prefix. `MeterCatalogueParityTest` now holds §4.1 to the code both ways (43 coded names + `http.server.requests` = 44 rows at lane delivery). **§4.2 / §6.4**: `micrometer-registry-prometheus` ships; `health` and `prometheus` answer anonymously on the management port (#231 item 1, record §17 row 11), with the per-pipeline cardinality note. **§5**: one sentence — tracing is not provided, deferred (record §12). **§9.1**: the two `tracing.*` keys are removed (record §17 row 12, no deprecation window). |
 | 2026-11-05 | v1.52 | 771 (#771) the never-admissible refusal counts under its own reason | **§4.1** `datapipelines.dashboard.refresh.refused` gains the `never_admissible` value of its `reason` tag: #762's once-never-admissible 429 now counts under `reason=never_admissible`, the busy refusal under `saturated` alone — one series per reason, no new tag or counter. **§3.4J**'s `dashboard.refresh_never_admissible` row names the new tag value. |
 | 2026-11-02 | v1.48 | 778 (#778) the lake reference index backfill | New **§3.4P**: the boot backfill's `lake.reference_index.backfill` (INFO, counts) and `lake.reference_index.backfill_failed` (WARN, version identity and exception class; no SQL, no parser message). |
+| 2026-11-04 | v1.52 | 799 (#799) trusted listing | New §3.4S records the safe `lake.delivery.listing_failed` SDK boundary event. |
+| 2026-11-05 | v1.53 | 799 (#799) immutable recipes | §3.4S records the sanitized recipe PUT failure; no SDK message, cause chain or storage configuration is logged. |
+| 2026-11-05 | v1.54 | 799 (#799) library deletion refusal | §3.4S records the production FileIO refusal and retained key, including Iceberg transaction cleanup after manifest merges. |
+| 2026-11-06 | v1.55 | 799b (#799) bounded settlement | §3.4S `lake.settle.sweep` gains `rows`, `changed` and `exhausted`: each tick's visited deliveries, terminal transitions and whether its work budget ran out ([Lake §8](lake.md#8-settlement-and-recovery)). No event added or renamed. |
+| 2026-11-06 | v1.56 | 799c (#799, #843) whole-tick settlement bound | §3.4S `lake.settle.sweep` gains `deferred_budget`, `deferred_stuck` and `deferred_failed`; new `lake.settle.metadata_read_stuck` and `lake.settle.metadata_read_ended` for the metadata read that left the tick's thread. |
 | 2026-11-02 | v1.49 | 785 (#785) managed lake boot check | New **§3.4Q** (numbered at merge after #778's §3.4P / v1.48): the `lake.boot.ok` INFO line and the five `lake.boot.*` refusal ids the after-Flyway boot check leads its startup failure with (defined here so a citation of one is checked; they are not log events). |
 | 2026-11-04 | v1.51 | 810 (#811) unclassified apply failure | **§3.4R** gains `lake.definition.apply_unclassified` (ERROR, `cause` + `sql_state`). It is logged where an unclassified failure of the commit step is caught, before the attempt's `apply_unknown` line, whose `code` is then `lake.definition.apply_unclassified`. |
 | 2026-11-03 | v1.50 | 798 (#798) lake table definition apply | New **§3.4R** (after #785's §3.4Q / v1.49): one line per apply or verify attempt that reached the table, with the events `lake.definition.applied` (INFO), `apply_failed` (WARN), `apply_deferred` (INFO, lease busy or back to pending), `apply_unknown` (WARN, the row stays applying) and `apply_superseded` (INFO). No body, location or storage value is logged. |

@@ -51,6 +51,10 @@ internal object LakeApplyLog {
             is LakeApplyOutcome.NotApplicable -> {
                 // Nothing to do was found: no line (§3.4R).
             }
+
+            is LakeApplyOutcome.Deferred -> {
+                // No verdict was reached: the sweep's line counts it by cause (§3.4S).
+            }
         }
     }
 

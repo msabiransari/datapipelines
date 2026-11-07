@@ -1,9 +1,9 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.52 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.53 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
-**Last updated:** 2026-11-02
+**Last updated:** 2026-11-04
 
 ---
 
@@ -1948,6 +1948,68 @@ ALTER TABLE lake_tables
 - **`revision_seq`** is the `lake_table_revisions.seq` the managed row's `location` was projected from. The projection only moves forward: `… ON CONFLICT … DO UPDATE … WHERE lake_tables.origin = 'managed' AND (lake_tables.revision_seq IS NULL OR lake_tables.revision_seq < EXCLUDED.revision_seq)` (record §8b; an older writer that resumes late changes nothing).
 - A managed row is written only when the datasource named by `datapipelines.lake.name` exists; the registry's own `lake_tables_*` tools refusing `origin = managed` rows is P8's.
 
+### 4.53 `lake_deliveries`
+
+V55 adds the permanent delivery ledger (#799, design §5.2). Identity is `(table_id, feed, delivery_id)`; fingerprints hash the sorted manifest's keys, sizes and ETags. Execution and pipeline identifiers retain historical identity without foreign keys so execution retention cannot remove delivery evidence. Every state transition must compare the current `operation_id` as well as state.
+
+```sql
+CREATE TABLE lake_deliveries (
+    id                      UUID PRIMARY KEY,
+    table_id                UUID NOT NULL REFERENCES lake_tables_managed(id),
+    feed                    TEXT NOT NULL,
+    delivery_id             TEXT NOT NULL,
+    fingerprint             TEXT NOT NULL,
+    manifest_json           JSONB NULL,
+    state                   TEXT NOT NULL DEFAULT 'RECEIVED',
+    failure_phase           TEXT NULL,
+    failure_code            TEXT NULL,
+    error_json              JSONB NULL,
+    operation_id            UUID NOT NULL,
+    execution_id            UUID NOT NULL,
+    pipeline_id             UUID NOT NULL,
+    snapshot_id             BIGINT NULL,
+    metadata_location_after TEXT NULL,
+    replay_mode             TEXT NULL,
+    received_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    published_at            TIMESTAMPTZ NULL,
+    CONSTRAINT uq_lake_deliveries_key UNIQUE (table_id, feed, delivery_id),
+    CONSTRAINT chk_lake_deliveries_feed CHECK (feed ~ '^[a-z0-9_-]{1,64}$'),
+    CONSTRAINT chk_lake_deliveries_delivery_id CHECK (delivery_id ~ '^[a-z0-9_-]{1,64}$'),
+    CONSTRAINT chk_lake_deliveries_fingerprint CHECK (fingerprint ~ '^[a-f0-9]{64}$'),
+    CONSTRAINT chk_lake_deliveries_state CHECK (state IN ('RECEIVED', 'PUBLISHING', 'PUBLISHED', 'FAILED', 'UNKNOWN')),
+    CONSTRAINT chk_lake_deliveries_failure_phase CHECK (failure_phase IN ('listing', 'staging', 'validation', 'publish')),
+    CONSTRAINT chk_lake_deliveries_replay_mode CHECK (replay_mode IN ('exact', 'directed'))
+);
+CREATE INDEX idx_lake_deliveries_unsettled ON lake_deliveries (table_id, state)
+    WHERE state IN ('RECEIVED', 'PUBLISHING', 'UNKNOWN');
+```
+
+### 4.54 `lake_delivery_attempts`
+
+V55 adds one permanent row per publication attempt. Joining `operation_id` to `lake_table_revisions` provides durable commit evidence. Recipe fields and the outcome remain nullable until their respective persistent steps complete. Neither ledger has an application delete path.
+
+```sql
+CREATE TABLE lake_delivery_attempts (
+    id            UUID PRIMARY KEY,
+    delivery_id   UUID NOT NULL REFERENCES lake_deliveries(id),
+    operation_id  UUID NOT NULL UNIQUE,
+    recipe_key    TEXT NULL,
+    recipe_sha256 TEXT NULL,
+    started_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ended_at      TIMESTAMPTZ NULL,
+    outcome       TEXT NULL,
+    CONSTRAINT chk_lake_delivery_attempts_outcome CHECK (outcome IN ('PUBLISHED', 'FAILED', 'UNKNOWN')),
+    CONSTRAINT chk_lake_delivery_attempts_sha256 CHECK (recipe_sha256 ~ '^[a-f0-9]{64}$')
+);
+CREATE INDEX idx_lake_delivery_attempts_delivery ON lake_delivery_attempts (delivery_id);
+```
+
+V55 also adds `pipeline_versions.writes_managed_lake BOOLEAN NOT NULL DEFAULT FALSE`, reserved for derivation from direct and transitive pipeline outputs at save, validation and import by the P4 execution implementation. Historical versions predate managed lake writes.
+
+```sql
+ALTER TABLE pipeline_versions ADD COLUMN writes_managed_lake BOOLEAN NOT NULL DEFAULT FALSE;
+```
+
 ## 5. Index Strategy Summary
 
 **This table is generated from §4 and must contain nothing §4 does not create.** Two kinds of entry appear:
@@ -1957,6 +2019,12 @@ ALTER TABLE lake_tables
 
 | Table | Index | Kind | Purpose |
 |---|---|---|---|
+| `lake_deliveries` | `lake_deliveries_pkey` | via PK | Permanent delivery identity |
+| `lake_deliveries` | `uq_lake_deliveries_key` | via UNIQUE | Deduplicate table, feed and delivery id |
+| `lake_deliveries` | `idx_lake_deliveries_unsettled` | explicit | Outstanding delivery sweep by table and state |
+| `lake_delivery_attempts` | `lake_delivery_attempts_pkey` | via PK | Attempt identity |
+| `lake_delivery_attempts` | `lake_delivery_attempts_operation_id_key` | via UNIQUE | Join commit evidence by operation |
+| `lake_delivery_attempts` | `idx_lake_delivery_attempts_delivery` | explicit | Attempt history for a delivery |
 | `users` | `users_pkey` | via PK | Lookup by id (hot — per-request `is_active` check, D13) |
 | `users` | `users_email_key` | via UNIQUE | Login lookup by email; enforces one account per email |
 | `users` | `uq_users_provider_subject` | explicit (unique) | OIDC identity lookup `(provider, provider_subject)` |
@@ -2171,6 +2239,8 @@ table and the test's expected-table list in the same commit.
 | `lake_namespaces` | environment-local | LakeNamespace | — | — | Created on each environment by its own first definition naming the namespace; description and status are edited per environment and never promoted (record §5.2, B7) |
 | `lake_tables_managed` | environment-local | LakeTable | — | — | The table row in THIS environment: its apply state, applied version and policy are facts about this deployment's Iceberg table; the receiver creates its own row when a definition version is imported (P9) |
 | `lake_table_definition_versions` | promotable | LakeTableDefinition | `lake_table_definition_versions.version` | `(namespace, table, version)` | The promoted object (record §5.2): a RELEASED body transfers at its exact version number; the receiver applies it to its own table. The import path itself is P9's |
+| `lake_deliveries` | environment-local | LakeDelivery | — | — | Permanent evidence of deliveries ingested in this environment; never promoted or deleted with execution history |
+| `lake_delivery_attempts` | environment-local | LakeDelivery | — | — | Permanent publication attempt identities joined to this environment's revision log |
 | `lake_column_semantics` | derived | LakeTableDefinition | — | — | Rebuilt from the applied body inside the `applied` transaction; a receiver derives its own when it applies |
 
 ---
@@ -2487,6 +2557,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-04 | v1.53 | 799 (#799, dp-lake P4) | V55 adds permanent deliveries (§4.53), publication attempts (§4.54), and the derived pipeline version `writes_managed_lake` flag. |
 | 2026-11-02 | v1.52 | 798 (#798, dp-lake P3) | **V54 — managed lake table definitions.** New **§4.48 `lake_namespaces`** (one row per namespace, not versioned), **§4.49 `lake_tables_managed`** (lifecycle, the definition pointer, `applied_version_here` and the apply state machine `pending` / `applying` / `applied` / `failed` with `apply_operation_id` owning an `applying` row, `policy_json`), **§4.50 `lake_table_definition_versions`** (DRAFT / RELEASED / DISCARDED bodies, the house `body_hash`, the one-DRAFT partial unique index) and **§4.51 `lake_column_semantics`** (the applied version's projection by Iceberg field id); **§4.52** adds `lake_tables.origin` (`managed` / `external`, default `external`) and `revision_seq` (managed rows only), noted in §4.15. JSONB columns take the `_json` suffix (§2), so the record's `policy`, `apply_error` and `body` are `policy_json`, `apply_error_json` and `body_json`. §3 ERD, §5 (seven indexes) and §5A (three environment-local or derived, the definition versions promotable) updated. Down path documented in the migration header, not shipped. |
 | 2026-11-02 | v1.50 | 778 (#778) | **V52 — the lake reference index.** New **§4.41 `lake_reference_scans`** (one row per scanned released pipeline or parameter-set version — `exact` / `partial` / `unscannable`, the findings in `reasons_json`, `scanner_version` for re-scans; keyed by workspace, family, entity id and version) and **§4.42 `lake_table_references`** (one row per table position, the written triple and the resolved registry identity, cascading from the scan); §3 ERD, §5 (three indexes) and §5A (both **derived**) updated. Down path documented in the migration header, not shipped. |
 | 2026-11-02 | v1.51 | 785 (#785, dp-lake P2; sections and this row renumbered at merge after #778's v1.50) | **V53 — the managed lake's catalog core.** New **§4.43 `iceberg_tables`** and **§4.44 `iceberg_namespace_properties`** (Iceberg 1.12.0's `JdbcCatalog` V1 shape, byte for byte, created by Flyway so the library runs with `init-catalog-tables=false` and issues no DDL), **§4.45 `lake_control`** (one row, the catalog mode), **§4.46 `lake_leases`** (the design record §8a's lease rows) and **§4.47 `lake_table_revisions`** (the trigger-written revision log). **§2's no-trigger rule gains its one named exception:** `dp_fence` on both catalog tables and `dp_revlog` / `dp_revlog_drop` on `iceberg_tables` (§7 and `FlywayMigrationIntegrationTest` list exactly these four). §5 gains nine indexes; §5A classifies all five tables environment-local. V52 is #778's. Down path documented in the migration header, not shipped. |

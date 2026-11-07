@@ -1,5 +1,6 @@
 package co.datapipelines.lake
 
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
@@ -80,7 +81,7 @@ class LakeUnitTest {
         val deferred = mutableListOf<String>()
         val io = DeferringFileIO(delegate) { deferred += it }
 
-        io.deleteFile(path)
+        shouldThrow<IllegalStateException> { io.deleteFile(path) }
 
         deferred shouldContainExactly listOf(path)
         delegate.fileExists(path) shouldBe true
