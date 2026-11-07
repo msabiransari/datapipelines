@@ -164,12 +164,21 @@ class ManagedLakeRegistryIntegrationTest {
             registry.syncManagedLake(managed(egressProxy = "egress-proxy:3128"), owner) shouldBe ManagedLakeSync.RESYNCED
 
             assertAll(
-                { registry.get(LAKE).shouldNotBeNull().properties.dialect[LakeHttpBounds.EGRESS_PROXY_KEY] shouldBe "egress-proxy:3128" },
+                {
+                    registry
+                        .get(LAKE)
+                        .shouldNotBeNull()
+                        .properties.dialect[LakeHttpBounds.EGRESS_PROXY_KEY] shouldBe "egress-proxy:3128"
+                },
                 { registry.poolFor(registry.get(LAKE).shouldNotBeNull()) shouldNotBe withoutProxy },
             )
             registry.syncManagedLake(managed(egressProxy = "egress-proxy:3128"), owner) shouldBe ManagedLakeSync.UNCHANGED
             registry.syncManagedLake(managed(), owner) shouldBe ManagedLakeSync.RESYNCED
-            registry.get(LAKE).shouldNotBeNull().properties.dialect.containsKey(LakeHttpBounds.EGRESS_PROXY_KEY) shouldBe false
+            registry
+                .get(LAKE)
+                .shouldNotBeNull()
+                .properties.dialect
+                .containsKey(LakeHttpBounds.EGRESS_PROXY_KEY) shouldBe false
         } finally {
             registry.shutdown()
         }
@@ -533,30 +542,29 @@ class ManagedLakeRegistryIntegrationTest {
     private fun managed(
         secret: String = READER_SECRET,
         egressProxy: String? = null,
-    ) =
-        Datasource(
-            name = LAKE,
-            displayName = "Managed lake",
-            description = "The server's managed lake.",
-            dialect = Dialect.LAKE,
-            jdbcUrl = "jdbc:duckdb::memory:",
-            username = "reader",
-            credentialKind = CredentialKind.PASSWORD,
-            secret = secret,
-            properties =
-                DatasourceProperties(
-                    dialect =
-                        mapOf(
-                            "catalog.kind" to "s3",
-                            MANAGED_DIALECT_KEY to "true",
-                            "region" to "us-east-1",
-                            "endpoint" to "localhost:9",
-                            "url_style" to "path",
-                            "memory_limit" to "512MB",
-                        ) + listOfNotNull(egressProxy?.let { LakeHttpBounds.EGRESS_PROXY_KEY to it }),
-                ),
-            isReadonly = true,
-        )
+    ) = Datasource(
+        name = LAKE,
+        displayName = "Managed lake",
+        description = "The server's managed lake.",
+        dialect = Dialect.LAKE,
+        jdbcUrl = "jdbc:duckdb::memory:",
+        username = "reader",
+        credentialKind = CredentialKind.PASSWORD,
+        secret = secret,
+        properties =
+            DatasourceProperties(
+                dialect =
+                    mapOf(
+                        "catalog.kind" to "s3",
+                        MANAGED_DIALECT_KEY to "true",
+                        "region" to "us-east-1",
+                        "endpoint" to "localhost:9",
+                        "url_style" to "path",
+                        "memory_limit" to "512MB",
+                    ) + listOfNotNull(egressProxy?.let { LakeHttpBounds.EGRESS_PROXY_KEY to it }),
+            ),
+        isReadonly = true,
+    )
 
     private fun table(
         name: String,

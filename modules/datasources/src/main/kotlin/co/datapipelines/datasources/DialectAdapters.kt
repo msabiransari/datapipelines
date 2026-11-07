@@ -713,13 +713,21 @@ class LakeDialectAdapter(
         val value = properties[key]?.toString()?.takeIf { it.isNotBlank() } ?: return null
         val problem =
             when {
-                properties["managed"]?.toString()?.lowercase() != "true" ->
+                properties["managed"]?.toString()?.lowercase() != "true" -> {
                     "properties.dialect.$key is accepted only on the managed lake datasource (managed: true)."
-                properties["catalog.kind"] == null ->
+                }
+
+                properties["catalog.kind"] == null -> {
                     "properties.dialect.$key needs properties.dialect.catalog.kind: the proxy applies to the object-store client."
-                !LakeHttpBounds.isEgressProxy(value) ->
+                }
+
+                !LakeHttpBounds.isEgressProxy(value) -> {
                     "properties.dialect.$key must be host:port (letters, digits, '.', '-'; port 1-65535)."
-                else -> return null
+                }
+
+                else -> {
+                    return null
+                }
             }
         return ValidationResult.ValidationError(DatasourceErrorCodes.PROPERTIES_INVALID, "properties.dialect.$key", problem)
     }
