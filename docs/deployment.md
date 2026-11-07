@@ -482,8 +482,10 @@ on **every `./gradlew build`**, not when someone remembers to run it.
 It also inventories every app-container environment name, refuses JVM code-loading names,
 and requires a reasoned allowlist for names outside `DATAPIPELINES_*`, rejecting stale entries.
 
-The compose file also runs `egress-proxy` (#845, §4.3): Envoy pinned by digest, read-only, all capabilities dropped,
-no published port. Its config is rendered by compose from the SAME `DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS`
+The compose file also runs `egress-proxy` (#845, §4.3): Envoy pinned by digest, its image's non-root user, all
+capabilities dropped, no privilege escalation, no published port. Its root filesystem is NOT read-only under compose:
+compose copies an inline config into the container and refuses to do so on a read-only root filesystem, while a
+`file:` config would not be interpolated (the chart's proxy pod is read-only; `helm-check.sh` pins both). Its config is rendered by compose from the SAME `DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS`
 variable and default the app receives (the audit's check 10 refuses a diverged default), and the app is pointed at it
 with the literal `egress-proxy:3128`. The app waits for it to START, not to be healthy: the distroless image has no
 shell or HTTP client to run a healthcheck with, so the app's boot check is the readiness gate.

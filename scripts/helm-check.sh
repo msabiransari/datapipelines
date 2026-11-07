@@ -98,6 +98,9 @@
 #         networkPolicy is off) NetworkPolicy, nothing else carrying the
 #         component label; the proxy and app selectors select only their own
 #         pods; the image equals deploy/compose.yml's egress-proxy image; the
+#         compose service drops every capability, sets no-new-privileges, and is
+#         NOT read_only while it mounts an inline-content config (compose refuses
+#         to create that; the chart's pod stays readOnlyRootFilesystem); the
 #         ConfigMap's envoy.yaml PARSES EQUAL to compose's configs content with
 #         the max-age substituted (the one-config rule); the app's two env
 #         entries name the proxy Service and the same max-age; the policy
@@ -1350,7 +1353,16 @@ def main():
     port = ports.get("proxy")
     if port is None or len(ports) != 1:
         problems.append(f"the proxy containerPorts {ports} (expected exactly one named proxy)")
-    compose_image = compose["services"]["egress-proxy"]["image"]
+    compose_svc = compose["services"]["egress-proxy"]
+    compose_image = compose_svc["image"]
+    # Compose refuses to create a service that mounts an inline-`content` config on a read-only root filesystem
+    # (the 2026-11-07 dp845 start: "`file` is the sole supported option"), a refusal no render here would see. The
+    # compose posture is pinned instead: no read_only, every capability dropped, no privilege escalation.
+    inline_cfgs = [c.get("source") if isinstance(c, dict) else c for c in compose_svc.get("configs") or []]
+    if any("content" in (compose.get("configs") or {}).get(n, {}) for n in inline_cfgs) and compose_svc.get("read_only"):
+        problems.append("deploy/compose.yml's egress-proxy mounts an inline-content config AND sets read_only: compose refuses to create it")
+    if compose_svc.get("cap_drop") != ["ALL"] or "no-new-privileges:true" not in (compose_svc.get("security_opt") or []):
+        problems.append(f"deploy/compose.yml's egress-proxy cap_drop={compose_svc.get('cap_drop')} security_opt={compose_svc.get('security_opt')} (expected [ALL] and no-new-privileges:true)")
     if c.get("image") != compose_image:
         problems.append(f"the proxy image {c.get('image')} != deploy/compose.yml's {compose_image}")
     sc, psc = c.get("securityContext") or {}, dep["spec"]["template"]["spec"].get("securityContext") or {}

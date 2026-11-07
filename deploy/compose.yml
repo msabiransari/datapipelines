@@ -750,7 +750,10 @@ services:
     configs:
       - source: egress-proxy-envoy
         target: /etc/envoy/envoy.yaml
-    read_only: true
+    # No `read_only: true`: Compose injects an inline-`content` config by copying it into the container, and refuses
+    # that on a read-only root filesystem ("`file` is the sole supported option", Compose v5.5.1, 2026-11-07). A
+    # `file:` config would not be interpolated, losing the one-variable max-age. The chart's pod keeps
+    # readOnlyRootFilesystem (its ConfigMap is a volume); scripts/helm-check.sh pins both postures.
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
