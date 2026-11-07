@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.83 (revised — see Change Log)
+**Status:** v1.84 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-11-05
+**Last updated:** 2026-11-07
 
 ---
 
@@ -1213,6 +1213,7 @@ Defined and described in [Datasources §9–10](datasources.md#9-validation-rule
 | `datasource.validation.duplicate_name` | 409 | Name already exists — the namespace is global across workspaces too (workspaces design §3: `name` stays the PK/AAD anchor) |
 | `datasource.validation.workspace_forbidden` | 400 | Workspaces D8 refusal: non-admin attempted the `global` flag (or any mutation of a global datasource), a `readonly` flip on a global datasource, or a workspace binding the caller is not in — including member CUD while `member-datasources-enabled` is off (workspaces design §8) |
 | `datasource.in_use` | 409 | Delete blocked: pipelines reference this datasource |
+| `datasource.managed` | 409 | An edit or a delete of the managed lake datasource (`properties.dialect.managed = true`, [Datasources §8C.10](datasources.md#8c10-the-managed-lake-datasource)): the server creates and re-syncs that row from `datapipelines.lake.*` at every boot, so no surface may change it. Refused in the registry, below every surface (#818) |
 | `datasource.not_found` | 404 | Datasource name unknown on a read/mutate/test path (added 2026-08-11, gate C) |
 | `datasource.grant_required` | 404 | The datasource exists on the instance but is not GRANTED to the caller's workspace ([RBAC design §4](superpowers/specs/2026-09-10-rbac-design.md), D-R7). A 404 and not a 403 because the 404 rule has no exception for datasources: an ungranted datasource is INVISIBLE, and "this exists, you may not see it" turns the flat, global datasource namespace into an enumeration oracle — every name on the instance probeable one request at a time |
 | `datasource.driver_not_loaded` | 400 | JDBC driver JAR for the dialect is not on the classpath |
@@ -1713,7 +1714,7 @@ The `lake.definition.*` rows (#798, dp-lake P3; [lake.md](lake.md)) are the mana
 | `lake.commit.contended` | 409 | Bounded CAS attempts ended without commit evidence. The attempt failed in the publish phase; already written files remain. |
 | `lake.table.busy` | 409 | Another operation or an unconfirmed publication prevents this attempt; retryable after settlement. |
 | `lake.table.deprecated` | 409 | A deprecated managed table refuses delivery ingestion. |
-| `lake.table.unavailable` | 409 | The managed ingestion target is missing, archived or purged. This ledger-level refusal differs from the datasource read refusal `datasource.lake.table_unavailable`. |
+| `lake.table.unavailable` | 409 | The managed ingestion target is missing, archived or purged, or a node/introspection read names a table this server serves no view for (#818): archived or purged, no catalog row, no lifecycle row, or the lake disabled. Reads refuse before leasing a connection and include `datasource`, `table` (dotted) and `reason` in details. This managed-table refusal differs from the external datasource read refusal `datasource.lake.table_unavailable`. |
 | `lake.delivery.changed` | 409 | The immutable delivery identity already has a different trusted fingerprint; a correction needs a new delivery id. |
 | `lake.delivery.changed_during_read` | 409 | The post-read trusted re-list differs from the original manifest; unpublished attempts fail in the staging phase. |
 | `lake.append.ambiguous_column` | 400 | The staged result has column names that differ only by case. |
@@ -1755,6 +1756,7 @@ The `lake.definition.*` rows (#798, dp-lake P3; [lake.md](lake.md)) are the mana
 | `lake.definition.drift` | — | The Iceberg table holds neither the target definition nor the last applied one (it was changed outside DP); recorded on the table as `failed` with the field diff. |
 | `lake.definition.table_busy` | — | Another operation holds the table (its lease, or an apply in flight); nothing changed. |
 | `lake.definition.authoring_disabled` | — | This deployment has authoring disabled: definitions are written where authoring is enabled and promoted. |
+| `lake.unavailable` | 503 | The catalog read a new managed reader generation is built from failed, so no generation was built (#818, [Datasources §8C.10](datasources.md#8c10-the-managed-lake-datasource)). A live generation keeps serving until its age bound; a lease with none fails here. `details` carry `datasource` and the bounded `cause`. |
 | `lake.definition.apply_unclassified` | — | The apply's commit step failed with an exception that is not one of the catalog's refusals (#811), so whether the commit landed is unknown. The row stays `applying` until `verifyApplying` settles it from the revision log; it is never recorded as `failed`. A release that reached this outcome has landed, and it returns the outcome. |
 
 
@@ -1997,13 +1999,14 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-05 | v1.77 | 799 (#799), owner ruling | Optional `redact_in_recipe` parameter metadata defaults false and is omitted when false; true selects recipe-only redaction without changing the frozen logical types. |
-| 2026-11-05 | v1.78 | 799 (#799) | §13.25 adds immutable recipe conflict and storage-write refusals; a recipe is conditionally written before catalog publication and never overwritten. |
-| 2026-11-05 | v1.79 | 799 (#799) | §13.25 registers the effective-principal lake append permission refusal. |
-| 2026-11-05 | v1.80 | 799 (#799) | §13.25 adds strict append column-name, required-value and native-type refusals before data files are opened. |
-| 2026-11-05 | v1.81 | 799 (#799) | §13.25 pins column-name comparison to DuckDB’s ASCII identifier semantics; non-ASCII names cannot alias managed ASCII fields through Unicode folding. |
-| 2026-11-05 | v1.82 | 799 (#799) | §13.25 adds the partition fanout bound for uncommitted Parquet append files. |
+| 2026-11-04 | v1.84 | 818 (#818) | dp-lake P5 managed reads. §13.8 gains `datasource.managed` (409); §13.25 gains `lake.unavailable` (503) and `lake.table.unavailable` (409), landed in the SAME commit as their `PipelineErrorCodes` constants and `ApiErrorCatalog` rows (merged §13 row count 475 → 477; P4 and P5 share `lake.table.unavailable`). |
 | 2026-11-05 | v1.83 | 799 (#799) | §13.25 adds admission, target status and immutable delivery identity refusals. |
+| 2026-11-05 | v1.82 | 799 (#799) | §13.25 adds the partition fanout bound for uncommitted Parquet append files. |
+| 2026-11-05 | v1.81 | 799 (#799) | §13.25 pins column-name comparison to DuckDB’s ASCII identifier semantics; non-ASCII names cannot alias managed ASCII fields through Unicode folding. |
+| 2026-11-05 | v1.80 | 799 (#799) | §13.25 adds strict append column-name, required-value and native-type refusals before data files are opened. |
+| 2026-11-05 | v1.79 | 799 (#799) | §13.25 registers the effective-principal lake append permission refusal. |
+| 2026-11-05 | v1.78 | 799 (#799) | §13.25 adds immutable recipe conflict and storage-write refusals; a recipe is conditionally written before catalog publication and never overwritten. |
+| 2026-11-05 | v1.77 | 799 (#799), owner ruling | Optional `redact_in_recipe` parameter metadata defaults false and is omitted when false; true selects recipe-only redaction without changing the frozen logical types. |
 | 2026-11-04 | v1.76 | 799 (#799) trusted listing | §13.25 adds six delivery key/listing/manifest refusal codes, including retryable incomplete and unavailable-store outcomes; SDK messages and causes stay private. |
 | 2026-11-04 | v1.75 | 799 (#799) | Delivery node block, managed-only qualified append targets, and nine §13.25 structure refusals. Appends require one delivery and a transitive dependency barrier over all non-append nodes; rejects-producing scripts must be strict. External readonly datasources retain their refusal. |
 | 2026-11-04 | v1.74 | 780 (#780) script-invariants docs | §13.18's two script rows say what the code does: `pool_exhausted` names both refusal paths (the full admission bound, and an admitted evaluation that waited its whole wall clock for a running slot); `invariants_too_large` states the read-back's COMBINED count — written outputs and rejects plus table inputs, row mode adding the streamed input and a caller output's buffered rows and rejects. No code, code count or permission change. — Renumbered at merge after #810. |

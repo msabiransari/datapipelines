@@ -259,6 +259,15 @@ class BootstrapDatasourceRegistrar(
                 )
             }
 
+            CredentialResync.MANAGED_ROW -> {
+                log.warn(
+                    "event=datasource.bootstrap_managed_name name={} " +
+                        "message=\"a bootstrap entry names the managed lake datasource; configuration owns that row, " +
+                        "so the entry was skipped and its credential ignored. Rename the entry or datapipelines.lake.name\"",
+                    name,
+                )
+            }
+
             CredentialResync.STORED_WORKS,
             CredentialResync.CREDENTIAL_MATCHES,
             CredentialResync.NO_LIVE_ROW,

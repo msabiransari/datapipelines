@@ -205,7 +205,7 @@ class SchemaIntrospector(
                         .registeredTables(datasource.name)
                         .filter { filter.isEmpty() || it.namespace == filter }
                 TablesPage(
-                    rows.take(maxTables).map { TableInfo(it.namespace, it.name, LAKE_TABLE_TYPE, it.format) },
+                    rows.take(maxTables).map { TableInfo(it.namespace, it.name, LAKE_TABLE_TYPE, lakeRemarks(it)) },
                     truncated = rows.size > maxTables,
                 )
             }
@@ -346,6 +346,15 @@ class SchemaIntrospector(
         val registered =
             inNamespace.firstOrNull { it.name == table }
                 ?: throw lakeTableNotFound(datasource, effective.orEmpty(), table, inNamespace.map { it.name })
+        // #818: a managed table this server serves no view for is refused with its reason, not an engine error.
+        registered.unavailableReason?.let { reason ->
+            val qualified = (registered.namespace + registered.name).joinToString(".")
+            throw DatapipelinesException(
+                ManagedLakeErrorCodes.TABLE_UNAVAILABLE,
+                "Lake table '$qualified' on datasource '${datasource.name}' is unavailable ($reason)",
+                mapOf("datasource" to datasource.name, "table" to qualified, "reason" to reason),
+            )
+        }
         val qualifier = (registered.namespace + registered.name).joinToString(Namespaces.SEPARATOR.toString())
         return lakeCache.get(datasource.name, "columns", qualifier) {
             ConnectionLease.lease(registry, datasource) { connection ->
@@ -359,6 +368,19 @@ class SchemaIntrospector(
             }
         }
     }
+
+    /**
+     * #818 (record §10): a lake row's `remarks` — the registry format, then a managed table's state, so the
+     * existing listing (and `datasources_get_tables`) shows it without a wire change: `iceberg; deprecated: …`
+     * carries the deprecation notice, `iceberg; unavailable: …` the reason no view is served. An archived table
+     * is MARKED, not omitted, so a reader learns why a name it used stopped resolving.
+     */
+    private fun lakeRemarks(row: LakeRegisteredTable): String =
+        when {
+            row.unavailableReason != null -> "${row.format}; unavailable: ${row.unavailableReason}"
+            row.notice != null -> "${row.format}; deprecated: ${row.notice}"
+            else -> row.format
+        }
 
     /**
      * The unfiltered lake read's namespace: the single registered one; null when nothing is

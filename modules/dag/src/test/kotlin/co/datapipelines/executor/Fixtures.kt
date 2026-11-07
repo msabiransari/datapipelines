@@ -8,6 +8,7 @@ import co.datapipelines.datasources.ResultRowReader
 import co.datapipelines.datasources.TestResult
 import co.datapipelines.datasources.ValidationResult
 import co.datapipelines.datasources.pooling.ConnectionPool
+import co.datapipelines.datasources.pooling.ManagedLakeGeneration
 import co.datapipelines.events.EventEmitter
 import co.datapipelines.events.ExecutionEvent
 import co.datapipelines.events.SseEventType
@@ -383,6 +384,11 @@ class FakeDatasourceRegistry(
      * (the default) is the interface's own default, so every other suite is unchanged.
      */
     private val brokenLakeTables: Map<String, List<LakeBrokenTable>> = emptyMap(),
+    /**
+     * #818b B — the generation each named pool carries ([ConnectionPool.managedGeneration]): the snapshot the
+     * executor's managed-table check reads at the lease. Absent = null, every datasource but the managed lake.
+     */
+    private val managedGenerations: Map<String, ManagedLakeGeneration> = emptyMap(),
 ) : DatasourceRegistry {
     /** Connections handed out, and the ones handed back — the resource-leak assertion surface. */
     val leased = AtomicInteger()
@@ -431,7 +437,7 @@ class FakeDatasourceRegistry(
     override fun delete(name: String): DeleteResult = DeleteResult(true, name)
 
     override fun poolFor(datasource: Datasource): ConnectionPool =
-        TrackingPool(datasource, leased, closed, driverPrologueMs, cancelsInPrologue, blockingDriver)
+        TrackingPool(datasource, leased, closed, driverPrologueMs, cancelsInPrologue, blockingDriver, managedGenerations[datasource.name])
 
     override fun lakeBrokenTables(datasourceName: String): List<LakeBrokenTable> = brokenLakeTables[datasourceName].orEmpty()
 
@@ -444,6 +450,7 @@ class FakeDatasourceRegistry(
         private val prologueMs: (() -> Long)?,
         private val cancelsInPrologue: AtomicInteger,
         private val blockingDriver: BlockingDriver?,
+        override val managedGeneration: ManagedLakeGeneration?,
     ) : ConnectionPool {
         override val name: String get() = datasource.name
 

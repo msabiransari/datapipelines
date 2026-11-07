@@ -482,6 +482,7 @@ class ArchitectureGuardTest {
             setOf(
                 "SweepSchedulingConfiguration.kt",
                 "PoolReaperSchedulingConfiguration.kt",
+                "PoolReaderLeaseConfiguration.kt",
                 "RetentionSchedulingConfiguration.kt",
                 "DashboardRuntimeConfiguration.kt",
                 "LakeSettlementSchedulingConfiguration.kt", // #799: conditional, bounded, non-request delivery recovery.
@@ -512,13 +513,15 @@ class ArchitectureGuardTest {
          * stale sweep and retention (steps of the retention tick) — the History tab READS the records, never
          * the jobs that close and delete them.
          * #799's conditional lake recovery, its runtime aggregate and its metadata read are internal jobs too.
+         * #818 adds the managed lake freshness tick, reader keeper and registry refresh pass.
          */
         val JOB_SERVICE =
             Regex(
                 "\\b(StaleExecutionSweeper|ExecutionEventRetention|reapRetiredPools|StaleExecutionSweepScheduler|" +
                     "DatasourcePoolReaperScheduler|ExecutionEventRetentionScheduler|AuditLogRetention|" +
                     "ScheduleDispatcher|ScheduledRunWorker|RunReconciler|ScheduleNotifier|SchedulerTasks|SchedulerAdmission|" +
-                    "ParameterEvaluationSweeper|ParameterEvaluationRetention|" +
+                    "ParameterEvaluationSweeper|ParameterEvaluationRetention|ManagedLakeFreshnessScheduler|" +
+                    "ReaderLeaseKeeper|refreshManagedGenerations|" +
                     "LakeSettlementScheduler|LakeSettlementSweep|LakeMetadataReads|LakeAppendRuntime)\\b",
             )
 

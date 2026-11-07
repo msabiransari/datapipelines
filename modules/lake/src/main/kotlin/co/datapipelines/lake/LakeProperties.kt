@@ -10,8 +10,8 @@ import java.time.Duration
  * application.yml's; `LakeConfigKeysSpecDriftTest` holds the three together, and `LakeRules` in `app`'s
  * ConfigValidator refuses a bad combination at boot before this binding is ever consumed.
  *
- * P2 (#785) consumes [enabled], [name], [storage] (but the landing prefix and the reader pair) and [catalog].
- * [mode], [admission], [reads], [maintenance] and [retention] bind with their documented defaults and are
+ * P2 (#785) consumes [enabled], [name], [storage] (but the landing prefix) and [catalog]; P5 (#818) consumes
+ * [reads] and the reader pair. [mode], [admission], [maintenance] and [retention] bind with their documented defaults and are
  * consumed by later lanes (P1/P4/P5/P6/P7) — bound now so one key set is documented, validated and
  * drift-tested from the first release of the module.
  *
@@ -94,13 +94,32 @@ class LakeProperties(
             "Catalog(lockTimeoutSeconds=$lockTimeoutSeconds, statementTimeoutSeconds=$statementTimeoutSeconds)"
     }
 
-    /** §6 `reads.*` (§10, P5) — bound, unused by P2. */
+    /**
+     * §6 `reads.*` (§10, P5 #818) — the managed reader generations. [maxGenerationAgeSeconds] bounds a generation's
+     * life inside the pool manager's lookup; [freshnessTickSeconds] is the cadence of the catalog comparison that
+     * retires a stale generation early; [memoryLimit] is the DuckDB `memory_limit` written onto the managed
+     * datasource row, so every reader instance is bounded (the §6 amendment's `reads.memory-limit` term; the cgroup
+     * boot check that sums it is a follow-up). `LakeRules.checkLakeReads` refuses a bad combination at boot.
+     */
     class Reads(
         val maxGenerationAgeSeconds: Long = DEFAULT_MAX_GENERATION_AGE_SECONDS,
         val freshnessTickSeconds: Long = DEFAULT_FRESHNESS_TICK_SECONDS,
+        val memoryLimit: DataSize = DataSize.ofMegabytes(DEFAULT_READS_MEMORY_LIMIT_MB),
     ) {
+        init {
+            require(maxGenerationAgeSeconds > 0) { "$PREFIX.reads.max-generation-age-seconds must be > 0" }
+            require(freshnessTickSeconds > 0) { "$PREFIX.reads.freshness-tick-seconds must be > 0" }
+            // A tick at or above the bound never retires a generation before the bound does (#818 brief A5).
+            require(freshnessTickSeconds < maxGenerationAgeSeconds) {
+                "$PREFIX.reads.freshness-tick-seconds ($freshnessTickSeconds) must be below " +
+                    "$PREFIX.reads.max-generation-age-seconds ($maxGenerationAgeSeconds)"
+            }
+            require(memoryLimit.toBytes() > 0) { "$PREFIX.reads.memory-limit must be a positive size" }
+        }
+
         override fun toString(): String =
-            "Reads(maxGenerationAgeSeconds=$maxGenerationAgeSeconds, freshnessTickSeconds=$freshnessTickSeconds)"
+            "Reads(maxGenerationAgeSeconds=$maxGenerationAgeSeconds, freshnessTickSeconds=$freshnessTickSeconds, " +
+                "memoryLimit=$memoryLimit)"
     }
 
     /** §6 `maintenance.*` (§11, P6) — bound, unused by P2. The window is UTC (call 8). */
@@ -140,6 +159,7 @@ class LakeProperties(
         const val DEFAULT_STATEMENT_TIMEOUT_SECONDS = 30L
         const val DEFAULT_MAX_GENERATION_AGE_SECONDS = 900L
         const val DEFAULT_FRESHNESS_TICK_SECONDS = 60L
+        const val DEFAULT_READS_MEMORY_LIMIT_MB = 512L
         const val DEFAULT_MAINTENANCE_WINDOW = "02:00-05:00"
         const val DEFAULT_MAX_BYTES_REWRITTEN_GB = 50L
         const val DEFAULT_PROTECTION_DAYS = 7

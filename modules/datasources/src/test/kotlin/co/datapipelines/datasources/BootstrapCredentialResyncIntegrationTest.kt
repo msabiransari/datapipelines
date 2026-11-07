@@ -16,6 +16,7 @@ import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
+import org.junit.jupiter.api.assertAll
 import org.junit.jupiter.api.io.TempDir
 import org.slf4j.LoggerFactory
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
@@ -283,6 +284,41 @@ class BootstrapCredentialResyncIntegrationTest {
             .shouldNotBeNull()
             .lastTest
             .shouldBeNull()
+    }
+
+    /**
+     * #818: when the registry answers that the row is the managed lake datasource, the entry is
+     * skipped with a WARN naming it, and nothing is resynced or reported broken. The registry
+     * side (no probe, no write) is `ManagedLakeRegistryIntegrationTest`'s.
+     */
+    @Test
+    fun `an entry naming the managed lake datasource is skipped with a WARN and nothing is resynced`() {
+        register(ORIGINAL_PASSWORD)
+        rotateRolePasswordOutOfBand()
+        val beforeBoot = preV9Snapshot()
+        val managedAnswer =
+            BootstrapDatasourceRegistrar(
+                registry =
+                    object : DatasourceRegistry by DefaultDatasourceRegistry(repository, encryptor) {
+                        override fun resyncBootstrapCredential(
+                            name: String,
+                            fileCredential: String,
+                        ) = CredentialResync.MANAGED_ROW
+                    },
+                repository = repository,
+                reader = BootstrapDatasourceFileReader(environment = ::envValue),
+            )
+
+        val (summary, lines) = capturingLogs { managedAnswer.register(bootstrapFile(), actor) }
+
+        assertAll(
+            { summary.skipped shouldContainExactly listOf(NAME) },
+            { summary.resynced.shouldBeEmpty() },
+            { summary.broken.shouldBeEmpty() },
+            { lines.single { it.contains("datasource.bootstrap_managed_name") } shouldContain NAME },
+            { lines.none { it.contains(ROTATED_PASSWORD) } shouldBe true },
+            { preV9Snapshot() shouldBe beforeBoot },
+        )
     }
 
     /** No rule-3 line carries a credential — not the stored one, not the file's. */

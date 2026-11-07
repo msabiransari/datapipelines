@@ -558,7 +558,8 @@ class SqliteDialectAdapter : AbstractDialectAdapter(Dialect.SQLITE, "sqlite") {
  * `temp_directory` (a unique path under the JVM temp directory for anonymous engines by default),
  * and `preserve_insertion_order = false` ALWAYS — insertion
  * order costs the engine memory and temp-file discipline it would otherwise spend on a
- * guarantee a read-only lake never asks for.
+ * guarantee a read-only lake never asks for. An engine that loads `httpfs` (any `catalog.kind`)
+ * then gets the object-store request bounds, [LakeHttpBounds] (#818d) — constants, not keys.
  *
  * The DEFAULT memory limit, when `memory_limit` is unset, is either the operator's
  * [defaultMemoryLimit] (`datapipelines.duckdb.memory-limit`, configuration.md §3.25) verbatim,
@@ -694,14 +695,16 @@ class LakeDialectAdapter(
         enumValue(properties, "catalog.kind", CATALOG_KINDS)?.let { errors += it }
         enumValue(properties, "url_style", URL_STYLES)?.let { errors += it }
         enumValue(properties, "unsigned", BOOLEAN_WORDS)?.let { errors += it }
+        enumValue(properties, "managed", BOOLEAN_WORDS)?.let { errors += it }
         limitValueError(properties)?.let { errors += it }
         return ValidationResult.of(errors)
     }
 
     /**
      * §D's engine limits as `SET` statements, in a fixed order: `memory_limit` (explicit, or
-     * the class-KDoc default), optional `threads`, explicit or generated `temp_directory`, and
-     * `preserve_insertion_order = false` always. Every value reached here already passed
+     * the class-KDoc default), optional `threads`, explicit or generated `temp_directory`,
+     * `preserve_insertion_order = false` always, then — for a datasource with `catalog.kind`,
+     * whose engine loads `httpfs` — [LakeHttpBounds.STATEMENTS] (#818d), code constants. Every value reached here already passed
      * [validateDialectProperties] at save — the memory-limit regex admits no quote, `threads`
      * is a bare integer, and `temp_directory` carries none of the refused characters — so the
      * interpolation into the two string literals cannot break out of them.
@@ -732,6 +735,9 @@ class LakeDialectAdapter(
                 }
             effectiveSpillDirectory?.let { add("SET temp_directory = '${it.replace("'", "''")}'") }
             add("SET preserve_insertion_order = false")
+            // #818d: the object-store request bounds the silent-store hygiene budget is measured from. Only where `httpfs` is
+            // loaded (the extension statements' own predicate): the settings do not exist before it.
+            if (properties["catalog.kind"] != null) addAll(LakeHttpBounds.STATEMENTS)
         }
 
     /** The class KDoc's default: 25 % of the container's memory, floored and hard-capped. */
@@ -946,6 +952,10 @@ class LakeDialectAdapter(
                 "memory_limit",
                 "threads",
                 "temp_directory",
+                // #818: marks the server-owned managed lake datasource (design record §6). Accepted
+                // here so the registrar's row validates; DefaultDatasourceRegistry refuses it on
+                // every caller's save (`datasource.managed`).
+                "managed",
             )
         val CATALOG_KINDS = setOf("s3", "glue", "s3_tables", "rest")
         val ICEBERG_KINDS = setOf("glue", "s3_tables", "rest")

@@ -1,5 +1,7 @@
 package co.datapipelines.config
 
+import co.datapipelines.web.config.DatasourcesProperties
+import co.datapipelines.web.config.ReaperDelay
 import org.springframework.boot.convert.DurationStyle
 import org.springframework.util.unit.DataSize
 import java.net.URI
@@ -17,12 +19,17 @@ import java.time.Duration
  *   REFUSAL, the safety premise of §8a part (b) ([checkLakeRetention]);
  * - `lease-wait-seconds < node-query-timeout-max-seconds`; `max-delivery-bytes × staging-expansion-factor ≤
  *   scratch-bytes` ([checkLakeAdmission]);
- * - every other number positive, the maintenance window `HH:MM-HH:MM` ([checkLakeBounds]).
+ * - every other number positive, the maintenance window `HH:MM-HH:MM` ([checkLakeBounds]);
+ * - `freshness-tick-seconds < max-generation-age-seconds`, `reads.memory-limit` a positive size, and
+ *   `max-generation-age + 2 × reaper-delay + retire-ceiling + freshness-tick ≤
+ *   protection-days × 86400 / 24` (record §10 RULING 4 as amended, #818 P5 / #818c / #818d) ([checkLakeReads]). The
+ *   retire ceiling is the one `datasources` applies: `retire-ceiling-seconds` when set, else
+ *   `node-query-timeout-seconds + 30` (datasources.md §5.2). The reaper delay is a code constant, not a key:
+ *   [ReaperDelay.SECONDS] (the scheduling layer) derived and pinned where it is produced.
  *
- * Deferred, with the lane that consumes the input: `max-generation-age + retire-ceiling + freshness-tick ≤
- * protection-days × 86400 / 24` to P5 (the retire ceiling is derived inside `datasources`, and the managed reader
- * generations it bounds are P5's); `scratch-bytes ≤ the pod's /tmp limit` and the cgroup memory sum to P1/P6 (the
- * sum's amendment adds keys that do not exist yet, and E10b is its acceptance — owner 2026-11-02).
+ * Deferred, with the lane that consumes the input: `scratch-bytes ≤ the pod's /tmp limit` and the cgroup memory
+ * sum to P1/P6 (the sum's amendment adds keys that do not exist yet, and E10b is its acceptance — owner
+ * 2026-11-02); the sum's `reads.memory-limit` term is a filed follow-up of #818 (owner 2026-11-04).
  */
 internal object LakeRules {
     private const val PREFIX = "datapipelines.lake"
@@ -53,6 +60,7 @@ internal object LakeRules {
     const val STATEMENT_TIMEOUT_SECONDS = "$PREFIX.catalog.statement-timeout-seconds"
     const val MAX_GENERATION_AGE_SECONDS = "$PREFIX.reads.max-generation-age-seconds"
     const val FRESHNESS_TICK_SECONDS = "$PREFIX.reads.freshness-tick-seconds"
+    const val READS_MEMORY_LIMIT = "$PREFIX.reads.memory-limit"
     const val MAINTENANCE_WINDOW = "$PREFIX.maintenance.window"
     const val MAX_BYTES_REWRITTEN = "$PREFIX.maintenance.max-bytes-rewritten-per-run"
     const val PROTECTION_DAYS = "$PREFIX.retention.protection-days"
@@ -87,6 +95,7 @@ internal object LakeRules {
             STATEMENT_TIMEOUT_SECONDS,
             MAX_GENERATION_AGE_SECONDS,
             FRESHNESS_TICK_SECONDS,
+            READS_MEMORY_LIMIT,
             MAINTENANCE_WINDOW,
             MAX_BYTES_REWRITTEN,
             PROTECTION_DAYS,
@@ -116,6 +125,13 @@ internal object LakeRules {
 
     /** §3.2's default for `node-query-timeout-max-seconds`, read when the key is unset (ConfigValidator's twin). */
     private const val DEFAULT_NODE_QUERY_TIMEOUT_MAX_SECONDS = 900L
+
+    /** §3.2's default for `node-query-timeout-seconds`, read when the key is unset (the executor's own default). */
+    private const val DEFAULT_NODE_QUERY_TIMEOUT_SECONDS = 60L
+
+    /** The share of the protection window the read bounds may use (record §10 RULING 4: one hour of a 24-hour day). */
+    private const val PROTECTION_SHARE_DIVISOR = 24L
+    private const val SECONDS_PER_DAY = 86_400L
 
     private fun enabled(snapshot: ConfigSnapshot): Boolean = snapshot.lake[ENABLED]?.trim()?.equals("true", ignoreCase = true) == true
 
@@ -191,19 +207,73 @@ internal object LakeRules {
         }
     }
 
-    /** The catalog timeouts, the read cadence and the maintenance budget positive; the window `HH:MM-HH:MM` (UTC). */
+    /** The catalog timeouts and the maintenance budget positive; the window `HH:MM-HH:MM` (UTC). */
     fun checkLakeBounds(
         snapshot: ConfigSnapshot,
         violations: MutableList<String>,
     ) {
         if (!enabled(snapshot)) return
         positiveLong(snapshot, LOCK_TIMEOUT_SECONDS, violations)
-        positiveLong(snapshot, MAX_GENERATION_AGE_SECONDS, violations)
-        positiveLong(snapshot, FRESHNESS_TICK_SECONDS, violations)
         dataSize(snapshot, MAX_BYTES_REWRITTEN, violations)
         if (!WINDOW.matches(value(snapshot, MAINTENANCE_WINDOW))) {
             violations += "$MAINTENANCE_WINDOW must be HH:MM-HH:MM in UTC (§3.36)."
         }
+    }
+
+    /**
+     * The managed reads (record §10 RULING 4, #818): the tick below the age bound (a tick at or above it would
+     * never retire a generation before the bound does), the reader's memory bound a positive size, and the
+     * longest a generation can keep serving a snapshot within an hour of every protected day, so no reader can
+     * hold a snapshot the remover may already have expired.
+     *
+     * #818c (RULING 4 amended 2026-11-05) — that longest is `age bound + 2 × reaper delay + retire ceiling + one
+     * tick`: the reaper retires an over-age generation with no borrower within one [ReaperDelay] of its age bound,
+     * and hard-closes it within one more of its ceiling. The delay is [ReaperDelay.SECONDS], never typed here.
+     *
+     * #818e: this bounds staleness; live reader leases independently pin snapshot expiry.
+     */
+    fun checkLakeReads(
+        snapshot: ConfigSnapshot,
+        violations: MutableList<String>,
+    ) {
+        if (!enabled(snapshot)) return
+        dataSize(snapshot, READS_MEMORY_LIMIT, violations)
+        val age = positiveLong(snapshot, MAX_GENERATION_AGE_SECONDS, violations)
+        val tick = positiveLong(snapshot, FRESHNESS_TICK_SECONDS, violations)
+        if (age != null && tick != null && tick >= age) {
+            violations += "$FRESHNESS_TICK_SECONDS ($tick) must be below $MAX_GENERATION_AGE_SECONDS ($age) (§3.36)."
+        }
+        val days = value(snapshot, PROTECTION_DAYS).toLongOrNull()?.takeIf { it > 0 } ?: return // checkLakeRetention names it
+        val ceiling = retireCeilingSeconds(snapshot, violations) ?: return
+        if (age == null || tick == null) return
+        val window = days * SECONDS_PER_DAY / PROTECTION_SHARE_DIVISOR
+        val reaperDelay = ReaperDelay.SECONDS
+        if (age + 2 * reaperDelay + ceiling + tick > window) {
+            violations +=
+                "$MAX_GENERATION_AGE_SECONDS ($age) + 2 × the reaper delay ($reaperDelay) + the retire ceiling ($ceiling) + " +
+                "$FRESHNESS_TICK_SECONDS ($tick) must not exceed " +
+                "$PROTECTION_DAYS × 86400 / 24 ($window) (§3.36 — staleness bound; reader leases protect live readers)."
+        }
+    }
+
+    /** The ceiling `datasources` applies (datasources.md §5.2); a malformed explicit value is named here. */
+    private fun retireCeilingSeconds(
+        snapshot: ConfigSnapshot,
+        violations: MutableList<String>,
+    ): Long? {
+        val explicit = snapshot.datasourcesRetireCeilingSeconds?.trim().orEmpty()
+        if (explicit.isNotEmpty()) {
+            val parsed = explicit.toLongOrNull()?.takeIf { it > 0 }
+            if (parsed == null) violations += "datapipelines.datasources.retire-ceiling-seconds must be a positive whole number (§3.36)."
+            return parsed
+        }
+        // A malformed node timeout is named by the executor's own check; fall back to its default here.
+        val nodeTimeout =
+            snapshot.executorNodeQueryTimeoutSeconds
+                ?.trim()
+                ?.toLongOrNull()
+                ?.takeIf { it > 0 } ?: DEFAULT_NODE_QUERY_TIMEOUT_SECONDS
+        return nodeTimeout + DatasourcesProperties.CEILING_SLACK_SECONDS
     }
 
     private fun usableEndpoint(endpoint: String): Boolean =

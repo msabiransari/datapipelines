@@ -120,6 +120,7 @@ class LakeConfigKeysSpecDriftTest {
                 "$PREFIX.name",
                 "$PREFIX.reads.freshness-tick-seconds",
                 "$PREFIX.reads.max-generation-age-seconds",
+                "$PREFIX.reads.memory-limit",
                 "$PREFIX.retention.orphan-grace-hours",
                 "$PREFIX.retention.protection-days",
                 "$PREFIX.storage.access-key",
