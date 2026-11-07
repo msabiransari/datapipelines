@@ -87,9 +87,9 @@ import kotlin.io.path.relativeTo
  *   **proof (a)**: with no catalog movement (so the tick retires nothing), every lease is served by a generation
  *   younger than `reads.max-generation-age-seconds` (A runs a 6 s bound) and the generation is replaced.
  * - **B**, a second full boot after a table was defined with no registry row: B's registrar BACKFILLS the row, and
- *   **A4**: the catalog pointer is moved by a direct UPDATE under a lease (simulating #799's `settle`, which P5 does
- *   not own) — nothing is published on the invalidation channel, B's age bound is 900 s, so only B's 2 s freshness
- *   tick can make B's next lease read the new snapshot.
+ *   **A4**: the catalog pointer moves by a direct UPDATE under a lease while the projection row is held, so P4's
+ *   repair cannot publish invalidation. B's age bound is 900 s, so only B's 2 s freshness tick can make its next
+ *   lease read the new snapshot.
  * - **C**, a boot whose `lake.name` is held by an ordinary datasource: refused with `lake.boot.datasource_name_taken`.
  * - **D**, a boot with the lake disabled: the managed row stays, and a read of a managed table is refused
  *   `lake.table.unavailable` with reason `lake.disabled`.
@@ -223,23 +223,26 @@ class ManagedLakeReadsE2eTest {
     @Order(4)
     fun `A4 - a catalog move nobody published reaches B's next lease through B's freshness tick alone`() {
         pipelineId = createReadPipeline()
-        val before = countOn(portB)
-        before shouldBeInRange 1..(ICEBERG_ROWS - 1)
+        withHeldProjection { projected ->
+            projected shouldBe PREVIOUS
+            val before = countOn(portB)
+            before shouldBeInRange 1..(ICEBERG_ROWS - 1)
 
-        // #799's settle, simulated: P5 does not own it. A direct UPDATE under a lease publishes nothing.
-        moveCatalogPointer(PREVIOUS, CURRENT)
+            // P4's repair cannot update the held projection or publish its invalidation. Only the catalog moves.
+            moveCatalogPointer(PREVIOUS, CURRENT)
 
-        val deadline = System.nanoTime() + Duration.ofSeconds(B_TICK_SECONDS * 10).toNanos()
-        var after = before
-        while (System.nanoTime() < deadline && after != ICEBERG_ROWS) {
-            Thread.sleep(POLL_MILLIS)
-            after = countOn(portB)
+            val deadline = System.nanoTime() + Duration.ofSeconds(B_TICK_SECONDS * 10).toNanos()
+            var after = before
+            while (System.nanoTime() < deadline && after != ICEBERG_ROWS) {
+                Thread.sleep(POLL_MILLIS)
+                after = countOn(portB)
+            }
+            withClue("B kept reading the old snapshot; its age bound is $B_MAX_AGE_SECONDS s, so only the tick could move it") {
+                after shouldBe ICEBERG_ROWS
+            }
+            // The lagging projection was never the source: it still names the old file under its row lock.
+            registryLocation() shouldBe PREVIOUS
         }
-        withClue("B kept reading the old snapshot; its age bound is $B_MAX_AGE_SECONDS s, so only the tick could move it") {
-            after shouldBe ICEBERG_ROWS
-        }
-        // The lagging projection was never the source: the registry row still names the old file.
-        registryLocation() shouldBe PREVIOUS
     }
 
     @Test
@@ -455,13 +458,29 @@ class ManagedLakeReadsE2eTest {
     @Test
     @Order(14)
     fun `B - a table with no catalog row is refused no catalog row, never served from the projection`() {
-        // The projection row still names PREVIOUS (see A4): a fallback to it would serve the older snapshot.
-        registryLocation() shouldBe PREVIOUS
-        renameCatalogRow(from = "trips", to = AWAY)
-        try {
-            refusalOn(lifecycleReady()) shouldContain "no catalog row"
-        } finally {
-            renameCatalogRow(from = AWAY, to = "trips")
+        // P4 can repair the display row after A4. Make that observed state explicit instead of relying on tick timing.
+        metadata { connection ->
+            connection
+                .prepareStatement(
+                    "UPDATE lake_tables SET location = ? WHERE datasource_id = ? AND name = 'trips' AND origin = 'managed'",
+                ).use { statement ->
+                    statement.setString(1, CURRENT)
+                    statement.setString(2, LAKE)
+                    statement.executeUpdate() shouldBe 1
+                }
+        }
+        // Complete boot/backfill before holding the projection; the first lease is still after the catalog row goes.
+        val portF = lifecycleReady()
+        withHeldProjection { projected ->
+            // This real fixture pointer would serve if fallback were allowed, even with no catalog row.
+            projected shouldBe CURRENT
+            renameCatalogRow(from = "trips", to = AWAY)
+            try {
+                registryLocation() shouldBe projected
+                refusalOn(portF) shouldContain "no catalog row"
+            } finally {
+                renameCatalogRow(from = AWAY, to = "trips")
+            }
         }
         countOn(lifecycleReady()) shouldBe ICEBERG_ROWS
     }
@@ -1640,6 +1659,30 @@ class ManagedLakeReadsE2eTest {
                     ps.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
                 }
         }
+
+    /** Keep P4's projection repair from helping a catalog-only proof; ordinary catalog reads remain free. */
+    private fun withHeldProjection(block: (String) -> Unit) {
+        metadata { connection ->
+            connection.autoCommit = false
+            try {
+                val projected =
+                    connection
+                        .prepareStatement(
+                            "SELECT location FROM lake_tables WHERE datasource_id = ? AND name = 'trips' " +
+                                "AND origin = 'managed' FOR UPDATE",
+                        ).use { statement ->
+                            statement.setString(1, LAKE)
+                            statement.executeQuery().use { rows ->
+                                check(rows.next()) { "the managed projection fixture must exist" }
+                                requireNotNull(rows.getString(1))
+                            }
+                        }
+                block(projected)
+            } finally {
+                connection.rollback()
+            }
+        }
+    }
 
     /** A namespace, its lifecycle row and the catalog pointer (written under a lease, so the revision trigger runs). */
     private fun defineManagedTable(location: String) {
