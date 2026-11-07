@@ -26,9 +26,14 @@
 #         under test and is never edited here; the case fails only if even the
 #         non-strict lint exits non-zero.
 #   (a)   defaults: exit 0; NO DuckDB or JavaScript env entry, NO rendered
-#         `value: ""`, no `env:` block at all (an empty entry would override the
-#         image's own DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY or
+#         `value: ""`, and the env: block holds EXACTLY the two egress-proxy
+#         entries the default-ON lake.egressProxy sets (#845) — nothing else (an
+#         empty entry would override the image's own
+#         DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY or
 #         DATAPIPELINES_SCRIPT_JS_ISOLATE_DIR — the #140/#688 trap); no /app/lib.
+#   (a-off) lake.egressProxy.enabled=false: the pre-#845 contract — no `env:`
+#         block at all. (b2-single) and (b2-null) render with the proxy OFF too,
+#         so the env block's or-clause stays the thing they pin.
 #   (b)   both duckdb values set: exit 0; each env name exactly once, with its
 #         quoted value; no rendered `value: ""`.
 #   (b2)  all nine script.js values set: exit 0; each env name exactly once,
@@ -87,6 +92,25 @@
 #         the app port); allowAll AND a from; a bare label map as the scraper
 #         selector (round one's example) and inside an app peer; an unknown
 #         peer key; an empty peer; a quoted "true" allowAll.
+#   (i)   the managed reads' egress proxy (#845, values.yaml lake.egressProxy,
+#         ON by default) — egress_contract below, the rendered stream PARSED:
+#         exactly one proxy Deployment, Service, ConfigMap and (unless its
+#         networkPolicy is off) NetworkPolicy, nothing else carrying the
+#         component label; the proxy and app selectors select only their own
+#         pods; the image equals deploy/compose.yml's egress-proxy image; the
+#         ConfigMap's envoy.yaml PARSES EQUAL to compose's configs content with
+#         the max-age substituted (the one-config rule); the app's two env
+#         entries name the proxy Service and the same max-age; the policy
+#         admits only the app pods on the proxy port, and restricts egress only
+#         when the store is declared (then store rule + DNS rule, verbatim).
+#         Renders: (i) defaults, (i2) store to+ports with another max-age,
+#         (i3) ports-only with dnsTo, (i4) its policy off, (i5) the proxy off
+#         (no proxy object, no egress env entry; an extraEnv proxy is then
+#         the operator's and renders once).
+#   (i6)  refusals, each with the template's own message verbatim: the two
+#         extraEnv double mappings while enabled; maxAgeSeconds 0, quoted and
+#         fractional; a tag-only image; a bare label map, an unknown key and
+#         a non-list in the policy's peers.
 #
 # Tools: helm and kubeconform, both PINNED (kubeconform's pin is described
 # beside KUBECONFORM_VERSION; it follows the same discipline), plus python3
@@ -424,8 +448,13 @@ def main():
     np_values = (values.get("management") or {}).get("networkPolicy") or {}
     app_values = np_values.get("appIngress") or {}
 
-    deployments = [d for d in docs if d.get("kind") == "Deployment"]
-    policies = [d for d in docs if d.get("kind") == "NetworkPolicy"]
+    # The app's objects only: the egress proxy's (#845) carry the component label
+    # and have their own contract (egress_contract).
+    def app_object(d):
+        return ((d.get("metadata") or {}).get("labels") or {}).get("app.kubernetes.io/component") != "egress-proxy"
+
+    deployments = [d for d in docs if d.get("kind") == "Deployment" and app_object(d)]
+    policies = [d for d in docs if d.get("kind") == "NetworkPolicy" and app_object(d)]
     if len(deployments) != 1 or len(policies) != 1:
         print(f"{len(deployments)} Deployment(s), {len(policies)} NetworkPolicy object(s) (expected 1 each)")
         sys.exit(1)
@@ -541,6 +570,10 @@ else
   n_js=$(grep -c 'DATAPIPELINES_SCRIPT_JS_' "$WORK/a.out" || true)
   n_emp=$(grep -c 'value: ""' "$WORK/a.out" || true)
   n_env=$(grep -c '^ *env:' "$WORK/a.out" || true)
+  # Env entry names are the upper-case `- name:` lines (ports, volumes and
+  # containers are lower-case); the default-ON egress proxy sets exactly two.
+  a_names=$(grep -E '^ *- name: [A-Z_][A-Z0-9_]*$' "$WORK/a.out" | sed -E 's/^ *- name: //' | sort | tr '\n' ' ' || true)
+  a_expected="DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS DATAPIPELINES_LAKE_READS_EGRESS_PROXY "
   n_lib=$(grep -c '/app/lib' "$WORK/a.out" || true)
   n_driver=$(grep -c 'name: driver-library$' "$WORK/a.out" || true)
   if [ "$n_dbu" -ne 0 ]; then
@@ -549,15 +582,28 @@ else
     verdict "(a) defaults" 1 "grep -c 'DATAPIPELINES_SCRIPT_JS_' = $n_js (expected 0 — an empty entry would override the image's ISOLATE_DIR)"
   elif [ "$n_emp" -ne 0 ]; then
     verdict "(a) defaults" 1 "grep -c 'value: \"\"' = $n_emp (expected 0 — an empty env value still SETS the variable)"
-  elif [ "$n_env" -ne 0 ]; then
-    verdict "(a) defaults" 1 "grep -c '^ *env:' = $n_env (expected 0 — the env: block renders only when a source is set)"
+  elif [ "$n_env" -ne 1 ] || [ "$a_names" != "$a_expected" ]; then
+    verdict "(a) defaults" 1 "env: blocks=$n_env, entry names=[$a_names] (expected 1 block holding exactly [$a_expected] — the egress proxy's two)"
   elif [ "$n_lib" -ne 0 ] || [ "$n_driver" -ne 0 ]; then
     verdict "(a) defaults" 1 "/app/lib count=$n_lib; driver-library count=$n_driver (expected 0 each)"
   else
-    verdict "(a) defaults" 0 "exit 0; 0 DuckDB entries, 0 JavaScript entries, 0 rendered empty values, no env: block, no /app/lib or driver-library"
+    verdict "(a) defaults" 0 "exit 0; 0 DuckDB entries, 0 JavaScript entries, 0 rendered empty values, the env: block holds only the two egress-proxy entries, no /app/lib or driver-library"
   fi
 fi
 if [ "$rc" -eq 0 ]; then kc_validate "(a) defaults" "$WORK/a.out"; fi
+
+# (a-off) the egress proxy off — the pre-#845 default contract: no env: block.
+rc=0
+"$HELM" template dp "$CHART_DIR" --set "existingSecret=$PLACEHOLDER" \
+  --set lake.egressProxy.enabled=false >"$WORK/a-off.out" 2>"$WORK/a-off.err" || rc=$?
+n_env=$(grep -c '^ *env:' "$WORK/a-off.out" || true)
+n_emp=$(grep -c 'value: ""' "$WORK/a-off.out" || true)
+if [ "$rc" -eq 0 ] && [ "$n_env" -eq 0 ] && [ "$n_emp" -eq 0 ]; then
+  verdict "(a-off) egress proxy off" 0 "exit 0; no env: block, no rendered empty value"
+else
+  verdict "(a-off) egress proxy off" 1 "exit=$rc; env: blocks=$n_env; empty values=$n_emp (expected 0/0/0)"
+fi
+if [ "$rc" -eq 0 ]; then kc_validate "(a-off) egress proxy off" "$WORK/a-off.out"; fi
 
 # (b) both duckdb values set — each env name exactly once, quoted value.
 rc=0
@@ -630,9 +676,10 @@ if [ "$rc" -eq 0 ]; then kc_validate "(b2) all nine script.js values set" "$WORK
 
 # (b2-single) maxHeapMb ALONE — the env: block must still render, with exactly
 # that one entry. Red proof for the or-clause: remove
-# .Values.script.js.maxHeapMb from it and no env: block renders at all.
+# .Values.script.js.maxHeapMb from it and no env: block renders at all. The
+# egress proxy is OFF here: its entries would render the block regardless.
 rc=0
-"$HELM" template dp "$CHART_DIR" --set "existingSecret=$PLACEHOLDER" \
+"$HELM" template dp "$CHART_DIR" --set "existingSecret=$PLACEHOLDER" --set lake.egressProxy.enabled=false \
   --set script.js.maxHeapMb=512 >"$WORK/b2s.out" 2>"$WORK/b2s.err" || rc=$?
 if [ "$rc" -ne 0 ]; then
   verdict "(b2-single) maxHeapMb alone" 1 "helm template exited $rc (expected 0)"
@@ -682,7 +729,7 @@ maxInputMb|DATAPIPELINES_SCRIPT_JS_MAX_INPUT_MB
 JS_ZERO_KEYS
 # Null is unset; empty strings are already covered by (a).
 rc=0
-"$HELM" template dp "$CHART_DIR" --set "existingSecret=$PLACEHOLDER" \
+"$HELM" template dp "$CHART_DIR" --set "existingSecret=$PLACEHOLDER" --set lake.egressProxy.enabled=false \
   --set script.js.maxHeapMb=null >"$WORK/b2-null.out" 2>"$WORK/b2-null.err" || rc=$?
 n_js=$(grep -c 'DATAPIPELINES_SCRIPT_JS_' "$WORK/b2-null.out" || true)
 n_env=$(grep -c '^ *env:' "$WORK/b2-null.out" || true)
@@ -886,14 +933,15 @@ rc=0
 "$HELM" template dp "$CHART_DIR" --set "existingSecret=$PLACEHOLDER" >"$WORK/h.out" 2>"$WORK/h.err" || rc=$?
 n_9090=$(grep -c '9090' "$WORK/h.out" || true)
 n_mgmt_env=$(grep -c 'MANAGEMENT_' "$WORK/h.out" || true)
-n_np=$(grep -c 'kind: NetworkPolicy' "$WORK/h.out" || true)
+# The management policy by its name: the egress proxy's own policy (#845) renders by default.
+n_np=$(grep -c '^  name: dp-datapipelines-management$' "$WORK/h.out" || true)
 n_sm=$(grep -c 'ServiceMonitor' "$WORK/h.out" || true)
 if [ "$rc" -ne 0 ]; then
   verdict "(h) management defaults" 1 "helm template exited $rc (expected 0)"
 elif [ "$n_9090" -ne 0 ] || [ "$n_mgmt_env" -ne 0 ] || [ "$n_np" -ne 0 ] || [ "$n_sm" -ne 0 ]; then
   verdict "(h) management defaults" 1 "9090=$n_9090 MANAGEMENT_=$n_mgmt_env NetworkPolicy=$n_np ServiceMonitor=$n_sm (expected 0 each — the management block is off by default)"
 else
-  verdict "(h) management defaults" 0 "exit 0; no 9090, no MANAGEMENT_* env entry, no NetworkPolicy, no ServiceMonitor"
+  verdict "(h) management defaults" 0 "exit 0; no 9090, no MANAGEMENT_* env entry, no management NetworkPolicy, no ServiceMonitor"
 fi
 if [ "$rc" -eq 0 ]; then kc_validate "(h) management defaults" "$WORK/h.out"; fi
 
@@ -1205,6 +1253,327 @@ management:
         kubernetes.io/metadata.name: monitoring
     appIngress:
       allowAll: "true"
+VALUES
+
+# The egress proxy contract (#845), independent of kubeconform: the rendered
+# stream is PARSED and held against the chart's values.yaml deep-merged with
+# the case's values file, and against deploy/compose.yml (the image and the
+# Envoy config are ONE authority across compose and the chart). See the
+# header's (i) for every assertion; <values-file> may be "-" for defaults.
+egress_contract() {  # <case-label> <rendered-file> <values-file|->
+  local label="$1" file="$2" values="$3" prc=0 report
+  report=$(trap - ERR; python3 - "$file" "$values" "$CHART_DIR/values.yaml" "$ROOT/deploy/compose.yml" <<'PY'
+import copy
+import sys
+
+import yaml
+
+MAX_AGE_VAR = "${DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS:-960}"
+COMPONENT = "app.kubernetes.io/component"
+
+
+def merge(base, over):
+    out = copy.deepcopy(base)
+    for k, v in (over or {}).items():
+        out[k] = merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
+def main():
+    render, values_path, chart_values, compose_path = sys.argv[1:5]
+    with open(render, encoding="utf-8") as f:
+        docs = [d for d in yaml.safe_load_all(f) if d is not None]
+    with open(chart_values, encoding="utf-8") as f:
+        values = yaml.safe_load(f) or {}
+    if values_path != "-":
+        with open(values_path, encoding="utf-8") as f:
+            values = merge(values, yaml.safe_load(f) or {})
+    with open(compose_path, encoding="utf-8") as f:
+        compose = yaml.safe_load(f)
+    ep = values["lake"]["egressProxy"]
+
+    def labels(d):
+        return (d.get("metadata") or {}).get("labels") or {}
+
+    proxy = [d for d in docs if labels(d).get(COMPONENT) == "egress-proxy"]
+    apps = [d for d in docs if d.get("kind") == "Deployment" and labels(d).get(COMPONENT) != "egress-proxy"]
+    if len(apps) != 1:
+        print(f"{len(apps)} app Deployment(s) (expected 1)")
+        sys.exit(1)
+    app = apps[0]
+    app_env = [e for c in app["spec"]["template"]["spec"]["containers"] for e in c.get("env") or []]
+    egress_env = [e for e in app_env if e.get("name", "").startswith("DATAPIPELINES_LAKE_READS_EGRESS_")]
+
+    if ep.get("enabled") is not True:
+        problems = []
+        if proxy:
+            problems.append(f"the proxy is off but {[(d['kind'], d['metadata']['name']) for d in proxy]} rendered")
+        extra = (values.get("extraEnv") or {})
+        expected_env = [{"name": k, "value": str(v)} for k, v in sorted(extra.items())
+                        if k.startswith("DATAPIPELINES_LAKE_READS_EGRESS_")]
+        if egress_env != expected_env:
+            problems.append(f"egress env entries {egress_env} (expected only extraEnv's {expected_env})")
+        if problems:
+            print("; ".join(problems))
+            sys.exit(1)
+        print(f"proxy off: no proxy object; egress env entries = extraEnv's ({len(expected_env)})")
+        return
+
+    problems = []
+    kinds = sorted(d["kind"] for d in proxy)
+    want = sorted(["ConfigMap", "Deployment", "Service"] + (["NetworkPolicy"] if ep["networkPolicy"]["enabled"] is True else []))
+    if kinds != want:
+        print(f"proxy objects {kinds} (expected exactly {want})")
+        sys.exit(1)
+    by_kind = {d["kind"]: d for d in proxy}
+    dep, svc, cm = by_kind["Deployment"], by_kind["Service"], by_kind["ConfigMap"]
+    proxy_sel = dep["spec"]["selector"]["matchLabels"]
+    app_sel = app["spec"]["selector"]["matchLabels"]
+    proxy_pod = dep["spec"]["template"]["metadata"]["labels"]
+    app_pod = app["spec"]["template"]["metadata"]["labels"]
+
+    def selects(selector, pod):
+        return all(pod.get(k) == v for k, v in selector.items())
+
+    if not selects(proxy_sel, proxy_pod):
+        problems.append("the proxy Deployment's selector does not select its own pods")
+    if selects(app_sel, proxy_pod):
+        problems.append(f"the app selector {app_sel} also selects the proxy pods {proxy_pod}")
+    if selects(proxy_sel, app_pod):
+        problems.append(f"the proxy selector {proxy_sel} also selects the app pods {app_pod}")
+
+    containers = dep["spec"]["template"]["spec"]["containers"]
+    if len(containers) != 1:
+        problems.append(f"{len(containers)} proxy containers (expected 1)")
+    c = containers[0]
+    ports = {p.get("name"): p.get("containerPort") for p in c.get("ports") or []}
+    port = ports.get("proxy")
+    if port is None or len(ports) != 1:
+        problems.append(f"the proxy containerPorts {ports} (expected exactly one named proxy)")
+    compose_image = compose["services"]["egress-proxy"]["image"]
+    if c.get("image") != compose_image:
+        problems.append(f"the proxy image {c.get('image')} != deploy/compose.yml's {compose_image}")
+    sc, psc = c.get("securityContext") or {}, dep["spec"]["template"]["spec"].get("securityContext") or {}
+    if not (psc.get("runAsNonRoot") is True and sc.get("readOnlyRootFilesystem") is True
+            and sc.get("allowPrivilegeEscalation") is False and (sc.get("capabilities") or {}).get("drop") == ["ALL"]):
+        problems.append(f"the proxy securityContext pod={psc} container={sc} is not non-root/read-only/no-escalation/drop-ALL")
+    if "checksum/config" not in (dep["spec"]["template"]["metadata"].get("annotations") or {}):
+        problems.append("the proxy pods carry no checksum/config annotation (a max-age change would not roll them)")
+    mounts = {m["name"]: m for m in c.get("volumeMounts") or []}
+    vols = {v["name"]: v for v in dep["spec"]["template"]["spec"].get("volumes") or []}
+    cfg = [n for n, v in vols.items() if (v.get("configMap") or {}).get("name") == cm["metadata"]["name"]]
+    if len(cfg) != 1 or mounts.get(cfg[0], {}).get("mountPath") != "/etc/envoy" or mounts[cfg[0]].get("readOnly") is not True:
+        problems.append(f"the ConfigMap {cm['metadata']['name']} is not mounted read-only at /etc/envoy (volumes {list(vols)}, mounts {list(mounts)})")
+
+    if svc["spec"].get("selector") != proxy_sel:
+        problems.append(f"the proxy Service selector {svc['spec'].get('selector')} != the Deployment's {proxy_sel}")
+    sports = svc["spec"].get("ports") or []
+    if len(sports) != 1 or sports[0].get("targetPort") != "proxy" or sports[0].get("port") != port:
+        problems.append(f"the proxy Service ports {sports} (expected one: port {port} → targetPort proxy)")
+
+    max_age = ep["maxAgeSeconds"]
+    compose_cfg = compose["configs"]["egress-proxy-envoy"]["content"]
+    if compose_cfg.count(MAX_AGE_VAR) != 3:
+        problems.append(f"deploy/compose.yml's envoy config names {MAX_AGE_VAR} {compose_cfg.count(MAX_AGE_VAR)} time(s) (expected 3)")
+    expected_cfg = yaml.safe_load(compose_cfg.replace(MAX_AGE_VAR, str(max_age)))
+    rendered_cfg = yaml.safe_load(cm["data"]["envoy.yaml"])
+    if rendered_cfg != expected_cfg:
+        problems.append(f"the ConfigMap's envoy.yaml does not parse equal to deploy/compose.yml's configs content at max-age {max_age}")
+    try:
+        listen = rendered_cfg["static_resources"]["listeners"][0]["address"]["socket_address"]["port_value"]
+    except (KeyError, IndexError, TypeError):
+        listen = None
+    if listen != port:
+        problems.append(f"the Envoy listener port {listen} != the proxy containerPort {port}")
+
+    service_addr = f"{svc['metadata']['name']}:{port}"
+    expected_env = [{"name": "DATAPIPELINES_LAKE_READS_EGRESS_PROXY", "value": service_addr},
+                    {"name": "DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS", "value": str(max_age)}]
+    stripped = [{"name": e.get("name"), "value": e.get("value")} for e in egress_env]
+    if stripped != expected_env:
+        problems.append(f"the app's egress env entries {stripped} (expected {expected_env})")
+
+    if "NetworkPolicy" in by_kind:
+        spec = by_kind["NetworkPolicy"]["spec"]
+        npv = ep["networkPolicy"]
+        store = npv.get("storeEgress") or {}
+        if spec.get("podSelector") != {"matchLabels": proxy_sel}:
+            problems.append(f"the proxy policy's podSelector {spec.get('podSelector')} is not the proxy Deployment's selector")
+        want_ingress = [{"from": [{"podSelector": {"matchLabels": app_sel}}], "ports": [{"protocol": "TCP", "port": port}]}]
+        if spec.get("ingress") != want_ingress:
+            problems.append(f"the proxy policy's ingress {spec.get('ingress')} (expected only the app pods on TCP {port})")
+        if store.get("to") or store.get("ports"):
+            rule = {}
+            if store.get("to"):
+                rule["to"] = store["to"]
+            if store.get("ports"):
+                rule["ports"] = store["ports"]
+            dns = {"ports": [{"protocol": "UDP", "port": 53}, {"protocol": "TCP", "port": 53}]}
+            if npv.get("dnsTo"):
+                dns = {"to": npv["dnsTo"], **dns}
+            if spec.get("policyTypes") != ["Ingress", "Egress"] or spec.get("egress") != [rule, dns]:
+                problems.append(f"policyTypes {spec.get('policyTypes')}, egress {spec.get('egress')} (expected [Ingress, Egress] and [{rule}, {dns}])")
+        elif spec.get("policyTypes") != ["Ingress"] or "egress" in spec:
+            problems.append(f"no store declared, yet policyTypes {spec.get('policyTypes')} / egress {spec.get('egress')} (expected [Ingress] and none)")
+
+    if problems:
+        print("; ".join(problems))
+        sys.exit(1)
+    np_mode = "no policy" if "NetworkPolicy" not in by_kind else (
+        "ingress app→proxy + store/DNS egress" if (ep["networkPolicy"].get("storeEgress") or {}).get("to")
+        or (ep["networkPolicy"].get("storeEgress") or {}).get("ports") else "ingress app→proxy, egress the cluster's")
+    print(f"proxy {svc['metadata']['name']}:{port}, max-age {max_age} in the app env and the Envoy config (== compose's), image == compose's, {np_mode}")
+
+
+# An uncaught exception would exit 1 — a VERDICT code; a crash is tooling (2).
+try:
+    main()
+except SystemExit:
+    raise
+except Exception as e:  # noqa: BLE001
+    print(f"crashed: {e!r}")
+    sys.exit(2)
+PY
+) || prc=$?
+  case "$prc" in
+    0) verdict "$label egress proxy contract" 0 "$report" ;;
+    1) verdict "$label egress proxy contract" 1 "$report" ;;
+    *) echo "helm-check: the egress proxy contract crashed for $label (exit $prc) — $report (tooling, not a verdict)" >&2; exit 2 ;;
+  esac
+}
+
+# egress_render <label> <values-file|-> <out> <err> — one successful render:
+# exit 0, then the parsed egress contract and the kubeconform leg.
+egress_render() {
+  local label="$1" values="$2" out="$3" err="$4" rc=0
+  local -a extra=()
+  [ "$values" = "-" ] || extra=(-f "$values")
+  "$HELM" template dp "$CHART_DIR" --set "existingSecret=$PLACEHOLDER" \
+    "${extra[@]}" >"$out" 2>"$err" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    verdict "$label renders" 1 "helm template exited $rc (expected 0)"
+    return 0
+  fi
+  egress_contract "$label" "$out" "$values"
+  kc_validate "$label" "$out"
+}
+
+# (i) defaults — the proxy ON, its policy admitting only the app pods.
+egress_render "(i) egress proxy defaults" - "$WORK/i.out" "$WORK/i.err"
+
+# (i2) the store declared (an ipBlock and TCP 443) at another max-age.
+cat >"$WORK/i2.values.yaml" <<'VALUES'
+lake:
+  egressProxy:
+    maxAgeSeconds: 1200
+    networkPolicy:
+      storeEgress:
+        to:
+          - ipBlock:
+              cidr: 10.20.0.0/16
+        ports:
+          - protocol: TCP
+            port: 443
+VALUES
+egress_render "(i2) store egress declared" "$WORK/i2.values.yaml" "$WORK/i2.out" "$WORK/i2.err"
+
+# (i3) ports only, and DNS limited to the cluster DNS namespace.
+cat >"$WORK/i3.values.yaml" <<'VALUES'
+lake:
+  egressProxy:
+    networkPolicy:
+      storeEgress:
+        ports:
+          - protocol: TCP
+            port: 9000
+      dnsTo:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+VALUES
+egress_render "(i3) ports-only store egress" "$WORK/i3.values.yaml" "$WORK/i3.out" "$WORK/i3.err"
+
+# (i4) the proxy's policy off — the proxy objects without it.
+cat >"$WORK/i4.values.yaml" <<'VALUES'
+lake:
+  egressProxy:
+    networkPolicy:
+      enabled: false
+VALUES
+egress_render "(i4) proxy policy off" "$WORK/i4.values.yaml" "$WORK/i4.out" "$WORK/i4.err"
+
+# (i5) the proxy off — nothing renders; an operator's own proxy through
+# extraEnv is then admitted (the double-mapping refusal holds only while ON).
+cat >"$WORK/i5.values.yaml" <<'VALUES'
+lake:
+  egressProxy:
+    enabled: false
+extraEnv:
+  DATAPIPELINES_LAKE_READS_EGRESS_PROXY: corp-proxy.example:3128
+VALUES
+egress_render "(i5) proxy off" "$WORK/i5.values.yaml" "$WORK/i5.out" "$WORK/i5.err"
+
+# (i6) refusals — each with the template's own message verbatim.
+check_double_mapping "(i6) extraEnv double-maps DATAPIPELINES_LAKE_READS_EGRESS_PROXY" \
+  DATAPIPELINES_LAKE_READS_EGRESS_PROXY other:3128 \
+  'lake.egressProxy.enabled sets DATAPIPELINES_LAKE_READS_EGRESS_PROXY — not extraEnv (deployment.md §6.4)' \
+  "$WORK/i6a.out" "$WORK/i6a.err"
+check_double_mapping "(i6) extraEnv double-maps DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS" \
+  DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS 1200 \
+  'set lake.egressProxy.maxAgeSeconds, not extraEnv.DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS (deployment.md §6.4)' \
+  "$WORK/i6b.out" "$WORK/i6b.err"
+np_refusal "(i6) maxAgeSeconds 0 refused" \
+  'lake.egressProxy.maxAgeSeconds must be a whole number of seconds greater than 0 (deployment.md §6.4)' <<'VALUES'
+lake:
+  egressProxy:
+    maxAgeSeconds: 0
+VALUES
+np_refusal "(i6) fractional maxAgeSeconds refused" \
+  'lake.egressProxy.maxAgeSeconds must be a whole number of seconds greater than 0 (deployment.md §6.4)' <<'VALUES'
+lake:
+  egressProxy:
+    maxAgeSeconds: 960.5
+VALUES
+np_refusal "(i6) quoted maxAgeSeconds refused" \
+  'lake.egressProxy.maxAgeSeconds must be a whole number of seconds, unquoted (deployment.md §6.4)' <<'VALUES'
+lake:
+  egressProxy:
+    maxAgeSeconds: "960"
+VALUES
+np_refusal "(i6) tag-only proxy image refused" \
+  'lake.egressProxy.image.digest must be a sha256: digest — the proxy image is pinned by digest (deployment.md §6.4)' <<'VALUES'
+lake:
+  egressProxy:
+    image:
+      digest: ""
+VALUES
+np_refusal "(i6) bare label map in a store peer refused" \
+  'lake.egressProxy.networkPolicy.storeEgress.to[0].namespaceSelector must be a LabelSelector object — matchLabels / matchExpressions — not a bare label map (found key "kubernetes.io/metadata.name"; deployment.md §6.4)' <<'VALUES'
+lake:
+  egressProxy:
+    networkPolicy:
+      storeEgress:
+        to:
+          - namespaceSelector:
+              kubernetes.io/metadata.name: storage
+VALUES
+np_refusal "(i6) unknown key in a DNS peer refused" \
+  'lake.egressProxy.networkPolicy.dnsTo[0] carries "namespace" — a NetworkPolicyPeer has only namespaceSelector / podSelector / ipBlock (deployment.md §6.4)' <<'VALUES'
+lake:
+  egressProxy:
+    networkPolicy:
+      dnsTo:
+        - namespace: kube-system
+VALUES
+np_refusal "(i6) non-list store peers refused" \
+  'lake.egressProxy.networkPolicy.storeEgress.to must be a list of NetworkPolicyPeer objects (deployment.md §6.4)' <<'VALUES'
+lake:
+  egressProxy:
+    networkPolicy:
+      storeEgress:
+        to:
+          ipBlock:
+            cidr: 10.20.0.0/16
 VALUES
 
 if [ "$fails" -eq 0 ]; then
