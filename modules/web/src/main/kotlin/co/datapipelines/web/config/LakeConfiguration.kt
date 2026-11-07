@@ -13,6 +13,7 @@ import co.datapipelines.datasources.LakeViewOutcomeRecorder
 import co.datapipelines.datasources.ManagedLakeCatalog
 import co.datapipelines.datasources.ManagedLakeTable
 import co.datapipelines.datasources.PoolInvalidationPublisher
+import co.datapipelines.executor.BoundedJdbc
 import co.datapipelines.lake.LakeProperties
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.context.annotation.Bean
@@ -81,9 +82,22 @@ class LakeConfiguration {
     ): ManagedLakeDatasourceRegistrar =
         ManagedLakeDatasourceRegistrar(lakeProperties, datasources, grants, applyRepository, userService, lakeCatalogStartupCheck)
 
-    /** #818 — the managed read's SQL (a sibling of [LakeTableRepository], see its KDoc). */
+    /**
+     * #818 — the managed read's SQL (a sibling of [LakeTableRepository], see its KDoc).
+     *
+     * #833: over its own template bounded at [MANAGED_BUILD_READ_TIMEOUT_SECONDS]. This repository's one statement is
+     * the catalog read a managed generation BUILD runs first (`DefaultDatasourceRegistry.managedLakeViewInit`), on the
+     * lease's thread inside `poolFor`; unbounded, a held lock on the catalog tables would stall every lease that needs
+     * a new generation for as long as the lock is held. A cancelled read is that build's `lake.unavailable`, and the
+     * live generation (if any) serves until its age bound, as for any failed catalog read. The shared template the
+     * bound is built over is unchanged, so no other statement on it gains a bound. The same port also answers the
+     * introspection and stats listings' managed enrichment ([lakeTableCatalog]), which inherit the bound.
+     */
     @Bean
-    fun managedLakeTableRepository(jdbc: NamedParameterJdbcTemplate): ManagedLakeTableRepository = ManagedLakeTableRepository(jdbc)
+    fun managedLakeTableRepository(jdbc: NamedParameterJdbcTemplate): ManagedLakeTableRepository =
+        ManagedLakeTableRepository(
+            BoundedJdbc.bounded(jdbc, MANAGED_BUILD_READ_TIMEOUT_SECONDS, "MANAGED_BUILD_READ_TIMEOUT_SECONDS"),
+        )
 
     /**
      * #818 (record §10) — the `datasources`-module port the managed generation is built from and the freshness
@@ -145,6 +159,13 @@ class LakeConfiguration {
         )
 
     companion object {
+        /**
+         * #833 — the managed generation build's catalog read bound, in seconds: the freshness tick's own
+         * `ManagedLakeFreshnessScheduler.FRESHNESS_STATEMENT_TIMEOUT_SECONDS` value, because both bound the same
+         * one-row-per-table catalog read on the metadata database. A constant, not a key (datasources.md §8C.10).
+         */
+        const val MANAGED_BUILD_READ_TIMEOUT_SECONDS = 5
+
         /**
          * `lake_tables` as stored, one [LakeRegisteredTable] per row: the location is the registry column, a managed
          * row is only MARKED managed (no catalog read, no reason, no notice). `lastError` (109 §A, V22) crosses the
