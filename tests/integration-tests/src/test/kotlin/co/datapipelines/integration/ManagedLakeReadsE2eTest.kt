@@ -643,7 +643,7 @@ class ManagedLakeReadsE2eTest {
      * Gen 1 is leased once and returned; the reaper retires it at its age bound and hands its close away, where it
      * hangs. Gen 2 is then built by a lease that runs the long reader: the reaper must retire and hard-close gen 2 in
      * bound while gen 1's close is still hung, and `datasource.pool_close_stuck` must name gen 1 once, no earlier than
-     * the deadline after its hand-off. Red with the synchronous close restored (the reaper then hangs in gen 1's close
+     * its own deadline after its hand-off, and carry that deadline (#840: a managed generation's, 100 s here). Red with the synchronous close restored (the reaper then hangs in gen 1's close
      * and never reaches gen 2), and with the `scheduler` attribute removed (the retirement lines' thread).
      */
     @Test
@@ -685,6 +685,7 @@ class ManagedLakeReadsE2eTest {
                     { withClue("gen 1's close was still held when gen 2 closed") { release.count shouldBe 1L } },
                     { stuck.size shouldBe 1 },
                     { stuck.single().text shouldContain "datasource=$LAKE generation=${seam.generation.get()} " },
+                    { stuck.single().text shouldContain " deadline_seconds=$POOL_CLOSE_DEADLINE_SECONDS " },
                     { (stuck.single().at >= handedOffAt.plusSeconds(POOL_CLOSE_DEADLINE_SECONDS)) shouldBe true },
                 )
             } finally {
@@ -1972,8 +1973,13 @@ class ManagedLakeReadsE2eTest {
          */
         private const val REAPER_DELAY_SECONDS = 7L
 
-        /** #818d — the per-close deadline (`PoolCloser.DEADLINE_SECONDS`), a literal; I3 waits for its WARN. */
-        private const val POOL_CLOSE_DEADLINE_SECONDS = 65L
+        /**
+         * #840 — a MANAGED generation's close deadline on this profile, a literal; I3 waits for its WARN. The lake pool
+         * and the metadata pool both run HikariCP's 30 s `connectionTimeout`: 30 (the pool's own first shutdown wait)
+         * + 3 × 10 + 5 (the fixed terms) + 30 + 5 (the reader-pin release: metadata checkout, bounded DELETE) = 100.
+         * #818d's constant 65 dropped the first term's source and the fourth term.
+         */
+        private const val POOL_CLOSE_DEADLINE_SECONDS = 100L
 
         /** #818d — the reaper's own thread, and the jobs' shared one, by the spec's names. */
         private const val REAPER_THREAD = "dp-reaper"

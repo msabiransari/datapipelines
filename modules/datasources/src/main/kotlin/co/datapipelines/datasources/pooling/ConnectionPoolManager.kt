@@ -90,6 +90,18 @@ interface ConnectionPool : AutoCloseable {
 
     /** Physical handles, including the retained owner and any close still in flight. */
     val holdsPhysicalHandles: Boolean get() = false
+
+    /**
+     * #840 — the Hikari `connectionTimeout` this pool runs with: the bound of its shutdown's first wait (Hikari sets the
+     * login timeout from it), so the first term of this pool's own close deadline ([PoolCloser.deadlineFor]). A pool
+     * with no Hikari configuration (the test doubles) answers HikariCP's default, [DEFAULT_CONNECTION_TIMEOUT].
+     */
+    val connectionTimeout: Duration get() = DEFAULT_CONNECTION_TIMEOUT
+
+    companion object {
+        /** A fresh `HikariConfig`'s `connectionTimeout` (30 s on the pinned HikariCP), read once, never typed here. */
+        val DEFAULT_CONNECTION_TIMEOUT: Duration = Duration.ofMillis(HikariConfig().connectionTimeout)
+    }
 }
 
 /**
@@ -165,6 +177,9 @@ class HikariConnectionPool(
 ) : ConnectionPool {
     /** Whether the underlying pool has been shut down — the observable half of retirement (§5.2). */
     val isClosed: Boolean get() = dataSource.isClosed
+
+    /** #840 — this pool's own `connectionTimeout`, as its datasource's pool settings set it ([ConnectionPool.connectionTimeout]). */
+    override val connectionTimeout: Duration get() = Duration.ofMillis(dataSource.connectionTimeout)
 
     /** Won by the ONE caller that runs the whole retire → Hikari close → owner release sequence. */
     private val closing = AtomicBoolean(false)
@@ -337,7 +352,8 @@ interface PoolLifecycleMetrics {
 
     /**
      * #818d — `datapipelines.datasource.pool.close_stuck{datasource_name}`: a close handed to the closer was still
-     * running at `PoolCloser.DEADLINE_SECONDS`. Defaulted so an implementation that predates it keeps compiling.
+     * running at that pool's own deadline (`PoolCloser.deadlineFor`, #840). Defaulted so an implementation that
+     * predates it keeps compiling.
      */
     fun poolCloseStuck(datasourceName: String) = Unit
 

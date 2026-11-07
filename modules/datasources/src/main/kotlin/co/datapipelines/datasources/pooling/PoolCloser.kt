@@ -1,5 +1,7 @@
 package co.datapipelines.datasources.pooling
 
+import java.time.Duration
+
 /**
  * #818d (dp-lake record §10 RULING 4 amended, item 6) — who closes a pool the reaper's pass has taken off its
  * retiring queue. The pass DECIDES (a clock comparison, the queue walk) and hands each close here; it never waits
@@ -8,7 +10,7 @@ package co.datapipelines.datasources.pooling
  *
  * [SYNCHRONOUS] closes on the caller's thread: the library default, for callers that wire no closer (this module's
  * own tests, a plain library caller). The assembling layer injects one that runs each close on a dedicated thread
- * under [DEADLINE_SECONDS] (`DeadlinePoolCloser`, the `dp-pool-close` threads). Whatever the closer, the close
+ * under that pool's own deadline, [deadlineFor] (`DeadlinePoolCloser`, the `dp-pool-close` threads; #840). Whatever the closer, the close
  * itself is [ConnectionPool.close]: for a LAKE generation that is interrupt-first ([PoolInstanceOwner.interruptReaders]),
  * then Hikari's shutdown, then the owner release — so a reader stops on the interrupt, never behind Hikari's waits.
  *
@@ -46,15 +48,41 @@ fun interface PoolCloser {
         const val OWNER_RELEASE_MARGIN_SECONDS = 5L
 
         /**
-         * The per-close deadline: Hikari's own bound for the shipped pool settings — `connectionTimeout` (30 s, a
-         * fresh `HikariConfig`'s default, which bounds `shutdown()`'s first wait: `addConnectionExecutor
-         * .awaitTermination(loginTimeout)`, the login timeout Hikari sets from `connectionTimeout`) plus the
-         * [HIKARI_SHUTDOWN_WAITS] × [HIKARI_SHUTDOWN_WAIT_SECONDS] — plus [OWNER_RELEASE_MARGIN_SECONDS]:
-         * `30 + 3 × 10 + 5 = 65`. A close still running past it logs one WARN `datasource.pool_close_stuck` and
-         * counts `datapipelines.datasource.pool.close_stuck`; the thread is left to finish. A datasource whose own
-         * `connectionTimeout` is longer can legitimately run past it and be reported: the deadline is a monitor on
-         * the close, never on the reader, which interrupt-first stopped before Hikari's first wait.
+         * The documented DEFAULT per-close deadline: [deadlineFor] at a fresh `HikariConfig`'s `connectionTimeout`
+         * (30 s) for a pool with no reader pins, `30 + 3 × 10 + 5 = 65`. Since #840 the closer reads each pool's own
+         * deadline, never this constant; `ReaperDelayDerivationTest` keeps pinning that the default's derivation
+         * still lands here.
          */
         const val DEADLINE_SECONDS = 65L
+
+        /**
+         * #840 — the deadline terms that do not depend on the pool: [HIKARI_SHUTDOWN_WAITS] ×
+         * [HIKARI_SHUTDOWN_WAIT_SECONDS] plus [OWNER_RELEASE_MARGIN_SECONDS], `3 × 10 + 5 = 35` s.
+         */
+        val FIXED_CLOSE_TERMS: Duration =
+            Duration.ofSeconds(HIKARI_SHUTDOWN_WAITS * HIKARI_SHUTDOWN_WAIT_SECONDS + OWNER_RELEASE_MARGIN_SECONDS)
+
+        /**
+         * #840 — one pool's close deadline, from its own [ConnectionPool.connectionTimeout]: Hikari's bound for THAT
+         * pool's settings (`shutdown()`'s first wait is `addConnectionExecutor.awaitTermination(loginTimeout)`, the
+         * login timeout Hikari sets from `connectionTimeout`), plus [fixedTerms] ([FIXED_CLOSE_TERMS]), plus
+         * [releaseBound]: what else the close runs inside the same deadline after the owner release. `65` s at 30 s,
+         * `155` s at 120 s, so a datasource configured with a longer `connectionTimeout` is no longer reported stuck
+         * while Hikari is still inside a wait its own settings admit.
+         *
+         * [releaseBound], the fourth term, is a MANAGED generation's reader-pin release. Its close is wrapped
+         * (`ConnectionPoolManager.buildProtected`): `pool.close()` and then, once no physical handle remains,
+         * `ManagedGenerationPins.unpin`, which in production (`ReaderLeaseKeeper.unpin` → `LakeLeases.release`) checks a
+         * connection out of the METADATA pool (up to that pool's `connectionTimeout`) and runs one DELETE bounded at
+         * `LakeLeases.READER_STATEMENT_TIMEOUT_SECONDS` (statement timeout and socket timeout). That is not
+         * [OWNER_RELEASE_MARGIN_SECONDS]'s five seconds, which cover one native disconnect; it is a named term, derived
+         * by the assembling layer from the metadata pool it actually runs on. Zero for every other pool, which unpins
+         * nothing.
+         */
+        fun deadlineFor(
+            connectionTimeout: Duration,
+            releaseBound: Duration = Duration.ZERO,
+            fixedTerms: Duration = FIXED_CLOSE_TERMS,
+        ): Duration = Duration.ofSeconds(DEADLINE_SECONDS) // inert scaffolding: the #840 fix commit derives it
     }
 }
