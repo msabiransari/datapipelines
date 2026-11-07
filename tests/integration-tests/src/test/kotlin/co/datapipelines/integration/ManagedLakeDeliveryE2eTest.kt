@@ -42,7 +42,6 @@ class ManagedLakeDeliveryE2eTest {
     @BeforeAll
     fun seed() {
         E2eClean.beforeSeeding()
-        jdbc.update("INSERT INTO lake_control (id, mode) VALUES (1, 'normal')")
         runtime.restoreStartupSeeds()
         jdbc.update("INSERT INTO workspaces (id, name, display_name) VALUES (?, ?, 'P4 delivery')", WORKSPACE, WORKSPACE_NAME)
         listOf(ADMIN to "super_admin", AUTHOR to "author", VIEWER to "viewer").forEach { (id, role) ->
