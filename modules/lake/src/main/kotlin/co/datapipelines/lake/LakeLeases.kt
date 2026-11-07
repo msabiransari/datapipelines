@@ -68,18 +68,20 @@ sealed interface LeaseOutcome {
  * commits, so it is refused ([requireNoTransaction]). The namespace lease is taken before the table lease (§8a fixed
  * order); that order is the caller's (P3/P4).
  *
- * **A takeover waits at most [lockTimeout] (#812).** `ON CONFLICT DO UPDATE` locks the conflicting row before its
+ * **A takeover waits until [lockTimeout] or the five-second acquire transaction expires (#812, #799).**
+ * `ON CONFLICT DO UPDATE` locks the conflicting row before its
  * `WHERE` is evaluated, so a takeover waits on any transaction that holds the row: the fence takes it `FOR SHARE` for
  * the life of a catalog transaction, including a dead attempt's that is still open. The acquire therefore runs as its
  * own short transaction whose first statement sets `lock_timeout` for that transaction only (`set_config(…, true)`,
  * the value bound, never a session setting on the shared pool), then the acquire statement, then the commit. A lock
- * wait that reaches the timeout (SQLSTATE `55P03`) answers [LeaseOutcome.Busy], with the row unchanged.
+ * wait that reaches either timeout (SQLSTATE `55P03` or `57014`) answers [LeaseOutcome.Busy], with the row unchanged.
+ * Spring rounds remaining transaction time up to whole seconds, allowing almost one additional second.
  */
 class LakeLeases(
     private val jdbc: JdbcTemplate,
     /** `lake_leases.holder_instance`: which process holds the lease (diagnostic only, never compared). */
     val holderInstance: String = defaultHolderInstance(),
-    /** How long one acquire waits on a lease row another transaction holds (`datapipelines.lake.catalog.lock-timeout-seconds`). */
+    /** Lease-row lock timeout (`datapipelines.lake.catalog.lock-timeout-seconds`); the acquire transaction also caps it. */
     val lockTimeout: Duration = Duration.ofSeconds(LakeProperties.DEFAULT_LOCK_TIMEOUT_SECONDS),
 ) {
     init {

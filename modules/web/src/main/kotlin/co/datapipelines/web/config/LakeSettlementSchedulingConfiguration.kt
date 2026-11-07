@@ -21,8 +21,9 @@ class LakeSettlementSchedulingConfiguration {
 /**
  * Runs on the application's existing scheduler, one tick 60 seconds after the previous one ends. A tick visits
  * a rotating page of managed tables and, per table, a bounded page of unsettled deliveries under a ten-second work budget
- * checked before every statement group; the tick ends at most 16 seconds past it, whatever the object store does, because
- * its metadata read leaves this thread (docs/lake.md §8, `LakeSettlementSweep`).
+ * checked before every statement group; with PostgreSQL answering and default Redis timeouts, the tick ends at most
+ * 16 seconds past it. Its metadata read leaves this thread, so an unresponsive object store adds no scheduler wait.
+ * Connection checkout, commit and driver cancellation assumptions are documented in docs/lake.md §8 (`LakeSettlementSweep`).
  */
 class LakeSettlementScheduler(
     private val sweep: LakeSettlementSweep,
