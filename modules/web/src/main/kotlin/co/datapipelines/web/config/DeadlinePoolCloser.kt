@@ -26,12 +26,12 @@ import java.util.concurrent.atomic.AtomicInteger
  * - **A stuck close is reported once, never retried.** Past the deadline the close is still running (the thread is
  *   left to finish; nothing can safely cut a native close): one WARN `datasource.pool_close_stuck` with the datasource,
  *   the instance generation, the seconds elapsed since the hand-off and the active count the pass read at hand-off,
- *   and one increment of `datapipelines.datasource.pool.close_stuck`. The reader the close was for is not waiting on
- *   it: [ConnectionPool.close] interrupts every reader of a LAKE generation first.
+ *   and one increment of `datapipelines.datasource.pool.close_stuck`. [ConnectionPool.close] starts independent
+ *   physical-handle close attempts first. A native reader can remain blocked; reader pins follow its physical lifetime.
  * - **Threads: daemon, named, one per close, never queued.** A cached executor: a thread is made for a hand-off
  *   when none is idle, and an idle one ends after [IDLE_SECONDS]. No cap and no queue, on purpose: a close waiting
- *   behind other closes would wait with its generation's readers still running — interrupt-first is the close's
- *   first act, and the reads lifetime rule counts the reader's termination from the hard close, not from a queue.
+ *   behind other closes would delay even starting its generation's physical close attempts. Reader termination is
+ *   not bounded by this executor; live handles retain their snapshot pins until confirmed physical closure.
  *   The count is bounded by the closes in flight, and each is one retiring pool handed off exactly once (a pool
  *   leaves the retiring queue before the hand-off, and a stuck close is reported, never retried), so it grows only
  *   with closes that do not end — each of which is a `pool_close_stuck` WARN and a counted increment.

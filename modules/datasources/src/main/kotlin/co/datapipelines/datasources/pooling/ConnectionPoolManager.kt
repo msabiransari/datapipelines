@@ -272,17 +272,18 @@ class HikariConnectionPool(
         get() = instanceOwner != null && (!ownerReleased.get() || (instanceOwner as? LakeInstanceOwner)?.holdsPhysicalHandles == true)
 
     /**
-     * Retire the owner, then **interrupt first** (#818d, record §10 item 6: every physical handle of
-     * the generation is put into its own close, which interrupts the running DuckDB query before
-     * anything else — [PoolInstanceOwner.interruptReaders]), then Hikari shutdown — it waits
+     * Retire the owner, then start each physical handle's close independently
+     * ([PoolInstanceOwner.interruptReaders]), before Hikari shutdown. A native reader may remain
+     * blocked in that close; its reader pins stay live until physical closure is confirmed.
+     * Hikari shutdown waits
      * (bounded by the DataSource's login timeout, which Hikari itself sets from
      * `connectionTimeout`) for a physical connection mid-creation, then aborts the leases still
      * out once its shutdown grace expires (the existing §5.2 hard-close policy) — then the owner's
      * release, which closes every physical handle the generation still owns (one Hikari abandoned
      * at that ceiling included: a duplicate does not outlive its generation) and the retained
-     * connection. The interrupt comes BEFORE Hikari's shutdown because that shutdown's first act
+     * connection. The close attempts start BEFORE Hikari's shutdown because that shutdown's first act
      * is `addConnectionExecutor.awaitTermination(loginTimeout)` (HikariCP 6.3.3, read off the
-     * bytecode), and a reader must never wait behind a stuck connection creation. Hikari's later
+     * bytecode), so a stuck connection creation cannot delay starting those attempts. Hikari's later
      * abort of a handle the interrupt already closed is harmless: the driver refuses `abort`,
      * Hikari falls back to `close()`, and a handle mid-close or closed returns at once
      * (`TrackedDuplicate`). No step throws: Hikari's close contains its own failures, and the
