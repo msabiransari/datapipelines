@@ -1,9 +1,9 @@
 # Observability Specification
 
-**Status:** v1.56 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.58 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-11-06
+**Last updated:** 2026-11-07
 
 ---
 
@@ -732,8 +732,8 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 | 2026-11-06 | v1.53 | #708 the Prometheus scrape | **§4.1 is cut to the meters that exist** (the failure-flow and telemetry record §7, §17 row 13): the 13 documented-only rows are deleted — `staging.bytes`, `staging.active_tables`, `datasource.pool.active`/`.pending`/`.timeout_total`, `templates.render.duration`, `templates.cache.hits`/`.misses`, `mcp.tool.calls`, `auth.login.attempts`, `auth.api_key.validations`, `result.expiries`, `result.size` — and `datapipelines.web.endpoint_key_budget.saturated` gains its row; the two gauges `script.evaluations.abandoned` and `parameters.selectors.abandoned` are renamed under the `datapipelines.` prefix. `MeterCatalogueParityTest` now holds §4.1 to the code both ways (43 coded names + `http.server.requests` = 44 rows at lane delivery). **§4.2 / §6.4**: `micrometer-registry-prometheus` ships; `health` and `prometheus` answer anonymously on the management port (#231 item 1, record §17 row 11), with the per-pipeline cardinality note. **§5**: one sentence — tracing is not provided, deferred (record §12). **§9.1**: the two `tracing.*` keys are removed (record §17 row 12, no deprecation window). |
 | 2026-11-05 | v1.52 | 771 (#771) the never-admissible refusal counts under its own reason | **§4.1** `datapipelines.dashboard.refresh.refused` gains the `never_admissible` value of its `reason` tag: #762's once-never-admissible 429 now counts under `reason=never_admissible`, the busy refusal under `saturated` alone — one series per reason, no new tag or counter. **§3.4J**'s `dashboard.refresh_never_admissible` row names the new tag value. |
 | 2026-11-02 | v1.48 | 778 (#778) the lake reference index backfill | New **§3.4P**: the boot backfill's `lake.reference_index.backfill` (INFO, counts) and `lake.reference_index.backfill_failed` (WARN, version identity and exception class; no SQL, no parser message). |
-| 2026-11-04 | v1.52 | 799 (#799) trusted listing | New §3.4S records the safe `lake.delivery.listing_failed` SDK boundary event. |
-| 2026-11-05 | v1.53 | 799 (#799) immutable recipes | §3.4S records the sanitized recipe PUT failure; no SDK message, cause chain or storage configuration is logged. |
+| 2026-11-04 | v1.57 | 799 (#799) trusted listing — renumbered at merge after #799c's v1.56 | New §3.4S records the safe `lake.delivery.listing_failed` SDK boundary event. |
+| 2026-11-05 | v1.58 | 799 (#799) immutable recipes — renumbered at merge after #799's v1.57 | §3.4S records the sanitized recipe PUT failure; no SDK message, cause chain or storage configuration is logged. |
 | 2026-11-05 | v1.54 | 799 (#799) library deletion refusal | §3.4S records the production FileIO refusal and retained key, including Iceberg transaction cleanup after manifest merges. |
 | 2026-11-06 | v1.55 | 799b (#799) bounded settlement | §3.4S `lake.settle.sweep` gains `rows`, `changed` and `exhausted`: each tick's visited deliveries, terminal transitions and whether its work budget ran out ([Lake §8](lake.md#8-settlement-and-recovery)). No event added or renamed. |
 | 2026-11-06 | v1.56 | 799c (#799, #843) whole-tick settlement bound | §3.4S `lake.settle.sweep` gains `deferred_budget`, `deferred_stuck` and `deferred_failed`; new `lake.settle.metadata_read_stuck` and `lake.settle.metadata_read_ended` for the metadata read that left the tick's thread. |
