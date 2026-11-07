@@ -362,6 +362,7 @@ class SettlementWorkBoundIntegrationTest {
         requireNotNull(h.jdbc.queryForObject("SELECT clock_timestamp()", OffsetDateTime::class.java)).toInstant()
 
     /** Names a sweep or settlement statement by the step or statement group it belongs to. */
+    @Suppress("CyclomaticComplexMethod") // One flat lookup: a branch per group, in match order.
     private fun groupOf(statement: String): String =
         when {
             statement.startsWith("UPDATE lake_table_revisions r SET protected_until") -> "protection"

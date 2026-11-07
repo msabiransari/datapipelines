@@ -191,7 +191,11 @@ class SettlementWholeTickBoundIntegrationTest {
         }
         sql.executed.count { it.startsWith("DELETE FROM lake_leases") } shouldBe 0
         h.applyState() shouldBe LakeApplyState.APPLYING
-        h.jdbc.queryForObject("SELECT apply_operation_id FROM lake_tables_managed WHERE id = ?", UUID::class.java, h.tableId) shouldBe attempt
+        h.jdbc.queryForObject(
+            "SELECT apply_operation_id FROM lake_tables_managed WHERE id = ?",
+            UUID::class.java,
+            h.tableId,
+        ) shouldBe attempt
         io.streamsEntered.get() shouldBe 0
         LakeTestDb.leases.release(holder.operationId)
     }

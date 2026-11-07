@@ -118,16 +118,21 @@ class LakeDefinitionApplier(
         val operationId = UUID.randomUUID()
         val outcome =
             when (val taken = leases.tryTable(row.namespace, row.name, operationId, budget.deadline, OPERATION_VERIFY)) {
-                is LeaseOutcome.Acquired ->
+                is LeaseOutcome.Acquired -> {
                     try {
                         verifyLeased(row, attemptId, budget, metadata, actor)
                     } finally {
                         leases.release(operationId)
                     }
+                }
 
-                LeaseOutcome.Busy -> LakeApplyOutcome.Busy(LakeApplyLeases.REASON_TABLE)
+                LeaseOutcome.Busy -> {
+                    LakeApplyOutcome.Busy(LakeApplyLeases.REASON_TABLE)
+                }
 
-                LeaseOutcome.DeadlinePassed -> LakeApplyOutcome.Busy(LakeApplyLeases.REASON_DEADLINE)
+                LeaseOutcome.DeadlinePassed -> {
+                    LakeApplyOutcome.Busy(LakeApplyLeases.REASON_DEADLINE)
+                }
             }
         LakeApplyLog.ended(OPERATION_VERIFY, row, row.currentDefinitionVersion, attemptId, outcome)
         return outcome

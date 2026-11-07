@@ -167,8 +167,6 @@ class LakeLeaseTakeoverIntegrationTest {
     private fun tokenOf(): UUID? =
         h.jdbc.queryForObject("SELECT token FROM lake_leases WHERE kind = 'table' AND name = ?", UUID::class.java, NAME)
 
-    private fun deadline() = leases.catalogNowPlus(MINUTE)
-
     private fun millisSince(started: Long): Long = Duration.ofNanos(System.nanoTime() - started).toMillis()
 
     private companion object {
