@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.63 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.64 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-07
@@ -414,8 +414,10 @@ When `datapipelines.lake.enabled=true`, `LakeBootCheck` runs once after Flyway (
 | Level | `event=` | When | Fields |
 |---|---|---|---|
 | INFO | `lake.boot.ok` | Every check passed: the catalog shape, the four V53 triggers, the control row, the store reachable and honouring `If-None-Match: *` | `bucket`, `prefix` |
+| INFO | `lake.egress_proxy_verified` | #845: before the managed datasource is registered, the configured egress proxy declared the configured max-age at `/dp-egress` and a `HEAD` of the bucket through it reached the store (any store answer counts; only a proxy-generated 502/503/504 does not) | `proxy` (`host:port`), `max_age_seconds`, `store` (the bucket URI, no credential), `store_status`, `duration_ms` |
+| WARN | `lake.egress_proxy_absent` | #845: `datapipelines.lake.reads.egress-proxy` is empty, so managed reads reach the store directly with no connection max-age ([Lake §9](lake.md#9-reads)) | — |
 
-**The refusals are startup failures, not log events.** Each is an `IllegalStateException` whose message starts with its id, so the operator greps the boot failure for it: `lake.boot.catalog_shape`, `lake.boot.trigger_missing`, `lake.boot.control_row`, `lake.boot.storage_unreachable`, `lake.boot.conditional_put`, and `lake.boot.datasource_name_taken` (#818, raised when the managed datasource is registered: another datasource holds `datapipelines.lake.name`) (what each means: Configuration §7). No credential, key, or object body appears in any of them.
+**The refusals are startup failures, not log events.** Each is an `IllegalStateException` whose message starts with its id, so the operator greps the boot failure for it: `lake.boot.catalog_shape`, `lake.boot.trigger_missing`, `lake.boot.control_row`, `lake.boot.storage_unreachable`, `lake.boot.conditional_put`, `lake.boot.egress_proxy` (#845: the configured egress proxy is malformed, does not answer within its 2 s connect / 5 s read bound, declares another max-age, or answers a 502/503/504 of its own for the store), and `lake.boot.datasource_name_taken` (#818, raised when the managed datasource is registered: another datasource holds `datapipelines.lake.name`) (what each means: Configuration §7). No credential, key, or object body appears in any of them.
 
 #### 3.4R The lake table definition apply events (#798)
 
@@ -761,6 +763,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-07 | v1.64 | 845 (#845) managed reads egress proxy | **§3.4Q** gains `lake.egress_proxy_verified` (INFO: the proxy declared the configured max-age and reached the store, with the probe's duration) and `lake.egress_proxy_absent` (WARN: no proxy configured, reads are uncapped), and lists the `lake.boot.egress_proxy` refusal. No credential appears in either line or in the refusal. |
 | 2026-11-06 | v1.63 | 818e (#818) | Reader-lease loss, overlong and slow-round events and counters; pins follow physical closure. |
 | 2026-11-05 | v1.62 | 818d (#818) managed reader lifetime enforced | **§3.4A**: new `datasource.pool_close_stuck` (WARN, a close past its 65 s deadline on `dp-pool-close`, never retried), `datasource.pool_close_failed` (WARN) and `datasource.reaper_pass_slow` (WARN, a pass past its 1 s bound). **§3.4C**: new `lake.instance_readers_interrupted` (INFO, interrupt-first before Hikari's shutdown). **§3.4H**: the pool reaper runs on its own `dp-reaper` thread; the closes on `dp-pool-close`. **§4.1**: `datapipelines.datasource.pool.close_stuck` and `datapipelines.datasource.pool.reaper_pass_slow`. |
 | 2026-11-05 | v1.61 | 818c (#818) managed reader lifetime | **§3.4C**: `lake.generation_expired` gains `trigger` (`lease` or `reaper`): the pool reaper now retires a managed generation past its age bound with no borrower; new `lake.reaper_retired` (INFO, `generations`), one line per reaper pass that retired any. **§3.4H**: the reaper's pass includes that retirement and still issues no statement. |
