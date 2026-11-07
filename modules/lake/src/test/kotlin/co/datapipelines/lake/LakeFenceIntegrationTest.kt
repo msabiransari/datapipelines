@@ -32,6 +32,25 @@ class LakeFenceIntegrationTest {
     }
 
     @Test
+    fun `reader tokens cannot authorize a catalog write`() {
+        val id = UUID.randomUUID()
+        val reader =
+            LakeTestDb.leases
+                .acquireReader(
+                    "sales.orders@reader/$id",
+                    id,
+                    Duration.ofMinutes(1),
+                    LakeTestDb.leases.catalogNowPlus(Duration.ofMinutes(1)),
+                    "s3://b/old.json",
+                ).shouldBeInstanceOf<LeaseOutcome.Acquired>()
+                .lease
+        session(reader).use { connection ->
+            sqlState { connection.execute(INSERT_TABLE, "sales", "orders", "s3://b/new.json") } shouldBe DP001
+        }
+        catalogRows() shouldBe 0L
+    }
+
+    @Test
     fun `a write with no lease token is refused on both catalog tables`() {
         LakeTestDb.connect().use { connection ->
             sqlState { connection.execute(INSERT_TABLE, "sales", "orders", "s3://b/m0.json") } shouldBe DP001

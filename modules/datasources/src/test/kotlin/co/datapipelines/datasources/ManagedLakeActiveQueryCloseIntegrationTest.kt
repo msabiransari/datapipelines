@@ -221,19 +221,19 @@ class ManagedLakeActiveQueryCloseIntegrationTest {
      * #818d — proof (c) with Hikari's shutdown held: a connection creation hangs in the pool's `getConnection` (a
      * stand-in over the generation's [LakeInstanceDataSource] that blocks once armed), so `HikariPool.shutdown()`
      * first waits on its add-connection executor for the pool's login timeout, which Hikari derives from
-     * `connectionTimeout` — here [HUNG_CONNECTION_TIMEOUT], longer than [ReaderTermination.SECONDS], as a datasource's
+     * `connectionTimeout` — here [HUNG_CONNECTION_TIMEOUT], longer than [HTTP_HYGIENE_TEST_BUDGET_SECONDS], as a datasource's
      * own pool setting may make it — before it aborts any leased connection. The reader is the engine's own work (an
      * in-memory range sum on a duplicate of the generation's owner: minutes of CPU) on a real lease, seen executing
      * by its thread's CPU time. The pool is retired in a real [ConnectionPoolManager] with a zero ceiling, and the pass
      * hands the close to a thread of its own, as the application's deadline closer does.
      *
-     * The query must end within [ReaderTermination.SECONDS] of the pass: interrupt-first reaches it before Hikari's
+     * The query must end within [HTTP_HYGIENE_TEST_BUDGET_SECONDS] of the pass: interrupt-first reaches it before Hikari's
      * first wait. Falsified by removing interrupt-first from `HikariConnectionPool.close`: the reader then waits behind
      * the hung creation, and the bound passes with the query still running.
      */
     @Test
     @Suppress("LongMethod") // one timeline is the witness: lease, executing, hung creation, pass, end
-    fun `a reader stops within reader-termination of the close while Hikari's shutdown waits on a hung creation - proof c`() {
+    fun `a reader stops within stalled-store hygiene budget of the close while Hikari's shutdown waits on a hung creation - proof c`() {
         val creationEntered = CountDownLatch(1)
         val releaseCreation = CountDownLatch(1)
         val armed = AtomicBoolean(false)
@@ -271,16 +271,16 @@ class ManagedLakeActiveQueryCloseIntegrationTest {
             manager.retire(HUNG) shouldBe true
             val passStarted = Instant.now()
             val outcome = manager.reapRetiring()
-            val ended = run.ended.await(ReaderTermination.SECONDS, TimeUnit.SECONDS)
+            val ended = run.ended.await(HTTP_HYGIENE_TEST_BUDGET_SECONDS, TimeUnit.SECONDS)
             val endedAt = run.endedAt.get()
             println(
                 "HUNG_CREATION_CLOSE executing_cpu_ns=$cpu pass_started=$passStarted hard_closed=${outcome.hardClosed} " +
                     "ended=$endedAt hikari_closed=${pool.isClosed} outcome=${run.outcome.get()}",
             )
-            withClue("the reader must stop within reader-termination (${ReaderTermination.SECONDS} s) of the pass") {
+            withClue("the reader must stop within stalled-store hygiene budget (${HTTP_HYGIENE_TEST_BUDGET_SECONDS} s) of the pass") {
                 outcome.hardClosed shouldBe 1
                 ended shouldBe true
-                Duration.between(passStarted, endedAt.shouldNotBeNull()).seconds shouldBeLessThanOrEqual ReaderTermination.SECONDS
+                Duration.between(passStarted, endedAt.shouldNotBeNull()).seconds shouldBeLessThanOrEqual HTTP_HYGIENE_TEST_BUDGET_SECONDS
                 run.outcome.get().startsWith("failed:") shouldBe true
             }
         } finally {
@@ -389,6 +389,8 @@ class ManagedLakeActiveQueryCloseIntegrationTest {
         )
 
     private companion object {
+        const val HTTP_HYGIENE_TEST_BUDGET_SECONDS = 92L
+
         const val LAKE = "lake"
         const val BUCKET = "dp-lake-it"
         const val MINIO_PORT = 9000
@@ -423,8 +425,8 @@ class ManagedLakeActiveQueryCloseIntegrationTest {
         const val HUNG = "lake_hung_creation"
         const val ENGINE_QUERY = "SELECT sum(i) FROM range(1000000000000) t(i)"
 
-        /** Longer than reader-termination, so a reader left to Hikari's shutdown would outlive the bound. */
-        val HUNG_CONNECTION_TIMEOUT: Duration = Duration.ofSeconds(ReaderTermination.SECONDS + 60)
+        /** Longer than stalled-store hygiene budget, so a reader left to Hikari's shutdown would outlive the bound. */
+        val HUNG_CONNECTION_TIMEOUT: Duration = Duration.ofSeconds(HTTP_HYGIENE_TEST_BUDGET_SECONDS + 60)
         val CREATION_WAIT: Duration = Duration.ofSeconds(10)
 
         @Container

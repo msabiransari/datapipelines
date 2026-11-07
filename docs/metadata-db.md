@@ -1,9 +1,9 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.52 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.53 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
-**Last updated:** 2026-11-02
+**Last updated:** 2026-11-06
 
 ---
 
@@ -1715,7 +1715,7 @@ INSERT INTO lake_control (id, mode) VALUES (1, 'normal');
 
 ```sql
 CREATE TABLE lake_leases (
-    kind            TEXT        NOT NULL CHECK (kind IN ('table', 'namespace')),
+    kind            TEXT        NOT NULL CHECK (kind IN ('table', 'namespace', 'reader')),
     name            TEXT        NOT NULL,
     operation_id    UUID        NOT NULL,
     token           UUID        NOT NULL,
@@ -1724,15 +1724,19 @@ CREATE TABLE lake_leases (
     deadline_at     TIMESTAMPTZ NOT NULL,
     operation       TEXT        NOT NULL,
     holder_instance TEXT        NOT NULL,
+    pinned_metadata_location TEXT,
+    CONSTRAINT lake_leases_reader_location_check CHECK ((kind = 'reader') = (pinned_metadata_location IS NOT NULL)),
     PRIMARY KEY (kind, name)
 );
 CREATE INDEX idx_lake_leases_operation ON lake_leases (operation_id);
+CREATE INDEX idx_lake_leases_reader_location ON lake_leases (pinned_metadata_location) WHERE kind = 'reader';
 ```
 
 **Notes:**
 - **Tokens are random** (`gen_random_uuid()`), drawn anew on every takeover, so a restore cannot rewind them and a dead holder's token stops matching. `deadline_at` is never extended.
 - **V53's CHECKs are inline and unnamed** (Postgres names them `lake_leases_kind_check`, `lake_control_id_check` and `lake_control_mode_check`), verbatim from the E1 harness where every statement was falsified; `FlywayMigrationIntegrationTest`'s named-CHECK inventory covers only `chk_`-named constraints.
-- `holder_instance` (`<host>/<pid>`) is diagnostic only, never compared.
+- `holder_instance` (`<host>/<pid>`) is diagnostic for writer leases; the reader keeper compares it when renewing this instance's rows.
+- **V56 (#818): reader pins** use a generation UUID as operation id and `<namespace>.<table>@<holder>/<generation>` as name, never taking over another row. The metadata location is non-null iff the kind is `reader`. They cannot authorize a catalog write: `dp_fence` still requires the writer kind and name. The dedicated heartbeat renews only live, undeadlined rows; confirmed physical closure releases the operation. A dead instance's rows lapse at TTL ([Lake §6](lake.md#6-reads)).
 
 ### 4.47 `lake_table_revisions`
 
@@ -2082,6 +2086,7 @@ ALTER TABLE lake_tables
 | `lake_control` | `lake_control_pkey` | via PK | The one row (`CHECK (id = 1)`) the fence reads on every catalog write ([§4.45](#445-lake_control)) |
 | `lake_leases` | `lake_leases_pkey` | via PK | One lease per `(kind, name)` — the acquire's `ON CONFLICT` arbiter and the fence's `FOR SHARE` lookup ([§4.46](#446-lake_leases)) |
 | `lake_leases` | `idx_lake_leases_operation` | explicit | V53: release by operation — `DELETE … WHERE operation_id = ?` drops every lease of the operation at once |
+| `lake_leases` | `idx_lake_leases_reader_location` | explicit | V56: live reader pins identify protected metadata revisions |
 | `lake_table_revisions` | `lake_table_revisions_pkey` | via PK | Surrogate `BIGSERIAL` `seq` ([§4.47](#447-lake_table_revisions)) |
 | `lake_table_revisions` | `idx_lake_table_revisions_table` | explicit | V53: a table's revisions in order — the orphan sweep's and the history's walk |
 | `lake_table_revisions` | `idx_lake_table_revisions_operation` | explicit | V53: an operation's pointer moves — what one attempt committed |
@@ -2166,7 +2171,7 @@ table and the test's expected-table list in the same commit.
 | `iceberg_tables` | environment-local | LakeCatalog | — | — | The managed lake's pointer rows: each names a metadata file in THIS environment's bucket, and an Iceberg snapshot is an environment-local data state that never promotes (dp-lake design record, one lake per environment) |
 | `iceberg_namespace_properties` | environment-local | LakeCatalog | — | — | The same catalog's namespaces — the catalog's classification |
 | `lake_control` | environment-local | LakeCatalog | — | — | This lake's mode and restore epoch; meaningless beside another environment's catalog |
-| `lake_leases` | environment-local | LakeCatalog | — | — | Live write leases of this deployment's operations; runtime coordination, never authored |
+| `lake_leases` | environment-local | LakeCatalog | — | — | Live writer leases and reader pins of this deployment; runtime coordination, never authored |
 | `lake_table_revisions` | environment-local | LakeCatalog | — | — | This catalog's pointer history, written by its triggers; it protects THIS bucket's files from the orphan sweep |
 | `lake_namespaces` | environment-local | LakeNamespace | — | — | Created on each environment by its own first definition naming the namespace; description and status are edited per environment and never promoted (record §5.2, B7) |
 | `lake_tables_managed` | environment-local | LakeTable | — | — | The table row in THIS environment: its apply state, applied version and policy are facts about this deployment's Iceberg table; the receiver creates its own row when a definition version is imported (P9) |
@@ -2487,6 +2492,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-06 | v1.53 | 818e (#818) | V56 widens the lease kind and adds reader metadata pins, their check and index; writer fencing is unchanged. |
 | 2026-11-02 | v1.52 | 798 (#798, dp-lake P3) | **V54 — managed lake table definitions.** New **§4.48 `lake_namespaces`** (one row per namespace, not versioned), **§4.49 `lake_tables_managed`** (lifecycle, the definition pointer, `applied_version_here` and the apply state machine `pending` / `applying` / `applied` / `failed` with `apply_operation_id` owning an `applying` row, `policy_json`), **§4.50 `lake_table_definition_versions`** (DRAFT / RELEASED / DISCARDED bodies, the house `body_hash`, the one-DRAFT partial unique index) and **§4.51 `lake_column_semantics`** (the applied version's projection by Iceberg field id); **§4.52** adds `lake_tables.origin` (`managed` / `external`, default `external`) and `revision_seq` (managed rows only), noted in §4.15. JSONB columns take the `_json` suffix (§2), so the record's `policy`, `apply_error` and `body` are `policy_json`, `apply_error_json` and `body_json`. §3 ERD, §5 (seven indexes) and §5A (three environment-local or derived, the definition versions promotable) updated. Down path documented in the migration header, not shipped. |
 | 2026-11-02 | v1.50 | 778 (#778) | **V52 — the lake reference index.** New **§4.41 `lake_reference_scans`** (one row per scanned released pipeline or parameter-set version — `exact` / `partial` / `unscannable`, the findings in `reasons_json`, `scanner_version` for re-scans; keyed by workspace, family, entity id and version) and **§4.42 `lake_table_references`** (one row per table position, the written triple and the resolved registry identity, cascading from the scan); §3 ERD, §5 (three indexes) and §5A (both **derived**) updated. Down path documented in the migration header, not shipped. |
 | 2026-11-02 | v1.51 | 785 (#785, dp-lake P2; sections and this row renumbered at merge after #778's v1.50) | **V53 — the managed lake's catalog core.** New **§4.43 `iceberg_tables`** and **§4.44 `iceberg_namespace_properties`** (Iceberg 1.12.0's `JdbcCatalog` V1 shape, byte for byte, created by Flyway so the library runs with `init-catalog-tables=false` and issues no DDL), **§4.45 `lake_control`** (one row, the catalog mode), **§4.46 `lake_leases`** (the design record §8a's lease rows) and **§4.47 `lake_table_revisions`** (the trigger-written revision log). **§2's no-trigger rule gains its one named exception:** `dp_fence` on both catalog tables and `dp_revlog` / `dp_revlog_drop` on `iceberg_tables` (§7 and `FlywayMigrationIntegrationTest` list exactly these four). §5 gains nine indexes; §5A classifies all five tables environment-local. V52 is #778's. Down path documented in the migration header, not shipped. |

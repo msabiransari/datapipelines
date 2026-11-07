@@ -13,12 +13,13 @@ import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.UUID
 
-/** What a lease guards (§8a): a managed table (`<ns>.<table>`) or a namespace (`<ns>`). The `lake_leases.kind` values. */
+/** The writer table/namespace guards and the managed reader pin kind (§8a). */
 enum class LeaseKind(
     val sql: String,
 ) {
     TABLE("table"),
     NAMESPACE("namespace"),
+    READER("reader"),
 }
 
 /**
@@ -77,7 +78,7 @@ sealed interface LeaseOutcome {
  */
 class LakeLeases(
     private val jdbc: JdbcTemplate,
-    /** `lake_leases.holder_instance`: which process holds the lease (diagnostic only, never compared). */
+    /** `lake_leases.holder_instance`: which process holds it; diagnostics for writers and a bulk-heartbeat fence for readers. */
     val holderInstance: String = defaultHolderInstance(),
     /** How long one acquire waits on a lease row another transaction holds (`datapipelines.lake.catalog.lock-timeout-seconds`). */
     val lockTimeout: Duration = Duration.ofSeconds(LakeProperties.DEFAULT_LOCK_TIMEOUT_SECONDS),
@@ -148,6 +149,88 @@ class LakeLeases(
         return jdbc.update(HEARTBEAT_SQL, ttl.toMillis() / MILLIS_PER_SECOND, lease.kind.sql, lease.name, lease.operationId) == 1
     }
 
+    private val readerJdbc = JdbcTemplate(requireNotNull(jdbc.dataSource)).apply { queryTimeout = READER_STATEMENT_TIMEOUT_SECONDS }
+
+    /** Reader names are generation-unique: one autocommit INSERT, never a writer takeover transaction. */
+    fun acquireReader(
+        name: String,
+        operationId: UUID,
+        ttl: Duration,
+        deadline: Instant,
+        pinnedLocation: String,
+    ): LeaseOutcome {
+        requireNoTransaction()
+        require(ttl > Duration.ZERO) { "reader ttl must be positive" }
+        require(pinnedLocation.isNotBlank()) { "reader metadata location must be named" }
+        val at = OffsetDateTime.ofInstant(deadline, ZoneOffset.UTC)
+        val token =
+            readerJdbc
+                .query(
+                    "INSERT INTO lake_leases (kind,name,operation_id,token,acquired_at,expires_at,deadline_at," +
+                        "operation,holder_instance,pinned_metadata_location)" +
+                        " SELECT 'reader',?,?,gen_random_uuid(),now(),least(now()+make_interval(secs => ?),?::timestamptz)," +
+                        " ?::timestamptz,'read',?,? WHERE ?::timestamptz > now() RETURNING token",
+                    { rs, _ -> rs.getObject(1, UUID::class.java) },
+                    name,
+                    operationId,
+                    ttl.toMillis() / MILLIS_PER_SECOND,
+                    at,
+                    at,
+                    holderInstance,
+                    pinnedLocation,
+                    at,
+                ).singleOrNull()
+        return if (token ==
+            null
+        ) {
+            LeaseOutcome.DeadlinePassed
+        } else {
+            LeaseOutcome.Acquired(LeaseHandle(LeaseKind.READER, name, operationId, token))
+        }
+    }
+
+    /** One statement renews live readers and releases closed generations, returning per-generation row counts. */
+    fun heartbeatReaders(
+        operationIds: Set<UUID>,
+        ttl: Duration,
+        releasedIds: Set<UUID> = emptySet(),
+    ): Map<UUID, Int> {
+        requireNoTransaction()
+        require(ttl > Duration.ZERO) { "reader ttl must be positive" }
+        require(operationIds.intersect(releasedIds).isEmpty()) { "a generation cannot be live and released" }
+        if (operationIds.isEmpty() && releasedIds.isEmpty()) return emptyMap()
+        return jdbc
+            .execute(
+                org.springframework.jdbc.core.ConnectionCallback { connection ->
+                    connection
+                        .prepareStatement(
+                            "WITH released AS (DELETE FROM lake_leases WHERE kind='reader' AND holder_instance=?" +
+                                " AND operation_id=ANY(?) RETURNING operation_id)" +
+                                " UPDATE lake_leases SET expires_at=least(now()+make_interval(secs => ?),deadline_at)" +
+                                " WHERE kind='reader' AND holder_instance=? AND operation_id=ANY(?)" +
+                                " AND expires_at>now() AND deadline_at>now() RETURNING operation_id",
+                        ).use { statement ->
+                            statement.queryTimeout = READER_STATEMENT_TIMEOUT_SECONDS
+                            val live = connection.createArrayOf("uuid", operationIds.toTypedArray())
+                            val released = connection.createArrayOf("uuid", releasedIds.toTypedArray())
+                            try {
+                                statement.setString(1, holderInstance)
+                                statement.setArray(2, released)
+                                statement.setDouble(READER_TTL_PARAMETER, ttl.toMillis() / MILLIS_PER_SECOND)
+                                statement.setString(READER_HOLDER_PARAMETER, holderInstance)
+                                statement.setArray(READER_IDS_PARAMETER, live)
+                                statement.executeQuery().use { rows ->
+                                    buildList { while (rows.next()) add(rows.getObject(1, UUID::class.java)) }.groupingBy { it }.eachCount()
+                                }
+                            } finally {
+                                live.free()
+                                released.free()
+                            }
+                        }
+                },
+            ).orEmpty()
+    }
+
     /** Releases every lease of [operationId]; answers how many rows it removed. */
     fun release(operationId: UUID): Int {
         requireNoTransaction()
@@ -167,6 +250,13 @@ class LakeLeases(
     }
 
     companion object {
+        private const val READER_TTL_PARAMETER = 3
+        private const val READER_HOLDER_PARAMETER = 4
+        private const val READER_IDS_PARAMETER = 5
+
+        /** Reader statement timeout in seconds; the web adapter also bounds socket reads. */
+        const val READER_STATEMENT_TIMEOUT_SECONDS = 5
+
         private const val MILLIS_PER_SECOND = 1000.0
 
         /** `lock_not_available`: a lock wait reached `lock_timeout`. */

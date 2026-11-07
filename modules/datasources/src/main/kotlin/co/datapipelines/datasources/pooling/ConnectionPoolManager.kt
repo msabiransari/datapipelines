@@ -8,6 +8,7 @@ import co.datapipelines.datasources.DialectAdapters
 import co.datapipelines.datasources.JdbcUrlForm
 import co.datapipelines.datasources.LakeViewOutcomeRecorder
 import co.datapipelines.datasources.LakeViewPlan
+import co.datapipelines.datasources.ManagedLakeErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.jdbc.guardedForAuthorSql
@@ -20,6 +21,7 @@ import java.sql.SQLException
 import java.time.Duration
 import java.time.Instant
 import java.util.Collections
+import java.util.UUID
 import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -85,6 +87,9 @@ interface ConnectionPool : AutoCloseable {
      * closer's `datasource.pool_close_stuck` line; null for a pool that owns no instance (every non-LAKE pool).
      */
     val generation: String? get() = null
+
+    /** Physical handles, including the retained owner and any close still in flight. */
+    val holdsPhysicalHandles: Boolean get() = false
 }
 
 /**
@@ -93,8 +98,8 @@ interface ConnectionPool : AutoCloseable {
  * duplicate of. The pool drives it through exactly three calls, in this order and from ONE
  * caller: [retire] as shutdown begins (no NEW physical connection may join the generation from
  * here on — one that is mid-creation closes itself instead of being handed to a pool that is
- * closing), then [interruptReaders] (#818d — every reader stops before Hikari's shutdown can make it
- * wait), then [close] after the Hikari pool has fully shut down.
+ * closing), then [interruptReaders] (#818d — independent physical close attempts before Hikari shutdown),
+ * then [close] after the Hikari pool has fully shut down.
  */
 interface PoolInstanceOwner : AutoCloseable {
     /** This generation's identity for log lines; null when the owner has none. */
@@ -104,7 +109,7 @@ interface PoolInstanceOwner : AutoCloseable {
     fun retire()
 
     /**
-     * #818d (record §10 item 6) — interrupt first: stop every running reader of this generation NOW, before Hikari's
+     * #818d (record §10 item 6) — interrupt first: attempt every physical close independently, before Hikari's
      * `shutdown()` runs its connection-creation wait. Returns how many physical handles it reached. Never throws and
      * never waits for a reader to stop. The default reaches nothing (an owner with no handles of its own).
      */
@@ -163,6 +168,7 @@ class HikariConnectionPool(
 
     /** Won by the ONE caller that runs the whole retire → Hikari close → owner release sequence. */
     private val closing = AtomicBoolean(false)
+    private val ownerReleased = AtomicBoolean(false)
 
     /** Whether leases are handed out behind the author-SQL guard (class KDoc). */
     private val guardsAuthorSql: Boolean = dialect in GUARDED_DIALECTS
@@ -262,6 +268,9 @@ class HikariConnectionPool(
     /** #818d — the owner's generation, for the closer's stuck-close line; null without an owner. */
     override val generation: String? get() = instanceOwner?.generation
 
+    override val holdsPhysicalHandles: Boolean
+        get() = instanceOwner != null && (!ownerReleased.get() || (instanceOwner as? LakeInstanceOwner)?.holdsPhysicalHandles == true)
+
     /**
      * Retire the owner, then **interrupt first** (#818d, record §10 item 6: every physical handle of
      * the generation is put into its own close, which interrupts the running DuckDB query before
@@ -289,6 +298,7 @@ class HikariConnectionPool(
             dataSource.close()
         } finally {
             instanceOwner?.close()
+            ownerReleased.set(true)
         }
     }
 
@@ -433,6 +443,7 @@ class ConnectionPoolManager(
      * `ConnectionPoolManager { ds -> … }` call shape would silently start supplying a CLOCK
      * instead of a pool factory. A non-SAM interface here makes that a compile error instead.
      */
+    private val pins: ManagedGenerationPins = ManagedGenerationPins.NONE,
     private val metrics: PoolLifecycleMetrics = PoolLifecycleMetrics.NONE,
 ) : AutoCloseable {
     private val pools = ConcurrentHashMap<String, LivePool>()
@@ -443,6 +454,63 @@ class ConnectionPoolManager(
      * two pools retiring at once, and a name-keyed map would drop the first one un-closed.
      */
     private val retiring = ConcurrentLinkedQueue<RetiringPool>()
+
+    /** Pin after view construction, before computeIfAbsent publishes the pool. */
+    @Suppress("TooGenericExceptionCaught")
+    private fun buildProtected(datasource: Datasource): LivePool {
+        val builtAt = clock()
+        val pool = poolFactory(datasource)
+        val managed = pool.managedGeneration ?: return LivePool(builtAt, pool)
+        if (pins === ManagedGenerationPins.NONE) return LivePool(builtAt, pool)
+        val id = UUID.fromString(requireNotNull(pool.generation) { "managed generation requires an owner id" })
+        val published = AtomicBoolean(false)
+        lateinit var protectedPool: ConnectionPool
+        try {
+            check(
+                pins.pin(
+                    id,
+                    datasource.name,
+                    managed.locations
+                        .mapNotNull { (name, location) ->
+                            location?.let { name.substringAfter('.') to it }
+                        }.toMap(),
+                    builtAt,
+                    { pool.holdsPhysicalHandles },
+                    { if (published.get()) retireGeneration(datasource.name, protectedPool) },
+                ),
+            ) { "reader pin was refused" }
+        } catch (failure: Exception) {
+            pool.close()
+            pins.unpin(id)
+            throw DatapipelinesException(
+                ManagedLakeErrorCodes.UNAVAILABLE,
+                "Managed lake reader protection could not be acquired",
+                cause = failure,
+            )
+        }
+        protectedPool =
+            object : ConnectionPool by pool {
+                override fun leaseConnection(): Connection {
+                    if (!pins.valid(id)) unpinned()
+                    val connection = pool.leaseConnection()
+                    if (pins.valid(id)) return connection
+                    connection.use {
+                        pool.discard(it)
+                        unpinned()
+                    }
+                }
+
+                private fun unpinned(): Nothing =
+                    throw DatapipelinesException(ManagedLakeErrorCodes.UNAVAILABLE, "Managed lake reader protection was lost")
+
+                override fun close() {
+                    pool.close()
+                    if (!pool.holdsPhysicalHandles) pins.unpin(id)
+                }
+            }
+        published.set(true)
+        return LivePool(builtAt, protectedPool)
+    }
 
     /**
      * The pool for [datasource], created atomically on first call and cached thereafter, except that a
@@ -456,9 +524,10 @@ class ConnectionPoolManager(
      * generation's `builtAt` is read BEFORE its factory call, so a slow build is never credited with
      * a younger snapshot than the catalog read it began with.
      */
+
     fun poolFor(datasource: Datasource): ConnectionPool {
         while (true) {
-            val live = pools.computeIfAbsent(datasource.name) { LivePool(builtAt = clock(), pool = poolFactory(datasource)) }
+            val live = pools.computeIfAbsent(datasource.name) { buildProtected(datasource) }
             val age = expiredAge(live) ?: return live.pool
             retireExpired(datasource.name, live, age, TRIGGER_LEASE)
         }
@@ -643,8 +712,8 @@ class ConnectionPoolManager(
 
     /**
      * Closes every pool, live and retiring — application shutdown, where the gentle path has no
-     * value: `ExecutionDrainLifecycle` has already cancelled the live statements by the time
-     * this runs, and the JVM is going away regardless.
+     * value: `ExecutionDrainLifecycle` has requested cancellation, but a native reader can still be running.
+     * The pin port's shutdown barrier keeps its heartbeat and metadata resources alive until physical closure.
      *
      * #818d — synchronous on the caller's thread, NOT through [closer]: this is not the reaper's path, and a shutdown
      * that returned before its pools closed would release the context with generations still open. Each close is
@@ -653,6 +722,7 @@ class ConnectionPoolManager(
     override fun close() {
         pools.keys.toList().forEach { name -> pools.remove(name)?.pool?.close() }
         generateSequence { retiring.poll() }.forEach { it.pool.close() }
+        pins.close()
     }
 
     /** A live pool with the instant it was built: the age bound's input (#818). */

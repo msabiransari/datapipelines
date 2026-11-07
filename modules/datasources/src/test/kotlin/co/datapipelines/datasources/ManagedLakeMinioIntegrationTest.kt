@@ -54,7 +54,7 @@ import java.util.concurrent.CopyOnWriteArrayList
  *   `COPY` or `ATTACH`, and cannot turn the lock back; every lease, not just the first.
  * - A8 (proof (c)): a query on a retired managed generation still out at the ceiling is hard-closed.
  * - #818d: the HTTP request bounds are in force and locked on every lease, and a reader waiting on a STALLED store
- *   (a proxy that accepts and answers nothing) stops within `reader-termination` of its generation's hard close.
+ *   (a proxy that accepts and answers nothing) stops within `stalled-store hygiene budget` of its generation's hard close.
  * - A7: one rebuild timed at 1, 20 and 100 managed tables (`REBUILD_TIMING` lines in the report's system-out).
  * - The Iceberg extensions load from the plan under `catalog.kind = s3`, which by itself loads only httpfs + aws.
  */
@@ -194,7 +194,7 @@ class ManagedLakeMinioIntegrationTest {
     /**
      * The §15a lockdown as one leased [connection] sees it; the S3 view still serves through the same connection.
      *
-     * #818d (record §10 RULING 4, second amendment, item 7): the HTTP request bounds `ReaderTermination` is derived
+     * #818d (record §10 RULING 4, second amendment, item 7): the silent-store HTTP settings are enforced
      * from are in force on the generation, and author SQL cannot set them back — `SET`, `SET SESSION`, `SET GLOBAL`
      * and `RESET` of each are refused by the configuration lock, so the term holds for every query a lease runs.
      */
@@ -250,16 +250,16 @@ class ManagedLakeMinioIntegrationTest {
     }
 
     /**
-     * #818d (record §10 RULING 4, second amendment, item 7) — the stalled-store proof of `reader-termination`, on the
+     * #818d (record §10 RULING 4, second amendment, item 7) — the stalled-store proof of `stalled-store hygiene budget`, on the
      * real reader: a managed generation built through [StallingTcpProxy] in front of MinIO, a lease's query sent into
      * a store that accepts and then answers nothing, the generation hard-closed at the ceiling while that query waits.
      * Interrupt-first lands on a thread inside the driver's native execute, blocked in DuckDB's HTTP retry loop (which
      * checks no interrupt), so the query ends only when the request chain the [LakeHttpBounds] allow has run out:
-     * about 3 × 10 s + 0.1 s, inside [ReaderTermination.SECONDS]. Red with the bounds' `SET`s removed: the engine's
+     * about 3 × 10 s + 0.1 s, inside [HTTP_HYGIENE_TEST_BUDGET_SECONDS]. Red with the bounds' `SET`s removed: the engine's
      * defaults hold the reader about 4 × 30 s + 0.5 s, past the term.
      */
     @Test
-    fun `a reader waiting on a stalled store stops within reader-termination of its generation's hard close`() {
+    fun `a reader waiting on a stalled store stops within stalled-store hygiene budget of its generation's hard close`() {
         manage(table("trips", CURRENT))
         StallingTcpProxy("localhost", minio.getMappedPort(MINIO_PORT)).use { proxy ->
             val registry = registry(retireCeiling = Duration.ZERO, poolCloser = threadPerClose())
@@ -292,7 +292,7 @@ class ManagedLakeMinioIntegrationTest {
                 withClue("from_close=$fromClose outcome=${reader.outcome} landed_on=$landedOn") {
                     assertAll(
                         { outcome.hardClosed shouldBe 1 },
-                        { fromClose.shouldNotBeNull() shouldBeLessThanOrEqualTo Duration.ofSeconds(ReaderTermination.SECONDS) },
+                        { fromClose.shouldNotBeNull() shouldBeLessThanOrEqualTo Duration.ofSeconds(HTTP_HYGIENE_TEST_BUDGET_SECONDS) },
                         // Non-vacuity: the stall held the reader for at least one whole HTTP timeout after it began.
                         {
                             fromStall.shouldNotBeNull() shouldBeGreaterThanOrEqualTo
@@ -446,6 +446,8 @@ class ManagedLakeMinioIntegrationTest {
     ): String = shouldThrow<SQLException> { connection.createStatement().use { it.execute(sql) } }.message.orEmpty()
 
     private companion object {
+        const val HTTP_HYGIENE_TEST_BUDGET_SECONDS = 92L
+
         /** #818d — the four engine settings and the constants the adapter sets them to (`LakeHttpBounds`). */
         val HTTP_BOUNDS: List<Pair<String, Long>> =
             listOf(

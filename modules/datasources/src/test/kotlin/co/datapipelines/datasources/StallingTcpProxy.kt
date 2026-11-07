@@ -13,7 +13,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * #818d (record §10 RULING 4, second amendment, item 7) — a byte-level TCP proxy on loopback in front of an object
- * store that, once [stall]ed, ACCEPTS and then sends nothing: the stalled-store shape `ReaderTermination` is derived
+ * store that, once [stall]ed, ACCEPTS and then sends nothing: the stalled-store shape the silent-store hygiene budget is measured
  * against. Exemplar: the lake module's `PgResponseDropProxy` (E1 #774), without the protocol parsing.
  *
  * Before [stall] every byte is forwarded both ways. After it, nothing is forwarded in either direction on any

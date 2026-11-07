@@ -9,12 +9,9 @@ import kotlin.math.pow
  *
  * ## Why they exist
  *
- * Interrupt-first stops a reader that is computing at once, but a reader blocked inside an object-store request is
- * not computing: DuckDB v1.5.5's `HTTPUtil::RunRequestWithRetry` has no interrupt check, so the interrupt lands only
- * when the request (with its retries) returns. These four settings bound that, and [ReaderTermination] is derived
- * from them. With the engine's defaults (30 s, 3 retries, 100 ms, backoff 4) the same count is 360.5 s, and a store
- * that accepts a connection and then sends nothing holds a reader 4 × 30 s + 0.5 s = 120.5 s; with these bounds,
- * 3 × 10 s + 0.1 s = 30.1 s (the stalled-store integration test observes both).
+ * These settings bound silent-store waits as hygiene. They cannot bound a trickling transfer above curl's
+ * low-speed threshold (duckdb-httpfs#519). Live reader leases protect snapshots independently of termination.
+ * A silent-store test observes roughly 30.1 seconds with these settings and 120.5 seconds at engine defaults.
  *
  * ## The engine's semantics (read off DuckDB v1.5.5 `src/main/http/http_util.cpp` and the settings table, probed)
  *
@@ -39,7 +36,7 @@ import kotlin.math.pow
  * The wait and backoff keep the engine's own values. The handback states the residual: a store that trickles a byte
  * just inside the timeout, forever, is not bounded by any of these (DuckDB has no whole-request deadline).
  *
- * `LakeDialectAdapterTest` pins [STATEMENTS] and their place; `ReaderTerminationDerivationTest` recomputes the chain.
+ * `LakeDialectAdapterTest` pins [STATEMENTS] and their place; the stalled-store test measures hygiene.
  */
 object LakeHttpBounds {
     /** `http_timeout`: each of the connect, write and read timeouts, seconds. */
@@ -67,7 +64,7 @@ object LakeHttpBounds {
         )
 
     /**
-     * The longest one object-store request chain can block a reader, milliseconds: every attempt timing out in each
+     * The conservative silent-store request-chain budget, milliseconds: every attempt timing out in each
      * phase, plus every sleep between attempts. `(2 + 1) × 3 × 10 000 + 100 = 90 100`.
      */
     fun requestChainMillis(

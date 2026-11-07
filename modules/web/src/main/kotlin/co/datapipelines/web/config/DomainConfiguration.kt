@@ -332,6 +332,7 @@ class DomainConfiguration {
         managedLake: co.datapipelines.datasources.ManagedLakeCatalog,
         lakeProperties: org.springframework.beans.factory.ObjectProvider<co.datapipelines.lake.LakeProperties>,
         poolCloser: co.datapipelines.datasources.pooling.PoolCloser,
+        generationPins: co.datapipelines.datasources.pooling.ManagedGenerationPins,
     ): DatasourceRegistry =
         DefaultDatasourceRegistry(
             repository = repository,
@@ -383,6 +384,7 @@ class DomainConfiguration {
             // #818d (record §10 RULING 4 amended, item 6): the reaper hands each close to the `dp-pool-close`
             // threads (`PoolReaperSchedulingConfiguration.poolCloser`); application shutdown still closes in place.
             poolCloser = poolCloser,
+            generationPins = generationPins,
         )
 
     /**

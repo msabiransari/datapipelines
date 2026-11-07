@@ -38,6 +38,7 @@ import org.springframework.context.ApplicationContext
 import org.springframework.context.ApplicationContextInitializer
 import org.springframework.context.ConfigurableApplicationContext
 import org.springframework.context.support.GenericApplicationContext
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.testcontainers.DockerClientFactory
@@ -599,6 +600,7 @@ class ManagedLakeReadsE2eTest {
     fun `I2 - with the metadata Postgres paused the reaper still retires and closes an executing reader's generation in bound`() {
         val reader = bootReaderProfile(APP_I2)
         try {
+            (reader.getBean("readerLeaseTaskScheduler") as ThreadPoolTaskScheduler).shutdown()
             val metadataPool = reader.getBean("dataSource") as HikariDataSource
             val docker = DockerClientFactory.instance().client()
             val container = SharedE2e.postgres.containerId
@@ -696,6 +698,374 @@ class ManagedLakeReadsE2eTest {
         val release: () -> Unit,
         val witness: () -> Int,
     )
+
+    /** E.1: the physical query outlives close; database-clock reader rows must outlive it too. */
+    @Test
+    @Order(19)
+    fun `E1 - trickling Parquet GET remains pinned while the real closer cannot finish`() {
+        verifyTrickle(shutdown = false)
+    }
+
+    @Test
+    @Order(23)
+    fun `E1shutdown - context close keeps the heartbeat alive until physical readers close`() {
+        verifyTrickle(shutdown = true)
+    }
+
+    @Suppress("LongMethod", "NestedBlockDepth") // one physical-reader timeline, including context shutdown and the final release oracle
+    private fun verifyTrickle(shutdown: Boolean) {
+        ensureReaderFixture()
+        ReaderTrickleProxy(minio.host, minio.getMappedPort(MINIO_PORT)).use { proxy ->
+            val reader =
+                boot(
+                    maxAgeSeconds = B_MAX_AGE_SECONDS,
+                    tickSeconds = LIFECYCLE_TICK_SECONDS,
+                    application = "reader-trickle",
+                    extra =
+                        listOf(
+                            "datapipelines.lake.storage.endpoint" to proxy.endpoint,
+                            "datapipelines.datasources.retire-ceiling-seconds" to "1",
+                        ),
+                )
+            val lease = leaseManaged(reader)
+            recordReaderInputs(reader, lease)
+            val run = LongRead(lease.prepareStatement("SELECT sum(fare) FROM $LAKE.sales.trips"))
+            var contextClose: Thread? = null
+            try {
+                val registry = reader.getBean("datasourceRegistry")
+                val generation = readerGeneration(reader)
+                val ids = readerRows().filterKeys { it == generation }
+                ids.isNotEmpty() shouldBe true
+                installHeartbeatWitness()
+                proxy.arm()
+                run.start()
+                proxy.arrived.await(ReaderTrickleProxy.START_SECONDS, TimeUnit.SECONDS) shouldBe true
+                retireManagedPool(reader) shouldBe true
+                Thread.sleep(2000)
+                startRetiredClose(registry, generation)
+                if (shutdown) {
+                    contextClose =
+                        Thread({ reader.close() }, "reader-context-close").apply {
+                            isDaemon = true
+                            start()
+                        }
+                }
+                val closeStarted = databaseNow()
+                Thread.sleep(ReaderTrickleProxy.WAIT_SECONDS * 1000)
+                val stillLive = readerRows().filterKeys { it in ids }
+                println(
+                    "READER_TRICKLE shutdown=$shutdown close_started=$closeStarted observed=${databaseNow()} bytes=${proxy.bytes.get()} " +
+                        "rows=$stillLive reader_alive=${run.thread.isAlive}",
+                )
+                withClue("E1 reader still executing above curl low-speed threshold") { run.thread.isAlive shouldBe true }
+                if (shutdown) contextClose?.isAlive shouldBe true
+                withClue("E1 every snapshot pin stays live by database clock during blocked close") { stillLive.keys shouldBe ids.keys }
+                stillLive.values.all { it } shouldBe true
+                val physicalCloses = Thread.getAllStackTraces().keys.filter { it.name.startsWith("dp-pool-interrupt-$generation-") }
+                withClue("E1 real physical close remains blocked") { physicalCloses.isNotEmpty() shouldBe true }
+                val beats = heartbeatWitness(generation, closeStarted)
+                println("READER_HEARTBEATS generation=$generation rounds=$beats close_threads=${physicalCloses.map { it.name }}")
+                beats shouldBeGreaterThanOrEqual 19
+                finishTrickle(proxy, run, physicalCloses, generation)
+                contextClose?.join(CLEANUP_JOIN_MS)
+                contextClose?.isAlive shouldBe if (shutdown) false else null
+            } finally {
+                proxy.close()
+                run.thread.join(CLEANUP_JOIN_MS)
+                runCatching { lease.close() }
+                contextClose?.join(CLEANUP_JOIN_MS)
+                reader.close()
+            }
+        }
+    }
+
+    /** E.2: a metadata lock refuses the build before a single connection can be served. */
+    @Test
+    @Order(20)
+    fun `E2 - a refused reader pin never publishes the generation`() {
+        ensureReaderFixture()
+        val reader = boot(maxAgeSeconds = B_MAX_AGE_SECONDS, tickSeconds = LIFECYCLE_TICK_SECONDS, application = "reader-pin-refusal")
+        try {
+            metadata { connection ->
+                connection.autoCommit = false
+                connection.createStatement().use { it.execute("LOCK TABLE lake_leases IN SHARE MODE") }
+                try {
+                    val failure = shouldThrowAny { leaseManaged(reader) }
+                    val causes =
+                        generateSequence(
+                            failure as Throwable?,
+                        ) { it.cause }.map { it.javaClass.simpleName + ":" + it.message }.joinToString(" <- ")
+                    println("READER_PIN_REFUSED database_now=${databaseNow()} causes=$causes")
+                    causes shouldContain "Managed lake reader protection could not be acquired"
+                    generationBuiltAt(reader) shouldBe null
+                } finally {
+                    connection.rollback()
+                }
+            }
+            leaseManaged(reader).use { lease ->
+                readerRows().isNotEmpty() shouldBe true
+                lease.isClosed shouldBe false
+            }
+        } finally {
+            reader.close()
+        }
+    }
+
+    /** E.3a: a stopped instance cannot renew after its database-clock TTL, while its reader remains active. */
+    @Test
+    @Order(21)
+    fun `E3a - dead keeper pins lapse at TTL and the old operation cannot renew`() {
+        ensureReaderFixture()
+        val reader = boot(maxAgeSeconds = B_MAX_AGE_SECONDS, tickSeconds = LIFECYCLE_TICK_SECONDS, application = "reader-dead-keeper")
+        val lease = leaseManaged(reader)
+        val run = LongRead(lease.prepareStatement(H_LONG_QUERY))
+        try {
+            run.start()
+            awaitBurning(run)
+            (reader.getBean("readerLeaseTaskScheduler") as ThreadPoolTaskScheduler).shutdown()
+            val generation = readerGeneration(reader)
+            val pins = setOf(generation)
+            val expiry =
+                metadata { connection ->
+                    connection.createStatement().use {
+                        it
+                            .executeQuery(
+                                "SELECT min(expires_at) FROM lake_leases " +
+                                    "WHERE kind='reader' AND operation_id='$generation'",
+                            ).use { rows ->
+                                rows.next()
+                                rows.getTimestamp(1).toInstant()
+                            }
+                    }
+                }
+            println("READER_TTL before=${databaseNow()} expiry=$expiry reader_alive=${run.thread.isAlive}")
+            readerRows().filterKeys { it in pins }.values.all { it } shouldBe true
+            val delay = Duration.between(databaseNow(), expiry.plusSeconds(1)).toMillis().coerceAtLeast(0)
+            Thread.sleep(delay)
+            val after = readerRows().filterKeys { it in pins }
+            withClue("E3a rows lapse at database expiry, with a physical reader still executing") {
+                run.thread.isAlive shouldBe true
+                after.values.none { it } shouldBe true
+            }
+            withClue("a delayed keeper cannot admit a new query after its last known protection has lapsed") {
+                shouldThrowAny { leaseManaged(reader) }
+            }
+            metadata { connection ->
+                connection.createStatement().use {
+                    it.executeUpdate(
+                        "UPDATE lake_leases SET expires_at=now()+interval '80 seconds' WHERE kind='reader' " +
+                            "AND operation_id='$generation' AND expires_at>now() AND deadline_at>now()",
+                    ) shouldBe
+                        0
+                }
+            }
+            println("READER_TTL after=${databaseNow()} expiry=$expiry rows=$after reader_alive=${run.thread.isAlive}")
+        } finally {
+            runCatching { run.thread.interrupt() }
+            reader.close()
+            run.thread.join(CLEANUP_JOIN_MS)
+            runCatching { lease.close() }
+        }
+    }
+
+    /** E.3b: short and long metadata outages differ in pin survival, while both retire new admission. */
+    @Test
+    @Order(22)
+    fun `E3b - a paused metadata server is bounded and lost reader protection is reported`() {
+        pausedReader(40, true)
+        pausedReader(90, false)
+    }
+
+    private fun pausedReader(
+        pauseSeconds: Long,
+        remainsPinned: Boolean,
+    ) {
+        ensureReaderFixture()
+        val reader =
+            boot(
+                maxAgeSeconds = B_MAX_AGE_SECONDS,
+                tickSeconds = LIFECYCLE_TICK_SECONDS,
+                application = "reader-paused-$pauseSeconds",
+                extra = listOf("datapipelines.datasources.retire-ceiling-seconds" to "180"),
+            )
+        val lease = leaseManaged(reader)
+        val generation = readerGeneration(reader)
+        val run = LongRead(lease.prepareStatement(H_LONG_QUERY))
+        val logger = LoggerFactory.getLogger(PRODUCT_LOGGERS) as Logger
+        val capture = SnapshotListAppender()
+        logger.addAppender(capture)
+        val docker = DockerClientFactory.instance().client()
+        var paused = false
+        try {
+            run.start()
+            awaitBurning(run)
+            val before = databaseNow()
+            docker.pauseContainerCmd(SharedE2e.postgres.containerId).exec()
+            paused = true
+            Thread.sleep(pauseSeconds * 1000)
+            val lost = linesOf(capture, "event=lake.reader_lease_lost").filter { "generation=$generation" in it.text }
+            withClue("E3b bounded heartbeat must report loss while Postgres is still paused") { lost.size shouldBe 1 }
+            generationBuiltAt(reader) shouldBe null
+            run.thread.isAlive shouldBe true
+            docker.unpauseContainerCmd(SharedE2e.postgres.containerId).exec()
+            paused = false
+            val pinned = readerRows()[generation] == true
+            println(
+                "READER_PAUSED before=$before after=${databaseNow()} pause_s=$pauseSeconds pinned=$pinned " +
+                    "reader_alive=${run.thread.isAlive} lost=${lost.map { it.text }}",
+            )
+            withClue(
+                "E3b one failed round cannot expire a live reader; a full TTL outage loses protection",
+            ) { pinned shouldBe remainsPinned }
+            val meters = reader.getBean(Class.forName("io.micrometer.core.instrument.MeterRegistry"))
+            val search = meters.javaClass.getMethod("find", String::class.java).invoke(meters, "datapipelines.lake.reader_lease.lost")
+            val counter =
+                search.javaClass
+                    .getMethod("counter")
+                    .invoke(search)
+                    .shouldNotBeNull()
+            (Class.forName("io.micrometer.core.instrument.Counter").getMethod("count").invoke(counter) as Double) shouldBe 1.0
+        } finally {
+            if (paused) docker.unpauseContainerCmd(SharedE2e.postgres.containerId).exec()
+            logger.detachAppender(capture)
+            capture.stop()
+            reader.close()
+            run.thread.join(CLEANUP_JOIN_MS)
+            runCatching { lease.close() }
+        }
+    }
+
+    /** Acceptance methods can also run alone during falsification. */
+    private fun ensureReaderFixture() {
+        val present =
+            metadata { connection ->
+                connection.createStatement().use {
+                    it
+                        .executeQuery(
+                            "SELECT EXISTS(SELECT 1 FROM iceberg_tables WHERE table_namespace='sales' AND table_name='trips')",
+                        ).use { rows ->
+                            rows.next()
+                            rows.getBoolean(1)
+                        }
+                }
+            }
+        if (!present) defineManagedTable(CURRENT)
+        setStatus("active")
+    }
+
+    private fun finishTrickle(
+        proxy: ReaderTrickleProxy,
+        run: LongRead,
+        closes: List<Thread>,
+        generation: UUID,
+    ) {
+        proxy.close()
+        run.thread.join(CLEANUP_JOIN_MS)
+        run.thread.isAlive shouldBe false
+        closes.forEach { it.join(CLEANUP_JOIN_MS) }
+        closes.any { it.isAlive } shouldBe false
+        val closedAt = databaseNow()
+        awaitUntil(Instant.now().plusSeconds(10), "reader pins released after physical close") { generation !in readerRows() }
+        val releasedAt = databaseNow()
+        val elapsed = Duration.between(closedAt, releasedAt).toMillis()
+        println("READER_RELEASE closed=$closedAt released=$releasedAt elapsed_ms=$elapsed")
+        elapsed shouldBeLessThanOrEqual 5000L
+    }
+
+    private fun startRetiredClose(
+        registry: Any,
+        generation: UUID,
+    ) {
+        registry.javaClass.getMethod("reapRetiredPools").invoke(registry)
+        awaitUntil(Instant.now().plusSeconds(ReaderTrickleProxy.START_SECONDS), "physical DuckDB close has begun") {
+            Thread.getAllStackTraces().any { (thread, frames) ->
+                thread.name.startsWith("dp-pool-interrupt-$generation-") &&
+                    frames.any { it.className == "org.duckdb.DuckDBConnection" && it.methodName == "close" }
+            }
+        }
+    }
+
+    private fun recordReaderInputs(
+        reader: ApplicationContext,
+        lease: Connection,
+    ) {
+        println("READER_ENGINE database=${lease.metaData.databaseProductVersion} driver=${lease.metaData.driverVersion}")
+        val keeper = reader.getBean("managedGenerationPins")
+        val metadataAcquire = (reader.getBean("dataSource") as HikariDataSource).connectionTimeout
+        val ttl = keeper.javaClass.getMethod("getTtl").invoke(keeper)
+        println("READER_LEASE_INPUTS acquire_ms=$metadataAcquire ttl=$ttl")
+    }
+
+    private fun readerGeneration(reader: ApplicationContext): UUID {
+        val registry = reader.getBean("datasourceRegistry")
+        val type = Class.forName("co.datapipelines.datasources.DatasourceRegistry")
+        val datasource = type.getMethod("get", String::class.java).invoke(registry, LAKE)
+        val pool = type.getMethod("poolFor", Class.forName("co.datapipelines.datasources.Datasource")).invoke(registry, datasource)
+        val id = Class.forName("co.datapipelines.datasources.pooling.ConnectionPool").getMethod("getGeneration").invoke(pool) as String
+        return UUID.fromString(id)
+    }
+
+    /** Independent database witness: only committed UPDATEs count, one transaction per keeper round. */
+    private fun installHeartbeatWitness() {
+        metadata { connection ->
+            connection.createStatement().use { sql ->
+                sql.execute("CREATE TABLE IF NOT EXISTS test_reader_beats (generation uuid, at timestamptz, tx bigint)")
+                sql.execute("TRUNCATE test_reader_beats")
+                sql.execute(
+                    """
+                    CREATE OR REPLACE FUNCTION test_reader_beat() RETURNS trigger LANGUAGE plpgsql AS $$
+                    BEGIN
+                      INSERT INTO test_reader_beats VALUES (NEW.operation_id,clock_timestamp(),txid_current());
+                      RETURN NEW;
+                    END; $$
+                    """.trimIndent(),
+                )
+                sql.execute("DROP TRIGGER IF EXISTS test_reader_beat ON lake_leases")
+                sql.execute(
+                    "CREATE TRIGGER test_reader_beat AFTER UPDATE ON lake_leases FOR EACH ROW " +
+                        "WHEN (NEW.kind='reader') EXECUTE FUNCTION test_reader_beat()",
+                )
+            }
+        }
+    }
+
+    private fun heartbeatWitness(
+        generation: UUID,
+        since: Instant,
+    ): Int =
+        metadata { connection ->
+            connection.prepareStatement("SELECT count(DISTINCT tx) FROM test_reader_beats WHERE generation=? AND at>=?").use {
+                it.setObject(1, generation)
+                it.setObject(2, java.time.OffsetDateTime.ofInstant(since, java.time.ZoneOffset.UTC))
+                it.executeQuery().use { rows ->
+                    rows.next()
+                    rows.getInt(1)
+                }
+            }
+        }
+
+    private fun databaseNow(): Instant =
+        metadata { connection ->
+            connection.createStatement().use {
+                it.executeQuery("SELECT clock_timestamp()").use { rows ->
+                    rows.next()
+                    rows.getTimestamp(1).toInstant()
+                }
+            }
+        }
+
+    private fun readerRows(): Map<UUID, Boolean> =
+        metadata { connection ->
+            connection.createStatement().use { statement ->
+                statement
+                    .executeQuery(
+                        "SELECT operation_id,bool_and(expires_at>now() AND deadline_at>now()) " +
+                            "FROM lake_leases WHERE kind='reader' GROUP BY operation_id",
+                    ).use { rows ->
+                        buildMap { while (rows.next()) put(rows.getObject(1, UUID::class.java), rows.getBoolean(2)) }
+                    }
+            }
+        }
 
     /**
      * H's timeline with [apply]'s condition imposed once the reader is executing and released only after the
@@ -801,9 +1171,8 @@ class ManagedLakeReadsE2eTest {
         return ReapTimeline(builtAt, expired, hardClosed, ended, run, label)
     }
 
-    /** The record's bound from a generation's build to its last reader stopping: age + 2 × delay + ceiling + termination. */
-    private fun lifetimeBound(): Duration =
-        Duration.ofSeconds(H_MAX_AGE_SECONDS + 2 * REAPER_DELAY_SECONDS + H_CEILING_SECONDS + READER_TERMINATION_SECONDS)
+    /** The staleness budget; these CPU-query regressions also finish inside it, unlike a trickling reader. */
+    private fun lifetimeBound(): Duration = Duration.ofSeconds(H_MAX_AGE_SECONDS + 2 * REAPER_DELAY_SECONDS + H_CEILING_SECONDS)
 
     /**
      * I3's test seam: the application's `PoolCloser`, decorated. The first managed generation handed to it goes on to
@@ -1407,9 +1776,6 @@ class ManagedLakeReadsE2eTest {
          */
         private const val REAPER_DELAY_SECONDS = 7L
 
-        /** #818d — the reader-termination term (`ReaderTermination.SECONDS` in datasources), a literal for the same reason. */
-        private const val READER_TERMINATION_SECONDS = 92L
-
         /** #818d — the per-close deadline (`PoolCloser.DEADLINE_SECONDS`), a literal; I3 waits for its WARN. */
         private const val POOL_CLOSE_DEADLINE_SECONDS = 65L
 
@@ -1568,7 +1934,7 @@ class ManagedLakeReadsE2eTest {
                 )
             return SpringApplicationBuilder(*sources.toTypedArray()).initializers(*initializers.toTypedArray()).run(
                 "--server.port=0",
-                *(bootProperties(maxAgeSeconds, tickSeconds, name, enabled, application) + extra)
+                *(bootProperties(maxAgeSeconds, tickSeconds, name, enabled, application).toMap() + extra.toMap())
                     .map { (k, v) -> "--$k=$v" }
                     .toTypedArray(),
             )

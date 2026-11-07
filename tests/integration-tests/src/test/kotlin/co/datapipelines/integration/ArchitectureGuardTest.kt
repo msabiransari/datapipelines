@@ -481,6 +481,7 @@ class ArchitectureGuardTest {
             setOf(
                 "SweepSchedulingConfiguration.kt",
                 "PoolReaperSchedulingConfiguration.kt",
+                "PoolReaderLeaseConfiguration.kt",
                 "RetentionSchedulingConfiguration.kt",
                 "DashboardRuntimeConfiguration.kt",
             )
@@ -515,7 +516,8 @@ class ArchitectureGuardTest {
                 "\\b(StaleExecutionSweeper|ExecutionEventRetention|reapRetiredPools|StaleExecutionSweepScheduler|" +
                     "DatasourcePoolReaperScheduler|ExecutionEventRetentionScheduler|AuditLogRetention|" +
                     "ScheduleDispatcher|ScheduledRunWorker|RunReconciler|ScheduleNotifier|SchedulerTasks|SchedulerAdmission|" +
-                    "ParameterEvaluationSweeper|ParameterEvaluationRetention|ManagedLakeFreshnessScheduler|refreshManagedGenerations)\\b",
+                    "ParameterEvaluationSweeper|ParameterEvaluationRetention|ManagedLakeFreshnessScheduler|" +
+                    "ReaderLeaseKeeper|refreshManagedGenerations)\\b",
             )
 
         /** The ordinary evaluate's call sites (spec §4.5) — the REST route, the dashboard runtime, the MCP tool. */

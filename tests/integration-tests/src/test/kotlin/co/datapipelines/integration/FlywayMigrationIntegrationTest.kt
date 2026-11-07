@@ -180,6 +180,7 @@ class FlywayMigrationIntegrationTest {
                 // #798 (V54) — managed lake table definitions: namespaces, managed tables, definition versions, the
                 // column-semantics projection, and lake_tables' origin / revision_seq.
                 "54|lake definitions|true",
+                "56|lake reader leases|true",
             )
     }
 
@@ -1738,6 +1739,7 @@ class FlywayMigrationIntegrationTest {
                 "iceberg_tables.iceberg_tables_pkey",
                 "lake_control.lake_control_pkey",
                 "lake_leases.idx_lake_leases_operation",
+                "lake_leases.idx_lake_leases_reader_location",
                 "lake_leases.lake_leases_pkey",
                 "lake_table_revisions.idx_lake_table_revisions_operation",
                 "lake_table_revisions.idx_lake_table_revisions_table",

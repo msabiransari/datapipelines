@@ -1,6 +1,6 @@
 # The Managed Lake: Table Definitions
 
-**Status:** v1.7 (#798, dp-lake P3; #810, #811, #812; #818, dp-lake P5)
+**Status:** v1.8 (#798, dp-lake P3; #810, #811, #812; #818, dp-lake P5)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and the names involved. The design is
@@ -256,22 +256,42 @@ generation is replaced.
 the lake write path (#799) retires the committing server's generation itself, the freshness tick bounds freshness on
 every server, the committing one included.
 
-**The bound.** A generation is retired once it is older than `reads.max-generation-age-seconds`: by the next lease
-that asks for it, or, when nothing asks, by the pool reaper, which checks every live generation's age on every pass
-and issues no statement to do it. The tick retires a generation earlier when its tables' catalog rows have changed
-since it was built. A query still running on a retired generation is hard-closed at the retire ceiling. The reaper
-runs every 5 s on a scheduler thread of its own (`dp-reaper`), and a pass only compares clocks and hands each close to
-a close thread, so a pass can start late by at most the reaper delay: 7 s, the cadence plus twice the longest a pass may
-take (a constant, not a key; a pass slower than its bound is logged and counted). A late pass can delay both the
-retirement and the close, so the oldest snapshot any query reads is at most age + 2 × reaper delay + retire ceiling +
-reader termination old. The reader termination, 92 s, is the longest a query keeps running after its generation's hard
-close: the close interrupts every reader first, and a reader waiting on the object store stops when that request gives
-up. The managed lake bounds each request (a 10 s timeout and 2 retries, fixed in code and locked against SQL), so a
-stalled store holds a reader about 30 s. Boot refuses a configuration where age + 2 × reaper delay + retire ceiling +
-reader termination + tick exceeds one twenty-fourth of the snapshot protection window (`retention.protection-days`),
-so a reader never reaches a snapshot that may already be expired. With the shipped keys that is 900 + 14 + 90 + 92 +
-60 = 1156 s against 25 200 s. A store that keeps a request alive by trickling bytes is not bounded by the request
-timeout.
+**The bound.** The pool reaper retires generations older than `reads.max-generation-age-seconds`,
+including generations with no later borrower. It runs on `dp-reaper`, every 5 s, and issues no statement.
+The reaper delay is 7 s (cadence plus twice its 1 s pass bound); closes run on `dp-pool-close` threads.
+Boot checks the staleness rule: age + 2 × reaper delay + retire ceiling + freshness tick must fit
+`retention.protection-days × 86400 / 24`. With shipped values: 900 + 14 + 90 + 60 = 1064 ≤ 25 200 s.
+This bounds the age handed to new queries. Reader termination is not a safety premise: DuckDB's
+HTTP settings bound a silent store, but cannot bound a trickling response (duckdb-httpfs#519).
+
+**Reader pins.** Before serving, a managed generation acquires one reader lease per available table,
+pinning the exact catalog metadata location its view reads. A failed pin refuses the build with
+`lake.unavailable`. Its UUID identifies the operation. A dedicated daemon thread, `dp-reader-lease`,
+heartbeats the instance's rows in one statement every 5 s while any physical handle remains, including
+handles retiring, closing or blocked in `close()`. Pins are released only after physical closure is
+confirmed. Graceful shutdown keeps the scheduler, scheduled-task registrar and metadata pool alive until every physical
+handle is confirmed closed, then releases its rows. A stuck native reader can therefore hold graceful shutdown;
+a killed process instead leaves rows that lapse at TTL.
+A dead process's rows lapse at TTL; expired or deadlined rows cannot renew. The deadline is
+the build instant plus the full protection window. A reader older than one twenty-fourth of that window
+logs `lake.reader_lease_overlong`; it stays pinned until its deadline or confirmed close.
+
+The TTL is derived from the metadata pool's actual acquisition timeout and the 5 s statement timeout:
+`previous statement tail + 2 × (cadence + acquire wait + statement timeout)`, 85 s for the shipped 30 s acquisition timeout.
+This covers a failed round followed by the next successful round under fixed-delay scheduling.
+New admission also checks the monotonic age of the last confirmed heartbeat, so a delayed keeper cannot admit a read after protection lapses.
+A short heartbeat or a failed round retires the generation, logs `lake.reader_lease_lost` and counts it;
+existing readers can continue. A round exceeding its cadence logs `lake.reader_lease_round_slow`.
+
+P6 must treat every live pinned metadata revision as protected regardless of `protected_until`.
+`ReaderPins.pinnedLocations` supplies its pins; `SnapshotExpiryFloor.compute` returns both the expiry
+floor (the minimum of now minus the window and every protected revision's current snapshot timestamp)
+and the protected revisions for the orphan walker. The remover itself belongs to P6.
+
+**Residual.** If an instance stays alive but cannot heartbeat for a full TTL, its pins lapse while
+its readers may still be reading. Expiry may then remove a snapshot such a reader holds and the reader
+fails with a missing-file error, never a wrong result: a planned scan names files, and a missing file
+is an error. The same loss applies when the full protection-window deadline is reached.
 
 **The operator knobs** ([Configuration §3.36](configuration.md#336-managed-lake-dp-lake-785)):
 
@@ -289,6 +309,7 @@ timeout.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-06 | v1.8 | 818e (#818) | §6: reader leases pin metadata revisions through physical close; five-term staleness rule, dedicated heartbeat, expiry/orphan consumer contract and stalled-metadata residual. |
 | 2026-11-05 | v1.7 | 818d (#818) | §6 "The bound.": the reaper runs on its own `dp-reaper` thread and hands each close to a close thread, so the reaper delay is 7 s; the bound and boot rule gain the reader termination (92 s, derived from the managed lake's object-store request bounds). |
 | 2026-11-05 | v1.6 | 818c (#818) | §6 "The bound.": the pool reaper retires an over-age generation nobody leases from, and the bound and boot rule gain 2 × the reaper delay (260 s, derived from the scheduled jobs). |
 | 2026-11-04 | v1.5 | 818b (#818) | §6: a table's state, like its snapshot, is the one the reader's generation was built with. |

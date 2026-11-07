@@ -729,7 +729,7 @@ class LakeDialectAdapter(
                 }
             effectiveSpillDirectory?.let { add("SET temp_directory = '${it.replace("'", "''")}'") }
             add("SET preserve_insertion_order = false")
-            // #818d: the object-store request bounds `ReaderTermination` is derived from. Only where `httpfs` is
+            // #818d: the object-store request bounds the silent-store hygiene budget is measured from. Only where `httpfs` is
             // loaded (the extension statements' own predicate): the settings do not exist before it.
             if (properties["catalog.kind"] != null) addAll(LakeHttpBounds.STATEMENTS)
         }

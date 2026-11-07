@@ -134,7 +134,16 @@ class ScheduledJobsSchedulerE2eTest {
         val observed = SCHEDULED_METHODS.associateWith { job -> recorder.threadsOf(job) }
         // Non-vacuity: the clue names the thread each job was actually observed on.
         withClue("the thread each job's ticks ran on, as Spring's observation saw them: $observed") {
-            observed shouldBe SCHEDULED_METHODS.associateWith { job -> setOf(if (job == REAP) REAPER_THREAD else JOBS_THREAD) }
+            observed shouldBe
+                SCHEDULED_METHODS.associateWith { job ->
+                    setOf(
+                        when (job) {
+                            REAP -> REAPER_THREAD
+                            READER -> "dp-reader-lease"
+                            else -> JOBS_THREAD
+                        },
+                    )
+                }
             // Every @Scheduled task the application runs, not just the ones named here.
             recorder.jobs() shouldBe SCHEDULED_METHODS
         }
@@ -218,7 +227,9 @@ class ScheduledJobsSchedulerE2eTest {
     @Order(4)
     fun `on close the jobs' scheduler stops after the execution drain and every writer's drain`(output: CapturedOutput) {
         val reaperExecutor = app.getBean(REAPER_SCHEDULER_BEAN).shouldBeInstanceOf<ThreadPoolTaskScheduler>().scheduledExecutor
+        val readerExecutor = app.getBean("readerLeaseTaskScheduler").shouldBeInstanceOf<ThreadPoolTaskScheduler>().scheduledExecutor
         app.close()
+        readerExecutor.isTerminated shouldBe true
         val log = output.out
         val executionDrain = log.indexOf("event=shutdown.drain_complete")
         val drained = WRITERS.map { writer -> log.indexOf("event=persistence.drained writer=$writer") }
@@ -601,9 +612,11 @@ class ScheduledJobsSchedulerE2eTest {
         const val REAPER_THREAD = "dp-reaper"
         const val REAP = "co.datapipelines.web.config.DatasourcePoolReaperScheduler.reap"
         const val SWEEP = "co.datapipelines.web.config.StaleExecutionSweepScheduler.sweep"
+        const val READER = "co.datapipelines.web.config.ReaderLeaseKeeper.heartbeat"
         val SCHEDULED_METHODS =
             setOf(
                 SWEEP,
+                READER,
                 REAP,
                 "co.datapipelines.web.config.ExecutionEventRetentionScheduler.retain",
                 // #10 L2: the dashboard refresh sweep — an approved `@Scheduled` home riding the same thread.

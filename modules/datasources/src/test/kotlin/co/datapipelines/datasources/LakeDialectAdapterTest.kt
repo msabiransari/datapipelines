@@ -272,7 +272,7 @@ class LakeDialectAdapterTest {
      * #818d (record §10 item 7) — every engine that loads `httpfs` ends its setup with the object-store request bounds,
      * literally these four, in this order, after the engine limits; one that loads nothing gets none (the settings do
      * not exist before `httpfs`). Literal text on purpose: a change to a `LakeHttpBounds` constant must go red here
-     * and in `ReaderTerminationDerivationTest`, never pass silently through a shared reference.
+     * and in the stalled-store integration test, never pass silently through a shared reference.
      */
     @Test
     fun `an engine that loads httpfs ends its setup with the HTTP request bounds - every catalog kind, and only then`() {

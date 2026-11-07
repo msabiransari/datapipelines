@@ -5,6 +5,7 @@ import co.datapipelines.datasources.crypto.CredentialEncryptor
 import co.datapipelines.datasources.pooling.ConnectionPool
 import co.datapipelines.datasources.pooling.ConnectionPoolManager
 import co.datapipelines.datasources.pooling.LakeViewInit
+import co.datapipelines.datasources.pooling.ManagedGenerationPins
 import co.datapipelines.datasources.pooling.ManagedLakeGeneration
 import co.datapipelines.datasources.pooling.PoolCloser
 import co.datapipelines.datasources.pooling.PoolLifecycleMetrics
@@ -121,6 +122,7 @@ class DefaultDatasourceRegistry(
      * threads); the default closes on the caller's thread, this module's tests and a plain library caller.
      */
     private val poolCloser: PoolCloser = PoolCloser.SYNCHRONOUS,
+    private val generationPins: ManagedGenerationPins = ManagedGenerationPins.NONE,
 ) : DatasourceRegistry {
     private val log = org.slf4j.LoggerFactory.getLogger(DefaultDatasourceRegistry::class.java)
 
@@ -190,6 +192,7 @@ class DefaultDatasourceRegistry(
             retireCeiling = retireCeiling,
             maxGenerationAge = maxGenerationAge,
             closer = poolCloser,
+            pins = generationPins,
             metrics = poolMetrics,
         )
 
