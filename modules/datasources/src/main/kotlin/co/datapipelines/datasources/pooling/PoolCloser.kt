@@ -83,6 +83,6 @@ fun interface PoolCloser {
             connectionTimeout: Duration,
             releaseBound: Duration = Duration.ZERO,
             fixedTerms: Duration = FIXED_CLOSE_TERMS,
-        ): Duration = Duration.ofSeconds(DEADLINE_SECONDS) // inert scaffolding: the #840 fix commit derives it
+        ): Duration = connectionTimeout.plus(fixedTerms).plus(releaseBound)
     }
 }

@@ -14,6 +14,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler
@@ -76,12 +77,21 @@ class PoolReaperSchedulingConfiguration {
 
     /**
      * #818d (record §10 RULING 4 amended, item 6) — the closer every pool the reaper hands off is closed by: the
-     * `dp-pool-close` threads, each close under [co.datapipelines.datasources.pooling.PoolCloser.DEADLINE_SECONDS].
+     * `dp-pool-close` threads, each close under its pool's own deadline (#840,
+     * [co.datapipelines.datasources.pooling.PoolCloser.deadlineFor]); a managed generation's adds the release of its
+     * reader pins on the metadata pool [jdbc] runs on ([DeadlinePoolCloser.managedReleaseBound]).
      * The registry takes it (`DomainConfiguration.datasourceRegistry`), which is what orders its destruction after
      * the registry's own synchronous shutdown close.
      */
     @Bean
-    fun poolCloser(metrics: PoolLifecycleMetrics): DeadlinePoolCloser = DeadlinePoolCloser(metrics)
+    fun poolCloser(
+        metrics: PoolLifecycleMetrics,
+        jdbc: JdbcTemplate,
+    ): DeadlinePoolCloser =
+        DeadlinePoolCloser(
+            metrics,
+            managedReleaseBound = DeadlinePoolCloser.managedReleaseBound(jdbc.dataSource),
+        )
 
     /**
      * #818 (dp-lake record §10 RULING 4 item 2) — the managed lake's freshness tick, on the jobs' `dp-scheduled`

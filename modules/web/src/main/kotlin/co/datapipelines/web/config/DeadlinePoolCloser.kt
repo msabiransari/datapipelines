@@ -130,11 +130,13 @@ class DeadlinePoolCloser(
     ) {
         LOG.warn(
             "event=datasource.pool_close_stuck datasource={} generation={} elapsed_seconds={} active_connections={} " +
+                "deadline_seconds={} " +
                 "message=\"a retired pool's close is still running past its deadline; the close thread is left to finish\"",
             pool.name,
             pool.generation ?: NO_GENERATION,
             TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - handedOffAt),
             activeAtHandOff,
+            deadline.seconds,
         )
         metrics.poolCloseStuck(pool.name)
     }
@@ -169,6 +171,8 @@ class DeadlinePoolCloser(
          * statement timeout and its socket timeout. 30 + 5 = 35 s on the shipped metadata pool.
          */
         fun managedReleaseBound(metadata: DataSource?): Duration =
-            Duration.ZERO // inert scaffolding: the #840 fix commit derives it from the metadata pool
+            Duration
+                .ofMillis((metadata as? HikariDataSource)?.connectionTimeout ?: HikariConfig().connectionTimeout)
+                .plusSeconds(LakeLeases.READER_STATEMENT_TIMEOUT_SECONDS.toLong())
     }
 }
