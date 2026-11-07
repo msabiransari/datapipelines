@@ -146,6 +146,90 @@ class ManagedLakeActiveQueryCloseIntegrationTest {
         }
     }
 
+    /**
+     * #824 (owner ruling 2026-11-07) — a retired MANAGED generation is held to its own, longer ceiling. The general
+     * ceiling is [CEILING] (2 s), the managed one [MANAGED_CEILING] (10 s); a managed query sized to run about
+     * [QUERY_TARGET] holds a lease when the generation is retired. A reap past the general ceiling closes nothing and
+     * the query completes on its own; the lease is still out, so only a reap past the managed ceiling hard-closes the
+     * generation. Falsified by stamping every retired pool with the general ceiling in
+     * `ConnectionPoolManager.enqueueRetired`: the first reap then hard-closes the generation under the running query.
+     */
+    @Test
+    @Suppress("LongMethod") // one timeline is the witness: calibrate, retire, general-ceiling reap, completion, managed reap
+    fun `a retired managed generation is hard-closed at the managed ceiling - never at the general one (#824)`() {
+        jdbc.jdbcTemplate.execute("TRUNCATE datasources, users CASCADE")
+        val owner = actor()
+        val registry =
+            DefaultDatasourceRegistry(
+                DatasourceRepository(jdbc),
+                testEncryptor(),
+                lakeTables = { emptyList() },
+                retireCeiling = CEILING,
+                managedRetireCeiling = MANAGED_CEILING,
+                managedLake = { listOf(TRIPS) },
+                maxGenerationAge = Duration.ofMinutes(MAX_AGE_MINUTES),
+            )
+        try {
+            registry.syncManagedLake(managed(), owner) shouldBe ManagedLakeSync.CREATED
+            val pool = registry.poolFor(registry.get(LAKE).shouldNotBeNull()).shouldBeInstanceOf<HikariConnectionPool>()
+            val lease = pool.leaseConnection()
+            val physical = pool.poolConnectionOf(lease).unwrap(java.sql.Connection::class.java)
+            val rows = calibratedRange(physical)
+            val statement = physical.prepareStatement("SELECT sum(i) FROM range($rows) t(i)")
+            val run = RunningQuery(statement)
+            try {
+                run.start()
+                val retiredAt = Instant.now()
+                registry.retirePool(LAKE) shouldBe true
+                Thread.sleep(Duration.between(Instant.now(), retiredAt.plus(CEILING)).toMillis().coerceAtLeast(0) + CEILING_MARGIN_MS)
+                val pastGeneral = registry.reapRetiredPools()
+                val runningAtGeneral = run.ended.count == 1L
+                val managedDeadline = retiredAt.plus(MANAGED_CEILING)
+                val completed =
+                    run.ended.await(Duration.between(Instant.now(), managedDeadline).toMillis().coerceAtLeast(0), TimeUnit.MILLISECONDS)
+                val beforeManaged = registry.reapRetiredPools()
+                val beforeManagedAt = Instant.now()
+                Thread.sleep(Duration.between(Instant.now(), managedDeadline).toMillis().coerceAtLeast(0) + CEILING_MARGIN_MS)
+                val pastManaged = registry.reapRetiredPools()
+                println(
+                    "MANAGED_CEILING rows=$rows retired=$retiredAt past_general_hard_closed=${pastGeneral.hardClosed} " +
+                        "running_at_general=$runningAtGeneral ended=${run.endedAt.get()} outcome=${run.outcome.get()} " +
+                        "before_managed_at=$beforeManagedAt before_managed_hard_closed=${beforeManaged.hardClosed} " +
+                        "past_managed_hard_closed=${pastManaged.hardClosed} pool_closed=${pool.isClosed}",
+                )
+                assertAll(
+                    { withClue("a reap past the GENERAL ceiling must not close a managed generation") { pastGeneral.hardClosed shouldBe 0 } },
+                    { withClue("the query must outlive the general ceiling, or the case discriminates nothing") { runningAtGeneral shouldBe true } },
+                    { withClue("the query must complete on its own before the managed ceiling") { completed shouldBe true } },
+                    { run.outcome.get().startsWith("completed:") shouldBe true },
+                    { withClue("still inside the managed ceiling at $beforeManagedAt") { beforeManaged.hardClosed shouldBe 0 } },
+                    { withClue("the lease is still out: the managed ceiling hard-closes the generation") { pastManaged.hardClosed shouldBe 1 } },
+                )
+            } finally {
+                runCatching { statement.cancel() }
+                run.thread.join(CLEANUP_JOIN_MS)
+                runCatching { lease.close() }
+            }
+        } finally {
+            registry.shutdown()
+        }
+    }
+
+    /**
+     * A `range` length whose sum runs about [QUERY_TARGET] on [connection]: doubled from [CALIBRATION_START_ROWS] until
+     * one sum takes [CALIBRATION_MIN], then scaled. Measured on the generation's own engine, so the box's speed is in it.
+     */
+    private fun calibratedRange(connection: java.sql.Connection): Long {
+        var rows = CALIBRATION_START_ROWS
+        while (true) {
+            val started = System.nanoTime()
+            connection.createStatement().use { it.executeQuery("SELECT sum(i) FROM range($rows) t(i)").use { rs -> rs.next() } }
+            val took = Duration.ofNanos(System.nanoTime() - started)
+            if (took >= CALIBRATION_MIN) return rows * QUERY_TARGET.toMillis() / took.toMillis().coerceAtLeast(1)
+            rows *= 2
+        }
+    }
+
     @Test
     @Suppress("LongMethod") // one timeline is the witness: build, burn, retiring reap, deadline, closing reap, end
     fun `with no later borrower the reaper retires an executing reader's generation past its age bound and closes it`() {
@@ -407,6 +491,17 @@ class ManagedLakeActiveQueryCloseIntegrationTest {
 
         /** A short ceiling, so the test waits seconds; the production default is 90 s. */
         val CEILING: Duration = Duration.ofSeconds(2)
+
+        /** #824: the managed generation's own ceiling, longer than [CEILING] and than [QUERY_TARGET]. */
+        val MANAGED_CEILING: Duration = Duration.ofSeconds(10)
+
+        /** #824: how long the managed query is sized to run, from a calibration on the generation's own engine. */
+        val QUERY_TARGET: Duration = Duration.ofSeconds(5)
+        val CALIBRATION_MIN: Duration = Duration.ofMillis(400)
+        const val CALIBRATION_START_ROWS = 10_000_000L
+
+        /** How far past a ceiling a reap is called, so the reap is unambiguously past it. */
+        const val CEILING_MARGIN_MS = 500L
 
         /** The reaper case's age bound: short, so the test crosses age + ceiling in seconds. */
         val SHORT_AGE: Duration = Duration.ofSeconds(3)

@@ -900,6 +900,8 @@ class ConfigValidator(
                 executorNodeQueryTimeoutMaxSeconds = environment.getProperty("datapipelines.executor.node-query-timeout-max-seconds"),
                 executorNodeQueryTimeoutSeconds = environment.getProperty("datapipelines.executor.node-query-timeout-seconds"),
                 datasourcesRetireCeilingSeconds = environment.getProperty("datapipelines.datasources.retire-ceiling-seconds"),
+                datasourcesManagedRetireCeilingSeconds =
+                    environment.getProperty("datapipelines.datasources.managed-retire-ceiling-seconds"),
                 executorNodeQueryTimeoutSecondsByDialect = executorNodeQueryTimeoutSecondsByDialect(environment),
                 stagingMaxMemoryMb = environment.getProperty("datapipelines.staging.h2.max-memory-mb"),
                 maxHeapMb = Runtime.getRuntime().maxMemory() / BYTES_PER_MB,
@@ -1153,6 +1155,8 @@ internal data class ConfigSnapshot(
     val executorNodeQueryTimeoutSeconds: String? = null,
     /** §3.36 (#818) — `datapipelines.datasources.retire-ceiling-seconds`, raw; empty = derived (datasources.md §5.2). */
     val datasourcesRetireCeilingSeconds: String? = null,
+    /** #824 test scaffolding: read by no rule until the fix. */
+    val datasourcesManagedRetireCeilingSeconds: String? = null,
     /** §3.2 (156, #2) — the per-dialect map, raw values (`dialect wire -> seconds string`). */
     val executorNodeQueryTimeoutSecondsByDialect: Map<String, String> = emptyMap(),
     /** §3.3 — the PER-EXECUTION tempdb budget, read here only for the §C pressure warning. */

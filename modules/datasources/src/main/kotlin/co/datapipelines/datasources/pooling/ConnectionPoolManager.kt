@@ -419,6 +419,13 @@ class ConnectionPoolManager(
     private val poolFactory: (Datasource) -> ConnectionPool = ::buildHikariPool,
     /** How long a retired pool may keep connections out before [reapRetiring] closes it anyway. */
     private val retireCeiling: Duration = DEFAULT_RETIRE_CEILING,
+    /**
+     * #824 (owner ruling 2026-11-07) — the same ceiling for a retired MANAGED lake generation
+     * ([ConnectionPool.managedGeneration] non-null) only: the assembling layer derives it from the node query timeout's
+     * maximum, because a generation is retired by age or by the freshness tick, never because its readers are done.
+     * Every other retired pool keeps [retireCeiling]; unset, the two are the same.
+     */
+    private val managedRetireCeiling: Duration = retireCeiling,
     /** Injectable so the reaper's state machine can be tested without sleeping. */
     private val clock: () -> Instant = Instant::now,
     /**
@@ -647,7 +654,8 @@ class ConnectionPoolManager(
         name: String,
         retired: ConnectionPool,
     ) {
-        retiring += RetiringPool(retired, deadline = clock().plus(retireCeiling))
+        val ceiling = retireCeiling
+        retiring += RetiringPool(retired, deadline = clock().plus(ceiling), ceiling = ceiling)
         retired.softEvict()
         metrics.poolRetired(name)
     }
@@ -691,7 +699,7 @@ class ConnectionPoolManager(
                             "message=\"retired pool still had connections out at its ceiling; closing it anyway\"",
                         entry.pool.name,
                         active,
-                        retireCeiling.seconds,
+                        entry.ceiling.seconds,
                     )
                     closer.close(entry.pool)
                     metrics.poolHardClosed(entry.pool.name, active)
@@ -732,10 +740,14 @@ class ConnectionPoolManager(
         val pool: ConnectionPool,
     )
 
-    /** A pool out of the map, draining, with the instant after which it is closed regardless. */
+    /**
+     * A pool out of the map, draining, with the instant after which it is closed regardless and the [ceiling] that
+     * instant was stamped from (#824: the managed one for a managed generation), which the hard-close line reports.
+     */
     private data class RetiringPool(
         val pool: ConnectionPool,
         val deadline: Instant,
+        val ceiling: Duration,
     )
 
     companion object {

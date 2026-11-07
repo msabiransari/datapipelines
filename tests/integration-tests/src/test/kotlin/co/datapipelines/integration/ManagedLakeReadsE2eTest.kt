@@ -509,7 +509,7 @@ class ManagedLakeReadsE2eTest {
                 maxAgeSeconds = H_MAX_AGE_SECONDS,
                 tickSeconds = H_TICK_SECONDS,
                 application = APP_H,
-                extra = listOf("datapipelines.datasources.retire-ceiling-seconds" to H_CEILING_SECONDS.toString()),
+                extra = hCeilings(),
             )
         val logger = LoggerFactory.getLogger(PRODUCT_LOGGERS) as Logger
         val capture = SnapshotListAppender()
@@ -709,7 +709,7 @@ class ManagedLakeReadsE2eTest {
             maxAgeSeconds = H_MAX_AGE_SECONDS,
             tickSeconds = H_TICK_SECONDS,
             application = application,
-            extra = listOf("datapipelines.datasources.retire-ceiling-seconds" to H_CEILING_SECONDS.toString()),
+            extra = hCeilings(),
             initializers = initializers,
         )
 
@@ -745,6 +745,7 @@ class ManagedLakeReadsE2eTest {
                         listOf(
                             "datapipelines.lake.storage.endpoint" to proxy.endpoint,
                             "datapipelines.datasources.retire-ceiling-seconds" to "1",
+                            "datapipelines.datasources.managed-retire-ceiling-seconds" to "1",
                         ),
                 )
             val lease = leaseManaged(reader)
@@ -912,7 +913,11 @@ class ManagedLakeReadsE2eTest {
                 maxAgeSeconds = B_MAX_AGE_SECONDS,
                 tickSeconds = LIFECYCLE_TICK_SECONDS,
                 application = "reader-paused-$pauseSeconds",
-                extra = listOf("datapipelines.datasources.retire-ceiling-seconds" to "180"),
+                extra =
+                    listOf(
+                        "datapipelines.datasources.retire-ceiling-seconds" to "180",
+                        "datapipelines.datasources.managed-retire-ceiling-seconds" to "180",
+                    ),
             )
         val lease = leaseManaged(reader)
         val generation = readerGeneration(reader)
@@ -1051,6 +1056,16 @@ class ManagedLakeReadsE2eTest {
         error.javaClass.methods
             .firstOrNull { it.name == "getCode" && it.parameterCount == 0 }
             ?.invoke(error) as? String
+
+    /**
+     * H's and the reader profile's ceilings: the general one as before, and since #824 the MANAGED one too, which is
+     * the ceiling a retired managed generation is actually held to; both at [H_CEILING_SECONDS], as the cases expect.
+     */
+    private fun hCeilings(): List<Pair<String, String>> =
+        listOf(
+            "datapipelines.datasources.retire-ceiling-seconds" to H_CEILING_SECONDS.toString(),
+            "datapipelines.datasources.managed-retire-ceiling-seconds" to H_CEILING_SECONDS.toString(),
+        )
 
     /** Acceptance methods can also run alone during falsification. */
     private fun ensureReaderFixture() {
