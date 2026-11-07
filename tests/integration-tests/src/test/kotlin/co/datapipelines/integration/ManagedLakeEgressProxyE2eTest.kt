@@ -68,7 +68,8 @@ import kotlin.io.path.relativeTo
  * - **D.3** a multi-MB read goes through the proxy and is correct; nothing stays connected to the proxy past max-age +
  *   drain; the read then succeeds again.
  * - **D.1** the trickling read ENDS within the derived bound — httpfs retries a cut transfer, so the bound is
- *   `(http_retries + 1) × (max-age + slack)` (probe A.0b), not one max-age — and the `Connection.close()` thread
+ *   `LakeHttpBounds.egressReaderEndByMillis` ((http_retries + 1) × max-age + slack, probe A.0b), not one max-age — and
+ *   the `Connection.close()` thread
  *   blocked behind it is gone with it.
  * - **D.2** the control: the same read with no proxy is NOT ended within 2 × max-age (bounded, then released).
  */
@@ -100,7 +101,8 @@ class ManagedLakeEgressProxyE2eTest {
             println("EGRESS_E2E D4 green round=$round boot_ms=${millisSince(started)}")
             withClue("the green boot logs exactly one verification line naming the proxy and its cap") {
                 verified.size shouldBe 1
-                verified.single() shouldContain "proxy=$envoyAddress max_age_seconds=$MAX_AGE_SECONDS "
+                verified.single() shouldContain
+                    "proxy=$envoyAddress max_age_seconds=$MAX_AGE_SECONDS reader_end_by_ms=${endByMillis()} "
             }
             if (round == 0) {
                 ensureTable()
@@ -162,9 +164,11 @@ class ManagedLakeEgressProxyE2eTest {
     fun `D1 - a trickling managed read ends within the derived bound and the close thread behind it is gone`() {
         val context = checkNotNull(greenContext) { "D4's green boot did not run" }
         try {
-            val outcome = trickle(context, greenTrickle, observeSeconds = d1BoundSeconds())
-            withClue("D.1: the reader ended within (http_retries + 1) × (max-age + slack) = ${d1BoundSeconds()} s of the first GET") {
-                outcome.readerEndedAfterMs.shouldNotBeNull() shouldBeLessThanOrEqual d1BoundSeconds() * 1000
+            // Observed past end-by so a reader that is NOT ended reports as such, then held to end-by itself.
+            val outcome = trickle(context, greenTrickle, observeSeconds = endByMillis() / MILLIS_PER_SECOND + SLACK_SECONDS)
+            val clue = "D.1: the reader ended within LakeHttpBounds.egressReaderEndByMillis($MAX_AGE_SECONDS) = ${endByMillis()} ms"
+            withClue("$clue of the first GET") {
+                outcome.readerEndedAfterMs.shouldNotBeNull() shouldBeLessThanOrEqual endByMillis()
             }
             withClue("D.1: the Connection.close() thread blocked behind the read is gone (#839)") {
                 outcome.closeThreadsAlive shouldBe 0
@@ -449,6 +453,7 @@ class ManagedLakeEgressProxyE2eTest {
         private const val CLEANUP_JOIN_MS = 30_000L
         private const val MESSAGE_CHARS = 200
         private const val NANOS_PER_MILLI = 1_000_000L
+        private const val MILLIS_PER_SECOND = 1_000L
         private const val COMPOSE_PATH = "deploy/compose.yml"
         private const val MAX_AGE_VARIABLE = "\${DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS:-960}"
         private const val SHIPPED_LISTENER = "socket_address: { address: 0.0.0.0, port_value: 3128 }"
@@ -457,11 +462,16 @@ class ManagedLakeEgressProxyE2eTest {
         private val oidc = OidcDiscoveryStub()
         private val database by lazy { SharedE2e.scratchDatabase("managed_lake_egress") }
 
-        /** The bound D.1 holds the reader to: every attempt httpfs makes (`LakeHttpBounds.HTTP_RETRIES` + 1) is cut. */
-        fun d1BoundSeconds(): Long {
-            val retries = Class.forName("co.datapipelines.datasources.LakeHttpBounds").getField("HTTP_RETRIES").getInt(null)
-            return (retries + 1) * (MAX_AGE_SECONDS + SLACK_SECONDS)
-        }
+        /**
+         * The bound D.1 holds the reader to, from the product's ONE derivation, `LakeHttpBounds.egressReaderEndByMillis`
+         * ((http_retries + 1) × max-age + slack): this suite does not restate the formula, it tests it. Reflection, because
+         * this module compiles against `:modules:app` only.
+         */
+        fun endByMillis(): Long =
+            Class
+                .forName("co.datapipelines.datasources.LakeHttpBounds")
+                .getMethod("egressReaderEndByMillis", Long::class.javaPrimitiveType)
+                .invoke(null, MAX_AGE_SECONDS) as Long
 
         private val minioStarted =
             lazy {
