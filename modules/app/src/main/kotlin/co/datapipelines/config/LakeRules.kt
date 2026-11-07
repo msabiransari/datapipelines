@@ -1,6 +1,7 @@
 package co.datapipelines.config
 
 import co.datapipelines.web.config.DatasourcesProperties
+import co.datapipelines.web.config.ManagedLakeEgressCheck
 import co.datapipelines.web.config.ReaperDelay
 import org.springframework.boot.convert.DurationStyle
 import org.springframework.util.unit.DataSize
@@ -61,6 +62,8 @@ internal object LakeRules {
     const val MAX_GENERATION_AGE_SECONDS = "$PREFIX.reads.max-generation-age-seconds"
     const val FRESHNESS_TICK_SECONDS = "$PREFIX.reads.freshness-tick-seconds"
     const val READS_MEMORY_LIMIT = "$PREFIX.reads.memory-limit"
+    const val EGRESS_PROXY = "$PREFIX.reads.egress-proxy"
+    const val EGRESS_MAX_AGE_SECONDS = "$PREFIX.reads.egress-max-age-seconds"
     const val MAINTENANCE_WINDOW = "$PREFIX.maintenance.window"
     const val MAX_BYTES_REWRITTEN = "$PREFIX.maintenance.max-bytes-rewritten-per-run"
     const val PROTECTION_DAYS = "$PREFIX.retention.protection-days"
@@ -96,6 +99,8 @@ internal object LakeRules {
             MAX_GENERATION_AGE_SECONDS,
             FRESHNESS_TICK_SECONDS,
             READS_MEMORY_LIMIT,
+            EGRESS_PROXY,
+            EGRESS_MAX_AGE_SECONDS,
             MAINTENANCE_WINDOW,
             MAX_BYTES_REWRITTEN,
             PROTECTION_DAYS,
@@ -238,6 +243,7 @@ internal object LakeRules {
     ) {
         if (!enabled(snapshot)) return
         dataSize(snapshot, READS_MEMORY_LIMIT, violations)
+        readsEgressTerm(snapshot, violations)
         val age = positiveLong(snapshot, MAX_GENERATION_AGE_SECONDS, violations)
         val tick = positiveLong(snapshot, FRESHNESS_TICK_SECONDS, violations)
         if (age != null && tick != null && tick >= age) {
@@ -323,5 +329,45 @@ internal object LakeRules {
         val parsed = runCatching { DurationStyle.detectAndParse(value(snapshot, key)) }.getOrNull()?.takeIf { !it.isNegative && !it.isZero }
         if (parsed == null) violations += "$key must be a positive duration such as 2h or 90m (§3.36)."
         return parsed
+    }
+
+    /** #845 D1: the proxy may never cut a healthy query before the executor's own longest timeout, plus this slack. */
+    private const val EGRESS_MAX_AGE_SLACK_SECONDS = 30L
+
+    /**
+     * #845 (owner ruling 2026-11-06 option B, decision D1) — the managed reads' egress proxy term, its own violations:
+     * `reads.egress-max-age-seconds` is a positive whole number; when `reads.egress-proxy` is set, the proxy is
+     * `host:port` (the adapter's grammar, [ManagedLakeEgressCheck.isWellFormed]) and the max-age is at least
+     * `node-query-timeout-max-seconds` + [EGRESS_MAX_AGE_SLACK_SECONDS], so a healthy query is never cut by the proxy
+     * before its own timeout ends it. Whether the proxy answers and declares that max-age is the boot check's
+     * (`lake.boot.egress_proxy`), not configuration's.
+     *
+     * Deliberately NOT named `check…`: it is a term of [checkLakeReads], not a new §7 rule, and
+     * `ConfigValidatorCheckCountTest` counts `check*` declarations against `CHECK_COUNT`.
+     */
+    private fun readsEgressTerm(
+        snapshot: ConfigSnapshot,
+        violations: MutableList<String>,
+    ) {
+        val maxAge = positiveLong(snapshot, EGRESS_MAX_AGE_SECONDS, violations)
+        val proxy = value(snapshot, EGRESS_PROXY)
+        if (proxy.isEmpty()) return
+        if (!ManagedLakeEgressCheck.isWellFormed(proxy)) {
+            violations += "$EGRESS_PROXY must be host:port — letters, digits, '.' and '-', port 1-65535, no scheme (§3.36)."
+        }
+        if (maxAge == null) return
+        // A malformed node timeout maximum is named by the executor's own check; fall back to its default here.
+        val nodeMax =
+            snapshot.executorNodeQueryTimeoutMaxSeconds
+                ?.trim()
+                ?.toLongOrNull()
+                ?.takeIf { it > 0 } ?: DEFAULT_NODE_QUERY_TIMEOUT_MAX_SECONDS
+        val floor = nodeMax + EGRESS_MAX_AGE_SLACK_SECONDS
+        if (maxAge < floor) {
+            violations +=
+                "$EGRESS_MAX_AGE_SECONDS ($maxAge) must be at least datapipelines.executor.node-query-timeout-max-seconds " +
+                "($nodeMax) + $EGRESS_MAX_AGE_SLACK_SECONDS ($floor) while $EGRESS_PROXY is set (§3.36 — the proxy never " +
+                "cuts a healthy query before its own timeout)."
+        }
     }
 }
