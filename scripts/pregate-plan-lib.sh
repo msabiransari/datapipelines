@@ -111,7 +111,7 @@ GUARDS[":modules:web"]="co.datapipelines.web.api.ApiErrorCatalogSpecDriftTest co
 # 2026-10-02: 328's batch gate went red on the shipped-migrations pin; no lane pregate selects it
 # from a migration diff (FlywayMigrationIntegrationTest pins the exact V-list a lane adding a
 # migration must extend).
-GUARDS[":tests:integration-tests"]="co.datapipelines.integration.ArchitectureGuardTest co.datapipelines.integration.EntryInventoryE2eTest co.datapipelines.integration.PublicContractE2eTest co.datapipelines.integration.RequestNestingDepthE2eTest co.datapipelines.integration.DependencyGuardsE2eTest co.datapipelines.integration.FlywayMigrationIntegrationTest co.datapipelines.integration.ElvisBoundMatcherGuardTest"
+GUARDS[":tests:integration-tests"]="co.datapipelines.integration.ArchitectureGuardTest co.datapipelines.integration.EntryInventoryE2eTest co.datapipelines.integration.LakeEnabledEntryInventoryE2eTest co.datapipelines.integration.PublicContractE2eTest co.datapipelines.integration.RequestNestingDepthE2eTest co.datapipelines.integration.DependencyGuardsE2eTest co.datapipelines.integration.FlywayMigrationIntegrationTest co.datapipelines.integration.ElvisBoundMatcherGuardTest"
 
 # Only runtime retained evidence can populate PG_COVERED; preview passes none.
 pgplan::guard_args() {
