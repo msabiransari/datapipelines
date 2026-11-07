@@ -643,8 +643,9 @@ class ManagedLakeReadsE2eTest {
      * Gen 1 is leased once and returned; the reaper retires it at its age bound and hands its close away, where it
      * hangs. Gen 2 is then built by a lease that runs the long reader: the reaper must retire and hard-close gen 2 in
      * bound while gen 1's close is still hung, and `datasource.pool_close_stuck` must name gen 1 once, no earlier than
-     * its own deadline after its hand-off, and carry that deadline (#840: a managed generation's, 100 s here). Red with the synchronous close restored (the reaper then hangs in gen 1's close
-     * and never reaches gen 2), and with the `scheduler` attribute removed (the retirement lines' thread).
+     * its own deadline after its hand-off, and carry that deadline (#840: a managed generation's, 100 s here). Red
+     * with the synchronous close restored (the reaper then hangs in gen 1's close and never reaches gen 2), and with
+     * the `scheduler` attribute removed (the retirement lines' thread).
      */
     @Test
     @Order(18)
@@ -2011,7 +2012,10 @@ class ManagedLakeReadsE2eTest {
         private const val APP_833 = "dp833-build"
         private const val BUILD_READ_BOUND_SECONDS = 5L
         private const val BUILD_READ_RED_SECONDS = 15L
-        private val BUILD_READ_WINDOW_MS = (BUILD_READ_BOUND_SECONDS * 1000 - 1000)..((BUILD_READ_BOUND_SECONDS + BOUND_SLACK_SECONDS) * 1000)
+        private const val MILLIS_PER_SECOND = 1_000L
+        private val BUILD_READ_WINDOW_MS =
+            (BUILD_READ_BOUND_SECONDS * MILLIS_PER_SECOND - MILLIS_PER_SECOND)..
+                ((BUILD_READ_BOUND_SECONDS + BOUND_SLACK_SECONDS) * MILLIS_PER_SECOND)
         private const val CAUSE_PRINT_CHARS = 160
         private val EXECUTION_BUDGET: Duration = Duration.ofSeconds(180)
 

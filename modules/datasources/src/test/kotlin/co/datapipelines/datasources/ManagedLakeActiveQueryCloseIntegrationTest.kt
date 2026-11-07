@@ -198,12 +198,24 @@ class ManagedLakeActiveQueryCloseIntegrationTest {
                         "past_managed_hard_closed=${pastManaged.hardClosed} pool_closed=${pool.isClosed}",
                 )
                 assertAll(
-                    { withClue("a reap past the GENERAL ceiling must not close a managed generation") { pastGeneral.hardClosed shouldBe 0 } },
-                    { withClue("the query must outlive the general ceiling, or the case discriminates nothing") { runningAtGeneral shouldBe true } },
+                    {
+                        withClue("a reap past the GENERAL ceiling must not close a managed generation") {
+                            pastGeneral.hardClosed shouldBe 0
+                        }
+                    },
+                    {
+                        withClue("the query must outlive the general ceiling, or the case discriminates nothing") {
+                            runningAtGeneral shouldBe true
+                        }
+                    },
                     { withClue("the query must complete on its own before the managed ceiling") { completed shouldBe true } },
                     { run.outcome.get().startsWith("completed:") shouldBe true },
                     { withClue("still inside the managed ceiling at $beforeManagedAt") { beforeManaged.hardClosed shouldBe 0 } },
-                    { withClue("the lease is still out: the managed ceiling hard-closes the generation") { pastManaged.hardClosed shouldBe 1 } },
+                    {
+                        withClue("the lease is still out: the managed ceiling hard-closes the generation") {
+                            pastManaged.hardClosed shouldBe 1
+                        }
+                    },
                 )
             } finally {
                 runCatching { statement.cancel() }
