@@ -493,8 +493,9 @@ class ManagedLakeEgressProxyE2eTest {
                 val parsed: Any? = Yaml().load(compose.readText())
                 val image = parsed.child("services").child("egress-proxy").child("image") as String
                 val shipped = parsed.child("configs").child("egress-proxy-envoy").child("content") as String
+                // Present, not counted: which options carry the cap is the subject (R2 removes one; D.1 must go red).
                 withClue("the shipped config still carries the substituted shapes") {
-                    (shipped.split(MAX_AGE_VARIABLE).size - 1) shouldBe 3
+                    shipped shouldContain "max-age=$MAX_AGE_VARIABLE"
                     (shipped.split(SHIPPED_LISTENER).size - 1) shouldBe 1
                 }
                 val config =
