@@ -42,6 +42,12 @@ import java.util.UUID
  * catalog read, the regrant INSERT) carry the freshness bound through the production scheduler bean, while the
  * registrar's boot-time grant and the build's catalog read stay on the unbounded shared template. That the bound
  * then cancels a held statement on the real scheduler is `ManagedLakeReadsE2eTest`'s.
+ *
+ * #837 — the same statements carry a SOCKET bound too: the connection a bounded statement runs on has its network
+ * timeout set to the statement's bound plus five seconds — 15 000, 30 000, 15 000 and 10 000
+ * milliseconds for the sweep, the retention, the dashboard refresh sweep and the freshness tick — and every statement on
+ * the shared, unbounded template runs on a connection with none. The numbers are literals, like the statement bounds.
+ * That a paused server then ends the statement at the socket bound is `ScheduledJobsMetadataBoundsE2eTest`'s.
  */
 class ScheduledJobsStatementBoundsTest {
     private val recording = RecordingTimeoutDataSource(LAKE)
@@ -77,6 +83,8 @@ class ScheduledJobsStatementBoundsTest {
 
         recording.timeoutOf("UPDATE pipeline_executions\n   SET status = 'ABORTED'") shouldBe SWEEP_BOUND
         recording.timeoutOf("UPDATE pipeline_executions SET heartbeat_at") shouldBe UNBOUNDED
+        recording.socketTimeoutOf("UPDATE pipeline_executions\n   SET status = 'ABORTED'") shouldBe SWEEP_SOCKET
+        recording.socketTimeoutOf("UPDATE pipeline_executions SET heartbeat_at") shouldBe NO_SOCKET
     }
 
     @Test
@@ -88,6 +96,8 @@ class ScheduledJobsStatementBoundsTest {
 
         recording.timeoutOf("DELETE FROM execution_events") shouldBe RETENTION_BOUND
         recording.timeoutOf("SELECT COALESCE(MAX(event_id)") shouldBe UNBOUNDED
+        recording.socketTimeoutOf("DELETE FROM execution_events") shouldBe RETENTION_SOCKET
+        recording.socketTimeoutOf("SELECT COALESCE(MAX(event_id)") shouldBe NO_SOCKET
     }
 
     @Test
@@ -97,6 +107,7 @@ class ScheduledJobsStatementBoundsTest {
         recording.timeoutOf("SELECT NOW() - make_interval") shouldBe RETENTION_BOUND
         recording.timeoutOf("DELETE FROM audit_log") shouldBe RETENTION_BOUND
         recording.everyTimeout() shouldBe setOf(RETENTION_BOUND)
+        recording.everySocketTimeout() shouldBe setOf(RETENTION_SOCKET)
     }
 
     @Test
@@ -107,6 +118,7 @@ class ScheduledJobsStatementBoundsTest {
         recording.timeoutOf("DELETE FROM api_keys") shouldBe RETENTION_BOUND
         recording.timeoutOf("DELETE FROM users") shouldBe RETENTION_BOUND
         recording.everyTimeout() shouldBe setOf(RETENTION_BOUND)
+        recording.everySocketTimeout() shouldBe setOf(RETENTION_SOCKET)
     }
 
     @Test
@@ -117,6 +129,7 @@ class ScheduledJobsStatementBoundsTest {
 
         recording.timeoutOf("UPDATE dashboard_refreshes") shouldBe REFRESH_SWEEP_BOUND
         recording.everyTimeout() shouldBe setOf(REFRESH_SWEEP_BOUND)
+        recording.everySocketTimeout() shouldBe setOf(REFRESH_SWEEP_SOCKET)
     }
 
     @Test
@@ -128,6 +141,7 @@ class ScheduledJobsStatementBoundsTest {
 
         recording.timeoutOf("UPDATE dashboard_refreshes") shouldBe UNBOUNDED
         recording.timeoutOf("DELETE FROM dashboard_refreshes") shouldBe UNBOUNDED
+        recording.everySocketTimeout() shouldBe setOf(NO_SOCKET)
     }
 
     @Test
@@ -138,6 +152,7 @@ class ScheduledJobsStatementBoundsTest {
 
         recording.timeoutOf("DELETE FROM dashboard_refreshes") shouldBe RETENTION_BOUND
         recording.everyTimeout() shouldBe setOf(RETENTION_BOUND)
+        recording.everySocketTimeout() shouldBe setOf(RETENTION_SOCKET)
     }
 
     @Test
@@ -148,6 +163,7 @@ class ScheduledJobsStatementBoundsTest {
 
         recording.timeoutOf("UPDATE parameter_evaluations") shouldBe RETENTION_BOUND
         recording.everyTimeout() shouldBe setOf(RETENTION_BOUND)
+        recording.everySocketTimeout() shouldBe setOf(RETENTION_SOCKET)
     }
 
     @Test
@@ -158,6 +174,7 @@ class ScheduledJobsStatementBoundsTest {
 
         recording.timeoutOf("DELETE FROM parameter_evaluations") shouldBe RETENTION_BOUND
         recording.everyTimeout() shouldBe setOf(RETENTION_BOUND)
+        recording.everySocketTimeout() shouldBe setOf(RETENTION_SOCKET)
     }
 
     @Test
@@ -165,6 +182,7 @@ class ScheduledJobsStatementBoundsTest {
         val registrar = registrar()
         registrar.register()
         recording.timeoutOf("INSERT INTO datasource_workspaces") shouldBe UNBOUNDED
+        recording.socketTimeoutOf("INSERT INTO datasource_workspaces") shouldBe NO_SOCKET
         recording.clear()
         // A registry that reads the catalog it is handed, as DefaultDatasourceRegistry does (its own test pins that).
         val datasources =
@@ -182,6 +200,7 @@ class ScheduledJobsStatementBoundsTest {
         recording.timeoutOf("SELECT t.namespace, t.name") shouldBe FRESHNESS_BOUND
         recording.timeoutOf("INSERT INTO datasource_workspaces") shouldBe FRESHNESS_BOUND
         recording.everyTimeout() shouldBe setOf(FRESHNESS_BOUND)
+        recording.everySocketTimeout() shouldBe setOf(FRESHNESS_SOCKET)
         recording.statementCount() shouldBe 2
     }
 
@@ -192,6 +211,7 @@ class ScheduledJobsStatementBoundsTest {
             .managedTables(LAKE)
 
         recording.timeoutOf("SELECT t.namespace, t.name") shouldBe UNBOUNDED
+        recording.socketTimeoutOf("SELECT t.namespace, t.name") shouldBe NO_SOCKET
     }
 
     /**
@@ -210,6 +230,23 @@ class ScheduledJobsStatementBoundsTest {
 
         recording.everyTimeout() shouldContainAll setOf(REFRESH_SWEEP_BOUND, RETENTION_BOUND, UNBOUNDED)
         recording.everyTimeout().size shouldBe 3
+    }
+
+    /**
+     * #837 non-vacuity: the same recording holds three DISTINCT socket values, each tied to its statement bound
+     * (+ 5 s) and the shared bean's none — a recorder that saw no `setNetworkTimeout`, or one value for every
+     * connection, could not pass the cases above, and cannot pass this. The calls themselves are counted too:
+     * one per bounded statement, none for the shared bean's.
+     */
+    @Test
+    fun `one recording of the housekeeping statements and the shared bean holds socket bounds 15000, 30000 and none`() {
+        val registry = SimpleMeterRegistry()
+        DashboardRuntimeConfiguration().dashboardRefreshSweeper(jdbc, DashboardRuntimeConfig(), ExecutorConfig(), registry).sweepOnce()
+        RetentionSchedulingConfiguration().dashboardRefreshRetention(jdbc, ExecutionsProperties(), registry).retainOnce()
+        DashboardRuntimeConfiguration().dashboardRefreshRepository(jdbc).deleteFinishedOlderThan(RETENTION_DAYS)
+
+        recording.everySocketTimeout() shouldBe setOf(REFRESH_SWEEP_SOCKET, RETENTION_SOCKET, NO_SOCKET)
+        recording.networkTimeoutCalls() shouldBe listOf(REFRESH_SWEEP_SOCKET, RETENTION_SOCKET)
     }
 
     /** The production registrar over the unbounded template (the shared fixture). */
@@ -239,6 +276,19 @@ class ScheduledJobsStatementBoundsTest {
 
         /** No `setQueryTimeout` call. */
         const val UNBOUNDED = 0
+
+        /** #837: no `setNetworkTimeout` call — the driver's own unbounded socket read. */
+        const val NO_SOCKET = 0
+
+        /**
+         * #837: a bounded statement's socket bound is its statement bound plus five seconds, in milliseconds — literals,
+         * never computed from the constants under test: the sweep's 10 s, the retention's 25 s, the dashboard refresh
+         * sweep's 10 s and the freshness tick's 5 s.
+         */
+        const val SWEEP_SOCKET = 15_000
+        const val RETENTION_SOCKET = 30_000
+        const val REFRESH_SWEEP_SOCKET = 15_000
+        const val FRESHNESS_SOCKET = 10_000
 
         /** #818b A: the freshness tick's bound, two statements of it inside the 5 s reaper's cadence each. */
         const val FRESHNESS_BOUND = 5
