@@ -75,8 +75,17 @@ object DatasourceErrorCodes {
     const val IN_USE = "datasource.in_use"
 
     /**
-     * #818 — an edit or delete of the MANAGED lake datasource (design record §6): the server owns the
-     * row and re-syncs it from `datapipelines.lake.*` at every boot, so no caller may change it. 409.
+     * 409 — an edit or delete of the MANAGED lake datasource, or a revoke of its grant to a workspace
+     * (pipeline-contract §13.8).
+     *
+     * #818 (design record §6): the server owns the row and re-syncs it from `datapipelines.lake.*` at
+     * every boot, so no caller may change it. `DefaultDatasourceRegistry` refuses the edit and the
+     * delete below every surface, together with any save whose row claims the managed marker.
+     *
+     * #823: the server, not a person, holds the lake's workspace grants, and the freshness tick would
+     * restore a revoked one. The REST and UI grant-revoke handlers refuse the revoke before anything
+     * is deleted or audited, whether or not the workspace holds the grant. The grant repository does
+     * not refuse it.
      */
     const val MANAGED = "datasource.managed"
 
