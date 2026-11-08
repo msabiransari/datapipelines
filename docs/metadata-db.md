@@ -3,7 +3,7 @@
 **Status:** v1.55 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
-**Last updated:** 2026-11-07
+**Last updated:** 2026-11-08
 
 ---
 
@@ -2566,7 +2566,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-07 | v1.55 | 851 (#844) | V57 replaces `idx_lake_deliveries_unsettled (table_id, state)` with `idx_lake_deliveries_unsettled_page (table_id, id)` under the same partial predicate (§4.53, §5): the settlement page is an index range scan with no sort. |
+| 2026-11-08 | v1.55 | 851 (#844) | V57 replaces `idx_lake_deliveries_unsettled (table_id, state)` with `idx_lake_deliveries_unsettled_page (table_id, id)` under the same partial predicate (§4.53, §5): the settlement page is an index range scan with no sort. |
 | 2026-11-06 | v1.54 | 818e (#818) | V56 widens the lease kind and adds reader metadata pins, their check and index; writer fencing is unchanged. |
 | 2026-11-04 | v1.53 | 799 (#799, dp-lake P4) | V55 adds permanent deliveries (§4.53), publication attempts (§4.54), and the derived pipeline version `writes_managed_lake` flag. |
 | 2026-11-02 | v1.52 | 798 (#798, dp-lake P3) | **V54 — managed lake table definitions.** New **§4.48 `lake_namespaces`** (one row per namespace, not versioned), **§4.49 `lake_tables_managed`** (lifecycle, the definition pointer, `applied_version_here` and the apply state machine `pending` / `applying` / `applied` / `failed` with `apply_operation_id` owning an `applying` row, `policy_json`), **§4.50 `lake_table_definition_versions`** (DRAFT / RELEASED / DISCARDED bodies, the house `body_hash`, the one-DRAFT partial unique index) and **§4.51 `lake_column_semantics`** (the applied version's projection by Iceberg field id); **§4.52** adds `lake_tables.origin` (`managed` / `external`, default `external`) and `revision_seq` (managed rows only), noted in §4.15. JSONB columns take the `_json` suffix (§2), so the record's `policy`, `apply_error` and `body` are `policy_json`, `apply_error_json` and `body_json`. §3 ERD, §5 (seven indexes) and §5A (three environment-local or derived, the definition versions promotable) updated. Down path documented in the migration header, not shipped. |

@@ -6,6 +6,7 @@ import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceGrantRepository
 import co.datapipelines.datasources.DatasourceProperties
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.LakeHttpBounds
 import co.datapipelines.datasources.MANAGED_DIALECT_KEY
 import co.datapipelines.datasources.ManagedLakeSync
 import co.datapipelines.lake.LakeBootCheck
@@ -33,7 +34,9 @@ import java.util.UUID
  *
  * ## What it writes
  * One row named `lake.name`: dialect LAKE, `dialect.catalog.kind = s3`, `dialect.managed = true`, read-only,
- * the store's region, endpoint and URL style, and `memory_limit = reads.memory-limit`. The URL is the anonymous
+ * the store's region, endpoint and URL style, `memory_limit = reads.memory-limit`, and — when
+ * `reads.egress-proxy` is set — `egress_proxy` (#845), which the adapter turns into `SET http_proxy` ahead of the
+ * §15a lockdown. Adding or changing that key RESYNCs the row on the next boot. The URL is the anonymous
  * in-memory engine, so the §15a lock on each generation reaches no other pool. The credential is the reader
  * pair, else the writer pair, through the registry's encrypted credential path, never `properties.dialect`.
  * Neither pair set means the instance's credential chain (`CredentialKind.NONE`).
@@ -64,6 +67,9 @@ class ManagedLakeDatasourceRegistrar(
     @PostConstruct
     fun register() {
         val properties = lakeProperties.ifAvailable?.takeIf { it.enabled } ?: return
+        // #845 D4: the egress proxy answers, declares the configured max-age and reaches the store, or the boot stops
+        // here (lake.boot.egress_proxy) before anything is written.
+        ManagedLakeEgressCheck.verify(properties)
         val actor = userService.provisionSystemActor().id
         systemActor = actor
         val desired = desiredDatasource(properties)
@@ -163,6 +169,11 @@ class ManagedLakeDatasourceRegistrar(
                     storage.endpoint.takeIf { it.isNotBlank() }?.let { put("endpoint", it) }
                     put("url_style", if (storage.pathStyle) "path" else "vhost")
                     put("memory_limit", duckdbSize(properties.reads.memoryLimit))
+                    // #845: the egress proxy the adapter points `http_proxy` at; absent when configuration sets none.
+                    properties.reads.egressProxy
+                        .trim()
+                        .takeIf { it.isNotEmpty() }
+                        ?.let { put(LakeHttpBounds.EGRESS_PROXY_KEY, it) }
                 }
             return Datasource(
                 name = properties.name,
