@@ -86,9 +86,9 @@ class UnsettledPageIndexIntegrationTest {
             println("EXPLAIN EXECUTE prepared deep keyset page (plan_cache_mode=$mode)\n$plan")
             withClue("the prepared deep keyset page's plan under plan_cache_mode=$mode:\n$plan") {
                 assertPageScan(plan)
-                plan shouldContain Regex(
-                    "Index Cond: \\(\\(table_id = ('[0-9a-f-]+'::uuid|\\$1)\\) AND \\(id > ('[0-9a-f-]+'::uuid|\\$2)\\)\\)",
-                )
+                val boundCond =
+                    Regex("Index Cond: \\(\\(table_id = ('[0-9a-f-]+'::uuid|\\$1)\\) AND \\(id > ('[0-9a-f-]+'::uuid|\\$2)\\)\\)")
+                plan shouldContain boundCond
             }
         }
     }
