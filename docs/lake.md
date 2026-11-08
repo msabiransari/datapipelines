@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries, Publication and Reads
 
-**Status:** v1.15 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #824, the managed retire ceiling)
+**Status:** v1.16 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -382,12 +382,20 @@ The Iceberg metadata read leaves the tick's thread. Verification and repair read
 the catalog row with a five-second statement, open no catalog session, and read the metadata JSON on one dedicated
 daemon thread, `dp-lake-metadata`, waiting at most what remains of the budget. So an object store that stops answering
 adds nothing to the 16 seconds. A read that outlives the wait is abandoned and counted
-(`lake.settle.metadata_read_stuck`). It holds no lease and no database connection. It leaves that thread on one socket.
-On a stalled store the client's ten-second socket timeout ends each attempt, and six attempts end the read after about
-a minute (measured at 62 s). On a store that trickles bytes under that timeout it runs until the file ends, which
-nothing here bounds. While it runs, every table's verification and
-repair are deferred on every tick without sending a read: the one thread is the cap, so one stuck read delays
-verification for the whole lake, while deliveries keep settling. Its result is discarded, and a later tick reads again.
+(`lake.settle.metadata_read_stuck`). It holds no lease and no database connection, and it stops itself: the read
+checks between every chunk the store returns, so **an abandoned read ends at its next chunk, or after the store's
+10-second socket timeout if that chunk never comes**. On a store that trickles bytes it therefore ends within one gap
+between bytes; closing the stream then reads at most one more chunk, under the same timeout, before the client aborts
+the connection. A read blocked on a store that has stopped answering sees the stop only when the client gives up: the
+socket timeout ends each attempt, six attempts end a request that gets no response after about a minute (measured at
+62 s), and Iceberg's S3 stream reopens a body read that timed out up to three more times, each a new request under
+those attempts. The file is read whole and capped at 64 MiB of JSON after decompression; a larger one fails the read,
+so every tick defers that table as failed (`lake.settle.deferred`, cause `MetadataFileTooLarge`) until its metadata
+file is back under the cap. The cap is this read's alone: the catalog's own table loads are not capped. While an
+abandoned read runs, every table's verification and repair are deferred on every tick without sending a read: the one
+thread is the cap, so one stuck read delays verification for the whole lake, while deliveries keep settling. Its result
+is discarded; once it has ended (`lake.settle.metadata_read_ended`, `cause=abandoned`) the next tick reads the file
+again from its first byte.
 
 A tick cannot promise more than this. Against a stalled PostgreSQL every statement it started runs to its timeout;
 a connection checkout is bounded by the metadata pool's `connection-timeout` (10 s since #837), and a commit by the
@@ -515,7 +523,8 @@ is an error. The same loss applies when the full protection-window deadline is r
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-07 | v1.15 | 833 (#824) managed retire ceiling | §9 "The bound.": the staleness rule's ceiling term is the managed retire ceiling (`managed-retire-ceiling-seconds`, else `node-query-timeout-max-seconds` + 30); shipped 900 + 14 + 930 + 60 = 1904 ≤ 25 200 s. |
+| 2026-11-08 | v1.16 | 833 (#824) managed retire ceiling | §9 "The bound.": the staleness rule's ceiling term is the managed retire ceiling (`managed-retire-ceiling-seconds`, else `node-query-timeout-max-seconds` + 30); shipped 900 + 14 + 930 + 60 = 1904 ≤ 25 200 s. |
+| 2026-11-08 | v1.15 | 851 (#851) | §8: an abandoned metadata read stops itself at its next chunk, or after the store's 10-second socket timeout; the read is capped at 64 MiB of JSON after decompression; the trickle is no longer unbounded. |
 | 2026-11-07 | v1.14 | 837 (#837) | §8: the sentence on what a tick cannot promise states the connection checkout's bound (10 s) and that the other jobs on `dp-scheduled` end a statement against an unresponsive server at a socket bound while this tick's statements do not yet (#858). |
 | 2026-11-07 | v1.13 | #845 managed reads egress proxy | §9 "The egress proxy": the managed reads leave through a proxy that cuts each object-store connection at `reads.egress-max-age-seconds`, a hygiene bound and not a safety premise; httpfs's retries make a trickling store's reader bound (`http_retries` + 1) × max-age + slack, derived in one place (`LakeHttpBounds.egressReaderEndByMillis`) and printed at boot; the boot refusal; what the proxy sees; a temporary accommodation until duckdb-httpfs#519. The key table gains both keys. |
 | 2026-11-07 | v1.12 | #818 merge review | §9 describes the now-integrated P4 projection-repair invalidation and its independent freshness-tick fallback. |

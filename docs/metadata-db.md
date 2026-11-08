@@ -1,9 +1,9 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.54 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.55 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
-**Last updated:** 2026-11-07
+**Last updated:** 2026-11-08
 
 ---
 
@@ -1984,9 +1984,13 @@ CREATE TABLE lake_deliveries (
     CONSTRAINT chk_lake_deliveries_failure_phase CHECK (failure_phase IN ('listing', 'staging', 'validation', 'publish')),
     CONSTRAINT chk_lake_deliveries_replay_mode CHECK (replay_mode IN ('exact', 'directed'))
 );
-CREATE INDEX idx_lake_deliveries_unsettled ON lake_deliveries (table_id, state)
+-- V57 (#844) replaced V55's idx_lake_deliveries_unsettled ON lake_deliveries (table_id, state) with:
+CREATE INDEX idx_lake_deliveries_unsettled_page ON lake_deliveries (table_id, id)
     WHERE state IN ('RECEIVED', 'PUBLISHING', 'UNKNOWN');
 ```
+
+**Notes:**
+- **V57 (#844): the settlement page's index.** The sweep reads one table's unsettled deliveries a keyset page at a time (`WHERE table_id = ? AND state IN (…) AND id > ? ORDER BY id LIMIT 50`). V55's `(table_id, state)` index served the filter but not the order, so a page could read and sort the table's whole backlog. `(table_id, id)` under the same partial predicate makes the page an index range scan that stops after its rows; the page is the predicate's only reader, so the new index replaces the old one rather than joining it. `UnsettledPageIndexIntegrationTest` pins the plan (no `Sort`, no `Filter`, `id >` in the index condition) under PostgreSQL's default plan cache. A server forced to generic plans (`plan_cache_mode = force_generic_plan`) keeps the keyset bound as a filter instead (#859).
 
 ### 4.54 `lake_delivery_attempts`
 
@@ -2025,7 +2029,7 @@ ALTER TABLE pipeline_versions ADD COLUMN writes_managed_lake BOOLEAN NOT NULL DE
 |---|---|---|---|
 | `lake_deliveries` | `lake_deliveries_pkey` | via PK | Permanent delivery identity |
 | `lake_deliveries` | `uq_lake_deliveries_key` | via UNIQUE | Deduplicate table, feed and delivery id |
-| `lake_deliveries` | `idx_lake_deliveries_unsettled` | explicit | Outstanding delivery sweep by table and state |
+| `lake_deliveries` | `idx_lake_deliveries_unsettled_page` | explicit | V57 (#844): the settlement sweep's keyset page — one table's unsettled deliveries in id order, partial on the unsettled states; replaces V55's `idx_lake_deliveries_unsettled` |
 | `lake_delivery_attempts` | `lake_delivery_attempts_pkey` | via PK | Attempt identity |
 | `lake_delivery_attempts` | `lake_delivery_attempts_operation_id_key` | via UNIQUE | Join commit evidence by operation |
 | `lake_delivery_attempts` | `idx_lake_delivery_attempts_delivery` | explicit | Attempt history for a delivery |
@@ -2562,6 +2566,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-08 | v1.55 | 851 (#844) | V57 replaces `idx_lake_deliveries_unsettled (table_id, state)` with `idx_lake_deliveries_unsettled_page (table_id, id)` under the same partial predicate (§4.53, §5): the settlement page is an index range scan with no sort. |
 | 2026-11-06 | v1.54 | 818e (#818) | V56 widens the lease kind and adds reader metadata pins, their check and index; writer fencing is unchanged. |
 | 2026-11-04 | v1.53 | 799 (#799, dp-lake P4) | V55 adds permanent deliveries (§4.53), publication attempts (§4.54), and the derived pipeline version `writes_managed_lake` flag. |
 | 2026-11-02 | v1.52 | 798 (#798, dp-lake P3) | **V54 — managed lake table definitions.** New **§4.48 `lake_namespaces`** (one row per namespace, not versioned), **§4.49 `lake_tables_managed`** (lifecycle, the definition pointer, `applied_version_here` and the apply state machine `pending` / `applying` / `applied` / `failed` with `apply_operation_id` owning an `applying` row, `policy_json`), **§4.50 `lake_table_definition_versions`** (DRAFT / RELEASED / DISCARDED bodies, the house `body_hash`, the one-DRAFT partial unique index) and **§4.51 `lake_column_semantics`** (the applied version's projection by Iceberg field id); **§4.52** adds `lake_tables.origin` (`managed` / `external`, default `external`) and `revision_seq` (managed rows only), noted in §4.15. JSONB columns take the `_json` suffix (§2), so the record's `policy`, `apply_error` and `body` are `policy_json`, `apply_error_json` and `body_json`. §3 ERD, §5 (seven indexes) and §5A (three environment-local or derived, the definition versions promotable) updated. Down path documented in the migration header, not shipped. |

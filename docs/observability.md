@@ -1,9 +1,9 @@
 # Observability Specification
 
-**Status:** v1.66 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.67 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-11-07
+**Last updated:** 2026-11-08
 
 ---
 
@@ -465,8 +465,8 @@ Delivery storage failures report the exception class and first SQLSTATE using §
 | WARN | `lake.append.settlement_deferred` | Immediate settlement failed and leaves recovery to a later sweep | `delivery_id`, `operation_id`, `cause`, `sql_state` |
 | WARN | `lake.delivery.cleanup_deferred` | Pre-publication cleanup could not stamp every receipt; resources were released and terminal executions are sweepable | `execution_id`, `cause`, `sql_state` |
 | INFO | `lake.settle.sweep` | A normal-mode tick finished its rotating table page, or stopped where its work budget ran out | `tables` (managed tables visited), `rows` (deliveries visited), `changed` (deliveries moved to a terminal state), `exhausted` (the tick's budget was spent), `deferred_budget`, `deferred_stuck`, `deferred_failed` (the tables whose recovery stopped short because the budget was spent, a metadata read could not be waited for, or an exception), `cause=none`, `sql_state=none` |
-| WARN | `lake.settle.metadata_read_stuck` | A metadata read outlived the tick's budget and was abandoned on its own thread. It holds no lease and no connection; every table's verification and repair are deferred until it ends | `table_id`, `elapsed_ms`, `stuck_total` (abandoned reads since boot), `cause=none`, `sql_state=none` |
-| INFO | `lake.settle.metadata_read_ended` | A later tick found the abandoned read finished: its result was discarded and reads resume | `table_id`, `elapsed_ms` (the read's whole life), `cause`, `sql_state` (what it failed with, `none` when it completed) |
+| WARN | `lake.settle.metadata_read_stuck` | A metadata read outlived the tick's budget and was abandoned on its own thread. It holds no lease and no connection and stops itself at its next chunk from the store ([Lake §8](lake.md#8-settlement-and-recovery)); every table's verification and repair are deferred until it ends | `table_id`, `elapsed_ms`, `stuck_total` (abandoned reads since boot), `cause=none`, `sql_state=none` |
+| INFO | `lake.settle.metadata_read_ended` | A later tick found the abandoned read finished: its result was discarded and reads resume | `table_id`, `elapsed_ms` (the read's whole life), `cause` (`abandoned` when it stopped itself after the tick abandoned it, the failure's class when it failed, `none` when it completed), `sql_state` |
 | WARN | `lake.settle.deferred` | One table's recovery failed; later eligible tables/pages remain recoverable | `table_id`, `cause`, `sql_state` |
 | WARN | `lake.settle.sweep_deferred` | The bounded sweep failed outside an individual table, including a held control-row lock | `cause`, `sql_state` |
 | WARN | `lake.append.recipe_write_failed` | The immutable recipe PUT failed before catalog publication. No storage message or cause chain crosses the boundary | `cause`, `sql_state` |
@@ -775,7 +775,8 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-07 | v1.66 | 833 (#833, #824, #840) managed generation bounds | **§3.4A**: `datasource.pool_close_stuck` is reported at each pool's own deadline, from its `connectionTimeout` plus, for a managed lake generation, its reader-pin release bound (was a constant 65 s), and gains `deadline_seconds`. `datasource.pool_hard_closed` reports a managed generation at the managed retire ceiling (`datasources.managed-retire-ceiling-seconds`, #824). **§4.1**: `datapipelines.datasource.pool.close_stuck` counts against that per-pool deadline. |
+| 2026-11-08 | v1.67 | 833 (#833, #824, #840) managed generation bounds | **§3.4A**: `datasource.pool_close_stuck` is reported at each pool's own deadline, from its `connectionTimeout` plus, for a managed lake generation, its reader-pin release bound (was a constant 65 s), and gains `deadline_seconds`. `datasource.pool_hard_closed` reports a managed generation at the managed retire ceiling (`datasources.managed-retire-ceiling-seconds`, #824). **§4.1**: `datapipelines.datasource.pool.close_stuck` counts against that per-pool deadline. |
+| 2026-11-08 | v1.66 | 851 (#851) | §3.4S `lake.settle.metadata_read_stuck`: the abandoned read stops itself at its next chunk; `lake.settle.metadata_read_ended` gains `cause=abandoned` for that end. No event added or renamed. |
 | 2026-11-07 | v1.65 | 837 (#837) | **§3.4H**: the lake settlement tick is named among the jobs on `dp-scheduled`; the new paragraph and table state the two wall-clock bounds on the jobs' metadata waits (the pool's 10 s acquire, a socket bound of statement + 5 s on each bounded statement) and each job's worst wait; the shutdown row notes the retention sweep can outlive the phase against a dead server. No new event or metric. |
 | 2026-11-07 | v1.64 | 845 (#845) managed reads egress proxy | **§3.4Q** gains `lake.egress_proxy_verified` (INFO: the proxy declared the configured max-age and reached the store, with the probe's duration) and `lake.egress_proxy_absent` (WARN: no proxy configured, reads are uncapped), and lists the `lake.boot.egress_proxy` refusal. No credential appears in either line or in the refusal. |
 | 2026-11-06 | v1.63 | 818e (#818) | Reader-lease loss, overlong and slow-round events and counters; pins follow physical closure. |

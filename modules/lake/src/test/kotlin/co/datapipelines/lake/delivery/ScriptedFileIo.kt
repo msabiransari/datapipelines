@@ -11,17 +11,21 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * The object store as the sweep's metadata read meets it (B.0): every file answers [bytes], healthily, stalled or
- * trickling. A stalled read blocks on a latch and IGNORES interrupts, because a read on a real socket does; a trickling
- * read serves one byte per [TRICKLE_MILLIS] until released. After [release] a stream serves the rest at once.
+ * The object store as the sweep's metadata read meets it (B.0): every file answers [padding] ASCII spaces then [bytes]
+ * (JSON allows leading whitespace, so a file of any size parses without a literal of that size), healthily, stalled,
+ * trickling or paced. A read asking for many bytes gets what a socket has: everything at once when healthy, one byte
+ * per [TRICKLE_MILLIS] when trickling, [PACE_CHUNK] bytes per [PACE_MILLIS] when paced. A stalled read blocks on a latch
+ * and IGNORES interrupts, because a read on a real socket does. After [release] a stream serves the rest at once.
  */
 internal class ScriptedFileIo(
     private val bytes: ByteArray,
     @Volatile var mode: Mode = Mode.HEALTHY,
+    private val padding: Int = 0,
 ) : FileIO {
-    enum class Mode { HEALTHY, STALL, TRICKLE, FAIL }
+    enum class Mode { HEALTHY, STALL, TRICKLE, PACED, FAIL }
 
     private val released = CountDownLatch(1)
+    private val size = padding.toLong() + bytes.size
 
     /** How many streams were opened: the count of reads that were ever submitted to the store. */
     val streamsEntered = AtomicInteger()
@@ -29,6 +33,9 @@ internal class ScriptedFileIo(
     /** How many streams were closed: a read that ended, whichever way. */
     val readsEnded = AtomicInteger()
     val bytesServed = AtomicLong()
+
+    /** Bytes the latest stream served: a read that starts again starts from byte 0. */
+    val latestStreamBytes = AtomicLong()
 
     /** How many times the client itself was closed. */
     val closes = AtomicInteger()
@@ -52,10 +59,11 @@ internal class ScriptedFileIo(
     private inner class ScriptedInput(
         private val path: String,
     ) : InputFile {
-        override fun getLength(): Long = bytes.size.toLong()
+        override fun getLength(): Long = size
 
         override fun newStream(): SeekableInputStream {
             streamsEntered.incrementAndGet()
+            latestStreamBytes.set(0)
             readerThread = Thread.currentThread()
             return ScriptedStream(mode)
         }
@@ -68,31 +76,49 @@ internal class ScriptedFileIo(
     private inner class ScriptedStream(
         private val script: Mode,
     ) : SeekableInputStream() {
-        private var position = 0
+        private var position = 0L
 
-        override fun getPos(): Long = position.toLong()
+        override fun getPos(): Long = position
 
         override fun seek(newPos: Long) {
-            position = newPos.toInt()
+            position = newPos
         }
 
         override fun read(): Int {
-            when (script) {
-                Mode.HEALTHY -> Unit
-                Mode.STALL -> awaitReleaseIgnoringInterrupts()
-                Mode.TRICKLE -> pauseWhileTrickling()
-                Mode.FAIL -> throw IOException("the scripted store refused the read")
-            }
+            val one = ByteArray(1)
+            return if (read(one, 0, 1) < 0) -1 else one[0].toInt() and BYTE_MASK
+        }
+
+        override fun read(
+            b: ByteArray,
+            off: Int,
+            len: Int,
+        ): Int {
+            if (len == 0) return 0
+            val available =
+                when (script) {
+                    Mode.HEALTHY -> len
+                    Mode.STALL -> awaitReleaseIgnoringInterrupts().let { len }
+                    Mode.TRICKLE -> if (pause(TRICKLE_MILLIS)) len else 1
+                    Mode.PACED -> if (pause(PACE_MILLIS)) len else minOf(len, PACE_CHUNK)
+                    Mode.FAIL -> throw IOException("the scripted store refused the read")
+                }
             // A stalled read released into a failing store fails as it wakes.
             if (mode == Mode.FAIL) throw IOException("the scripted store failed the read")
-            if (position >= bytes.size) return -1
-            bytesServed.incrementAndGet()
-            return bytes[position++].toInt() and BYTE_MASK
+            if (position >= size) return -1
+            val served = minOf(available.toLong(), size - position).toInt()
+            for (i in 0 until served) b[off + i] = byteAt(position + i)
+            position += served
+            bytesServed.addAndGet(served.toLong())
+            latestStreamBytes.addAndGet(served.toLong())
+            return served
         }
 
         override fun close() {
             readsEnded.incrementAndGet()
         }
+
+        private fun byteAt(at: Long): Byte = if (at < padding) SPACE else bytes[(at - padding).toInt()]
 
         private fun awaitReleaseIgnoringInterrupts() {
             while (released.count > 0) {
@@ -104,17 +130,21 @@ internal class ScriptedFileIo(
             }
         }
 
-        private fun pauseWhileTrickling() {
+        /** Waits [millis] for the next bytes; true when the store was released meanwhile and serves the rest at once. */
+        private fun pause(millis: Long): Boolean =
             try {
-                released.await(TRICKLE_MILLIS, TimeUnit.MILLISECONDS)
+                released.await(millis, TimeUnit.MILLISECONDS)
             } catch (_: InterruptedException) {
-                // As above; the next byte is simply due.
+                // As above; the next bytes are simply due.
+                released.count == 0L
             }
-        }
     }
 
-    private companion object {
-        const val BYTE_MASK = 0xFF
+    companion object {
+        private const val BYTE_MASK = 0xFF
+        private const val SPACE = ' '.code.toByte()
         const val TRICKLE_MILLIS = 100L
+        const val PACE_MILLIS = 100L
+        const val PACE_CHUNK = 64 * 1024
     }
 }
