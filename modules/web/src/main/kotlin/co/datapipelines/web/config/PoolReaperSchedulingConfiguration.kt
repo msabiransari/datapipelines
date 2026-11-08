@@ -79,18 +79,20 @@ class PoolReaperSchedulingConfiguration {
      * #818d (record §10 RULING 4 amended, item 6) — the closer every pool the reaper hands off is closed by: the
      * `dp-pool-close` threads, each close under its pool's own deadline (#840,
      * [co.datapipelines.datasources.pooling.PoolCloser.deadlineFor]); a managed generation's adds the release of its
-     * reader pins on the metadata pool [jdbc] runs on ([DeadlinePoolCloser.managedReleaseBound]).
+     * reader pins on the metadata pool [jdbc] runs on ([DeadlinePoolCloser.managedReleaseBound]). A context with no
+     * `JdbcTemplate` (a slice that wires the reaper alone) has no keeper either, so the term falls back to HikariCP's
+     * default checkout, as the keeper's own derivation does for a pool it cannot read.
      * The registry takes it (`DomainConfiguration.datasourceRegistry`), which is what orders its destruction after
      * the registry's own synchronous shutdown close.
      */
     @Bean
     fun poolCloser(
         metrics: PoolLifecycleMetrics,
-        jdbc: JdbcTemplate,
+        jdbc: ObjectProvider<JdbcTemplate>,
     ): DeadlinePoolCloser =
         DeadlinePoolCloser(
             metrics,
-            managedReleaseBound = DeadlinePoolCloser.managedReleaseBound(jdbc.dataSource),
+            managedReleaseBound = DeadlinePoolCloser.managedReleaseBound(jdbc.ifAvailable?.dataSource),
         )
 
     /**
