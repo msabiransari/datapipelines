@@ -26,28 +26,55 @@ import javax.sql.DataSource
  * The `@Scheduled` jobs' statement fixtures, shared by `ScheduledJobsStatementBoundsTest` (#326, #636, #818b A: each
  * statement carries its bound) and `ReaperDelayDerivationTest` (#818c: the bounds sum to the published reaper delay).
  *
- * Hands out relaxed JDBC doubles and records, per prepared statement, its SQL and the `queryTimeout` set on it
- * ([UNBOUNDED] when none was). A query answers one row: one column, the database clock for the audit cutoff, a
- * `(table, column)` pair for the keys purge's FK list, an `id` for the housekeeping sweeps' `RETURNING id`, and the
- * managed lake's namespace for its catalog read. An update answers 0 rows, so a batched loop ends after one batch.
+ * Hands out relaxed JDBC doubles and records, per prepared statement, its SQL, the `queryTimeout` set on it
+ * ([UNBOUNDED] when none was) and — #837 — the network (socket read) timeout in force on the connection it was prepared
+ * on when it was executed ([NO_SOCKET_BOUND] when none was set). A query answers one row: one column, the database
+ * clock for the audit cutoff, a `(table, column)` pair for the keys purge's FK list, an `id` for the housekeeping sweeps'
+ * `RETURNING id`, and the managed lake's namespace for its catalog read. An update answers 0 rows, so a batched loop ends after one batch.
  */
 internal class RecordingTimeoutDataSource(
     private val lakeName: String = SCHEDULED_JOBS_TEST_LAKE,
 ) : DataSource by mockk(relaxed = true) {
     private val statements = mutableListOf<Pair<String, IntArray>>()
 
-    override fun getConnection(): Connection =
-        mockk(relaxed = true) {
-            every { prepareStatement(any<String>()) } answers { statement(firstArg()) }
-        }
+    /** Per statement, parallel to [statements]: the connection's network timeout when the statement ran. */
+    private val sockets = mutableListOf<IntArray>()
 
-    private fun statement(sql: String): PreparedStatement {
+    /** Every `setNetworkTimeout` call on any connection handed out, in order, in milliseconds. */
+    private val networkCalls = mutableListOf<Int>()
+
+    override fun getConnection(): Connection {
+        val network = intArrayOf(NO_SOCKET_BOUND)
+        val connection = mockk<Connection>(relaxed = true)
+        every { connection.prepareStatement(any<String>()) } answers { statement(firstArg(), connection, network) }
+        every { connection.setNetworkTimeout(any(), any()) } answers {
+            network[0] = secondArg()
+            networkCalls += secondArg<Int>()
+        }
+        every { connection.networkTimeout } answers { network[0] }
+        return connection
+    }
+
+    private fun statement(
+        sql: String,
+        owner: Connection,
+        network: IntArray,
+    ): PreparedStatement {
         val timeout = intArrayOf(UNBOUNDED)
+        val socket = intArrayOf(NO_SOCKET_BOUND)
         statements += sql to timeout
+        sockets += socket
         return mockk(relaxed = true) {
             every { setQueryTimeout(any()) } answers { timeout[0] = firstArg() }
-            every { executeUpdate() } returns 0
-            every { executeQuery() } answers { oneRow() }
+            every { connection } returns owner
+            every { executeUpdate() } answers {
+                socket[0] = network[0]
+                0
+            }
+            every { executeQuery() } answers {
+                socket[0] = network[0]
+                oneRow()
+            }
         }
     }
 
@@ -76,6 +103,25 @@ internal class RecordingTimeoutDataSource(
 
     fun everyTimeout(): Set<Int> = statements.map { it.second[0] }.toSet()
 
+    /**
+     * #837 — the network timeout, in milliseconds, in force on the connection of the one statement whose SQL starts with
+     * [prefix] when it ran ([NO_SOCKET_BOUND] when none was set).
+     */
+    fun socketTimeoutOf(prefix: String): Int {
+        val matching = statements.indices.filter { statements[it].first.trim().startsWith(prefix) }
+        withClue("statements sent: ${firstLines()}") {
+            matching.shouldNotBeEmpty()
+            matching.map { sockets[it][0] }.toSet().size shouldBe 1
+        }
+        return sockets[matching.first()][0]
+    }
+
+    /** #837 — every statement's network timeout when it ran, as a set (milliseconds). */
+    fun everySocketTimeout(): Set<Int> = sockets.map { it[0] }.toSet()
+
+    /** #837 — every `setNetworkTimeout` call on a connection handed out, in order (milliseconds). */
+    fun networkTimeoutCalls(): List<Int> = networkCalls.toList()
+
     /** Every statement's recorded timeout, in the order the statements were prepared. */
     fun timeouts(): List<Int> = statements.map { it.second[0] }
 
@@ -90,11 +136,18 @@ internal class RecordingTimeoutDataSource(
 
     fun statementCount(): Int = statements.size
 
-    fun clear() = statements.clear()
+    fun clear() {
+        statements.clear()
+        sockets.clear()
+        networkCalls.clear()
+    }
 
     companion object {
         /** No `setQueryTimeout` call. */
         const val UNBOUNDED = 0
+
+        /** No `setNetworkTimeout` call: the driver's own 0, an unbounded socket read. */
+        const val NO_SOCKET_BOUND = 0
     }
 }
 
