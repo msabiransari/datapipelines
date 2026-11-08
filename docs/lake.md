@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries, Publication and Reads
 
-**Status:** v1.12 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases)
+**Status:** v1.13 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -390,9 +390,11 @@ repair are deferred on every tick without sending a read: the one thread is the 
 verification for the whole lake, while deliveries keep settling. Its result is discarded, and a later tick reads again.
 
 A tick cannot promise more than this. Against a stalled PostgreSQL every statement it started runs to its timeout;
-commits and connection checkouts are not statements and are bounded only by the pool's and driver's settings, and
-against a server that accepts and never answers, a timeout's cancel does not end the blocked read (#837). A healthy
-tick still reads the store once per table for the semantics repair's version check.
+a connection checkout is bounded by the metadata pool's `connection-timeout` (10 s since #837), and a commit by the
+pool's and driver's settings. Against a server that accepts and never answers, a timeout's cancel does not end the
+blocked read, and the other four jobs on this thread end such a statement at a socket bound (#837); this tick's
+statements are built in this module and do not carry one yet, so against that server a statement here has no
+wall-clock bound (#858). A healthy tick still reads the store once per table for the semantics repair's version check.
 
 The row cursor passes over live, busy and failing deliveries and wraps when a page comes back short, so deliveries
 behind them are reached on a later tick. Cursors are held in memory; after a restart each table starts again at its
@@ -485,6 +487,7 @@ is an error. The same loss applies when the full protection-window deadline is r
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-07 | v1.13 | 837 (#837) | §8: the sentence on what a tick cannot promise states the connection checkout's bound (10 s) and that the other jobs on `dp-scheduled` end a statement against an unresponsive server at a socket bound while this tick's statements do not yet (#858). |
 | 2026-11-07 | v1.12 | #818 merge review | §9 describes the now-integrated P4 projection-repair invalidation and its independent freshness-tick fallback. |
 | 2026-11-06 | v1.11 | 818e (#818) | §9: reader leases pin metadata revisions through physical close; five-term staleness rule, dedicated heartbeat, expiry/orphan consumer contract and stalled-metadata residual. |
 | 2026-11-05 | v1.10 | 818d (#818) | §9 "The bound.": the reaper runs on its own `dp-reaper` thread and hands each close to a close thread, so the reaper delay is 7 s; the bound and boot rule gain the reader termination (92 s, derived from the managed lake's object-store request bounds). |
