@@ -86,7 +86,7 @@ class PoolCloseDeadlineTest {
     }
 
     @Test
-    fun `the release bound is the metadata pool's checkout plus the reader statement bound - 35 s shipped`() {
+    fun `the release bound is the metadata pool's checkout plus the reader statement bound - 35 s on HikariCP's default`() {
         // LakeLeases.READER_STATEMENT_TIMEOUT_SECONDS = 5, a literal here: never read back from the class under test.
         DeadlinePoolCloser.managedReleaseBound(null) shouldBe Duration.ofSeconds(DEFAULT_TIMEOUT_SECONDS + READER_STATEMENT_SECONDS)
         // The no-argument constructor is lazy: it validates and starts nothing until a connection is asked for.

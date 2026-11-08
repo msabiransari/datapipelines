@@ -168,7 +168,8 @@ class DeadlinePoolCloser(
          * (`PoolReaderLeaseConfiguration.managedGenerationPins` builds the keeper over the same [metadata]): the
          * checkout, bounded by that pool's own `connectionTimeout` (HikariCP's default when it is not a Hikari pool,
          * as the keeper reads it), plus the DELETE, bounded at `LakeLeases.READER_STATEMENT_TIMEOUT_SECONDS` by its
-         * statement timeout and its socket timeout. 30 + 5 = 35 s on the shipped metadata pool.
+         * statement timeout and its socket timeout. 10 + 5 = 15 s on the shipped metadata pool
+         * (`spring.datasource.hikari.connection-timeout` = 10 000 ms since #837); 30 + 5 = 35 s on HikariCP's default.
          */
         fun managedReleaseBound(metadata: DataSource?): Duration =
             Duration
