@@ -2014,8 +2014,10 @@ class ManagedLakeReadsE2eTest {
         private const val BUILD_READ_RED_SECONDS = 15L
         private const val MILLIS_PER_SECOND = 1_000L
         private val BUILD_READ_WINDOW_MS =
-            (BUILD_READ_BOUND_SECONDS * MILLIS_PER_SECOND - MILLIS_PER_SECOND)..
-                ((BUILD_READ_BOUND_SECONDS + BOUND_SLACK_SECONDS) * MILLIS_PER_SECOND)
+            LongRange(
+                BUILD_READ_BOUND_SECONDS * MILLIS_PER_SECOND - MILLIS_PER_SECOND,
+                (BUILD_READ_BOUND_SECONDS + BOUND_SLACK_SECONDS) * MILLIS_PER_SECOND,
+            )
         private const val CAUSE_PRINT_CHARS = 160
         private val EXECUTION_BUDGET: Duration = Duration.ofSeconds(180)
 
