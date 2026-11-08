@@ -39,7 +39,7 @@ class LakeHttpBoundsTest {
     fun `845 - the shipped 960 s max-age bounds a trickled reader at 2 886 100 ms, about 48 minutes`() {
         val endBy = LakeHttpBounds.egressReaderEndByMillis(960)
         endBy shouldBe 2_886_100L
-        withClue("the docs' 'about 48 minutes'") { (endBy / 60_000.0).toInt() shouldBe 48 }
+        withClue("the KDoc's 'about 48 minutes'") { (endBy / 60_000.0).toInt() shouldBe 48 }
     }
 
     @Test
