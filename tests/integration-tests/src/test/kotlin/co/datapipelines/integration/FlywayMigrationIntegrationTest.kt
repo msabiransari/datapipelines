@@ -182,6 +182,8 @@ class FlywayMigrationIntegrationTest {
                 "54|lake definitions|true",
                 "55|lake deliveries|true",
                 "56|lake reader leases|true",
+                // #844 (V57) — the settlement page's (table_id, id) partial index replaces V55's (table_id, state) one.
+                "57|lake deliveries keyset index|true",
             )
     }
 
@@ -1757,7 +1759,7 @@ class FlywayMigrationIntegrationTest {
                 // #798 (V54) — the four PKs, a namespace / table name each registered once, one DRAFT per table.
                 "lake_deliveries.lake_deliveries_pkey",
                 "lake_deliveries.uq_lake_deliveries_key",
-                "lake_deliveries.idx_lake_deliveries_unsettled",
+                "lake_deliveries.idx_lake_deliveries_unsettled_page",
                 "lake_delivery_attempts.lake_delivery_attempts_pkey",
                 "lake_delivery_attempts.lake_delivery_attempts_operation_id_key",
                 "lake_delivery_attempts.idx_lake_delivery_attempts_delivery",
