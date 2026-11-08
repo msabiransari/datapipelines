@@ -24,14 +24,14 @@ class EgressProxyConfigMainTest {
 
     @Test
     fun `the output path and refusal prefix are the deployment's contract`() {
-EgressProxyConfigMain.DEFAULT_OUTPUT shouldBe "/dp-egress-config/envoy.yaml"
-EgressProxyConfigMain.REFUSAL_PREFIX shouldBe "egress_config:"
+        EgressProxyConfigMain.DEFAULT_OUTPUT shouldBe "/dp-egress-config/envoy.yaml"
+        EgressProxyConfigMain.REFUSAL_PREFIX shouldBe "egress_config:"
     }
 
     @Test
     fun `the rendered config is deterministic - same inputs, byte-identical output`() {
-        val first =EgressProxyConfigMain.render(960, minioVhost())
-        val second =EgressProxyConfigMain.render(960, minioVhost())
+        val first = EgressProxyConfigMain.render(960, minioVhost())
+        val second = EgressProxyConfigMain.render(960, minioVhost())
         first shouldBe second
     }
 
@@ -99,10 +99,18 @@ EgressProxyConfigMain.REFUSAL_PREFIX shouldBe "egress_config:"
         val out = temp.resolve("envoy.yaml")
         val stdout = StringBuilder()
         val stderr = StringBuilder()
+        val envMap =
+            env(
+                EgressProxyConfigMain.ENV_ENABLED to "true",
+                EgressProxyConfigMain.ENV_BUCKET to "dp-lake",
+                EgressProxyConfigMain.ENV_ENDPOINT to "http://minio:9000",
+                EgressProxyConfigMain.ENV_PATH_STYLE to "false",
+                EgressProxyConfigMain.ENV_MAX_AGE to "120",
+            )
         val code =
-EgressProxyConfigMain.run(
+            EgressProxyConfigMain.run(
                 args = arrayOf(out.toString()),
-                env = env(EgressProxyConfigMain.ENV_ENABLED to "true",EgressProxyConfigMain.ENV_BUCKET to "dp-lake",EgressProxyConfigMain.ENV_ENDPOINT to "http://minio:9000",EgressProxyConfigMain.ENV_PATH_STYLE to "false",EgressProxyConfigMain.ENV_MAX_AGE to "120"),
+                env = envMap,
                 out = { stdout.appendLine(it) },
                 err = { stderr.appendLine(it) },
             )
@@ -125,9 +133,14 @@ EgressProxyConfigMain.run(
         val out = temp.resolve("never.yaml")
         val stderr = StringBuilder()
         val code =
-EgressProxyConfigMain.run(
+            EgressProxyConfigMain.run(
                 args = arrayOf(out.toString()),
-                env = env(EgressProxyConfigMain.ENV_ENABLED to "true",EgressProxyConfigMain.ENV_BUCKET to "",EgressProxyConfigMain.ENV_MAX_AGE to "120"),
+                env =
+                    env(
+                        EgressProxyConfigMain.ENV_ENABLED to "true",
+                        EgressProxyConfigMain.ENV_BUCKET to "",
+                        EgressProxyConfigMain.ENV_MAX_AGE to "120",
+                    ),
                 err = { stderr.appendLine(it) },
             )
         code shouldBe 1
@@ -138,13 +151,31 @@ EgressProxyConfigMain.run(
     @Test
     fun `run refuses a malformed cap or a non-boolean - nothing is rendered`() {
         listOf(
-            env(EgressProxyConfigMain.ENV_ENABLED to "true",EgressProxyConfigMain.ENV_BUCKET to "b",EgressProxyConfigMain.ENV_MAX_AGE to "abc"),
-            env(EgressProxyConfigMain.ENV_ENABLED to "true",EgressProxyConfigMain.ENV_BUCKET to "b",EgressProxyConfigMain.ENV_MAX_AGE to "0"),
-            env(EgressProxyConfigMain.ENV_ENABLED to "TRUE",EgressProxyConfigMain.ENV_BUCKET to "b",EgressProxyConfigMain.ENV_MAX_AGE to "120",EgressProxyConfigMain.ENV_PATH_STYLE to "yes"),
+            env(
+                EgressProxyConfigMain.ENV_ENABLED to "true",
+                EgressProxyConfigMain.ENV_BUCKET to "b",
+                EgressProxyConfigMain.ENV_MAX_AGE to "abc",
+            ),
+            env(
+                EgressProxyConfigMain.ENV_ENABLED to "true",
+                EgressProxyConfigMain.ENV_BUCKET to "b",
+                EgressProxyConfigMain.ENV_MAX_AGE to "0",
+            ),
+            env(
+                EgressProxyConfigMain.ENV_ENABLED to "TRUE",
+                EgressProxyConfigMain.ENV_BUCKET to "b",
+                EgressProxyConfigMain.ENV_MAX_AGE to "120",
+                EgressProxyConfigMain.ENV_PATH_STYLE to "yes",
+            ),
         ).forEach { badEnv ->
             val out = temp.resolve("refused.yaml")
             val stderr = StringBuilder()
-            val code =EgressProxyConfigMain.run(args = arrayOf(out.toString()), env = badEnv, err = { stderr.appendLine(it) })
+            val code =
+                EgressProxyConfigMain.run(
+                    args = arrayOf(out.toString()),
+                    env = badEnv,
+                    err = { stderr.appendLine(it) },
+                )
             withClue(stderr.toString()) {
                 code shouldBe 1
                 stderr.toString().trim() shouldStartWith "egress_config:"
@@ -156,7 +187,15 @@ EgressProxyConfigMain.run(
     @Test
     fun `run with the lake disabled still renders the deny-only fail-closed file`() {
         val out = temp.resolve("deny-only.yaml")
-        val code =EgressProxyConfigMain.run(args = arrayOf(out.toString()), env = env(EgressProxyConfigMain.ENV_ENABLED to "false",EgressProxyConfigMain.ENV_MAX_AGE to "960"))
+        val code =
+            EgressProxyConfigMain.run(
+                args = arrayOf(out.toString()),
+                env =
+                    env(
+                        EgressProxyConfigMain.ENV_ENABLED to "false",
+                        EgressProxyConfigMain.ENV_MAX_AGE to "960",
+                    ),
+            )
         code shouldBe 0
         val vhosts = virtualHosts(hcm(parse(Files.readString(out))))
         vhosts.size shouldBe 1
@@ -175,7 +214,9 @@ EgressProxyConfigMain.run(
     @Suppress("UNCHECKED_CAST")
     private fun parse(yaml: String): Map<String, Any> =
         com.fasterxml.jackson.dataformat.yaml.YAMLFactory().let { factory ->
-            com.fasterxml.jackson.databind.ObjectMapper(factory).readValue(yaml, Map::class.java) as Map<String, Any>
+            com.fasterxml.jackson.databind
+                .ObjectMapper(factory)
+                .readValue(yaml, Map::class.java) as Map<String, Any>
         }
 
     @Suppress("UNCHECKED_CAST")
@@ -197,8 +238,7 @@ EgressProxyConfigMain.run(
     private fun routes(vhost: Map<String, Any>) = vhost["routes"] as List<Map<String, Any>>
 
     @Suppress("UNCHECKED_CAST")
-    private fun clusters(config: Map<String, Any>) =
-        (config["static_resources"] as Map<String, Any>)["clusters"] as List<Map<String, Any>>
+    private fun clusters(config: Map<String, Any>) = (config["static_resources"] as Map<String, Any>)["clusters"] as List<Map<String, Any>>
 
     private fun declarationBody(route: Map<String, Any>): String {
         val response = route["direct_response"] as Map<*, *>

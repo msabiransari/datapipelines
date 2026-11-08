@@ -26,6 +26,9 @@ object EgressStoreTarget {
     /** The HTTPS default port; a CONNECT tunnel always carries it (probe A). */
     private const val HTTPS_PORT = 443
 
+    /** The inclusive top of the port range; the bottom (1) needs no name. */
+    private const val MAX_PORT = 65_535
+
     /** A derived or declared host: letters, digits, dots and dashes, starting and ending alphanumeric. */
     private val HOST_GRAMMAR = Regex("^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$")
 
@@ -93,7 +96,7 @@ object EgressStoreTarget {
             error("the endpoint's ':$port' is not a port (§3.36)")
         }
         val parsed = port.toInt()
-        if (parsed !in 1..65_535) error("the endpoint's port $parsed is outside 1..65535 (§3.36)")
+        if (parsed !in 1..MAX_PORT) error("the endpoint's port $parsed is outside 1..65535 (§3.36)")
         return Triple(scheme, tail.substring(0, colon), parsed)
     }
 

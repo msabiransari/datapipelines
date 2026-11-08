@@ -95,7 +95,7 @@ class ManagedLakeDatasourceRegistrarTest {
     }
 
     @Test
-    fun `862 - a blank region and endpoint render the derived regional AWS form, virtual-host style is spelled vhost, a non-MB size falls to KB`() {
+    fun `862 - a blank region and endpoint render the derived regional form, a non-MB size falls to KB`() {
         val dialect =
             desired(
                 storage(region = "", endpoint = "", pathStyle = false),

@@ -119,12 +119,13 @@ object ManagedLakeEgressCheck {
      * dials a host the proxy refuses.
      */
     internal fun storeProbeUri(storage: LakeProperties.Storage): URI =
-        EgressStoreTarget.derive(
-            endpoint = storage.endpoint,
-            region = storage.region,
-            bucket = storage.bucket,
-            pathStyle = storage.pathStyle,
-        ).probeUri
+        EgressStoreTarget
+            .derive(
+                endpoint = storage.endpoint,
+                region = storage.region,
+                bucket = storage.bucket,
+                pathStyle = storage.pathStyle,
+            ).probeUri
 
     private fun declarationRequest(proxy: String): HttpRequest =
         HttpRequest

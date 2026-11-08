@@ -52,30 +52,7 @@ object EgressProxyConfigMain {
         maxAgeSeconds: Long,
         target: EgressStoreTarget.Target?,
     ): String {
-        val vhosts = StringBuilder()
-        if (target != null) {
-            val domains = target.domains.joinToString(", ") { "\"$it\"" }
-            vhosts.append(
-                """
-                |                    - name: store
-                |                      domains: [$domains]
-                |                      routes:
-                |                        - match: { path: /dp-egress, headers: [{ name: x-dp-egress-check, present_match: true }] }
-                |                          direct_response: { status: 200, body: { inline_string: "max-age=$maxAgeSeconds" } }
-                |                        - match: { connect_matcher: {} }
-                |                          route:
-                |                            cluster: $FORWARD_CLUSTER
-                |                            timeout: 0s
-                |                            upgrade_configs:
-                |                              - upgrade_type: CONNECT
-                |                                connect_config: {}
-                |                        - match: { prefix: / }
-                |                          route:
-                |                            cluster: $FORWARD_CLUSTER
-                |                            timeout: 0s
-                """.trimMargin(),
-            ).append('\n')
-        }
+        val vhosts = storeVhosts(target, maxAgeSeconds)
         return """
             |static_resources:
             |  listeners:
@@ -125,6 +102,36 @@ object EgressProxyConfigMain {
             """.trimMargin() + "\n"
     }
 
+    /**
+     * The store vhost prepended ahead of the deny vhost; empty when no store allowlist is configured,
+     * so the deny-only shape keeps its indentation without a dangling list head.
+     */
+    private fun storeVhosts(
+        target: EgressStoreTarget.Target?,
+        maxAgeSeconds: Long,
+    ): String {
+        if (target == null) return ""
+        val domains = target.domains.joinToString(", ") { "\"$it\"" }
+        return """
+            |                    - name: store
+            |                      domains: [$domains]
+            |                      routes:
+            |                        - match: { path: /dp-egress, headers: [{ name: x-dp-egress-check, present_match: true }] }
+            |                          direct_response: { status: 200, body: { inline_string: "max-age=$maxAgeSeconds" } }
+            |                        - match: { connect_matcher: {} }
+            |                          route:
+            |                            cluster: $FORWARD_CLUSTER
+            |                            timeout: 0s
+            |                            upgrade_configs:
+            |                              - upgrade_type: CONNECT
+            |                                connect_config: {}
+            |                        - match: { prefix: / }
+            |                          route:
+            |                            cluster: $FORWARD_CLUSTER
+            |                            timeout: 0s
+            """.trimMargin() + "\n"
+    }
+
     /** Reads the environment, renders and writes; the exit code is the container's verdict. */
     fun run(
         args: Array<String>,
@@ -159,7 +166,10 @@ object EgressProxyConfigMain {
                     "store=${target?.domains?.singleOrNull() ?: "none"}",
             )
             0
-        } catch (refused: EgressConfigRefusal) {
+        } catch (
+            @Suppress("SwallowedException")
+            refused: EgressConfigRefusal,
+        ) {
             1
         }
 
