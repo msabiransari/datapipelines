@@ -345,14 +345,15 @@ class ManagedLakeReadsE2eTest {
             awaitTrue(Duration.ofSeconds(A_TICK_SECONDS * 4)) { CREATED_WS in grantedWorkspaceNames() }
             val auditBefore = grantAuditRows()
             metadata { connection ->
-                connection.prepareStatement(
-                    "DELETE FROM datasource_workspaces WHERE datasource_name = ? AND workspace_id = " +
-                        "(SELECT id FROM workspaces WHERE name = ?)",
-                ).use {
-                    it.setString(1, LAKE)
-                    it.setString(2, CREATED_WS)
-                    it.executeUpdate() shouldBe 1
-                }
+                connection
+                    .prepareStatement(
+                        "DELETE FROM datasource_workspaces WHERE datasource_name = ? AND workspace_id = " +
+                            "(SELECT id FROM workspaces WHERE name = ?)",
+                    ).use {
+                        it.setString(1, LAKE)
+                        it.setString(2, CREATED_WS)
+                        it.executeUpdate() shouldBe 1
+                    }
             }
 
             awaitTrue(Duration.ofSeconds(A_TICK_SECONDS * 4)) { CREATED_WS in grantedWorkspaceNames() }
