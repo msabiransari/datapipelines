@@ -146,9 +146,10 @@ class DatasourceGrantRepository(
      * the new workspace atomically, in the creation transaction (the registrar's `grantTo`, through
      * [grant]), so while the lake is enabled a workspace created there never exists without it. The
      * tick's pass through here is the REPAIR path, for a workspace that lacks the grant: one not
-     * created through `WorkspaceService.create` (the `demo` workspace, which its seeder inserts
-     * directly, or one inserted by SQL), one that predates the lake, or one whose grant row was
-     * deleted by hand.
+     * created through `WorkspaceService.create` (for example, one inserted by SQL), one that
+     * predates the lake, or one whose grant row was deleted by hand. The `demo` seeder has its own
+     * grant path: [grantAllInstanceDatasourcesTo] includes an already-registered managed lake,
+     * because that datasource is active and has no owning workspace.
      */
     fun grantToEveryWorkspace(
         datasourceName: String,
