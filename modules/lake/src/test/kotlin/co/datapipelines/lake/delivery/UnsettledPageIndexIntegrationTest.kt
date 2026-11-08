@@ -14,11 +14,15 @@ import org.springframework.jdbc.datasource.SingleConnectionDataSource
 import java.util.UUID
 
 /**
- * #844: the settlement tick's keyset page of one table's unsettled deliveries is an index range scan on
- * `idx_lake_deliveries_unsettled_page (table_id, id) WHERE state IN (…)` that stops after the page: the key carries the
- * table filter and the order, so no plan reads the table's whole backlog to sort it. Real PostgreSQL, the SHIPPED
- * migrations, a backlog many pages deep on one table beside settled rows and a second table, the EXACT statement
- * `DeliveryLedgerRepository.unsettled` issues, with its parameters.
+ * #844, corrected by #859: the settlement tick's keyset page of one table's unsettled deliveries is an index range scan
+ * on `idx_lake_deliveries_unsettled_page (table_id, id) WHERE state IN (…)` that stops after the page — and stays one
+ * whatever the plan cache does. `DeliveryLedgerRepository.unsettled` issues TWO statement texts (#859): the first page
+ * without a cursor predicate and a cursor page with a direct `id > :after`, because a single nullable-cursor OR under a
+ * generic prepared plan cannot fold away its null branch — the bound then leaves the index condition and degrades to a
+ * `Filter` over the table's whole unsettled backlog. Real PostgreSQL, the SHIPPED migrations, a backlog many pages deep
+ * on one table beside settled rows and a second table, and the EXACT statement texts `unsettled` issues, captured by
+ * calling it, then PREPAREd with their own parameter arities on unpooled connections under `plan_cache_mode = auto` and
+ * `plan_cache_mode = force_generic_plan`.
  */
 class UnsettledPageIndexIntegrationTest {
     private val h = DeliverySettlementHarness()
@@ -35,11 +39,17 @@ class UnsettledPageIndexIntegrationTest {
 
     @Test
     fun `the first page and a keyset page are index range scans on the page index with no sort`() {
+        // The two static shapes: the first page's text carries no cursor predicate and no cursor parameter at all.
+        val (firstSql, _) = recorded(after = null)
+        firstSql shouldNotContain "id >"
+        firstSql shouldNotContain ":after"
+
         val first = planOf(after = null)
         println("EXPLAIN unsettled first page\n$first")
         withClue("the first page's plan:\n$first") {
             assertPageScan(first)
             first shouldNotContain "id >"
+            first shouldContain Regex("Index Cond: \\(table_id = '[0-9a-f-]+'::uuid\\)")
         }
 
         val keyset = planOf(after = fiftiethUnsettledId())
@@ -51,36 +61,52 @@ class UnsettledPageIndexIntegrationTest {
     }
 
     @Test
-    fun `a prepared page under the default plan cache keeps the keyset bound in its index condition`() {
+    fun `a prepared first page keeps its plan on the page index under any plan cache mode`() {
         val (sql, _) = recorded(after = null)
-        val prepared =
-            sql
-                .replace(":table", "$1")
-                .replace(":after", "$2")
-                .replace(":limit", "$3")
-        val deep = deepUnsettledId()
-        val plan =
-            // Its own unpooled connection: the prepared statement and the setting end with it.
-            LakeTestDb.connect().use { connection ->
-                connection.createStatement().use { statement ->
-                    statement.execute("SET plan_cache_mode = auto")
-                    statement.execute("PREPARE page(uuid, uuid, int) AS $prepared")
-                    // Past PostgreSQL's five custom plans, where the plan cache weighs a generic plan; both page shapes.
-                    repeat(PREPARED_RUNS) { n ->
-                        val after = if (n % 2 == 0) "NULL" else "'$deep'"
-                        statement.executeQuery("EXECUTE page('${h.tableId}', $after, $PAGE)").close()
-                    }
-                    val lines =
-                        statement.executeQuery("EXPLAIN EXECUTE page('${h.tableId}', '$deep', $PAGE)").use { rows ->
-                            generateSequence { if (rows.next()) rows.getString(1) else null }.toList()
-                        }
-                    lines.joinToString("\n")
-                }
+        val prepared = sql.replace(":table", "$1").replace(":limit", "$2")
+        for (mode in PLAN_MODES) {
+            val plan = preparedPlan(mode, prepared, "uuid, int") { "EXECUTE page('${h.tableId}', $PAGE)" }
+            println("EXPLAIN EXECUTE prepared first page (plan_cache_mode=$mode)\n$plan")
+            withClue("the prepared first page's plan under plan_cache_mode=$mode:\n$plan") {
+                assertPageScan(plan)
+                plan shouldContain Regex("Index Cond: \\(table_id = ('[0-9a-f-]+'::uuid|\\$1)\\)")
+                plan shouldNotContain "id >"
             }
-        println("EXPLAIN EXECUTE prepared deep keyset page (plan_cache_mode=auto)\n$plan")
-        withClue("the prepared keyset page's plan:\n$plan") {
-            assertPageScan(plan)
-            plan shouldContain Regex("Index Cond: \\(\\(table_id = '[0-9a-f-]+'::uuid\\) AND \\(id > '[0-9a-f-]+'::uuid\\)\\)")
+        }
+    }
+
+    @Test
+    fun `a prepared keyset page keeps the cursor bound in its index condition under any plan cache mode`() {
+        val (sql, _) = recorded(after = fiftiethUnsettledId())
+        sql shouldContain "id > :after"
+        val prepared = sql.replace(":table", "$1").replace(":after", "$2").replace(":limit", "$3")
+        val deep = deepUnsettledId()
+        for (mode in PLAN_MODES) {
+            val plan = preparedPlan(mode, prepared, "uuid, uuid, int") { "EXECUTE page('${h.tableId}', '$deep', $PAGE)" }
+            println("EXPLAIN EXECUTE prepared deep keyset page (plan_cache_mode=$mode)\n$plan")
+            withClue("the prepared deep keyset page's plan under plan_cache_mode=$mode:\n$plan") {
+                assertPageScan(plan)
+                plan shouldContain Regex(
+                    "Index Cond: \\(\\(table_id = ('[0-9a-f-]+'::uuid|\\$1)\\) AND \\(id > ('[0-9a-f-]+'::uuid|\\$2)\\)\\)",
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `a forced generic deep keyset page is analyzed as a bounded page scan, with its buffer evidence`() {
+        val (sql, _) = recorded(after = fiftiethUnsettledId())
+        val prepared = sql.replace(":table", "$1").replace(":after", "$2").replace(":limit", "$3")
+        val deep = deepUnsettledId()
+        val analyzed =
+            preparedPlan("force_generic_plan", prepared, "uuid, uuid, int", explainPrefix = "EXPLAIN (ANALYZE, BUFFERS)") {
+                "EXECUTE page('${h.tableId}', '$deep', $PAGE)"
+            }
+        println("EXPLAIN (ANALYZE, BUFFERS) EXECUTE prepared deep keyset page (plan_cache_mode=force_generic_plan)\n$analyzed")
+        // Evidence, not a gate: machine-sensitive buffer counts are printed above; the assertions stay plan-shape ones.
+        withClue("the analyzed deep keyset page under a forced generic plan:\n$analyzed") {
+            assertPageScan(analyzed)
+            analyzed shouldContain Regex("Index Cond: .*id >")
         }
     }
 
@@ -102,6 +128,26 @@ class UnsettledPageIndexIntegrationTest {
 
         walked shouldBe expected
         walked.size shouldBe UNSETTLED.size * PER_STATE
+    }
+
+    @Test
+    fun `the first page is exact, a cursor at the last row is empty, and the last page is short`() {
+        val ordered =
+            h.jdbc.queryForList(
+                "SELECT id FROM lake_deliveries WHERE table_id = ? AND state IN ('RECEIVED', 'PUBLISHING', 'UNKNOWN') ORDER BY id",
+                UUID::class.java,
+                h.tableId,
+            )
+
+        // The first page (null cursor) is exactly the first PAGE unsettled rows in id order — the limit binds.
+        val first = h.repository.unsettled(h.tableId, null, PAGE)
+        first.map { it.id } shouldBe ordered.take(PAGE)
+        first.size shouldBe PAGE
+        h.repository.unsettled(h.tableId, null, 3).map { it.id } shouldBe ordered.take(3)
+
+        // The page at the second-to-last row is the terminal short page; past the last row the page is empty.
+        h.repository.unsettled(h.tableId, ordered[ordered.size - 2], PAGE).map { it.id } shouldBe listOf(ordered.last())
+        h.repository.unsettled(h.tableId, ordered.last(), PAGE).map { it.id } shouldBe emptyList<UUID>()
     }
 
     private fun assertPageScan(plan: String) {
@@ -127,6 +173,31 @@ class UnsettledPageIndexIntegrationTest {
         DeliveryLedgerRepository(recording).unsettled(h.tableId, after, PAGE)
         return requireNotNull(recording.last) { "the page issued no statement" }
     }
+
+    /**
+     * PREPAREs a captured production text — its named parameters substituted by the ordinal placeholders PREPARE
+     * declares, the text itself untouched (#859: the test must not manufacture replacement SQL) — on its own unpooled
+     * connection under `plan_cache_mode = [mode]`, runs it [PREPARED_RUNS] times so the plan cache is warm, and answers
+     * [explainPrefix] of the prepared EXECUTE. The connection ends with the statement and the session setting.
+     */
+    private fun preparedPlan(
+        mode: String,
+        prepared: String,
+        arity: String,
+        explainPrefix: String = "EXPLAIN",
+        execute: () -> String,
+    ): String =
+        LakeTestDb.connect().use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute("SET plan_cache_mode = $mode")
+                statement.execute("PREPARE page($arity) AS $prepared")
+                repeat(PREPARED_RUNS) { statement.executeQuery(execute()).close() }
+                statement
+                    .executeQuery("$explainPrefix ${execute()}")
+                    .use { rows -> generateSequence { if (rows.next()) rows.getString(1) else null }.toList() }
+                    .joinToString("\n")
+            }
+        }
 
     private fun fiftiethUnsettledId(): UUID = unsettledIdAt(PAGE - 1)
 
@@ -201,5 +272,6 @@ class UnsettledPageIndexIntegrationTest {
         const val FINGERPRINT_LENGTH = 64
         val UNSETTLED = listOf("RECEIVED", "PUBLISHING", "UNKNOWN")
         val SETTLED = listOf("PUBLISHED", "FAILED")
+        val PLAN_MODES = listOf("auto", "force_generic_plan")
     }
 }
