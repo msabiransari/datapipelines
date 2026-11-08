@@ -207,9 +207,11 @@ class LakeConfiguration {
          * #867 — [inTransaction] when Spring has a connection bound for [metadata] on the calling thread (a metadata
          * transaction, or a nested participant in one), else [outsideTransaction]; decided at every call, never when the
          * bean is built. The test is the resource binding for THIS DataSource (`TransactionSynchronizationManager`, the
-         * key `DataSourceUtils` hands a transaction's connection out by), so an active synchronization or a transaction on
-         * another DataSource leaves the read on [outsideTransaction]. Nothing wraps the DataSource and no transaction is
-         * opened: both ports run on whatever connection `DataSourceUtils` gives the same DataSource.
+         * key `DataSourceUtils` hands a transaction's connection out by). An active synchronization or a transaction on
+         * another DataSource selects [outsideTransaction] only when no metadata connection is already bound. The
+         * listing's preceding projection read can bind that connection to the scope; enrichment then preserves its
+         * policy through [inTransaction]. Nothing wraps the DataSource and no transaction is opened: both ports run on
+         * whatever connection `DataSourceUtils` gives the same DataSource.
          */
         fun transactionAwareManagedCatalog(
             metadata: DataSource,
