@@ -1,6 +1,7 @@
 package co.datapipelines.web.config
 
 import co.datapipelines.application.datasources.LakeTableRepository
+import co.datapipelines.datasources.LakeRegisteredTable
 import co.datapipelines.datasources.LakeTableCatalog
 import co.datapipelines.datasources.ManagedLakeTable
 import co.datapipelines.web.TestRepoFiles
@@ -116,23 +117,40 @@ class LakeTableCatalogTransactionBoundsIntegrationTest {
 
     @Test
     fun `inside a transaction the read joins its connection, sets no socket bound, and a later longer statement completes`() {
-        transactions.executeWithoutResult { status ->
-            val pid = backendPid()
-            insertLifecycleRow(plain)
+        var orders: LakeRegisteredTable? = null
+        var socketAfterRead = UNREAD
+        var longer: Result<Unit>? = null
+        var pids = UNREAD to UNREAD
+        // Captured, asserted after the transaction: a socket bound left on the connection closes it at the longer
+        // statement, and the rollback that follows would otherwise replace the assertion with "Connection is closed".
+        val transaction =
+            runCatching {
+                transactions.executeWithoutResult { status ->
+                    status.setRollbackOnly()
+                    val pid = backendPid()
+                    insertLifecycleRow(plain)
+                    orders = catalog.registeredTables(LAKE).single()
+                    socketAfterRead = networkTimeout()
+                    // Longer than the listing read's 10 s socket bound.
+                    val slept = runCatching { plain.execute("SELECT pg_sleep($LONGER_THAN_SOCKET_SECONDS)") }
+                    longer = slept
+                    pids = pid to (if (slept.isSuccess) backendPid() else UNREAD)
+                }
+            }
 
-            val orders = catalog.registeredTables(LAKE).single()
-            assertAll(
-                // Only the transaction's connection can see its uncommitted lifecycle row.
-                { orders.unavailableReason.shouldBeNull() },
-                { orders.location shouldBe CATALOG_LOCATION },
-                { networkTimeout() shouldBe DRIVER_DEFAULT_MILLIS },
-            )
-            // Longer than the listing read's 10 s socket bound: red if the managed read left that bound on the connection.
-            plain.execute("SELECT pg_sleep($LONGER_THAN_SOCKET_SECONDS)")
-            backendPid() shouldBe pid
-            status.setRollbackOnly()
-        }
-
+        assertAll(
+            // Only the transaction's connection can see its uncommitted lifecycle row.
+            { orders?.unavailableReason.shouldBeNull() },
+            { orders?.location shouldBe CATALOG_LOCATION },
+            { socketAfterRead shouldBe DRIVER_DEFAULT_MILLIS },
+            {
+                withClue("the later longer statement: ${longer?.exceptionOrNull()?.let(::causeChain)}") {
+                    longer?.isSuccess shouldBe true
+                }
+            },
+            { withClue("the transaction: ${transaction.exceptionOrNull()?.let(::causeChain)}") { transaction.isSuccess shouldBe true } },
+            { pids.second shouldBe pids.first },
+        )
         withClue("the rollback discarded the transaction's lifecycle row") {
             catalog.registeredTables(LAKE).single().unavailableReason shouldBe ManagedLakeTable.REASON_NO_LIFECYCLE_ROW
         }
@@ -352,6 +370,9 @@ class LakeTableCatalogTransactionBoundsIntegrationTest {
 
         /** The PostgreSQL driver's default network timeout: 0, no limit. */
         const val DRIVER_DEFAULT_MILLIS = 0
+
+        /** A captured value the case never reached. */
+        const val UNREAD = -1
 
         /** The listing read's socket bound (5 s + BoundedJdbc's 5 s slack) — a literal, never computed from the class under test. */
         const val SOCKET_MILLIS = 10_000L
