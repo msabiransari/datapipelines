@@ -201,6 +201,47 @@ class LakeRulesTest {
             "datapipelines.datasources.managed-retire-ceiling-seconds"
     }
 
+    /**
+     * #845 (D1) — the egress term, its own named violations, both sides of each boundary. The floor is
+     * `node-query-timeout-max-seconds` + 30: shipped 900 + 30 = 930, so the shipped 960 is admitted.
+     */
+    @Test
+    fun `845 - the egress max-age is positive, the proxy is host-colon-port, and the cap clears the node timeout maximum plus 30`() {
+        val proxy = LakeRules.EGRESS_PROXY
+        val maxAge = LakeRules.EGRESS_MAX_AGE_SECONDS
+
+        // Shipped: no proxy, 960. Without a proxy the floor does not apply; positivity always does.
+        enabled() shouldContainExactly emptyList()
+        enabled(maxAge to "20") shouldContainExactly emptyList()
+        enabled(maxAge to "0").single() shouldStartWith maxAge
+        enabled(maxAge to "soon").single() shouldStartWith maxAge
+        // With a proxy: 930 is the floor, admitted; 929 refuses, naming both terms.
+        enabled(proxy to "egress-proxy:3128") shouldContainExactly emptyList()
+        enabled(proxy to "egress-proxy:3128", maxAge to "930") shouldContainExactly emptyList()
+        val belowFloor = enabled(proxy to "egress-proxy:3128", maxAge to "929").single()
+        belowFloor shouldStartWith "$maxAge (929)"
+        belowFloor shouldContain "node-query-timeout-max-seconds (900) + 30 (930)"
+        // The proxy's grammar is the adapter's.
+        listOf("http://egress-proxy:3128", "egress-proxy", "egress-proxy:0", "egress proxy:3128").forEach { bad ->
+            enabled(proxy to bad).single() shouldStartWith proxy
+        }
+
+        // A raised node timeout maximum raises the floor: 1000 + 30.
+        fun judged(vararg overrides: Pair<String, String?>): List<String> =
+            ConfigValidator
+                .validate(
+                    ConfigSnapshots.valid().copy(
+                        executorNodeQueryTimeoutMaxSeconds = "1000",
+                        lake =
+                            shipped +
+                                mapOf(LakeRules.ENABLED to "true", LakeRules.BUCKET to "b", LakeRules.REGION to "r", proxy to "p:3128") +
+                                overrides,
+                    ),
+                ).violations
+        judged(maxAge to "1030") shouldContainExactly emptyList()
+        judged(maxAge to "1029").single() shouldContain "node-query-timeout-max-seconds (1000) + 30 (1030)"
+    }
+
     private fun defaultOf(key: String): String? {
         val raw = yaml[key]?.toString() ?: return null
         return PLACEHOLDER_DEFAULT.find(raw)?.groupValues?.get(1) ?: raw

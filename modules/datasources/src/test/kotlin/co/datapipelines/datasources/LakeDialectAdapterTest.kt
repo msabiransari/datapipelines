@@ -292,6 +292,81 @@ class LakeDialectAdapterTest {
         LakeHttpBounds.STATEMENTS shouldContainExactly bounds
     }
 
+    /**
+     * #845 (D2) — the managed row's whole setup, literal and in order, without and with the egress proxy: the proxy
+     * `SET` is the LAST adapter statement, after the HTTP bounds, so it precedes the §15a lockdown the managed
+     * generation runs after this init (ManagedLakeGeneration.LOCKDOWN_STATEMENTS). Literal text on purpose, like the
+     * bounds test above.
+     */
+    @Test
+    fun `845 - the managed row's full setup without and with the egress proxy, the proxy SET last`() {
+        val withoutProxy =
+            listOf(
+                "SET extension_directory = '/opt/duckdb/extensions'",
+                "LOAD httpfs",
+                "LOAD aws",
+                "CREATE OR REPLACE SECRET dp_lake (TYPE s3, KEY_ID 'minioadmin', SECRET 'minio-secret', REGION 'us-east-1', " +
+                    "ENDPOINT 'minio:9000', URL_STYLE 'path', USE_SSL false)",
+                "SET memory_limit = '512MB'",
+                "SET preserve_insertion_order = false",
+                "SET http_timeout = 10",
+                "SET http_retries = 2",
+                "SET http_retry_wait_ms = 100",
+                "SET http_retry_backoff = 4",
+            )
+        assertAll(
+            { lakeBundled.connectionInit(managedRow(egressProxy = null)).withoutGeneratedSpill() shouldContainExactly withoutProxy },
+            {
+                lakeBundled.connectionInit(managedRow(egressProxy = "egress-proxy:3128")).withoutGeneratedSpill() shouldContainExactly
+                    withoutProxy + "SET http_proxy = 'egress-proxy:3128'"
+            },
+        )
+    }
+
+    @Test
+    fun `845 - egress_proxy is accepted only on a managed catalog row and only as host-colon-port`() {
+        val validator = DatasourceValidator()
+        val key = "properties.dialect.egress_proxy"
+
+        fun errorsFor(dialect: Map<String, Any?>) = validator.validate(lakeDatasource(dialectProperties = dialect), isCreate = true).errors
+
+        val managedCatalog = mapOf("catalog.kind" to "s3", "managed" to "true")
+        listOf("egress-proxy:3128", "10.0.0.5:3128", "a:1", "proxy.dp.svc.cluster.local:65535").forEach { good ->
+            withClue("'$good' is a host:port") { errorsFor(managedCatalog + ("egress_proxy" to good)) shouldBe emptyList() }
+        }
+        listOf(
+            "egress-proxy",
+            "egress-proxy:0",
+            "egress-proxy:65536",
+            "egress-proxy:123456",
+            "http://egress-proxy:3128",
+            "egress-proxy:3128/x",
+            "user@egress-proxy:3128",
+            "[::1]:3128",
+            "-egress:3128",
+            "egress-:3128",
+            "egress proxy:3128",
+            "e'x:3128",
+            ":3128",
+            "a".repeat(254) + ":3128",
+        ).forEach { bad ->
+            withClue("'$bad' is refused") {
+                errorsFor(managedCatalog + ("egress_proxy" to bad)).single { it.field == key }.message shouldContain "host:port"
+            }
+        }
+        // A blank value is refused ONCE, by the generic empty rule, not twice.
+        errorsFor(managedCatalog + ("egress_proxy" to " ")).single { it.field == key }.code shouldBe DatasourceErrorCodes.PROPERTY_EMPTY
+        // Not the managed row: refused whatever the value's shape.
+        listOf(mapOf("catalog.kind" to "s3"), mapOf("catalog.kind" to "s3", "managed" to "false")).forEach { row ->
+            withClue(row) {
+                errorsFor(row + ("egress_proxy" to "egress-proxy:3128")).single { it.field == key }.message shouldContain "managed: true"
+            }
+        }
+        // Managed, but no object-store client to apply it to.
+        errorsFor(mapOf("managed" to "true", "egress_proxy" to "egress-proxy:3128")).single { it.field == key }.message shouldContain
+            "catalog.kind"
+    }
+
     @Test
     fun `a bundled local lake still emits no extension statements at all`() {
         // The directory knob does not reopen what the catalog.kind conditional closes: a lake
@@ -607,6 +682,24 @@ class LakeDialectAdapterTest {
         lakeDatasource(
             dialectProperties =
                 mapOf("attach" to "a1=${tempDir.resolve("one.db")}, a2=${tempDir.resolve("two.db")}"),
+        )
+
+    /** The registrar's managed row (`ManagedLakeDatasourceRegistrar.desiredDatasource`'s shape), with an optional proxy. */
+    private fun managedRow(egressProxy: String?): Datasource =
+        lakeDatasource(
+            credentialKind = CredentialKind.PASSWORD,
+            username = "minioadmin",
+            secret = "minio-secret",
+            dialectProperties =
+                buildMap {
+                    put("catalog.kind", "s3")
+                    put("managed", "true")
+                    put("region", "us-east-1")
+                    put("endpoint", "http://minio:9000")
+                    put("url_style", "path")
+                    put("memory_limit", "512MB")
+                    egressProxy?.let { put(LakeHttpBounds.EGRESS_PROXY_KEY, it) }
+                },
         )
 
     private fun lakeDatasource(

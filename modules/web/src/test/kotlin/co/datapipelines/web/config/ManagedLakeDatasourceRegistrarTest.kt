@@ -6,6 +6,7 @@ import co.datapipelines.datasources.CredentialKind
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceGrantRepository
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.LakeHttpBounds
 import co.datapipelines.datasources.MANAGED_DIALECT_KEY
 import co.datapipelines.datasources.ManagedLakeSync
 import co.datapipelines.lake.LakeBootCheck
@@ -25,6 +26,8 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
 import org.springframework.beans.factory.support.StaticListableBeanFactory
 import org.springframework.util.unit.DataSize
+import java.net.InetAddress
+import java.net.ServerSocket
 import java.util.UUID
 
 /**
@@ -108,6 +111,33 @@ class ManagedLakeDatasourceRegistrarTest {
     }
 
     @Test
+    fun `845 - the dialect map carries the egress proxy trimmed when configured, and no key when it is empty`() {
+        val withProxy = desired(storage(), reads = LakeProperties.Reads(egressProxy = " egress-proxy:3128 ")).properties.dialect
+        val withoutProxy = desired(storage(), reads = LakeProperties.Reads(egressProxy = "")).properties.dialect
+
+        assertAll(
+            { withProxy[LakeHttpBounds.EGRESS_PROXY_KEY] shouldBe "egress-proxy:3128" },
+            { withoutProxy.containsKey(LakeHttpBounds.EGRESS_PROXY_KEY) shouldBe false },
+        )
+    }
+
+    @Test
+    fun `845 - an unreachable egress proxy refuses the boot with the catalogued id, before anything is written`() {
+        val closedPort = ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { it.localPort }
+        val fixture =
+            Fixture(enabled = true, sync = ManagedLakeSync.CREATED, reads = LakeProperties.Reads(egressProxy = "127.0.0.1:$closedPort"))
+
+        val refused = shouldThrow<IllegalStateException> { fixture.registrar.register() }
+
+        assertAll(
+            { refused.message.orEmpty() shouldStartWith "${LakeBootCheck.Refusal.EGRESS_PROXY.id}: " },
+            { verify(exactly = 0) { fixture.users.provisionSystemActor() } },
+            { verify(exactly = 0) { fixture.registry.syncManagedLake(any(), any()) } },
+            { verify(exactly = 0) { fixture.grants.grantToEveryWorkspace(any(), any()) } },
+        )
+    }
+
+    @Test
     fun `register syncs the desired row, backfills and grants every workspace`() {
         val fixture = Fixture(enabled = true, sync = ManagedLakeSync.CREATED)
 
@@ -182,6 +212,7 @@ class ManagedLakeDatasourceRegistrarTest {
     private inner class Fixture(
         enabled: Boolean,
         sync: ManagedLakeSync,
+        reads: LakeProperties.Reads = LakeProperties.Reads(),
     ) {
         val synced = slot<Datasource>()
         val registry = mockk<DatasourceRegistry> { every { syncManagedLake(capture(synced), actor) } returns sync }
@@ -192,7 +223,7 @@ class ManagedLakeDatasourceRegistrarTest {
             mockk<UserService> {
                 every { provisionSystemActor() } returns mockk<User> { every { id } returns actor }
             }
-        private val properties = LakeProperties(enabled = enabled, storage = storage())
+        private val properties = LakeProperties(enabled = enabled, storage = storage(), reads = reads)
         val registrar =
             ManagedLakeDatasourceRegistrar(
                 lakeProperties = providerOf(properties),

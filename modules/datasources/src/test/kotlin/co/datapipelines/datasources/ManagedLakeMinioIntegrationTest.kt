@@ -211,9 +211,25 @@ class ManagedLakeMinioIntegrationTest {
                 { refusal(connection, "SET disabled_filesystems = ''") shouldContain "locked" },
                 { refusal(connection, "SET lock_configuration = false") shouldContain "locked" },
                 { count(connection, "SELECT count(*) FROM trips") shouldBe ICEBERG_ROWS },
-            ) + httpBoundsLocked(connection)
+            ) + httpBoundsLocked(connection) + egressProxyLocked(connection)
         ).toTypedArray(),
     )
+
+    /**
+     * #845 (D2, Security): a lease can neither point the engine's object-store traffic at a proxy of its own nor clear
+     * the configured one — `SET`/`SET SESSION`/`SET GLOBAL`/`RESET http_proxy` and the proxy credentials are refused
+     * by the §15a lock, and the value stays the row's (none on this row: no `egress_proxy` key).
+     */
+    private fun egressProxyLocked(connection: Connection): List<() -> Unit> =
+        listOf(
+            "SET http_proxy = '127.0.0.1:1'",
+            "SET SESSION http_proxy = '127.0.0.1:1'",
+            "SET GLOBAL http_proxy = '127.0.0.1:1'",
+            "RESET http_proxy",
+            "SET http_proxy_username = 'x'",
+            "SET http_proxy_password = 'x'",
+        ).map<String, () -> Unit> { sql -> { withClue(sql) { refusal(connection, sql) shouldContain "locked" } } } +
+            listOf<() -> Unit>({ text(connection, "SELECT current_setting('http_proxy')") shouldBe "" })
 
     /** Each HTTP bound holds its constant's value and refuses every way back to the engine's default. */
     private fun httpBoundsLocked(connection: Connection): List<() -> Unit> =
@@ -437,6 +453,17 @@ class ManagedLakeMinioIntegrationTest {
             st.executeQuery(sql).use { rs ->
                 rs.next() shouldBe true
                 rs.getInt(1)
+            }
+        }
+
+    private fun text(
+        connection: Connection,
+        sql: String,
+    ): String =
+        connection.createStatement().use { st ->
+            st.executeQuery(sql).use { rs ->
+                rs.next() shouldBe true
+                rs.getString(1).orEmpty()
             }
         }
 
