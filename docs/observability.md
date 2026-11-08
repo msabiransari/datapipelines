@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.63 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.64 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-07
@@ -451,8 +451,8 @@ Delivery storage failures report the exception class and first SQLSTATE using §
 | WARN | `lake.append.settlement_deferred` | Immediate settlement failed and leaves recovery to a later sweep | `delivery_id`, `operation_id`, `cause`, `sql_state` |
 | WARN | `lake.delivery.cleanup_deferred` | Pre-publication cleanup could not stamp every receipt; resources were released and terminal executions are sweepable | `execution_id`, `cause`, `sql_state` |
 | INFO | `lake.settle.sweep` | A normal-mode tick finished its rotating table page, or stopped where its work budget ran out | `tables` (managed tables visited), `rows` (deliveries visited), `changed` (deliveries moved to a terminal state), `exhausted` (the tick's budget was spent), `deferred_budget`, `deferred_stuck`, `deferred_failed` (the tables whose recovery stopped short because the budget was spent, a metadata read could not be waited for, or an exception), `cause=none`, `sql_state=none` |
-| WARN | `lake.settle.metadata_read_stuck` | A metadata read outlived the tick's budget and was abandoned on its own thread. It holds no lease and no connection; every table's verification and repair are deferred until it ends | `table_id`, `elapsed_ms`, `stuck_total` (abandoned reads since boot), `cause=none`, `sql_state=none` |
-| INFO | `lake.settle.metadata_read_ended` | A later tick found the abandoned read finished: its result was discarded and reads resume | `table_id`, `elapsed_ms` (the read's whole life), `cause`, `sql_state` (what it failed with, `none` when it completed) |
+| WARN | `lake.settle.metadata_read_stuck` | A metadata read outlived the tick's budget and was abandoned on its own thread. It holds no lease and no connection and stops itself at its next chunk from the store ([Lake §8](lake.md#8-settlement-and-recovery)); every table's verification and repair are deferred until it ends | `table_id`, `elapsed_ms`, `stuck_total` (abandoned reads since boot), `cause=none`, `sql_state=none` |
+| INFO | `lake.settle.metadata_read_ended` | A later tick found the abandoned read finished: its result was discarded and reads resume | `table_id`, `elapsed_ms` (the read's whole life), `cause` (`abandoned` when it stopped itself after the tick abandoned it, the failure's class when it failed, `none` when it completed), `sql_state` |
 | WARN | `lake.settle.deferred` | One table's recovery failed; later eligible tables/pages remain recoverable | `table_id`, `cause`, `sql_state` |
 | WARN | `lake.settle.sweep_deferred` | The bounded sweep failed outside an individual table, including a held control-row lock | `cause`, `sql_state` |
 | WARN | `lake.append.recipe_write_failed` | The immutable recipe PUT failed before catalog publication. No storage message or cause chain crosses the boundary | `cause`, `sql_state` |
@@ -761,6 +761,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-07 | v1.64 | 851 (#851) | §3.4S `lake.settle.metadata_read_stuck`: the abandoned read stops itself at its next chunk; `lake.settle.metadata_read_ended` gains `cause=abandoned` for that end. No event added or renamed. |
 | 2026-11-06 | v1.63 | 818e (#818) | Reader-lease loss, overlong and slow-round events and counters; pins follow physical closure. |
 | 2026-11-05 | v1.62 | 818d (#818) managed reader lifetime enforced | **§3.4A**: new `datasource.pool_close_stuck` (WARN, a close past its 65 s deadline on `dp-pool-close`, never retried), `datasource.pool_close_failed` (WARN) and `datasource.reaper_pass_slow` (WARN, a pass past its 1 s bound). **§3.4C**: new `lake.instance_readers_interrupted` (INFO, interrupt-first before Hikari's shutdown). **§3.4H**: the pool reaper runs on its own `dp-reaper` thread; the closes on `dp-pool-close`. **§4.1**: `datapipelines.datasource.pool.close_stuck` and `datapipelines.datasource.pool.reaper_pass_slow`. |
 | 2026-11-05 | v1.61 | 818c (#818) managed reader lifetime | **§3.4C**: `lake.generation_expired` gains `trigger` (`lease` or `reaper`): the pool reaper now retires a managed generation past its age bound with no borrower; new `lake.reaper_retired` (INFO, `generations`), one line per reaper pass that retired any. **§3.4H**: the reaper's pass includes that retirement and still issues no statement. |

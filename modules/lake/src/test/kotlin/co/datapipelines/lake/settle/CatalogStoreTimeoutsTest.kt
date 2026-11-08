@@ -39,7 +39,16 @@ class CatalogStoreTimeoutsTest {
             "**an abandoned read ends at its next chunk, or after the store's $seconds-second socket timeout if that chunk never comes**"
     }
 
+    @Test
+    fun `the metadata read's cap is the documented 64 MiB`() {
+        LakeMetadataReads.METADATA_MAX_BYTES shouldBe MIB * CAP_MIB
+        LakeTestDb.repoFile("docs/lake.md").readText().replace(Regex("\\s+"), " ") shouldContain
+            "capped at $CAP_MIB MiB of JSON after decompression"
+    }
+
     private companion object {
         const val MILLIS_PER_SECOND = 1_000L
+        const val MIB = 1_024L * 1_024L
+        const val CAP_MIB = 64L
     }
 }
