@@ -372,6 +372,9 @@ class DomainConfiguration {
             // §5.2: the retirement ceiling defaults to the node query timeout + 30 s, which is
             // why the two properties meet here rather than inside either binding class.
             retireCeiling = datasourcesProperties.ceiling(executorProperties.nodeQueryTimeoutSeconds),
+            // #824 (owner ruling 2026-11-07): a retired MANAGED generation's ceiling is derived from the node query
+            // timeout's MAXIMUM, the longest statement a managed node may legitimately be running.
+            managedRetireCeiling = datasourcesProperties.managedCeiling(executorProperties.nodeQueryTimeoutMaxSeconds),
             // #818 (record §10 RULING 4): the managed reader generations' age bound, applied in the pool
             // lookup. Unbound lake (disabled) = no bound; its managed rows then serve no view at all.
             managedLake = managedLake,

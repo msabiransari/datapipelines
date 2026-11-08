@@ -133,18 +133,29 @@ class LakeRulesTest {
     }
 
     @Test
-    fun `age bound plus twice the reaper delay plus ceiling plus tick fits an hour of every protected day`() {
-        // Record §10 third amendment (#818e). One protected day = 3600 s. Reaper delay 7;
-        // shipped ceiling = node timeout 60 + 30 = 90; tick 60. Reader termination is not a safety term.
-        // 3436 + 2 × 7 + 90 + 60 = 3600 is admitted (≤); 3437 refuses, naming every term it used.
-        enabled(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to "3436") shouldContainExactly emptyList()
-        val overBoundary = enabled(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to "3437")
+    fun `age bound plus twice the reaper delay plus the managed ceiling plus tick fits an hour of every protected day`() {
+        // Record §10 third amendment (#818e), #824. One protected day = 3600 s. Reaper delay 7;
+        // shipped managed ceiling = node timeout MAXIMUM 900 + 30 = 930; tick 60. Reader termination is not a safety term.
+        // 2596 + 2 × 7 + 930 + 60 = 3600 is admitted (≤); 2597 refuses, naming every term it used.
+        enabled(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to "2596") shouldContainExactly emptyList()
+        val overBoundary = enabled(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to "2597")
         overBoundary shouldHaveSize 1
         val refused = overBoundary.single()
         refused shouldStartWith LakeRules.MAX_GENERATION_AGE_SECONDS
         refused shouldContain "2 × the reaper delay (7)"
-        refused shouldContain "retire ceiling (90)"
+        refused shouldContain "the managed retire ceiling (930)"
         refused shouldContain "(3600)"
+    }
+
+    @Test
+    fun `the managed ceiling - not the general one - is the rule's term (#824)`() {
+        // Discriminating: under the GENERAL derived ceiling (node timeout 60 + 30 = 90) an age of 2597 would be admitted,
+        // 2597 + 14 + 90 + 60 = 2761 ≤ 3600, and so would #818's old boundary, 3436. Under the managed one both refuse.
+        listOf("2597", "3436").forEach { age ->
+            val refused = enabled(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to age)
+            refused shouldHaveSize 1
+            refused.single() shouldContain "the managed retire ceiling (930)"
+        }
     }
 
     @Test
@@ -164,8 +175,8 @@ class LakeRulesTest {
     }
 
     @Test
-    fun `the retire ceiling is read the way datasources derives it`() {
-        val atBoundary = mapOf(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to "3436")
+    fun `the managed retire ceiling is read the way datasources derives it`() {
+        val atBoundary = mapOf(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to "2596")
 
         fun judged(snapshot: ConfigSnapshot): List<String> =
             ConfigValidator
@@ -176,15 +187,18 @@ class LakeRulesTest {
                 ).violations
         val base = ConfigSnapshots.valid()
         judged(base) shouldContainExactly emptyList()
-        // A longer node timeout raises the derived ceiling: 61 + 30 = 91 tips the sum over.
-        val longerNodeTimeout = judged(base.copy(executorNodeQueryTimeoutSeconds = "61"))
-        longerNodeTimeout shouldHaveSize 1
-        longerNodeTimeout.single() shouldContain "retire ceiling (91)"
-        // An explicit ceiling wins over the derivation, in both directions.
-        judged(base.copy(executorNodeQueryTimeoutSeconds = "61", datasourcesRetireCeilingSeconds = "90")) shouldContainExactly emptyList()
-        judged(base.copy(datasourcesRetireCeilingSeconds = "91")).single() shouldContain "retire ceiling (91)"
-        judged(base.copy(datasourcesRetireCeilingSeconds = "soon")).single() shouldStartWith
-            "datapipelines.datasources.retire-ceiling-seconds"
+        // A longer node timeout MAXIMUM raises the derived ceiling: 901 + 30 = 931 tips the sum over.
+        val longerMaximum = judged(base.copy(executorNodeQueryTimeoutMaxSeconds = "901"))
+        longerMaximum shouldHaveSize 1
+        longerMaximum.single() shouldContain "the managed retire ceiling (931)"
+        // A malformed maximum is the executor check's to name; this rule falls back to its default 900.
+        judged(base.copy(executorNodeQueryTimeoutMaxSeconds = "soon")).none { "managed retire ceiling" in it } shouldBe true
+        // An explicit managed ceiling wins over the derivation, in both directions.
+        judged(base.copy(executorNodeQueryTimeoutMaxSeconds = "901", datasourcesManagedRetireCeilingSeconds = "930")) shouldContainExactly
+            emptyList()
+        judged(base.copy(datasourcesManagedRetireCeilingSeconds = "931")).single() shouldContain "the managed retire ceiling (931)"
+        judged(base.copy(datasourcesManagedRetireCeilingSeconds = "soon")).single() shouldStartWith
+            "datapipelines.datasources.managed-retire-ceiling-seconds"
     }
 
     /**

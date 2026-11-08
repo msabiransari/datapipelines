@@ -90,6 +90,18 @@ interface ConnectionPool : AutoCloseable {
 
     /** Physical handles, including the retained owner and any close still in flight. */
     val holdsPhysicalHandles: Boolean get() = false
+
+    /**
+     * #840 — the Hikari `connectionTimeout` this pool runs with: the bound of its shutdown's first wait (Hikari sets the
+     * login timeout from it), so the first term of this pool's own close deadline ([PoolCloser.deadlineFor]). A pool
+     * with no Hikari configuration (the test doubles) answers HikariCP's default, [DEFAULT_CONNECTION_TIMEOUT].
+     */
+    val connectionTimeout: Duration get() = DEFAULT_CONNECTION_TIMEOUT
+
+    companion object {
+        /** A fresh `HikariConfig`'s `connectionTimeout` (30 s on the pinned HikariCP), read once, never typed here. */
+        val DEFAULT_CONNECTION_TIMEOUT: Duration = Duration.ofMillis(HikariConfig().connectionTimeout)
+    }
 }
 
 /**
@@ -165,6 +177,9 @@ class HikariConnectionPool(
 ) : ConnectionPool {
     /** Whether the underlying pool has been shut down — the observable half of retirement (§5.2). */
     val isClosed: Boolean get() = dataSource.isClosed
+
+    /** #840 — this pool's own `connectionTimeout`, as its datasource's pool settings set it ([ConnectionPool.connectionTimeout]). */
+    override val connectionTimeout: Duration get() = Duration.ofMillis(dataSource.connectionTimeout)
 
     /** Won by the ONE caller that runs the whole retire → Hikari close → owner release sequence. */
     private val closing = AtomicBoolean(false)
@@ -337,7 +352,8 @@ interface PoolLifecycleMetrics {
 
     /**
      * #818d — `datapipelines.datasource.pool.close_stuck{datasource_name}`: a close handed to the closer was still
-     * running at `PoolCloser.DEADLINE_SECONDS`. Defaulted so an implementation that predates it keeps compiling.
+     * running at that pool's own deadline (`PoolCloser.deadlineFor`, #840). Defaulted so an implementation that
+     * predates it keeps compiling.
      */
     fun poolCloseStuck(datasourceName: String) = Unit
 
@@ -419,6 +435,13 @@ class ConnectionPoolManager(
     private val poolFactory: (Datasource) -> ConnectionPool = ::buildHikariPool,
     /** How long a retired pool may keep connections out before [reapRetiring] closes it anyway. */
     private val retireCeiling: Duration = DEFAULT_RETIRE_CEILING,
+    /**
+     * #824 (owner ruling 2026-11-07) — the same ceiling for a retired MANAGED lake generation
+     * ([ConnectionPool.managedGeneration] non-null) only: the assembling layer derives it from the node query timeout's
+     * maximum, because a generation is retired by age or by the freshness tick, never because its readers are done.
+     * Every other retired pool keeps [retireCeiling]; unset, the two are the same.
+     */
+    private val managedRetireCeiling: Duration = retireCeiling,
     /** Injectable so the reaper's state machine can be tested without sleeping. */
     private val clock: () -> Instant = Instant::now,
     /**
@@ -647,7 +670,8 @@ class ConnectionPoolManager(
         name: String,
         retired: ConnectionPool,
     ) {
-        retiring += RetiringPool(retired, deadline = clock().plus(retireCeiling))
+        val ceiling = if (retired.managedGeneration != null) managedRetireCeiling else retireCeiling
+        retiring += RetiringPool(retired, deadline = clock().plus(ceiling), ceiling = ceiling)
         retired.softEvict()
         metrics.poolRetired(name)
     }
@@ -691,7 +715,7 @@ class ConnectionPoolManager(
                             "message=\"retired pool still had connections out at its ceiling; closing it anyway\"",
                         entry.pool.name,
                         active,
-                        retireCeiling.seconds,
+                        entry.ceiling.seconds,
                     )
                     closer.close(entry.pool)
                     metrics.poolHardClosed(entry.pool.name, active)
@@ -732,10 +756,14 @@ class ConnectionPoolManager(
         val pool: ConnectionPool,
     )
 
-    /** A pool out of the map, draining, with the instant after which it is closed regardless. */
+    /**
+     * A pool out of the map, draining, with the instant after which it is closed regardless and the [ceiling] that
+     * instant was stamped from (#824: the managed one for a managed generation), which the hard-close line reports.
+     */
     private data class RetiringPool(
         val pool: ConnectionPool,
         val deadline: Instant,
+        val ceiling: Duration,
     )
 
     companion object {
