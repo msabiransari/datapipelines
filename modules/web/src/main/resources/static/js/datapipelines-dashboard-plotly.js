@@ -1,379 +1,232 @@
 /*
- * The Plotly renderer for the Datapipelines dashboard runtime (#10, the implementation spec's
- * §10.3/§10.4, D25). Registered on load as renderer kind `plotly`, major version `4` — the major the
- * wire's `renderer.version` is matched against at bootstrap.
+ * The Plotly converter of the `chart` kind (design record 2026-11-06 §5.2): the bar family's pure
+ * `(spec, bindings, tokens) → {option, warnings}` — ported from the 854 reference `convert-bar-plotly.mjs` — and
+ * Plotly's host side (`react`, `rendered` on `plotly_afterplot`, resize, purge). It registers no renderer kind; it
+ * registers itself with the chart adapter (`datapipelines-dashboard-chart.js`, loaded before it) as library `plotly`.
  *
- * ## Data injection (§3.1)
- * The stored configuration is NEVER mutated: each `visualization_data` frame carries the resolved
- * bindings (`{path: [values]}`) and the adapter substitutes them into a CLONE — `data[0].x`,
- * `layout.title.text`, any path — and hands the result to `Plotly.react`. That is the whole
- * data-injection contract; nothing else changes between the stored configuration and the rendered one.
+ * ## Text is DATA (the rendering rule)
+ * Plotly parses a subset of HTML in names, tick text, hover text, titles and bar text (`<a href>`, `<img>`, `<b>`), so
+ * EVERY string the converter writes into the option is entity-escaped (`&`, `<`, `>`, quotes) — document text and
+ * bound data alike. Categories are positional ids (`c0`, `c1`, …) labelled by `ticktext`, so no category value is ever
+ * parsed by Plotly; value ticks are computed by the core and written as `tickvals`/`ticktext` (Plotly takes no format
+ * function).
  *
- * ## Bound values are DATA, not markup (the rendering rule)
- * Plotly renders a subset of HTML (`<img>`, `<a href>`, `<b>`) inside text, hover and titles, so a
- * bound string is markup-ready XSS. Every bound value is neutralised (`&`, `<`, `>` escaped) before it
- * touches Plotly — a data cell that happens to contain `<img onerror>` renders as TEXT. The author's
- * own configuration strings are the author's; only data is escaped.
+ * ## Q-L4 (record O-2; 854 `matrix/quirks.md` Q-L4)
+ * A horizontal bar's outside value label is drawn past the bar's end; `cliponaxis: false` lets it leave the plotting
+ * rectangle, and the right margin is sized to the widest label so the label stays inside the CHART BOX (the container
+ * element's box). The width is estimated from the label's characters at Plotly's default 12 px text size; the
+ * browser suite's bounding-box assertion is the oracle.
  *
- * ## The palette (D25, the THEME SYSTEM rule)
- * No literal colour lives here: at each render the adapter resolves the app's `--chart-*` tokens
- * (app.css, bridged off the theme) through a PROBE element — `getComputedStyle` answers `color-mix()`
- * token streams verbatim, so the browser must compute them — and maps them into Plotly's `layout`
- * (paper, plot, grid, ink, the categorical `colorway`). `presentation.tokens` is an open map; the
- * names the adapter knows (`series`) are honoured, names it does not know are ignored. A token that
- * resolves to nothing degrades to Plotly's own defaults rather than painting wrong.
- *
- * ## The size defaults (#386)
- * A compact margin and `automargin` on the axes, so a figure in a 2-row slot keeps a plot area. They
- * sit UNDER the author's stored `margin`/`automargin` (the author wins, key by key); the theme sits
- * OVER the author's colours. Both precedences: dashboards.md §6.3.
- *
- * ## The bundle
- * The page loads exactly one bundle (`plotly-2d.min.js` default; `plotly-3d.min.js` for a board with a
- * 3D trace), declared on its script tag as `data-dp-plotly-bundle`; the runtime refuses a board whose
- * declared bundle cannot cover it. This file touches `window.Plotly` only at render time.
+ * ## The host side
+ * `instance` is the Plotly object the host declared at init (`charts: {library: "plotly", instance: window.Plotly}`);
+ * this file never reads `window.Plotly`. The page loads exactly one vendored bundle (`data-dp-plotly-bundle`), and the
+ * runtime places the CSP style marker before any draw.
  */
 (function () {
   "use strict";
 
-  var REGISTERED = false;
+  var chart =
+    typeof module !== "undefined" && module.exports
+      ? require("./datapipelines-dashboard-chart.js") // node --test and the parity/equivalence scripts
+      : typeof window !== "undefined"
+        ? window.DatapipelinesDashboardChart
+        : null;
 
-  function isObject(value) {
-    return !!value && typeof value === "object" && !Array.isArray(value);
-  }
+  /** Every bar field is `direct` in Plotly (`chart-support/plotly.json`: 35 rows, all direct). */
+  var DEGRADED = {};
 
-  /** `&` first, then the brackets — a bound string arrives as TEXT or not at all. */
-  function escapeMarkup(value) {
-    return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  }
-
-  /**
-   * `data[0].x` → ["data", 0, "x"]. A path segment is either a name or `[n]`; a malformed path is
-   * skipped (the binding simply does not land) — the server validated it at save.
-   */
-  function parsePath(path) {
-    var segments = [];
-    var parts = String(path).split(".");
-    for (var i = 0; i < parts.length; i++) {
-      var part = parts[i];
-      var match = part.match(/^([^\[\]]+)\[(\d+)\]$/);
-      if (match) {
-        segments.push(match[1]);
-        segments.push(Number(match[2]));
-      } else if (/^\d+$/.test(part)) {
-        segments.push(Number(part));
-      } else {
-        segments.push(part);
-      }
-    }
-    return segments;
-  }
-
-  function clone(value) {
-    return JSON.parse(JSON.stringify(value));
-  }
-
-  function substitute(config, bindings, escape) {
-    var out = clone(config);
-    if (!isObject(bindings)) return out;
-    for (var path in bindings) {
-      if (!Object.prototype.hasOwnProperty.call(bindings, path)) continue;
-      var values = bindings[path];
-      if (!Array.isArray(values)) continue;
-      var segments = parsePath(path);
-      var target = out;
-      var ok = true;
-      for (var i = 0; i < segments.length - 1; i++) {
-        var key = segments[i];
-        if (target == null || typeof target !== "object") {
-          ok = false;
-          break;
-        }
-        if (target[key] == null || typeof target[key] !== "object") {
-          // Bindings resolve inside the configuration at SAVE (§3.1); a path that resolves nowhere
-          // now is skipped whole — the adapter never invents structure.
-          ok = false;
-          break;
-        }
-        target = target[key];
-      }
-      if (!ok || target == null || typeof target !== "object") continue;
-      var leaf = segments[segments.length - 1];
-      // Strings are escaped (they are DATA, never markup); numbers, booleans and nulls pass through.
-      target[leaf] = values.map(function (value) {
-        return typeof value === "string" ? escape(value) : value;
-      });
-    }
-    return out;
-  }
-
-  /**
-   * `getComputedStyle(...).getPropertyValue('--x')` returns a custom property's TOKEN STREAM verbatim
-   * (a `color-mix()` bridge arrives uncomputed), so colours resolve through a probe element the way
-   * the pipeline editor's canvas reads its tokens (graph.js readDesignTokens, the same mould): assign
-   * `color: var(--x)` to a real element and read `getComputedStyle(...).color` back, normalised from
-   * CSS Color 4's `color(srgb …)` form to the legacy `rgb()/rgba()` Plotly's own colour validation
-   * accepts. One FRESH probe per token (093: a reused probe answers its first colour); null when the
-   * token resolves to nothing, which the caller reads as "leave Plotly's default".
-   */
-  function resolveToken(name) {
-    if (typeof document === "undefined" || !document.body) return null;
-    var probe = document.createElement("span");
-    probe.setAttribute("aria-hidden", "true");
-    probe.style.position = "absolute";
-    probe.style.width = "0";
-    probe.style.height = "0";
-    probe.style.visibility = "hidden";
-    probe.style.pointerEvents = "none";
-    probe.style.transition = "none";
-    probe.style.color = "var(" + name + ")";
-    document.body.appendChild(probe);
-    var computed = null;
-    try {
-      computed = window.getComputedStyle(probe).color;
-    } catch (e) {
-      computed = null;
-    }
-    document.body.removeChild(probe);
-    return normaliseColor(computed);
-  }
-
-  function normaliseColor(computed) {
-    if (!computed) return null;
-    var value = String(computed).trim();
-    if (value.indexOf("rgb") === 0 || value.charAt(0) === "#") return value;
-    var srgb = /^color\(\s*srgb\s+([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)\s*(?:\/\s*([0-9.]+)\s*)?\)$/.exec(value);
-    if (!srgb) return null;
-    var byte = function (x) {
-      return Math.max(0, Math.min(255, Math.round(parseFloat(x) * 255)));
-    };
-    var rgb = byte(srgb[1]) + ", " + byte(srgb[2]) + ", " + byte(srgb[3]);
-    var alpha = srgb[4] === undefined ? 1 : parseFloat(srgb[4]);
-    return alpha >= 1 ? "rgb(" + rgb + ")" : "rgba(" + rgb + ", " + alpha + ")";
-  }
-
-  /** The theme map (D25): the token names and the `layout` paths they feed. */
-  var THEME_TOKENS = {
-    canvas: "--chart-canvas",
-    plot: "--chart-plot",
-    grid: "--chart-grid",
-    ink: "--chart-ink",
-    muted: "--chart-muted",
+  var LEGEND = {
+    top: { orientation: "h", x: 0, xanchor: "left", y: 1.02, yanchor: "bottom" },
+    bottom: { orientation: "h", x: 0, xanchor: "left", y: -0.18, yanchor: "top" },
+    left: { orientation: "v", x: -0.12, xanchor: "right", y: 1, yanchor: "top" },
+    right: { orientation: "v", x: 1.02, xanchor: "left", y: 1, yanchor: "top" },
   };
 
-  function themeLayout(presentation) {
-    var resolved = {};
-    for (var key in THEME_TOKENS) {
-      if (Object.prototype.hasOwnProperty.call(THEME_TOKENS, key)) resolved[key] = resolveToken(THEME_TOKENS[key]);
-    }
-    var layout = {};
-    if (resolved.canvas) layout.paper_bgcolor = resolved.canvas;
-    if (resolved.plot) layout.plot_bgcolor = resolved.plot;
-    if (resolved.ink) {
-      layout.font = { color: resolved.ink };
-      layout.xaxis = { gridcolor: resolved.grid || null, zerolinecolor: resolved.grid || null };
-      layout.yaxis = { gridcolor: resolved.grid || null, zerolinecolor: resolved.grid || null };
-    }
-    if (resolved.muted) {
-      layout.xaxis = layout.xaxis || {};
-      layout.yaxis = layout.yaxis || {};
-      layout.xaxis.zerolinecolor = resolved.muted;
-      layout.yaxis.zerolinecolor = resolved.muted;
-    }
-    // `presentation.tokens` is an open map (documented): `series` is the one name this adapter knows.
-    var tokens = presentation && isObject(presentation.tokens) ? presentation.tokens : {};
-    if ((!tokens.series || tokens.series === "categorical") && resolved.canvas) {
-      var colorway = [];
-      for (var i = 1; i <= 6; i++) {
-        var colour = resolveToken("--chart-series-" + i);
-        if (colour) colorway.push(colour);
-      }
-      if (colorway.length) layout.colorway = colorway;
-    }
-    return layout;
-  }
+  /** The reference's right margin; Q-L4 widens it for horizontal outside labels only. */
+  var MARGIN_RIGHT = 20;
+
+  /** Plotly's default text size (`layout.font.size`), which the outside bar text inherits. */
+  var TEXT_PX = 12;
+
+  /** Plotly's outside-text pad plus a safety allowance for the font the browser actually picks. */
+  var LABEL_PAD_PX = 12;
 
   /**
-   * #386 — the SIZE defaults (dashboards.md §6.3). Plotly's own margins (about 100 px top, 80 px on
-   * the other sides) consume a 2-row slot (176 px) whole; a figure starts from a compact frame and
-   * each axis's `automargin` grows it by what its tick labels and axis title need, and no more. The
-   * top margin opens for a title only. These are DEFAULTS under the author: a stored `layout.margin`
-   * key and a stored `automargin` win over them key by key — the opposite precedence to the theme's
-   * colours, which win over the author's ([mergeLayout]).
+   * Upper-bound advance widths, in em, of a sans-serif face by character class: what a formatted value label is made
+   * of (digits, separators, signs, `%`, compact suffixes, currency symbols).
    */
-  var COMPACT_MARGIN = { l: 8, r: 8, t: 8, b: 8, pad: 0 };
-
-  /** The top margin of a titled figure: one line of Plotly's default title font (17 px) with its leading. */
-  var COMPACT_TITLED_TOP = 36;
-
-  /** `xaxis`, `yaxis` and the numbered axes an author declared (`xaxis2`, `yaxis3`, …). */
-  var AXIS_KEY = /^[xy]axis\d*$/;
-
-  function hasTitle(layout) {
-    var title = layout.title;
-    if (typeof title === "string") return title.length > 0;
-    return isObject(title) && title.text !== undefined && title.text !== null && String(title.text).length > 0;
+  function charEm(c) {
+    if (/[0-9]/.test(c)) return 0.6;
+    if (/[.,:;'!|  ]/.test(c)) return 0.34;
+    if (/[-−+]/.test(c)) return 0.62;
+    if (/[%MWmw@]/.test(c)) return 0.95;
+    if (/[A-Z]/.test(c)) return 0.75;
+    if (/[a-z]/.test(c)) return 0.6;
+    return 1.0;
   }
 
-  /**
-   * #473 — the card head carries the occurrence's name; a stored figure title that repeats it
-   * verbatim would print the same words twice in one card. An EXACT trimmed match is dropped
-   * (and the compact top margin stays), so the in-figure title remains only when it says
-   * something the heading does not. The comparison uses the same wire field the card heading
-   * prefers (`display_name`).
-   */
-  function suppressDuplicateTitle(layout, displayName) {
-    if (!displayName || !isObject(layout)) return layout;
-    var title = layout.title;
-    var text =
-      typeof title === "string"
-        ? title
-        : isObject(title) && typeof title.text === "string"
-          ? title.text
-          : null;
-    if (text !== null && text.trim() === String(displayName).trim()) {
-      var out = clone(layout);
-      delete out.title;
-      return out;
-    }
-    return layout;
+  function labelWidth(text) {
+    var w = 0;
+    var cps = Array.from(String(text));
+    for (var i = 0; i < cps.length; i++) w += charEm(cps[i]);
+    return Math.ceil(w * TEXT_PX);
   }
 
-  function withSizeDefaults(stored) {
-    var out = clone(stored && isObject(stored) ? stored : {});
-    var margin = Object.assign({}, COMPACT_MARGIN);
-    if (hasTitle(out)) margin.t = COMPACT_TITLED_TOP;
-    out.margin = Object.assign(margin, isObject(out.margin) ? out.margin : {});
-    var axes = ["xaxis", "yaxis"];
-    for (var key in out) {
-      if (Object.prototype.hasOwnProperty.call(out, key) && AXIS_KEY.test(key) && axes.indexOf(key) === -1) axes.push(key);
-    }
-    for (var i = 0; i < axes.length; i++) {
-      var axis = isObject(out[axes[i]]) ? out[axes[i]] : {};
-      if (axis.automargin === undefined) axis.automargin = true;
-      out[axes[i]] = axis;
-    }
-    return out;
-  }
-
-  function mergeLayout(stored, theme) {
-    var out = clone(stored && isObject(stored) ? stored : {});
-    for (var key in theme) {
-      if (!Object.prototype.hasOwnProperty.call(theme, key)) continue;
-      if (key === "xaxis" || key === "yaxis") {
-        out[key] = Object.assign({}, out[key], theme[key]);
-        for (var sub in theme[key]) {
-          if (theme[key][sub] === null) delete out[key][sub];
-        }
-      } else if (key === "font") {
-        out[key] = Object.assign({}, out[key], theme[key]);
-      } else {
-        out[key] = theme[key];
-      }
-    }
-    return out;
-  }
-
-  function create(context) {
-    var host = context.host;
-    var occurrence = context.occurrence || {};
-    var stored = occurrence.config || {};
-
-    function plot() {
-      return typeof window !== "undefined" && window.Plotly && typeof window.Plotly.react === "function";
-    }
-
-    return {
-      /**
-       * §10.3: substitute the bound arrays into the stored configuration, `Plotly.react`, and resolve
-       * `'rendered'` on `plotly_afterplot`. `rows === 0` is the renderable-empty case the adapter owns:
-       * `'no-data'` back to the runtime. The theme is re-resolved at EACH render — a theme swap shows
-       * on the next frame without a reload (D25).
-       */
-      renderData: function (occurrenceRef, rows, bindings) {
-        if (!rows || rows === 0) return Promise.resolve("no-data");
-        if (!plot()) {
-          throw new Error("Plotly is not loaded; the page must load one vendored bundle");
-        }
-        var config = substitute(stored, bindings || {}, escapeMarkup);
-        config.layout = mergeLayout(
-          withSizeDefaults(suppressDuplicateTitle(config.layout, occurrence.display_name)),
-          themeLayout(occurrence.presentation),
-        );
-        var plotConfig = Object.assign({ responsive: true, displaylogo: false }, config.config || {});
-        return new Promise(function (resolve, reject) {
-          var settled = false;
-          function done(outcome) {
-            if (settled) return;
-            settled = true;
-            resolve(outcome);
-          }
-          host.addEventListener(
-            "plotly_afterplot",
-            function () {
-              done("rendered");
-            },
-            { once: true },
-          );
-          window.Plotly.react(host, config.data || [], config.layout || {}, plotConfig).then(
-            function () {
-              // `react` resolving IS a completed draw (the event may have raced ahead of the promise);
-              // whichever arrives first settles.
-              done("rendered");
-            },
-            function (error) {
-              if (!settled) {
-                settled = true;
-                reject(error);
-              }
-            },
-          );
+  /** The bar spec → Plotly `{data, layout, config}` (the product's 2D bundle). Pure. */
+  function convert(spec, bindings, tokens) {
+    var core = chart.core;
+    var e = core.escapeHtml;
+    var m = core.model(spec, bindings, tokens);
+    var c = spec.config;
+    var t = core.titles(m);
+    var ids = m.categories.map(function (_, i) {
+      return "c" + i;
+    });
+    var B = m.vertical ? "x" : "y";
+    var V = m.vertical ? "y" : "x";
+    var labels = c.mark.labels === "values";
+    var legendOn = !!m.color && m.color.enc.legend !== null;
+    var data = m.series.map(function (s, si) {
+      var trace = {
+        type: "bar",
+        orientation: m.vertical ? "v" : "h",
+        name: e(s.full),
+      };
+      trace[B] = ids;
+      trace[V] = m.cells[si].map(function (v) {
+        return v.num;
+      });
+      trace.hovertext = m.categories.map(function (_, ci) {
+        return e(core.tooltipText(m.tooltip(si, ci)));
+      });
+      trace.hoverinfo = "text";
+      trace.marker = { color: tokens.series[si % tokens.series.length] };
+      if (labels) {
+        trace.text = m.cells[si].map(function (v) {
+          return e(v.text);
         });
-      },
-      resize: function () {
-        if (plot() && host) {
-          try {
-            window.Plotly.Plots.resize(host);
-          } catch (e) {
-            /* an unrendered host has nothing to resize */
-          }
-        }
-      },
-      dispose: function () {
-        if (plot() && host) {
-          try {
-            window.Plotly.purge(host);
-          } catch (e) {
-            /* already gone */
-          }
-        }
-      },
+        trace.textposition = m.stack ? "inside" : "outside";
+        trace.cliponaxis = false;
+      }
+      trace.showlegend = legendOn;
+      return trace;
+    });
+    var axisTitle = function (x) {
+      return x === null ? { text: "" } : { text: e(x) };
     };
+    var band = {
+      type: "category",
+      categoryorder: "array",
+      categoryarray: ids,
+      tickmode: "array",
+      tickvals: ids,
+      ticktext: m.categories.map(function (k) {
+        return e(k.label);
+      }),
+      showgrid: !!(m.band.enc.axis && m.band.enc.axis.grid),
+      gridcolor: tokens.grid,
+      title: axisTitle(t.band),
+      automargin: true,
+      fixedrange: true,
+      color: tokens.muted,
+    };
+    if (!m.vertical) band.autorange = "reversed";
+    var value = {
+      type: "linear",
+      range: [m.axis.lo, m.axis.hi],
+      autorange: false,
+      tickmode: "array",
+      tickvals: m.axis.ticks,
+      ticktext: m.axis.tickText.map(e),
+      showgrid: m.value.enc.axis && "grid" in m.value.enc.axis ? m.value.enc.axis.grid : true,
+      gridcolor: tokens.grid,
+      zeroline: true,
+      zerolinecolor: tokens.muted,
+      title: axisTitle(t.value),
+      automargin: true,
+      fixedrange: true,
+      color: tokens.muted,
+    };
+    var right = MARGIN_RIGHT;
+    if (labels && !m.vertical && !m.stack) {
+      // Q-L4: the widest outside label must fit between the plotting rectangle's right edge and the chart box's.
+      m.cells.forEach(function (row) {
+        row.forEach(function (v) {
+          if (v.num !== null) right = Math.max(right, labelWidth(v.text) + LABEL_PAD_PX);
+        });
+      });
+    }
+    var layout = {
+      barmode: m.stack === "zero" || m.stack === "normalize" ? "relative" : "group",
+      paper_bgcolor: tokens.canvas,
+      plot_bgcolor: tokens.plot,
+      font: { family: tokens.font, color: tokens.ink },
+      showlegend: legendOn,
+      hovermode: "closest",
+      margin: { t: c.title ? 80 : 30, r: right, b: 60, l: 60 },
+    };
+    layout[B + "axis"] = band;
+    layout[V + "axis"] = value;
+    if (c.title) {
+      layout.title = { text: e(c.title.text) };
+      if (c.title.subtitle) layout.title.subtitle = { text: e(c.title.subtitle) };
+    }
+    if (legendOn) {
+      var orient = (m.color.enc.legend && m.color.enc.legend.orient) || "right";
+      layout.legend = Object.assign({}, LEGEND[orient], { traceorder: "normal" });
+      if (t.series !== null) layout.legend.title = { text: e(t.series) };
+    }
+    var warnings = m.warnings.concat(core.degradedWarnings(core.setFields(spec, spec.columns), DEGRADED));
+    return { option: { data: data, layout: layout, config: { displayModeBar: false, responsive: false } }, warnings: warnings };
+  }
+
+  /** `Plotly.react` with the converted option; resolves on `plotly_afterplot` or the call's own promise, whichever first. */
+  function draw(Plotly, host, option) {
+    if (!Plotly || typeof Plotly.react !== "function") {
+      return Promise.reject(new Error("the declared Plotly instance cannot draw: it has no react function"));
+    }
+    return new Promise(function (resolve, reject) {
+      var settled = false;
+      function done() {
+        if (settled) return;
+        settled = true;
+        resolve("rendered");
+      }
+      host.addEventListener("plotly_afterplot", done, { once: true });
+      Promise.resolve(Plotly.react(host, option.data, option.layout, option.config)).then(done, function (error) {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      });
+    });
+  }
+
+  function resize(Plotly, host) {
+    if (Plotly && Plotly.Plots && typeof Plotly.Plots.resize === "function") Plotly.Plots.resize(host);
+  }
+
+  function dispose(Plotly, host) {
+    if (Plotly && typeof Plotly.purge === "function") Plotly.purge(host);
   }
 
   var api = {
-    register: function (dashboard) {
-      if (REGISTERED || !dashboard) return;
-      dashboard.registerRenderer({ kind: "plotly", version: "4", create: create });
-      REGISTERED = true;
+    /** Idempotent: a second call replaces the library's converter with the same one. */
+    register: function (chartAdapter) {
+      if (!chartAdapter) return;
+      chartAdapter.registerConverter({ library: "plotly", families: { bar: convert }, draw: draw, resize: resize, dispose: dispose });
     },
-    /** Exported for the node tests: the pure substitution and escaping, the theme and the size defaults. */
+    /** For the node tests and the equivalence oracle: the pure converter and the Q-L4 width estimate. */
     _internal: {
-      substitute: substitute,
-      escapeMarkup: escapeMarkup,
-      parsePath: parsePath,
-      themeLayout: themeLayout,
-      mergeLayout: mergeLayout,
-      withSizeDefaults: withSizeDefaults,
-      suppressDuplicateTitle: suppressDuplicateTitle,
-      COMPACT_MARGIN: COMPACT_MARGIN,
-      COMPACT_TITLED_TOP: COMPACT_TITLED_TOP,
+      convert: convert,
+      labelWidth: labelWidth,
+      MARGIN_RIGHT: MARGIN_RIGHT,
+      LABEL_PAD_PX: LABEL_PAD_PX,
     },
   };
 
   if (typeof module !== "undefined" && module.exports) module.exports = api; // node --test
   if (typeof window !== "undefined") {
     window.DatapipelinesDashboardPlotly = api;
-    api.register(window.DatapipelinesDashboard);
+    api.register(window.DatapipelinesDashboardChart);
   }
 })();

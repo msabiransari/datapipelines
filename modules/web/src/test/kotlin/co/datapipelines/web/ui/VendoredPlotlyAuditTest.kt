@@ -198,6 +198,7 @@ class VendoredPlotlyAuditTest {
         val FIRST_PARTY_FILES =
             listOf(
                 "js/datapipelines-dashboard.js",
+                "js/datapipelines-dashboard-chart.js",
                 "js/datapipelines-dashboard-plotly.js",
                 "js/datapipelines-dashboard-table.js",
                 "js/datapipelines-dashboard-kpi.js",
