@@ -6,10 +6,10 @@ import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.WorkspaceService
+import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceAuditEvents
 import co.datapipelines.datasources.DatasourceErrorCodes
 import co.datapipelines.datasources.DatasourceGrant
-import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceGrantRepository
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.isManagedLake

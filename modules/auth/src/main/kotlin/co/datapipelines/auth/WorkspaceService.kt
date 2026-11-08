@@ -754,11 +754,6 @@ open class WorkspaceService(
         return apiKeyRepository.liveCreatorIds(workspace.id)
     }
 
-    /**
-     * The house pattern (`MailNotifier`): inside a transaction, after its commit; otherwise
-     * now. Cache evictions that must outlive a transactional write go through here — an
-     * eviction that runs before the commit can be undone by a concurrent reload.
-     */
     /** Runs [task] when the surrounding transaction completes — commit OR rollback — or now when there is none. */
     private fun afterCompletionOrNow(task: () -> Unit) {
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
@@ -772,6 +767,11 @@ open class WorkspaceService(
         }
     }
 
+    /**
+     * The house pattern (`MailNotifier`): inside a transaction, after its commit; otherwise
+     * now. Cache evictions that must outlive a transactional write go through here — an
+     * eviction that runs before the commit can be undone by a concurrent reload.
+     */
     private fun afterCommitOrNow(task: () -> Unit) {
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(

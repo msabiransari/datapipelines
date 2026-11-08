@@ -304,11 +304,28 @@ class ManagedLakeReadsE2eTest {
 
         // The ordinary path is untouched: a revoke of an ordinary datasource's grant is still a 204, and its dialog keeps the button.
         registerH2Datasource(ORDINARY)
-        given().port(port).asSession(ADMIN_SESSION).`when`().post("/api/v1/datasources/$ORDINARY/grants/default").then().statusCode(200)
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .`when`()
+            .post("/api/v1/datasources/$ORDINARY/grants/default")
+            .then()
+            .statusCode(200)
         val ordinaryDialog =
-            given().port(port).asSession(ADMIN_SESSION).header("HX-Request", "true").`when`().get("/partials/datasources/$ORDINARY/grants")
+            given()
+                .port(port)
+                .asSession(ADMIN_SESSION)
+                .header("HX-Request", "true")
+                .`when`()
+                .get("/partials/datasources/$ORDINARY/grants")
         ordinaryDialog.body.asString() shouldContain "datasource-grant-remove"
-        given().port(port).asSession(ADMIN_SESSION).`when`().delete("/api/v1/datasources/$ORDINARY/grants/default").then().statusCode(204)
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .`when`()
+            .delete("/api/v1/datasources/$ORDINARY/grants/default")
+            .then()
+            .statusCode(204)
     }
 
     /**
@@ -1835,7 +1852,10 @@ class ManagedLakeReadsE2eTest {
                 .prepareStatement("SELECT COUNT(*) FROM audit_log WHERE event = 'datasource.revoked' AND details_json ->> 'datasource' = ?")
                 .use { ps ->
                     ps.setString(1, datasource)
-                    ps.executeQuery().use { rs -> rs.next(); rs.getInt(1) }
+                    ps.executeQuery().use { rs ->
+                        rs.next()
+                        rs.getInt(1)
+                    }
                 }
         }
 
@@ -1850,7 +1870,7 @@ class ManagedLakeReadsE2eTest {
             }
         }
 
-    /** A key minted by the signed-in super admin in [workspace] (their session's active workspace) over REST; the plaintext is returned, never logged. */
+    /** A key minted by the signed-in super admin in [workspace] over REST; the plaintext is returned, never logged. */
     private fun mintMcpKeyIn(
         onPort: Int,
         workspace: String,
