@@ -6,11 +6,13 @@ import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.WorkspaceService
+import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceAuditEvents
 import co.datapipelines.datasources.DatasourceErrorCodes
 import co.datapipelines.datasources.DatasourceGrant
 import co.datapipelines.datasources.DatasourceGrantRepository
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.isManagedLake
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.ApiResponse
 import co.datapipelines.web.api.currentPrincipal
@@ -31,7 +33,7 @@ import org.springframework.web.bind.annotation.RestController
  * every former global datasource into one explicit grant row per workspace so nothing that
  * worked yesterday stopped today.
  *
- * Super admin only ([ScopeMatrix.RestOperation.MANAGE_DATASOURCE_GRANTS]). A workspace admin
+ * Super admin only ([Permission.DATASOURCE_GRANT]). A workspace admin
  * registering a datasource bound to their OWN workspace gets its grant automatically at
  * registration ([DatasourceGrantRepository.grantOnRegistration]); handing a datasource to
  * somebody else's workspace is this surface, and it is the one verb that decides who can reach
@@ -82,6 +84,12 @@ class DatasourceGrantsController(
      * deleting a credential, and a workspace that loses a grant loses only its ability to SEE
      * it. Pipelines in that workspace that referenced it will then fail at execution with the
      * ordinary not-found, which is the honest answer: the datasource no longer exists for them.
+     *
+     * The MANAGED lake is the exception (#823): its grant is the server's, written when a workspace
+     * is created and repaired by the freshness tick, so a revoke would be undone within one tick and
+     * would leave the workspace without its lake in the meantime. It is refused with
+     * [DatasourceErrorCodes.MANAGED] (409) BEFORE anything is deleted or audited, for a workspace that
+     * holds the grant and for one that does not.
      */
     @DeleteMapping("/{workspace}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
@@ -90,7 +98,14 @@ class DatasourceGrantsController(
         @PathVariable name: String,
         @PathVariable workspace: String,
     ) {
-        requireDatasource(name)
+        val datasource = requireDatasource(name)
+        if (datasource.isManagedLake()) {
+            throw DatapipelinesException(
+                DatasourceErrorCodes.MANAGED,
+                "The grant of managed datasource '$name' to a workspace is held by the server and cannot be revoked.",
+                mapOf("datasource_name" to name, "workspace" to workspace),
+            )
+        }
         val principal = currentPrincipal()
         val target = workspaces.read(principal, workspace)
         val removed = grants.revoke(name, target.id)
@@ -103,14 +118,13 @@ class DatasourceGrantsController(
      * point of the verb. [DatasourceRegistry.get] is the unfiltered read; the SUPER_ADMIN
      * capability on every handler is what makes using it safe.
      */
-    private fun requireDatasource(name: String) {
+    private fun requireDatasource(name: String): Datasource =
         datasources.get(name)
             ?: throw DatapipelinesException(
                 DatasourceErrorCodes.NOT_FOUND,
                 "Datasource '$name' not found.",
                 mapOf("datasource_name" to name),
             )
-    }
 
     /** Every grant change is audited (D-R7: "every grant is audited"). */
     private fun audit(

@@ -26,6 +26,9 @@
 #   3. THIRD-PARTY IMAGE — the egress proxy the deployment ships (#845), read
 #      from its ONE pin in deploy/compose.yml (helm-check.sh pins the chart's
 #      default to the same reference). An unpinned reference is a finding (exit 1).
+#      Its baseline is .trivyignore.egress-proxy, read by this scan ONLY: a
+#      suppression's reason is triaged against one image's exposure, so the
+#      proxy's entries never hide the production image's findings (or back).
 #
 # Needs network on first run (trivy downloads its vulnerability DB to
 # ~/.cache/trivy) and a running Docker daemon for the image scan.
@@ -95,6 +98,8 @@ install_trivy() {
 
 IGNORE_ARGS=()
 [ -f "$ROOT/.trivyignore" ] && IGNORE_ARGS=(--ignorefile "$ROOT/.trivyignore")
+PROXY_IGNORE_ARGS=()
+[ -f "$ROOT/.trivyignore.egress-proxy" ] && PROXY_IGNORE_ARGS=(--ignorefile "$ROOT/.trivyignore.egress-proxy")
 
 # trivy_verdict <stage-label> <captured-rc> — map trivy's CAPTURED exit to
 # the published contract (014/F1): 0 = clean, 1 = findings not allowlisted
@@ -163,5 +168,5 @@ case "$EGRESS_PROXY_IMAGE" in
 esac
 echo "== trivy $TRIVY_VERSION — image scan ($EGRESS_PROXY_IMAGE) =="
 scan_rc=0
-"$BIN" image --exit-code 1 ${IGNORE_ARGS[@]+"${IGNORE_ARGS[@]}"} "$EGRESS_PROXY_IMAGE" || scan_rc=$?
+"$BIN" image --exit-code 1 ${PROXY_IGNORE_ARGS[@]+"${PROXY_IGNORE_ARGS[@]}"} "$EGRESS_PROXY_IMAGE" || scan_rc=$?
 trivy_verdict "image scan (egress proxy)" "$scan_rc"

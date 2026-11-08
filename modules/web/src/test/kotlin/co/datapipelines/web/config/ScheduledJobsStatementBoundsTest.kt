@@ -1,6 +1,5 @@
 package co.datapipelines.web.config
 
-import co.datapipelines.application.datasources.ManagedLakeTableRepository
 import co.datapipelines.auth.AuditProperties
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.ManagedLakeCatalog
@@ -40,14 +39,18 @@ import java.util.UUID
  *
  * #818b A — the managed lake's freshness tick, the fifth job on that thread: its two statements (the managed
  * catalog read, the regrant INSERT) carry the freshness bound through the production scheduler bean, while the
- * registrar's boot-time grant and the build's catalog read stay on the unbounded shared template. That the bound
- * then cancels a held statement on the real scheduler is `ManagedLakeReadsE2eTest`'s.
+ * registrar's boot-time grant stays on the unbounded shared template. That the bound then cancels a held statement
+ * on the real scheduler is `ManagedLakeReadsE2eTest`'s.
+ *
+ * #833 — the build's catalog read (the generation build inside `poolFor`) carries its own bound through the production
+ * repository bean, on a dedicated template; the shared template stays unbounded.
  *
  * #837 — the same statements carry a SOCKET bound too: the connection a bounded statement runs on has its network
  * timeout set to the statement's bound plus five seconds — 15 000, 30 000, 15 000 and 10 000
- * milliseconds for the sweep, the retention, the dashboard refresh sweep and the freshness tick — and every statement on
- * the shared, unbounded template runs on a connection with none. The numbers are literals, like the statement bounds.
- * That a paused server then ends the statement at the socket bound is `ScheduledJobsMetadataBoundsE2eTest`'s.
+ * milliseconds for the sweep, the retention, the dashboard refresh sweep and the freshness tick, and 10 000 for the
+ * build read — and every statement on the shared, unbounded template runs on a connection with none. The numbers are
+ * literals, like the statement bounds. That a paused server then ends the statement at the socket bound is
+ * `ScheduledJobsMetadataBoundsE2eTest`'s.
  */
 class ScheduledJobsStatementBoundsTest {
     private val recording = RecordingTimeoutDataSource(LAKE)
@@ -204,14 +207,26 @@ class ScheduledJobsStatementBoundsTest {
         recording.statementCount() shouldBe 2
     }
 
+    /**
+     * #833 — the read that BUILDS a managed generation runs on the lease's thread inside `poolFor`, so it carries a bound
+     * of its own: the production bean wraps the shared template in a dedicated bounded one. The negative half: the
+     * shared template the bean was built over is unchanged, so a sibling statement on it (the registrar's boot grant)
+     * still carries none.
+     */
     @Test
-    fun `the build's managed catalog read stays on the shared template - only the tick's is bounded`() {
-        LakeConfiguration()
-            .managedLakeCatalog(ManagedLakeTableRepository(jdbc), providerOf(LAKE_PROPERTIES))
+    fun `the build's managed catalog read carries its own five second bound - the shared template's other statements none (#833)`() {
+        val lake = LakeConfiguration()
+        lake
+            .managedLakeCatalog(lake.managedLakeTableRepository(jdbc), providerOf(LAKE_PROPERTIES))
             .managedTables(LAKE)
+        registrar().register()
 
-        recording.timeoutOf("SELECT t.namespace, t.name") shouldBe UNBOUNDED
-        recording.socketTimeoutOf("SELECT t.namespace, t.name") shouldBe NO_SOCKET
+        recording.timeoutOf("SELECT t.namespace, t.name") shouldBe BUILD_READ_BOUND
+        recording.socketTimeoutOf("SELECT t.namespace, t.name") shouldBe BUILD_READ_SOCKET
+        recording.timeoutOf("INSERT INTO datasource_workspaces") shouldBe UNBOUNDED
+        recording.socketTimeoutOf("INSERT INTO datasource_workspaces") shouldBe NO_SOCKET
+        recording.everyTimeout() shouldBe setOf(BUILD_READ_BOUND, UNBOUNDED)
+        recording.everySocketTimeout() shouldBe setOf(BUILD_READ_SOCKET, NO_SOCKET)
     }
 
     /**
@@ -292,6 +307,10 @@ class ScheduledJobsStatementBoundsTest {
 
         /** #818b A: the freshness tick's bound, two statements of it inside the 5 s reaper's cadence each. */
         const val FRESHNESS_BOUND = 5
+
+        /** #833: the build's catalog read, its own bound (the tick's twin value, on a template of its own). */
+        const val BUILD_READ_BOUND = 5
+        const val BUILD_READ_SOCKET = 10_000
 
         const val LAKE = SCHEDULED_JOBS_TEST_LAKE
 

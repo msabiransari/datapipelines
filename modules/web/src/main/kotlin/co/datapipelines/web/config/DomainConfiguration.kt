@@ -212,6 +212,18 @@ class DomainConfiguration {
         }
 
     /**
+     * #823 (owner ruling 2026-11-07) — the managed lake granted to a workspace inside the transaction that creates it.
+     * See `ManagedDatasourceGrants`. Resolved through an `ObjectProvider` at call time, not at wiring time: the
+     * registrar is built after Flyway and the lake boot check, and `WorkspaceService` must not pull that ordering in.
+     * The registrar owns the datasource's name and the system actor; this bean owns neither.
+     */
+    @Bean
+    fun managedDatasourceGrants(
+        registrar: org.springframework.beans.factory.ObjectProvider<ManagedLakeDatasourceRegistrar>,
+    ): co.datapipelines.auth.ManagedDatasourceGrants =
+        co.datapipelines.auth.ManagedDatasourceGrants { workspaceId -> registrar.ifAvailable?.grantTo(workspaceId) ?: false }
+
+    /**
      * D-R11 — the `demo` workspace at first boot, and the example content into it. See
      * [DemoWorkspaceStartup] for the O-3 rule that a DEACTIVATED `demo` is never recreated.
      */
@@ -372,6 +384,9 @@ class DomainConfiguration {
             // §5.2: the retirement ceiling defaults to the node query timeout + 30 s, which is
             // why the two properties meet here rather than inside either binding class.
             retireCeiling = datasourcesProperties.ceiling(executorProperties.nodeQueryTimeoutSeconds),
+            // #824 (owner ruling 2026-11-07): a retired MANAGED generation's ceiling is derived from the node query
+            // timeout's MAXIMUM, the longest statement a managed node may legitimately be running.
+            managedRetireCeiling = datasourcesProperties.managedCeiling(executorProperties.nodeQueryTimeoutMaxSeconds),
             // #818 (record §10 RULING 4): the managed reader generations' age bound, applied in the pool
             // lookup. Unbound lake (disabled) = no bound; its managed rows then serve no view at all.
             managedLake = managedLake,

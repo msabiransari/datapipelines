@@ -17,6 +17,7 @@ import io.kotest.matchers.longs.shouldBeInRange
 import io.kotest.matchers.longs.shouldBeLessThanOrEqual
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.restassured.RestAssured.given
@@ -62,6 +63,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.sql.Connection
 import java.sql.DriverManager
+import java.sql.SQLException
 import java.time.Duration
 import java.time.Instant
 import java.util.Base64
@@ -83,7 +85,8 @@ import kotlin.io.path.relativeTo
  * row) and one store:
  *
  * - **A**, this class's `@SpringBootTest` context: the managed row is created and granted at boot; REST and UI writes
- *   to it are refused (`datasource.managed`); a workspace created after boot is granted within one tick; and
+ *   to it are refused (`datasource.managed`); a workspace inserted by SQL after boot is granted within one tick (the repair path, since
+ *   #823 grants a workspace created through the product in its own transaction); and
  *   **proof (a)**: with no catalog movement (so the tick retires nothing), every lease is served by a generation
  *   younger than `reads.max-generation-age-seconds` (A runs a 6 s bound) and the generation is replaced.
  * - **B**, a second full boot after a table was defined with no registry row: B's registrar BACKFILLS the row, and
@@ -196,7 +199,7 @@ class ManagedLakeReadsE2eTest {
 
     @Test
     @Order(2)
-    fun `a workspace created after boot is granted the managed lake within one tick`() {
+    fun `a workspace inserted by SQL after boot is granted the managed lake within one tick (repair path)`() {
         val workspace = UUID.randomUUID()
         metadata {
             it.createStatement().execute(
@@ -205,6 +208,164 @@ class ManagedLakeReadsE2eTest {
         }
 
         awaitTrue(Duration.ofSeconds(A_TICK_SECONDS * 4)) { workspace in grantedWorkspaces() }
+    }
+
+    // ------------------------------------------------------------------ #823: the grant at creation, the refused revoke, the repair
+
+    /**
+     * #823 (A.3) — a workspace created through `POST /api/v1/workspaces` is granted the managed lake IN ITS OWN
+     * TRANSACTION: listed at once, on an instance whose freshness tick (600 s) cannot have run, and visible to a key
+     * pinned to it. A and B tick the SAME database every 5 s and 2 s, so a listing alone could be their repair; the grant's
+     * `granted_at` equals the workspace's `created_at` only when both were written by one transaction (Postgres `NOW()` is
+     * the transaction's start), and its actor is the system actor, never the super admin who created the workspace.
+     */
+    @Test
+    @Order(8231)
+    fun `#823 - a workspace created through REST is granted the managed lake in its own transaction, before any tick`() {
+        val created = lifecycle()
+        val createdPort = portOf(created)
+        given()
+            .port(createdPort)
+            .contentType(ContentType.JSON)
+            .asSession(ADMIN_SESSION)
+            .body("""{"name": "$CREATED_WS", "display_name": "Created by #823"}""")
+            .`when`()
+            .post("/api/v1/workspaces")
+            .then()
+            .statusCode(201)
+
+        val listed =
+            given()
+                .port(createdPort)
+                .asSession(ADMIN_SESSION)
+                .`when`()
+                .get("/api/v1/datasources/$LAKE/grants")
+                .then()
+                .statusCode(200)
+                .extract()
+                .jsonPath()
+                .getList<String>("data.workspace")
+        val provenance = managedGrantProvenance(CREATED_WS)
+        assertAll(
+            { withClue("listed at once, with no await") { listed shouldContain CREATED_WS } },
+            { withClue("granted in the creation's transaction: $provenance") { provenance?.sameTransaction shouldBe true } },
+            { withClue("granted as the server, not as the creating super admin") { provenance?.byUserId shouldBe systemActorId() } },
+            { withClue("the super admin is not the grantor") { provenance?.byUserId shouldNotBe UUID.fromString(ADMIN_USER_ID) } },
+        )
+
+        // Visible to a key pinned to the new workspace, through the agent surface.
+        val key = mintMcpKeyIn(createdPort, CREATED_WS)
+        val (datasources, refused) = ManagedLakeMcpClient(createdPort, key).call("datasources_list", emptyMap())
+        withClue("datasources_list refused: $datasources") { refused shouldBe false }
+        datasources.map { it.path("name").asText() } shouldContain LAKE
+    }
+
+    /**
+     * #823 (B.2) — a revoke of the managed lake's grant is refused `datasource.managed` on the REST surface and the UI
+     * surface, the grant stays, and no `datasource.revoked` audit row is written. An ordinary datasource's revoke is
+     * unchanged (204), and the dialog draws a Revoke button for it and none for the managed row.
+     */
+    @Test
+    @Order(8232)
+    fun `#823 - the managed lake's grant cannot be revoked over REST or the UI, an ordinary datasource's still can`() {
+        val revokedBefore = revokeAuditRows(LAKE)
+
+        val rest =
+            given()
+                .port(port)
+                .asSession(ADMIN_SESSION)
+                .`when`()
+                .delete("/api/v1/datasources/$LAKE/grants/default")
+        val ui =
+            given()
+                .port(port)
+                .asSession(ADMIN_SESSION)
+                .header("HX-Request", "true")
+                .`when`()
+                .post("/partials/datasources/$LAKE/grants/default/remove")
+        val dialog =
+            given()
+                .port(port)
+                .asSession(ADMIN_SESSION)
+                .header("HX-Request", "true")
+                .`when`()
+                .get("/partials/datasources/$LAKE/grants")
+        assertAll(
+            { withClue("REST answered ${rest.body.asString()}") { rest.statusCode shouldBe 409 } },
+            { rest.jsonPath().getString("error.code") shouldBe MANAGED_CODE },
+            { rest.body.asString() shouldNotContain "jdbc:" },
+            { withClue("UI answered ${ui.body.asString()}") { ui.statusCode shouldBe 409 } },
+            { ui.body.asString() shouldContain MANAGED_CODE },
+            { grantedWorkspaces() shouldContain DEFAULT_WORKSPACE_ID },
+            { revokeAuditRows(LAKE) shouldBe revokedBefore },
+            { dialog.statusCode shouldBe 200 },
+            { dialog.body.asString() shouldNotContain "datasource-grant-remove" },
+            { dialog.body.asString() shouldContain "granted by the server" },
+        )
+
+        // The ordinary path is untouched: a revoke of an ordinary datasource's grant is still a 204, and its dialog keeps the button.
+        registerH2Datasource(ORDINARY)
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .`when`()
+            .post("/api/v1/datasources/$ORDINARY/grants/default")
+            .then()
+            .statusCode(200)
+        val ordinaryDialog =
+            given()
+                .port(port)
+                .asSession(ADMIN_SESSION)
+                .header("HX-Request", "true")
+                .`when`()
+                .get("/partials/datasources/$ORDINARY/grants")
+        ordinaryDialog.body.asString() shouldContain "datasource-grant-remove"
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .`when`()
+            .delete("/api/v1/datasources/$ORDINARY/grants/default")
+            .then()
+            .statusCode(204)
+    }
+
+    /**
+     * #823 (C.1) — the tick stays the repair path: a grant row an operator deleted by hand for an EXISTING workspace is
+     * written back within four ticks of A's, and the registrar logs it (`lake.managed_datasource_granted … workspaces=1`).
+     * The repair writes no audit row: the server repairing its own grant is not a person's act.
+     */
+    @Test
+    @Order(8233)
+    fun `#823 - the tick repairs a managed grant an operator deleted by hand, logs it and audits nothing`() {
+        val logger = LoggerFactory.getLogger(PRODUCT_LOGGERS) as Logger
+        val capture = SnapshotListAppender()
+        logger.addAppender(capture)
+        try {
+            // The row to delete exists at once on the fixed code and after one tick on the old (the workspace was
+            // created by the case above); waiting for it makes this case a repair test on both, not a copy of that one.
+            awaitTrue(Duration.ofSeconds(A_TICK_SECONDS * 4)) { CREATED_WS in grantedWorkspaceNames() }
+            val auditBefore = grantAuditRows()
+            metadata { connection ->
+                connection
+                    .prepareStatement(
+                        "DELETE FROM datasource_workspaces WHERE datasource_name = ? AND workspace_id = " +
+                            "(SELECT id FROM workspaces WHERE name = ?)",
+                    ).use {
+                        it.setString(1, LAKE)
+                        it.setString(2, CREATED_WS)
+                        it.executeUpdate() shouldBe 1
+                    }
+            }
+
+            awaitTrue(Duration.ofSeconds(A_TICK_SECONDS * 4)) { CREATED_WS in grantedWorkspaceNames() }
+
+            val repaired = linesOf(capture, "event=lake.managed_datasource_granted").filter { "workspaces=1 " in it.text }
+            withClue("the registrar logged the repair: ${capture.messages()}") { repaired.size shouldBeGreaterThanOrEqual 1 }
+            withClue("the repair is not a person's act: no grant audit row") { grantAuditRows() shouldBe auditBefore }
+        } finally {
+            logger.detachAppender(capture)
+            capture.stop()
+        }
     }
 
     @Test
@@ -508,7 +669,7 @@ class ManagedLakeReadsE2eTest {
                 maxAgeSeconds = H_MAX_AGE_SECONDS,
                 tickSeconds = H_TICK_SECONDS,
                 application = APP_H,
-                extra = listOf("datapipelines.datasources.retire-ceiling-seconds" to H_CEILING_SECONDS.toString()),
+                extra = hCeilings(),
             )
         val logger = LoggerFactory.getLogger(PRODUCT_LOGGERS) as Logger
         val capture = SnapshotListAppender()
@@ -642,8 +803,9 @@ class ManagedLakeReadsE2eTest {
      * Gen 1 is leased once and returned; the reaper retires it at its age bound and hands its close away, where it
      * hangs. Gen 2 is then built by a lease that runs the long reader: the reaper must retire and hard-close gen 2 in
      * bound while gen 1's close is still hung, and `datasource.pool_close_stuck` must name gen 1 once, no earlier than
-     * the deadline after its hand-off. Red with the synchronous close restored (the reaper then hangs in gen 1's close
-     * and never reaches gen 2), and with the `scheduler` attribute removed (the retirement lines' thread).
+     * its own deadline after its hand-off, and carry that deadline (#840: a managed generation's, 90 s here). Red
+     * with the synchronous close restored (the reaper then hangs in gen 1's close and never reaches gen 2), and with
+     * the `scheduler` attribute removed (the retirement lines' thread).
      */
     @Test
     @Order(18)
@@ -684,6 +846,7 @@ class ManagedLakeReadsE2eTest {
                     { withClue("gen 1's close was still held when gen 2 closed") { release.count shouldBe 1L } },
                     { stuck.size shouldBe 1 },
                     { stuck.single().text shouldContain "datasource=$LAKE generation=${seam.generation.get()} " },
+                    { stuck.single().text shouldContain " deadline_seconds=$POOL_CLOSE_DEADLINE_SECONDS " },
                     { (stuck.single().at >= handedOffAt.plusSeconds(POOL_CLOSE_DEADLINE_SECONDS)) shouldBe true },
                 )
             } finally {
@@ -708,7 +871,7 @@ class ManagedLakeReadsE2eTest {
             maxAgeSeconds = H_MAX_AGE_SECONDS,
             tickSeconds = H_TICK_SECONDS,
             application = application,
-            extra = listOf("datapipelines.datasources.retire-ceiling-seconds" to H_CEILING_SECONDS.toString()),
+            extra = hCeilings(),
             initializers = initializers,
         )
 
@@ -744,6 +907,7 @@ class ManagedLakeReadsE2eTest {
                         listOf(
                             "datapipelines.lake.storage.endpoint" to proxy.endpoint,
                             "datapipelines.datasources.retire-ceiling-seconds" to "1",
+                            "datapipelines.datasources.managed-retire-ceiling-seconds" to "1",
                         ),
                 )
             val lease = leaseManaged(reader)
@@ -911,7 +1075,11 @@ class ManagedLakeReadsE2eTest {
                 maxAgeSeconds = B_MAX_AGE_SECONDS,
                 tickSeconds = LIFECYCLE_TICK_SECONDS,
                 application = "reader-paused-$pauseSeconds",
-                extra = listOf("datapipelines.datasources.retire-ceiling-seconds" to "180"),
+                extra =
+                    listOf(
+                        "datapipelines.datasources.retire-ceiling-seconds" to "180",
+                        "datapipelines.datasources.managed-retire-ceiling-seconds" to "180",
+                    ),
             )
         val lease = leaseManaged(reader)
         val generation = readerGeneration(reader)
@@ -959,6 +1127,107 @@ class ManagedLakeReadsE2eTest {
             runCatching { lease.close() }
         }
     }
+
+    /**
+     * #833 — the read that BUILDS a managed generation (the catalog read, first in the view init) runs on the lease's
+     * thread inside `poolFor` and carries its own bound. Under a held catalog lock the rebuild is refused
+     * `lake.unavailable` by a statement cancel (SQLState 57014) within that bound, installs nothing, and the retired
+     * generation's held lease keeps serving meanwhile; once the lock goes, the next lease builds. The red run (no
+     * bound) is observed as the build still waiting at [BUILD_READ_RED_SECONDS], never as an unbounded wait.
+     */
+    @Test
+    @Order(24)
+    fun `#833 - a held catalog lock refuses the rebuild lake unavailable within its bound while the retired generation serves`() {
+        ensureReaderFixture()
+        val reader = boot(maxAgeSeconds = B_MAX_AGE_SECONDS, tickSeconds = LIFECYCLE_TICK_SECONDS, application = APP_833)
+        val lease = leaseManaged(reader)
+        try {
+            val served = countOnLease(lease)
+            retireManagedPool(reader) shouldBe true
+            metadata { lock ->
+                lock.autoCommit = false
+                lock.createStatement().use { it.execute("LOCK TABLE lake_tables_managed IN ACCESS EXCLUSIVE MODE") }
+                try {
+                    metadata { watcher -> rebuildUnderHeldLock(reader, lease, watcher, served) }
+                } finally {
+                    lock.rollback()
+                }
+            }
+            leaseManaged(reader).close()
+            generationBuiltAt(reader).shouldNotBeNull()
+        } finally {
+            runCatching { lease.close() }
+            reader.close()
+        }
+    }
+
+    private fun rebuildUnderHeldLock(
+        reader: ApplicationContext,
+        lease: Connection,
+        watcher: Connection,
+        served: Long,
+    ) {
+        val failure = AtomicReference<Throwable?>()
+        val failedAt = AtomicReference<Long?>()
+        val build =
+            Thread({
+                runCatching { leaseManaged(reader).close() }.onFailure {
+                    failedAt.set(System.nanoTime())
+                    failure.set(it)
+                }
+            }, "dp833-rebuild").apply {
+                isDaemon = true
+                start()
+            }
+        awaitTrue(Duration.ofSeconds(BUILD_READ_BOUND_SECONDS)) { waitingOnLock(watcher, CATALOG_READ_TEXT, APP_833) }
+        val queuedAt = System.nanoTime()
+        val servedWhileQueued = countOnLease(lease)
+        val countedAt = System.nanoTime()
+        build.join(Duration.ofSeconds(BUILD_READ_RED_SECONDS).toMillis())
+        val stillWaiting = build.isAlive
+        val causes = generateSequence(failure.get()) { it.cause }.toList()
+        val elapsedMs = failedAt.get()?.let { Duration.ofNanos(it - queuedAt).toMillis() }
+        println(
+            "BUILD_READ_BOUND queued_to_refused_ms=$elapsedMs still_waiting_after_${BUILD_READ_RED_SECONDS}s=$stillWaiting " +
+                "served=$served served_while_queued=$servedWhileQueued " +
+                "causes=${causes.joinToString(" <- ") { it.javaClass.simpleName + ":" + it.message?.take(CAUSE_PRINT_CHARS) }}",
+        )
+        withClue("the build read was still waiting on the held lock after ${BUILD_READ_RED_SECONDS}s: it carries no bound") {
+            stillWaiting shouldBe false
+        }
+        assertAll(
+            { elapsedMs.shouldNotBeNull() shouldBeInRange BUILD_READ_WINDOW_MS },
+            { causes.map { codeOf(it) } shouldContain "lake.unavailable" },
+            { causes.filterIsInstance<SQLException>().map { it.sqlState } shouldContain "57014" },
+            { generationBuiltAt(reader) shouldBe null },
+            { servedWhileQueued shouldBe served },
+            { (countedAt < failedAt.get().shouldNotBeNull()) shouldBe true },
+        )
+    }
+
+    private fun countOnLease(lease: Connection): Long =
+        lease.createStatement().use { st ->
+            st.executeQuery("SELECT count(*) FROM $H_TRIPS").use { rs ->
+                rs.next()
+                rs.getLong(1)
+            }
+        }
+
+    /** A `DatapipelinesException`'s code, by name (integration-tests reaches app only); null for any other throwable. */
+    private fun codeOf(error: Throwable): String? =
+        error.javaClass.methods
+            .firstOrNull { it.name == "getCode" && it.parameterCount == 0 }
+            ?.invoke(error) as? String
+
+    /**
+     * H's and the reader profile's ceilings: the general one as before, and since #824 the MANAGED one too, which is
+     * the ceiling a retired managed generation is actually held to; both at [H_CEILING_SECONDS], as the cases expect.
+     */
+    private fun hCeilings(): List<Pair<String, String>> =
+        listOf(
+            "datapipelines.datasources.retire-ceiling-seconds" to H_CEILING_SECONDS.toString(),
+            "datapipelines.datasources.managed-retire-ceiling-seconds" to H_CEILING_SECONDS.toString(),
+        )
 
     /** Acceptance methods can also run alone during falsification. */
     private fun ensureReaderFixture() {
@@ -1520,12 +1789,13 @@ class ManagedLakeReadsE2eTest {
     private fun waitingOnLock(
         watcher: Connection,
         statementText: String,
+        application: String = APP_G,
     ): Boolean =
         watcher
             .prepareStatement(
                 "SELECT count(*) FROM pg_stat_activity WHERE application_name = ? AND wait_event_type = 'Lock' AND query LIKE ?",
             ).use { ps ->
-                ps.setString(1, APP_G)
+                ps.setString(1, application)
                 ps.setString(2, statementText)
                 ps.executeQuery().use { rs ->
                     rs.next()
@@ -1649,6 +1919,85 @@ class ManagedLakeReadsE2eTest {
                 ps.executeQuery().use { rs -> generateSequence { if (rs.next()) rs.getObject(1, UUID::class.java) else null }.toSet() }
             }
         }
+
+    private fun grantedWorkspaceNames(): Set<String> =
+        metadata { connection ->
+            connection
+                .prepareStatement(
+                    "SELECT w.name FROM datasource_workspaces g JOIN workspaces w ON w.id = g.workspace_id WHERE g.datasource_name = ?",
+                ).use { ps ->
+                    ps.setString(1, LAKE)
+                    ps.executeQuery().use { rs -> generateSequence { if (rs.next()) rs.getString(1) else null }.toSet() }
+                }
+        }
+
+    /** Who wrote the managed grant for [workspace], and whether it was written in the very transaction that created the workspace. */
+    private data class GrantProvenance(
+        val byUserId: UUID,
+        val sameTransaction: Boolean,
+    )
+
+    private fun managedGrantProvenance(workspace: String): GrantProvenance? =
+        metadata { connection ->
+            connection
+                .prepareStatement(
+                    """
+                    SELECT g.granted_by, (g.granted_at = w.created_at) AS same_tx
+                      FROM datasource_workspaces g JOIN workspaces w ON w.id = g.workspace_id
+                     WHERE g.datasource_name = ? AND w.name = ?
+                    """.trimIndent(),
+                ).use { ps ->
+                    ps.setString(1, LAKE)
+                    ps.setString(2, workspace)
+                    ps.executeQuery().use { rs ->
+                        if (rs.next()) GrantProvenance(rs.getObject(1, UUID::class.java), rs.getBoolean(2)) else null
+                    }
+                }
+        }
+
+    private fun systemActorId(): UUID = metadata { systemActor(it) }
+
+    private fun revokeAuditRows(datasource: String): Int =
+        metadata { connection ->
+            connection
+                .prepareStatement("SELECT COUNT(*) FROM audit_log WHERE event = 'datasource.revoked' AND details_json ->> 'datasource' = ?")
+                .use { ps ->
+                    ps.setString(1, datasource)
+                    ps.executeQuery().use { rs ->
+                        rs.next()
+                        rs.getInt(1)
+                    }
+                }
+        }
+
+    /** Every grant or revoke audit row on the instance: the events a person's grant surface writes. */
+    private fun grantAuditRows(): Int =
+        metadata { connection ->
+            connection.createStatement().use { st ->
+                st.executeQuery("SELECT COUNT(*) FROM audit_log WHERE event IN ('datasource.granted', 'datasource.revoked')").use { rs ->
+                    rs.next()
+                    rs.getInt(1)
+                }
+            }
+        }
+
+    /** A key minted by the signed-in super admin in [workspace] over REST; the plaintext is returned, never logged. */
+    private fun mintMcpKeyIn(
+        onPort: Int,
+        workspace: String,
+    ): String =
+        given()
+            .port(onPort)
+            .contentType(ContentType.JSON)
+            .asSession(E2eSession.jwt(SECRET, ADMIN_USER_ID, "e2e-managed-lake@datapipelines.test", workspace))
+            .body("""{"name": "k823", "kind": "mcp", "role": "author"}""")
+            .`when`()
+            .post("/api/v1/auth/api-keys")
+            .then()
+            .statusCode(201)
+            .extract()
+            .jsonPath()
+            .getString("data.key")
 
     private fun registryLocation(): String? =
         metadata { connection ->
@@ -1800,6 +2149,8 @@ class ManagedLakeReadsE2eTest {
     companion object {
         private const val LAKE = "lake"
         private const val TAKEN_NAME = "lake_taken"
+        private const val CREATED_WS = "created_823"
+        private const val ORDINARY = "ordinary_823"
         private const val MANAGED_CODE = "datasource.managed"
         private const val TEMPLATE_ID = "test/managed_lake_count.sql"
         private const val DEFAULT_WORKSPACE = "defa0000-0000-0000-0000-000000000001"
@@ -1864,8 +2215,14 @@ class ManagedLakeReadsE2eTest {
          */
         private const val REAPER_DELAY_SECONDS = 7L
 
-        /** #818d — the per-close deadline (`PoolCloser.DEADLINE_SECONDS`), a literal; I3 waits for its WARN. */
-        private const val POOL_CLOSE_DEADLINE_SECONDS = 65L
+        /**
+         * #840 — a MANAGED generation's close deadline on this profile, a literal; I3 waits for its WARN. The lake pool
+         * runs HikariCP's 30 s `connectionTimeout`, the metadata pool the shipped 10 s acquire bound (#837): 30 (the
+         * lake pool's own first shutdown wait) + 3 × 10 + 5 (the fixed terms) + 10 + 5 + 10 (the reader-pin release:
+         * metadata checkout, bounded DELETE, the driver's cancel wait on a server that never answers; #833 merge review
+         * F1) = 90. #818d's constant 65 had neither the first term's source nor the fourth.
+         */
+        private const val POOL_CLOSE_DEADLINE_SECONDS = 90L
 
         /** #818d — the reaper's own thread, and the jobs' shared one, by the spec's names. */
         private const val REAPER_THREAD = "dp-reaper"
@@ -1889,6 +2246,21 @@ class ManagedLakeReadsE2eTest {
         private const val MESSAGE_CHARS = 200
         private const val APP_F = "dp818-f"
         private const val APP_G = "dp818-g"
+
+        /**
+         * #833: the build read's bound is the issue's 5 s, a literal (never read back from the class under test); the
+         * window is queued-to-refused like A's, and the red observation is bounded at 15 s.
+         */
+        private const val APP_833 = "dp833-build"
+        private const val BUILD_READ_BOUND_SECONDS = 5L
+        private const val BUILD_READ_RED_SECONDS = 15L
+        private const val MILLIS_PER_SECOND = 1_000L
+        private val BUILD_READ_WINDOW_MS =
+            LongRange(
+                BUILD_READ_BOUND_SECONDS * MILLIS_PER_SECOND - MILLIS_PER_SECOND,
+                (BUILD_READ_BOUND_SECONDS + BOUND_SLACK_SECONDS) * MILLIS_PER_SECOND,
+            )
+        private const val CAUSE_PRINT_CHARS = 160
         private val EXECUTION_BUDGET: Duration = Duration.ofSeconds(180)
 
         private const val MINIO_PORT = 9000

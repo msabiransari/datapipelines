@@ -91,6 +91,8 @@ class DefaultDatasourceRegistry(
     private val duckdbMemoryLimit: String? = null,
     private val poolMetrics: PoolLifecycleMetrics = PoolLifecycleMetrics.NONE,
     private val retireCeiling: Duration = ConnectionPoolManager.DEFAULT_RETIRE_CEILING,
+    /** #824 — a retired MANAGED generation's ceiling, forwarded to the pool manager; [retireCeiling] when unset. */
+    private val managedRetireCeiling: Duration = retireCeiling,
     /**
      * #204 L4 — the declared file roots, re-checked at EVERY pool build against every
      * `InProcessFile` row. The save-time validator holds the same instance for the same rule
@@ -190,6 +192,7 @@ class DefaultDatasourceRegistry(
                 )
             },
             retireCeiling = retireCeiling,
+            managedRetireCeiling = managedRetireCeiling,
             maxGenerationAge = maxGenerationAge,
             closer = poolCloser,
             pins = generationPins,

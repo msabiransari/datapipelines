@@ -6,8 +6,11 @@ import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.WorkspaceService
 import co.datapipelines.datasources.DatasourceAuditEvents
+import co.datapipelines.datasources.DatasourceErrorCodes
 import co.datapipelines.datasources.DatasourceGrantRepository
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.isManagedLake
+import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
@@ -81,6 +84,10 @@ class DatasourceGrantsPartialController(
     /**
      * Revokes a grant. The datasource is untouched — revoking visibility is not deleting a
      * credential — and the workspace that loses it simply stops being able to see the row.
+     *
+     * The MANAGED lake's grants are the server's (#823): the dialog draws no button for them, and a
+     * hand-built POST is refused with [DatasourceErrorCodes.MANAGED] (409, shown as a toast by
+     * `UiExceptionHandler`) before anything is deleted or audited.
      */
     @PostMapping("/partials/datasources/{name}/grants/{workspace}/remove")
     @RequiredScope(Permission.DATASOURCE_GRANT)
@@ -90,7 +97,14 @@ class DatasourceGrantsPartialController(
         @PathVariable workspace: String,
     ): Any {
         val principal = requirePrincipal()
-        datasources.get(name) ?: return notFound(name)
+        val datasource = datasources.get(name) ?: return notFound(name)
+        if (datasource.isManagedLake()) {
+            throw DatapipelinesException(
+                DatasourceErrorCodes.MANAGED,
+                "The grant of managed datasource '$name' to a workspace is held by the server and cannot be revoked.",
+                mapOf("datasource_name" to name, "workspace" to workspace),
+            )
+        }
         val target = workspaces.read(principal, workspace)
         val removed = grants.revoke(name, target.id)
         audit(principal, DatasourceAuditEvents.REVOKED, name, workspace, mapOf("had_grant" to removed))
@@ -113,6 +127,8 @@ class DatasourceGrantsPartialController(
         val rows = grants.grantsOf(name)
         val actors = actorNames.lookup(rows.map { it.grantedBy }.distinct())
         model.addAttribute("datasource", datasource)
+        // The managed lake's grants are the server's (#823): the template draws a sentence, not a Revoke button.
+        model.addAttribute("isManaged", datasource.isManagedLake())
         model.addAttribute(
             "grants",
             rows.map { grant ->
@@ -125,7 +141,9 @@ class DatasourceGrantsPartialController(
                     // has no owner exemption, and `DatasourceWorkspaceRules` says nothing about
                     // grants at all — it governs the `global` flag and the workspace BINDING).
                     // Hiding the button here would make the screen refuse what the server
-                    // allows, which is the mirror of the defect this round removes.
+                    // allows, which is the mirror of the defect this round removes. The one
+                    // exception is the MANAGED lake (`isManaged`, #823): the server refuses its
+                    // revoke, so the template hides the button for every row, owner or not.
                     "owner" to (datasource.workspaceName == grant.workspaceName),
                 )
             },
