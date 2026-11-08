@@ -167,15 +167,16 @@ internal class VisualizationReleaseCascadeFixtures(
     private fun document(title: String): String =
         """
         {"name":"$workspace/chart","display_name":"Cascade","description":"453",
-         "renderer":{"kind":"plotly","version":"4"},
+         "renderer":{"kind":"chart","version":"1"},
          "inputs":{"revenue":{"columns":[{"name":"month","type":"DATE","nullable":false},
                                             {"name":"amount","type":"DECIMAL","nullable":false}]}},
          "transform":{"template":{"name":"$template","version":1},"inputs":{"rows":"revenue"}},
-         "config":{"data":[{"type":"bar","x":[],"y":[]}]},
-         "bindings":{"data[0].x":"month_labels","data[0].y":"amounts"},
-         "presentation":{"title":"$title"},
+         "config":{"title":{"text":"$title"},"mark":{"type":"bar"},
+                   "encoding":{"x":{"field":"month_labels","type":"nominal","sort":"ascending"},
+                               "y":{"field":"amounts","type":"quantitative","aggregate":"sum"}}},
+         "bindings":{"amounts":"amounts","month_labels":"month_labels"},
          "tests":{"cases":[{"name":"one month","fixtures":{"revenue":[{"month":"2026-01-01","amount":10.5}]},
-                              "assertions":[{"kind":"rendered"},{"kind":"trace_count","equals":1}]}]}}
+                              "assertions":[{"kind":"rendered"},{"kind":"mark_count","equals":1}]}]}}
         """.trimIndent()
 
     private fun templateDocument(): String =
