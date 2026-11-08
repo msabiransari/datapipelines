@@ -1738,7 +1738,10 @@ with a path + exact-value allowlist entry, never by reshaping the fixture's hist
 
 trivy (pinned in the script, same verified-download pattern) scans the
 Dockerfile for misconfigurations and the locally-built production image for
-package CVEs. Baseline exceptions live in `.trivyignore` with a reason + date
+package CVEs, then the egress proxy image deploy/compose.yml pins. Baseline
+exceptions live in `.trivyignore` (the production image and the config scans)
+and `.trivyignore.egress-proxy` (the proxy image only, so one image's triage
+never suppresses the other's findings), each with a reason + date
 comment AND an `exp:` expiry per entry — an expired entry fails the scan
 again, so baselines get re-triaged instead of rotting (same discipline as
 `osv-scanner.toml`'s `ignoreUntil`). Anything NOT ignored exits 1, so new
