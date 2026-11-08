@@ -41,33 +41,23 @@ class LakeConfiguration {
      * #818b B: NOT the registry's port. The registry (pool builds, the executor's broken-view
      * check) takes the plain [projectionCatalog] (`DomainConfiguration.datasourceRegistry`), so
      * neither a build nor a node's CONNECT reads the managed catalog through here.
+     *
+     * #833 merge review F2: the managed enrichment reads over its OWN repository on the shared, unbounded template,
+     * never the build's bounded [managedLakeTableRepository]. This port is also read inside a release's, an import's
+     * and a promotion's metadata transaction (the lake reference scan, the promotion check), and a bounded statement
+     * leaves its socket bound on the transaction's connection until the transaction ends
+     * (`co.datapipelines.executor.BoundedJdbc`), which would cut that transaction's later, longer statements.
      */
     @Bean
     fun lakeTableCatalog(
         tables: LakeTableRepository,
-        managedLake: ManagedLakeCatalog,
-    ): LakeTableCatalog {
-        val projection = projectionCatalog(tables)
-        return LakeTableCatalog { datasourceName ->
-            val rows = projection.registeredTables(datasourceName)
-            // #818: a managed row is enriched from the managed read (catalog location, lifecycle), so every
-            // reader of this port (introspection, stats, the probe's listing root) sees the catalog's current
-            // facts. The read runs only when the datasource HAS managed rows, and a failure propagates.
-            if (rows.none { it.managed }) return@LakeTableCatalog rows
-            val managed = managedLake.managedTables(datasourceName).associateBy { it.qualifiedName }
-            rows.map { row ->
-                if (!row.managed) return@map row
-                val current = managed[(row.namespace + row.name).joinToString(".")]
-                row.copy(
-                    location = current?.metadataLocation ?: row.location,
-                    notice = current?.deprecationMessage,
-                    // A served table's reason is null; only a managed row the managed read did not return at all
-                    // (it raced a delete between the two reads) falls back to "no lifecycle row".
-                    unavailableReason = if (current == null) ManagedLakeTable.REASON_NO_LIFECYCLE_ROW else current.unavailableReason,
-                )
-            }
-        }
-    }
+        jdbc: NamedParameterJdbcTemplate,
+        lakeProperties: ObjectProvider<LakeProperties>,
+    ): LakeTableCatalog =
+        enrichedCatalog(
+            tables,
+            managedLakeCatalogOver(ManagedLakeTableRepository(jdbc), enabled = lakeProperties.ifAvailable?.enabled == true),
+        )
 
     /** #818 (record §6) — the managed lake datasource at boot; see [ManagedLakeDatasourceRegistrar] for the ordering. */
     @Bean
@@ -90,8 +80,9 @@ class LakeConfiguration {
      * lease's thread inside `poolFor`; unbounded, a held lock on the catalog tables would stall every lease that needs
      * a new generation for as long as the lock is held. A cancelled read is that build's `lake.unavailable`, and the
      * live generation (if any) serves until its age bound, as for any failed catalog read. The shared template the
-     * bound is built over is unchanged, so no other statement on it gains a bound. The same port also answers the
-     * introspection and stats listings' managed enrichment ([lakeTableCatalog]), which inherit the bound.
+     * bound is built over is unchanged, so no other statement on it gains a bound. The introspection and stats
+     * listings' managed enrichment ([lakeTableCatalog]) does NOT use this bean: it reads over an unbounded repository of
+     * its own, because it also runs inside metadata transactions (#833 merge review F2).
      */
     @Bean
     fun managedLakeTableRepository(jdbc: NamedParameterJdbcTemplate): ManagedLakeTableRepository =
@@ -165,6 +156,37 @@ class LakeConfiguration {
          * one-row-per-table catalog read on the metadata database. A constant, not a key (datasources.md §8C.10).
          */
         const val MANAGED_BUILD_READ_TIMEOUT_SECONDS = 5
+
+        /**
+         * The introspection port over the registry [tables]: [projectionCatalog]'s rows, with every managed row
+         * enriched from [managedLake] (catalog location, lifecycle). The bean, [LakeConfiguration.lakeTableCatalog],
+         * passes an unbounded port (#833 merge review F2).
+         */
+        fun enrichedCatalog(
+            tables: LakeTableRepository,
+            managedLake: ManagedLakeCatalog,
+        ): LakeTableCatalog {
+            val projection = projectionCatalog(tables)
+            return LakeTableCatalog { datasourceName ->
+                val rows = projection.registeredTables(datasourceName)
+                // #818: a managed row is enriched from the managed read (catalog location, lifecycle), so every
+                // reader of this port (introspection, stats, the probe's listing root) sees the catalog's current
+                // facts. The read runs only when the datasource HAS managed rows, and a failure propagates.
+                if (rows.none { it.managed }) return@LakeTableCatalog rows
+                val managed = managedLake.managedTables(datasourceName).associateBy { it.qualifiedName }
+                rows.map { row ->
+                    if (!row.managed) return@map row
+                    val current = managed[(row.namespace + row.name).joinToString(".")]
+                    row.copy(
+                        location = current?.metadataLocation ?: row.location,
+                        notice = current?.deprecationMessage,
+                        // A served table's reason is null; only a managed row the managed read did not return at all
+                        // (it raced a delete between the two reads) falls back to "no lifecycle row".
+                        unavailableReason = if (current == null) ManagedLakeTable.REASON_NO_LIFECYCLE_ROW else current.unavailableReason,
+                    )
+                }
+            }
+        }
 
         /**
          * `lake_tables` as stored, one [LakeRegisteredTable] per row: the location is the registry column, a managed
