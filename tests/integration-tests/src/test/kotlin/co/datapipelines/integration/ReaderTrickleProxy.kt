@@ -98,6 +98,9 @@ internal class ReaderTrickleProxy(
             input.copyTo(target.getOutputStream())
         } catch (_: IOException) {
             // closed by test
+        } finally {
+            // Carry EOF across the proxy: otherwise a closed upstream looks like a stalled keep-alive to its client.
+            runCatching { target.shutdownOutput() }
         }
     }
 
