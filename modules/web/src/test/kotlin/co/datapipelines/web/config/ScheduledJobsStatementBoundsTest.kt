@@ -51,13 +51,17 @@ import java.util.UUID
  * build read — and every statement on the shared, unbounded template runs on a connection with none. The numbers are
  * literals, like the statement bounds. That a paused server then ends the statement at the socket bound is
  * `ScheduledJobsMetadataBoundsE2eTest`'s.
+ *
+ * #858 — the lake settlement tick, built in `modules/lake` over the runtime's own template, carries both bounds too:
+ * its statements' 5 s bound and a socket bound of 10 000 milliseconds, set once per statement. That a paused server
+ * then ends the tick's statement at 15 s on the real scheduler is `LakeSettlementMetadataBoundsE2eTest`'s.
  */
 class ScheduledJobsStatementBoundsTest {
     private val recording = RecordingTimeoutDataSource(LAKE)
     private val jdbc = NamedParameterJdbcTemplate(recording)
 
     @Test
-    fun `lake settlement mode observation and protection finalization carry their dedicated five second bound`() {
+    fun `lake settlement mode observation and protection finalization carry their five second bound and its socket bound`() {
         val sweep =
             co.datapipelines.lake.settle.LakeSettlementSweep(
                 NamedParameterJdbcTemplate(
@@ -72,9 +76,15 @@ class ScheduledJobsStatementBoundsTest {
             )
         sweep.finalizeProtection()
         sweep.runOnce() // Recording result says non-normal: the mode guard itself still executes SQL.
-        recording.timeoutOf("UPDATE lake_table_revisions r SET protected_until") shouldBe 5
-        recording.timeoutOf("SELECT mode =") shouldBe 5
-        recording.everyTimeout() shouldBe setOf(5)
+        recording.timeoutOf("UPDATE lake_table_revisions r SET protected_until") shouldBe SETTLEMENT_BOUND
+        recording.timeoutOf("SELECT mode =") shouldBe SETTLEMENT_BOUND
+        recording.everyTimeout() shouldBe setOf(SETTLEMENT_BOUND)
+        recording.socketTimeoutOf("UPDATE lake_table_revisions r SET protected_until") shouldBe SETTLEMENT_SOCKET
+        recording.socketTimeoutOf("SELECT mode =") shouldBe SETTLEMENT_SOCKET
+        recording.everySocketTimeout() shouldBe setOf(SETTLEMENT_SOCKET)
+        // Set per statement, not once per connection: every statement's own call.
+        recording.networkTimeoutCalls() shouldBe List(recording.statementCount()) { SETTLEMENT_SOCKET }
+        recording.statementCount() shouldBe 2
     }
 
     @Test
@@ -311,6 +321,10 @@ class ScheduledJobsStatementBoundsTest {
         /** #833: the build's catalog read, its own bound (the tick's twin value, on a template of its own). */
         const val BUILD_READ_BOUND = 5
         const val BUILD_READ_SOCKET = 10_000
+
+        /** #858: the lake settlement tick's statement bound, and that plus five seconds in milliseconds — literals. */
+        const val SETTLEMENT_BOUND = 5
+        const val SETTLEMENT_SOCKET = 10_000
 
         const val LAKE = SCHEDULED_JOBS_TEST_LAKE
 
