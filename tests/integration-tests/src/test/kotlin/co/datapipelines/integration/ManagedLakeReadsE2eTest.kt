@@ -754,6 +754,8 @@ class ManagedLakeReadsE2eTest {
     fun `I1 - with the metadata pool exhausted the reaper still retires and closes an executing reader's generation in bound`() {
         val reader = bootReaderProfile(APP_I1)
         try {
+            // Isolate the reaper, as in I2: a failed keeper heartbeat would otherwise retire the generation first.
+            (reader.getBean("readerLeaseTaskScheduler") as ThreadPoolTaskScheduler).shutdown()
             val metadataPool = reader.getBean("dataSource") as HikariDataSource
             reapedUnderAdversity(reader, "I1 metadata pool exhausted") {
                 val held = (1..metadataPool.maximumPoolSize).map { metadataPool.connection }
