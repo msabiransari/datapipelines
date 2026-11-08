@@ -74,7 +74,8 @@ fun interface PoolCloser {
          * (`ConnectionPoolManager.buildProtected`): `pool.close()` and then, once no physical handle remains,
          * `ManagedGenerationPins.unpin`, which in production (`ReaderLeaseKeeper.unpin` → `LakeLeases.release`) checks a
          * connection out of the METADATA pool (up to that pool's `connectionTimeout`) and runs one DELETE bounded at
-         * `LakeLeases.READER_STATEMENT_TIMEOUT_SECONDS` (statement timeout and socket timeout). That is not
+         * `LakeLeases.READER_STATEMENT_TIMEOUT_SECONDS` (statement timeout and socket timeout), which against a server
+         * that never answers ends at that bound plus the driver's 10 s cancel wait (#837). That is not
          * [OWNER_RELEASE_MARGIN_SECONDS]'s five seconds, which cover one native disconnect; it is a named term, derived
          * by the assembling layer from the metadata pool it actually runs on. Zero for every other pool, which unpins
          * nothing.

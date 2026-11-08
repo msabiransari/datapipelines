@@ -86,12 +86,16 @@ class PoolCloseDeadlineTest {
     }
 
     @Test
-    fun `the release bound is the metadata pool's checkout plus the reader statement bound - 35 s on HikariCP's default`() {
-        // LakeLeases.READER_STATEMENT_TIMEOUT_SECONDS = 5, a literal here: never read back from the class under test.
-        DeadlinePoolCloser.managedReleaseBound(null) shouldBe Duration.ofSeconds(DEFAULT_TIMEOUT_SECONDS + READER_STATEMENT_SECONDS)
+    fun `the release bound is the metadata pool's checkout plus the reader statement's end - 45 s on HikariCP's default`() {
+        // LakeLeases.READER_STATEMENT_TIMEOUT_SECONDS = 5 and pgjdbc's cancelSignalTimeout = 10 (#833 merge review F1: a
+        // statement against a server that never answers ends at its bound plus the driver's cancel wait), literals here:
+        // never read back from the class under test.
+        DeadlinePoolCloser.managedReleaseBound(null) shouldBe
+            Duration.ofSeconds(DEFAULT_TIMEOUT_SECONDS + READER_STATEMENT_SECONDS + DRIVER_CANCEL_WAIT_SECONDS)
         // The no-argument constructor is lazy: it validates and starts nothing until a connection is asked for.
         HikariDataSource().apply { connectionTimeout = Duration.ofSeconds(LONG_TIMEOUT_SECONDS).toMillis() }.use {
-            DeadlinePoolCloser.managedReleaseBound(it) shouldBe Duration.ofSeconds(LONG_TIMEOUT_SECONDS + READER_STATEMENT_SECONDS)
+            DeadlinePoolCloser.managedReleaseBound(it) shouldBe
+                Duration.ofSeconds(LONG_TIMEOUT_SECONDS + READER_STATEMENT_SECONDS + DRIVER_CANCEL_WAIT_SECONDS)
         }
     }
 
@@ -122,6 +126,7 @@ class PoolCloseDeadlineTest {
         const val LONG_DEADLINE_SECONDS = 155L
         const val RELEASE_SECONDS = 35L
         const val READER_STATEMENT_SECONDS = 5L
+        const val DRIVER_CANCEL_WAIT_SECONDS = 10L
 
         /** The scaled pair: 35 s of fixed terms become 1 s; 30 s and 120 s timeouts become 1 s and 3 s. */
         val SCALED_FIXED_TERMS: Duration = Duration.ofSeconds(1)

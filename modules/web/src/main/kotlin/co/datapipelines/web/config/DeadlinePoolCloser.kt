@@ -167,13 +167,25 @@ class DeadlinePoolCloser(
          * #840 — the fourth term for a managed generation, derived from the metadata pool its pins are released on
          * (`PoolReaderLeaseConfiguration.managedGenerationPins` builds the keeper over the same [metadata]): the
          * checkout, bounded by that pool's own `connectionTimeout` (HikariCP's default when it is not a Hikari pool,
-         * as the keeper reads it), plus the DELETE, bounded at `LakeLeases.READER_STATEMENT_TIMEOUT_SECONDS` by its
-         * statement timeout and its socket timeout. 10 + 5 = 15 s on the shipped metadata pool
-         * (`spring.datasource.hikari.connection-timeout` = 10 000 ms since #837); 30 + 5 = 35 s on HikariCP's default.
+         * as the keeper reads it), plus the DELETE, whose statement and socket timeouts are both
+         * `LakeLeases.READER_STATEMENT_TIMEOUT_SECONDS`, plus [DRIVER_CANCEL_WAIT_SECONDS]: against a server that accepts
+         * and never answers, the statement ends only when the driver's cancel attempt gives up, at its bound plus that
+         * wait (measured under #837, `co.datapipelines.executor.BoundedJdbc`). 10 + 5 + 10 = 25 s on the shipped metadata
+         * pool (`spring.datasource.hikari.connection-timeout` = 10 000 ms since #837); 30 + 5 + 10 = 45 s on HikariCP's
+         * default.
          */
         fun managedReleaseBound(metadata: DataSource?): Duration =
             Duration
                 .ofMillis((metadata as? HikariDataSource)?.connectionTimeout ?: HikariConfig().connectionTimeout)
                 .plusSeconds(LakeLeases.READER_STATEMENT_TIMEOUT_SECONDS.toLong())
+                .plusSeconds(DRIVER_CANCEL_WAIT_SECONDS)
+
+        /**
+         * pgjdbc's `cancelSignalTimeout` default, in seconds (`PGProperty.CANCEL_SIGNAL_TIMEOUT`, "10" in the pinned
+         * 42.7.13): a statement whose query timeout has fired waits for its cancel to finish
+         * (`PgStatement.killTimerTask`), and a cancel sent to a server that never answers gives up only at this timeout.
+         * The metadata URL does not set it. A typed value because the driver is not on this module's compile classpath.
+         */
+        const val DRIVER_CANCEL_WAIT_SECONDS = 10L
     }
 }

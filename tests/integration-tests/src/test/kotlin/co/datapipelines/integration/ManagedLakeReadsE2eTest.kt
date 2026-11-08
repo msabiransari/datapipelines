@@ -643,7 +643,7 @@ class ManagedLakeReadsE2eTest {
      * Gen 1 is leased once and returned; the reaper retires it at its age bound and hands its close away, where it
      * hangs. Gen 2 is then built by a lease that runs the long reader: the reaper must retire and hard-close gen 2 in
      * bound while gen 1's close is still hung, and `datasource.pool_close_stuck` must name gen 1 once, no earlier than
-     * its own deadline after its hand-off, and carry that deadline (#840: a managed generation's, 80 s here). Red
+     * its own deadline after its hand-off, and carry that deadline (#840: a managed generation's, 90 s here). Red
      * with the synchronous close restored (the reaper then hangs in gen 1's close and never reaches gen 2), and with
      * the `scheduler` attribute removed (the retirement lines' thread).
      */
@@ -1977,10 +1977,11 @@ class ManagedLakeReadsE2eTest {
         /**
          * #840 — a MANAGED generation's close deadline on this profile, a literal; I3 waits for its WARN. The lake pool
          * runs HikariCP's 30 s `connectionTimeout`, the metadata pool the shipped 10 s acquire bound (#837): 30 (the
-         * lake pool's own first shutdown wait) + 3 × 10 + 5 (the fixed terms) + 10 + 5 (the reader-pin release:
-         * metadata checkout, bounded DELETE) = 80. #818d's constant 65 had neither the first term's source nor the fourth.
+         * lake pool's own first shutdown wait) + 3 × 10 + 5 (the fixed terms) + 10 + 5 + 10 (the reader-pin release:
+         * metadata checkout, bounded DELETE, the driver's cancel wait on a server that never answers; #833 merge review
+         * F1) = 90. #818d's constant 65 had neither the first term's source nor the fourth.
          */
-        private const val POOL_CLOSE_DEADLINE_SECONDS = 80L
+        private const val POOL_CLOSE_DEADLINE_SECONDS = 90L
 
         /** #818d — the reaper's own thread, and the jobs' shared one, by the spec's names. */
         private const val REAPER_THREAD = "dp-reaper"
