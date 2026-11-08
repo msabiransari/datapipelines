@@ -109,7 +109,25 @@ class DialectRefusalSetsTest {
                 "file_search_path",
                 "temp_directory",
                 "allowed_paths",
+                // #845: the object-store egress path is configuration's (the managed row's `egress_proxy`).
+                "http_proxy",
+                "http_proxy_username",
+                "http_proxy_password",
             )
+    }
+
+    @Test
+    fun `845 - the http_proxy family is refused in properties_jdbc on every LAKE and DUCKDB datasource`() {
+        // D2: no caller points a lake engine's object-store traffic at another proxy, or supplies proxy credentials,
+        // through properties.jdbc; the managed lake row's proxy comes from configuration only.
+        listOf(Dialect.LAKE, Dialect.DUCKDB).forEach { dialect ->
+            listOf("http_proxy", "http_proxy_username", "http_proxy_password").forEach { key ->
+                withClue("properties.jdbc.$key must be refused for $dialect") {
+                    refusalErrorsForJdbcProperty(dialect, key).map { it.code } shouldContain
+                        DatasourceErrorCodes.PROPERTIES_INVALID
+                }
+            }
+        }
     }
 
     @Test

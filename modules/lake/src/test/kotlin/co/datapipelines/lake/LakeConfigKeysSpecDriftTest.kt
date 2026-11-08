@@ -118,6 +118,8 @@ class LakeConfigKeysSpecDriftTest {
                 "$PREFIX.maintenance.window",
                 "$PREFIX.mode",
                 "$PREFIX.name",
+                "$PREFIX.reads.egress-max-age-seconds",
+                "$PREFIX.reads.egress-proxy",
                 "$PREFIX.reads.freshness-tick-seconds",
                 "$PREFIX.reads.max-generation-age-seconds",
                 "$PREFIX.reads.memory-limit",

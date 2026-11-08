@@ -697,14 +697,47 @@ class LakeDialectAdapter(
         enumValue(properties, "unsigned", BOOLEAN_WORDS)?.let { errors += it }
         enumValue(properties, "managed", BOOLEAN_WORDS)?.let { errors += it }
         limitValueError(properties)?.let { errors += it }
+        egressProxyError(properties)?.let { errors += it }
         return ValidationResult.of(errors)
+    }
+
+    /**
+     * #845 (D2) — [LakeHttpBounds.EGRESS_PROXY_KEY] belongs to the managed row only: configuration writes it through
+     * the registrar, and DefaultDatasourceRegistry refuses `managed` on every caller's save, so a caller can never reach
+     * an accepted proxy key. It is admitted only beside `managed: true` and a `catalog.kind` (the `SET` exists only once
+     * `httpfs` is loaded), and only in the [LakeHttpBounds.isEgressProxy] grammar.
+     */
+    private fun egressProxyError(properties: Map<String, Any?>): ValidationResult.ValidationError? {
+        val key = LakeHttpBounds.EGRESS_PROXY_KEY
+        // A blank value is the generic EMPTY rule's (DatasourceValidator, PROPERTY_EMPTY): one cause, one error.
+        val value = properties[key]?.toString()?.takeIf { it.isNotBlank() } ?: return null
+        val problem =
+            when {
+                properties["managed"]?.toString()?.lowercase() != "true" -> {
+                    "properties.dialect.$key is accepted only on the managed lake datasource (managed: true)."
+                }
+
+                properties["catalog.kind"] == null -> {
+                    "properties.dialect.$key needs properties.dialect.catalog.kind: the proxy applies to the object-store client."
+                }
+
+                !LakeHttpBounds.isEgressProxy(value) -> {
+                    "properties.dialect.$key must be host:port (letters, digits, '.', '-'; port 1-65535)."
+                }
+
+                else -> {
+                    return null
+                }
+            }
+        return ValidationResult.ValidationError(DatasourceErrorCodes.PROPERTIES_INVALID, "properties.dialect.$key", problem)
     }
 
     /**
      * §D's engine limits as `SET` statements, in a fixed order: `memory_limit` (explicit, or
      * the class-KDoc default), optional `threads`, explicit or generated `temp_directory`,
      * `preserve_insertion_order = false` always, then — for a datasource with `catalog.kind`,
-     * whose engine loads `httpfs` — [LakeHttpBounds.STATEMENTS] (#818d), code constants. Every value reached here already passed
+     * whose engine loads `httpfs` — [LakeHttpBounds.STATEMENTS] (#818d), code constants, and then, for the managed row
+     * carrying [LakeHttpBounds.EGRESS_PROXY_KEY], the egress proxy `SET` (#845). Every value reached here already passed
      * [validateDialectProperties] at save — the memory-limit regex admits no quote, `threads`
      * is a bare integer, and `temp_directory` carries none of the refused characters — so the
      * interpolation into the two string literals cannot break out of them.
@@ -737,7 +770,13 @@ class LakeDialectAdapter(
             add("SET preserve_insertion_order = false")
             // #818d: the object-store request bounds the silent-store hygiene budget is measured from. Only where `httpfs` is
             // loaded (the extension statements' own predicate): the settings do not exist before it.
-            if (properties["catalog.kind"] != null) addAll(LakeHttpBounds.STATEMENTS)
+            if (properties["catalog.kind"] != null) {
+                addAll(LakeHttpBounds.STATEMENTS)
+                // #845: the managed row's egress proxy, after the bounds and therefore before the §15a lockdown that the
+                // managed generation runs after this init (ManagedLakeGeneration.LOCKDOWN_STATEMENTS), which refuses
+                // any later SET or RESET of it. Validation admitted the key only beside managed: true.
+                properties[LakeHttpBounds.EGRESS_PROXY_KEY]?.toString()?.let { add(LakeHttpBounds.proxyStatement(it)) }
+            }
         }
 
     /** The class KDoc's default: 25 % of the container's memory, floored and hard-capped. */
@@ -956,6 +995,8 @@ class LakeDialectAdapter(
                 // here so the registrar's row validates; DefaultDatasourceRegistry refuses it on
                 // every caller's save (`datasource.managed`).
                 "managed",
+                // #845: the managed row's egress proxy (host:port), accepted only beside managed: true.
+                LakeHttpBounds.EGRESS_PROXY_KEY,
             )
         val CATALOG_KINDS = setOf("s3", "glue", "s3_tables", "rest")
         val ICEBERG_KINDS = setOf("glue", "s3_tables", "rest")

@@ -54,10 +54,12 @@ spec:
           {{- if hasKey .Values.extraEnv "DATAPIPELINES_SCRIPT_JS_MAX_INPUT_MB" }}{{ fail "set script.js.maxInputMb, not extraEnv.DATAPIPELINES_SCRIPT_JS_MAX_INPUT_MB" }}{{- end }}
           {{- if hasKey .Values.extraEnv "MANAGEMENT_SERVER_ADDRESS" }}{{ fail "set management.expose, not extraEnv.MANAGEMENT_SERVER_ADDRESS (deployment.md §6.4)" }}{{- end }}
           {{- if hasKey .Values.extraEnv "MANAGEMENT_SERVER_PORT" }}{{ fail "set management.port, not extraEnv.MANAGEMENT_SERVER_PORT (deployment.md §6.4)" }}{{- end }}
+          {{- if and .Values.lake.egressProxy.enabled (hasKey .Values.extraEnv "DATAPIPELINES_LAKE_READS_EGRESS_PROXY") }}{{ fail "lake.egressProxy.enabled sets DATAPIPELINES_LAKE_READS_EGRESS_PROXY — not extraEnv (deployment.md §6.4)" }}{{- end }}
+          {{- if and .Values.lake.egressProxy.enabled (hasKey .Values.extraEnv "DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS") }}{{ fail "set lake.egressProxy.maxAgeSeconds, not extraEnv.DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS (deployment.md §6.4)" }}{{- end }}
           {{- range $name := keys .Values.extraEnv }}{{ if eq (upper (replace "." "_" $name)) "LOADER_PATH" }}{{ fail "LOADER_PATH comes from the image, never from extraEnv.LOADER_PATH (deployment.md §9)" }}{{ end }}{{- end }}
           {{- range $name := keys .Values.extraEnv }}{{ if has (upper $name) (list "JAVA_TOOL_OPTIONS" "JDK_JAVA_OPTIONS" "_JAVA_OPTIONS") }}{{ fail (printf "extraEnv.%s is refused: a JVM option variable can override the image's launcher path (deployment.md §9)" $name) }}{{ end }}{{- end }}
           {{- if and (ne .Values.script.js.isolateDir nil) (ne (toString .Values.script.js.isolateDir) "") (not (has .Values.script.js.isolateDir (list "/opt/graaljs" "/app/lib"))) }}{{ fail "script.js.isolateDir must be one of the image's LOADER_PATH entries (/app/lib,/opt/graaljs) and contain js-isolate.jar (deployment.md §6.4)" }}{{- end }}
-          {{- if or .Values.extraEnv .Values.duckdb.extensionDirectory .Values.duckdb.memoryLimit (and (ne .Values.script.js.isolateDir nil) (ne (toString .Values.script.js.isolateDir) "")) (and (ne .Values.script.js.maxHeapMb nil) (ne (toString .Values.script.js.maxHeapMb) "")) (and (ne .Values.script.js.isolateMemoryMb nil) (ne (toString .Values.script.js.isolateMemoryMb) "")) (and (ne .Values.script.js.maxStatements nil) (ne (toString .Values.script.js.maxStatements) "")) (and (ne .Values.script.js.maxAstDepth nil) (ne (toString .Values.script.js.maxAstDepth) "")) (and (ne .Values.script.js.maxStackFrames nil) (ne (toString .Values.script.js.maxStackFrames) "")) (and (ne .Values.script.js.maxOutputBytes nil) (ne (toString .Values.script.js.maxOutputBytes) "")) (and (ne .Values.script.js.maxResultMb nil) (ne (toString .Values.script.js.maxResultMb) "")) (and (ne .Values.script.js.maxInputMb nil) (ne (toString .Values.script.js.maxInputMb) "")) .Values.management.expose }}
+          {{- if or .Values.extraEnv .Values.duckdb.extensionDirectory .Values.duckdb.memoryLimit (and (ne .Values.script.js.isolateDir nil) (ne (toString .Values.script.js.isolateDir) "")) (and (ne .Values.script.js.maxHeapMb nil) (ne (toString .Values.script.js.maxHeapMb) "")) (and (ne .Values.script.js.isolateMemoryMb nil) (ne (toString .Values.script.js.isolateMemoryMb) "")) (and (ne .Values.script.js.maxStatements nil) (ne (toString .Values.script.js.maxStatements) "")) (and (ne .Values.script.js.maxAstDepth nil) (ne (toString .Values.script.js.maxAstDepth) "")) (and (ne .Values.script.js.maxStackFrames nil) (ne (toString .Values.script.js.maxStackFrames) "")) (and (ne .Values.script.js.maxOutputBytes nil) (ne (toString .Values.script.js.maxOutputBytes) "")) (and (ne .Values.script.js.maxResultMb nil) (ne (toString .Values.script.js.maxResultMb) "")) (and (ne .Values.script.js.maxInputMb nil) (ne (toString .Values.script.js.maxInputMb) "")) .Values.management.expose .Values.lake.egressProxy.enabled }}
           env:
             {{- if .Values.duckdb.extensionDirectory }}
             - name: DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY
@@ -110,6 +112,14 @@ spec:
               # The opt-open switch (configuration.md §3.14): rendered ONLY here,
               # under management.expose — never through extraEnv (refused above).
               value: "0.0.0.0"
+            {{- end }}
+            {{- if .Values.lake.egressProxy.enabled }}
+            # #845: the managed reads' egress proxy — this chart's Service and the max-age its
+            # ConfigMap declares (one value, lake.egressProxy.maxAgeSeconds).
+            - name: DATAPIPELINES_LAKE_READS_EGRESS_PROXY
+              value: {{ printf "%s:%s" (include "datapipelines.egressProxy.fullname" .) (include "datapipelines.egressProxy.port" .) | quote }}
+            - name: DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS
+              value: {{ include "datapipelines.egressProxy.maxAgeSeconds" . | quote }}
             {{- end }}
             {{- range $name, $value := .Values.extraEnv }}
             - name: {{ $name }}

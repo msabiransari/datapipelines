@@ -1,0 +1,78 @@
+{{- if and .Values.lake.egressProxy.enabled .Values.lake.egressProxy.networkPolicy.enabled }}
+{{- $np := .Values.lake.egressProxy.networkPolicy }}
+{{- $store := $np.storeEgress | default dict }}
+{{- if and $store.to (not (kindIs "slice" $store.to)) }}{{ fail "lake.egressProxy.networkPolicy.storeEgress.to must be a list of NetworkPolicyPeer objects (deployment.md §6.4)" }}{{- end }}
+{{- if and $store.ports (not (kindIs "slice" $store.ports)) }}{{ fail "lake.egressProxy.networkPolicy.storeEgress.ports must be a list of NetworkPolicyPort objects (deployment.md §6.4)" }}{{- end }}
+{{- if and $np.dnsTo (not (kindIs "slice" $np.dnsTo)) }}{{ fail "lake.egressProxy.networkPolicy.dnsTo must be a list of NetworkPolicyPeer objects (deployment.md §6.4)" }}{{- end }}
+{{- range $field, $peers := dict "storeEgress.to" $store.to "dnsTo" $np.dnsTo }}
+{{- range $i, $peer := $peers }}
+{{- $at := printf "lake.egressProxy.networkPolicy.%s[%d]" $field $i }}
+{{- if or (not (kindIs "map" $peer)) (empty $peer) }}{{ fail (printf "%s must be a NetworkPolicyPeer object — namespaceSelector / podSelector / ipBlock (deployment.md §6.4)" $at) }}{{- end }}
+{{- range $key, $value := $peer }}
+{{- if not (has $key (list "namespaceSelector" "podSelector" "ipBlock")) }}{{ fail (printf "%s carries %q — a NetworkPolicyPeer has only namespaceSelector / podSelector / ipBlock (deployment.md §6.4)" $at $key) }}{{- end }}
+{{- if ne $key "ipBlock" }}{{- include "datapipelines.requireLabelSelector" (list (printf "%s.%s" $at $key) $value) }}{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- $restrictEgress := or $store.to $store.ports }}
+{{/* The egress proxy's OWN policy (#845; deployment.md §6.4) — a separate
+     object selecting only the proxy pods, so the app's management policy
+     (networkpolicy.yaml) is untouched.
+       Ingress: ONLY the app pods (the Deployment's selector), ONLY on the proxy
+         port. Nothing else may use the proxy — it carries no credential of its
+         own, so this rule is its fence.
+       Egress: restricted only when the operator declares the store
+         (storeEgress.to and/or storeEgress.ports, copied verbatim); a DNS rule
+         (UDP+TCP 53, to dnsTo, empty = any destination) is then added because
+         the proxy resolves each store host itself. With neither declared the
+         egress stays the cluster's (policyTypes: [Ingress]) — the proxy's boot
+         probe through to the store is what proves the path either way. */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "datapipelines.egressProxy.fullname" . }}
+  labels:
+    {{- include "datapipelines.egressProxy.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "datapipelines.egressProxy.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    {{- if $restrictEgress }}
+    - Egress
+    {{- end }}
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "datapipelines.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ include "datapipelines.egressProxy.port" . }}
+  {{- if $restrictEgress }}
+  egress:
+    {{- if $store.to }}
+    - to:
+        {{- toYaml $store.to | nindent 8 }}
+      {{- with $store.ports }}
+      ports:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- else }}
+    - ports:
+        {{- toYaml $store.ports | nindent 8 }}
+    {{- end }}
+    {{- if $np.dnsTo }}
+    - to:
+        {{- toYaml $np.dnsTo | nindent 8 }}
+      ports:
+    {{- else }}
+    - ports:
+    {{- end }}
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+  {{- end }}
+{{- end }}

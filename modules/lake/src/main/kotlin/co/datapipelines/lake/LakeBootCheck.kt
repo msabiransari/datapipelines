@@ -166,6 +166,16 @@ class LakeBootCheck(
 
         /** #818 (record §6): raised by the web layer's managed-datasource registrar, which runs after [verify]. */
         DATASOURCE_NAME_TAKEN("lake.boot.datasource_name_taken", "a datasource that is not the managed lake holds the lake's name"),
+
+        /**
+         * #845 (D4): raised by the web layer's managed-datasource registrar before it writes the row, when
+         * `reads.egress-proxy` is set: the proxy is unreachable, does not declare the configured
+         * `reads.egress-max-age-seconds` at `/dp-egress`, or cannot reach the object store.
+         */
+        EGRESS_PROXY(
+            "lake.boot.egress_proxy",
+            "the managed reads' egress proxy is unreachable, does not declare the configured max-age, or cannot reach the store",
+        ),
     }
 
     companion object {

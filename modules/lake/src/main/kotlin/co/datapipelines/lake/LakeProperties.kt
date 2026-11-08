@@ -100,11 +100,19 @@ class LakeProperties(
      * retires a stale generation early; [memoryLimit] is the DuckDB `memory_limit` written onto the managed
      * datasource row, so every reader instance is bounded (the §6 amendment's `reads.memory-limit` term; the cgroup
      * boot check that sums it is a follow-up). `LakeRules.checkLakeReads` refuses a bad combination at boot.
+     *
+     * #845 (owner ruling 2026-11-06 option B): [egressProxy] is the `host:port` of the egress proxy the managed
+     * datasource's object-store traffic leaves through (empty = none; compose and Helm ship one ON), written onto the
+     * managed row as its `egress_proxy` dialect key; [egressMaxAgeSeconds] is the proxy's connection and stream max-age,
+     * which the proxy declares at `/dp-egress` and the boot check compares. Hygiene, not safety: reader leases protect
+     * snapshots. A temporary accommodation until duckdb-httpfs#519 lands.
      */
     class Reads(
         val maxGenerationAgeSeconds: Long = DEFAULT_MAX_GENERATION_AGE_SECONDS,
         val freshnessTickSeconds: Long = DEFAULT_FRESHNESS_TICK_SECONDS,
         val memoryLimit: DataSize = DataSize.ofMegabytes(DEFAULT_READS_MEMORY_LIMIT_MB),
+        val egressProxy: String = "",
+        val egressMaxAgeSeconds: Long = DEFAULT_EGRESS_MAX_AGE_SECONDS,
     ) {
         init {
             require(maxGenerationAgeSeconds > 0) { "$PREFIX.reads.max-generation-age-seconds must be > 0" }
@@ -115,11 +123,12 @@ class LakeProperties(
                     "$PREFIX.reads.max-generation-age-seconds ($maxGenerationAgeSeconds)"
             }
             require(memoryLimit.toBytes() > 0) { "$PREFIX.reads.memory-limit must be a positive size" }
+            require(egressMaxAgeSeconds > 0) { "$PREFIX.reads.egress-max-age-seconds must be > 0" }
         }
 
         override fun toString(): String =
             "Reads(maxGenerationAgeSeconds=$maxGenerationAgeSeconds, freshnessTickSeconds=$freshnessTickSeconds, " +
-                "memoryLimit=$memoryLimit)"
+                "memoryLimit=$memoryLimit, egressProxy=$egressProxy, egressMaxAgeSeconds=$egressMaxAgeSeconds)"
     }
 
     /** §6 `maintenance.*` (§11, P6) — bound, unused by P2. The window is UTC (call 8). */
@@ -160,6 +169,9 @@ class LakeProperties(
         const val DEFAULT_MAX_GENERATION_AGE_SECONDS = 900L
         const val DEFAULT_FRESHNESS_TICK_SECONDS = 60L
         const val DEFAULT_READS_MEMORY_LIMIT_MB = 512L
+
+        /** #845 D1: `node-query-timeout-max-seconds` (900) + 60 — a healthy query is never cut before its own timeout. */
+        const val DEFAULT_EGRESS_MAX_AGE_SECONDS = 960L
         const val DEFAULT_MAINTENANCE_WINDOW = "02:00-05:00"
         const val DEFAULT_MAX_BYTES_REWRITTEN_GB = 50L
         const val DEFAULT_PROTECTION_DAYS = 7

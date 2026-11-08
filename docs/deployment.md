@@ -1,6 +1,6 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.63
+**Status:** v1.64
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-04
@@ -202,6 +202,18 @@ The app must reach:
 - The metadata Postgres.
 - Redis.
 - (Optional) OTLP collector, Sentry, KMS — if those features are configured.
+- **The managed lake's egress proxy (#845)**, when the lake is enabled and `datapipelines.lake.reads.egress-proxy` is
+  set: the managed lake datasource's object-store requests leave through it (DuckDB's `http_proxy`), and the PROXY,
+  not the app, reaches the store for them. The app's own S3 client (the boot check's HEADs and PUTs, the writer)
+  still reaches the store directly. The reference compose file and Helm chart ship the proxy ON: an Envoy container
+  that resets every object-store stream at `datapipelines.lake.reads.egress-max-age-seconds`, so a store that
+  trickles cannot hold a reader forever ([Lake §9](lake.md#9-reads); keys in
+  [Configuration §3.36](configuration.md#336-managed-lake-dp-lake-785)). It publishes no port and holds no
+  credential: S3 signing stays in DuckDB. For an `https://` store it sees `CONNECT host:443`; for a plain-`http://`
+  endpoint (a MinIO inside your network) it sees the signed requests in clear, which is acceptable only inside the
+  deployment's network. Boot refuses with `lake.boot.egress_proxy` when the proxy does not answer, declares another
+  max-age, or cannot reach the store. A temporary accommodation until
+  [duckdb-httpfs#519](https://github.com/duckdb/duckdb-httpfs/issues/519) lands.
 
 The app **does not** require inbound network access beyond the HTTP/MCP ports it serves.
 
@@ -470,6 +482,14 @@ on **every `./gradlew build`**, not when someone remembers to run it.
 It also inventories every app-container environment name, refuses JVM code-loading names,
 and requires a reasoned allowlist for names outside `DATAPIPELINES_*`, rejecting stale entries.
 
+The compose file also runs `egress-proxy` (#845, §4.3): Envoy pinned by digest, its image's non-root user, all
+capabilities dropped, no privilege escalation, no published port. Its root filesystem is NOT read-only under compose:
+compose copies an inline config into the container and refuses to do so on a read-only root filesystem, while a
+`file:` config would not be interpolated (the chart's proxy pod is read-only; `helm-check.sh` pins both). Its config is rendered by compose from the SAME `DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS`
+variable and default the app receives (the audit's check 10 refuses a diverged default), and the app is pointed at it
+with the literal `egress-proxy:3128`. The app waits for it to START, not to be healthy: the distroless image has no
+shell or HTTP client to run a healthcheck with, so the app's boot check is the readiness gate.
+
 ### 6.3A Promotion: a receiver deployment (055)
 
 A second deployment that receives released content from the first ([Versioning §10](versioning.md#10-promotion-ui-driven-separate-use-case)). Both sides are the same image in different postures — there is no separate build.
@@ -537,6 +557,20 @@ Reference Helm chart in `deploy/helm/`. Includes:
   (below); `management.serviceMonitor.enabled` adds a `ServiceMonitor` for the headless
   `Service`. Any `extraEnv.MANAGEMENT_SERVER_ADDRESS` / `_PORT` double mapping is refused
   (Kubernetes honours the last duplicate env name silently).
+- The managed lake reads' egress proxy (#845, §4.3), ON by default (`lake.egressProxy.enabled`):
+  a `Deployment`, `Service` and `ConfigMap` named `<release>-datapipelines-egress-proxy`, with
+  their own `app.kubernetes.io/name` (`datapipelines-egress-proxy`), so no selector of the app's
+  selects a proxy pod and none of the proxy's selects an app pod; and its own `NetworkPolicy`
+  (below). The image is `lake.egressProxy.image` (repository, tag and a required `sha256:`
+  digest, the compose file's); the ConfigMap's Envoy config is the compose file's text, rendered
+  from `lake.egressProxy.maxAgeSeconds`, and the app's two env entries
+  (`DATAPIPELINES_LAKE_READS_EGRESS_PROXY` = the Service's `name:3128`,
+  `DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS`) come from the same values. A changed max-age
+  rolls both the app and the proxy pods. While enabled, both names are refused in `extraEnv`;
+  disabled, nothing renders and `extraEnv` may point the app at your own proxy. The proxy pod is
+  ready once `GET /dp-egress` (with the `x-dp-egress-check` header) answers. With the lake
+  enabled, an app pod that boots before the proxy is ready is refused (`lake.boot.egress_proxy`)
+  and restarted by Kubernetes until it is.
 
 **The management `NetworkPolicy` is a complete ingress policy for the app pods** (#712). A
 NetworkPolicy that selects a pod isolates that pod for **every** ingress, not only for the ports
@@ -585,7 +619,34 @@ declared peers to that union. It never narrows your policy, and it widens it by 
 what you declare. To leave an existing stricter app-port policy unwidened, declare no peer it
 does not already admit. `allowAll: true` widens the app port to every source. Egress is not
 touched (`policyTypes: [Ingress]`): §9's egress policy stays yours. With
-`management.networkPolicy.enabled` off (the default) the chart renders no policy at all.
+`management.networkPolicy.enabled` off (the default) the chart renders no policy for the app
+pods; the egress proxy's own policy, below, is a separate object.
+
+**The egress proxy's `NetworkPolicy`** (#845, `lake.egressProxy.networkPolicy.enabled`, ON by
+default) selects only the proxy pods and leaves the app's policies untouched. Ingress: only the
+app pods (the app `Deployment`'s selector), only on TCP 3128 — the proxy holds no credential,
+so this rule is what limits who can use it. Egress is restricted only when you declare the
+store: `storeEgress.to` (a list of `NetworkPolicyPeer` objects, typically an `ipBlock` for the
+object store's CIDR) and/or `storeEgress.ports` (a list of `NetworkPolicyPort` objects, e.g.
+TCP 443), copied verbatim; the policy then also admits DNS (UDP and TCP 53, to `dnsTo`, empty =
+any destination), because the proxy resolves each store host itself. With neither declared,
+the proxy's egress is the cluster's (`policyTypes: [Ingress]`). Either way, the app's boot
+probe through the proxy to the store proves the path. Peers are refused at render time the way
+the management policy's are (a bare label map, an unknown key, an empty peer, a non-list). If
+your own egress policy selects the app pods, it must admit TCP 3128 to the proxy pods.
+
+```yaml
+lake:
+  egressProxy:
+    networkPolicy:
+      storeEgress:
+        to:
+          - ipBlock:
+              cidr: 10.20.0.0/16
+        ports:
+          - protocol: TCP
+            port: 443
+```
 
 The pod keeps its root filesystem read-only and mounts a disk-backed `emptyDir` at `/tmp`.
 This supports JVM native libraries and the default LAKE spill directories. Set
@@ -871,6 +932,19 @@ Operators should run a quarterly restore drill: restore metadata DB from backup 
 
 For k8s: rolling update via `kubectl rollout`. Each terminated pod flips its readiness and cancels its in-flight executions on the way out (§8.3.1); the `preStop` and `terminationGracePeriodSeconds` settings in §8.3.2 keep that orderly.
 
+**Managed lake egress proxy (#845).** The first boot of a build that sets
+`datapipelines.lake.reads.egress-proxy` (the reference compose file and Helm chart do) rewrites
+the managed lake datasource row with its `egress_proxy` key, and the next lease builds a new
+generation through the proxy; later boots leave the row unchanged. Bring the proxy up with the
+app: `./app.sh` starts the compose service, and the chart renders it by default. With the lake
+enabled, a new instance whose proxy is not yet answering is refused at boot
+(`lake.boot.egress_proxy`) rather than serving uncapped reads. During a rolling update an
+older instance still reads directly until it is replaced: its connection setup ignores the key
+it does not know. An older instance that RESTARTS mid-rollout rewrites the row without the key;
+the next new instance's boot puts it back, so finish the rollout rather than pausing it. To opt
+out, set the key empty (compose) or `lake.egressProxy.enabled=false` (Helm); the next boot
+removes the key from the row.
+
 **Scheduler notification kinds (V51).**
 
 1. Keep `datapipelines.scheduler.notifications.enabled=false` (the default) throughout the first rollout containing V51; with mail off this is the ordinary rolling update.
@@ -925,6 +999,7 @@ lifecycle:
 - [ ] Redis `maxmemory-policy noeviction` (§4.2.1) — correctness, not tuning.
 - [ ] OIDC client secrets from a secret manager, not a plaintext env file; at least one provider configured (§5.1).
 - [ ] NetworkPolicy restricts app's egress.
+- [ ] With the managed lake: only the app reaches the egress proxy (the chart's proxy policy does this), and the proxy's egress is limited to the object store (`lake.egressProxy.networkPolicy.storeEgress`, §6.4). A plain-`http://` store endpoint is reachable only inside the deployment's network (the proxy sees its signed requests in clear).
 - [ ] Service account / IAM role has least privilege.
 - [ ] Container runs as non-root user (enforced in Dockerfile).
 - [ ] Container filesystem read-only except for configured volume mounts.
@@ -1412,6 +1487,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-07 | v1.64 | #845 managed reads egress proxy | **§4.3:** the managed lake datasource's object-store requests leave through the egress proxy; what it sees, holds and refuses at boot; a temporary accommodation until duckdb-httpfs#519. **§6.3:** the compose `egress-proxy` service and why the app waits for it to start, not be healthy. **§6.4:** the chart's proxy `Deployment`/`Service`/`ConfigMap` (`lake.egressProxy.*`, ON by default; chart 0.2.1 → 0.3.0), the app env entries and `extraEnv` refusals, and the proxy's own `NetworkPolicy` (ingress from the app pods on 3128 only; egress restricted when the store is declared, plus DNS). **§8.3:** the upgrade note (the managed row is rewritten on the first boot; boot refused until the proxy answers; older instances read directly). **§9:** a checklist line for the proxy's fence. `helm-check.sh` gains the parsed egress contract (`(a-off)`, `(i)`–`(i6)`). |
 | 2026-11-04 | v1.63 | #781 merge follow-up | **§3.1:** state the version guard's detected-literal scope, ownership exclusions and uncaptured-bare-version limit; require reviewing the tracked-file inventory during a bump. |
 | 2026-11-04 | v1.62 | #781 | **§3.1:** the three-input DuckDB re-pin paragraph becomes the bump runbook: the version catalog's `duckdb-jdbc` is the one hand-edited DuckDB version, then cold locks and verification metadata, the core ARG and checksums, closures, the hand-declared `CORE` review, `DuckDbVersionSpecDriftTest`'s red and re-probe lists, and the E9 read-posture harness rerun. The notices build now refuses an ARG, reviewed core tag or core closure row that disagrees with the catalog. No version changes. |
 | 2026-11-01 | v1.61 | #685 merge follow-up | **§3.1 / §6.5:** the image disables glibc's native thread-stack cache before its JVMs start; overrides retain that entry, and bare JVM launches set it before Java starts. The Dockerfile drift guard pins the declaration and launch order. |
