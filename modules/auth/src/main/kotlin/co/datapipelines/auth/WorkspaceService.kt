@@ -97,6 +97,11 @@ open class WorkspaceService(
      * nothing of this one).
      */
     private val userService: UserService? = null,
+    /**
+     * #823 — the server's own datasource (the managed lake) granted to a workspace in the transaction that creates it.
+     * See [ManagedDatasourceGrants]; a context with no datasource layer passes [ManagedDatasourceGrants.NONE].
+     */
+    @Suppress("unused") private val managedDatasourceGrants: ManagedDatasourceGrants = ManagedDatasourceGrants.NONE,
 ) : WorkspaceLiveness {
     private val log = LoggerFactory.getLogger(WorkspaceService::class.java)
 
