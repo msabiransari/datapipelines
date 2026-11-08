@@ -124,6 +124,45 @@ management:
     interval: 30s
     labels: {}
 
+# #845 (configuration.md §3.36, lake.md §9, deployment.md §4.3) — the managed lake reads'
+# egress proxy, ON by default as in deploy/compose.yml. The app's managed LAKE datasource
+# sends every object-store request through it (DuckDB http_proxy), and Envoy resets each
+# stream at maxAgeSeconds: a store that trickles faster than curl's low-speed limit cannot
+# hold a reader forever. A hygiene bound, not a safety premise; a temporary accommodation
+# until duckdb-httpfs#519 lands. When enabled the chart sets the app's
+# DATAPIPELINES_LAKE_READS_EGRESS_PROXY (<release>-datapipelines-egress-proxy:3128) and
+# DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS from maxAgeSeconds — the SAME value the
+# proxy's ConfigMap is rendered from — and refuses both names in extraEnv. The app refuses a
+# max-age below datapipelines.executor.node-query-timeout-max-seconds + 30 while the proxy is
+# set (LakeRules), and refuses to boot with the lake enabled when the proxy is unreachable,
+# declares another max-age, or cannot reach the store (lake.boot.egress_proxy).
+# Disabled: no proxy objects and no env entries; the app's reads go direct, uncapped.
+lake:
+  egressProxy:
+    enabled: true
+    # Pinned by digest; scanned by scripts/container-scan.sh (the compose service's image).
+    image:
+      repository: envoyproxy/envoy
+      tag: distroless-v1.40.2
+      digest: sha256:09ca6f2140a61ad8df11779a4a30d52b48433d444466328494f9188c9c35eded
+      pullPolicy: IfNotPresent
+    replicaCount: 1
+    # Whole seconds, > 0. 960 = node-query-timeout-max-seconds 900 + 60.
+    maxAgeSeconds: 960
+    resources: {}
+    # The proxy's OWN NetworkPolicy: ingress only from the app pods on the proxy port.
+    # Egress is restricted only when the store is declared here — storeEgress.to (a list
+    # of NetworkPolicyPeer objects, e.g. an ipBlock for the object store's CIDR) and/or
+    # storeEgress.ports (a list of NetworkPolicyPort objects, e.g. TCP 443) — and then a
+    # DNS rule (UDP+TCP 53, to dnsTo; empty = any destination) is added. Your own egress
+    # policy for the APP pods must admit TCP 3128 to the proxy pods.
+    networkPolicy:
+      enabled: true
+      storeEgress:
+        to: []
+        ports: []
+      dnsTo: []
+
 # §6.6: heap ≥ staging max-memory-mb × this instance's share of concurrent
 # executions + ~512 MB; container limit ≈ heap × 1.5. Left empty deliberately —
 # a default that pretends to know the deployment's execution profile is worse

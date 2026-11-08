@@ -1,0 +1,85 @@
+{{- if .Values.lake.egressProxy.enabled }}
+{{/* The managed lake reads' egress proxy (#845; values.yaml lake.egressProxy;
+     deployment.md §4.3). The app's managed LAKE datasource sends every
+     object-store request through this Service (DuckDB http_proxy), and Envoy
+     resets each stream at lake.egressProxy.maxAgeSeconds — a hygiene bound, not
+     a safety premise (lake.md §9). A temporary accommodation until
+     duckdb-httpfs#519 lands. Its own NetworkPolicy is
+     egress-proxy-networkpolicy.yaml; the app's policies are untouched. */}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "datapipelines.egressProxy.fullname" . }}
+  labels:
+    {{- include "datapipelines.egressProxy.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.lake.egressProxy.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "datapipelines.egressProxy.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "datapipelines.egressProxy.selectorLabels" . | nindent 8 }}
+      annotations:
+        # A changed max-age rolls the proxy pods (Envoy reads its config once, at start).
+        checksum/config: {{ include (print $.Template.BasePath "/egress-proxy-configmap.yaml") . | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        # The distroless image's own non-root user.
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+      containers:
+        - name: egress-proxy
+          image: {{ include "datapipelines.egressProxy.image" . }}
+          imagePullPolicy: {{ .Values.lake.egressProxy.image.pullPolicy }}
+          ports:
+            - name: proxy
+              containerPort: {{ include "datapipelines.egressProxy.port" . }}
+          # The same request the app's boot check sends (lake.boot.egress_proxy):
+          # ready only once the listener answers with its declared max-age route.
+          readinessProbe:
+            httpGet:
+              path: /dp-egress
+              port: proxy
+              httpHeaders:
+                - name: x-dp-egress-check
+                  value: "1"
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: proxy
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.lake.egressProxy.resources | nindent 12 }}
+          volumeMounts:
+            - name: envoy-config
+              mountPath: /etc/envoy
+              readOnly: true
+      volumes:
+        - name: envoy-config
+          configMap:
+            name: {{ include "datapipelines.egressProxy.fullname" . }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "datapipelines.egressProxy.fullname" . }}
+  labels:
+    {{- include "datapipelines.egressProxy.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: proxy
+      port: {{ include "datapipelines.egressProxy.port" . }}
+      targetPort: proxy
+  selector:
+    {{- include "datapipelines.egressProxy.selectorLabels" . | nindent 4 }}
+{{- end }}
