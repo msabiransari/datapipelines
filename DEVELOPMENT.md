@@ -579,7 +579,7 @@ planted failure (a held route, a planted page, a removed control) at a 5 s bound
 helper's real path with the plant gone. The derived fixtures (`DashboardBrowserSuite`,
 `ParameterSetBrowserSuite`, `SchedulesBrowserSuite`, `VisualizationBrowserSuite`,
 `RestTreeBrowserFixture`) and the support objects (`OverviewHomeBrowserSupport`,
-`EditorRunFixtures`, `PlotlyColorbarProbe`, through the top-level `namedWait`) name their waits
+`EditorRunFixtures`, through the top-level `namedWait`) name their waits
 the same way, second sessions sign in through `login(on, …)` and `landOnDashboard(on)`, and
 `FixtureSetupWaitsBrowserTest` pins each wrapper (#831); a change to `BrowserSuite` or to any of
 these runs the FULL browser suite locally before handback (the #456 rule).

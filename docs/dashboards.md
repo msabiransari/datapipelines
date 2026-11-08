@@ -845,7 +845,8 @@ renderer shows the resolved value" for this case only).
   and title take what they need and no more. A value label drawn past the plotting rectangle takes no automargin, so
   horizontal outside labels keep the conversion's right margin (sized to the widest label) and vertical ones add one
   label line on top. An axis whose title is `null` is drawn with no title at all: Plotly reserves a title line for an
-  empty string. A default chart — both axis titles drawn — in a 2-row slot keeps about 45% of the slot for its plot.
+  empty string. A default chart — both axis titles drawn — in a 2-row slot keeps about 45% of the slot for its plot,
+  under #386's half floor (#870).
 - **Table.** `columns[]` (`label`, `values` — the path the binding fills, `format`, `align`),
   `page_size` capping the rows. Every cell is `textContent`.
 - **KPI.** `value` (the bound path), `format` (`number|integer|percent|currency`), `unit`,
