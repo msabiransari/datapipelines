@@ -323,6 +323,9 @@ class ManagedLakeReadsE2eTest {
         val capture = SnapshotListAppender()
         logger.addAppender(capture)
         try {
+            // The row to delete exists at once on the fixed code and after one tick on the old (the workspace was
+            // created by the case above); waiting for it makes this case a repair test on both, not a copy of that one.
+            awaitTrue(Duration.ofSeconds(A_TICK_SECONDS * 4)) { CREATED_WS in grantedWorkspaceNames() }
             val auditBefore = grantAuditRows()
             metadata { connection ->
                 connection.prepareStatement(
