@@ -17,6 +17,17 @@
  * element's box). The width is estimated from the label's characters at Plotly's default 12 px text size; the
  * browser suite's bounding-box assertion is the oracle.
  *
+ * ## The size frame (#386, dashboards.md §6.3)
+ * The converter's margins are the reference's (`t` 80 titled / 30, `b` 60, `l` 60), sized for the corpus's 900×600
+ * render; a 2-row board slot (176 px) would keep a sliver of plot. `draw` therefore lays the option over #386's compact
+ * frame — every side 8 px, `t` 36 with a title, one more line with a subtitle — and each axis's `automargin` (set by
+ * the converter) grows it by what its tick labels and title need. A value label drawn past the plotting rectangle
+ * takes no automargin, so two sides keep room for it: horizontal outside labels keep the converter's Q-L4 right margin,
+ * vertical outside labels add one label line on top. An axis titled `null` is drawn without a title, so automargin
+ * reserves no empty title line for it ([untitled]). [sizeFrame] is pure and returns a new layout; the converter's
+ * option is not changed, so the equivalence oracle compares the converter alone, and the browser suite's plot-area
+ * floor (`DashboardGridRowUnitBrowserTest`) and text-inside-the-box check (`BarChartBrowserTest`) measure the frame.
+ *
  * ## The host side
  * `instance` is the Plotly object the host declared at init (`charts: {library: "plotly", instance: window.Plotly}`);
  * this file never reads `window.Plotly`. The page loads exactly one vendored bundle (`data-dp-plotly-bundle`), and the
@@ -180,11 +191,64 @@
     return { option: { data: data, layout: layout, config: { displayModeBar: false, responsive: false } }, warnings: warnings };
   }
 
-  /** `Plotly.react` with the converted option; resolves on `plotly_afterplot` or the call's own promise, whichever first. */
+  /** #386's compact frame: every side 8 px and no pad; the axes' `automargin` grows it. */
+  var COMPACT_MARGIN = { l: 8, r: 8, t: 8, b: 8, pad: 0 };
+
+  /** The top margin of a titled figure: one line of Plotly's default title font (17 px) with its leading (#386). */
+  var TITLED_TOP = 36;
+
+  /** A subtitle's line under the title (Plotly draws it in a smaller face than the title's). */
+  var SUBTITLE_LINE_PX = 18;
+
+  /** A vertical bar's outside value label, drawn above its bar: one line of bar text with Plotly's pad. */
+  var LABEL_LINE_PX = TEXT_PX + LABEL_PAD_PX;
+
+  /** The converted layout over #386's compact frame (see the file's header). Pure: a new layout, a new margin. */
+  function sizeFrame(option) {
+    var layout = option.layout;
+    var outside = option.data.filter(function (trace) {
+      return trace.textposition === "outside";
+    });
+    var margin = Object.assign({}, COMPACT_MARGIN);
+    if (layout.title) margin.t = TITLED_TOP + (layout.title.subtitle ? SUBTITLE_LINE_PX : 0);
+    if (
+      outside.some(function (trace) {
+        return trace.orientation === "h";
+      })
+    ) {
+      margin.r = layout.margin.r;
+    }
+    if (
+      outside.some(function (trace) {
+        return trace.orientation === "v";
+      })
+    ) {
+      margin.t += LABEL_LINE_PX;
+    }
+    return Object.assign({}, layout, { margin: margin, xaxis: untitled(layout.xaxis), yaxis: untitled(layout.yaxis) });
+  }
+
+  /**
+   * An axis whose title the document set to `null` (the option's `{text: ""}`) without that title: Plotly's automargin
+   * reserves a title's depth whenever `title.text` differs from its own placeholder default, an empty string included,
+   * and draws no placeholder on a chart whose title edits are off. A new axis; the option's is unchanged.
+   */
+  function untitled(axis) {
+    if (!axis || !axis.title || axis.title.text !== "") return axis;
+    var drawn = Object.assign({}, axis);
+    delete drawn.title;
+    return drawn;
+  }
+
+  /**
+   * `Plotly.react` with the converted option over the size frame; resolves on `plotly_afterplot` or the call's own
+   * promise, whichever first.
+   */
   function draw(Plotly, host, option) {
     if (!Plotly || typeof Plotly.react !== "function") {
       return Promise.reject(new Error("the declared Plotly instance cannot draw: it has no react function"));
     }
+    var layout = sizeFrame(option);
     return new Promise(function (resolve, reject) {
       var settled = false;
       function done() {
@@ -193,7 +257,7 @@
         resolve("rendered");
       }
       host.addEventListener("plotly_afterplot", done, { once: true });
-      Promise.resolve(Plotly.react(host, option.data, option.layout, option.config)).then(done, function (error) {
+      Promise.resolve(Plotly.react(host, option.data, layout, option.config)).then(done, function (error) {
         if (settled) return;
         settled = true;
         reject(error);
@@ -215,12 +279,17 @@
       if (!chartAdapter) return;
       chartAdapter.registerConverter({ library: "plotly", families: { bar: convert }, draw: draw, resize: resize, dispose: dispose });
     },
-    /** For the node tests and the equivalence oracle: the pure converter and the Q-L4 width estimate. */
+    /** For the node tests and the equivalence oracle: the pure converter, the Q-L4 width estimate and the size frame. */
     _internal: {
       convert: convert,
       labelWidth: labelWidth,
+      sizeFrame: sizeFrame,
       MARGIN_RIGHT: MARGIN_RIGHT,
       LABEL_PAD_PX: LABEL_PAD_PX,
+      COMPACT_MARGIN: COMPACT_MARGIN,
+      TITLED_TOP: TITLED_TOP,
+      SUBTITLE_LINE_PX: SUBTITLE_LINE_PX,
+      LABEL_LINE_PX: LABEL_LINE_PX,
     },
   };
 

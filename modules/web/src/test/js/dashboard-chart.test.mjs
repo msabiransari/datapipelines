@@ -214,6 +214,65 @@ test("Q-L4: a horizontal bar's outside value labels widen the right margin to th
   assert.ok(labelWidth("MMM") > labelWidth("iii"));
 });
 
+test("the size frame (#386): draw lays the option over 8 px sides, t 36 titled plus a subtitle line, and keeps room for outside labels - the Q-L4 right margin, one label line on top - without changing the converted option", () => {
+  const { sizeFrame, COMPACT_MARGIN, TITLED_TOP, SUBTITLE_LINE_PX, LABEL_LINE_PX } = plotly._internal;
+  const bindings = { region: ["North", "South"], amount: [1234567.891, 12] };
+  const frame = (config) => {
+    const option = convert(spec(config), bindings, TOKENS).option;
+    const before = JSON.stringify(option);
+    const layout = sizeFrame(option);
+    assert.equal(JSON.stringify(option), before, "the converted option is not changed");
+    return { option, layout };
+  };
+  const plain = frame(BAR);
+  assert.deepEqual(plain.layout.margin, COMPACT_MARGIN);
+  assert.equal(plain.layout.xaxis.automargin, true, "the band axis grows the frame by its ticks");
+  assert.equal(plain.layout.yaxis.automargin, true, "the value axis grows the frame by its ticks");
+  assert.equal(frame(Object.assign({}, BAR, { title: { text: "Sales" } })).layout.margin.t, TITLED_TOP);
+  const subtitled = frame(Object.assign({}, BAR, { title: { text: "Sales", subtitle: "By region" } }));
+  assert.equal(subtitled.layout.margin.t, TITLED_TOP + SUBTITLE_LINE_PX);
+  const horizontal = frame(HORIZONTAL_LABELLED);
+  assert.equal(horizontal.layout.margin.r, horizontal.option.layout.margin.r, "Q-L4's right margin is kept");
+  assert.ok(horizontal.layout.margin.r > COMPACT_MARGIN.r);
+  assert.equal(horizontal.layout.margin.t, COMPACT_MARGIN.t);
+  const vertical = frame(Object.assign({}, BAR, { mark: { type: "bar", labels: "values" } }));
+  assert.equal(vertical.layout.margin.t, COMPACT_MARGIN.t + LABEL_LINE_PX, "a label line above the tallest bar");
+  assert.equal(vertical.layout.margin.r, COMPACT_MARGIN.r);
+  const stacked = convert(
+    spec(
+      {
+        mark: { type: "bar", labels: "values" },
+        encoding: {
+          x: { field: "region", type: "nominal", sort: null },
+          y: { field: "amount", type: "quantitative", aggregate: "sum", stack: "zero" },
+          color: { field: "segment", type: "nominal", sort: null },
+        },
+      },
+      { region: "STRING", segment: "STRING", amount: "DECIMAL" },
+    ),
+    { region: ["North", "North"], segment: ["a", "b"], amount: [3, 2] },
+    TOKENS,
+  ).option;
+  assert.deepEqual(sizeFrame(stacked).margin, COMPACT_MARGIN, "a stacked label sits inside its bar");
+  // An axis titled null: the option keeps the reference's `{text: ""}`; the drawn axis has no title, because Plotly's
+  // automargin reserves a title line for any text but its own placeholder, the empty string included.
+  assert.deepEqual(plain.option.layout.xaxis.title, { text: "region" }, "an absent title is the field name");
+  assert.deepEqual(plain.layout.xaxis.title, { text: "region" }, "a drawn title is kept");
+  const untitled = frame({
+    mark: { type: "bar" },
+    encoding: {
+      x: { field: "region", type: "nominal", sort: null, title: null },
+      y: { field: "amount", type: "quantitative", aggregate: "sum", title: null },
+    },
+  });
+  assert.deepEqual(untitled.option.layout.xaxis.title, { text: "" });
+  assert.deepEqual(untitled.option.layout.yaxis.title, { text: "" });
+  assert.equal("title" in untitled.layout.xaxis, false, "no empty band title line is reserved");
+  assert.equal("title" in untitled.layout.yaxis, false, "no empty value title line is reserved");
+  assert.equal(untitled.layout.xaxis.automargin, true, "the rest of the axis is the converter's");
+  assert.deepEqual(untitled.layout.yaxis.tickvals, untitled.option.layout.yaxis.tickvals);
+});
+
 test("tokens: each declared property through a FRESH probe in the host's cascade, color(srgb) normalised, unset properties keep the built-in defaults, the locale from the document's lang", () => {
   const { doc, created } = installDom(
     { "--chart-canvas": "color(srgb 0 0 0)", "--chart-series-2": "rgb(1, 2, 3)", "--font-sans": "Inter, sans-serif" },
@@ -283,7 +342,7 @@ test("the Plotly host side touches the declared instance ONLY through react, Plo
   const calls = [];
   const target = {
     react: (host, data, layout, config) => {
-      calls.push(["react", data.length, config.displayModeBar]);
+      calls.push(["react", data.length, config.displayModeBar, layout.margin]);
       return new Promise(() => {}); // never settles: the afterplot event must
     },
     Plots: { resize: (host) => calls.push(["resize", host.tagName]) },
@@ -313,7 +372,7 @@ test("the Plotly host side touches the declared instance ONLY through react, Plo
     assert.deepEqual(await drawn, { outcome: "rendered", warnings: [] });
     handle.resize();
     handle.dispose();
-    assert.deepEqual(calls, [["react", 1, false], ["resize", "DIV"], ["purge", "DIV"]]);
+    assert.deepEqual(calls, [["react", 1, false, plotly._internal.COMPACT_MARGIN], ["resize", "DIV"], ["purge", "DIV"]], "react draws over the size frame");
     assert.deepEqual([...touched].sort(), ["Plots", "purge", "react"], "nothing else of the instance is read");
     // A measure outside its wire form rejects the draw (the runtime reports render.failed); its text is not echoed.
     const bad = chart._internal.converters().plotly;

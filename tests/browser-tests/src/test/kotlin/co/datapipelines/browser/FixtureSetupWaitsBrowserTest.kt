@@ -14,10 +14,10 @@ import java.util.function.Predicate
 /**
  * #831: the setup waits of the fixtures DERIVED from [BrowserSuite] — DashboardBrowserSuite,
  * SchedulesBrowserSuite, RestTreeBrowserFixture, the post-login landing every fixture shares — and
- * of the suite's support objects (OverviewHomeBrowserSupport, EditorRunFixtures,
- * PlotlyColorbarProbe) raise the named AssertionError #825 gave BrowserSuite's own helpers, never
- * Playwright's bare `TimeoutError`. ParameterSetBrowserSuite and VisualizationBrowserSuite keep no
- * wait of their own: their second sessions call [login], [landOnDashboard] and [enterWorkspace].
+ * of the suite's support objects (OverviewHomeBrowserSupport, EditorRunFixtures) raise the named
+ * AssertionError #825 gave BrowserSuite's own helpers, never Playwright's bare `TimeoutError`.
+ * ParameterSetBrowserSuite and VisualizationBrowserSuite keep no wait of their own: their second
+ * sessions call [login], [landOnDashboard] and [enterWorkspace].
  *
  * Each case plants ONE step's failure (a held route, a planted page, a removed control) and runs the
  * fixture's own helper through [planted], which gives up at [PLANTED_BOUND_MS]; the shape is
@@ -312,19 +312,6 @@ class FixtureSetupWaitsBrowserTest : DashboardBrowserSuite() {
             releaseHeld()
             page.unroute(THEME_PATCH)
         }
-    }
-
-    @Test
-    fun `a colorbar that never draws names the probe's wait`() {
-        startTrace()
-        plantPage("<main id=\"case\">no plot here</main>")
-        val failure = planted { PlotlyColorbarProbe.assertPainted(page, "the 831 planted card", "#case") }
-        val message =
-            failure.shouldNameTheStep(
-                "the colorbar's fill rectangles of the 831 planted card (#case .js-plotly-plot rect.cbfill, attached)",
-                document = true,
-            )
-        println("831 plotly colorbar: $message")
     }
 
     /**

@@ -229,6 +229,7 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
                 dashboard: { id: '$board', version: 'released' },
                 container: second,
                 adapter: window.DatapipelinesDashboard.adapters(second),
+                charts: { library: 'plotly', instance: window.Plotly },
               });
               window.__dpPage2.instance = instance;
               instance.ready.then(function () { window.__dpPage2.ready = true; }, function () {});
