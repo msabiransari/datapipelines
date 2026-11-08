@@ -392,7 +392,7 @@ verification for the whole lake, while deliveries keep settling. Its result is d
 A tick cannot promise more than this. Against a stalled PostgreSQL every statement it started runs to its timeout;
 a connection checkout is bounded by the metadata pool's `connection-timeout` (10 s since #837), and a commit by the
 pool's and driver's settings. Against a server that accepts and never answers, a timeout's cancel does not end the
-blocked read, and the other four jobs on this thread end such a statement at a socket bound (#837); this tick's
+blocked read, and the other four jobs on this thread end such a statement at its bound plus the driver's 10 s cancel wait, through a socket bound (#837); this tick's
 statements are built in this module and do not carry one yet, so against that server a statement here has no
 wall-clock bound (#858). A healthy tick still reads the store once per table for the semantics repair's version check.
 

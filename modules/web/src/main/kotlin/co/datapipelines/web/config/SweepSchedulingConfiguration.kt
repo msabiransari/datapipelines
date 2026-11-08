@@ -36,10 +36,11 @@ import java.time.Duration
  *   dashboard refresh sweep (`DashboardRuntimeConfiguration`) and, only with `datapipelines.lake.enabled=true`, the lake
  *   settlement tick (`LakeSettlementSchedulingConfiguration`) — and nothing else does: no bean is wired to it;
  *   Spring's registrar looks it up. The four jobs built on `BoundedJdbc` carry two bounds on every metadata statement
- *   (#837): the statement's `queryTimeout` (a cancel) and a socket read bound of that plus 5 s, which ends a statement
- *   against a server that accepts and never answers, where the cancel cannot. The connection acquire is bounded pool-wide
- *   by `spring.datasource.hikari.connection-timeout` (10 s). A tick's worst wait on the metadata database is therefore the
- *   acquire plus the socket bound of its longest statement; the settlement tick's statements have the acquire bound and
+ *   (#837): the statement's `queryTimeout` (a cancel) and a socket read bound of that plus 5 s, which lets a statement end
+ *   against a server that accepts and never answers, where the cancel cannot (it ends at the statement bound plus the
+ *   driver's 10 s cancel wait, measured). The connection acquire is bounded pool-wide by
+ *   `spring.datasource.hikari.connection-timeout` (10 s). A tick's worst wait on the metadata database is therefore the
+ *   acquire plus the statement bound plus 10 s for its longest statement; the settlement tick's statements have the acquire bound and
  *   their own 5 s statement bound, but no socket bound yet (its template is built in `modules/lake`). The pool reaper is
  *   the one exception, by name: since #818d it ticks alone on
  *   `dp-reaper` (`PoolReaperTaskScheduler`, its `@Scheduled`'s `scheduler` attribute), because the reads lifetime

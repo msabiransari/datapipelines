@@ -19,6 +19,10 @@ import javax.sql.DataSource
  *   in milliseconds: the read that never returns ends with a `SocketTimeoutException` the driver reports as an I/O
  *   failure (SQLState `08006`), the driver closes the connection, and the pool discards it. The slack lets a statement that
  *   IS answering finish its own cancel first. This is the caller-side bound the statement bound could not be.
+ *   Measured (pgjdbc 42.7.14, a Postgres container paused mid-statement): the statement ends at the LATER of the socket
+ *   bound and `seconds` + the driver's `cancelSignalTimeout` (10 s by default), because the failed read is reported only
+ *   after the driver's cancel attempt on the hung server gives up; with no socket bound it never ends. So the worst
+ *   wall-clock wait of a bounded statement is `seconds` + 10, not `seconds` + 5.
  *
  * The same DataSource means the same transaction: inside a Spring-managed transaction the returned template's statements
  * run on the transaction's connection (`DataSourceUtils`), and a transaction timeout, when one is set, takes precedence
