@@ -22,6 +22,16 @@ data class VisualizationReleased(
 )
 
 /**
+ * What a visualization save (create or draft write) produced — the stored version, and the save's [warnings]
+ * (design record 2026-11-06 §4.4, D-A outcome 1: a chart field the library honours only in part). Recomputed by the
+ * rules on every save and never stored in the body; empty for a clean save and for every kind but `chart`.
+ */
+data class VisualizationSaved(
+    val version: ArtifactVersion<VisualizationBody>,
+    val warnings: List<ArtifactWarning>,
+)
+
+/**
  * The visualization aggregate's use cases (the spec's §3.1, §11.4, §12; versioning §3.5's verb table) — the one
  * place every write and every read passes, so the surfaces (L1b) add transport only. Validation is the
  * [VisualizationValidator]'s; the verb table is [ArtifactLifecycle]'s; this adds what is the family's own:
@@ -62,6 +72,15 @@ class VisualizationService(
 
     private val lifecycle = ArtifactLifecycle(repository, authoring, transactions, newId)
 
+    /**
+     * The `columns` a chart occurrence is served with (design record 2026-11-06 §4.1 "Types at render"): `{field:
+     * LogicalType}` of the encoded fields, from the contract the save rules read ([ChartColumns]); empty otherwise.
+     */
+    fun chartColumns(
+        workspaceId: UUID,
+        body: VisualizationBody,
+    ): Map<String, co.datapipelines.typesystem.LogicalType> = validator.chartColumns(workspaceId, body)
+
     /** [block] in one metadata transaction, the workspace writer guard acquired first (#517); the lifecycle's transactions join it. */
     private fun <T> guarded(
         workspaceId: UUID,
@@ -70,21 +89,21 @@ class VisualizationService(
 
     // ---- writes ---------------------------------------------------------------------------------------
 
-    /** Creates the visualization as version 1 DRAFT, validated in full. */
+    /** Creates the visualization as version 1 DRAFT, validated in full; the save's warnings beside it. */
     fun create(
         workspaceId: UUID,
         document: VisualizationDocument,
         actor: UUID,
         via: WriteSurface,
-    ): ArtifactVersion<VisualizationBody> {
+    ): VisualizationSaved {
         lifecycle.requireAuthoring()
         return guarded(workspaceId) {
-            val valid = validated(workspaceId, document)
-            lifecycle.create(workspaceId, valid.name, valid.body, actor, via)
+            val valid = validatedWithWarnings(workspaceId, document)
+            VisualizationSaved(lifecycle.create(workspaceId, valid.document.name, valid.document.body, actor, via), valid.warnings)
         }
     }
 
-    /** The draft write (copy-on-write, or in place) at [expectedHash]; never a rename. */
+    /** The draft write (copy-on-write, or in place) at [expectedHash]; never a rename. The save's warnings beside it. */
     fun write(
         workspaceId: UUID,
         id: UUID,
@@ -92,11 +111,12 @@ class VisualizationService(
         expectedHash: String,
         actor: UUID,
         via: WriteSurface,
-    ): ArtifactVersion<VisualizationBody> {
+    ): VisualizationSaved {
         lifecycle.requireAuthoring()
         return guarded(workspaceId) {
-            val valid = validated(workspaceId, document)
-            lifecycle.write(workspaceId, id, valid.name, valid.body, expectedHash, actor, via)
+            val valid = validatedWithWarnings(workspaceId, document)
+            val name = valid.document.name
+            VisualizationSaved(lifecycle.write(workspaceId, id, name, valid.document.body, expectedHash, actor, via), valid.warnings)
         }
     }
 
@@ -349,7 +369,17 @@ class VisualizationService(
     private fun validated(
         workspaceId: UUID,
         document: VisualizationDocument,
-    ): VisualizationDocument = validator.validate(workspaceId, document).orThrow(VisualizationErrorCodes.BODY_INVALID)
+    ): VisualizationDocument = validatedWithWarnings(workspaceId, document).document
+
+    /** The rules' [ArtifactValidation.Valid] — the canonical document and its warnings — or every refusal thrown. */
+    private fun validatedWithWarnings(
+        workspaceId: UUID,
+        document: VisualizationDocument,
+    ): ArtifactValidation.Valid<VisualizationDocument> =
+        when (val validation = validator.validate(workspaceId, document)) {
+            is ArtifactValidation.Valid -> validation
+            is ArtifactValidation.Invalid -> throw ArtifactValidationException(validation.result, VisualizationErrorCodes.BODY_INVALID)
+        }
 
     /** The 142 guard and the cascade's worklist: the transform pin, unless RELEASED; refused unless a consented DRAFT. */
     private fun templatesToRelease(

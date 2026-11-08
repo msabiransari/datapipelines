@@ -2,6 +2,7 @@ package co.datapipelines.web.visualizations
 
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.visualization.ArtifactJson
 import co.datapipelines.visualization.ArtifactRecord
 import co.datapipelines.visualization.ArtifactVersion
@@ -11,6 +12,7 @@ import co.datapipelines.visualization.PreviewCase
 import co.datapipelines.visualization.TestPreview
 import co.datapipelines.visualization.VisualizationErrorCodes
 import co.datapipelines.visualization.VisualizationReader
+import co.datapipelines.visualization.VisualizationService
 import co.datapipelines.visualization.VisualizationTestCapabilities
 import co.datapipelines.web.ui.UiProperties
 import io.kotest.assertions.throwables.shouldThrow
@@ -34,7 +36,8 @@ import java.util.UUID
  */
 class VisualizationPreviewControllerTest {
     private val capabilities = mockk<VisualizationTestCapabilities>()
-    private val controller = VisualizationPreviewController(capabilities, UiProperties(theme = "dark"))
+    private val visualizations = mockk<VisualizationService>()
+    private val controller = VisualizationPreviewController(capabilities, UiProperties(theme = "dark"), visualizations)
     private val id = UUID.randomUUID()
 
     @Test
@@ -73,8 +76,33 @@ class VisualizationPreviewControllerTest {
     }
 
     @Test
+    fun `a served preview's chart occurrence carries the one resolver's columns and the board's accessible name - 860`() {
+        val preview = preview()
+        every { capabilities.preview(id, "SECRET-TOKEN") } returns preview
+        every { visualizations.chartColumns(preview.visualization.record.workspaceId, preview.visualization.body) } returns
+            mapOf("month" to LogicalType.STRING)
+        val model = ExtendedModelMap()
+
+        controller.preview(id.toString(), "SECRET-TOKEN", "light", model, MockHttpServletResponse())
+
+        val cases = ArtifactJson.mapper.readTree(model["previewJson"] as String).path("cases")
+        cases.size() shouldBe 3
+        // Read once for the run's workspace and version; every case's occurrence carries the same columns.
+        cases.forEach { case ->
+            val occurrence = case.path("config").path("visualizations")[0]
+            occurrence.path("columns").toString() shouldBe """{"month":"STRING"}"""
+            occurrence.path("display_name").asText() shouldBe "Monthly revenue"
+            occurrence.path("description").asText() shouldBe ""
+        }
+        verify(exactly = 1) { visualizations.chartColumns(any(), any()) }
+    }
+
+    @Test
     fun `a served preview carries each case's configuration and results through the script-safe JSON`() {
-        every { capabilities.preview(id, "SECRET-TOKEN") } returns preview()
+        val preview = preview()
+        every { capabilities.preview(id, "SECRET-TOKEN") } returns preview
+        every { visualizations.chartColumns(preview.visualization.record.workspaceId, preview.visualization.body) } returns
+            mapOf("month" to LogicalType.STRING)
         val model = ExtendedModelMap()
         val response = MockHttpServletResponse()
 
@@ -92,12 +120,8 @@ class VisualizationPreviewControllerTest {
         cases.size() shouldBe 3
 
         val data = cases[0]
-        data
-            .path("config")
-            .path("visualizations")[0]
-            .path("renderer")
-            .path("kind")
-            .asText() shouldBe "chart"
+        val occurrence = data.path("config").path("visualizations")[0]
+        occurrence.path("renderer").path("kind").asText() shouldBe "chart"
         data
             .path("config")
             .path("actions")[0]
@@ -133,6 +157,7 @@ class VisualizationPreviewControllerTest {
     @Test
     fun `the theme is a closed set - anything else is the deployment default`() {
         every { capabilities.preview(id, any()) } returns preview()
+        every { visualizations.chartColumns(any(), any()) } returns emptyMap()
         val model = ExtendedModelMap()
         controller.preview(id.toString(), "T", "../../etc", model, MockHttpServletResponse())
         model["activeTheme"] shouldBe "dark"

@@ -2,12 +2,14 @@ package co.datapipelines.web.dashboards.runtime
 
 import co.datapipelines.parameters.EvaluateResponse
 import co.datapipelines.parameters.EvaluateResponseJson
+import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.visualization.ArtifactJson
 import co.datapipelines.visualization.ArtifactVersion
 import co.datapipelines.visualization.DashboardBody
 import co.datapipelines.visualization.DashboardRuntimeConfig
 import co.datapipelines.visualization.RefreshExecutionLink
 import co.datapipelines.visualization.RefreshRecord
+import co.datapipelines.visualization.RendererKind
 import co.datapipelines.visualization.StateSetting
 import co.datapipelines.visualization.VisualizationBody
 import co.datapipelines.visualization.VisualizationOccurrence
@@ -30,11 +32,13 @@ internal object RuntimeViews {
      * `GET /runtime/config` (spec §8.1). `bindings` ride BESIDE each `config` — the renderer configuration is stored
      * verbatim and the bindings (a config path → a column) are what the client fills from `visualization_data`.
      * `timeouts.render_seconds` is an addition to the spec's list: the client's render allowance is a server number
-     * (§9.6) and this is the one place a client learns it.
+     * (§9.6) and this is the one place a client learns it. [columns] is occurrence name → a chart's `{field: LogicalType}`
+     * ([DashboardRuntimeResolver.chartColumns]), served as `columns` on each `chart` occurrence (#860).
      */
     fun config(
         resolved: ResolvedDashboard,
         runtime: DashboardRuntimeConfig,
+        columns: Map<String, Map<String, LogicalType>>,
     ): ObjectNode {
         val served = resolved.served
         val body = served.body
@@ -53,7 +57,9 @@ internal object RuntimeViews {
             out.set<JsonNode>("layout", mapper.valueToTree(body.layout))
             out.set<JsonNode>("parameter_set", body.parameterSet?.let { mapper.valueToTree(it) } ?: nodes.nullNode())
             val visualizations = out.putArray("visualizations")
-            body.visualizations.forEach { occurrence -> visualizations.add(visualization(resolved, occurrence, runtime)) }
+            body.visualizations.forEach { occurrence ->
+                visualizations.add(visualization(resolved, occurrence, runtime, columns[occurrence.name].orEmpty()))
+            }
             out.set<JsonNode>("groups", mapper.valueToTree(body.groups))
             out.set<JsonNode>("actions", mapper.valueToTree(body.actions))
             out.set<JsonNode>("action_controls", mapper.valueToTree(body.actionControls))
@@ -76,6 +82,7 @@ internal object RuntimeViews {
         resolved: ResolvedDashboard,
         occurrence: VisualizationOccurrence,
         runtime: DashboardRuntimeConfig,
+        columns: Map<String, LogicalType>,
     ): ObjectNode {
         val body = resolved.served.body
         val mapper = ArtifactJson.mapper
@@ -99,10 +106,20 @@ internal object RuntimeViews {
             }
             v.set<JsonNode>("config", pinned.body.config)
             v.set<JsonNode>("bindings", mapper.valueToTree(pinned.body.bindings))
+            if (pinned.body.renderer.kind == RendererKind.CHART) {
+                v.set<JsonNode>("columns", chartColumns(columns))
+            }
             v.set<JsonNode>("presentation", pinned.body.presentation?.let { mapper.valueToTree(it) } ?: nodes.nullNode())
             v.put("timeout_seconds", minOf(occurrence.timeoutSeconds ?: refresh, refresh))
         }
     }
+
+    /**
+     * A chart occurrence's `columns` (#860, design record §4.1 "Types at render"): `{field: LogicalType}` of its encoded
+     * fields, which the runtime merges into the spec its converter receives. One writer for the board and the preview.
+     */
+    fun chartColumns(columns: Map<String, LogicalType>): ObjectNode =
+        nodes.objectNode().also { out -> columns.forEach { (field, type) -> out.put(field, type.wire) } }
 
     /** The refresh deadline: the dashboard's own `timeouts.refresh_seconds`, else the default; never above the cap. */
     fun refreshSeconds(

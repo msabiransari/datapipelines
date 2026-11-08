@@ -101,12 +101,13 @@ class TestSessionServiceIntegrationTest {
         val caselessTree = DocumentFixtures.visualization()
         caselessTree.remove("tests")
         val caseless =
-            h.visualizations.create(
-                TestEvidenceHarness.WORKSPACE,
-                VisualizationDocument("finance/visualizations/caseless", ValidatorFakes.visualizationDocument(caselessTree).body),
-                TestEvidenceHarness.AUTHOR,
-                WriteSurface.MCP,
-            )
+            h.visualizations
+                .create(
+                    TestEvidenceHarness.WORKSPACE,
+                    VisualizationDocument("finance/visualizations/caseless", ValidatorFakes.visualizationDocument(caselessTree).body),
+                    TestEvidenceHarness.AUTHOR,
+                    WriteSurface.MCP,
+                ).version
         shouldThrow<DatapipelinesException> {
             h.sessions.start(TestEvidenceHarness.WORKSPACE, caseless.detail.artifactId, TestEvidenceHarness.AUTHOR)
         }.let {

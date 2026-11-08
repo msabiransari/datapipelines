@@ -38,6 +38,14 @@ class VisualizationValidator(
     private val renderers: RendererConfigValidator = RendererConfigValidators.default(),
     private val charts: ChartDocumentRules = ChartDocumentRules.DEFAULT,
 ) {
+    private val columns = ChartColumns(templates)
+
+    /** A chart body's `columns` for the runtime ([ChartColumns]), from the contract this validator's save rules read. */
+    fun chartColumns(
+        workspaceId: UUID,
+        body: VisualizationBody,
+    ): Map<String, co.datapipelines.typesystem.LogicalType> = columns.of(workspaceId, body)
+
     /** Every rule over [document]; the document itself (a chart's with its derived bindings) when it passes. */
     fun validate(
         workspaceId: UUID,
@@ -213,11 +221,7 @@ class VisualizationValidator(
             if (body.inputs.size > 1) {
                 bindingInvalid("transform", "transform_required", "With more than one input a transform must combine them.", failures)
             }
-            return Output(
-                body.inputs.values
-                    .singleOrNull()
-                    ?.columns,
-            )
+            return Output(ChartColumns.inputs(body))
         }
         return when (val pin = templates.pinOf(workspaceId, transform.template)) {
             TemplatePin.NotFound -> {
@@ -252,10 +256,7 @@ class VisualizationValidator(
 
             is TemplatePin.Transform -> {
                 contractBinding(body, transform, pin.contract, failures)
-                Output(
-                    (pin.contract.output as? ScriptContractView.Output.Table)?.columns?.map { InputColumn(it.name, it.type, it.nullable) }
-                        ?: emptyList(),
-                )
+                Output(ChartColumns.output(pin))
             }
         }
     }

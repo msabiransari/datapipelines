@@ -2,14 +2,17 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateVersionStatuses
+import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.visualization.ArtifactJson
 import co.datapipelines.visualization.FixtureEvaluation
 import co.datapipelines.visualization.PreviewCase
 import co.datapipelines.visualization.TestPreview
+import co.datapipelines.visualization.VisualizationService
 import co.datapipelines.web.visualizations.PreviewViews
 import com.fasterxml.jackson.databind.node.ObjectNode
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldNotContain
+import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.Test
 import java.time.Instant
@@ -41,9 +44,16 @@ class VisualizationPreviewBlockTest {
             PreviewCase("refused", fixtures, null, FixtureEvaluation.Refused("template.evaluate.input_invalid", "no fit"), emptyList()),
         )
 
+    /** The chart's columns (#860) the one resolver answers for this version, in this workspace. */
+    private val columns = mapOf("month" to LogicalType.STRING)
+    private val visualizations =
+        mockk<VisualizationService>().also {
+            every { it.chartColumns(workspaceId, version.body) } returns columns
+        }
+
     private val tabs =
         VisualizationTabModel(
-            visualizations = mockk(),
+            visualizations = visualizations,
             workspace = mockk(),
             previewCases = mockk(),
             sessions = mockk(),
@@ -53,7 +63,7 @@ class VisualizationPreviewBlockTest {
 
     @Test
     fun `the capability block keeps its identity - the run key on every case, the expiry, the key order`() {
-        val block = PreviewViews.page(TestPreview(runId, UUID.randomUUID(), expiresAt, version, cases))
+        val block = PreviewViews.page(TestPreview(runId, UUID.randomUUID(), expiresAt, version, cases), columns)
 
         block.fieldNames().asSequence().toList() shouldBe listOf("visualization", "expires_at", "cases")
         block.path("expires_at").asText() shouldBe expiresAt.toString()
@@ -63,12 +73,21 @@ class VisualizationPreviewBlockTest {
 
     @Test
     fun `the workspace block is the capability block field for field, keyed by the version and never expiring`() {
-        val capability = PreviewViews.page(TestPreview(runId, UUID.randomUUID(), expiresAt, version, cases))
+        val capability = PreviewViews.page(TestPreview(runId, UUID.randomUUID(), expiresAt, version, cases), columns)
         val json = tabs.previewJson(version, cases)
         json shouldNotContain "</script"
         val workspace = ArtifactJson.mapper.readTree(json) as ObjectNode
 
         workspace.has("expires_at") shouldBe false
+        // The Preview tab resolves the chart's columns for the viewed version's own workspace.
+        workspace.path("cases").map {
+            it
+                .path("config")
+                .path("visualizations")[0]
+                .path("columns")
+                .toString()
+        } shouldBe
+            List(cases.size) { """{"month":"STRING"}""" }
         workspace.path("cases").map { it.path("config").path("configuration_id").asText() } shouldBe
             listOf("workspace:$vizId:v2:0", "workspace:$vizId:v2:1", "workspace:$vizId:v2:2")
 

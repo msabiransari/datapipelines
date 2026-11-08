@@ -10,6 +10,7 @@ import co.datapipelines.visualization.ArtifactVersion
 import co.datapipelines.visualization.DashboardService
 import co.datapipelines.visualization.VisualizationErrorCodes
 import co.datapipelines.visualization.VisualizationReader
+import co.datapipelines.visualization.VisualizationSaved
 import co.datapipelines.visualization.VisualizationService
 import com.fasterxml.jackson.databind.JsonNode
 import io.modelcontextprotocol.spec.McpSchema
@@ -47,6 +48,15 @@ internal object ArtifactTools {
             "status" to loaded.detail.status.name,
             "body_hash" to loaded.detail.bodyHash,
         )
+
+    /**
+     * What a visualization write answers (§6.2.52/§6.2.53, #860): [written]'s row plus `warnings` — ALWAYS present,
+     * `[]` on a clean save, one `{code, path, library}` per chart field the library honours only in part (design record
+     * 2026-11-06 §4.4). Never document text.
+     */
+    fun written(saved: VisualizationSaved): Map<String, Any?> =
+        written(saved.version) +
+            ("warnings" to saved.warnings.map { mapOf("code" to it.code, "path" to it.path, "library" to it.library) })
 
     /** A read's lifecycle state and document; the draft pointer only under the whole view (a promoter never sees one). */
     fun <B : Any> full(
@@ -213,7 +223,9 @@ class VisualizationsCreateTool(
                     "path (it must already exist in config) and column, the transform pin's contract against the " +
                     "inputs, the test cases — and a refusal names every failing path. A NEW top-level folder is refused " +
                     "until you confirm it: reuse an existing root, or ask the person first and then pass " +
-                    "confirm_new_root: true. Returns the id the other tools take and the body_hash an update needs.",
+                    "confirm_new_root: true. Returns the id the other tools take, the body_hash an update needs, and " +
+                    "warnings: [] on a clean save, else one {code, path, library} per chart field the library draws " +
+                    "only in part (the save landed; the warning names what will look different).",
             schema = VISUALIZATION_DOCUMENT_SCHEMA_CREATE,
         )
 
@@ -250,7 +262,8 @@ class VisualizationsUpdateTool(
                     "updates overwrite that same draft in place. Requires expected_hash — the body_hash you read from " +
                     "visualizations_get (or the previous update's result) for the version this edit is based on; a " +
                     "mismatch is a 409 conflict: re-read and rebase. The whole document is sent and validated in full. " +
-                    "A visualization is never renamed: a document naming another is refused.",
+                    "A visualization is never renamed: a document naming another is refused. Returns the new body_hash " +
+                    "and warnings, as visualizations_create does.",
             schema = VISUALIZATION_DOCUMENT_SCHEMA_UPDATE,
         )
 

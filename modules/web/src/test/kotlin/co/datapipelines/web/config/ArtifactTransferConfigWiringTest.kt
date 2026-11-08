@@ -237,12 +237,13 @@ class ArtifactTransferConfigWiringTest {
 
     /** A real visualization created through the context's service (the real save path), still DRAFT. */
     private fun createdVisualization(svc: VisualizationService) =
-        svc.create(
-            WS_A,
-            VisualizationReader().readOrThrow(ArtifactJson.mapper.readTree(DocumentFixturesJson.VISUALIZATION)),
-            AUTHOR,
-            WriteSurface.MCP,
-        )
+        svc
+            .create(
+                WS_A,
+                VisualizationReader().readOrThrow(ArtifactJson.mapper.readTree(DocumentFixturesJson.VISUALIZATION)),
+                AUTHOR,
+                WriteSurface.MCP,
+            ).version
 
     /** The SQL stamp the real release would write — the evidence gate is not this suite's subject. */
     private fun stampReleased(created: co.datapipelines.visualization.ArtifactVersion<*>) {

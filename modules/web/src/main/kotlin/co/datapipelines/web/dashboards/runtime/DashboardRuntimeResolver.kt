@@ -8,6 +8,7 @@ import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.templates.TemplateService
+import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.visualization.ArtifactVersion
 import co.datapipelines.visualization.DashboardBody
 import co.datapipelines.visualization.DashboardErrorCodes
@@ -120,6 +121,15 @@ class DashboardRuntimeResolver(
         val sources = body.sources.associate { it.name to resolveSource(workspaceId, it, allowDraft) }
         return ResolvedDashboard(served, vizByOccurrence, set, sources, configurationId(workspaceId, served, vizByOccurrence, set, sources))
     }
+
+    /**
+     * Occurrence name → its chart `columns` (`{field: LogicalType}`, empty for a non-chart kind; #860, design record
+     * §4.1): what `GET /runtime/config` serves beside a chart occurrence, read through the ONE resolver the save rules
+     * share ([VisualizationService.chartColumns]). Not part of [resolve]: a refresh never reads them, so only the
+     * configuration route pays for the transform contract read.
+     */
+    fun chartColumns(resolved: ResolvedDashboard): Map<String, Map<String, LogicalType>> =
+        resolved.visualizations.mapValues { (_, pinned) -> visualizations.chartColumns(resolved.served.record.workspaceId, pinned.body) }
 
     @Suppress("ThrowsCount") // one distinct refusal per way a pin can stop holding
     private fun resolveSource(

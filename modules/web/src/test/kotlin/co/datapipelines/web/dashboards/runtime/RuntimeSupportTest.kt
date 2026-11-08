@@ -6,6 +6,7 @@ import co.datapipelines.executor.ExecutionSlots
 import co.datapipelines.persistence.FailureShape
 import co.datapipelines.persistence.ScheduledJob
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.visualization.ActionScope
 import co.datapipelines.visualization.ArtifactJson
 import co.datapipelines.visualization.ArtifactRecord
@@ -164,7 +165,7 @@ class RuntimeSupportTest {
                 configurationId = "cfg-1",
             )
 
-        val config = RuntimeViews.config(resolved, DashboardRuntimeConfig())
+        val config = RuntimeViews.config(resolved, DashboardRuntimeConfig(), emptyMap())
         val visualization = config["visualizations"][0]
 
         visualization["name"].asText() shouldBe "rev"
@@ -183,7 +184,68 @@ class RuntimeSupportTest {
                 sources = emptyMap(),
                 configurationId = "cfg-1",
             )
-        RuntimeViews.config(withoutDescription, DashboardRuntimeConfig())["visualizations"][0]["description"].isNull shouldBe true
+        RuntimeViews.config(withoutDescription, DashboardRuntimeConfig(), emptyMap())["visualizations"][0]["description"].isNull shouldBe
+            true
+    }
+
+    @Test
+    fun `a chart occurrence carries its columns as wire types and a table occurrence carries none - 860`() {
+        val at = Instant.parse("2026-11-08T00:00:00Z")
+        val user = UUID.randomUUID()
+
+        fun pinned(
+            kind: RendererKind,
+            config: String,
+        ): ArtifactVersion<VisualizationBody> {
+            val id = UUID.randomUUID()
+            return ArtifactVersion(
+                ArtifactRecord(id, UUID.randomUUID(), "dbr/viz", "v", "", 1, at, at, user),
+                ArtifactVersionDetail(id, 1, PipelineVersionStatus.RELEASED, "h", at, user),
+                VisualizationBody(
+                    displayName = "v",
+                    renderer = RendererSpec(kind, "1"),
+                    inputs = emptyMap(),
+                    config = ArtifactJson.mapper.readTree(config) as ObjectNode,
+                ),
+            )
+        }
+        val occurrence = { name: String ->
+            VisualizationOccurrence(name = name, type = DashboardObjectType.VISUALIZATION, visualization = ArtifactRef("v", 1))
+        }
+        val servedId = UUID.randomUUID()
+        val resolved =
+            ResolvedDashboard(
+                served =
+                    ArtifactVersion(
+                        ArtifactRecord(servedId, UUID.randomUUID(), "dbr/dashboard", "Board", "", 1, at, at, user),
+                        ArtifactVersionDetail(servedId, 1, PipelineVersionStatus.RELEASED, "h", at, user),
+                        DashboardBody(
+                            displayName = "Board",
+                            visualizations = listOf(occurrence("bars"), occurrence("rows")),
+                            layout = DashboardLayout(),
+                        ),
+                    ),
+                visualizations =
+                    mapOf(
+                        "bars" to pinned(RendererKind.CHART, """{"mark":{"type":"bar"}}"""),
+                        "rows" to pinned(RendererKind.TABLE, """{"columns":[]}"""),
+                    ),
+                set = null,
+                sources = emptyMap(),
+                configurationId = "cfg-1",
+            )
+        val columns =
+            mapOf(
+                "bars" to linkedMapOf("amount" to LogicalType.BIGINTEGER, "region" to LogicalType.STRING),
+                "rows" to mapOf("ignored" to LogicalType.STRING),
+            )
+
+        val entries = RuntimeViews.config(resolved, DashboardRuntimeConfig(), columns)["visualizations"]
+
+        entries[0]["columns"].toString() shouldBe """{"amount":"BIGINTEGER","region":"STRING"}"""
+        entries[1].has("columns") shouldBe false
+        // A chart whose contract is unknowable still carries the key: the runtime reads `{}` as "no contract".
+        RuntimeViews.config(resolved, DashboardRuntimeConfig(), emptyMap())["visualizations"][0]["columns"].toString() shouldBe "{}"
     }
 
     @Test

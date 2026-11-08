@@ -124,12 +124,13 @@ internal class TestEvidenceHarness(
         name: String = DocumentFixtures.VISUALIZATION_NAME,
         edit: (ObjectNode) -> Unit = {},
     ): ArtifactVersion<VisualizationBody> =
-        visualizations.create(
-            VisualizationTestDb.WORKSPACE,
-            VisualizationDocument(name, ValidatorFakes.visualizationDocument(DocumentFixtures.visualization().also(edit)).body),
-            VisualizationTestDb.AUTHOR,
-            WriteSurface.MCP,
-        )
+        visualizations
+            .create(
+                VisualizationTestDb.WORKSPACE,
+                VisualizationDocument(name, ValidatorFakes.visualizationDocument(DocumentFixtures.visualization().also(edit)).body),
+                VisualizationTestDb.AUTHOR,
+                WriteSurface.MCP,
+            ).version
 
     fun now(): Instant = Instant.now()
 

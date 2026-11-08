@@ -1994,7 +1994,7 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
 ```json
 {
   "name": "visualizations_create",
-  "description": "Create a visualization: version 1 lands as a DRAFT (a human releases it; no tool releases anything). The document is validated in FULL at save — the renderer's configuration schema, every binding path (it must already exist in config) and column, the transform pin's contract against the inputs, the test cases — and a refusal names every failing path. A NEW top-level folder is refused until you confirm it: reuse an existing root, or ask the person first and then pass confirm_new_root: true. Returns the id the other tools take and the body_hash an update needs.",
+  "description": "Create a visualization: version 1 lands as a DRAFT (a human releases it; no tool releases anything). The document is validated in FULL at save — the renderer's configuration schema, every binding path (it must already exist in config) and column, the transform pin's contract against the inputs, the test cases — and a refusal names every failing path. A NEW top-level folder is refused until you confirm it: reuse an existing root, or ask the person first and then pass confirm_new_root: true. Returns the id the other tools take, the body_hash an update needs, and warnings: [] on a clean save, else one {code, path, library} per chart field the library draws only in part (the save landed; the warning names what will look different).",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -2055,7 +2055,7 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
 }
 ```
 
-**Permission:** `visualization.create`. **Mutating.** **Returns:** `{id, name, version, status, body_hash}`. **Errors:** `visualization.validation.*` (every failure in `details.failures`; `name_taken` 409), `visualization.validation.new_root_requires_confirmation` (`details.existing_roots`), `visualization.authoring.disabled`.
+**Permission:** `visualization.create`. **Mutating.** **Returns:** `{id, name, version, status, body_hash, warnings}` — `warnings` is always present: `[]` on a clean save, else one `{code, path, library}` per chart field the declared library draws only in part (`chart.degraded.<field>`, design record 2026-11-06 §4.4; recomputed on every save, never stored, never document text). The save has landed either way. **Errors:** `visualization.validation.*` (every failure in `details.failures`; `name_taken` 409), `visualization.validation.new_root_requires_confirmation` (`details.existing_roots`), `visualization.authoring.disabled`.
 
 #### 6.2.53 `visualizations_update`
 
@@ -2064,7 +2064,7 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
 ```json
 {
   "name": "visualizations_update",
-  "description": "Edit a visualization by ID: the first change after a release opens a DRAFT (copy-on-write); later updates overwrite that same draft in place. Requires expected_hash — the body_hash you read from visualizations_get (or the previous update's result) for the version this edit is based on; a mismatch is a 409 conflict: re-read and rebase. The whole document is sent and validated in full. A visualization is never renamed: a document naming another is refused.",
+  "description": "Edit a visualization by ID: the first change after a release opens a DRAFT (copy-on-write); later updates overwrite that same draft in place. Requires expected_hash — the body_hash you read from visualizations_get (or the previous update's result) for the version this edit is based on; a mismatch is a 409 conflict: re-read and rebase. The whole document is sent and validated in full. A visualization is never renamed: a document naming another is refused. Returns the new body_hash and warnings, as visualizations_create does.",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -2131,7 +2131,7 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
 }
 ```
 
-**Permission:** `visualization.update`. **Mutating.** **Returns:** `{id, name, version, status, body_hash}`. **Errors:** `visualization.not_found`, `visualization.version.conflict` (stale `expected_hash` — re-read and rebase), `visualization.validation.*` (`name_invalid` / `immutable` for another name).
+**Permission:** `visualization.update`. **Mutating.** **Returns:** `{id, name, version, status, body_hash, warnings}` — `warnings` as `visualizations_create` answers it. **Errors:** `visualization.not_found`, `visualization.version.conflict` (stale `expected_hash` — re-read and rebase), `visualization.validation.*` (`name_invalid` / `immutable` for another name).
 
 #### 6.2.54 `visualizations_purge_draft`
 

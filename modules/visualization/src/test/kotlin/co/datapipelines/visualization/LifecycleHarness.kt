@@ -14,11 +14,13 @@ import org.springframework.transaction.support.TransactionTemplate
  * cases need a rollback that means something) and the validators' ports faked as [ValidatorFakes] seeds them. The
  * template side of the visualization release is two recording fakes: [templateStatuses] answers the pin's status,
  * [templateReleaser] records what the cascade released. [evidence] defaults to PASS — the gate's own default
- * (`NOT_INSTALLED`, refusing) is proven by its own cases.
+ * (`NOT_INSTALLED`, refusing) is proven by its own cases. [charts] is the chart rules the validator runs (a planted D-A
+ * row makes a save warn, #860).
  */
 internal class LifecycleHarness(
     authoringEnabled: Boolean = true,
     evidence: ReleaseEvidence = ReleaseEvidence { _, _ -> EvidenceVerdict.Pass },
+    charts: ChartDocumentRules = ChartDocumentRules.DEFAULT,
 ) {
     val jdbc = VisualizationTestDb.jdbc
     val fakes = ValidatorFakes.Fakes()
@@ -33,7 +35,7 @@ internal class LifecycleHarness(
     val visualizations =
         VisualizationService(
             repository = visualizationRepository,
-            validator = VisualizationValidator(fakes.templateFacts),
+            validator = VisualizationValidator(fakes.templateFacts, charts = charts),
             dashboards = dashboardRepository,
             authoring = AuthoringGuard(authoringEnabled),
             templateStatuses = TemplateVersionStatuses { _, name, version -> templateStatuses[ArtifactRef(name, version)] },
@@ -88,10 +90,11 @@ internal class LifecycleHarness(
 
     /** A visualization created as v1 DRAFT (MCP) in [WORKSPACE]. */
     fun createVisualization(name: String = DocumentFixtures.VISUALIZATION_NAME): ArtifactVersion<VisualizationBody> =
-        visualizations.create(
-            WORKSPACE,
-            visualizationDocument(name),
-            VisualizationTestDb.AUTHOR,
-            co.datapipelines.pipeline.WriteSurface.MCP,
-        )
+        visualizations
+            .create(
+                WORKSPACE,
+                visualizationDocument(name),
+                VisualizationTestDb.AUTHOR,
+                co.datapipelines.pipeline.WriteSurface.MCP,
+            ).version
 }

@@ -7,6 +7,7 @@ import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.TemplateVersionStatuses
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.visualization.ArtifactJson
 import co.datapipelines.visualization.ArtifactPage
 import co.datapipelines.visualization.ArtifactRef
@@ -156,6 +157,7 @@ class VisualizationPartialControllerTest {
         twoVersions()
         val case = PreviewCase("twelve months", emptyMap(), listOf(mapOf("x" to 1)), null, emptyList())
         every { previewCases.cases(workspaceId, any()) } returns listOf(case)
+        every { visualizations.chartColumns(workspaceId, any()) } returns mapOf("x" to LogicalType.BIGINTEGER)
 
         val model = ExtendedModelMap()
         controller.preview(model, vizId, "2") shouldBe VisualizationTabModel.PREVIEW_VIEW
@@ -165,6 +167,7 @@ class VisualizationPartialControllerTest {
         (model["cases"] as List<VisualizationTabModel.CaseView>).single().name shouldBe "twelve months"
         val json = model["previewJson"] as String
         json shouldContain "\"twelve months\""
+        json shouldContain "\"columns\":{\"x\":\"BIGINTEGER\"}" // #860: the chart's columns, for this workspace
         // The script-safe encoding: no raw angle bracket can reach the script element.
         json shouldNotContain "<"
     }
