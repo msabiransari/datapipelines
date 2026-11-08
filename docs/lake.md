@@ -444,7 +444,8 @@ HTTP settings bound a silent store, but cannot bound a trickling response (duckd
 leaves through that proxy (DuckDB's `http_proxy`, set before the generation's lockdown, which then refuses any change).
 `deploy/compose.yml` and the Helm chart ship one ON: Envoy, pinned by digest, which resets every stream at
 `reads.egress-max-age-seconds` whatever its activity and retires every keep-alive connection at the same age.
-A managed read's object-store connection lives at most `egress-max-age-seconds`; a trickling store is ended there. This
+A managed read's object-store connection lives at most `egress-max-age-seconds`; a trickling store's connection is
+cut there, and the reader ends by the end-by bound below. This
 is a hygiene bound, not a safety premise: reader leases are the safety premise. A healthy keep-alive connection older
 than the max-age is also cut, and the next request retries on a fresh one (`http_retries`); measured with DuckDB 1.5.5,
 a query's proxy connections close when the query ends, so within the max-age floor below a healthy query does not meet
