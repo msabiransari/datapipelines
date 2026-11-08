@@ -126,8 +126,10 @@ class LakeCatalogs(
         private const val S3_SECRET_ACCESS_KEY = "s3.secret-access-key"
         private const val CLIENT_REGION = "client.region"
         private const val HTTP_CLIENT_TYPE = "http-client.type"
-        private const val HTTP_CONNECTION_TIMEOUT_MS = "http-client.urlconnection.connection-timeout-ms"
-        private const val HTTP_SOCKET_TIMEOUT_MS = "http-client.urlconnection.socket-timeout-ms"
+
+        /** The two bounds the settlement read's end is derived from (`SettlementObjectReadEnd`, docs/lake.md §8). */
+        const val HTTP_CONNECTION_TIMEOUT_MS = "http-client.urlconnection.connection-timeout-ms"
+        const val HTTP_SOCKET_TIMEOUT_MS = "http-client.urlconnection.socket-timeout-ms"
 
         /** The SDK's own default, stated so it cannot drift: a longer one would only loosen the bound (record §8b, D4). */
         const val STORE_CONNECTION_TIMEOUT_MILLIS = 2_000L
@@ -136,7 +138,8 @@ class LakeCatalogs(
          * Tighter than the SDK's 30 s and equal to the settlement tick's budget, so a store that stops answering ends the
          * read the tick abandoned: six SDK attempts, about a minute (measured, 799c). A store trickling bytes under this
          * bound is not ended by it (docs/lake.md §8). Every FileIO of the lake carries it: a write that stalls this long
-         * fails before its pointer swap, clean.
+         * fails before its pointer swap, clean. The whole blocked read's end — this bound times the SDK's and Iceberg's
+         * retries — is `SettlementObjectReadEnd.stalledReadEndByMillis`, derived in one place and stated in §8.
          */
         const val STORE_SOCKET_TIMEOUT_MILLIS = 10_000L
 

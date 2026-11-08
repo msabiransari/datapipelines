@@ -31,12 +31,12 @@ class CatalogStoreTimeoutsTest {
     }
 
     @Test
-    fun `the abandoned read's documented bound names this socket timeout, so the number cannot drift from the constant`() {
+    fun `the abandoned read's documented end names this derivation, computed from these bounds`() {
         val lake = LakeTestDb.repoFile("docs/lake.md").readText().replace(Regex("\\s+"), " ")
-        val seconds = LakeCatalogs.STORE_SOCKET_TIMEOUT_MILLIS / MILLIS_PER_SECOND
+        val end = SettlementObjectReadEnd.stalledReadEndByMillis(properties)
 
-        lake shouldContain
-            "**an abandoned read ends at its next chunk, or after the store's $seconds-second socket timeout if that chunk never comes**"
+        lake shouldContain "SettlementObjectReadEnd.stalledReadEndByMillis"
+        lake shouldContain "at most ${grouped(end)} ms"
     }
 
     @Test
@@ -47,7 +47,6 @@ class CatalogStoreTimeoutsTest {
     }
 
     private companion object {
-        const val MILLIS_PER_SECOND = 1_000L
         const val MIB = 1_024L * 1_024L
         const val CAP_MIB = 64L
     }
