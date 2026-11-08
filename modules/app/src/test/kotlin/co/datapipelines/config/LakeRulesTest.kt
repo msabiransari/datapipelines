@@ -159,9 +159,11 @@ class LakeRulesTest {
     }
 
     /**
-     * #804 — the reservation bound cannot overflow: the memory sits at `Long.MAX_VALUE` with factor 3,
-     * where a naive `memory × factor` wraps around and would admit the configuration. The delivered
-     * shape divides the scratch by the factor (the delivery bound's shape), which cannot wrap.
+     * #804 — the reservation bound cannot overflow: the memory sits at `Long.MAX_VALUE` with factor 2,
+     * where a naive `memory × factor` wraps around to -2 and would ADMIT the configuration; the
+     * delivered shape divides the scratch by the factor (the delivery bound's shape), which cannot wrap.
+     * (Factor 3 is a false comfort: `Long.MAX × 3` wraps to a small positive, still over the scratch,
+     * so a plant survives it — the falsification run pins factor 2.)
      */
     @Test
     fun `804 - the reservation rule cannot overflow the memory times the factor`() {
@@ -170,6 +172,7 @@ class LakeRulesTest {
                 mapOf(
                     LakeRules.STAGING_MEMORY_LIMIT to "9223372036854775807B",
                     LakeRules.SCRATCH_BYTES to "20GB",
+                    LakeRules.STAGING_EXPANSION_FACTOR to "2",
                 ),
             )
         overflow.single() shouldStartWith LakeRules.SCRATCH_BYTES
