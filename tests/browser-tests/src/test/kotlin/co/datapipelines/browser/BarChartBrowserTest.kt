@@ -505,7 +505,7 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
               const inside = r.left >= box.left && r.right <= box.right && r.top >= box.top && r.bottom <= box.bottom;
               const edge = rect => rect ? [rect.left, rect.top, rect.right, rect.bottom].map(Math.round) : null;
               return { inside: inside, label: edge(r), box: edge(box), bar: edge(bar), plot: edge(plot),
-                text: longest.text.textContent, transform: longest.text.getAttribute('transform') };
+                text: longest.text.textContent };
             }"""
     }
 }

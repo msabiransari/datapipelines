@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.84 (revised — see Change Log)
+**Status:** v1.85 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-11-07
+**Last updated:** 2026-11-08
 
 ---
 
@@ -1605,7 +1605,7 @@ The visualization artifact's refusals (#10; the [dashboard implementation spec](
 | `visualization.validation.renderer_unsupported` | 400 | `renderer.kind` is a reserved kind round one does not render (`html`, `svg` — D13, D46), or a `renderer.version` the kind does not accept |
 | `visualization.validation.input_contract_invalid` | 400 | an input contract that cannot be satisfied: no inputs, an input name outside `[a-z][a-z0-9_]{0,63}`, an input with no columns, a column name outside the column grammar, or two columns of one input sharing a name |
 | `visualization.validation.transform_binding_invalid` | 400 | `transform` does not bind: the pinned template is missing or DISCARDED at that version (`details.reason` `template_not_found` / `template_version_not_found`), not a transform (`not_a_transform`), its contract's input names differ from `transform.inputs`' keys, a `transform.inputs` value names no visualization input, or a declared input column differs from the named input's column by name, type or nullability (`details.column`); a transform-less visualization with more than one input (`transform_required`) |
-| `visualization.validation.config_schema_invalid` | 400 | `config` fails the renderer's schema: for `plotly` an object whose `data` is an array of objects each with a `type` from the vendored bundle's list and whose `layout` is an object; for `table` and `kpi` their own schemas ([Dashboards §2.1](dashboards.md)); `details.path` names the offending path inside `config` |
+| `visualization.validation.config_schema_invalid` | 400 | `config` fails the renderer's schema: for `chart` the v1 JSON Schema served at `/schemas/chart/1/` (`details.reason` `schema`, with the failing `keyword` and its JSON `pointer`), then the chart save rules and the declared library's support table (`details.reason` the `chart.*` code, [Dashboards §2.1.2](dashboards.md)); for `table` and `kpi` their own schemas ([Dashboards §2.1](dashboards.md)); `details.renderer` names the kind, and the failure's `path` names the offending path inside the document |
 | `visualization.validation.binding_unbound` | 400 | a `bindings` entry does not bind: its path is not the binding grammar or does not resolve inside `config` (`details.reason` `path_invalid` / `path_unresolved`), or its column is not in the transform's OUTPUT contract (or, with no transform, the one input's columns) — `details.column` |
 | `visualization.validation.test_case_invalid` | 400 | a `tests.cases[]` entry that is not runnable: a missing or duplicate case name, fixtures missing an input or naming an unknown one, a fixture row with a column outside the input's contract or a value outside its type, an assertion kind outside the closed vocabulary or missing its argument |
 | `visualization.not_found` | 404 | no such visualization (or version) in the workspace, hidden by the promoter lens, or discarded on a read/mutate path — indistinguishable by design |
@@ -1999,6 +1999,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-08 | v1.85 | 860 (#860) | §13.22: `visualization.validation.config_schema_invalid` describes the `chart` kind (the served v1 schema, then the `chart.*` save rules, `details.reason` and `details.renderer`) in place of the retired `plotly` kind; no code is added or removed. |
 | 2026-11-04 | v1.84 | 818 (#818) | dp-lake P5 managed reads. §13.8 gains `datasource.managed` (409); §13.25 gains `lake.unavailable` (503) and `lake.table.unavailable` (409), landed in the SAME commit as their `PipelineErrorCodes` constants and `ApiErrorCatalog` rows (merged §13 row count 475 → 477; P4 and P5 share `lake.table.unavailable`). |
 | 2026-11-05 | v1.83 | 799 (#799) | §13.25 adds admission, target status and immutable delivery identity refusals. |
 | 2026-11-05 | v1.82 | 799 (#799) | §13.25 adds the partition fanout bound for uncommitted Parquet append files. |

@@ -782,6 +782,22 @@
     return out;
   }
 
+  /**
+   * #473 — the card heading names the chart (a chart has no `presentation`, so the heading is its `display_name`): a
+   * chart title whose text repeats it (trimmed) and that carries no subtitle says nothing the heading does not, and
+   * is not drawn, so a card never prints the same words twice. A title with a subtitle stays whole — the subtitle
+   * says something more and is drawn under its title. A new config; the occurrence's is unchanged.
+   */
+  function withoutDuplicateTitle(config, displayName) {
+    if (!config || typeof config !== "object" || !config.title || typeof config.title !== "object") return config;
+    if (typeof config.title.text !== "string" || typeof displayName !== "string") return config;
+    var heading = displayName.trim();
+    if (heading === "" || config.title.text.trim() !== heading || config.title.subtitle) return config;
+    var drawn = Object.assign({}, config);
+    delete drawn.title;
+    return drawn;
+  }
+
   function create(context) {
     var host = context.host;
     var occurrence = context.occurrence || {};
@@ -799,7 +815,7 @@
     var spec = {
       display_name: occurrence.display_name,
       description: occurrence.description,
-      config: occurrence.config,
+      config: withoutDuplicateTitle(occurrence.config, occurrence.display_name),
       columns: occurrence.columns && typeof occurrence.columns === "object" ? occurrence.columns : {},
     };
     // The accessible description (record §4.1 host contract): Plotly has no description of its own.
@@ -886,6 +902,7 @@
     },
     _internal: {
       resolveTokens: resolveTokens,
+      withoutDuplicateTitle: withoutDuplicateTitle,
       normaliseColor: normaliseColor,
       renderWarnings: renderWarnings,
       judge: judge,

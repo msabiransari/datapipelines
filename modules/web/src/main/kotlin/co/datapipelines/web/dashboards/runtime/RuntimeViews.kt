@@ -25,7 +25,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode
 internal object RuntimeViews {
     private val nodes = JsonNodeFactory.instance
 
-    /** The light Plotly bundle (`plotly-basic`, D63) — the only one a v1 chart family needs. */
+    /** The light Plotly bundle (`plotly-2d.min.js`, a vendored custom build, D63): all a v1 chart family needs. */
     private const val BUNDLE_2D = "2d"
 
     /**

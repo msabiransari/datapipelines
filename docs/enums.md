@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.47 (living document — updated as enums evolve)
+**Status:** v1.48 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -1245,6 +1245,7 @@ Stored in `lake_delivery_attempts.outcome` ([Metadata DB §4.54](metadata-db.md#
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-08 | v1.48 | 860 (#860) | **§31 `RendererKind`:** `chart` (the chart document v1, judged by the schema served at `/schemas/chart/1/`) replaces `plotly`, which is retired and refused as `visualization.validation.renderer_unsupported` with a message naming `chart`. **§32 `AssertionKind`:** `mark_count` replaces `trace_count`; `text_visible` on a chart is proven by the mechanical check or left unjudged, never refused. |
 | 2026-11-05 | v1.47 | 799 (#799) | New §49 delivery states, §50 failure phases and §51 attempt outcomes, matching V55's CHECKs and the Kotlin vocabularies; §15 gains the four strict delivery audit events. |
 | 2026-11-04 | v1.46 | 799 (#799) | §16 registers `lake.delivery.*` and `lake.append.*` domains for delivery and managed append structure/publication. |
 | 2026-11-04 | v1.45 | 798 (#798) | New **§46 `LakeTableStatus`**, **§47 `LakeApplyState`** and **§48 `LakeChangeClass`** (V54's two CHECKs and the supported-change policy's classes, held to their Kotlin enums by `LakeDefinitionEnumsSpecDriftTest`); **§15** gains the three lake definition audit events (`lake.definition.released` / `applied` / `apply_failed`, held by `LakeAuditEventsSpecDriftTest`); **§16** registers the `lake.definition.*` domain (pipeline-contract §13.25). Section numbers follow #778's §45; a lane merging after this one with its own §46 renumbers. |

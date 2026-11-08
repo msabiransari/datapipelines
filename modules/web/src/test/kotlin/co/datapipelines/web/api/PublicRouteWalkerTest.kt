@@ -131,6 +131,8 @@ class PublicRouteWalkerTest {
                 // authenticates by ONE capability its handler checks (VisualizationTestCapabilities).
                 "VisualizationPreviewController#preview",
                 "VisualizationTestsController#screenshot",
+                // #860: the chart document v1 schemas — the validator's packaged bytes by an allowlist of names.
+                "ChartSchemaController#schema",
             ).sorted()
     }
 

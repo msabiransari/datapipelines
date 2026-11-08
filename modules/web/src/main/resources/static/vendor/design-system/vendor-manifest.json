@@ -221,8 +221,8 @@
     ],
     "sha256": {
       "js/datapipelines-dashboard.js": "d5e2bf340985cc1bc6b05cb4854f06e9197ee22bbcee5f0321363d6a1622deae",
-      "js/datapipelines-dashboard-chart.js": "9d377189100bddf899437d77077007dcf5eb7b0cb87411d0a91fe49c91c0acb7",
-      "js/datapipelines-dashboard-plotly.js": "1f618298afac95d155e58db679271a16c5dfa9ea34ef1c81fcba8ca0ffe858bb",
+      "js/datapipelines-dashboard-chart.js": "c829a567bac3a70b12e567df9a521b5a71cf727b0475b69e86053acd76b44b4c",
+      "js/datapipelines-dashboard-plotly.js": "85da47639cfc25ffe658becc713808e8294b6e547fa27265505201b9dc35c3fb",
       "js/datapipelines-dashboard-table.js": "3412e46ba63d4e045ac33fc7d3305352ab9da5bff015863b5dc96d4e56ce9e39",
       "js/datapipelines-dashboard-kpi.js": "1de1ea45789aebece9397f7c87622eb7cd27705874ce009b4623ce28f3bbcb28"
     },

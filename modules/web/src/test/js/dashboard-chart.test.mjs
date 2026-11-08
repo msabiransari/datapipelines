@@ -337,6 +337,37 @@ test("the registry and the mount judgement: an unknown library is refused, undec
   ]);
 });
 
+test("#473: a chart title that only repeats the card heading (the display name) is not drawn; one that says more, or carries a subtitle, stays", async () => {
+  const { withoutDuplicateTitle } = chart._internal;
+  const titled = (title) => Object.assign({}, BAR, { title });
+  const config = titled({ text: " Sales " });
+  const before = JSON.stringify(config);
+  assert.equal("title" in withoutDuplicateTitle(config, "Sales"), false, "the same words, trimmed, are dropped");
+  assert.equal(JSON.stringify(config), before, "the occurrence's config is not changed");
+  assert.deepEqual(withoutDuplicateTitle(config, "Sales").encoding, BAR.encoding, "the rest of the config is kept");
+  assert.deepEqual(withoutDuplicateTitle(titled({ text: "Sales" }), "Sales by region").title, { text: "Sales" }, "a different title stays");
+  assert.deepEqual(withoutDuplicateTitle(titled({ text: "Sales", subtitle: "2026" }), "Sales").title, { text: "Sales", subtitle: "2026" }, "a subtitle keeps its title");
+  assert.deepEqual(withoutDuplicateTitle(titled({ text: "sales" }), "Sales").title, { text: "sales" }, "the match is exact, case included");
+  assert.deepEqual(withoutDuplicateTitle(titled({ text: "Sales" }), "  ").title, { text: "Sales" }, "a blank heading drops nothing");
+  assert.equal(withoutDuplicateTitle(BAR, "Sales"), BAR, "an untitled config is returned as is");
+  // Through the kind's create: the drawn layout has no title when the title repeats the display name.
+  const layouts = [];
+  const instance = { react: (host, data, layout) => (layouts.push(layout), Promise.resolve()), Plots: { resize() {} }, purge() {} };
+  installDom({});
+  try {
+    const runtime = { registerRenderer: (spec) => (runtime.spec = spec) };
+    chart.register(runtime);
+    for (const display_name of ["Sales", "Sales by region"]) {
+      const handle = runtime.spec.create({ host: fakeElement("div"), occurrence: { name: "s", display_name, config: config, columns: COLUMNS }, charts: { library: "plotly", instance } });
+      await handle.renderData({ name: "s" }, 1, { region: ["North"], amount: [1] });
+    }
+    assert.equal(layouts[0].title, undefined, "the heading already says it");
+    assert.deepEqual(layouts[1].title, { text: " Sales " }, "the title says more than the heading");
+  } finally {
+    uninstallDom();
+  }
+});
+
 test("the Plotly host side touches the declared instance ONLY through react, Plots.resize and purge, and draw settles on react or plotly_afterplot", async () => {
   const touched = new Set();
   const calls = [];
