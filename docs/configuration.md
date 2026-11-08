@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Status:** v1.81 (operator reference; source-traced configuration authority)
+**Status:** v1.82 (operator reference; source-traced configuration authority)
 **Owner:** datapipelines.co core
 **Last updated:** 2026-11-07
 
@@ -229,6 +229,7 @@ There is deliberately **no fail-open key**. When the limiter's Redis is unreacha
 |---|---|---|---|
 | `server.port` | `SERVER_PORT` | `8080` | HTTP port |
 | `spring.datasource.hikari.maximum-pool-size` | `SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE` | `10` | Metadata DB connection pool size |
+| `spring.datasource.hikari.connection-timeout` | `SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT` | `10000` | How long, in **milliseconds**, a caller waits for a metadata DB connection before the pool refuses it (#837; HikariCP's own default is 30 000). The only bound on the acquire: HikariCP has no per-call timeout and a statement's `queryTimeout` starts after it. A request handler that cannot get a connection within it fails through the existing error path instead of hanging up to 30 s, and a `@Scheduled` job's tick fails at it with its failed-tick line (`CannotGetJdbcConnectionException`). HikariCP refuses a value below 250 ms at startup, and treats `0` as no bound at all (about 24 days): do not set it. The scheduled jobs' other wall-clock bound, a socket read bound on every bounded statement, is a code constant, not a key ([Observability §3.4H](observability.md#34h-the-scheduled-jobs-thread-316)) |
 | `server.tomcat.max-swallow-size` | `SERVER_TOMCAT_MAX_SWALLOW_SIZE` | `2MB` | How much unread request body Tomcat may drain for non-413 responses before closing (#279), including skipped GET/HEAD/OPTIONS bodies and other 4xx responses with unread bodies. Every 413 skips this swallow. Before closing a declared-over-cap 413, the request-body filter drains declared-over-cap screenshots up to 6 MiB and platform bodies up to the effective `max-request-bytes` + 2 MiB (#467, #559, #561). This key moves neither filter byte bound. The filter shares eight refuse-at-once drain permits across screenshots and platform routes, with a 10 s monotonic budget checked after every read. An in-progress read can add the connector timeout (60 s by default): an expired declared-body drain holds its thread for at most 10 + 60 = 70 s, or 8 × 70 = 560 thread-seconds for eight concurrent drains. Expiry, saturation and declarations above the byte bound flush the 413 then return normally. A context-wide TomcatContextCustomizer fixes swallowAbortedUploads=false and installs a context valve for committed 413 read failures (#561, #559): every 413 the app sends closes its connection without reading the remainder, without throwing. The valve marks an already-latched IOException on a committed 413 as reported before host error handling, preventing a client reset or read timeout from reaching /error; it preserves the error flag and all other error handling. Saturated and over-bound refusals read no body and close within at most one connector timeout (60 s by default). Completed drains have no declared remainder; client_gone has already failed I/O. These fixed code bounds and this safety flag are not configuration keys. |
 
 **Not a key: aborted-upload swallowing (#561, #559).** A `TomcatContextCustomizer` fixes `swallowAbortedUploads=false` context-wide and adds a valve that marks only committed 413 IOException read failures as reported before host error handling. The Catalina read latch precedes the filter catch; the valve prevents reset/timeout error-page includes without clearing the error flag or handling other errors. This is shipped safety wiring, not ordinary tuning, following §3.14's `use-relative-redirects` precedent. Every 413 connection closes without reading the remainder, including counting-stream refusals; no exception or error-page dispatch is involved. `server.tomcat.max-swallow-size` remains effective for non-413 responses with unread bodies.
@@ -775,6 +776,7 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD}
     hikari:
       maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:10}
+      connection-timeout: ${SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT:10000}
 
   flyway:
     enabled: true
@@ -1440,6 +1442,7 @@ The Helm input reference already lives in the commented `deploy/helm/datapipelin
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-07 | v1.82 | 837 (#837) | §3.13 and §5: new `spring.datasource.hikari.connection-timeout` (`SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT`, default `10000` ms), the metadata pool's acquire bound; HikariCP's own default was 30 000. A request handler that cannot get a connection within it now fails through the existing error path. |
 | 2026-11-06 | v1.81 | 818e (#818) | Reader leases on dedicated `dp-reader-lease`; five-term staleness rule, protection window sets the pin deadline. No new key. |
 | 2026-11-05 | v1.80 | 818d (#818) managed reader lifetime enforced | §3.36: the reaper runs on its own `dp-reaper` thread; the freshness tick stays on `dp-scheduled`. §7 reads rule: the reaper delay is now 7 s and the rule gains the reader termination (92 s, derived from the LAKE adapter's HTTP request bounds, not a key); the refusal prints six numbers. No key, default or template change. |
 | 2026-11-05 | v1.79 | 818c (#818) managed reader lifetime | §3.36 `reads.max-generation-age-seconds`: the pool reaper also retires an over-age generation nobody leases from. §7 reads rule gains 2 × the reaper delay (260 s, derived, not a key); the refusal prints it. No key, default or template change. |
