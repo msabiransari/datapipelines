@@ -53,7 +53,7 @@ class DeliveryLedgerRepository(
         limit: Int,
     ): List<LakeDelivery> =
         when (afterId) {
-            null ->
+            null -> {
                 jdbc.query(
                     "SELECT id, table_id, feed, delivery_id, fingerprint, state, operation_id, execution_id, pipeline_id, received_at, " +
                         "metadata_location_after FROM lake_deliveries " +
@@ -62,7 +62,9 @@ class DeliveryLedgerRepository(
                     mapOf("table" to tableId, "limit" to limit),
                     ROW,
                 )
-            else ->
+            }
+
+            else -> {
                 jdbc.query(
                     "SELECT id, table_id, feed, delivery_id, fingerprint, state, operation_id, execution_id, pipeline_id, received_at, " +
                         "metadata_location_after FROM lake_deliveries " +
@@ -71,6 +73,7 @@ class DeliveryLedgerRepository(
                     mapOf("table" to tableId, "after" to afterId, "limit" to limit),
                     ROW,
                 )
+            }
         }
 
     internal fun insertIfAbsent(request: ReceiveDelivery) {
