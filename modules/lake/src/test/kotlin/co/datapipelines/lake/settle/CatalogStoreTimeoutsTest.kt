@@ -3,7 +3,9 @@ package co.datapipelines.lake.settle
 import co.datapipelines.lake.CatalogDatabase
 import co.datapipelines.lake.LakeCatalogs
 import co.datapipelines.lake.LakeProperties
+import co.datapipelines.lake.LakeTestDb
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 
 /**
@@ -26,5 +28,18 @@ class CatalogStoreTimeoutsTest {
     @Test
     fun `the socket bound is the sweep's ten-second budget, not the SDK's thirty`() {
         properties["http-client.urlconnection.socket-timeout-ms"] shouldBe LakeSettlementSweep.SWEEP_BUDGET.toMillis().toString()
+    }
+
+    @Test
+    fun `the abandoned read's documented bound names this socket timeout, so the number cannot drift from the constant`() {
+        val lake = LakeTestDb.repoFile("docs/lake.md").readText().replace(Regex("\\s+"), " ")
+        val seconds = LakeCatalogs.STORE_SOCKET_TIMEOUT_MILLIS / MILLIS_PER_SECOND
+
+        lake shouldContain
+            "**an abandoned read ends at its next chunk, or after the store's $seconds-second socket timeout if that chunk never comes**"
+    }
+
+    private companion object {
+        const val MILLIS_PER_SECOND = 1_000L
     }
 }
