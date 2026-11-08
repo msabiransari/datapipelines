@@ -6,7 +6,6 @@ import co.datapipelines.datasources.pooling.ManagedLakeGeneration
 import co.datapipelines.datasources.pooling.PoolCloser
 import co.datapipelines.datasources.pooling.PoolLifecycleMetrics
 import co.datapipelines.web.capturingLogEvents
-import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
@@ -90,7 +89,8 @@ class PoolCloseDeadlineTest {
     fun `the release bound is the metadata pool's checkout plus the reader statement bound - 35 s shipped`() {
         // LakeLeases.READER_STATEMENT_TIMEOUT_SECONDS = 5, a literal here: never read back from the class under test.
         DeadlinePoolCloser.managedReleaseBound(null) shouldBe Duration.ofSeconds(DEFAULT_TIMEOUT_SECONDS + READER_STATEMENT_SECONDS)
-        HikariDataSource(HikariConfig().apply { connectionTimeout = Duration.ofSeconds(LONG_TIMEOUT_SECONDS).toMillis() }).use {
+        // The no-argument constructor is lazy: it validates and starts nothing until a connection is asked for.
+        HikariDataSource().apply { connectionTimeout = Duration.ofSeconds(LONG_TIMEOUT_SECONDS).toMillis() }.use {
             DeadlinePoolCloser.managedReleaseBound(it) shouldBe Duration.ofSeconds(LONG_TIMEOUT_SECONDS + READER_STATEMENT_SECONDS)
         }
     }
