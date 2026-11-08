@@ -1,5 +1,9 @@
 package co.datapipelines.config
 
+import org.springframework.boot.env.YamlPropertySourceLoader
+import org.springframework.core.env.EnumerablePropertySource
+import org.springframework.core.io.FileSystemResource
+import java.io.File
 import java.security.SecureRandom
 import java.util.Base64
 
@@ -70,6 +74,11 @@ internal object ConfigSnapshots {
             scriptMaxDepth = 100,
             activeProfiles = emptySet(),
             vendoredThemes = setOf("saas", "high-contrast"),
+            // §3.36 (#804) — the shipped lake defaults (see [lakeDefaults]). An empty map is no
+            // longer a valid production configuration: the DuckDB staging admission is judged
+            // whether or not the lake is enabled, so a snapshot without it is a deployment whose
+            // lake block lost its admission keys.
+            lake = lakeDefaults(),
         )
 
     /**
@@ -86,4 +95,30 @@ internal object ConfigSnapshots {
      * the other column's).
      */
     fun hardened() = valid().copy(env = "prod", posture = "hardened", activeProfiles = setOf("hardened"))
+
+    /**
+     * §3.36 — the shipped lake defaults, read off `application.yml`: the baseline is the shipped
+     * template, so a future key's default lands here automatically and an INVALID default breaks
+     * the baseline loudly. Every [LakeRules] key must resolve to a non-null default —
+     * `LakeRulesTest`'s first case asserts exactly that against this same map.
+     */
+    fun lakeDefaults(): Map<String, String?> =
+        LakeRules.KEYS.associateWith { key ->
+            rawYaml[key]?.toString()?.let { raw -> PLACEHOLDER_DEFAULT.find(raw)?.groupValues?.get(1) ?: raw }
+        }
+
+    private val rawYaml: Map<String, Any?> by lazy {
+        YamlPropertySourceLoader()
+            .load("application.yml", FileSystemResource(repoFile("modules/app/src/main/resources/application.yml")))
+            .filterIsInstance<EnumerablePropertySource<*>>()
+            .flatMap { source -> source.propertyNames.map { it to source.getProperty(it) } }
+            .toMap()
+    }
+
+    private fun repoFile(relative: String): File {
+        val root = generateSequence(File(".").absoluteFile) { it.parentFile }.first { File(it, "settings.gradle.kts").isFile }
+        return File(root, relative).also { check(it.isFile) { "missing $relative" } }
+    }
+
+    private val PLACEHOLDER_DEFAULT = Regex("""^\$\{[A-Z0-9_]+:(.*)}$""")
 }

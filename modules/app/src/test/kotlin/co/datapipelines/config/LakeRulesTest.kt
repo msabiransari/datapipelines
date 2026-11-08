@@ -8,9 +8,6 @@ import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.string.shouldStartWith
 import org.junit.jupiter.api.Test
-import org.springframework.boot.env.YamlPropertySourceLoader
-import org.springframework.core.env.EnumerablePropertySource
-import org.springframework.core.io.FileSystemResource
 import java.io.File
 
 /**
@@ -19,7 +16,8 @@ import java.io.File
  * at its boundary, naming the key; no violation and no snapshot ever carries a credential's value.
  */
 class LakeRulesTest {
-    private val shipped: Map<String, String?> by lazy { LakeRules.KEYS.associateWith { defaultOf(it) } }
+    /** The shipped template, from [ConfigSnapshots.lakeDefaults] — one source for both suites. */
+    private val shipped: Map<String, String?> by lazy { ConfigSnapshots.lakeDefaults() }
 
     private fun violations(overrides: Map<String, String?>): List<String> =
         ConfigValidator.validate(ConfigSnapshots.valid().copy(lake = shipped + overrides)).violations
@@ -332,25 +330,8 @@ class LakeRulesTest {
         judged(maxAge to "1029").single() shouldContain "node-query-timeout-max-seconds (1000) + 30 (1030)"
     }
 
-    private fun defaultOf(key: String): String? {
-        val raw = yaml[key]?.toString() ?: return null
-        return PLACEHOLDER_DEFAULT.find(raw)?.groupValues?.get(1) ?: raw
-    }
-
     private fun repoFile(relative: String): File {
         val root = generateSequence(File(".").absoluteFile) { it.parentFile }.first { File(it, "settings.gradle.kts").isFile }
         return File(root, relative).also { check(it.isFile) { "missing $relative" } }
-    }
-
-    private val yaml: Map<String, Any?> by lazy {
-        YamlPropertySourceLoader()
-            .load("application.yml", FileSystemResource(repoFile("modules/app/src/main/resources/application.yml")))
-            .filterIsInstance<EnumerablePropertySource<*>>()
-            .flatMap { source -> source.propertyNames.map { it to source.getProperty(it) } }
-            .toMap()
-    }
-
-    private companion object {
-        val PLACEHOLDER_DEFAULT = Regex("""^\$\{[A-Z0-9_]+:(.*)}$""")
     }
 }
