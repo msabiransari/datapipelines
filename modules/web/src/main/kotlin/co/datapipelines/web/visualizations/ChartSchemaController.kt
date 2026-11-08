@@ -4,7 +4,9 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.visualization.ChartSchemas
 import co.datapipelines.web.api.ApiErrors
+import jakarta.servlet.http.HttpServletResponse
 import org.springframework.http.CacheControl
+import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.stereotype.Controller
@@ -39,6 +41,13 @@ import java.util.concurrent.TimeUnit
  *
  * The [co.datapipelines.web.skill.SkillController] reasoning: the route is outside the scope-governed prefixes and
  * public by design, so it declares no §7.6 operation, and `RequiredScopeCoverageTest` governs `@RestController`s.
+ *
+ * ## Why the cache header is SET on the servlet response
+ *
+ * The security chain has already written its `Cache-Control: no-cache, no-store, …` on the response when this handler
+ * runs. `ResponseEntity.cacheControl` ADDS a second header beside it, and a cache that combines the two obeys
+ * `no-store` — measured on a running instance, 2026-11-08. `setHeader` replaces it, the
+ * [co.datapipelines.web.skill.SkillController] way, so the route carries ONE header: `max-age=900, public`.
  */
 @Controller
 class ChartSchemaController {
@@ -46,6 +55,7 @@ class ChartSchemaController {
     @ResponseBody
     fun schema(
         @PathVariable name: String,
+        response: HttpServletResponse,
     ): ResponseEntity<ByteArray> {
         val file = "$name$SUFFIX"
         if (file !in ChartSchemas.FILES) {
@@ -55,10 +65,13 @@ class ChartSchemaController {
                 details = mapOf(ApiErrors.REASON to "chart_schema_not_found"),
             )
         }
+        response.setHeader(
+            HttpHeaders.CACHE_CONTROL,
+            CacheControl.maxAge(MAX_AGE_MINUTES, TimeUnit.MINUTES).cachePublic().headerValue,
+        )
         return ResponseEntity
             .ok()
             .contentType(SCHEMA_JSON)
-            .cacheControl(CacheControl.maxAge(MAX_AGE_MINUTES, TimeUnit.MINUTES).cachePublic())
             .body(ChartSchemas.bytes(file))
     }
 

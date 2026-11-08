@@ -4,6 +4,8 @@ import co.datapipelines.visualization.ChartSchemas
 import co.datapipelines.web.api.ApiExceptionHandler
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.matchers.shouldBe
+import jakarta.servlet.Filter
+import jakarta.servlet.http.HttpServletResponse
 import org.hamcrest.Matchers.containsString
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpHeaders
@@ -13,6 +15,7 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
+import org.springframework.test.web.servlet.setup.StandaloneMockMvcBuilder
 
 /**
  * `GET /schemas/chart/1/{name}.schema.json` (#860 A.6): the served bytes ARE the validator's resource — one copy —
@@ -24,6 +27,32 @@ class ChartSchemaControllerTest {
             .standaloneSetup(ChartSchemaController())
             .setControllerAdvice(ApiExceptionHandler())
             .build()
+
+    @Test
+    fun `the route carries ONE public cache header even when the security chain already wrote its no-store`() {
+        // The stand-in writes what the running instance's security chain put on this route before the handler ran
+        // (measured 2026-11-08): a handler that ADDS its header leaves two, and a cache that combines them obeys
+        // no-store.
+        val securityWritten =
+            Filter { request, response, chain ->
+                (response as HttpServletResponse)
+                    .setHeader(HttpHeaders.CACHE_CONTROL, "no-cache, no-store, max-age=0, must-revalidate")
+                chain.doFilter(request, response)
+            }
+        val chained =
+            MockMvcBuilders
+                .standaloneSetup(ChartSchemaController())
+                .setControllerAdvice(ApiExceptionHandler())
+                .addFilter<StandaloneMockMvcBuilder>(securityWritten)
+                .build()
+        val response =
+            chained
+                .perform(get("/schemas/chart/1/${ChartSchemas.BAR}"))
+                .andExpect(status().isOk)
+                .andReturn()
+                .response
+        response.getHeaders(HttpHeaders.CACHE_CONTROL) shouldBe listOf("max-age=900, public")
+    }
 
     @Test
     fun `every v1 file is served byte for byte as the classpath resource the validator loads, under its own id`() {
