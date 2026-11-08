@@ -1,0 +1,217 @@
+{
+ "variant": "markup",
+ "note": "markup in a category and a series is shown as text in axis, legend and tooltip; nothing executes",
+ "spec": {
+  "display_name": "Markup as text",
+  "description": "Total amount per region, one bar per channel.",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "region",
+      "type": "STRING"
+     },
+     {
+      "name": "month",
+      "type": "DATE"
+     },
+     {
+      "name": "channel",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "units",
+      "type": "INTEGER"
+     },
+     {
+      "name": "payload",
+      "type": "BINARY",
+      "nullable": true
+     },
+     {
+      "name": "segment",
+      "type": "STRING",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "region",
+     "type": "nominal",
+     "sort": null,
+     "title": "Region"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "stack": null,
+     "format": "decimal(0)"
+    },
+    "color": {
+     "field": "channel",
+     "type": "nominal",
+     "sort": null,
+     "title": "Channel",
+     "legend": {
+      "orient": "top"
+     }
+    }
+   },
+   "title": {
+    "text": "Amount by region and channel"
+   }
+  }
+ },
+ "bindings": {
+  "region": [
+   "<img src=x onerror=__xss=1>",
+   "<img src=x onerror=__xss=1>",
+   "Plain",
+   "Plain",
+   "&amp; entity",
+   "&amp; entity"
+  ],
+  "channel": [
+   "<b>bold</b>",
+   "Normal",
+   "<b>bold</b>",
+   "Normal",
+   "<b>bold</b>",
+   "Normal"
+  ],
+  "amount": [
+   10.0,
+   20.0,
+   30.0,
+   40.0,
+   50.0,
+   60.0
+  ]
+ },
+ "expect": {
+  "vertical": true,
+  "stack": null,
+  "categories": [
+   "<img src=x onerror=__xss=1>",
+   "Plain",
+   "&amp; entity"
+  ],
+  "categories_full": [
+   "<img src=x onerror=__xss=1>",
+   "Plain",
+   "&amp; entity"
+  ],
+  "series": [
+   "<b>bold</b>",
+   "Normal"
+  ],
+  "values": [
+   [
+    10.0,
+    30.0,
+    50.0
+   ],
+   [
+    20.0,
+    40.0,
+    60.0
+   ]
+  ],
+  "exact": [
+   [
+    null,
+    null,
+    null
+   ],
+   [
+    null,
+    null,
+    null
+   ]
+  ],
+  "intervals": [
+   [
+    [
+     0,
+     10.0
+    ],
+    [
+     0,
+     30.0
+    ],
+    [
+     0,
+     50.0
+    ]
+   ],
+   [
+    [
+     0,
+     20.0
+    ],
+    [
+     0,
+     40.0
+    ],
+    [
+     0,
+     60.0
+    ]
+   ]
+  ],
+  "totals": [
+   {
+    "pos": 30.0,
+    "neg": 0
+   },
+   {
+    "pos": 70.0,
+    "neg": 0
+   },
+   {
+    "pos": 110.0,
+    "neg": 0
+   }
+  ],
+  "bars": 6,
+  "data_warnings": 0,
+  "degraded": {
+   "plotly": [],
+   "echarts": [
+    "color.title"
+   ],
+   "chartjs": [],
+   "apexcharts": [
+    "color.title"
+   ],
+   "vegalite": []
+  },
+  "hover": [
+   {
+    "si": 0,
+    "ci": 0,
+    "contains": [
+     "<img src=x onerror=__xss=1>",
+     "<b>bold</b>"
+    ]
+   }
+  ],
+  "label_texts": []
+ }
+}

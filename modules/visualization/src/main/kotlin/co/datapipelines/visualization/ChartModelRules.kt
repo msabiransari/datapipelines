@@ -16,6 +16,17 @@ internal object ChartValues {
             else -> "object:$value"
         }
 
+    /**
+     * ECMAScript `String.prototype.trim` (ECMA-262 §22.1.3.32): strips WhiteSpace and LineTerminator — TAB, VT, FF, SPACE,
+     * NBSP, ZWNBSP (U+FEFF), every `Zs` character, LF, CR, U+2028, U+2029. Kotlin's `trim()` differs on two counts (it
+     * strips U+001C to U+001F and keeps U+FEFF), and an exact value's grammar is judged after this trim on both sides.
+     */
+    fun trim(s: String): String = s.trim(::isEcmaSpace)
+
+    private fun isEcmaSpace(c: Char): Boolean = c in ECMA_SPACES || Character.getType(c) == Character.SPACE_SEPARATOR.toInt()
+
+    private const val ECMA_SPACES = "\t\u000B\u000C  ﻿\n\r  "
+
     /** `String(v)` of a wire value. */
     fun text(value: Any?): String =
         when (value) {
@@ -75,8 +86,11 @@ internal object ChartAggregates {
 
     val GAP = Result(null, null)
 
-    /** The reference's decimal grammar: an optional minus, digits, an optional fraction. */
-    private val DECIMAL = Regex("^-?\\d+(\\.\\d+)?$")
+    /**
+     * The reference's decimal grammar: an optional minus, digits, an optional fraction — the runtime core's `DECIMAL`, for
+     * the measures here and for an exact category's order in [ChartOrder] (`+3`, `1e1`, `.5` are not decimals on either side).
+     */
+    internal val DECIMAL = Regex("^-?\\d+(\\.\\d+)?$")
 
     /** The mean's extra fraction digits beyond the inputs' scale (record §4.1). */
     private const val MEAN_EXTRA_SCALE = 6
@@ -90,7 +104,7 @@ internal object ChartAggregates {
         val xs = values.filterNotNull()
         if (xs.isEmpty()) return GAP
         if (xs.any { it is String }) {
-            val exact = exact(xs.map { ChartValues.text(it).trim() }, aggregate, field)
+            val exact = exact(xs.map { ChartValues.trim(ChartValues.text(it)) }, aggregate, field)
             return Result(exact.toDouble(), exact)
         }
         val ds = xs.map { it as? Double ?: throw ChartModel.NotAMeasure(field) }
@@ -256,7 +270,11 @@ internal object ChartOrder {
             }
         }
 
-    private fun decimal(raw: Any?): BigDecimal? = (raw as? String)?.trim()?.let { runCatching { BigDecimal(it) }.getOrNull() }
+    /** An exact category's decimal value, or null outside the decimal grammar (it then orders by code point). */
+    private fun decimal(raw: Any?): BigDecimal? {
+        val text = (raw as? String)?.let(ChartValues::trim) ?: return null
+        return if (ChartAggregates.DECIMAL.matches(text)) BigDecimal(text) else null
+    }
 
     /** Code point order (a String's compareTo orders UTF-16 units; the two differ above U+FFFF). */
     fun codePoints(

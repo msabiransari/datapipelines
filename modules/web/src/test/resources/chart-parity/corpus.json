@@ -1,0 +1,34 @@
+{
+ "_doc": "Lane 860 A.2b model parity corpus: ONE list both sides read. fixtures/<n>.json carry spec + bindings (the 854 D/web fixtures, copied); examples/<n> = chart-examples/valid/<n>.json (modules/visualization test resources) joined to fixtures/<n>.json's bindings; numeric/<n>.json are the record's section 4.1 cases, hand-written in the fixture shape, with an expect the Kotlin test asserts.",
+ "fixtures": [
+  "bar-bigint",
+  "bar-grouped",
+  "bar-horizontal",
+  "bar-long-labels",
+  "bar-markup",
+  "bar-negatives",
+  "bar-nodata",
+  "bar-normalized",
+  "bar-nulls",
+  "bar-single",
+  "bar-stacked",
+  "bar-utc-date",
+  "bar-utc-timestamp",
+  "bar-vertical",
+  "tampered-bar-vertical"
+ ],
+ "examples": [
+  "bar-vertical",
+  "bar-horizontal",
+  "bar-grouped",
+  "bar-stacked",
+  "bar-normalized"
+ ],
+ "numeric": [
+  "numeric-bigint-order",
+  "numeric-beyond-2-53",
+  "numeric-mean-thirds",
+  "numeric-exact-sign-grammar",
+  "numeric-mean-tie"
+ ]
+}

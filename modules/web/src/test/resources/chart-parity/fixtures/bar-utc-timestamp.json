@@ -1,0 +1,165 @@
+{
+ "variant": "utc-timestamp",
+ "note": "TIMESTAMPs either side of UTC midnight; in New York the first is 2026-02-28 21:30",
+ "spec": {
+  "display_name": "UTC timestamps",
+  "description": "Total amount per region, 2024 to 2025.",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "region",
+      "type": "STRING"
+     },
+     {
+      "name": "month",
+      "type": "TIMESTAMP"
+     },
+     {
+      "name": "channel",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "units",
+      "type": "INTEGER"
+     },
+     {
+      "name": "payload",
+      "type": "BINARY",
+      "nullable": true
+     },
+     {
+      "name": "segment",
+      "type": "STRING",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "month",
+     "type": "temporal",
+     "sort": "ascending",
+     "format": "datetime",
+     "title": "Time (UTC)"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Amount",
+     "format": "compact"
+    }
+   },
+   "title": {
+    "text": "Amount by region"
+   }
+  }
+ },
+ "bindings": {
+  "month": [
+   "2026-03-01T02:30:00Z",
+   "2026-03-01T23:30:00Z",
+   "2026-03-02T00:15:00Z"
+  ],
+  "amount": [
+   10.0,
+   20.0,
+   30.0
+  ]
+ },
+ "expect": {
+  "vertical": true,
+  "stack": null,
+  "categories": [
+   "2026-03-01 02:30 UTC",
+   "2026-03-01 23:30 UTC",
+   "2026-03-02 00:15 UTC"
+  ],
+  "categories_full": [
+   "2026-03-01 02:30 UTC",
+   "2026-03-01 23:30 UTC",
+   "2026-03-02 00:15 UTC"
+  ],
+  "series": [
+   "amount"
+  ],
+  "values": [
+   [
+    10.0,
+    20.0,
+    30.0
+   ]
+  ],
+  "exact": [
+   [
+    null,
+    null,
+    null
+   ]
+  ],
+  "intervals": [
+   [
+    [
+     0,
+     10.0
+    ],
+    [
+     0,
+     20.0
+    ],
+    [
+     0,
+     30.0
+    ]
+   ]
+  ],
+  "totals": [
+   {
+    "pos": 10.0,
+    "neg": 0
+   },
+   {
+    "pos": 20.0,
+    "neg": 0
+   },
+   {
+    "pos": 30.0,
+    "neg": 0
+   }
+  ],
+  "bars": 3,
+  "data_warnings": 0,
+  "degraded": {
+   "plotly": [],
+   "echarts": [],
+   "chartjs": [],
+   "apexcharts": [],
+   "vegalite": []
+  },
+  "hover": [
+   {
+    "si": 0,
+    "ci": 0,
+    "contains": [
+     "2026-03-01 02:30 UTC"
+    ]
+   }
+  ],
+  "label_texts": []
+ }
+}

@@ -3,6 +3,8 @@
 // `templates` is allowed and NOT declared: every template fact this module needs arrives through
 // pipeline-contract's ports (TemplateDryRenderer.lookup/transformContract, TemplateVersionStatuses,
 // TemplateReleaser), which `templates` implements — the house "allowed ahead, undeclared" rule.
+import java.util.concurrent.TimeUnit
+
 plugins { id("datapipelines.common-conventions") }
 
 dependencies {
@@ -34,4 +36,68 @@ dependencies {
     testImplementation(libs.testcontainers.junit.jupiter)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.postgresql)
+}
+
+// #860 A.2b — the chart model parity's JS half (design record 2026-11-06 §5.1). ChartModelParityTest compares
+// ChartModel with the runtime core's `model` (modules/web's datapipelines-dashboard-chart.js) case by case over ONE
+// corpus (modules/web/src/test/resources/chart-parity/corpus.json). The JS side is evaluated IN the build, every run:
+// this task runs the node emitter against the CURRENT core and writes build/chart-parity/js-model.json, which the test
+// reads. Never up to date (a change to the core alone forces a fresh evaluation), the previous result is deleted
+// first (a failed run leaves no file to read), and a missing node, a non-zero exit or a missing result fails the
+// build: unlike editorJsTest this guard does not skip on a node-less machine, because the parity it proves is the
+// server's mechanical check judging what the browser draws (CI's ubuntu runners carry node).
+val chartParityRoot = rootProject.file("modules/web/src/test/resources/chart-parity")
+val chartCore = rootProject.file("modules/web/src/main/resources/static/js/datapipelines-dashboard-chart.js")
+val chartExamples = file("src/test/resources/chart-examples/valid")
+val chartParityResult = layout.buildDirectory.file("chart-parity/js-model.json")
+val chartParityEmit =
+    tasks.register("chartParityEmit") {
+        group = "verification"
+        description = "Evaluates the runtime chart core over the parity corpus on node for ChartModelParityTest."
+        inputs.file(chartCore).withPropertyName("chartCore")
+        inputs.dir(chartParityRoot).withPropertyName("chartParityCorpus")
+        inputs.dir(chartExamples).withPropertyName("chartExamples")
+        outputs.file(chartParityResult)
+        outputs.upToDateWhen { false }
+        val result = chartParityResult
+        doLast {
+            val out = result.get().asFile
+            out.delete()
+            val node =
+                System.getenv("PATH")
+                    ?.split(File.pathSeparator)
+                    ?.asSequence()
+                    ?.map { File(it, "node") }
+                    ?.firstOrNull { it.canExecute() }
+                    ?: throw GradleException(
+                        "chartParityEmit needs node on PATH (Node >= 18): ChartModelParityTest compares ChartModel with " +
+                            "the runtime chart core, which only node evaluates",
+                    )
+            val log = File(out.parentFile.apply { mkdirs() }, "emit.log")
+            val process =
+                ProcessBuilder(
+                    node.absolutePath,
+                    File(chartParityRoot, "emit-js-model.mjs").absolutePath,
+                    chartCore.absolutePath,
+                    chartParityRoot.absolutePath,
+                    chartExamples.absolutePath,
+                    out.absolutePath,
+                ).redirectErrorStream(true)
+                    .redirectOutput(log)
+                    .start()
+            if (!process.waitFor(60, TimeUnit.SECONDS)) {
+                process.destroyForcibly()
+                throw GradleException("chartParityEmit: the node emitter ran past 60 s (log: $log)")
+            }
+            val exit = process.exitValue()
+            if (exit != 0 || !out.isFile) {
+                throw GradleException("chartParityEmit: node exited $exit, result file present=${out.isFile}:\n${log.readText()}")
+            }
+            logger.lifecycle("chartParityEmit: {} {}", log.readText().trim(), out)
+        }
+    }
+
+tasks.named<Test>("test") {
+    // The emitter's result is an input: the test runs after a fresh evaluation and re-runs when the JS model changes.
+    inputs.files(chartParityEmit).withPropertyName("chartParityJsModel")
 }

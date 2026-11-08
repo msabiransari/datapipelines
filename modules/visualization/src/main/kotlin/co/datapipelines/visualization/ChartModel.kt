@@ -8,7 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode
  * runtime core's `model` (`datapipelines-dashboard-chart.js`, ported from the 854 reference `bar-core.mjs` with the
  * record's two corrections) — the same categories, series, cells and exact aggregates the converter draws, so the
  * mechanical check judges `mark_count`, `no_data` and `text_visible` over what the browser will draw. The parity test
- * (`ChartModelParityTest`, modules/web) runs both over one fixture set every build.
+ * (`ChartModelParityTest`, this module, over modules/web's `chart-parity` corpus) runs both over one corpus every build.
  *
  * Rows are read the way the runtime reads its columnar delivery: a value's identity is its JavaScript type and text (a
  * category `"1"` and a category `1` are two bands; INTEGER/DECIMAL values are float64, exactly as the browser parses
