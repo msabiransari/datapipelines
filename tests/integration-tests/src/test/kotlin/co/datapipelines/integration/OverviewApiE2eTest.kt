@@ -12,8 +12,10 @@ import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Test
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
+import org.springframework.context.ApplicationContext
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
+import org.springframework.test.context.TestConstructor
 import java.net.InetSocketAddress
 import java.sql.DriverManager
 import java.util.UUID
@@ -47,13 +49,20 @@ import java.util.UUID
     classes = [DatapipelinesApplication::class],
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
 )
-class OverviewApiE2eTest {
+@TestConstructor(autowireMode = TestConstructor.AutowireMode.ALL)
+class OverviewApiE2eTest(
+    private val applicationContext: ApplicationContext,
+) {
     @LocalServerPort
     private var port: Int = 0
 
     @Test
     fun `per role the home's totals are the console's rows and the Keys page's rows, and nothing of another workspace`() {
         ensureSeeded()
+        // A revoked key remains inventory only while history still references its identity.
+        // Run the real purge explicitly: the fixture must not depend on beating its scheduler tick.
+        val purge = applicationContext.getBean("keyRetentionPurge")
+        purge.javaClass.getMethod("purgeOnce").invoke(purge)
         EXPECTED.forEach { (role, expected) ->
             withClue("as $role") {
                 val home = page("/overview/api-console", role)
@@ -300,6 +309,15 @@ class OverviewApiE2eTest {
                             "'${key.seeded.id}', TRUE, FALSE, 'service')",
                     )
                 }
+            }
+            // Publish identity history before any revoked key can be seen by the purge.
+            connection.prepareStatement("INSERT INTO audit_log (event, user_id) VALUES (?, ?)").use { audit ->
+                KEYS.filter { it.revoked }.forEach { key ->
+                    audit.setString(1, "auth.api_key.revoked")
+                    audit.setObject(2, UUID.fromString(key.seeded.ownerId))
+                    audit.addBatch()
+                }
+                audit.executeBatch()
             }
             connection
                 .prepareStatement(
