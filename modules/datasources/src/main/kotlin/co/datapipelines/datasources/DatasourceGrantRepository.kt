@@ -28,9 +28,19 @@ data class DatasourceGrant(
  * predicate in their SQL (`GRANTED_PREDICATE`), so this repository exists for the
  * MANAGEMENT half: listing a datasource's grants, adding one, removing one.
  *
- * A datasource is never made visible as a side effect of anything. The one place a grant is
- * created implicitly is registration by a workspace admin ([grantOnRegistration]), because
- * registering a datasource you then cannot see would be a bug wearing a rule's clothes.
+ * An ordinary datasource is made visible only by a person's decision: an explicit grant, or the
+ * grant a registration implies — a workspace admin who registers a datasource bound to their own
+ * workspace gets its grant ([grantOnRegistration]), because registering a datasource you then
+ * cannot see would be a bug wearing a rule's clothes. The `demo` seeder's
+ * [grantAllInstanceDatasourcesTo] is D-R7's one narrow exception, for the workspace the product ships.
+ *
+ * The server-managed lake (#818, #823; dp-lake record D3: the lake is server-level) is the other
+ * exception: the server, not a person, holds its grants, as its system actor. Boot and the freshness
+ * tick grant it to every workspace ([grantToEveryWorkspace]); `WorkspaceService.create` grants it
+ * to a new workspace inside the creation transaction (through [grant]); and the REST and UI revoke
+ * handlers refuse to remove one with [DatasourceErrorCodes.MANAGED]. That refusal lives in those
+ * handlers, not here: this repository does not know which datasource is managed, and [revoke]
+ * deletes whatever grant it is asked to.
  */
 class DatasourceGrantRepository(
     private val jdbc: NamedParameterJdbcTemplate,
@@ -131,9 +141,15 @@ class DatasourceGrantRepository(
      * that is not deleted. Returns how many grants were created; existing ones keep their original
      * actor. ONE statement, so a workspace created between a read and a loop cannot be missed.
      *
-     * Its only caller is the managed lake's registrar, at boot and on every freshness tick: no
-     * workspace-creation-time grant path exists, so a new workspace sees the managed lake within
-     * one tick.
+     * Its only caller is the managed lake's registrar, at boot and on every freshness tick. It is not
+     * the only path that grants the managed lake: since #823 `WorkspaceService.create` grants it to
+     * the new workspace atomically, in the creation transaction (the registrar's `grantTo`, through
+     * [grant]), so while the lake is enabled a workspace created there never exists without it. The
+     * tick's pass through here is the REPAIR path, for a workspace that lacks the grant: one not
+     * created through `WorkspaceService.create` (for example, one inserted by SQL), one that
+     * predates the lake, or one whose grant row was deleted by hand. The `demo` seeder has its own
+     * grant path: [grantAllInstanceDatasourcesTo] includes an already-registered managed lake,
+     * because that datasource is active and has no owning workspace.
      */
     fun grantToEveryWorkspace(
         datasourceName: String,
@@ -150,7 +166,12 @@ class DatasourceGrantRepository(
             MapSqlParameterSource().addValue("name", datasourceName).addValue("by", grantedBy),
         )
 
-    /** Revokes the grant; false when there was none. Nothing about the datasource itself changes. */
+    /**
+     * Revokes the grant; false when there was none. Nothing about the datasource itself changes.
+     * It refuses nothing: the managed lake's grant is protected by the REST and UI revoke handlers
+     * ([DatasourceErrorCodes.MANAGED], #823), so a new caller that can reach a managed grant needs
+     * the same check.
+     */
     fun revoke(
         datasourceName: String,
         workspaceId: UUID,
