@@ -207,6 +207,44 @@ class ManagedLakeDatasourceRegistrarTest {
         )
     }
 
+    @Test
+    fun `823 - grantTo writes ONE grant for the named workspace as the boot actor, through the registrar's own repository`() {
+        val fixture = Fixture(enabled = true, sync = ManagedLakeSync.UNCHANGED)
+        val workspace = UUID.randomUUID()
+        every { fixture.grants.grant("lake", workspace, actor) } returns true
+        fixture.registrar.register()
+
+        val created = fixture.registrar.grantTo(workspace)
+
+        assertAll(
+            { created shouldBe true },
+            { verify(exactly = 1) { fixture.grants.grant("lake", workspace, actor) } },
+            // Never the tick's bounded repository, never a grant to every workspace: one row, on the caller's transaction.
+            { verify(exactly = 0) { fixture.tickGrants.grantToEveryWorkspace(any(), any()) } },
+            { verify(exactly = 1) { fixture.users.provisionSystemActor() } },
+        )
+    }
+
+    @Test
+    fun `823 - grantTo reports an existing grant as false, and grants nothing with the lake disabled or before boot`() {
+        val workspace = UUID.randomUUID()
+
+        val existing = Fixture(enabled = true, sync = ManagedLakeSync.UNCHANGED)
+        every { existing.grants.grant("lake", workspace, actor) } returns false
+        existing.registrar.register()
+        val disabled = Fixture(enabled = false, sync = ManagedLakeSync.UNCHANGED)
+        disabled.registrar.register()
+        val beforeBoot = Fixture(enabled = true, sync = ManagedLakeSync.UNCHANGED)
+
+        assertAll(
+            { existing.registrar.grantTo(workspace) shouldBe false },
+            { disabled.registrar.grantTo(workspace) shouldBe false },
+            { beforeBoot.registrar.grantTo(workspace) shouldBe false },
+            { verify(exactly = 0) { disabled.grants.grant(any(), any(), any()) } },
+            { verify(exactly = 0) { beforeBoot.grants.grant(any(), any(), any()) } },
+        )
+    }
+
     // ------------------ fixtures
 
     private inner class Fixture(

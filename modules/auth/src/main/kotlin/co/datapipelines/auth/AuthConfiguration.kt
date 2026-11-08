@@ -133,6 +133,7 @@ class AuthConfiguration {
         contentCheck: ObjectProvider<WorkspaceContentCheck>,
         demoWorkspaceSeeder: ObjectProvider<DemoWorkspaceSeeder>,
         userService: UserService,
+        managedDatasourceGrants: ObjectProvider<ManagedDatasourceGrants>,
     ): WorkspaceService =
         WorkspaceService(
             workspaceRepository,
@@ -151,6 +152,9 @@ class AuthConfiguration {
             // Keys v2 (A17/B6) — member removal deactivates a revoked key's identity; the user
             // service has no dependency on this one, so the reference is direct.
             userService,
+            // #823 — the managed lake's grant in the creation transaction. An ObjectProvider for the same reason as the
+            // seeder above: an auth-only slice has no datasource layer, and creates exactly what it always did.
+            managedDatasourceGrants.getIfAvailable() ?: ManagedDatasourceGrants.NONE,
         )
 
     /**

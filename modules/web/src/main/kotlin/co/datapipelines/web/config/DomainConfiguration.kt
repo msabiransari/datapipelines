@@ -212,6 +212,18 @@ class DomainConfiguration {
         }
 
     /**
+     * #823 (owner ruling 2026-11-07) — the managed lake granted to a workspace inside the transaction that creates it.
+     * See `ManagedDatasourceGrants`. Resolved through an `ObjectProvider` at call time, not at wiring time: the
+     * registrar is built after Flyway and the lake boot check, and `WorkspaceService` must not pull that ordering in.
+     * The registrar owns the datasource's name and the system actor; this bean owns neither.
+     */
+    @Bean
+    fun managedDatasourceGrants(
+        registrar: org.springframework.beans.factory.ObjectProvider<ManagedLakeDatasourceRegistrar>,
+    ): co.datapipelines.auth.ManagedDatasourceGrants =
+        co.datapipelines.auth.ManagedDatasourceGrants { workspaceId -> registrar.ifAvailable?.grantTo(workspaceId) ?: false }
+
+    /**
      * D-R11 — the `demo` workspace at first boot, and the example content into it. See
      * [DemoWorkspaceStartup] for the O-3 rule that a DEACTIVATED `demo` is never recreated.
      */
