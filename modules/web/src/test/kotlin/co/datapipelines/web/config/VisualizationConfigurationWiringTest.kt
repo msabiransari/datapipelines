@@ -85,10 +85,10 @@ class VisualizationConfigurationWiringTest {
         ObjectMapper().readTree(
             """
             {"name":"acme/visualizations/revenue","display_name":"Revenue",
-             "renderer":{"kind":"plotly","version":"4"},
+             "renderer":{"kind":"table","version":"1"},
              "inputs":{"revenue":{"columns":[{"name":"amount","type":"DECIMAL","nullable":false}]}},
-             "config":{"data":[{"type":"bar"}]},
-             "bindings":{${(0 until bindings).joinToString(",") { "\"data[0].y$it\":\"amount\"" }}}}
+             "config":{"columns":[]},
+             "bindings":{${(0 until bindings).joinToString(",") { "\"columns[$it].values\":\"amount\"" }}}}
             """.trimIndent(),
         )
 

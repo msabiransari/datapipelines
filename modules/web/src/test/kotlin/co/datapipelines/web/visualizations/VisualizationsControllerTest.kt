@@ -88,7 +88,7 @@ class VisualizationsControllerTest {
                 response.data
                     .get("renderer")
                     .get("kind")
-                    .asText() shouldBe "plotly"
+                    .asText() shouldBe "chart"
             },
         )
     }
@@ -423,15 +423,15 @@ class VisualizationsControllerTest {
         val DOCUMENT =
             """
             {"name": "$NAME", "display_name": "Monthly revenue", "description": "",
-             "renderer": {"kind": "plotly", "version": "4"},
+             "renderer": {"kind": "chart", "version": "1"},
              "inputs": {"revenue": {"columns": [{"name": "month", "type": "DATE", "nullable": false},
                                                 {"name": "amount", "type": "DECIMAL", "nullable": false}]}},
              "transform": {"template": {"name": "finance/scripts/revenue_bars", "version": 2}, "inputs": {"rows": "revenue"}},
-             "config": {"data": [{"type": "bar", "x": "${'$'}.x", "y": "${'$'}.y"}], "layout": {"title": {"text": "Revenue"}}},
-             "bindings": {"data[0].x": "month_labels", "data[0].y": "amounts"},
-             "presentation": {"title": "Monthly revenue", "tokens": {"series": "categorical"}},
+             "config": {"mark": {"type": "bar"}, "encoding": {"x": {"field": "month_labels", "type": "nominal", "sort": null, "title": "Month"},
+               "y": {"field": "amounts", "type": "quantitative", "aggregate": "sum", "title": "Revenue", "format": "compact"}}, "title": {"text": "Revenue"}},
+             "bindings": {"amounts": "amounts", "month_labels": "month_labels"},
              "tests": {"cases": [{"name": "twelve months", "fixtures": {"revenue": [{"month": "2026-01-01", "amount": 10.5}]},
-                                  "assertions": [{"kind": "rendered"}, {"kind": "trace_count", "equals": 1}]}]}}
+                                  "assertions": [{"kind": "rendered"}, {"kind": "mark_count", "equals": 1}]}]}}
             """.trimIndent()
     }
 }

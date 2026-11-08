@@ -1,0 +1,131 @@
+{
+ "_doc": "Expected verdict per example (lane #860; re-cut from the 854 lane expectations under design record R11 and §4.2). valid = passes the schema, the save rules and the product text rules. schema = fails ONLY at the schema, with an error of the named keyword at the named instance path. save = the save-rule refusal codes are EXACTLY [code]. product = passes the schema and the save rules and is refused by the product rule named (code, reason, path) - the JS reference stops at the save rules, so these are product-only.",
+ "examples": {
+  "valid/bar-vertical.json": {
+   "valid": true
+  },
+  "valid/bar-horizontal.json": {
+   "valid": true
+  },
+  "valid/bar-grouped.json": {
+   "valid": true
+  },
+  "valid/bar-stacked.json": {
+   "valid": true
+  },
+  "valid/bar-normalized.json": {
+   "valid": true
+  },
+  "invalid/unknown-property.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config"
+  },
+  "valid/markup-title.json": {
+   "valid": true,
+   "note": "refused at the schema pattern under the 854 lane D8; valid under design record R11 (< and > allowed, escaped at render)"
+  },
+  "invalid/measure-on-string.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric"
+  },
+  "invalid/unknown-column.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.field.unknown"
+  },
+  "invalid/binary-column.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.field.binary"
+  },
+  "invalid/nullable-category.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.category.nullable"
+  },
+  "invalid/temporal-on-string.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.category.type_mismatch"
+  },
+  "invalid/sort-missing.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding/x"
+  },
+  "invalid/stack-without-color.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/y"
+  },
+  "invalid/domain-without-zero.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.domain_invalid"
+  },
+  "invalid/bindings-mismatch.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.bindings.mismatch"
+  },
+  "invalid/presentation-theme.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": ""
+  },
+  "invalid/two-inputs.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "maxProperties",
+   "path": "/inputs"
+  },
+  "invalid/library-format-string.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "pattern",
+   "path": "/config/encoding/y/format"
+  },
+  "valid/script-in-display-name.json": {
+   "valid": true,
+   "note": "refused at the schema pattern under the 854 lane D8; valid under design record R11 (< and > allowed, escaped at render)"
+  },
+  "invalid/control-char-title.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "pattern",
+   "path": "/config/title/text"
+  },
+  "invalid/display-name-121.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "maxLength",
+   "path": "/display_name"
+  },
+  "valid/display-name-120.json": {
+   "valid": true,
+   "note": "the product bound exactly (design record §4.2)"
+  },
+  "invalid/display-name-61-astral.json": {
+   "valid": false,
+   "layer": "product",
+   "code": "visualization.validation.body_invalid",
+   "reason": "too_long",
+   "path": "display_name",
+   "note": "61 code points pass the schema maxLength 120; 122 UTF-16 units exceed the product bound (DocumentRules.texts, layer 2)"
+  },
+  "invalid/display-name-blank.json": {
+   "valid": false,
+   "layer": "product",
+   "code": "visualization.validation.body_invalid",
+   "reason": "blank",
+   "path": "display_name",
+   "note": "passes the schema minLength 1; the product refuses a blank name (DocumentRules.texts, layer 2)"
+  }
+ }
+}

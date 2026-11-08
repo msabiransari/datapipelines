@@ -54,9 +54,10 @@ import org.springframework.transaction.support.TransactionTemplate
  *
  * The release gate (#352): the factory consumes the `ReleaseEvidence` bean [VisualizationTestConfiguration]
  * declares — [co.datapipelines.visualization.VisualizationReleaseEvidence], the production §11.4 gate. The
- * renderer validator is the deep composition (`RendererConfigValidators.deep()`): Plotly through the reduced
- * 4.1.1 plot-schema, `table`/`kpi` the house schemas — the same composition the mechanical test reads, so
- * save, submit and release refuse the same configurations.
+ * renderer validator is `RendererConfigValidators.default()` (`table`/`kpi` the house schemas) and a `chart`
+ * document is judged whole by the validator's and the mechanical test's shared
+ * [co.datapipelines.visualization.ChartDocumentRules] (the v1 JSON Schema, the save rules, the D-A table) — so save,
+ * submit and release refuse the same documents.
  */
 @Configuration
 @EnableConfigurationProperties(VisualizationProperties::class)
@@ -83,9 +84,9 @@ class VisualizationConfiguration {
         renderers: RendererConfigValidator,
     ): VisualizationValidator = VisualizationValidator(TemplateContractFacts.over(renderer, statuses), renderers)
 
-    /** The deep renderer schemas (L4a): the reduced Plotly plot-schema behind the same port the mechanical test reads. */
+    /** The renderer config rules (`table`/`kpi`) behind the same port the mechanical test reads. */
     @Bean
-    fun rendererConfigValidator(): RendererConfigValidator = RendererConfigValidators.deep()
+    fun rendererConfigValidator(): RendererConfigValidator = RendererConfigValidators.default()
 
     /** The dashboard validator's pipeline port — [PipelineReleaseFactsReader], `application`'s implementation. */
     @Bean

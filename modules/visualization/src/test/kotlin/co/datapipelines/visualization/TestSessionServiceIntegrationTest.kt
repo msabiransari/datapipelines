@@ -62,7 +62,7 @@ class TestSessionServiceIntegrationTest {
         val current = h.visualizationRepository.findDraft(TestEvidenceHarness.WORKSPACE, session.visualizationId)!!
         val document =
             ValidatorFakes.visualizationDocument(
-                DocumentFixtures.visualization().also { it.obj("presentation").put("title", title) },
+                DocumentFixtures.visualization().also { it.obj("config.title").put("text", title) },
             )
         h.visualizations.write(
             TestEvidenceHarness.WORKSPACE,

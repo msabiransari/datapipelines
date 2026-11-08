@@ -1,0 +1,435 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://datapipelines.co/schemas/chart/1/skeleton.schema.json",
+  "$comment": "Product copy of the 854 lane schema, amended by lane #860 per design record 2026-11-06-neutral-chart-grammar: §4.2 (display_name 1-120, description <= 2000, presentation refused on a chart document) and R11 (plain text refuses control characters only; < and > are allowed and escaped at render). Served unchanged at /schemas/chart/1/skeleton.schema.json.",
+  "title": "datapipelines chart document, renderer.kind = chart, renderer.version = 1 (skeleton)",
+  "description": "The document shape shared by every chart family (spec/skeleton.md). config is one family's configuration, chosen from the family registry ($defs/familyConfig); each family schema (bar.schema.json) defines its config and narrows this document to it. Every object is closed (additionalProperties: false). Version 1 is the path segment of every $id: an incompatible change is version 2 at a new path, never an edit here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "display_name",
+    "renderer",
+    "inputs",
+    "config"
+  ],
+  "properties": {
+    "description": {
+      "$ref": "#/$defs/longText"
+    },
+    "display_name": {
+      "$ref": "#/$defs/displayName"
+    },
+    "renderer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "version"
+      ],
+      "properties": {
+        "kind": {
+          "const": "chart"
+        },
+        "version": {
+          "const": "1"
+        }
+      }
+    },
+    "inputs": {
+      "description": "Named input contracts (VisualizationBody.inputs). Without a transform exactly one input is bound (the chart reads its columns); with a transform the chart reads the transform's OUTPUT and the save check is given that output contract.",
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "#/$defs/inputName"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/inputContract"
+      }
+    },
+    "transform": {
+      "$ref": "#/$defs/transform"
+    },
+    "config": {
+      "$ref": "#/$defs/familyConfig"
+    },
+    "bindings": {
+      "description": "Derived, never authored: encoded field -> column, one entry per distinct encoded field, each mapping to itself (the save check refuses any other map, chart.bindings.mismatch). The runtime then delivers {field: [values]} (RefreshEngine.kt:360 unchanged).",
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/fieldName"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/fieldName"
+      }
+    },
+    "tests": {
+      "$ref": "#/$defs/tests"
+    }
+  },
+  "if": {
+    "not": {
+      "type": "object",
+      "required": [
+        "transform"
+      ]
+    }
+  },
+  "then": {
+    "type": "object",
+    "properties": {
+      "inputs": {
+        "type": "object",
+        "maxProperties": 1
+      }
+    }
+  },
+  "$defs": {
+    "title": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text"
+      ],
+      "properties": {
+        "text": {
+          "$ref": "#/$defs/plainTextRequired"
+        },
+        "subtitle": {
+          "$ref": "#/$defs/plainTextRequired"
+        }
+      }
+    },
+    "familyConfig": {
+      "description": "The family registry: one entry per v1 family schema. Version 1 of this lane registers bar only.",
+      "oneOf": [
+        {
+          "$ref": "bar.schema.json#/$defs/config"
+        }
+      ]
+    },
+    "plainText": {
+      "description": "Plain text shown to a person (design record R11): no control characters (Unicode general category Cc, U+0000-U+001F and U+007F-U+009F), at most 200 characters; < and > are allowed, and every converter escapes every sink (spec/skeleton.md#text).",
+      "type": "string",
+      "maxLength": 200,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*$"
+    },
+    "plainTextRequired": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/plainText"
+        },
+        {
+          "type": "string",
+          "minLength": 1
+        }
+      ]
+    },
+    "displayName": {
+      "description": "The document display name: plain text of 1-120 characters (the product bound, DocumentRules.MAX_DISPLAY_NAME_CHARS; design record §4.2). maxLength counts Unicode code points; the product also counts UTF-16 units and refuses a blank name at save, so 61 supplementary characters pass this schema and are refused by the product.",
+      "type": "string",
+      "allOf": [
+        {
+          "$ref": "#/$defs/plainTextRequired"
+        }
+      ],
+      "maxLength": 120
+    },
+    "longText": {
+      "type": "string",
+      "maxLength": 2000,
+      "pattern": "^[^\\u0000-\\u0009\\u000b-\\u001f\\u007f-\\u009f]*$",
+      "description": "Longer plain text (the document description): line feeds allowed, no other control character, < and > allowed (R11), at most 2000 characters (the product bound, design record §4.2)."
+    },
+    "inputName": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+    },
+    "fieldName": {
+      "description": "A column name of the bound input (or of the transform's output): 1-128 characters, no control character (VisualizationValidator's column grammar).",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+    },
+    "logicalType": {
+      "enum": [
+        "NULL",
+        "BOOLEAN",
+        "INTEGER",
+        "BIGINTEGER",
+        "DECIMAL",
+        "BIGDECIMAL",
+        "STRING",
+        "BINARY",
+        "DATE",
+        "TIME",
+        "TIMESTAMP"
+      ]
+    },
+    "inputContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "columns"
+      ],
+      "properties": {
+        "columns": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "$ref": "#/$defs/logicalType"
+              },
+              "name": {
+                "$ref": "#/$defs/fieldName"
+              },
+              "nullable": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    },
+    "transform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "template",
+        "inputs"
+      ],
+      "properties": {
+        "template": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "version"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "maxLength": 256,
+              "pattern": "^[a-z0-9_.-]+(/[a-z0-9_.-]+){1,9}$"
+            },
+            "version": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "inputs": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/inputName"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/inputName"
+          }
+        }
+      }
+    },
+    "tests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cases"
+      ],
+      "properties": {
+        "cases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "fixtures",
+              "assertions"
+            ],
+            "properties": {
+              "name": {
+                "$ref": "#/$defs/plainTextRequired"
+              },
+              "fixtures": {
+                "type": "object",
+                "propertyNames": {
+                  "$ref": "#/$defs/inputName"
+                },
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "propertyNames": {
+                      "$ref": "#/$defs/fieldName"
+                    },
+                    "additionalProperties": {
+                      "type": [
+                        "string",
+                        "number",
+                        "boolean",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              },
+              "assertions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "rendered",
+                        "no_console_errors",
+                        "text_visible",
+                        "no_data",
+                        "mark_count"
+                      ]
+                    },
+                    "equals": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "text": {
+                      "$ref": "#/$defs/plainText"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "channelTitle": {
+      "description": "Absent = the default title (field name, or aggregate and field); null = no title.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/plainTextRequired"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "bandType": {
+      "enum": [
+        "nominal",
+        "ordinal",
+        "temporal"
+      ]
+    },
+    "seriesType": {
+      "enum": [
+        "nominal",
+        "ordinal"
+      ]
+    },
+    "aggregate": {
+      "enum": [
+        "sum",
+        "mean",
+        "min",
+        "max",
+        "count"
+      ]
+    },
+    "temporalFormat": {
+      "description": "UTC label granularity (D-D).",
+      "enum": [
+        "date",
+        "month",
+        "year",
+        "datetime"
+      ]
+    },
+    "numberFormat": {
+      "description": "The named number formats: integer | decimal(n), n = 0..6 | percent | compact | currency(ISO 4217 code). Rendered by the converter, never a library format string.",
+      "type": "string",
+      "pattern": "^(integer|percent|compact|decimal\\([0-6]\\)|currency\\([A-Z]{3}\\))$"
+    },
+    "valueList": {
+      "description": "An explicit order: the category (or series) values as text, each once.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1000,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "maxLength": 1000
+      }
+    },
+    "orderSort": {
+      "description": "ascending | descending (by the value itself: code point order for text, numeric for numbers, time for temporal) | null (input order, first appearance) | an explicit list.",
+      "oneOf": [
+        {
+          "enum": [
+            "ascending",
+            "descending",
+            null
+          ]
+        },
+        {
+          "$ref": "#/$defs/valueList"
+        }
+      ]
+    },
+    "axis": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "grid": {
+          "type": "boolean"
+        }
+      }
+    },
+    "legend": {
+      "description": "null = no legend.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "orient": {
+              "enum": [
+                "top",
+                "bottom",
+                "left",
+                "right"
+              ]
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "domain": {
+      "description": "[min, max] of the value axis; the save check refuses min >= max or a range without zero (chart.scale.domain_invalid).",
+      "type": "array",
+      "prefixItems": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "number"
+        }
+      ],
+      "minItems": 2,
+      "maxItems": 2
+    }
+  }
+}

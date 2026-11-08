@@ -2019,7 +2019,7 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
       },
       "renderer": {
         "type": "object",
-        "description": "{kind, version}: kind is plotly, table or kpi (html and svg are reserved and refused); version is the renderer major the host must provide, as a string (\"4\")."
+        "description": "{kind, version}: kind is chart (the neutral chart document), table or kpi, each at version \"1\" (plotly is retired; html and svg are reserved; all three are refused); version is the renderer major the host must provide, as a string."
       },
       "inputs": {
         "type": "object",
@@ -2031,19 +2031,19 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
       },
       "config": {
         "type": "object",
-        "description": "The renderer's native configuration, stored verbatim and validated against its schema (plotly: a non-empty data array of supported traces). At most 262,144 bytes."
+        "description": "The renderer's configuration, stored verbatim. chart: the bar family's {mark, encoding, title}, validated against the v1 JSON Schema (https://datapipelines.co/schemas/chart/1/bar.schema.json, served at /schemas/chart/1/bar.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
       },
       "bindings": {
         "type": "object",
-        "description": "Optional: {<path into config, e.g. data[0].y>: <column of the transform's output, or of the single input>}. Each path must already exist in config; its value is replaced by the column's values at render."
+        "description": "Optional. chart: derived from the encoding, {<field>: <field>} for every encoded field; omit it, or send exactly that. table and kpi: {<path into config, e.g. columns[0].values>: <column of the transform's output, or of the single input>}; each path must already exist in config, and its value is replaced by the column's values at render."
       },
       "presentation": {
         "type": "object",
-        "description": "Optional: {title, tokens} — tokens name theme tokens, never colours."
+        "description": "Optional, table and kpi only (a chart's title is config.title): {title, tokens} — tokens name theme tokens, never colours."
       },
       "tests": {
         "type": "object",
-        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, trace_count (with equals), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
+        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the bars drawn), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
       },
       "confirm_new_root": {
         "type": "boolean",
@@ -2099,7 +2099,7 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
       },
       "renderer": {
         "type": "object",
-        "description": "{kind, version}: kind is plotly, table or kpi (html and svg are reserved and refused); version is the renderer major the host must provide, as a string (\"4\")."
+        "description": "{kind, version}: kind is chart (the neutral chart document), table or kpi, each at version \"1\" (plotly is retired; html and svg are reserved; all three are refused); version is the renderer major the host must provide, as a string."
       },
       "inputs": {
         "type": "object",
@@ -2111,19 +2111,19 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
       },
       "config": {
         "type": "object",
-        "description": "The renderer's native configuration, stored verbatim and validated against its schema (plotly: a non-empty data array of supported traces). At most 262,144 bytes."
+        "description": "The renderer's configuration, stored verbatim. chart: the bar family's {mark, encoding, title}, validated against the v1 JSON Schema (https://datapipelines.co/schemas/chart/1/bar.schema.json, served at /schemas/chart/1/bar.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
       },
       "bindings": {
         "type": "object",
-        "description": "Optional: {<path into config, e.g. data[0].y>: <column of the transform's output, or of the single input>}. Each path must already exist in config; its value is replaced by the column's values at render."
+        "description": "Optional. chart: derived from the encoding, {<field>: <field>} for every encoded field; omit it, or send exactly that. table and kpi: {<path into config, e.g. columns[0].values>: <column of the transform's output, or of the single input>}; each path must already exist in config, and its value is replaced by the column's values at render."
       },
       "presentation": {
         "type": "object",
-        "description": "Optional: {title, tokens} — tokens name theme tokens, never colours."
+        "description": "Optional, table and kpi only (a chart's title is config.title): {title, tokens} — tokens name theme tokens, never colours."
       },
       "tests": {
         "type": "object",
-        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, trace_count (with equals), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
+        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the bars drawn), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
       }
     },
     "additionalProperties": false

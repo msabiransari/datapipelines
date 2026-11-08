@@ -6,9 +6,9 @@ purpose: Visualizations and dashboards — author a chart bound to named inputs,
 
 # Dashboards — visualizations, dashboards and the authoring loop
 
-A **visualization** is a versioned chart, table or KPI bound to named inputs: its renderer (`plotly`,
-`table` or `kpi`), the renderer's native `config`, the input contracts (named column lists), an optional
-pinned script template that reshapes the inputs, the `bindings` that inject columns into `config`, and
+A **visualization** is a versioned chart, table or KPI bound to named inputs: its renderer (`chart`,
+`table` or `kpi`, each at version `"1"`), the renderer's `config`, the input contracts (named column lists), an optional
+pinned script template that reshapes the inputs, the `bindings` that connect columns to `config`, and
 saved test cases. It has no pipeline of its own — it is input-bound and reusable. A **dashboard** pins
 exact pipeline versions as `sources`, places occurrences of pinned visualizations, maps each visualization
 input to a source, and arranges them with groups, actions and controls on a 12-column grid. Both are
@@ -35,8 +35,9 @@ Build in this order — each step's refusal names the path to fix.
    A SQL source's columns are what its pinned version RECORDED from its last run — `dashboards_validate` judges
    your visualization inputs against that record at save, so run the draft before handing back for release.
 3. **Create the visualization** with `visualizations_create`: `renderer`, `inputs` (the columns you will
-   feed it), `config` with every path you bind already present (`"x": []`), `bindings` from a path to a
-   column of the single input (or of the transform's output), and at least one test case. It lands as a
+   feed it), `config`, and at least one test case. A chart's `bindings` are derived from its encoding —
+   omit them. A table or KPI binds a path that `config` already holds (`"values": []`) to a
+   column of the single input (or of the transform's output). It lands as a
    DRAFT.
 4. **Create the dashboard** with `dashboards_create`: `sources`, one `visualizations` occurrence per chart
    with every input mapped to a source, and a `layout.grid` that places each occurrence exactly once. A
@@ -67,7 +68,7 @@ Build in this order — each step's refusal names the path to fix.
 ## Proving a visualization — the test loop
 
 A visualization's `tests.cases` are its proof: fixture rows for every input and the assertions a
-reader checks (`rendered`, `trace_count`, `no_console_errors`, `text_visible`, `no_data`,
+reader checks (`rendered`, `mark_count` — a chart's bars, `no_console_errors`, `text_visible`, `no_data`,
 `value_visible`). The server's mechanical feasibility check scans configuration strings and bound
 strings or INTEGER/DECIMAL scalar numeric text (for example, `42` and `10.5`) by substring, without
 numeric normalization. Locale, currency, percent and rounded display text still need your visual
@@ -104,8 +105,8 @@ real renderer before you hand the work over:
   an unknown key, a wrong JSON type, a missing key, or a collection over its bound. `details.path` names it.
 - `visualization.validation.binding_unbound` — a binding path that is not in `config`, or a column the
   input (or the transform's output) does not have.
-- `visualization.validation.config_schema_invalid` — the renderer's configuration (for plotly: a
-  non-empty `data` array of supported trace types).
+- `visualization.validation.config_schema_invalid` — the renderer's configuration: for a chart, the v1
+  JSON Schema (`details.keyword` and `details.pointer`) or a chart save rule (`details.reason`, a `chart.*` code).
 - `dashboard.validation.input_unbound` — a pinned visualization input no source feeds.
 - `dashboard.validation.parameter_unbound` — a required pipeline parameter left unbound.
 - `dashboard.validation.source_not_released` / `source_not_read_only` — release requires a released pipeline; every source must stay transitively read-only.
@@ -118,6 +119,6 @@ real renderer before you hand the work over:
 ## Rules that hold everywhere here
 
 - A name is a folder path, lower-case, 2–10 segments; it is never renamed.
-- The server stores `config` verbatim and never executes it; `presentation.tokens` names theme tokens,
-  never colours.
+- The server stores `config` verbatim and never executes it; `presentation.tokens` (table and KPI)
+  names theme tokens, never colours.
 - Validation is exhaustive: fix every failure the list names, then write once.

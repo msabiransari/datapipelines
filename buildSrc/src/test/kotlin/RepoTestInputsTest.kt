@@ -200,7 +200,6 @@ class RepoTestInputsTest {
                 "modules/app/src/main/resources/application.yml",
                 "modules/app/src/main/resources/db/migration/V1__initial_schema.sql",
                 "modules/app/src/main/kotlin/co/datapipelines/config/ConfigValidator.kt",
-                "modules/visualization/schema/plotly/LICENSE",
                 "plugins/datapipelines/skills/datapipelines/SKILL.md",
                 "gradle/libs.versions.toml",
                 "Dockerfile",

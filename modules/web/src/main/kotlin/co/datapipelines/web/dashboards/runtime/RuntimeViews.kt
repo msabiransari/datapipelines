@@ -8,8 +8,6 @@ import co.datapipelines.visualization.DashboardBody
 import co.datapipelines.visualization.DashboardRuntimeConfig
 import co.datapipelines.visualization.RefreshExecutionLink
 import co.datapipelines.visualization.RefreshRecord
-import co.datapipelines.visualization.RendererConfigValidators
-import co.datapipelines.visualization.RendererKind
 import co.datapipelines.visualization.StateSetting
 import co.datapipelines.visualization.VisualizationBody
 import co.datapipelines.visualization.VisualizationOccurrence
@@ -24,6 +22,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode
  */
 internal object RuntimeViews {
     private val nodes = JsonNodeFactory.instance
+
+    /** The light Plotly bundle (`plotly-basic`, D63) — the only one a v1 chart family needs. */
+    private const val BUNDLE_2D = "2d"
 
     /**
      * `GET /runtime/config` (spec §8.1). `bindings` ride BESIDE each `config` — the renderer configuration is stored
@@ -110,22 +111,12 @@ internal object RuntimeViews {
     ): Int = minOf(body.timeouts?.refreshSeconds ?: runtime.defaultRefreshSeconds, runtime.maxRefreshSeconds)
 
     /**
-     * The Plotly bundle the host page loads (the implementation spec's §10.4, D63): `"3d"` when ANY pinned
-     * visualization is a Plotly renderer whose traces name a 3D type (WebGL), else `"2d"` — the default. One
-     * dashboard, exactly one bundle: the two are never on one page, so the derivation is dashboard-level and a
-     * single 3D trace loads the heavier bundle for the whole board. Trace types are the validator's closed list
-     * at save; anything else here is `"2d"` by the same reading that makes the page default light.
+     * The Plotly bundle the host page loads (the implementation spec's §10.4, D63): always `"2d"` since the `plotly`
+     * kind retired (design record 2026-11-06 §5.1) — every `chart` family the converter draws in v1 is a 2D trace,
+     * and the `"3d"` bundle stays vendored for the family that will need it. One dashboard, exactly one bundle.
      */
-    fun rendererBundle(visualizations: Collection<ArtifactVersion<VisualizationBody>>): String {
-        val threeD =
-            visualizations.any { pinned ->
-                pinned.body.renderer.kind == RendererKind.PLOTLY &&
-                    pinned.body.config
-                        .path("data")
-                        .any { trace -> trace.path("type").asText("") in RendererConfigValidators.PLOTLY_3D_TRACES }
-            }
-        return if (threeD) "3d" else "2d"
-    }
+    @Suppress("UNUSED_PARAMETER", "UnusedParameter", "FunctionOnlyReturningConstant") // the seam the next family reads
+    fun rendererBundle(visualizations: Collection<ArtifactVersion<VisualizationBody>>): String = BUNDLE_2D
 
     /**
      * `POST /runtime/parameters` (spec §8.2): the engine's [EvaluateResponseJson] UNCHANGED plus

@@ -1,0 +1,68 @@
+{
+ "display_name": "Amount by region",
+ "description": "Total amount per region, 2024 to 2025.",
+ "renderer": {
+  "kind": "chart",
+  "version": "1"
+ },
+ "inputs": {
+  "sales": {
+   "columns": [
+    {
+     "name": "region",
+     "type": "STRING"
+    },
+    {
+     "name": "month",
+     "type": "DATE"
+    },
+    {
+     "name": "channel",
+     "type": "STRING"
+    },
+    {
+     "name": "amount",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "units",
+     "type": "INTEGER"
+    },
+    {
+     "name": "payload",
+     "type": "BINARY",
+     "nullable": true
+    },
+    {
+     "name": "segment",
+     "type": "STRING",
+     "nullable": true
+    }
+   ]
+  }
+ },
+ "config": {
+  "mark": {
+   "type": "bar"
+  },
+  "encoding": {
+   "x": {
+    "field": "regoin",
+    "type": "nominal",
+    "sort": "ascending",
+    "title": "Region"
+   },
+   "y": {
+    "field": "amount",
+    "type": "quantitative",
+    "aggregate": "sum",
+    "title": "Amount",
+    "format": "compact"
+   }
+  },
+  "title": {
+   "text": "Amount by region"
+  }
+ }
+}

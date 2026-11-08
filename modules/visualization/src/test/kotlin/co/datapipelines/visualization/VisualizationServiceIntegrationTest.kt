@@ -42,7 +42,7 @@ class VisualizationServiceIntegrationTest {
             h.visualizations.write(
                 WORKSPACE,
                 v1.record.id,
-                h.visualizationDocument { it.obj("presentation").put("title", "Second") },
+                h.visualizationDocument { it.obj("config.title").put("text", "Second") },
                 released1.detail.bodyHash,
                 AUTHOR,
                 WriteSurface.MCP,
@@ -64,7 +64,7 @@ class VisualizationServiceIntegrationTest {
             h.visualizations.write(
                 WORKSPACE,
                 v1.record.id,
-                h.visualizationDocument { it.obj("presentation").put("title", "Beside") },
+                h.visualizationDocument { it.obj("config.title").put("text", "Beside") },
                 v1.detail.bodyHash,
                 AUTHOR,
                 WriteSurface.MCP,

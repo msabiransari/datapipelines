@@ -83,7 +83,7 @@ class RuntimeSupportTest {
     }
 
     @Test
-    fun `the bundle is 3d only when a pinned plotly visualization carries a 3D trace - otherwise 2d`() {
+    fun `the bundle is 2d for every pinned kind since the plotly kind retired - a 3D trace name in a chart changes nothing`() {
         fun pinned(
             kind: RendererKind,
             config: String,
@@ -103,28 +103,15 @@ class RuntimeSupportTest {
             )
         }
 
-        // A 2D trace, a table renderer, a KPI renderer and a config without data stay on the 2D bundle.
+        // Every v1 chart family is a 2D trace (design record 2026-11-06 §5.1): a chart, a table, a KPI and none at all.
         RuntimeViews.rendererBundle(emptyList()) shouldBe "2d"
-        RuntimeViews.rendererBundle(listOf(pinned(RendererKind.PLOTLY, """{"data":[{"type":"bar"}]}"""))) shouldBe "2d"
+        RuntimeViews.rendererBundle(listOf(pinned(RendererKind.CHART, """{"mark":{"type":"bar"}}"""))) shouldBe "2d"
         RuntimeViews.rendererBundle(listOf(pinned(RendererKind.TABLE, """{"columns":[]}"""))) shouldBe "2d"
         RuntimeViews.rendererBundle(listOf(pinned(RendererKind.KPI, """{}"""))) shouldBe "2d"
-        RuntimeViews.rendererBundle(
-            listOf(
-                pinned(RendererKind.PLOTLY, """{"layout":{"title":{"text":"x"}}}"""),
-                pinned(RendererKind.TABLE, """{"columns":[]}"""),
-            ),
-        ) shouldBe "2d"
-        // The trace types the derivation reads are the validator's closed list, not a re-spelled copy.
+        // The retired kind's 3D trace types, spelled into a config, no longer select the heavy bundle.
         RendererConfigValidators.PLOTLY_3D_TRACES.forEach { trace ->
-            RuntimeViews.rendererBundle(listOf(pinned(RendererKind.PLOTLY, """{"data":[{"type":"$trace"}]}"""))) shouldBe "3d"
+            RuntimeViews.rendererBundle(listOf(pinned(RendererKind.CHART, """{"data":[{"type":"$trace"}]}"""))) shouldBe "2d"
         }
-        // One 3D trace anywhere loads the heavy bundle for the whole board — the two are never on one page.
-        RuntimeViews.rendererBundle(
-            listOf(
-                pinned(RendererKind.PLOTLY, """{"data":[{"type":"bar"}]}"""),
-                pinned(RendererKind.PLOTLY, """{"data":[{"type":"surface"}]}"""),
-            ),
-        ) shouldBe "3d"
     }
 
     @Test

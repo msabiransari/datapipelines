@@ -97,7 +97,7 @@ class VisualizationPreviewControllerTest {
             .path("visualizations")[0]
             .path("renderer")
             .path("kind")
-            .asText() shouldBe "plotly"
+            .asText() shouldBe "chart"
         data
             .path("config")
             .path("actions")[0]
@@ -112,7 +112,7 @@ class VisualizationPreviewControllerTest {
             .path("results")
             .path(PreviewViews.OCCURRENCE)
             .path("bindings")
-            .path("data[0].x")
+            .path("month")
             .map { it.asText() } shouldBe listOf("Jan", "Feb")
         data.path("inputs").path("revenue").size() shouldBe 2
 
@@ -145,9 +145,11 @@ class VisualizationPreviewControllerTest {
                     ArtifactJson.mapper.readTree(
                         """
                         {"name": "finance/visualizations/monthly_revenue", "display_name": "Monthly revenue", "description": "",
-                         "renderer": {"kind": "plotly", "version": "4"},
+                         "renderer": {"kind": "chart", "version": "1"},
                          "inputs": {"revenue": {"columns": [{"name": "month", "type": "STRING", "nullable": false}]}},
-                         "config": {"data": [{"type": "bar", "x": []}]}, "bindings": {"data[0].x": "month"},
+                         "config": {"mark": {"type": "bar"}, "encoding": {"x": {"field": "month", "type": "nominal", "sort": null},
+                                    "y": {"type": "quantitative", "aggregate": "count"}}},
+                         "bindings": {"month": "month"},
                          "tests": {"cases": [{"name": "two months", "fixtures": {"revenue": [{"month": "Jan"}]}, "assertions": [{"kind": "rendered"}]}]}}
                         """.trimIndent(),
                     ),

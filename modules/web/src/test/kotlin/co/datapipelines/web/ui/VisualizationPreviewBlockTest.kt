@@ -30,8 +30,8 @@ class VisualizationPreviewBlockTest {
 
     private val version =
         VisualizationUiFixtures
-            .version(vizId, workspaceId, 2, PipelineVersionStatus.DRAFT, config = """{"data":[{"type":"bar","x":[]}]}""")
-            .let { it.copy(body = it.body.copy(bindings = mapOf("data[0].x" to "month"))) }
+            .version(vizId, workspaceId, 2, PipelineVersionStatus.DRAFT)
+            .let { it.copy(body = it.body.copy(bindings = mapOf("month" to "month"))) }
     private val fixtures =
         mapOf("revenue" to listOf(ArtifactJson.mapper.createObjectNode().put("month", "Jan")))
     private val cases =

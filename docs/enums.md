@@ -847,18 +847,18 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these four and NULL. V3
 
 ## 31. `RendererKind` — what a visualization's configuration targets (#10)
 
-**Source:** the [dashboard implementation spec §3.1](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) (D4, D12, D13); the Kotlin enum is `RendererKind` (`visualization`, `VisualizationModel.kt`), `renderer.kind` of a visualization ([Dashboards §2.1](dashboards.md)).
+**Source:** the [dashboard implementation spec §3.1](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) (D4, D13) and, for `chart`, the neutral chart grammar design record (2026-11-06, §4.2 and §5.1; issue #860); the Kotlin enum is `RendererKind` (`visualization`, `VisualizationModel.kt`), `renderer.kind` of a visualization ([Dashboards §2.1](dashboards.md)).
 **Used by:** the visualization module; the client runtime's adapters (L3).
 
 | Value | Meaning |
 |---|---|
-| `plotly` | A Plotly figure (`data` traces, `layout`, Plotly's own `config`) — the preferred chart renderer (D12) |
+| `chart` | A chart document v1 (`renderer.version` `"1"`): a library-neutral `mark` + `encoding`, judged by the JSON Schema served at `/schemas/chart/1/` and drawn by the runtime's converter; v1 has the bar family |
 | `table` | A table of labelled columns ([Dashboards §2.1.2](dashboards.md)) |
 | `kpi` | A single value with no label of its own, titled by its card heading; optional format and comparison (`comparison.label` names the comparison line) |
 | `html` | RESERVED — authored HTML (D13, D46); refused in round one |
 | `svg` | RESERVED — authored SVG (D13, D46); refused in round one |
 
-**Closed.** An unknown value — and, in round one, `html` or `svg` — is `visualization.validation.renderer_unsupported`.
+**Closed.** An unknown value — and, in round one, `html` or `svg` — is `visualization.validation.renderer_unsupported`. The `plotly` kind is **retired** (#860): a body naming it is refused the same way, with a message that names `chart`.
 
 ---
 
@@ -870,10 +870,10 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these four and NULL. V3
 | Value | Argument | Meaning |
 |---|---|---|
 | `rendered` | — | The renderer reported completion |
-| `trace_count` | `equals` (≥ 0) | The rendered trace count |
+| `mark_count` | `equals` (≥ 0) | A chart's drawn marks — the distinct category × series cells with a non-null value; the mechanical check judges it over the case's rows |
 | `no_console_errors` | — | No console error while rendering |
-| `text_visible` | `text` | A title, legend or cell string is visible |
-| `no_data` | — | The case expects the empty state |
+| `text_visible` | `text` | A title, legend or cell string is visible; on a chart the mechanical check proves it from the document and the model or leaves it unjudged for the browser, never refusing it |
+| `no_data` | — | The case expects the empty state (a chart: no mark to draw) |
 | `value_visible` | `text` | A KPI value is visible |
 
 **Closed.** An unknown kind, a missing argument or an argument the kind does not take is `visualization.validation.test_case_invalid`.

@@ -39,10 +39,17 @@ class VisualizationReader(
         VisualizationScan(config, failures).document(tree)
         if (!failures.isEmpty) return ReadOutcome.Refused(failures.toResult())
         return when (val bound = DocumentBinding.bind(tree, VisualizationBody::class.java, VisualizationErrorCodes.BODY_INVALID)) {
-            is ReadOutcome.Read -> ReadOutcome.Read(VisualizationDocument(bound.document.first, bound.document.second))
+            is ReadOutcome.Read -> ReadOutcome.Read(VisualizationDocument(bound.document.first, bound.document.second, presence(tree)))
             is ReadOutcome.Refused -> bound
         }
     }
+
+    /** Whether the authored tree carried `bindings` (absent, JSON null, or an object — the scan admits nothing else). */
+    private fun presence(tree: JsonNode): BindingsPresence =
+        when (val node = tree.get("bindings")) {
+            null -> BindingsPresence.ABSENT
+            else -> if (node.isNull) BindingsPresence.NULL else BindingsPresence.PRESENT
+        }
 
     /** [read] that throws [ArtifactValidationException] instead of returning a refusal. */
     fun readOrThrow(tree: JsonNode): VisualizationDocument =
@@ -74,6 +81,13 @@ class VisualizationReader(
         val TESTS_KEYS: Set<String> = setOf("cases")
         val CASE_KEYS: Set<String> = setOf("name", "fixtures", "assertions")
         val ASSERTION_KEYS: Set<String> = setOf("kind", "equals", "text")
+
+        /** The renderer kind the chart kind retired (design record 2026-11-06 R5) — refused as an unknown kind. */
+        const val RETIRED_PLOTLY_KIND = "plotly"
+
+        /** Its refusal names the replacement and echoes nothing of the input. */
+        const val PLOTLY_RETIRED_MESSAGE =
+            "The plotly kind is retired; author a chart document (renderer {kind: \"chart\", version: \"1\"})."
 
         /** Every logical type is allowed in an input contract (the spec's §3.1) — `NULL` included. */
         val COLUMN_TYPES: List<String> = LogicalType.entries.map { it.wire }
@@ -107,6 +121,16 @@ private class VisualizationScan(
 
     private fun renderer(node: JsonNode) {
         scan.unknownKeys(node, VisualizationReader.RENDERER_KEYS, "renderer")
+        if (node.get("kind")?.let { it.isTextual && it.asText() == VisualizationReader.RETIRED_PLOTLY_KIND } == true) {
+            failures.add(
+                VisualizationErrorCodes.RENDERER_UNSUPPORTED,
+                "renderer.kind",
+                VisualizationReader.PLOTLY_RETIRED_MESSAGE,
+                mapOf("reason" to "unknown_kind", "allowed" to RendererKind.WIRE_VALUES),
+            )
+            scan.requiredText(node, "version", "renderer.version")
+            return
+        }
         scan.literal(
             node,
             "kind",
