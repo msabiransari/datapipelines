@@ -1856,7 +1856,7 @@ class ManagedLakeReadsE2eTest {
             .port(onPort)
             .contentType(ContentType.JSON)
             .asSession(E2eSession.jwt(SECRET, ADMIN_USER_ID, "e2e-managed-lake@datapipelines.test", workspace))
-            .body("""{"name": "k823", "kind": "mcp", "role": "viewer"}""")
+            .body("""{"name": "k823", "kind": "mcp", "role": "author"}""")
             .`when`()
             .post("/api/v1/auth/api-keys")
             .then()
