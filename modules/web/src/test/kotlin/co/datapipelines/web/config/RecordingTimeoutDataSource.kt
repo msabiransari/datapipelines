@@ -29,8 +29,8 @@ import javax.sql.DataSource
  * Hands out relaxed JDBC doubles and records, per prepared statement, its SQL, the `queryTimeout` set on it
  * ([UNBOUNDED] when none was) and — #837 — the network (socket read) timeout in force on the connection it was prepared
  * on when it was executed ([NO_SOCKET_BOUND] when none was set). A query answers one row: one column, the database
- * clock for the audit cutoff, a `(table, column)` pair for the keys purge's FK list, an `id` for the housekeeping sweeps' `RETURNING id`, and the
- * managed lake's namespace for its catalog read. An update answers 0 rows, so a batched loop ends after one batch.
+ * clock for the audit cutoff, a `(table, column)` pair for the keys purge's FK list, an `id` for the housekeeping sweeps'
+ * `RETURNING id`, and the managed lake's namespace for its catalog read. An update answers 0 rows, so a batched loop ends after one batch.
  */
 internal class RecordingTimeoutDataSource(
     private val lakeName: String = SCHEDULED_JOBS_TEST_LAKE,

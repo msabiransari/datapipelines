@@ -49,13 +49,15 @@ import java.util.concurrent.TimeUnit
  * - **R2, the socket** — the sweep's `UPDATE` is held behind a table lock (the shape of `ScheduledJobsSchedulerE2eTest`),
  *   then the container is `docker pause`d. The statement's `queryTimeout` (10 s) fires, but its cancel is a second
  *   connection the paused server never reads, so only the SOCKET bound (statement + 5 s = 15 s) can end the statement.
- *   The failed-tick line appears 15 s after the statement began, with the lock still held and the server still paused;
+ *   The driver reports the failed read when its own cancel attempt gives up (`cancelSignalTimeout`, 10 s), so the
+ *   failed-tick line appears statement + 10 s = 20 s after the statement began (measured: 19.99 s here, 20.0 s in a bare
+ *   pgjdbc probe), with the lock still held and the server still paused;
  *   once the server is back the next tick runs and succeeds. The pause comes AFTER the statement is in flight on purpose:
  *   HikariCP validates a connection that has idled on checkout, so a pause before the tick fails the ACQUIRE instead (the
  *   `LifecycleWriteBoundIntegrationTest` precedent), which is R3's subject, not this one's.
  *
  * Red at the base of #837: R3's tick is still waiting at 15 s (its wait ends at 30 s), and R2's statement is still blocked at
- * 20 s — each case observes for its bound plus a margin, fails there, and restores the environment in `finally` (the
+ * 25 s — each case observes for its bound plus a margin, fails there, and restores the environment in `finally` (the
  * pool's connections released, the container unpaused, the lock rolled back) so a red run cannot hang the suite.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -88,7 +90,9 @@ class ScheduledJobsMetadataBoundsE2eTest {
 
     @Test
     @Order(1)
-    fun `R3 - with the metadata pool exhausted a sibling job's acquire fails at the pool's ten second bound, not thirty`(output: CapturedOutput) {
+    fun `R3 - with the metadata pool exhausted a sibling job's acquire fails at the pool's ten second bound, not thirty`(
+        output: CapturedOutput,
+    ) {
         val pool = app.getBean("dataSource") as HikariDataSource
         val recorder = app.getBean(TickRecorder::class.java)
         val held = (1..pool.maximumPoolSize).map { pool.connection }
@@ -100,7 +104,9 @@ class ScheduledJobsMetadataBoundsE2eTest {
             }
             val tickStartedAt = recorder.startsOf(SWEEP).last()
             // Non-vacuity: a thread is really waiting for a connection (the tick's acquire), not a free pool.
-            awaitCondition("a thread waiting for a metadata connection", AWAIT_SECONDS) { pool.hikariPoolMXBean.threadsAwaitingConnection > 0 }
+            awaitCondition("a thread waiting for a metadata connection", AWAIT_SECONDS) {
+                pool.hikariPoolMXBean.threadsAwaitingConnection > 0
+            }
             val failure = awaitFailedLine(output, logFrom, ACQUIRE_BOUND_SECONDS + MARGIN_SECONDS, tickStartedAt)
             val elapsedMs = failure.first
             println("837 R3 acquire bound under an exhausted pool: tick->failed line ${elapsedMs}ms; line=${failure.second}")
@@ -137,13 +143,13 @@ class ScheduledJobsMetadataBoundsE2eTest {
                     docker.pauseContainerCmd(postgres.containerId).exec()
                     paused = true
                 }
-                val failure = awaitFailedLine(output, logFrom, SOCKET_BOUND_SECONDS + MARGIN_SECONDS, queuedAt)
+                val failure = awaitFailedLine(output, logFrom, PAUSED_END_SECONDS + MARGIN_SECONDS, queuedAt)
                 val elapsedMs = failure.first
                 // Observed while the server is STILL paused: only the socket bound can have ended the statement.
                 println("837 R2 socket bound under a paused server: held statement->failed line ${elapsedMs}ms; line=${failure.second}")
                 withClue("held statement->failed line ${elapsedMs}ms; line=${failure.second}") {
                     elapsedMs shouldBeGreaterThanOrEqual TimeUnit.SECONDS.toMillis(SWEEP_BOUND_SECONDS)
-                    elapsedMs shouldBeLessThanOrEqual TimeUnit.SECONDS.toMillis(SOCKET_BOUND_SECONDS + MARGIN_SECONDS)
+                    elapsedMs shouldBeLessThanOrEqual TimeUnit.SECONDS.toMillis(PAUSED_END_SECONDS + MARGIN_SECONDS)
                     failure.second shouldContain "sql_state=$CONNECTION_FAILURE_SQL_STATE"
                 }
             } finally {
@@ -268,9 +274,14 @@ class ScheduledJobsMetadataBoundsE2eTest {
         /** #837 D2: the metadata pool's acquire bound — the issue's number, a literal; never read back from the class under test. */
         const val ACQUIRE_BOUND_SECONDS = 10L
 
-        /** #326: the sweep's statement bound, and #837 D1's socket bound on top of it: statement + 5 s. */
+        /** #326: the sweep's statement bound; #837 D1's socket bound (statement + 5 s) lets it end, see the class comment. */
         const val SWEEP_BOUND_SECONDS = 10L
-        const val SOCKET_BOUND_SECONDS = 15L
+
+        /** pgjdbc's `cancelSignalTimeout` default: the failed read is reported when the cancel on the paused server gives up. */
+        const val DRIVER_CANCEL_WAIT_SECONDS = 10L
+
+        /** Where the paused server's statement ends: its bound plus the driver's cancel wait. */
+        const val PAUSED_END_SECONDS = SWEEP_BOUND_SECONDS + DRIVER_CANCEL_WAIT_SECONDS
 
         /** A loaded box's margin on either wait above. */
         const val MARGIN_SECONDS = 5L
