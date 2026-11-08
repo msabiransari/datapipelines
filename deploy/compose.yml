@@ -37,6 +37,19 @@
 # The default `dp` keeps the historical names byte-for-byte.
 name: dp
 
+# #862 — the proxy renderer's six non-secret inputs, anchored once: the ONE place the renderer's environment is
+# spelled, with the SAME variables and defaults the app's env block carries for these six (compose-env-audit.sh
+# pins the parity mechanically; defaults.env documents them). The renderer (egress-config below;
+# EgressProxyConfigMain, deployment.md §4.3) derives the store authority and the Envoy allowlist from exactly
+# these — nothing else, no secrets: S3 signing stays in DuckDB.
+x-lake-render-env: &lake-render-env
+  DATAPIPELINES_LAKE_ENABLED: ${DATAPIPELINES_LAKE_ENABLED:-false}
+  DATAPIPELINES_LAKE_S3_BUCKET: ${DATAPIPELINES_LAKE_S3_BUCKET:-}
+  DATAPIPELINES_LAKE_S3_ENDPOINT: ${DATAPIPELINES_LAKE_S3_ENDPOINT:-}
+  DATAPIPELINES_LAKE_S3_REGION: ${DATAPIPELINES_LAKE_S3_REGION:-}
+  DATAPIPELINES_LAKE_S3_PATH_STYLE: ${DATAPIPELINES_LAKE_S3_PATH_STYLE:-false}
+  DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS: ${DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS:-960}
+
 services:
   datapipelines:
     image: ghcr.io/datapipelines/datapipelines:1.0.0
@@ -741,23 +754,61 @@ services:
       - sample-data:/srv/sample
     restart: "no"
 
+  # #862 — renders the proxy's Envoy config once, at stack start, from the SAME six values the app reads
+  # (the anchor above): the app image's non-Spring renderer main (EgressProxyConfigMain) through
+  # PropertiesLauncher, the Dockerfile's JavaScriptResourcesMain precedent. Fail closed: a bad value refuses
+  # with a nonzero exit before Envoy starts (`depends_on: service_completed_successfully` below refuses the
+  # whole stack, not a proxy without an allowlist), and a disabled lake still renders the deny-only config —
+  # the proxy never renders a wildcard allowance. Root on purpose: a fresh named volume is root-owned, and the
+  # renderer must place envoy.yaml in it for the proxy's non-root user (the renderer writes it 0644); the
+  # hardening bounds that root — caps dropped, no-new-privileges, read-only root filesystem, tmpfs /tmp.
+  egress-config:
+    image: ghcr.io/datapipelines/datapipelines:1.0.0
+    user: "0"
+    entrypoint:
+      [
+        "java",
+        "-Dloader.main=co.datapipelines.web.config.EgressProxyConfigMain",
+        "-cp",
+        "/app/datapipelines.jar",
+        "org.springframework.boot.loader.launch.PropertiesLauncher",
+        "/dp-egress-config/envoy.yaml",
+      ]
+    environment: *lake-render-env
+    volumes:
+      - egress-config:/dp-egress-config
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+
   # #845 (owner ruling 2026-11-06 option B — hygiene, not safety; docs/lake.md §9): the managed lake reads'
   # egress proxy. DuckDB's http_proxy points here (the managed datasource's egress_proxy key), and every
   # object-store stream through it is reset at DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS, so a store that
   # trickles above curl's low-speed limit cannot hold a reader forever. A temporary accommodation until
   # duckdb-httpfs#519 lands. No published port: only this compose network reaches it. Envoy v1.40.2 distroless,
   # pinned by digest and scanned by scripts/container-scan.sh; it runs as its image's non-root user.
+  # #862: the allowlist is the RENDERER's output — the egress-config service derives the store authority from
+  # the same env the app reads and places envoy.yaml in the named volume before this service starts. The
+  # volume mounts read-only and the root filesystem is read-only: the inline-`configs` compromise (#845 —
+  # Compose refuses content-configs on a read-only root, "`file` is the sole supported option", Compose v5.5.1,
+  # 2026-11-07) is gone with the inline config itself. After changing a lake value, recreate this service
+  # explicitly (`docker compose up -d --force-recreate egress-proxy`): Compose reruns the renderer on plain
+  # `up -d` but does NOT cascade the recreation to this dependent (observed on Docker 29.8.1), and a running
+  # Envoy never re-reads its config; until then the app's boot check refuses a mismatched declaration —
+  # fail-closed. scripts/helm-check.sh pins the chart's equivalent posture (checksum rolls both pods).
   egress-proxy:
     image: envoyproxy/envoy:distroless-v1.40.2@sha256:09ca6f2140a61ad8df11779a4a30d52b48433d444466328494f9188c9c35eded
-    configs:
-      - source: egress-proxy-envoy
-        target: /etc/envoy/envoy.yaml
-    # No `read_only: true`: Compose injects an inline-`content` config by copying it into the container, and refuses
-    # that on a read-only root filesystem ("`file` is the sole supported option", Compose v5.5.1, 2026-11-07). A
-    # `file:` config would not be interpolated, losing the one-variable max-age. The chart's pod keeps
-    # readOnlyRootFilesystem (its ConfigMap is a volume); scripts/helm-check.sh pins both postures.
+    volumes:
+      - egress-config:/etc/envoy:ro
+    depends_on:
+      egress-config:
+        condition: service_completed_successfully
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+    read_only: true
     restart: unless-stopped
 
 # 071 §I / T116: volume names follow the compose PROJECT, and the project name is
@@ -780,69 +831,21 @@ volumes:
     name: ${COMPOSE_PROJECT_NAME:-dp}-mysql-data
   sample-data:
     name: ${COMPOSE_PROJECT_NAME:-dp}-sample-data
+  # #862 — the renderer's output, mounted read-only into the proxy at /etc/envoy. Project-scoped like every
+  # other volume here (the 071 §I / T116 note above): the name follows COMPOSE_PROJECT_NAME.
+  egress-config:
+    name: ${COMPOSE_PROJECT_NAME:-dp}-egress-config
 
-# #845 — the egress proxy's Envoy config, rendered by compose from the SAME variable and default the app's
-# DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS pass-through carries (compose-env-audit.sh check 10 pins the
-# default; scripts/helm-check.sh pins the chart's ConfigMap to this text). What each part does (probe A.0b, #845):
-#   max_stream_duration      resets a stream at the age WHATEVER its activity: an active CONNECT tunnel (https store)
-#                            and an absolute-form transfer (plain-http store) alike. This is the cut.
+# #862 — the inline `configs.egress-proxy-envoy` block is GONE: compose no longer renders the proxy's
+# Envoy YAML, because an inline template cannot DERIVE (bucket-prefixed authorities, regional AWS forms,
+# path/vhost branches) — it can only substitute. The allowlist now comes from the renderer service above
+# (egress-config, EgressProxyConfigMain), which writes the file the proxy mounts; what each part does
+# (probe A.0b, #845) is unchanged and documented on the renderer and in deployment.md §4.3:
+#   max_stream_duration      resets a stream at the age WHATEVER its activity: an active CONNECT tunnel (https
+#                            store) and an absolute-form transfer (plain-http store) alike. This is the cut.
 #   max_connection_duration  retires a keep-alive connection at the age (busy: `connection: close` on the next
 #                            response; idle: closed after the drain), so no pooled connection outlives it.
 #   timeout: 0s              disables Envoy's 15 s route timeout, which would cut every healthy transfer over 15 s.
 #   /dp-egress               the cap's self-declaration the app's boot check reads; header-gated so a path-style
 #                            request for a bucket named dp-egress is still forwarded.
 # No admin listener, no access log, no credentials: S3 signing stays in DuckDB.
-configs:
-  egress-proxy-envoy:
-    content: |
-      static_resources:
-        listeners:
-          - name: egress
-            address:
-              socket_address: { address: 0.0.0.0, port_value: 3128 }
-            filter_chains:
-              - filters:
-                  - name: envoy.filters.network.http_connection_manager
-                    typed_config:
-                      "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
-                      stat_prefix: egress
-                      common_http_protocol_options:
-                        max_connection_duration: ${DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS:-960}s
-                        max_stream_duration: ${DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS:-960}s
-                      upgrade_configs:
-                        - upgrade_type: CONNECT
-                      route_config:
-                        name: egress
-                        virtual_hosts:
-                          - name: all
-                            domains: ["*"]
-                            routes:
-                              - match: { path: /dp-egress, headers: [{ name: x-dp-egress-check, present_match: true }] }
-                                direct_response: { status: 200, body: { inline_string: "max-age=${DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS:-960}" } }
-                              - match: { connect_matcher: {} }
-                                route:
-                                  cluster: dynamic_forward_proxy
-                                  timeout: 0s
-                                  upgrade_configs:
-                                    - upgrade_type: CONNECT
-                                      connect_config: {}
-                              - match: { prefix: / }
-                                route:
-                                  cluster: dynamic_forward_proxy
-                                  timeout: 0s
-                      http_filters:
-                        - name: envoy.filters.http.dynamic_forward_proxy
-                          typed_config:
-                            "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_forward_proxy.v3.FilterConfig
-                            dns_cache_config: { name: egress_dns, dns_lookup_family: V4_PREFERRED }
-                        - name: envoy.filters.http.router
-                          typed_config:
-                            "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
-        clusters:
-          - name: dynamic_forward_proxy
-            lb_policy: CLUSTER_PROVIDED
-            cluster_type:
-              name: envoy.clusters.dynamic_forward_proxy
-              typed_config:
-                "@type": type.googleapis.com/envoy.extensions.clusters.dynamic_forward_proxy.v3.ClusterConfig
-                dns_cache_config: { name: egress_dns, dns_lookup_family: V4_PREFERRED }

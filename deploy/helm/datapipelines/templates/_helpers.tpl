@@ -109,3 +109,31 @@ app's DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS are rendered from.
 {{- end -}}
 {{- int64 $value -}}
 {{- end -}}
+
+{{/*
+#862 — the five lake-storage env names the renderer reads out of extraEnv, as one
+comma-separated list (deployment.md §4.3). The proxy pod's init container passes
+through ONLY these (least privilege: no other app value reaches the proxy pod),
+and the render-inputs checksum covers exactly these plus the max-age. A string
+rather than JSON because helm's fromJson decodes dictionaries only.
+*/}}
+{{- define "datapipelines.egressRender.envNames" -}}
+DATAPIPELINES_LAKE_ENABLED,DATAPIPELINES_LAKE_S3_BUCKET,DATAPIPELINES_LAKE_S3_ENDPOINT,DATAPIPELINES_LAKE_S3_REGION,DATAPIPELINES_LAKE_S3_PATH_STYLE
+{{- end -}}
+
+{{/*
+#862 — every value the renderer consumes, as one YAML doc for the checksum that
+rolls the proxy pods: the five extraEnv lake-storage values actually set and the
+chart's own max-age. A changed input changes the checksum; the proxy pod rolls and
+its init container re-renders (deployment.md §6.4).
+*/}}
+{{- define "datapipelines.egressRender.inputs" -}}
+{{- $names := splitList "," (include "datapipelines.egressRender.envNames" .) -}}
+{{- $m := dict "DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS" (include "datapipelines.egressProxy.maxAgeSeconds" .) -}}
+{{- range $name := $names -}}
+{{- if hasKey $.Values.extraEnv $name -}}
+{{- $_ := set $m $name (get $.Values.extraEnv $name) -}}
+{{- end -}}
+{{- end -}}
+{{- toYaml $m -}}
+{{- end -}}

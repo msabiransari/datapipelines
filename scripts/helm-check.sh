@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # helm-check.sh — render the reference Helm chart (deploy/helm/datapipelines)
 # with a PINNED helm binary: `helm lint --strict` plus the `helm template`
-# cases below — eighty-nine `verdict` assertions in total, labels `(a)`–`(h5h)`
-# — whose assertions pin the chart's render-TIME behaviour, and validate every
+# cases below — each case prints its own PASS/FAIL `verdict` line, labels
+# `(a)`–`(i6)`; a full green run printed 114 PASS lines at this commit (#862;
+# the count moves with the cases, so re-measure it after adding one) —
+# whose assertions pin the chart's render-TIME behaviour, and validate every
 # successful render against the Kubernetes API schema with a PINNED
 # kubeconform (the `kubeconform` leg below; #712) — the Kotlin drift
 # tests HelmDuckDbValuesSpecDriftTest, HelmScriptJsValuesSpecDriftTest and
@@ -26,13 +28,14 @@
 #         under test and is never edited here; the case fails only if even the
 #         non-strict lint exits non-zero.
 #   (a)   defaults: exit 0; NO DuckDB or JavaScript env entry, NO rendered
-#         `value: ""`, and the env: block holds EXACTLY the two egress-proxy
-#         entries the default-ON lake.egressProxy sets (#845) — nothing else (an
-#         empty entry would override the image's own
+#         `value: ""`, and the env: blocks hold EXACTLY the egress-proxy
+#         entries (#845) plus the renderer init container's input block
+#         (#862) — nothing else (an empty entry would override the image's own
 #         DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY or
 #         DATAPIPELINES_SCRIPT_JS_ISOLATE_DIR — the #140/#688 trap); no /app/lib.
 #   (a-off) lake.egressProxy.enabled=false: the pre-#845 contract — no `env:`
-#         block at all. (b2-single) and (b2-null) render with the proxy OFF too,
+#         block at all (the init container renders only with the proxy).
+#         (b2-single) and (b2-null) render with the proxy OFF too,
 #         so the env block's or-clause stays the thing they pin.
 #   (b)   both duckdb values set: exit 0; each env name exactly once, with its
 #         quoted value; no rendered `value: ""`.
@@ -94,24 +97,35 @@
 #         peer key; an empty peer; a quoted "true" allowAll.
 #   (i)   the managed reads' egress proxy (#845, values.yaml lake.egressProxy,
 #         ON by default) — egress_contract below, the rendered stream PARSED:
-#         exactly one proxy Deployment, Service, ConfigMap and (unless its
+#         exactly one proxy Deployment, Service and (unless its
 #         networkPolicy is off) NetworkPolicy, nothing else carrying the
-#         component label; the proxy and app selectors select only their own
-#         pods; the image equals deploy/compose.yml's egress-proxy image; the
-#         compose service drops every capability, sets no-new-privileges, and is
-#         NOT read_only while it mounts an inline-content config (compose refuses
-#         to create that; the chart's pod stays readOnlyRootFilesystem); the
-#         ConfigMap's envoy.yaml PARSES EQUAL to compose's configs content with
-#         the max-age substituted (the one-config rule); the app's two env
-#         entries name the proxy Service and the same max-age; the policy
-#         admits only the app pods on the proxy port, and restricts egress only
-#         when the store is declared (then store rule + DNS rule, verbatim).
+#         component label — NO ConfigMap: since #862 the config is not chart
+#         text but the renderer init container's output, so the contract pins
+#         THE WIRING instead: the init container runs the app image's renderer
+#         entrypoint, byte-equal to deploy/compose.yml's egress-config
+#         entrypoint (the one-config rule), fed the chart's max-age and ONLY
+#         the five renderer names passed through from extraEnv (least
+#         privilege; values byte-equal to what the app container carries),
+#         writing an emptyDir that Envoy mounts read-only at /etc/envoy; the
+#         proxy and app selectors select only their own pods; the image equals
+#         deploy/compose.yml's egress-proxy image; compose's egress-proxy is
+#         read_only (the #862 accommodation is gone), drops every capability,
+#         and depends on the renderer's successful completion; a changed
+#         renderer input rolls the pods via checksum/egress-render-inputs;
+#         the app's two env entries name the proxy Service and the same
+#         max-age; the policy admits only the app pods on the proxy port, and
+#         restricts egress only when the store is declared (then store rule +
+#         DNS rule, verbatim). (The runtime output itself — the renderer's
+#         envoy.yaml, its listener port — is compose-env-audit's and the E2E's
+#         to parse; a render here sees only the wiring.)
 #         Renders: (i) defaults, (i2) store to+ports with another max-age,
 #         (i3) ports-only with dnsTo, (i4) its policy off, (i5) the proxy off
 #         (no proxy object, no egress env entry; an extraEnv proxy is then
 #         the operator's and renders once).
 #   (i6)  refusals, each with the template's own message verbatim: the two
-#         extraEnv double mappings while enabled; maxAgeSeconds 0, quoted and
+#         extraEnv double mappings while enabled; the four relaxed-binding
+#         lake-storage aliases (they bind in the app but never reach the
+#         renderer — #862); maxAgeSeconds 0, quoted and
 #         fractional; a tag-only image; a bare label map, an unknown key and
 #         a non-list in the policy's peers.
 #
@@ -574,9 +588,11 @@ else
   n_emp=$(grep -c 'value: ""' "$WORK/a.out" || true)
   n_env=$(grep -c '^ *env:' "$WORK/a.out" || true)
   # Env entry names are the upper-case `- name:` lines (ports, volumes and
-  # containers are lower-case); the default-ON egress proxy sets exactly two.
+  # containers are lower-case); the default-ON egress proxy sets the app's
+  # two (#845) and the renderer init container's max-age input (#862) — the
+  # max-age name appears twice, once per container.
   a_names=$(grep -E '^ *- name: [A-Z_][A-Z0-9_]*$' "$WORK/a.out" | sed -E 's/^ *- name: //' | sort | tr '\n' ' ' || true)
-  a_expected="DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS DATAPIPELINES_LAKE_READS_EGRESS_PROXY "
+  a_expected="DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS DATAPIPELINES_LAKE_READS_EGRESS_PROXY "
   n_lib=$(grep -c '/app/lib' "$WORK/a.out" || true)
   n_driver=$(grep -c 'name: driver-library$' "$WORK/a.out" || true)
   if [ "$n_dbu" -ne 0 ]; then
@@ -585,12 +601,12 @@ else
     verdict "(a) defaults" 1 "grep -c 'DATAPIPELINES_SCRIPT_JS_' = $n_js (expected 0 — an empty entry would override the image's ISOLATE_DIR)"
   elif [ "$n_emp" -ne 0 ]; then
     verdict "(a) defaults" 1 "grep -c 'value: \"\"' = $n_emp (expected 0 — an empty env value still SETS the variable)"
-  elif [ "$n_env" -ne 1 ] || [ "$a_names" != "$a_expected" ]; then
-    verdict "(a) defaults" 1 "env: blocks=$n_env, entry names=[$a_names] (expected 1 block holding exactly [$a_expected] — the egress proxy's two)"
+  elif [ "$n_env" -ne 2 ] || [ "$a_names" != "$a_expected" ]; then
+    verdict "(a) defaults" 1 "env: blocks=$n_env, entry names=[$a_names] (expected 2 blocks — the app's [$a_expected] with the max-age named twice: app container + renderer init)"
   elif [ "$n_lib" -ne 0 ] || [ "$n_driver" -ne 0 ]; then
     verdict "(a) defaults" 1 "/app/lib count=$n_lib; driver-library count=$n_driver (expected 0 each)"
   else
-    verdict "(a) defaults" 0 "exit 0; 0 DuckDB entries, 0 JavaScript entries, 0 rendered empty values, the env: block holds only the two egress-proxy entries, no /app/lib or driver-library"
+    verdict "(a) defaults" 0 "exit 0; 0 DuckDB entries, 0 JavaScript entries, 0 rendered empty values, the env: blocks hold only the app's two egress entries plus the renderer init's max-age input, no /app/lib or driver-library"
   fi
 fi
 if [ "$rc" -eq 0 ]; then kc_validate "(a) defaults" "$WORK/a.out"; fi
@@ -1271,8 +1287,27 @@ import sys
 
 import yaml
 
-MAX_AGE_VAR = "${DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS:-960}"
 COMPONENT = "app.kubernetes.io/component"
+# #862 — the six env names the renderer reads; the init container passes through
+# ONLY the first five from extraEnv, the max-age is the chart's own value.
+RENDER_NAMES = [
+    "DATAPIPELINES_LAKE_ENABLED",
+    "DATAPIPELINES_LAKE_S3_BUCKET",
+    "DATAPIPELINES_LAKE_S3_ENDPOINT",
+    "DATAPIPELINES_LAKE_S3_REGION",
+    "DATAPIPELINES_LAKE_S3_PATH_STYLE",
+]
+MAX_AGE_NAME = "DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS"
+# The renderer entrypoint, compose side AND chart side (the parity the one-config
+# rule now lives in): one main, one jar, one launcher, one output path.
+RENDERER_COMMAND = [
+    "java",
+    "-Dloader.main=co.datapipelines.web.config.EgressProxyConfigMain",
+    "-cp",
+    "/app/datapipelines.jar",
+    "org.springframework.boot.loader.launch.PropertiesLauncher",
+    "/dp-egress-config/envoy.yaml",
+]
 
 
 def merge(base, over):
@@ -1294,6 +1329,7 @@ def main():
     with open(compose_path, encoding="utf-8") as f:
         compose = yaml.safe_load(f)
     ep = values["lake"]["egressProxy"]
+    extra = values.get("extraEnv") or {}
 
     def labels(d):
         return (d.get("metadata") or {}).get("labels") or {}
@@ -1311,7 +1347,6 @@ def main():
         problems = []
         if proxy:
             problems.append(f"the proxy is off but {[(d['kind'], d['metadata']['name']) for d in proxy]} rendered")
-        extra = (values.get("extraEnv") or {})
         expected_env = [{"name": k, "value": str(v)} for k, v in sorted(extra.items())
                         if k.startswith("DATAPIPELINES_LAKE_READS_EGRESS_")]
         if egress_env != expected_env:
@@ -1324,12 +1359,12 @@ def main():
 
     problems = []
     kinds = sorted(d["kind"] for d in proxy)
-    want = sorted(["ConfigMap", "Deployment", "Service"] + (["NetworkPolicy"] if ep["networkPolicy"]["enabled"] is True else []))
+    want = sorted(["Deployment", "Service"] + (["NetworkPolicy"] if ep["networkPolicy"]["enabled"] is True else []))
     if kinds != want:
-        print(f"proxy objects {kinds} (expected exactly {want})")
+        print(f"proxy objects {kinds} (expected exactly {want} — the #862 config is rendered in-pod, no ConfigMap)")
         sys.exit(1)
     by_kind = {d["kind"]: d for d in proxy}
-    dep, svc, cm = by_kind["Deployment"], by_kind["Service"], by_kind["ConfigMap"]
+    dep, svc = by_kind["Deployment"], by_kind["Service"]
     proxy_sel = dep["spec"]["selector"]["matchLabels"]
     app_sel = app["spec"]["selector"]["matchLabels"]
     proxy_pod = dep["spec"]["template"]["metadata"]["labels"]
@@ -1345,7 +1380,17 @@ def main():
     if selects(proxy_sel, app_pod):
         problems.append(f"the proxy selector {proxy_sel} also selects the app pods {app_pod}")
 
-    containers = dep["spec"]["template"]["spec"]["containers"]
+    compose_svc = compose["services"]["egress-proxy"]
+    if compose_svc.get("cap_drop") != ["ALL"] or "no-new-privileges:true" not in (compose_svc.get("security_opt") or []):
+        problems.append(f"deploy/compose.yml's egress-proxy cap_drop={compose_svc.get('cap_drop')} security_opt={compose_svc.get('security_opt')} (expected [ALL] and no-new-privileges:true)")
+    if compose_svc.get("read_only") is not True:
+        problems.append("deploy/compose.yml's egress-proxy is not read_only — since #862 it mounts only the renderer's volume, so the writable rootfs accommodation is gone")
+    deps = compose_svc.get("depends_on") or {}
+    if deps.get("egress-config", {}).get("condition") != "service_completed_successfully":
+        problems.append(f"deploy/compose.yml's egress-proxy depends_on {deps} (expected the renderer gated on service_completed_successfully)")
+
+    pod_spec = dep["spec"]["template"]["spec"]
+    containers = pod_spec["containers"]
     if len(containers) != 1:
         problems.append(f"{len(containers)} proxy containers (expected 1)")
     c = containers[0]
@@ -1353,29 +1398,63 @@ def main():
     port = ports.get("proxy")
     if port is None or len(ports) != 1:
         problems.append(f"the proxy containerPorts {ports} (expected exactly one named proxy)")
-    compose_svc = compose["services"]["egress-proxy"]
-    compose_image = compose_svc["image"]
-    # Compose refuses to create a service that mounts an inline-`content` config on a read-only root filesystem
-    # (the 2026-11-07 dp845 start: "`file` is the sole supported option"), a refusal no render here would see. The
-    # compose posture is pinned instead: no read_only, every capability dropped, no privilege escalation.
-    inline_cfgs = [c.get("source") if isinstance(c, dict) else c for c in compose_svc.get("configs") or []]
-    if any("content" in (compose.get("configs") or {}).get(n, {}) for n in inline_cfgs) and compose_svc.get("read_only"):
-        problems.append("deploy/compose.yml's egress-proxy mounts an inline-content config AND sets read_only: compose refuses to create it")
-    if compose_svc.get("cap_drop") != ["ALL"] or "no-new-privileges:true" not in (compose_svc.get("security_opt") or []):
-        problems.append(f"deploy/compose.yml's egress-proxy cap_drop={compose_svc.get('cap_drop')} security_opt={compose_svc.get('security_opt')} (expected [ALL] and no-new-privileges:true)")
-    if c.get("image") != compose_image:
-        problems.append(f"the proxy image {c.get('image')} != deploy/compose.yml's {compose_image}")
-    sc, psc = c.get("securityContext") or {}, dep["spec"]["template"]["spec"].get("securityContext") or {}
-    if not (psc.get("runAsNonRoot") is True and sc.get("readOnlyRootFilesystem") is True
-            and sc.get("allowPrivilegeEscalation") is False and (sc.get("capabilities") or {}).get("drop") == ["ALL"]):
-        problems.append(f"the proxy securityContext pod={psc} container={sc} is not non-root/read-only/no-escalation/drop-ALL")
-    if "checksum/config" not in (dep["spec"]["template"]["metadata"].get("annotations") or {}):
-        problems.append("the proxy pods carry no checksum/config annotation (a max-age change would not roll them)")
-    mounts = {m["name"]: m for m in c.get("volumeMounts") or []}
-    vols = {v["name"]: v for v in dep["spec"]["template"]["spec"].get("volumes") or []}
-    cfg = [n for n, v in vols.items() if (v.get("configMap") or {}).get("name") == cm["metadata"]["name"]]
-    if len(cfg) != 1 or mounts.get(cfg[0], {}).get("mountPath") != "/etc/envoy" or mounts[cfg[0]].get("readOnly") is not True:
-        problems.append(f"the ConfigMap {cm['metadata']['name']} is not mounted read-only at /etc/envoy (volumes {list(vols)}, mounts {list(mounts)})")
+    if c.get("image") != compose_svc["image"]:
+        problems.append(f"the proxy image {c.get('image')} != deploy/compose.yml's {compose_svc['image']}")
+    sc = c.get("securityContext") or {}
+    if not (sc.get("readOnlyRootFilesystem") is True and sc.get("allowPrivilegeEscalation") is False
+            and (sc.get("capabilities") or {}).get("drop") == ["ALL"]):
+        problems.append(f"the Envoy container's securityContext {sc} is not read-only/no-escalation/drop-ALL")
+    psc = pod_spec.get("securityContext") or {}
+    if not (psc.get("runAsNonRoot") is True and psc.get("fsGroup") == 65532):
+        problems.append(f"the proxy pod securityContext {psc} is not non-root with fsGroup (the init container's emptyDir needs the group)")
+
+    annotations = dep["spec"]["template"]["metadata"].get("annotations") or {}
+    if "checksum/egress-render-inputs" not in annotations:
+        problems.append("the proxy pods carry no checksum/egress-render-inputs annotation (a renderer-input change would not roll them)")
+    if "checksum/config" in annotations:
+        problems.append("the proxy pods still carry the #845 checksum/config annotation")
+
+    # The init container IS the config now: the app image's renderer main, fed the
+    # same inputs the app container carries, writing the volume Envoy reads.
+    inits = pod_spec.get("initContainers") or []
+    if len(inits) != 1:
+        problems.append(f"{len(inits)} init container(s) (expected exactly the renderer)")
+    else:
+        init = inits[0]
+        if init.get("command") != RENDERER_COMMAND:
+            problems.append(f"the init container's command {init.get('command')} is not the renderer entrypoint {RENDERER_COMMAND}")
+        render_svc = compose["services"]["egress-config"]
+        if render_svc.get("entrypoint") != RENDERER_COMMAND:
+            problems.append(f"deploy/compose.yml's egress-config entrypoint {render_svc.get('entrypoint')} != the init container's command (one-config rule)")
+        if init.get("image") != render_svc.get("image"):
+            problems.append(f"the init image {init.get('image')} != deploy/compose.yml's egress-config image {render_svc.get('image')}")
+        isb = init.get("securityContext") or {}
+        if not (isb.get("readOnlyRootFilesystem") is True and isb.get("allowPrivilegeEscalation") is False
+                and (isb.get("capabilities") or {}).get("drop") == ["ALL"]):
+            problems.append(f"the init container's securityContext {isb} is not read-only/no-escalation/drop-ALL")
+        init_env = {e["name"]: e.get("value") for e in init.get("env") or []}
+        max_age = ep["maxAgeSeconds"]
+        if init_env.get(MAX_AGE_NAME) != str(max_age):
+            problems.append(f"the init container's {MAX_AGE_NAME}={init_env.get(MAX_AGE_NAME)!r} != the chart's maxAgeSeconds {max_age}")
+        passed = {k: v for k, v in init_env.items() if k in RENDER_NAMES}
+        want_passed = {k: str(extra[k]) for k in RENDER_NAMES if k in extra}
+        if passed != want_passed:
+            problems.append(f"the init container's pass-through env {passed} != extraEnv's renderer names {want_passed}")
+        stray = [k for k in init_env if k != MAX_AGE_NAME and k not in RENDER_NAMES]
+        if stray:
+            problems.append(f"the init container carries non-renderer env {stray} (least privilege: only the six inputs)")
+        mounts = {m["name"]: m for m in init.get("volumeMounts") or []}
+        if mounts.get("envoy-config", {}).get("mountPath") != "/dp-egress-config":
+            problems.append(f"the init container mounts {mounts} (expected envoy-config at /dp-egress-config)")
+
+    vols = {v["name"]: v for v in pod_spec.get("volumes") or []}
+    if list(vols) != ["envoy-config"] or "emptyDir" not in vols.get("envoy-config", {}):
+        problems.append(f"the proxy pod volumes {vols} (expected exactly one emptyDir envoy-config)")
+    else:
+        mounts = {m["name"]: m for m in c.get("volumeMounts") or []}
+        if (mounts.get("envoy-config", {}).get("mountPath") != "/etc/envoy"
+                or mounts.get("envoy-config", {}).get("readOnly") is not True):
+            problems.append(f"the renderer's volume is not mounted read-only at /etc/envoy (mounts {list(mounts)})")
 
     if svc["spec"].get("selector") != proxy_sel:
         problems.append(f"the proxy Service selector {svc['spec'].get('selector')} != the Deployment's {proxy_sel}")
@@ -1384,23 +1463,9 @@ def main():
         problems.append(f"the proxy Service ports {sports} (expected one: port {port} → targetPort proxy)")
 
     max_age = ep["maxAgeSeconds"]
-    compose_cfg = compose["configs"]["egress-proxy-envoy"]["content"]
-    if compose_cfg.count(MAX_AGE_VAR) != 3:
-        problems.append(f"deploy/compose.yml's envoy config names {MAX_AGE_VAR} {compose_cfg.count(MAX_AGE_VAR)} time(s) (expected 3)")
-    expected_cfg = yaml.safe_load(compose_cfg.replace(MAX_AGE_VAR, str(max_age)))
-    rendered_cfg = yaml.safe_load(cm["data"]["envoy.yaml"])
-    if rendered_cfg != expected_cfg:
-        problems.append(f"the ConfigMap's envoy.yaml does not parse equal to deploy/compose.yml's configs content at max-age {max_age}")
-    try:
-        listen = rendered_cfg["static_resources"]["listeners"][0]["address"]["socket_address"]["port_value"]
-    except (KeyError, IndexError, TypeError):
-        listen = None
-    if listen != port:
-        problems.append(f"the Envoy listener port {listen} != the proxy containerPort {port}")
-
     service_addr = f"{svc['metadata']['name']}:{port}"
     expected_env = [{"name": "DATAPIPELINES_LAKE_READS_EGRESS_PROXY", "value": service_addr},
-                    {"name": "DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS", "value": str(max_age)}]
+                    {"name": MAX_AGE_NAME, "value": str(max_age)}]
     stripped = [{"name": e.get("name"), "value": e.get("value")} for e in egress_env]
     if stripped != expected_env:
         problems.append(f"the app's egress env entries {stripped} (expected {expected_env})")
@@ -1434,7 +1499,7 @@ def main():
     np_mode = "no policy" if "NetworkPolicy" not in by_kind else (
         "ingress app→proxy + store/DNS egress" if (ep["networkPolicy"].get("storeEgress") or {}).get("to")
         or (ep["networkPolicy"].get("storeEgress") or {}).get("ports") else "ingress app→proxy, egress the cluster's")
-    print(f"proxy {svc['metadata']['name']}:{port}, max-age {max_age} in the app env and the Envoy config (== compose's), image == compose's, {np_mode}")
+    print(f"proxy {svc['metadata']['name']}:{port}, max-age {max_age} in the app env and the renderer init (== compose's entrypoint), image == compose's, {np_mode}")
 
 
 # An uncaught exception would exit 1 — a VERDICT code; a crash is tooling (2).
@@ -1534,6 +1599,26 @@ check_double_mapping "(i6) extraEnv double-maps DATAPIPELINES_LAKE_READS_EGRESS_
   DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS 1200 \
   'set lake.egressProxy.maxAgeSeconds, not extraEnv.DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS (deployment.md §6.4)' \
   "$WORK/i6b.out" "$WORK/i6b.err"
+# (i6, #862) the four relaxed-binding lake-storage aliases: Spring binds them to
+# the app's lake.storage.* properties, but the renderer reads only the exact env
+# names — an operator setting an alias would get a store the app sees and the
+# proxy's allowlist does not. Each refused with the template's own message.
+check_double_mapping "(i6) extraEnv double-maps the storage bucket alias" \
+  DATAPIPELINES_LAKE_STORAGE_BUCKET dp-lake \
+  'set extraEnv.DATAPIPELINES_LAKE_S3_BUCKET, not the relaxed-binding alias DATAPIPELINES_LAKE_STORAGE_BUCKET — the proxy renderer reads only the exact env names (deployment.md §4.3)' \
+  "$WORK/i6c.out" "$WORK/i6c.err"
+check_double_mapping "(i6) extraEnv double-maps the storage region alias" \
+  DATAPIPELINES_LAKE_STORAGE_REGION us-east-1 \
+  'set extraEnv.DATAPIPELINES_LAKE_S3_REGION, not the relaxed-binding alias DATAPIPELINES_LAKE_STORAGE_REGION — the proxy renderer reads only the exact env names (deployment.md §4.3)' \
+  "$WORK/i6d.out" "$WORK/i6d.err"
+check_double_mapping "(i6) extraEnv double-maps the storage endpoint alias" \
+  DATAPIPELINES_LAKE_STORAGE_ENDPOINT http://minio:9000 \
+  'set extraEnv.DATAPIPELINES_LAKE_S3_ENDPOINT, not the relaxed-binding alias DATAPIPELINES_LAKE_STORAGE_ENDPOINT — the proxy renderer reads only the exact env names (deployment.md §4.3)' \
+  "$WORK/i6e.out" "$WORK/i6e.err"
+check_double_mapping "(i6) extraEnv double-maps the storage path-style alias" \
+  DATAPIPELINES_LAKE_STORAGE_PATH_STYLE true \
+  'set extraEnv.DATAPIPELINES_LAKE_S3_PATH_STYLE, not the relaxed-binding alias DATAPIPELINES_LAKE_STORAGE_PATH_STYLE — the proxy renderer reads only the exact env names (deployment.md §4.3)' \
+  "$WORK/i6f.out" "$WORK/i6f.err"
 np_refusal "(i6) maxAgeSeconds 0 refused" \
   'lake.egressProxy.maxAgeSeconds must be a whole number of seconds greater than 0 (deployment.md §6.4)' <<'VALUES'
 lake:

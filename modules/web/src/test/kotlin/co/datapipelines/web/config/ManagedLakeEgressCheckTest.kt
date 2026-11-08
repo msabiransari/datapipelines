@@ -110,13 +110,23 @@ class ManagedLakeEgressCheckTest {
             pathStyle: Boolean,
         ) = ManagedLakeEgressCheck.storeProbeUri(LakeProperties.Storage(bucket = "dp-lake", endpoint = endpoint, pathStyle = pathStyle))
 
+        fun uriIn(
+            region: String,
+            pathStyle: Boolean,
+        ) = ManagedLakeEgressCheck.storeProbeUri(LakeProperties.Storage(bucket = "dp-lake", region = region, pathStyle = pathStyle))
+
         uri("http://minio:9000", pathStyle = true) shouldBe URI("http://minio:9000/dp-lake")
         uri("https://minio.example:9000/", pathStyle = true) shouldBe URI("https://minio.example:9000/dp-lake")
-        // Scheme-less = plain http, the adapter's secret reading (USE_SSL false).
-        uri("minio:9000", pathStyle = true) shouldBe URI("http://minio:9000/dp-lake")
-        // Blank = AWS over https; virtual-host style puts the bucket in the host.
-        uri("", pathStyle = false) shouldBe URI("https://dp-lake.s3.amazonaws.com/")
-        uri("", pathStyle = true) shouldBe URI("https://s3.amazonaws.com/dp-lake")
+        // #862: a scheme-less endpoint is refused, not guessed to plain http — the proxy renderer refuses the
+        // same value, and the boot check travels the ONE derivation ([EgressStoreTarget]).
+        shouldThrow<IllegalStateException> { uri("minio:9000", pathStyle = true) }
+        // Blank = the REGIONAL AWS endpoint (probe A, lane 862: the engine dials s3.<region>.amazonaws.com,
+        // default region us-east-1 — the legacy global host would be a host the proxy does not allowlist).
+        uri("", pathStyle = false) shouldBe URI("https://dp-lake.s3.us-east-1.amazonaws.com/")
+        uri("", pathStyle = true) shouldBe URI("https://s3.us-east-1.amazonaws.com/dp-lake")
+        // A declared region travels into the derived form (#862's mismatch fix).
+        uriIn("eu-west-1", pathStyle = false) shouldBe URI("https://dp-lake.s3.eu-west-1.amazonaws.com/")
+        uriIn("eu-west-1", pathStyle = true) shouldBe URI("https://s3.eu-west-1.amazonaws.com/dp-lake")
     }
 
     @Test

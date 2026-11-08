@@ -34,10 +34,17 @@
 #   8. JVM code-loading environment names are refused, even if allowlisted.
 #   9. Every name outside DATAPIPELINES_* must have a FOREIGN_ALLOWLIST reason;
 #      entries no longer passed by compose are stale and fail too.
-#  10. ONE VALUE, TWO READERS (#845). A DATAPIPELINES_* placeholder WITH a default anywhere
-#      else in compose.yml (the egress proxy's rendered config reads the app's max-age) is
-#      a variable the app binds, and its default is application.yml's — so the proxy's cap
-#      and the app's configured cap cannot diverge on a default install.
+#  10. ONE VALUE, TWO READERS (#845/#862). A DATAPIPELINES_* placeholder WITH a default anywhere
+#      else in compose.yml (the renderer service's anchored environment reads the app's
+#      values) is a variable the app binds, and its default is application.yml's — so the
+#      renderer's inputs and the app's configured values cannot diverge on a default install.
+#  11. THE RENDERER'S OWN ENV (#862). The x-lake-render-env anchor is the ONE place the
+#      renderer's environment is spelled: it must carry EXACTLY the six non-secret inputs —
+#      each the same-name pass-through with application.yml's default (check 10 covers the
+#      values) — and nothing else: no secret and no other app value crosses into the
+#      renderer (S3 signing stays in DuckDB). The egress-config service must use the anchor,
+#      the proxy must start only after the renderer completes, and the proxy must mount the
+#      renderer's volume read-only.
 #
 # Values built by CONCATENATION (`${OTHER:+literal}${OTHER2:+,literal}`) are DERIVED,
 # not pass-throughs: the demo's bootstrap lists are assembled from the family ON
@@ -70,16 +77,24 @@ if [[ "${1:-}" == "--self-test" ]]; then
   # a foreign literal without an allowlist entry (3), a line the app never binds (4), a
   # variable dropped from defaults.env (5), a drifted commented mirror (6), and a posture
   # key given a `${VAR:-}` default instead of the valueless form (7), a refused JVM
-  # loader variable (8), an unlisted foreign environment name (9), and the egress
-  # proxy's config rendering a max-age default the app does not ship (10).
+  # loader variable (8), an unlisted foreign environment name (9), a renderer-input
+  # default the app does not ship, outside the service block (10), and the renderer's
+  # anchor carrying an unknown name / missing one of the six (11).
   python3 - "$tmp/$COMPOSE" "$tmp/$DEFAULTS_ENV" "$tmp/$SECRETS_EXAMPLE" <<'PY'
 import sys, re
 p, defaults, secrets_example = sys.argv[1], sys.argv[2], sys.argv[3]
 t = open(p).read()
 t = t.replace("DATAPIPELINES_AUDIT_RETENTION_DAYS:-365", "DATAPIPELINES_AUDIT_RETENTION_DAYS:-7")
 t = t.replace("      DATAPIPELINES_ORG_WEEK_START: ${DATAPIPELINES_ORG_WEEK_START:-monday}\n", "")
-t = t.replace("max_stream_duration: ${DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS:-960}s",
-              "max_stream_duration: ${DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS:-20}s")
+# Class 10: the RENDERER ANCHOR's max-age default (line-anchored to the 2-space
+# indent — the app service's own 6-space pass-through must stay untouched), since
+# #862 replaced the inline config with the anchored renderer environment.
+t = re.sub(r"(?m)^  (DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS: \$\{DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS:-)960\}$",
+           r"  \g<1>20}", t)
+# Class 11: the renderer's anchor carries a name it must not (and loses PATH_STYLE,
+# so the renderer and the app would diverge on it) — one replacement, two failures.
+t = re.sub(r"(?m)^  DATAPIPELINES_LAKE_S3_PATH_STYLE: \$\{DATAPIPELINES_LAKE_S3_PATH_STYLE:-false\}$",
+           "  DATAPIPELINES_LAKE_STORAGE_PATH_STYLE: ${DATAPIPELINES_LAKE_STORAGE_PATH_STYLE:-false}", t)
 t = t.replace("      DATAPIPELINES_AUTH_COOKIE_SECURE:\n",
               "      DATAPIPELINES_AUTH_COOKIE_SECURE: ${DATAPIPELINES_AUTH_COOKIE_SECURE:-}\n")
 # INSIDE the service's environment block. Appending it at EOF put it outside the block
@@ -104,8 +119,9 @@ PY
   if [[ "$status" -ne 1 ]]; then
     echo "SELF-TEST FAILED: doctored audit exited $status, expected 1" >&2; exit 1
   fi
-  if ! grep -q '^  8 ' <<< "$output" || ! grep -q '^  9 ' <<< "$output" || ! grep -q '^  10 ' <<< "$output"; then
-    echo "SELF-TEST FAILED: missing class-8, class-9 or class-10 failure" >&2; exit 1
+  if ! grep -q '^  8 ' <<< "$output" || ! grep -q '^  9 ' <<< "$output" || ! grep -q '^  10 ' <<< "$output" \
+     || ! grep -q '^  11 ' <<< "$output"; then
+    echo "SELF-TEST FAILED: missing a class-8, class-9, class-10 or class-11 failure" >&2; exit 1
   fi
   echo "self-test OK: doctored compose correctly fails the audit"; exit 0
 fi
@@ -435,6 +451,53 @@ for name, default in outside_defaults:
         failures.append(f"10 compose renders {name} with default '{default}' outside the datapipelines service, but "
                         f"application.yml ships '{bound[name]}' — the two readers of one value would diverge")
 
+# 11. THE RENDERER'S OWN ENV (#862). The x-lake-render-env anchor is the ONE place the
+# renderer's environment is spelled: exactly the six non-secret inputs, each the same-name
+# pass-through with application.yml's default, nothing else (S3 signing stays in DuckDB),
+# the egress-config service using the anchor, the proxy gated on its completion and
+# mounting its volume read-only.
+RENDERER_ENV = [
+    "DATAPIPELINES_LAKE_ENABLED",
+    "DATAPIPELINES_LAKE_S3_BUCKET",
+    "DATAPIPELINES_LAKE_S3_ENDPOINT",
+    "DATAPIPELINES_LAKE_S3_REGION",
+    "DATAPIPELINES_LAKE_S3_PATH_STYLE",
+    "DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS",
+]
+anchor = re.search(r"^x-lake-render-env: &lake-render-env\n(.*?)(?=^[a-z])", t, re.M | re.S)
+if not anchor:
+    failures.append("11 deploy/compose.yml lost the x-lake-render-env anchor — the renderer's "
+                    "environment is no longer spelled in one place")
+else:
+    anchor_env = dict(re.findall(r"^  ([A-Z0-9_]+): (.*)$", anchor.group(1), re.M))
+    for name in sorted(set(anchor_env) - set(RENDERER_ENV)):
+        failures.append(f"11 the renderer environment (x-lake-render-env) carries {name} — the renderer reads "
+                        f"exactly the six inputs and nothing else; no secret or other app value crosses into it")
+    for name in RENDERER_ENV:
+        if name not in anchor_env:
+            failures.append(f"11 the renderer environment (x-lake-render-env) is missing {name} — the renderer "
+                            f"and the app would diverge on it")
+            continue
+        if name not in bound:
+            failures.append(f"11 the renderer environment names {name}, which application.yml never binds — "
+                            f"a second reader of a value the app does not have")
+            continue
+        m = re.match(r"^\$\{" + name + r"(?::-?([^}]*))?\}$", anchor_env[name])
+        if not m:
+            failures.append(f"11 the renderer environment value for {name} is '{anchor_env[name]}' — not the "
+                            f"same-name pass-through form")
+        elif (m.group(1) or "") != bound[name]:
+            failures.append(f"11 the renderer environment default for {name} is '{m.group(1)}' but application.yml "
+                            f"ships '{bound[name]}' — the two readers of one value would diverge")
+    if "environment: *lake-render-env" not in t:
+        failures.append("11 the egress-config service does not use the x-lake-render-env anchor "
+                        "(`environment: *lake-render-env` missing)")
+if "condition: service_completed_successfully" not in t:
+    failures.append("11 the egress-proxy service does not gate on the renderer's completion "
+                    "(service_completed_successfully missing)")
+if "- egress-config:/etc/envoy:ro" not in t:
+    failures.append("11 the egress-proxy does not mount the renderer's volume read-only at /etc/envoy")
+
 if failures:
     print(f"compose-env-audit: {len(failures)} failure(s)")
     for f in failures:
@@ -443,6 +506,7 @@ if failures:
 print(f"compose-env-audit: OK ({len(bound)} app env vars; {len(passed)} compose pass-throughs "
       f"+ {len(unset_unless_set)} posture keys passed only when set; {len(DECLARED_OVERRIDES)} "
       f"declared compose overrides; {len(FOREIGN_ALLOWLIST)} allowlisted foreign names; "
+      f"{len(RENDERER_ENV)} renderer inputs anchored (check 11); "
       f"one authority each — {len(defaults_active)} active in "
       f"{defaults_env} ({len(DEFAULTS_ENV_OVERRIDES)} declared to differ from application.yml), "
       f"{len(secrets_active)} in {secrets_example}, {len(POSTURE_VARS)} owned by the posture "
