@@ -120,8 +120,12 @@ class LakeAppendRuntime(
     companion object {
         const val STATEMENT_TIMEOUT_SECONDS = 5
 
-        /** One dedicated template for every admission and recovery collaborator in this runtime. */
-        fun statements(dataSource: DataSource): JdbcTemplate = JdbcTemplate(dataSource).apply { queryTimeout = STATEMENT_TIMEOUT_SECONDS }
+        /**
+         * One dedicated template for every admission, publication and recovery collaborator in this runtime: a
+         * [STATEMENT_TIMEOUT_SECONDS] `queryTimeout` and a socket bound of that plus 5 s on the statement's connection
+         * (#858, [LakeBoundedJdbcTemplate]). Over [dataSource] itself, so statements inside a transaction stay in it.
+         */
+        fun statements(dataSource: DataSource): JdbcTemplate = LakeBoundedJdbcTemplate(dataSource, STATEMENT_TIMEOUT_SECONDS)
     }
 }
 
