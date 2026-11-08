@@ -46,7 +46,7 @@ class DeadlinePoolCloserTest {
 
     @Test
     fun `a close that never returns does not block the next pass`() {
-        val closer = DeadlinePoolCloser(metrics, deadline = Duration.ofSeconds(LONG_DEADLINE_SECONDS))
+        val closer = DeadlinePoolCloser(metrics)
         val stuck = FakePool("stuck", blockOn = released)
         val next = FakePool("next")
         val manager = manager(closer, stuck, next)
@@ -65,7 +65,7 @@ class DeadlinePoolCloserTest {
 
     @Test
     fun `two pools retiring together - the first stuck - the second still closes on time`() {
-        val closer = DeadlinePoolCloser(metrics, deadline = Duration.ofSeconds(LONG_DEADLINE_SECONDS))
+        val closer = DeadlinePoolCloser(metrics)
         val stuck = FakePool("a-stuck", blockOn = released)
         val second = FakePool("b-second")
         val manager = manager(closer, stuck, second)
@@ -83,8 +83,16 @@ class DeadlinePoolCloserTest {
 
     @Test
     fun `a close past its deadline is reported once with its fields and counted, never retried`() {
-        val closer = DeadlinePoolCloser(metrics, deadline = Duration.ofMillis(SHORT_DEADLINE_MILLIS))
-        val stuck = FakePool("stuck", blockOn = released, active = 2, generation = "gen12345")
+        // #840: the deadline is the pool's own; with the fixed terms scaled to zero it is the pool's connectionTimeout.
+        val closer = DeadlinePoolCloser(metrics, fixedTerms = Duration.ZERO)
+        val stuck =
+            FakePool(
+                "stuck",
+                blockOn = released,
+                active = 2,
+                generation = "gen12345",
+                connectionTimeout = Duration.ofMillis(SHORT_DEADLINE_MILLIS),
+            )
         val manager = manager(closer, stuck, ceiling = Duration.ZERO)
         manager.retire("stuck")
 
@@ -100,7 +108,10 @@ class DeadlinePoolCloserTest {
         stuckLines shouldHaveSize 1
         stuckLines.single().level shouldBe Level.WARN
         stuckLines.single().formattedMessage.substringBefore(" message=") shouldMatch
-            Regex("event=datasource\\.pool_close_stuck datasource=stuck generation=gen12345 elapsed_seconds=\\d+ active_connections=2")
+            Regex(
+                "event=datasource\\.pool_close_stuck datasource=stuck generation=gen12345 elapsed_seconds=\\d+ active_connections=2 " +
+                    "deadline_seconds=0",
+            )
         metrics.closeStuck.get() shouldBe 1
         metrics.closeStuckNames shouldBe listOf("stuck")
         stuck.closeCalls.get() shouldBe 1
@@ -109,7 +120,7 @@ class DeadlinePoolCloserTest {
 
     @Test
     fun `a close inside its deadline reports nothing`() {
-        val closer = DeadlinePoolCloser(metrics, deadline = Duration.ofSeconds(LONG_DEADLINE_SECONDS))
+        val closer = DeadlinePoolCloser(metrics)
         val quick = FakePool("quick")
         val manager = manager(closer, quick)
         manager.retire("quick")
@@ -127,7 +138,7 @@ class DeadlinePoolCloserTest {
 
     @Test
     fun `a close that throws is contained to its thread and reported by class only`() {
-        val closer = DeadlinePoolCloser(metrics, deadline = Duration.ofSeconds(LONG_DEADLINE_SECONDS))
+        val closer = DeadlinePoolCloser(metrics)
         val throwing = FakePool("throwing", throwOnClose = true)
         val next = FakePool("next")
         val manager = manager(closer, throwing, next)
@@ -204,6 +215,7 @@ class DeadlinePoolCloserTest {
         private val throwOnClose: Boolean = false,
         private val active: Int = 0,
         override val generation: String? = null,
+        override val connectionTimeout: Duration = ConnectionPool.DEFAULT_CONNECTION_TIMEOUT,
     ) : ConnectionPool {
         val closeCalls = AtomicInteger()
         val closedOn = AtomicReference<String>()
@@ -265,7 +277,6 @@ class DeadlinePoolCloserTest {
 
     private companion object {
         val closerLogger = LoggerFactory.getLogger(DeadlinePoolCloser::class.java) as Logger
-        const val LONG_DEADLINE_SECONDS = 60L
         const val SHORT_DEADLINE_MILLIS = 200L
         const val PASS_RETURN_SECONDS = 2L
         const val AWAIT_SECONDS = 10L

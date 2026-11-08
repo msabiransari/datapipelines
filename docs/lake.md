@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries, Publication and Reads
 
-**Status:** v1.15 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound)
+**Status:** v1.16 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -445,8 +445,10 @@ still detects the changed catalog pointer independently of the projection.
 **The bound.** The pool reaper retires generations older than `reads.max-generation-age-seconds`,
 including generations with no later borrower. It runs on `dp-reaper`, every 5 s, and issues no statement.
 The reaper delay is 7 s (cadence plus twice its 1 s pass bound); closes run on `dp-pool-close` threads.
-Boot checks the staleness rule: age + 2 × reaper delay + retire ceiling + freshness tick must fit
-`retention.protection-days × 86400 / 24`. With shipped values: 900 + 14 + 90 + 60 = 1064 ≤ 25 200 s.
+Boot checks the staleness rule: age + 2 × reaper delay + managed retire ceiling + freshness tick must fit
+`retention.protection-days × 86400 / 24`. The managed retire ceiling is the one a retired managed generation is held to
+(`datapipelines.datasources.managed-retire-ceiling-seconds`, else `node-query-timeout-max-seconds` + 30; #824), not the
+general pool ceiling. With shipped values: 900 + 14 + 930 + 60 = 1904 ≤ 25 200 s.
 This bounds the age handed to new queries. Reader termination is not a safety premise: DuckDB's
 HTTP settings bound a silent store, but cannot bound a trickling response (duckdb-httpfs#519).
 
@@ -521,6 +523,7 @@ is an error. The same loss applies when the full protection-window deadline is r
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-08 | v1.16 | 833 (#824) managed retire ceiling | §9 "The bound.": the staleness rule's ceiling term is the managed retire ceiling (`managed-retire-ceiling-seconds`, else `node-query-timeout-max-seconds` + 30); shipped 900 + 14 + 930 + 60 = 1904 ≤ 25 200 s. |
 | 2026-11-08 | v1.15 | 851 (#851) | §8: an abandoned metadata read stops itself at its next chunk, or after the store's 10-second socket timeout; the read is capped at 64 MiB of JSON after decompression; the trickle is no longer unbounded. |
 | 2026-11-07 | v1.14 | 837 (#837) | §8: the sentence on what a tick cannot promise states the connection checkout's bound (10 s) and that the other jobs on `dp-scheduled` end a statement against an unresponsive server at a socket bound while this tick's statements do not yet (#858). |
 | 2026-11-07 | v1.13 | #845 managed reads egress proxy | §9 "The egress proxy": the managed reads leave through a proxy that cuts each object-store connection at `reads.egress-max-age-seconds`, a hygiene bound and not a safety premise; httpfs's retries make a trickling store's reader bound (`http_retries` + 1) × max-age + slack, derived in one place (`LakeHttpBounds.egressReaderEndByMillis`) and printed at boot; the boot refusal; what the proxy sees; a temporary accommodation until duckdb-httpfs#519. The key table gains both keys. |

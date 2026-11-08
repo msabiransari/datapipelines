@@ -130,6 +130,14 @@ class WebPropertiesSpecDriftTest {
         props.ceiling(ExecutorProperties().nodeQueryTimeoutSeconds).seconds shouldBe 90L
         // An explicit value opts out of the derivation entirely.
         DatasourcesProperties(retireCeilingSeconds = 600).ceiling(60).seconds shouldBe 600L
+        // #824: the managed generation's ceiling, documented the same way, derived from the MAXIMUM:
+        // 900 + 30 = 930 with the shipped executor default; an explicit value opts out of it too.
+        documented.getValue("datapipelines.datasources.managed-retire-ceiling-seconds") shouldBe "derived"
+        props.managedRetireCeilingSeconds shouldBe null
+        props.managedCeiling(ExecutorProperties().nodeQueryTimeoutMaxSeconds).seconds shouldBe 930L
+        DatasourcesProperties(managedRetireCeilingSeconds = 1200).managedCeiling(900).seconds shouldBe 1200L
+        // The two ceilings are independent: an explicit general ceiling does not move the managed one.
+        DatasourcesProperties(retireCeilingSeconds = 600).managedCeiling(900).seconds shouldBe 930L
     }
 
     @Test

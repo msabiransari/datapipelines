@@ -360,16 +360,34 @@ data class DatasourcesProperties(
      * overrides it explicitly.
      */
     val retireCeilingSeconds: Long? = null,
+    /**
+     * `managed-retire-ceiling-seconds` — the same ceiling for a retired MANAGED lake reader generation only (#824,
+     * owner ruling 2026-11-07; [Datasources §5.2](../../../../../../../docs/datasources.md)). Every other retired pool
+     * keeps [retireCeilingSeconds].
+     *
+     * Null (the default, documented as `derived`) means **the executor's `node-query-timeout-max-seconds` plus
+     * [CEILING_SLACK_SECONDS]** (930 s shipped): a managed node may raise its statement timeout up to that maximum, so a
+     * generation retired by age or by the freshness tick must not hard-close under a query its own settings admit. The
+     * managed lake's boot rule (`LakeRules`, Configuration §7) counts this ceiling, not the general one.
+     */
+    val managedRetireCeilingSeconds: Long? = null,
 ) {
     init {
         retireCeilingSeconds?.let {
             require(it > 0) { "datapipelines.datasources.retire-ceiling-seconds must be > 0" }
+        }
+        managedRetireCeilingSeconds?.let {
+            require(it > 0) { "datapipelines.datasources.managed-retire-ceiling-seconds must be > 0" }
         }
     }
 
     /** The configured ceiling, or the derivation from [nodeQueryTimeoutSeconds]. */
     fun ceiling(nodeQueryTimeoutSeconds: Int): Duration =
         Duration.ofSeconds(retireCeilingSeconds ?: (nodeQueryTimeoutSeconds + CEILING_SLACK_SECONDS))
+
+    /** #824 — the configured managed ceiling, or the derivation from [nodeQueryTimeoutMaxSeconds]. */
+    fun managedCeiling(nodeQueryTimeoutMaxSeconds: Int): Duration =
+        Duration.ofSeconds(managedRetireCeilingSeconds ?: (nodeQueryTimeoutMaxSeconds + CEILING_SLACK_SECONDS))
 
     companion object {
         /** The slack the derived default adds to the node query timeout (§5.2). */
