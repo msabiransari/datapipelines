@@ -32,6 +32,16 @@ dependencies {
     implementation(project(":modules:parameters"))
 
     implementation(libs.jackson.module.kotlin)
+    // The chart document v1's JSON Schema (draft 2020-12) at save — the schemas load from this module's
+    // classpath only; the registry never fetches (ChartSchemaValidator).
+    implementation(libs.json.schema.validator)
+    // Jackson stays at the product's pin (#860): networknt 2.0.8's POM asks for Jackson 2.22.1 and its Jackson
+    // modules import jackson-bom 2.22.1, which wins over the conventions' platform(jackson-bom 2.21.7) under
+    // default resolution — the lake module's precedent (modules/lake/build.gradle.kts, Iceberg's 2.22.2), same
+    // mechanism. Enforced at the only declaration that brings 2.0.8, so every consumer (mcp-server, web, app, the
+    // test projects) resolves the same Jackson, the MCP SDK's own edge to the validator included.
+    implementation(enforcedPlatform(libs.jackson.bom))
+    testImplementation(enforcedPlatform(libs.jackson.bom))
     implementation(libs.spring.boot.starter.jdbc) // the two repositories (§8.1), @ConfigurationProperties
 
     // The container suite runs the repositories and the lifecycle against a real Postgres with the SHIPPED
