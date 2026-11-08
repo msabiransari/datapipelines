@@ -3,7 +3,7 @@
 **Status:** v1.64
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-11-04
+**Last updated:** 2026-11-08
 
 ---
 
