@@ -29,6 +29,7 @@ import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.TransactionTemplate
 import org.testcontainers.DockerClientFactory
 import org.testcontainers.containers.PostgreSQLContainer
+import java.sql.Connection
 import java.sql.DriverManager
 import java.util.UUID
 import java.util.concurrent.Callable
@@ -158,14 +159,19 @@ class LakeTableCatalogTransactionBoundsIntegrationTest {
 
     @Test
     fun `a nested participant (savepoint) reads on the outer transaction's connection without a socket bound`() {
-        val nested = TransactionTemplate(DataSourceTransactionManager(pool)).apply {
-            propagationBehavior = TransactionDefinition.PROPAGATION_NESTED
-        }
+        val nested =
+            TransactionTemplate(DataSourceTransactionManager(pool)).apply {
+                propagationBehavior = TransactionDefinition.PROPAGATION_NESTED
+            }
         transactions.executeWithoutResult { outer ->
             val pid = backendPid()
             insertLifecycleRow(plain)
             nested.executeWithoutResult { inner ->
-                catalog.registeredTables(LAKE).single().unavailableReason.shouldBeNull()
+                catalog
+                    .registeredTables(LAKE)
+                    .single()
+                    .unavailableReason
+                    .shouldBeNull()
                 networkTimeout() shouldBe DRIVER_DEFAULT_MILLIS
                 inner.setRollbackOnly()
             }
@@ -282,10 +288,7 @@ class LakeTableCatalogTransactionBoundsIntegrationTest {
     private fun lease(): Pair<Int, Int> =
         requireNotNull(
             plain.execute(
-                ConnectionCallback { c ->
-                    val pid = c.createStatement().use { s -> s.executeQuery("SELECT pg_backend_pid()").use { r -> r.next().let { r.getInt(1) } } }
-                    c.networkTimeout to pid
-                },
+                ConnectionCallback { c -> c.networkTimeout to singleInt(c, "SELECT pg_backend_pid()") },
             ),
         )
 
@@ -333,21 +336,24 @@ class LakeTableCatalogTransactionBoundsIntegrationTest {
     private fun awaitManagedReadWaitingOnLock() {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(AWAIT_SECONDS)
         DriverManager.getConnection(container.jdbcUrl, container.username, container.password).use { probe ->
-            while (true) {
-                val waiting =
-                    probe.createStatement().use { s ->
-                        s
-                            .executeQuery(
-                                "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' " +
-                                    "AND pid <> pg_backend_pid() AND query LIKE '%LEFT JOIN iceberg_tables%'",
-                            ).use { r -> r.next().let { r.getInt(1) } }
-                    }
-                if (waiting > 0) return
+            while (singleInt(probe, WAITING_ON_LOCK) == 0) {
                 check(System.nanoTime() < deadline) { "the managed read never waited on the catalog lock" }
                 Thread.sleep(POLL_MILLIS)
             }
         }
     }
+
+    /** The one integer [sql] answers on [connection]. */
+    private fun singleInt(
+        connection: Connection,
+        sql: String,
+    ): Int =
+        connection.createStatement().use { statement ->
+            statement.executeQuery(sql).use { rows ->
+                check(rows.next()) { "no row for: $sql" }
+                rows.getInt(1)
+            }
+        }
 
     /** The exception classes outermost first, and the root's message (the driver's, never customer SQL here). */
     private fun causeChain(e: Throwable): String {
@@ -356,11 +362,19 @@ class LakeTableCatalogTransactionBoundsIntegrationTest {
     }
 
     private fun pause() {
-        DockerClientFactory.instance().client().pauseContainerCmd(container.containerId).exec()
+        DockerClientFactory
+            .instance()
+            .client()
+            .pauseContainerCmd(container.containerId)
+            .exec()
     }
 
     private fun unpause() {
-        DockerClientFactory.instance().client().unpauseContainerCmd(container.containerId).exec()
+        DockerClientFactory
+            .instance()
+            .client()
+            .unpauseContainerCmd(container.containerId)
+            .exec()
     }
 
     private companion object {
@@ -389,6 +403,11 @@ class LakeTableCatalogTransactionBoundsIntegrationTest {
         const val ACQUIRE_MILLIS = 2_000L
         const val AWAIT_SECONDS = 10L
         const val POLL_MILLIS = 50L
+
+        /** Another backend blocked on a lock in the managed read (its LEFT JOIN on the catalog table). */
+        const val WAITING_ON_LOCK =
+            "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' " +
+                "AND pid <> pg_backend_pid() AND query LIKE '%LEFT JOIN iceberg_tables%'"
         const val NANOS_PER_MILLI = 1_000_000L
     }
 }
