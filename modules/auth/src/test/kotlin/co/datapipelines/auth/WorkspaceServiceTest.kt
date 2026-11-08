@@ -34,7 +34,7 @@ class WorkspaceServiceTest {
     private val wsA = workspace("alpha")
     private val wsB = workspace("beta")
 
-    private fun service() =
+    private fun service(managedDatasourceGrants: ManagedDatasourceGrants = ManagedDatasourceGrants.NONE) =
         WorkspaceService(
             repository,
             mockk(relaxed = true),
@@ -46,6 +46,7 @@ class WorkspaceServiceTest {
             AuthProperties(),
             WorkspaceContentCheck.NONE,
             demoSeeder,
+            managedDatasourceGrants = managedDatasourceGrants,
         )
 
     private fun workspace(
@@ -412,6 +413,104 @@ class WorkspaceServiceTest {
 
         service().create(principal, "acme", "Acme") shouldBe acme
         verify { auditLogger.log("auth.workspace.created", userId, null, null, null, any()) }
+    }
+
+    // ------------------------------------------------------------ the managed lake's grant (#823)
+
+    /**
+     * #823 (i) — the server's own datasource is granted to the workspace the creation just wrote: once, to the created
+     * id, AFTER the row exists (the port cannot grant a workspace that is not there) and BEFORE the audit line (the
+     * audit records a creation that, with the grant, is complete). The port takes no datasource name and no actor.
+     */
+    @Test
+    fun `creating a workspace grants the managed lake to the created workspace once, after the row and before the audit (#823)`() {
+        val principal = principal(superAdmin = true, memberships = emptyList())
+        val acme = workspace("acme")
+        val events = mutableListOf<String>()
+        every { repository.nameExists("acme") } returns false
+        every { repository.create("acme", "Acme", false, userId) } answers
+            {
+                events += "create"
+                acme
+            }
+        every { repository.findByName("acme") } returns acme
+        every { auditLogger.log("auth.workspace.created", userId, null, null, null, any()) } answers
+            {
+                events += "audit"
+            }
+        val granted = mutableListOf<UUID>()
+        val port =
+            ManagedDatasourceGrants {
+                events += "grant"
+                granted += it
+                true
+            }
+
+        service(port).create(principal, "acme", "Acme") shouldBe acme
+
+        granted shouldBe listOf(acme.id)
+        events shouldBe listOf("create", "grant", "audit")
+    }
+
+    /**
+     * #823 (ii) — a grant that fails fails the creation: the exception reaches the caller unchanged and the audit line
+     * for a creation that did not complete is never written. (That the workspace row is rolled back with it is the
+     * transaction's, proven against a real database in `WorkspaceCreateTransactionIntegrationTest`.)
+     */
+    @Test
+    fun `a managed-lake grant that throws fails the creation and writes no creation audit (#823)`() {
+        val principal = principal(superAdmin = true, memberships = emptyList())
+        val acme = workspace("acme")
+        every { repository.nameExists("acme") } returns false
+        every { repository.create("acme", "Acme", false, userId) } returns acme
+        val refusal = IllegalStateException("grant refused")
+
+        val thrown =
+            shouldThrow<IllegalStateException> {
+                service(ManagedDatasourceGrants { throw refusal }).create(principal, "acme", "Acme")
+            }
+
+        thrown shouldBe refusal
+        verify(exactly = 0) { auditLogger.log("auth.workspace.created", any(), any(), any(), any(), any()) }
+    }
+
+    /** #823 (iii) — no datasource layer (the default port) or a lake that is off: the creation is exactly what it was. */
+    @Test
+    fun `a port that grants nothing leaves the creation unchanged (#823)`() {
+        val principal = principal(superAdmin = true, memberships = emptyList())
+        val acme = workspace("acme")
+        every { repository.nameExists("acme") } returns false
+        every { repository.create("acme", "Acme", false, userId) } returns acme
+        every { repository.findByName("acme") } returns acme
+
+        service(ManagedDatasourceGrants { false }).create(principal, "acme", "Acme") shouldBe acme
+
+        verify(exactly = 1) { auditLogger.log("auth.workspace.created", userId, null, null, null, any()) }
+    }
+
+    /** #823 — a creation that is refused before a row exists grants nothing: the port is behind every refusal. */
+    @Test
+    fun `no refusal of a creation reaches the managed-lake grant (#823)`() {
+        var calls = 0
+        val port =
+            ManagedDatasourceGrants {
+                calls++
+                true
+            }
+        // role, name shape, duplicate name (pre-check), duplicate name (the racing insert's DuplicateKeyException)
+        shouldThrow<RoleRequiredException> {
+            service(port).create(principal(memberships = listOf(membership(wsA))), "acme", "Acme")
+        }
+        val admin = principal(superAdmin = true, memberships = emptyList())
+        shouldThrow<WorkspaceNameInvalidException> { service(port).create(admin, "ACME Corp!", "Acme") }
+        every { repository.nameExists("taken") } returns true
+        shouldThrow<WorkspaceDuplicateNameException> { service(port).create(admin, "taken", "Taken") }
+        every { repository.nameExists("raced") } returns false
+        every { repository.create("raced", "Raced", false, userId) } throws
+            org.springframework.dao.DuplicateKeyException("workspaces_name_key")
+        shouldThrow<WorkspaceDuplicateNameException> { service(port).create(admin, "raced", "Raced") }
+
+        calls shouldBe 0
     }
 
     @Test

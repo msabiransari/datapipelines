@@ -68,7 +68,7 @@ fun interface WorkspaceLiveness {
  * it visible.
  *
  * ## Why this class and EVERY public method on it are `open`
- * [removeMember] is a multi-statement metadata write carried by
+ * [create] and [removeMember] are multi-statement metadata writes carried by
  * `@Transactional("metadataTransactionManager")` — the pipeline-contract (S3) rule. The
  * named manager is the one Spring transaction resource (the metadata database); the
  * annotation opens the class to CGLIB, which `kotlin("plugin.spring")` does NOT do for a
@@ -97,6 +97,11 @@ open class WorkspaceService(
      * nothing of this one).
      */
     private val userService: UserService? = null,
+    /**
+     * #823 — the server's own datasource (the managed lake) granted to a workspace in the transaction that creates it.
+     * See [ManagedDatasourceGrants]; a context with no datasource layer passes [ManagedDatasourceGrants.NONE].
+     */
+    private val managedDatasourceGrants: ManagedDatasourceGrants = ManagedDatasourceGrants.NONE,
 ) : WorkspaceLiveness {
     private val log = LoggerFactory.getLogger(WorkspaceService::class.java)
 
@@ -234,7 +239,20 @@ open class WorkspaceService(
      * [ScopeMatrix.RestOperation.MANAGE_INSTANCE_WORKSPACES] at the interceptor, and this
      * re-asserts it because a service must not depend on having been called from a governed
      * route). The creator enters as the workspace ADMIN.
+     *
+     * **The server's own datasource is granted in the same act** (#823, owner ruling 2026-11-07): when the managed
+     * lake is enabled, [managedDatasourceGrants] writes its grant for the new workspace on THIS transaction, as the
+     * system actor, so a workspace never exists without it and there is no window for the freshness tick to close.
+     * The workspace row, the creator's membership, the grant and the audit row are ONE metadata transaction: a grant
+     * that fails removes the workspace too, and the failure reaches the caller unchanged. The tick's regrant remains
+     * the repair path for a workspace that was NOT created here (inserted by SQL, a grant deleted by hand, a workspace
+     * that predates the managed lake).
+     *
+     * The `DuplicateKeyException` of a racing create is caught inside the transaction and rethrown as the catalogued
+     * [WorkspaceDuplicateNameException]; a `RuntimeException` rolls the transaction back and the CALLER receives that
+     * exception, not a rollback wrapper (pinned by `WorkspaceCreateTransactionIntegrationTest`).
      */
+    @Transactional("metadataTransactionManager")
     @Suppress("ThrowsCount") // a boundary maps each distinct refusal to its own catalogued code
     open fun create(
         principal: AuthenticatedPrincipal,
@@ -252,8 +270,19 @@ open class WorkspaceService(
                 // the SAME catalogued answer, never the raw constraint violation.
                 throw WorkspaceDuplicateNameException(name)
             }
-        authCache.invalidateMemberships(principal.userId)
+        // The grant is the server's act, not the principal's: the port holds its own actor and takes no datasource name.
+        val managedLakeGranted = managedDatasourceGrants.grantManagedLakeTo(created.id)
+        // Evicted now AND when the transaction completes, either way (see removeMember's note): a request racing the
+        // commit on another connection reads the not-yet-visible membership and would cache "no such workspace" for the
+        // TTL; and a rollback after the audit read cached the workspace by name must not leave it serving a phantom.
+        val evict: () -> Unit = {
+            authCache.invalidateMemberships(principal.userId)
+            authCache.invalidateWorkspace(created)
+        }
+        evict()
+        afterCompletionOrNow(evict)
         audit(principal, "auth.workspace.created", created.name, mapOf("workspace" to created.name))
+        log.info("event=auth.workspace_created workspace={} managed_lake_granted={}", created.name, managedLakeGranted)
         return created
     }
 
@@ -723,6 +752,19 @@ open class WorkspaceService(
         val workspace = read(principal, name)
         requirePermission(principal, workspace, Permission.WORKSPACE_MEMBERS_MANAGE)
         return apiKeyRepository.liveCreatorIds(workspace.id)
+    }
+
+    /** Runs [task] when the surrounding transaction completes — commit OR rollback — or now when there is none. */
+    private fun afterCompletionOrNow(task: () -> Unit) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(
+                object : TransactionSynchronization {
+                    override fun afterCompletion(status: Int) = task()
+                },
+            )
+        } else {
+            task()
+        }
     }
 
     /**

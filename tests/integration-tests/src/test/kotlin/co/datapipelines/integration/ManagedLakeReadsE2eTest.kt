@@ -17,6 +17,7 @@ import io.kotest.matchers.longs.shouldBeInRange
 import io.kotest.matchers.longs.shouldBeLessThanOrEqual
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.restassured.RestAssured.given
@@ -84,7 +85,8 @@ import kotlin.io.path.relativeTo
  * row) and one store:
  *
  * - **A**, this class's `@SpringBootTest` context: the managed row is created and granted at boot; REST and UI writes
- *   to it are refused (`datasource.managed`); a workspace created after boot is granted within one tick; and
+ *   to it are refused (`datasource.managed`); a workspace inserted by SQL after boot is granted within one tick (the repair path, since
+ *   #823 grants a workspace created through the product in its own transaction); and
  *   **proof (a)**: with no catalog movement (so the tick retires nothing), every lease is served by a generation
  *   younger than `reads.max-generation-age-seconds` (A runs a 6 s bound) and the generation is replaced.
  * - **B**, a second full boot after a table was defined with no registry row: B's registrar BACKFILLS the row, and
@@ -197,7 +199,7 @@ class ManagedLakeReadsE2eTest {
 
     @Test
     @Order(2)
-    fun `a workspace created after boot is granted the managed lake within one tick`() {
+    fun `a workspace inserted by SQL after boot is granted the managed lake within one tick (repair path)`() {
         val workspace = UUID.randomUUID()
         metadata {
             it.createStatement().execute(
@@ -206,6 +208,164 @@ class ManagedLakeReadsE2eTest {
         }
 
         awaitTrue(Duration.ofSeconds(A_TICK_SECONDS * 4)) { workspace in grantedWorkspaces() }
+    }
+
+    // ------------------------------------------------------------------ #823: the grant at creation, the refused revoke, the repair
+
+    /**
+     * #823 (A.3) — a workspace created through `POST /api/v1/workspaces` is granted the managed lake IN ITS OWN
+     * TRANSACTION: listed at once, on an instance whose freshness tick (600 s) cannot have run, and visible to a key
+     * pinned to it. A and B tick the SAME database every 5 s and 2 s, so a listing alone could be their repair; the grant's
+     * `granted_at` equals the workspace's `created_at` only when both were written by one transaction (Postgres `NOW()` is
+     * the transaction's start), and its actor is the system actor, never the super admin who created the workspace.
+     */
+    @Test
+    @Order(8231)
+    fun `#823 - a workspace created through REST is granted the managed lake in its own transaction, before any tick`() {
+        val created = lifecycle()
+        val createdPort = portOf(created)
+        given()
+            .port(createdPort)
+            .contentType(ContentType.JSON)
+            .asSession(ADMIN_SESSION)
+            .body("""{"name": "$CREATED_WS", "display_name": "Created by #823"}""")
+            .`when`()
+            .post("/api/v1/workspaces")
+            .then()
+            .statusCode(201)
+
+        val listed =
+            given()
+                .port(createdPort)
+                .asSession(ADMIN_SESSION)
+                .`when`()
+                .get("/api/v1/datasources/$LAKE/grants")
+                .then()
+                .statusCode(200)
+                .extract()
+                .jsonPath()
+                .getList<String>("data.workspace")
+        val provenance = managedGrantProvenance(CREATED_WS)
+        assertAll(
+            { withClue("listed at once, with no await") { listed shouldContain CREATED_WS } },
+            { withClue("granted in the creation's transaction: $provenance") { provenance?.sameTransaction shouldBe true } },
+            { withClue("granted as the server, not as the creating super admin") { provenance?.byUserId shouldBe systemActorId() } },
+            { withClue("the super admin is not the grantor") { provenance?.byUserId shouldNotBe UUID.fromString(ADMIN_USER_ID) } },
+        )
+
+        // Visible to a key pinned to the new workspace, through the agent surface.
+        val key = mintMcpKeyIn(createdPort, CREATED_WS)
+        val (datasources, refused) = ManagedLakeMcpClient(createdPort, key).call("datasources_list", emptyMap())
+        withClue("datasources_list refused: $datasources") { refused shouldBe false }
+        datasources.map { it.path("name").asText() } shouldContain LAKE
+    }
+
+    /**
+     * #823 (B.2) — a revoke of the managed lake's grant is refused `datasource.managed` on the REST surface and the UI
+     * surface, the grant stays, and no `datasource.revoked` audit row is written. An ordinary datasource's revoke is
+     * unchanged (204), and the dialog draws a Revoke button for it and none for the managed row.
+     */
+    @Test
+    @Order(8232)
+    fun `#823 - the managed lake's grant cannot be revoked over REST or the UI, an ordinary datasource's still can`() {
+        val revokedBefore = revokeAuditRows(LAKE)
+
+        val rest =
+            given()
+                .port(port)
+                .asSession(ADMIN_SESSION)
+                .`when`()
+                .delete("/api/v1/datasources/$LAKE/grants/default")
+        val ui =
+            given()
+                .port(port)
+                .asSession(ADMIN_SESSION)
+                .header("HX-Request", "true")
+                .`when`()
+                .post("/partials/datasources/$LAKE/grants/default/remove")
+        val dialog =
+            given()
+                .port(port)
+                .asSession(ADMIN_SESSION)
+                .header("HX-Request", "true")
+                .`when`()
+                .get("/partials/datasources/$LAKE/grants")
+        assertAll(
+            { withClue("REST answered ${rest.body.asString()}") { rest.statusCode shouldBe 409 } },
+            { rest.jsonPath().getString("error.code") shouldBe MANAGED_CODE },
+            { rest.body.asString() shouldNotContain "jdbc:" },
+            { withClue("UI answered ${ui.body.asString()}") { ui.statusCode shouldBe 409 } },
+            { ui.body.asString() shouldContain MANAGED_CODE },
+            { grantedWorkspaces() shouldContain DEFAULT_WORKSPACE_ID },
+            { revokeAuditRows(LAKE) shouldBe revokedBefore },
+            { dialog.statusCode shouldBe 200 },
+            { dialog.body.asString() shouldNotContain "datasource-grant-remove" },
+            { dialog.body.asString() shouldContain "granted by the server" },
+        )
+
+        // The ordinary path is untouched: a revoke of an ordinary datasource's grant is still a 204, and its dialog keeps the button.
+        registerH2Datasource(ORDINARY)
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .`when`()
+            .post("/api/v1/datasources/$ORDINARY/grants/default")
+            .then()
+            .statusCode(200)
+        val ordinaryDialog =
+            given()
+                .port(port)
+                .asSession(ADMIN_SESSION)
+                .header("HX-Request", "true")
+                .`when`()
+                .get("/partials/datasources/$ORDINARY/grants")
+        ordinaryDialog.body.asString() shouldContain "datasource-grant-remove"
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .`when`()
+            .delete("/api/v1/datasources/$ORDINARY/grants/default")
+            .then()
+            .statusCode(204)
+    }
+
+    /**
+     * #823 (C.1) — the tick stays the repair path: a grant row an operator deleted by hand for an EXISTING workspace is
+     * written back within four ticks of A's, and the registrar logs it (`lake.managed_datasource_granted … workspaces=1`).
+     * The repair writes no audit row: the server repairing its own grant is not a person's act.
+     */
+    @Test
+    @Order(8233)
+    fun `#823 - the tick repairs a managed grant an operator deleted by hand, logs it and audits nothing`() {
+        val logger = LoggerFactory.getLogger(PRODUCT_LOGGERS) as Logger
+        val capture = SnapshotListAppender()
+        logger.addAppender(capture)
+        try {
+            // The row to delete exists at once on the fixed code and after one tick on the old (the workspace was
+            // created by the case above); waiting for it makes this case a repair test on both, not a copy of that one.
+            awaitTrue(Duration.ofSeconds(A_TICK_SECONDS * 4)) { CREATED_WS in grantedWorkspaceNames() }
+            val auditBefore = grantAuditRows()
+            metadata { connection ->
+                connection
+                    .prepareStatement(
+                        "DELETE FROM datasource_workspaces WHERE datasource_name = ? AND workspace_id = " +
+                            "(SELECT id FROM workspaces WHERE name = ?)",
+                    ).use {
+                        it.setString(1, LAKE)
+                        it.setString(2, CREATED_WS)
+                        it.executeUpdate() shouldBe 1
+                    }
+            }
+
+            awaitTrue(Duration.ofSeconds(A_TICK_SECONDS * 4)) { CREATED_WS in grantedWorkspaceNames() }
+
+            val repaired = linesOf(capture, "event=lake.managed_datasource_granted").filter { "workspaces=1 " in it.text }
+            withClue("the registrar logged the repair: ${capture.messages()}") { repaired.size shouldBeGreaterThanOrEqual 1 }
+            withClue("the repair is not a person's act: no grant audit row") { grantAuditRows() shouldBe auditBefore }
+        } finally {
+            logger.detachAppender(capture)
+            capture.stop()
+        }
     }
 
     @Test
@@ -1760,6 +1920,85 @@ class ManagedLakeReadsE2eTest {
             }
         }
 
+    private fun grantedWorkspaceNames(): Set<String> =
+        metadata { connection ->
+            connection
+                .prepareStatement(
+                    "SELECT w.name FROM datasource_workspaces g JOIN workspaces w ON w.id = g.workspace_id WHERE g.datasource_name = ?",
+                ).use { ps ->
+                    ps.setString(1, LAKE)
+                    ps.executeQuery().use { rs -> generateSequence { if (rs.next()) rs.getString(1) else null }.toSet() }
+                }
+        }
+
+    /** Who wrote the managed grant for [workspace], and whether it was written in the very transaction that created the workspace. */
+    private data class GrantProvenance(
+        val byUserId: UUID,
+        val sameTransaction: Boolean,
+    )
+
+    private fun managedGrantProvenance(workspace: String): GrantProvenance? =
+        metadata { connection ->
+            connection
+                .prepareStatement(
+                    """
+                    SELECT g.granted_by, (g.granted_at = w.created_at) AS same_tx
+                      FROM datasource_workspaces g JOIN workspaces w ON w.id = g.workspace_id
+                     WHERE g.datasource_name = ? AND w.name = ?
+                    """.trimIndent(),
+                ).use { ps ->
+                    ps.setString(1, LAKE)
+                    ps.setString(2, workspace)
+                    ps.executeQuery().use { rs ->
+                        if (rs.next()) GrantProvenance(rs.getObject(1, UUID::class.java), rs.getBoolean(2)) else null
+                    }
+                }
+        }
+
+    private fun systemActorId(): UUID = metadata { systemActor(it) }
+
+    private fun revokeAuditRows(datasource: String): Int =
+        metadata { connection ->
+            connection
+                .prepareStatement("SELECT COUNT(*) FROM audit_log WHERE event = 'datasource.revoked' AND details_json ->> 'datasource' = ?")
+                .use { ps ->
+                    ps.setString(1, datasource)
+                    ps.executeQuery().use { rs ->
+                        rs.next()
+                        rs.getInt(1)
+                    }
+                }
+        }
+
+    /** Every grant or revoke audit row on the instance: the events a person's grant surface writes. */
+    private fun grantAuditRows(): Int =
+        metadata { connection ->
+            connection.createStatement().use { st ->
+                st.executeQuery("SELECT COUNT(*) FROM audit_log WHERE event IN ('datasource.granted', 'datasource.revoked')").use { rs ->
+                    rs.next()
+                    rs.getInt(1)
+                }
+            }
+        }
+
+    /** A key minted by the signed-in super admin in [workspace] over REST; the plaintext is returned, never logged. */
+    private fun mintMcpKeyIn(
+        onPort: Int,
+        workspace: String,
+    ): String =
+        given()
+            .port(onPort)
+            .contentType(ContentType.JSON)
+            .asSession(E2eSession.jwt(SECRET, ADMIN_USER_ID, "e2e-managed-lake@datapipelines.test", workspace))
+            .body("""{"name": "k823", "kind": "mcp", "role": "author"}""")
+            .`when`()
+            .post("/api/v1/auth/api-keys")
+            .then()
+            .statusCode(201)
+            .extract()
+            .jsonPath()
+            .getString("data.key")
+
     private fun registryLocation(): String? =
         metadata { connection ->
             connection
@@ -1910,6 +2149,8 @@ class ManagedLakeReadsE2eTest {
     companion object {
         private const val LAKE = "lake"
         private const val TAKEN_NAME = "lake_taken"
+        private const val CREATED_WS = "created_823"
+        private const val ORDINARY = "ordinary_823"
         private const val MANAGED_CODE = "datasource.managed"
         private const val TEMPLATE_ID = "test/managed_lake_count.sql"
         private const val DEFAULT_WORKSPACE = "defa0000-0000-0000-0000-000000000001"

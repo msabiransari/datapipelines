@@ -42,10 +42,13 @@ import java.util.UUID
  * Neither pair set means the instance's credential chain (`CredentialKind.NONE`).
  *
  * Then, every boot: the backfill of registry rows for tables defined while no datasource row existed, and the
- * grant to every workspace (record D3: the lake is server-level). [regrant] repeats the grant on the freshness
- * tick, so a workspace created after boot sees the lake within one tick. The tick's grant runs over the
- * repository the tick passes in (its statement-bounded one, #818b A) and as the system actor this registrar
- * provisioned at boot, so the tick issues exactly one statement and provisions nothing.
+ * grant to every workspace (record D3: the lake is server-level). A workspace created through the product is
+ * granted in its own creation transaction ([grantTo], #823), so it never exists without the lake; [regrant]
+ * repeats the grant on the freshness tick as the REPAIR path (a workspace inserted by SQL, a grant an operator
+ * deleted by hand, a grant that predates this registrar). The tick's grant runs over the repository the tick
+ * passes in (its statement-bounded one, #818b A) and as the system actor this registrar provisioned at boot, so
+ * the tick issues exactly one statement and provisions nothing. Neither path writes an audit row: the server
+ * granting its own datasource is not a person's act, and a creation is covered by `auth.workspace.created`.
  *
  * `enabled=false`: nothing is written, and an existing managed row stays where it is (record §6). The managed
  * catalog bean then reports every managed table unavailable (`lake.disabled`).
@@ -113,6 +116,20 @@ class ManagedLakeDatasourceRegistrar(
             )
         }
         grantEveryWorkspace(desired.name, actor)
+    }
+
+    /**
+     * #823 (owner ruling 2026-11-07) — the managed lake granted to ONE workspace, as the boot-provisioned system actor,
+     * through this registrar's own repository so the INSERT joins the transaction the caller is in (workspace creation's).
+     * Idempotent: returns true when a row was created, false when the grant existed, the lake is disabled, or [register]
+     * has not provisioned the actor. It takes no datasource name and no actor — the one thing it can grant is the managed
+     * lake, and the grantor is the server, never the principal creating the workspace. Not logged: a creation that
+     * grants is the norm (`WorkspaceService.create` logs `managed_lake_granted`); the event below reports repairs.
+     */
+    fun grantTo(workspaceId: UUID): Boolean {
+        val properties = lakeProperties.ifAvailable?.takeIf { it.enabled } ?: return false
+        val actor = systemActor ?: return false
+        return grants.grant(properties.name, workspaceId, actor)
     }
 
     /**
