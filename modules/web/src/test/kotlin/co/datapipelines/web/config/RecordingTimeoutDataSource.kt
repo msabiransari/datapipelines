@@ -34,6 +34,8 @@ import javax.sql.DataSource
  */
 internal class RecordingTimeoutDataSource(
     private val lakeName: String = SCHEDULED_JOBS_TEST_LAKE,
+    /** #867 — when set, a query's row answers `name` with it, so the managed read's row maps to a named table. */
+    private val tableName: String? = null,
 ) : DataSource by mockk(relaxed = true) {
     private val statements = mutableListOf<Pair<String, IntArray>>()
 
@@ -88,6 +90,7 @@ internal class RecordingTimeoutDataSource(
             every { getString("referencing_column") } returns "executed_by"
             every { getObject("id", UUID::class.java) } returns UUID.randomUUID()
             every { getArray("namespace").array } returns arrayOf(lakeName, "sales")
+            tableName?.let { every { getString("name") } returns it }
         }
     }
 
@@ -118,6 +121,9 @@ internal class RecordingTimeoutDataSource(
 
     /** #837 — every statement's network timeout when it ran, as a set (milliseconds). */
     fun everySocketTimeout(): Set<Int> = sockets.map { it[0] }.toSet()
+
+    /** #867 — every statement's network timeout when it ran, in the order the statements were prepared (milliseconds). */
+    fun socketTimeouts(): List<Int> = sockets.map { it[0] }
 
     /** #837 — every `setNetworkTimeout` call on a connection handed out, in order (milliseconds). */
     fun networkTimeoutCalls(): List<Int> = networkCalls.toList()
