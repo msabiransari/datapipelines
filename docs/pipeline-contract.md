@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.84 (revised — see Change Log)
+**Status:** v1.85 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-11-07
+**Last updated:** 2026-11-08
 
 ---
 
@@ -1213,7 +1213,7 @@ Defined and described in [Datasources §9–10](datasources.md#9-validation-rule
 | `datasource.validation.duplicate_name` | 409 | Name already exists — the namespace is global across workspaces too (workspaces design §3: `name` stays the PK/AAD anchor) |
 | `datasource.validation.workspace_forbidden` | 400 | Workspaces D8 refusal: non-admin attempted the `global` flag (or any mutation of a global datasource), a `readonly` flip on a global datasource, or a workspace binding the caller is not in — including member CUD while `member-datasources-enabled` is off (workspaces design §8) |
 | `datasource.in_use` | 409 | Delete blocked: pipelines reference this datasource |
-| `datasource.managed` | 409 | An edit or a delete of the managed lake datasource (`properties.dialect.managed = true`, [Datasources §8C.10](datasources.md#8c10-the-managed-lake-datasource)): the server creates and re-syncs that row from `datapipelines.lake.*` at every boot, so no surface may change it. Refused in the registry, below every surface (#818) |
+| `datasource.managed` | 409 | An edit or a delete of the managed lake datasource, or a revoke of its grant to a workspace (`properties.dialect.managed = true`, [Datasources §8C.10](datasources.md#8c10-the-managed-lake-datasource)): the server creates and re-syncs that row from `datapipelines.lake.*` at every boot, so no surface may change it, and the server, not a person, holds its workspace grants (#823). The edit and delete are refused in the registry, below every surface (#818); the revoke is refused by the REST and UI grant handlers |
 | `datasource.not_found` | 404 | Datasource name unknown on a read/mutate/test path (added 2026-08-11, gate C) |
 | `datasource.grant_required` | 404 | The datasource exists on the instance but is not GRANTED to the caller's workspace ([RBAC design §4](superpowers/specs/2026-09-10-rbac-design.md), D-R7). A 404 and not a 403 because the 404 rule has no exception for datasources: an ungranted datasource is INVISIBLE, and "this exists, you may not see it" turns the flat, global datasource namespace into an enumeration oracle — every name on the instance probeable one request at a time |
 | `datasource.driver_not_loaded` | 400 | JDBC driver JAR for the dialect is not on the classpath |
@@ -1999,6 +1999,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-08 | v1.85 | #823 managed grant at creation | §13.8: `datasource.managed` (409) also answers a revoke of the managed lake's grant (REST `DELETE .../grants/{workspace}` and the UI's revoke). No new code. |
 | 2026-11-04 | v1.84 | 818 (#818) | dp-lake P5 managed reads. §13.8 gains `datasource.managed` (409); §13.25 gains `lake.unavailable` (503) and `lake.table.unavailable` (409), landed in the SAME commit as their `PipelineErrorCodes` constants and `ApiErrorCatalog` rows (merged §13 row count 475 → 477; P4 and P5 share `lake.table.unavailable`). |
 | 2026-11-05 | v1.83 | 799 (#799) | §13.25 adds admission, target status and immutable delivery identity refusals. |
 | 2026-11-05 | v1.82 | 799 (#799) | §13.25 adds the partition fanout bound for uncommitted Parquet append files. |
