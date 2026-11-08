@@ -10,10 +10,15 @@ import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.WorkspaceService
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceAuditEvents
+import co.datapipelines.datasources.DatasourceErrorCodes
 import co.datapipelines.datasources.DatasourceGrant
 import co.datapipelines.datasources.DatasourceGrantRepository
+import co.datapipelines.datasources.DatasourceProperties
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.MANAGED_DIALECT_KEY
+import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
@@ -157,6 +162,49 @@ class DatasourceGrantsPartialControllerTest {
     }
 
     /**
+     * #823 — the managed lake is granted to every workspace by the server; its grant cannot be revoked. The refusal is
+     * the catalogued `datasource.managed`, thrown so the UI advice answers it with its real 409 (the toast), and nothing
+     * is deleted or audited. Red at the base: the row was removed and the dialog re-rendered.
+     */
+    @Test
+    fun `revoking the managed lake's grant is refused datasource_managed, deletes nothing and audits nothing (#823)`() {
+        authenticate()
+        every { datasources.get("lake") } returns managedLake()
+        every { workspaces.read(any(), "globex") } returns workspace("globex", globexId)
+        every { grants.revoke(any(), any()) } returns true
+
+        val refusal = shouldThrow<DatapipelinesException> { controller.revoke(ExtendedModelMap(), "lake", "globex") }
+
+        refusal.code shouldBe DatasourceErrorCodes.MANAGED
+        verify(exactly = 0) { grants.revoke(any(), any()) }
+        verify(exactly = 0) { auditLogger.log(any(), any(), any(), any(), any(), any()) }
+    }
+
+    /** #823 — the dialog marks the managed row so the template draws no button for it (a screen offers only what the server allows). */
+    @Test
+    fun `the dialog flags the managed datasource so the template can withhold the revoke button (#823)`() {
+        authenticate()
+        every { datasources.get("lake") } returns managedLake()
+        every { grants.grantsOf("lake") } returns listOf(DatasourceGrant("lake", acmeId, "acme", userId, Instant.EPOCH))
+        every { actorNames.lookup(listOf(userId)) } returns mapOf(userId to "System")
+        every { workspaces.listOwn(any()) } returns listOf(membership("acme", acmeId))
+        val managedModel = ExtendedModelMap()
+
+        controller.dialog(managedModel, "lake") shouldBe "partials/datasource-grants"
+
+        managedModel["isManaged"] shouldBe true
+
+        every { datasources.get("pg-prod") } returns datasource(owner = null, ownerName = null)
+        every { grants.grantsOf("pg-prod") } returns listOf(grant("acme", acmeId))
+        every { actorNames.lookup(listOf(userId)) } returns mapOf(userId to "Muhammad")
+        val ordinaryModel = ExtendedModelMap()
+
+        controller.dialog(ordinaryModel, "pg-prod")
+
+        ordinaryModel["isManaged"] shouldBe false
+    }
+
+    /**
      * A name that exists on no instance row is the dialog's inline refusal, not a 500 and not
      * an empty dialog. `DatasourceRegistry.get` is the UNFILTERED read here on purpose — a
      * super admin grants datasources their own workspace has never been granted, which is the
@@ -202,6 +250,16 @@ class DatasourceGrantsPartialControllerTest {
         ownerWorkspaceId = owner,
         workspaceName = ownerName,
     )
+
+    private fun managedLake() =
+        Datasource(
+            name = "lake",
+            displayName = "Managed lake",
+            dialect = Dialect.LAKE,
+            jdbcUrl = "jdbc:duckdb::memory:",
+            properties = DatasourceProperties(dialect = mapOf("catalog.kind" to "s3", MANAGED_DIALECT_KEY to "true")),
+            isReadonly = true,
+        )
 
     private fun grant(
         workspace: String,
