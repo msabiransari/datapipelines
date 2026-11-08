@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries, Publication and Reads
 
-**Status:** v1.16 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling)
+**Status:** v1.17 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -398,11 +398,20 @@ is discarded; once it has ended (`lake.settle.metadata_read_ended`, `cause=aband
 again from its first byte.
 
 A tick cannot promise more than this. Against a stalled PostgreSQL every statement it started runs to its timeout;
-a connection checkout is bounded by the metadata pool's `connection-timeout` (10 s since #837), and a commit by the
-pool's and driver's settings. Against a server that accepts and never answers, a timeout's cancel does not end the
-blocked read, and the other four jobs on this thread end such a statement at its bound plus the driver's 10 s cancel wait, through a socket bound (#837); this tick's
-statements are built in this module and do not carry one yet, so against that server a statement here has no
-wall-clock bound (#858). A healthy tick still reads the store once per table for the semantics repair's version check.
+a connection checkout is bounded by the metadata pool's `connection-timeout` (10 s since #837). Against a server that
+accepts and never answers, a timeout's cancel does not end the blocked read: the cancel is a second connection that
+server never reads. So every statement the runtime's template sends also carries a socket bound, like the other four
+jobs' on this thread (#837, #858): before each statement the template sets its connection's network timeout to the
+statement's 5 s plus 5 s. Against that server the statement ends with SQLState `08006` at the later of those 10 s and
+its 5 s plus the driver's cancel wait (pgjdbc's `cancelSignalTimeout`, 10 s by default): **15 s after it began**,
+observed on the real tick (`LakeSettlementMetadataBoundsE2eTest`), which then logs `lake.settle.sweep_deferred`. Inside
+one of the runtime's five-second transactions the connection keeps that bound until it goes back to the pool, which
+restores its own value, so the transaction's later statements, its joined audit row and its commit or rollback read
+under it too. The limit assumes two things: that the driver honours the network timeout (one that refuses it fails the
+statement rather than running it unbounded), and the driver's default cancel wait (a longer `cancelSignalTimeout`
+moves the 15 s with it). The 16 and 31 seconds above hold with PostgreSQL answering; against a server that has
+stopped, these per-statement and checkout bounds are what holds. A healthy tick still reads the store once per table
+for the semantics repair's version check.
 
 The row cursor passes over live, busy and failing deliveries and wraps when a page comes back short, so deliveries
 behind them are reached on a later tick. Cursors are held in memory; after a restart each table starts again at its
@@ -523,6 +532,7 @@ is an error. The same loss applies when the full protection-window deadline is r
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-08 | v1.17 | 858 (#858) | §8: the settlement tick's statements carry a socket bound (5 s + 5 s) through the runtime's own template, so against a server that accepts and never answers a statement ends with `08006` at max(10, 5 + 10) = 15 s; the exception for this tick is gone, and the paragraph states the limit's two assumptions and that a transaction's later statements and commit read under the bound. The conditional 16 s overrun and 31 s tick are unchanged. |
 | 2026-11-08 | v1.16 | 833 (#824) managed retire ceiling | §9 "The bound.": the staleness rule's ceiling term is the managed retire ceiling (`managed-retire-ceiling-seconds`, else `node-query-timeout-max-seconds` + 30); shipped 900 + 14 + 930 + 60 = 1904 ≤ 25 200 s. |
 | 2026-11-08 | v1.15 | 851 (#851) | §8: an abandoned metadata read stops itself at its next chunk, or after the store's 10-second socket timeout; the read is capped at 64 MiB of JSON after decompression; the trickle is no longer unbounded. |
 | 2026-11-07 | v1.14 | 837 (#837) | §8: the sentence on what a tick cannot promise states the connection checkout's bound (10 s) and that the other jobs on `dp-scheduled` end a statement against an unresponsive server at a socket bound while this tick's statements do not yet (#858). |
