@@ -645,6 +645,7 @@ class ManagedLakeEgressProxyE2eTest {
                 "datapipelines.lake.reads.max-generation-age-seconds" to "900",
                 "datapipelines.lake.reads.freshness-tick-seconds" to "600",
                 "datapipelines.datasources.retire-ceiling-seconds" to "1",
+                "datapipelines.datasources.managed-retire-ceiling-seconds" to "1",
                 // The ceiling that puts MAX_AGE_SECONDS on LakeRules' floor, and the keys bounded by it.
                 "datapipelines.executor.node-query-timeout-max-seconds" to CEILING_SECONDS.toString(),
                 "datapipelines.executor.node-query-timeout-seconds" to CEILING_SECONDS.toString(),
