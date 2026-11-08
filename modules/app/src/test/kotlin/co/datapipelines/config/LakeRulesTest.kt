@@ -31,8 +31,11 @@ class LakeRulesTest {
     fun `every key has a shipped default, and a disabled lake is never judged`() {
         shipped.filterValues { it == null }.keys shouldContainExactly emptyList()
         violations(emptyMap()) shouldContainExactly emptyList()
-        // Disabled with nonsense everywhere: still nothing — a deployment without a lake is not refused for its keys.
-        violations(LakeRules.KEYS.filter { it != LakeRules.ENABLED }.associateWith { "nonsense" }) shouldContainExactly emptyList()
+        // Disabled with nonsense everywhere: still nothing — a deployment without a lake is not refused for its
+        // keys. The three DuckDB staging inputs are the #804 exception (staging consumes them with or without a
+        // lake), so they keep their shipped defaults here and have their own cases below.
+        val unconsumed = LakeRules.KEYS.filter { it !in LakeRules.STAGING_ADMISSION_KEYS && it != LakeRules.ENABLED }
+        violations(unconsumed.associateWith { "nonsense" }) shouldContainExactly emptyList()
     }
 
     @Test
@@ -121,6 +124,90 @@ class LakeRulesTest {
         enabled(LakeRules.MAINTENANCE_WINDOW to "22:30-01:15") shouldContainExactly emptyList()
         // A statement timeout of zero fails positivity, and nothing downstream divides by it.
         enabled(LakeRules.STATEMENT_TIMEOUT_SECONDS to "0") shouldHaveSize 1
+    }
+
+    /**
+     * #804 — the DuckDB staging admission is judged with the lake DISABLED, at every boundary:
+     * DuckDB's 1 MiB memory floor (exactly 1 MiB in, one byte below out), the one-reservation rule
+     * (`scratch ≥ memory × factor`; exactly one reservation in, one byte below out), and positivity.
+     * Before #804 the same lake-less deployments met only `DuckDbStagingProperties`' bare
+     * `IllegalArgumentException` at bean construction, and the reservation had no check at all.
+     */
+    @Test
+    fun `804 - the staging admission is judged with the lake disabled, at every boundary`() {
+        // The memory floor: 1 MiB exactly is admitted, 1048575 bytes and the issue's 512KB refuse.
+        violations(mapOf(LakeRules.STAGING_MEMORY_LIMIT to "1048576B")) shouldContainExactly emptyList()
+        violations(mapOf(LakeRules.STAGING_MEMORY_LIMIT to "1048575B")).single().let {
+            it shouldStartWith LakeRules.STAGING_MEMORY_LIMIT
+            it shouldContain "at least 1 MiB"
+        }
+        violations(mapOf(LakeRules.STAGING_MEMORY_LIMIT to "512KB")).single().let {
+            it shouldStartWith LakeRules.STAGING_MEMORY_LIMIT
+            it shouldContain "at least 1 MiB"
+        }
+        // One default reservation, shipped 1GB × 3 = 3GB: exactly one reservation in, one byte below out.
+        violations(mapOf(LakeRules.SCRATCH_BYTES to "3221225472B")) shouldContainExactly emptyList()
+        violations(mapOf(LakeRules.SCRATCH_BYTES to "3221225471B")).single().let {
+            it shouldStartWith LakeRules.SCRATCH_BYTES
+            it shouldContain "one DuckDB staging reservation"
+        }
+        // Positivity, judged without a lake too.
+        violations(mapOf(LakeRules.STAGING_EXPANSION_FACTOR to "0")).single() shouldStartWith LakeRules.STAGING_EXPANSION_FACTOR
+        violations(mapOf(LakeRules.STAGING_EXPANSION_FACTOR to "soon")).single() shouldStartWith LakeRules.STAGING_EXPANSION_FACTOR
+        violations(mapOf(LakeRules.SCRATCH_BYTES to "0")).single() shouldStartWith LakeRules.SCRATCH_BYTES
+        violations(mapOf(LakeRules.STAGING_MEMORY_LIMIT to "-1")).single() shouldStartWith LakeRules.STAGING_MEMORY_LIMIT
+    }
+
+    /**
+     * #804 — the reservation bound cannot overflow: the memory sits at `Long.MAX_VALUE` with factor 3,
+     * where a naive `memory × factor` wraps around and would admit the configuration. The delivered
+     * shape divides the scratch by the factor (the delivery bound's shape), which cannot wrap.
+     */
+    @Test
+    fun `804 - the reservation rule cannot overflow the memory times the factor`() {
+        val overflow =
+            violations(
+                mapOf(
+                    LakeRules.STAGING_MEMORY_LIMIT to "9223372036854775807B",
+                    LakeRules.SCRATCH_BYTES to "20GB",
+                ),
+            )
+        overflow.single() shouldStartWith LakeRules.SCRATCH_BYTES
+    }
+
+    /** #804 — a malformed staging key is named ONCE, enabled or not; the delivery bound re-reads it silently. */
+    @Test
+    fun `804 - a malformed staging key is named exactly once, and the lake keys it does not use stay ungated`() {
+        // Disabled: exactly one refusal, from the always-on check.
+        violations(mapOf(LakeRules.SCRATCH_BYTES to "lots")) shouldHaveSize 1
+        // Enabled: the same key is still named exactly once — the delivery bound re-reads it silently (#804).
+        enabled(LakeRules.SCRATCH_BYTES to "lots") shouldHaveSize 1
+        enabled(LakeRules.SCRATCH_BYTES to "lots").single() shouldStartWith LakeRules.SCRATCH_BYTES
+        // A malformed factor is named once, not twice — the delivery bound re-reads it silently (#804).
+        enabled(LakeRules.STAGING_EXPANSION_FACTOR to "0") shouldHaveSize 1
+        // Likewise a zero scratch alongside a valid delivery: one refusal, and no second from the bound.
+        enabled(LakeRules.SCRATCH_BYTES to "0", LakeRules.MAX_DELIVERY_BYTES to "7GB") shouldHaveSize 1
+
+        // The lake-specific keys stay enabled-gated: with the lake off and the staging inputs valid,
+        // nonsense storage and retention is still no violation — and with the staging inputs broken,
+        // the refusal names ONLY the staging inputs.
+        violations(
+            mapOf(
+                LakeRules.BUCKET to "",
+                LakeRules.PROTECTION_DAYS to "0",
+                LakeRules.STAGING_MEMORY_LIMIT to "1048576B",
+            ),
+        ) shouldContainExactly emptyList()
+        val mixed =
+            violations(
+                mapOf(
+                    LakeRules.BUCKET to "",
+                    LakeRules.PROTECTION_DAYS to "0",
+                    LakeRules.STAGING_MEMORY_LIMIT to "512KB",
+                ),
+            )
+        mixed shouldHaveSize 1
+        mixed.single() shouldStartWith LakeRules.STAGING_MEMORY_LIMIT
     }
 
     @Test
