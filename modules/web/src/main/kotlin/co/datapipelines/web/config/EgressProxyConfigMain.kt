@@ -80,37 +80,6 @@ object EgressProxyConfigMain {
         maxAgeSeconds: Long,
         target: EgressStoreTarget.Target?,
     ): String {
-        val connectionManager =
-            mapOf(
-                "@type" to "type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager",
-                "stat_prefix" to "egress",
-                "common_http_protocol_options" to
-                    mapOf(
-                        "max_connection_duration" to "${maxAgeSeconds}s",
-                        "max_stream_duration" to "${maxAgeSeconds}s",
-                    ),
-                "upgrade_configs" to listOf(mapOf("upgrade_type" to "CONNECT")),
-                "route_config" to
-                    mapOf(
-                        "name" to "egress",
-                        "virtual_hosts" to listOfNotNull(target?.let { storeVhost(it, maxAgeSeconds) }, denyVhost(maxAgeSeconds)),
-                    ),
-                "http_filters" to
-                    listOf(
-                        mapOf(
-                            "name" to "envoy.filters.http.dynamic_forward_proxy",
-                            "typed_config" to
-                                mapOf(
-                                    "@type" to "type.googleapis.com/envoy.extensions.filters.http.dynamic_forward_proxy.v3.FilterConfig",
-                                    "dns_cache_config" to DNS_CACHE,
-                                ),
-                        ),
-                        mapOf(
-                            "name" to "envoy.filters.http.router",
-                            "typed_config" to mapOf("@type" to "type.googleapis.com/envoy.extensions.filters.http.router.v3.Router"),
-                        ),
-                    ),
-            )
         val config =
             mapOf(
                 "static_resources" to
@@ -127,7 +96,7 @@ object EgressProxyConfigMain {
                                                     listOf(
                                                         mapOf(
                                                             "name" to "envoy.filters.network.http_connection_manager",
-                                                            "typed_config" to connectionManager,
+                                                            "typed_config" to connectionManager(maxAgeSeconds, target),
                                                         ),
                                                     ),
                                             ),
@@ -135,25 +104,63 @@ object EgressProxyConfigMain {
                                 ),
                             ),
                         "clusters" to
-                            listOf(
-                                mapOf(
-                                    "name" to FORWARD_CLUSTER,
-                                    "lb_policy" to "CLUSTER_PROVIDED",
-                                    "cluster_type" to
-                                        mapOf(
-                                            "name" to "envoy.clusters.dynamic_forward_proxy",
-                                            "typed_config" to
-                                                mapOf(
-                                                    "@type" to FORWARD_CLUSTER_TYPE,
-                                                    "dns_cache_config" to DNS_CACHE,
-                                                ),
-                                        ),
-                                ),
-                            ),
+                            listOf(forwardCluster()),
                     ),
             )
         return WRITER.writeValueAsString(config) + "\n"
     }
+
+    /** The HTTP connection manager: the max-age caps, CONNECT upgrades, the store and deny virtual hosts, the filters. */
+    private fun connectionManager(
+        maxAgeSeconds: Long,
+        target: EgressStoreTarget.Target?,
+    ): Map<String, Any> =
+        mapOf(
+            "@type" to "type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager",
+            "stat_prefix" to "egress",
+            "common_http_protocol_options" to
+                mapOf(
+                    "max_connection_duration" to "${maxAgeSeconds}s",
+                    "max_stream_duration" to "${maxAgeSeconds}s",
+                ),
+            "upgrade_configs" to listOf(mapOf("upgrade_type" to "CONNECT")),
+            "route_config" to
+                mapOf(
+                    "name" to "egress",
+                    "virtual_hosts" to listOfNotNull(target?.let { storeVhost(it, maxAgeSeconds) }, denyVhost(maxAgeSeconds)),
+                ),
+            "http_filters" to
+                listOf(
+                    mapOf(
+                        "name" to "envoy.filters.http.dynamic_forward_proxy",
+                        "typed_config" to
+                            mapOf(
+                                "@type" to "type.googleapis.com/envoy.extensions.filters.http.dynamic_forward_proxy.v3.FilterConfig",
+                                "dns_cache_config" to DNS_CACHE,
+                            ),
+                    ),
+                    mapOf(
+                        "name" to "envoy.filters.http.router",
+                        "typed_config" to mapOf("@type" to "type.googleapis.com/envoy.extensions.filters.http.router.v3.Router"),
+                    ),
+                ),
+        )
+
+    /** The one dynamic-forward-proxy cluster every allowed request leaves through (DNS resolved by Envoy). */
+    private fun forwardCluster(): Map<String, Any> =
+        mapOf(
+            "name" to FORWARD_CLUSTER,
+            "lb_policy" to "CLUSTER_PROVIDED",
+            "cluster_type" to
+                mapOf(
+                    "name" to "envoy.clusters.dynamic_forward_proxy",
+                    "typed_config" to
+                        mapOf(
+                            "@type" to FORWARD_CLUSTER_TYPE,
+                            "dns_cache_config" to DNS_CACHE,
+                        ),
+                ),
+        )
 
     /**
      * The `/dp-egress` declaration: header-gated (a path-style bucket literally named `dp-egress` is still forwarded)
@@ -209,8 +216,8 @@ object EgressProxyConfigMain {
             "routes" to
                 listOf(
                     declarationRoute(maxAgeSeconds),
-                    refusalRoute(mapOf("connect_matcher" to emptyMap<String, Any>()), "CONNECT to"),
-                    refusalRoute(mapOf("prefix" to "/"), "requests to"),
+                    refusalRoute(mapOf("connect_matcher" to emptyMap<String, Any>()), "a CONNECT to"),
+                    refusalRoute(mapOf("prefix" to "/"), "a request to"),
                 ),
         )
 
