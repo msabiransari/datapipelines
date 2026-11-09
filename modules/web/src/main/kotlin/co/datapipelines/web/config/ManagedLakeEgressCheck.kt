@@ -32,9 +32,9 @@ import java.util.concurrent.TimeoutException
  *    a bucket literally named `dp-egress` is still forwarded to the store.
  * 2. **The store through the proxy.** `HEAD` of the bucket, addressed the way DuckDB addresses it —
  *    [EgressStoreTarget]'s one derivation (probe A, lane 862: a blank endpoint resolves to the REGIONAL
- *    `s3.<region>.amazonaws.com`, default region us-east-1; the endpoint's scheme decides TLS; path or virtual-host
- *    style) — sent through the proxy: an `https` store is a `CONNECT` tunnel, a plain-http one an absolute-form
- *    request.
+ *    `s3.<region>.<partition DNS suffix>`, default region us-east-1; the endpoint's scheme decides TLS; path or
+ *    virtual-host style) — sent through the proxy: an `https` store is a `CONNECT` tunnel, a plain-http one an
+ *    absolute-form request.
  *    Unsigned on purpose — nothing but the HEAD leaves, and any answer FROM the store (`403` included) proves the
  *    path. Refused when the exchange fails (connect, tunnel, timeout); when the answer carries the proxy's refusal
  *    marker (`x-dp-egress-refused`, #862: the proxy's allowlist names another authority — its 403 is the proxy's,
@@ -125,8 +125,8 @@ object ManagedLakeEgressCheck {
 
     /**
      * The bucket as DuckDB addresses it for this storage configuration — [EgressStoreTarget]'s ONE derivation
-     * (probe A, lane 862: the blank-endpoint case resolves to the REGIONAL `s3.<region>.amazonaws.com` the engine
-     * dials, default region us-east-1; the class KDoc's step 2), so the probe cannot succeed while the engine
+     * (probe A, lane 862: the blank-endpoint case resolves to the REGIONAL `s3.<region>.<partition DNS suffix>`,
+     * default region us-east-1; the class KDoc's step 2), so the probe cannot succeed while the engine
      * dials a host the proxy refuses.
      */
     internal fun storeProbeUri(storage: LakeProperties.Storage): URI =
