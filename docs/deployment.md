@@ -209,19 +209,38 @@ The app must reach:
   that resets every object-store stream at `datapipelines.lake.reads.egress-max-age-seconds`, so a store that
   trickles cannot hold a reader forever ([Lake §9](lake.md#9-reads); keys in
   [Configuration §3.36](configuration.md#336-managed-lake-dp-lake-785)). Since #862 the shipped proxy's config is
-  an ALLOWLIST, not just a cap: it forwards only to the store authority derived from the same five non-secret lake
-  values the app reads (bucket host forms, and the regional DNS forms of an explicit endpoint or the endpoint the
-  region implies), and answers 403 to every other authority — CONNECT or absolute-form GET — before contacting any
-  upstream. Both compose and the chart render that config with one deterministic JVM main
-  (`EgressProxyConfigMain`) reading exactly those five `DATAPIPELINES_LAKE_*` env names plus the max-age — the
-  renderer refuses to emit a config on a missing or invalid input (fail-closed), and with the lake disabled it
-  renders a deny-only config. The chart's app deployment refuses the four `DATAPIPELINES_LAKE_STORAGE_*` alias
-  names while the proxy is enabled: one spelling, one reader. Mechanics: §6.2 (compose) and §6.4 (chart). It
-  publishes no port and holds no
+  an ALLOWLIST, not just a cap: it forwards only to ONE store authority — the exact `host[:port]` DuckDB puts on
+  the wire for the five non-secret lake values the app reads (`EgressStoreTarget`, the same derivation the managed
+  datasource's engine settings and the boot probe use). In virtual-host style the bucket prefixes the host (a
+  dotted bucket included); an `https://` store is `host:443` (the CONNECT line always carries the port); a
+  declared default port is dropped as the engine drops it (`http://minio:80` is the bare `minio`); a blank endpoint
+  is the regional `s3.<region>.<partition DNS suffix>` of the aws, aws-cn (`amazonaws.com.cn`) or aws-us-gov
+  partition, and any other region is refused rather than guessed. Every other authority — another host, a
+  suffix or prefix of the store's name, the store's host on another port, an IP literal, a trailing dot, a
+  leading-zero port, CONNECT or absolute-form GET alike — gets the proxy's own 403, stamped
+  `x-dp-egress-refused: store-allowlist`, before any DNS lookup or connect (a form Envoy's HTTP parser refuses
+  outright — a port past 65535, a percent-encoded host, CONNECT without a port or with userinfo — gets a 400
+  instead, equally unforwarded); the proxy strips that header from every store answer, so the app's boot check
+  tells the two 403s apart. `ManagedLakeEgressAllowlistE2eTest` runs this matrix against the shipped image with
+  recording destinations: no forbidden destination accepts a connection. The absolute-form URL decides the
+  destination: a conflicting or duplicated `Host` header or a destination-override header (`X-Forwarded-Host`,
+  `Forwarded`, `x-envoy-original-dst-host`) cannot redirect a request, a store's redirect is passed back to the client, never
+  followed, and the `/dp-egress` declaration is answered by the proxy itself on any authority, never forwarded.
+  Two forms reach the SAME store and are therefore admitted: a different letter case of the store's name, and
+  userinfo on the store's own authority (Envoy drops it). Both compose and the chart render that config with one
+  deterministic JVM main (`EgressProxyConfigMain`) reading exactly those five `DATAPIPELINES_LAKE_*` env names plus
+  the max-age — the renderer refuses to emit a config on a missing or invalid input (fail-closed), and with the
+  lake disabled it renders a deny-only config. The chart's app deployment refuses the four
+  `DATAPIPELINES_LAKE_STORAGE_*` alias names while the proxy is enabled: one spelling, one reader. Mechanics: §6.3
+  (compose) and §6.4 (chart). An allowlist names a HOST, not an address: the proxy resolves the store's name
+  itself, so it trusts the DNS answer for that one name — restrict the proxy pod's sockets with the chart's
+  `storeEgress` (§6.4) or your own network policy; the allowlist does not replace it. The proxy writes no access
+  log (a request's SigV4 headers never land in one). It publishes no port and holds no
   credential: S3 signing stays in DuckDB. For an `https://` store it sees `CONNECT host:443`; for a plain-`http://`
   endpoint (a MinIO inside your network) it sees the signed requests in clear, which is acceptable only inside the
   deployment's network. Boot refuses with `lake.boot.egress_proxy` when the proxy does not answer, declares another
-  max-age, or cannot reach the store. A temporary accommodation until
+  max-age, cannot reach the store, or refuses the store itself (its stamped 403: the proxy's allowlist names another
+  authority than the app's — a lake value changed on one side only). A temporary accommodation until
   [duckdb-httpfs#519](https://github.com/duckdb/duckdb-httpfs/issues/519) lands.
 
 The app **does not** require inbound network access beyond the HTTP/MCP ports it serves.
@@ -497,10 +516,19 @@ is not shipped as text: an `egress-config` RENDERER service — the same app ima
 `PropertiesLauncher` main as the chart's renderer — runs once, reads the six `x-lake-render-env` names (the five
 non-secret `DATAPIPELINES_LAKE_*` store keys plus `DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS`, passed
 through with the same defaults the app receives — the audit's check 10 refuses a diverged default and check 11
-pins the renderer's inputs to exactly those six), writes `/etc/envoy/envoy.yaml` into a shared `egress-config`
-volume and exits; a missing or invalid input leaves the file unwritten and the renderer failing. `egress-proxy`
-mounts that volume read-only at `/etc/envoy` and is gated `depends_on: service_completed_successfully`, so a
-failed render never reaches a running proxy. `helm-check.sh` pins the renderer wiring on both sides. The proxy
+pins the renderer's inputs to exactly those six), writes `/dp-egress-config/envoy.yaml` into a shared
+`egress-config` volume and exits; a missing or invalid input leaves the file unwritten and the renderer failing.
+The renderer runs as the app image's own non-root user (no `user:` override; the audit's check 12 refuses one, and
+requires the renderer's image to be the app's in both `compose.yml` and `compose.local-build.yml`): the image ships
+`/dp-egress-config` owned by that user, so a FRESH volume takes that ownership when the renderer first mounts it.
+`egress-proxy` mounts the volume read-only at `/etc/envoy` with `nocopy: true` (check 11 pins the long form) —
+without it, a proxy that happened to mount the empty volume first would copy its image's own root-owned
+`envoy.yaml` into it and the renderer could not overwrite it. A renderer that cannot write its file refuses with
+one `egress_config: cannot write /dp-egress-config/envoy.yaml (...)` line and exit 1; the volume was created by
+something else (a pre-release build that rendered as root, or a proxy mount without `nocopy`), and the recovery is to
+drop it — it holds nothing but the rendered file: `docker compose down`, `docker volume rm <project>_egress-config`,
+`docker compose up -d`. `egress-proxy` is gated
+`depends_on: service_completed_successfully`, so a failed render never reaches a running proxy. `helm-check.sh` pins the renderer wiring on both sides. The proxy
 still publishes no port and holds no credential, and the app is pointed at it
 with the literal `egress-proxy:3128`. The app waits for it to START, not to be healthy: the distroless image has no
 shell or HTTP client to run a healthcheck with, so the app's boot check is the readiness gate.
@@ -581,12 +609,21 @@ Reference Helm chart in `deploy/helm/`. Includes:
   (`egress-config-render`) — the same app image, run once through `PropertiesLauncher` with
   `-Dloader.main=...EgressProxyConfigMain` — writes the Envoy config into a shared `emptyDir`
   volume, and the Envoy container mounts it read-only at `/etc/envoy`. The renderer's inputs are
-  `lake.egressProxy.maxAgeSeconds` and the five `DATAPIPELINES_LAKE_*` names the operator
-  supplies through `extraEnv` (exact names; the four `DATAPIPELINES_LAKE_STORAGE_*` aliases and
-  the two egress env names are refused by the app Deployment's render while the proxy is
-  enabled). A changed render input rolls BOTH pods: the proxy
-  pod template carries a `checksum/egress-render-inputs` annotation over the same values the
-  app Deployment reads. A missing or invalid input fails the init container with a named
+  `lake.egressProxy.maxAgeSeconds` and the five `DATAPIPELINES_LAKE_*` names, resolved the way the
+  app's own environment resolves them: each name is taken from `extraEnv` when set there, else
+  from the key of the same name in `existingSecret` (one optional `secretKeyRef` per name — never
+  the whole Secret, so no credential reaches the renderer), else left unset (the renderer's
+  default or refusal). The app reads `existingSecret` through `envFrom` and `extraEnv` as `env`,
+  which wins, so both pods see the same five values; `helm-check.sh` simulates that resolution
+  for a Secret-only, an override, a partial and an empty case and, given the renderer jar, runs
+  the real renderer on both sides. Exact names only: the four `DATAPIPELINES_LAKE_STORAGE_*`
+  aliases and the two egress env names are refused in `extraEnv` while the proxy is enabled; an
+  alias held in the Secret reaches only the app, whose boot check then refuses the mismatch. A
+  changed render VALUE rolls BOTH pods: the proxy pod template carries a
+  `checksum/egress-render-inputs` annotation over the same values the app Deployment reads,
+  `existingSecret`'s NAME included. Helm cannot see a Secret's CONTENT: after changing a lake key
+  in the Secret, restart both (`kubectl rollout restart deployment/<release>-datapipelines
+  deployment/<release>-datapipelines-egress-proxy`). A missing or invalid input fails the init container with a named
   cause (`egress_config: ...` in its log), so the pod never starts Envoy on a partial config —
   fail-closed. With the lake disabled the renderer emits a deny-only config (the proxy still
   caps and refuses everything else), and the app's two env entries
@@ -652,7 +689,7 @@ pods; the egress proxy's own policy, below, is a separate object.
 default) selects only the proxy pods and leaves the app's policies untouched. Ingress: only the
 app pods (the app `Deployment`'s selector), only on TCP 3128 — the proxy holds no credential,
 so this rule is what limits who can use it. Since #862 the config itself is an allowlist — the
-proxy 403s every authority outside the derived store domains before contacting any upstream —
+proxy 403s every authority but the one derived store authority before contacting any upstream —
 so this policy is the second layer on the same premise: the config decides which authorities
 are answered at all, and the policy decides which sockets the proxy may open. Declare the
 store here too: `storeEgress.to` (a list of `NetworkPolicyPeer` objects, typically an `ipBlock` for the
@@ -986,7 +1023,9 @@ RUNNING proxy keeps its previous config in memory — compose does not cascade a
 recreation to its dependents (observed: `render` recreated and rerun while `egress-proxy`
 stayed up). Finish the change with `docker compose up -d --force-recreate egress-proxy` (or
 `--force-recreate` across all three services), and until then expect the boot check to refuse
-a changed max-age the proxy does not declare — fail-closed.
+a changed max-age the proxy does not declare, or a changed store the proxy's allowlist does not
+name (its stamped 403) — fail-closed. Under the CHART, a lake key changed inside `existingSecret`
+is invisible to Helm (no checksum moves): restart both deployments (§6.4).
 
 **Scheduler notification kinds (V51).**
 

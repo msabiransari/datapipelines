@@ -759,14 +759,14 @@ services:
   # PropertiesLauncher, the Dockerfile's JavaScriptResourcesMain precedent. Fail closed: a bad value refuses
   # with a nonzero exit before Envoy starts (`depends_on: service_completed_successfully` below refuses the
   # whole stack, not a proxy without an allowlist), and a disabled lake still renders the deny-only config —
-  # the proxy never renders a wildcard allowance. Root on purpose: a fresh named volume is root-owned, and the
-  # renderer must place envoy.yaml in it for the proxy's non-root user (the renderer writes it 0644); the
-  # hardening bounds that root — caps dropped, no-new-privileges, read-only root filesystem, tmpfs /tmp.
+  # the proxy never renders a wildcard allowance. It writes envoy.yaml 0644 for the proxy's non-root user, as
+  # the app image's own non-root user (below), with caps dropped, no-new-privileges, a read-only root
+  # filesystem and a tmpfs /tmp.
   egress-config:
     # The app's own image and its own non-root user (#862 review R4): the image's /dp-egress-config is owned by
     # that user, so this fresh named volume is too (Dockerfile; the proxy's mount below copies nothing). A volume
     # already holding a file this user cannot write is refused, exit 1, one egress_config line — deployment.md
-    # §6.4 names the `docker volume rm`. compose-env-audit.sh pins this image to the app service's, in both
+    # §6.3 names the `docker volume rm`. compose-env-audit.sh pins this image to the app service's, in both
     # files, and refuses a `user:` here.
     image: ghcr.io/datapipelines/datapipelines:1.0.0
     entrypoint:
@@ -801,8 +801,8 @@ services:
   # 2026-11-07) is gone with the inline config itself. After changing a lake value, recreate this service
   # explicitly (`docker compose up -d --force-recreate egress-proxy`): Compose reruns the renderer on plain
   # `up -d` but does NOT cascade the recreation to this dependent (observed on Docker 29.8.1), and a running
-  # Envoy never re-reads its config; until then the app's boot check refuses a mismatched declaration —
-  # fail-closed. scripts/helm-check.sh pins the chart's equivalent posture (checksum rolls both pods).
+  # Envoy never re-reads its config; until then the app's boot check refuses a mismatched declaration or the
+  # proxy's own refusal of a changed store — fail-closed. scripts/helm-check.sh pins the chart's equivalent posture (checksum rolls both pods).
   egress-proxy:
     image: envoyproxy/envoy:distroless-v1.40.2@sha256:09ca6f2140a61ad8df11779a4a30d52b48433d444466328494f9188c9c35eded
     # nocopy (#862 review R4): without it, Docker copies the Envoy image's own /etc/envoy (a root-owned
