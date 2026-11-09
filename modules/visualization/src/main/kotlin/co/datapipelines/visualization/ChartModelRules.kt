@@ -54,40 +54,44 @@ internal object ChartValues {
         if (d.isInfinite()) return if (d > 0) "Infinity" else "-Infinity"
         if (d == 0.0) return "0"
         val sign = if (d < 0) "-" else ""
-        val a = Math.abs(d)
-        var digits = ""
-        var scale = 0
+        val (digits, scale) = shortestDigits(Math.abs(d))
+        return sign + ecmaLayout(digits, scale)
+    }
+
+    /** The first k (1..17) HALF_EVEN-rounded significant digits of [a] whose double round-trips: ECMA's s and k. */
+    @Suppress("MagicNumber") // the digit search's 17 (ECMA's s bound: any double round-trips by 17 digits)
+    private fun shortestDigits(a: Double): Pair<String, Int> {
         for (k in 1..17) {
             val rounded = BigDecimal(a).round(MathContext(k, RoundingMode.HALF_EVEN))
-            if (rounded.toDouble() == a) {
-                digits = rounded.unscaledValue().toString()
-                scale = rounded.scale()
-                break
-            }
+            if (rounded.toDouble() == a) return rounded.unscaledValue().toString() to rounded.scale()
         }
+        return BigDecimal(a).toPlainString() to 0
+    }
+
+    /** ECMA-262 §6.1.6.1.20's step 8-10 layout: [digits] of length k with point position n = k - [scale]. */
+    @Suppress("MagicNumber") // the ECMA-262 layout bounds (21 and -6)
+    private fun ecmaLayout(digits: String, scale: Int): String {
         val k = digits.length
         val n = k - scale
-        val body =
-            when {
-                n in k..21 -> {
-                    digits + "0".repeat(n - k)
-                }
-
-                n in 1..21 -> {
-                    digits.substring(0, n) + "." + digits.substring(n)
-                }
-
-                n in -5..0 -> {
-                    "0." + "0".repeat(-n) + digits
-                }
-
-                else -> {
-                    val e = n - 1
-                    val mantissa = if (k == 1) digits else digits[0] + "." + digits.substring(1)
-                    mantissa + "e" + (if (e >= 0) "+" else "-") + Math.abs(e)
-                }
+        return when {
+            n in k..21 -> {
+                digits + "0".repeat(n - k)
             }
-        return sign + body
+
+            n in 1..21 -> {
+                digits.substring(0, n) + "." + digits.substring(n)
+            }
+
+            n in -5..0 -> {
+                "0." + "0".repeat(-n) + digits
+            }
+
+            else -> {
+                val e = n - 1
+                val mantissa = if (k == 1) digits else digits[0] + "." + digits.substring(1)
+                mantissa + "e" + (if (e >= 0) "+" else "-") + Math.abs(e)
+            }
+        }
     }
 }
 
