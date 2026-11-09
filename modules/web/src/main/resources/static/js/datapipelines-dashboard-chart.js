@@ -129,7 +129,23 @@
     return cps.length > limit ? cps.slice(0, limit - 1).join("") + "…" : String(s);
   }
 
-  /** 1-2-2.5-5 ticks covering lo..hi. */
+  // #860 R1 — tick generation is finite and bounded: a step or endpoint that leaves float64 (a domain at
+  // 1.7e308, an aggregate overflow) or an interval count past the cap falls back to the range's clamped
+  // endpoints, and the loop walks an INTEGER index, never a float accumulator (a float accumulator can
+  // overflow to Infinity mid-loop and never terminate, which hangs the whole render).
+  var FLOAT64_MAX = Number.MAX_VALUE;
+
+  /** The bounded fallback: the range clamped to float64's finite extremes, its two endpoints the only ticks. */
+  function boundedTicks(lo, hi) {
+    var a = Math.max(Math.min(lo, FLOAT64_MAX), -FLOAT64_MAX);
+    var b = Math.max(Math.min(hi, FLOAT64_MAX), -FLOAT64_MAX);
+    if (!(b > a)) b = a < FLOAT64_MAX ? Math.min(a + 1, FLOAT64_MAX) : a;
+    return { lo: a, hi: b, step: b - a, ticks: [a, b] };
+  }
+
+  /** 1-2-2.5-5 ticks covering lo..hi — at most [count] + [TICK_SLACK] intervals before the bounded fallback. */
+  var TICK_SLACK = 2;
+
   function niceTicks(lo, hi, count) {
     var n = count || 5;
     if (!(hi > lo)) hi = lo + 1;
@@ -142,10 +158,19 @@
       .find(function (s) {
         return s >= raw;
       });
+    if (typeof step !== "number" || !isFinite(step) || step <= 0) return boundedTicks(lo, hi);
     var a = Math.floor(lo / step + 1e-9) * step;
     var b = Math.ceil(hi / step - 1e-9) * step;
+    var intervals = Math.ceil((b - a) / step);
+    if (!isFinite(a) || !isFinite(b) || !isFinite(intervals) || intervals < 0 || intervals > n + TICK_SLACK) {
+      return boundedTicks(lo, hi);
+    }
     var ticks = [];
-    for (var v = a; v <= b + step / 2; v += step) ticks.push(Math.round(v / step) * step);
+    for (var i = 0; i <= intervals; i++) {
+      var v = Math.round((a + i * step) / step) * step;
+      if (!isFinite(v)) break;
+      ticks.push(v);
+    }
     return { lo: a, hi: b, step: step, ticks: ticks };
   }
 
@@ -388,9 +413,12 @@
       var sk = C ? keyOf(s) : "";
       if (!cats.has(bk)) cats.set(bk, { key: bk, raw: b, first: cats.size, full: temporal ? temporalLabel(b, band.enc.format) : String(b) });
       if (!sers.has(sk)) sers.set(sk, { key: sk, raw: s, first: sers.size, full: C ? String(s) : String(value.enc.field || "count") });
-      var g = bk + "\u0000" + sk;
-      if (!groups.has(g)) groups.set(g, []);
-      groups.get(g).push(V ? V[i] : 1);
+      // #860 R2 — a pair's identity is the (band, series) key PAIR, nested: a flat NUL-joined key collides
+      // when a category carries the NUL character itself, drawing one cell where the browser must draw two.
+      if (!groups.has(bk)) groups.set(bk, new Map());
+      var bySeries = groups.get(bk);
+      if (!bySeries.has(sk)) bySeries.set(sk, []);
+      bySeries.get(sk).push(V ? V[i] : 1);
     }
     if (droppedCat) warnings.push({ field: "rule.null-category", class: "data", message: droppedCat + " row(s) with a null category were not drawn." });
     if (droppedSer) warnings.push({ field: "rule.null-category", class: "data", message: droppedSer + " row(s) with a null series were not drawn." });
@@ -398,11 +426,16 @@
     var agg = value.enc.aggregate;
     var stack = color ? (value.enc.stack === undefined ? null : value.enc.stack) : undefined;
     var raw = new Map();
-    groups.forEach(function (vals, key) {
-      raw.set(key, aggregate(vals, agg, value.enc.field || "count"));
+    groups.forEach(function (bySeries, bk) {
+      var m = new Map();
+      bySeries.forEach(function (vals, sk) {
+        m.set(sk, aggregate(vals, agg, value.enc.field || "count"));
+      });
+      raw.set(bk, m);
     });
     var cell = function (c, s2) {
-      return raw.get(c.key + "\u0000" + s2.key) || { num: null, exact: null };
+      var g = raw.get(c.key);
+      return (g && g.get(s2.key)) || { num: null, exact: null };
     };
     var catTotal = function (c) {
       var t = null;
@@ -428,16 +461,22 @@
     var locale = tokens.locale;
     var normalize = stack === "normalize";
     var fmt = numberFormatter(normalize ? value.enc.format || "percent" : value.enc.format, locale);
+    // #860 R1 — a value float64 cannot carry (an aggregate past ±1.7e308, exact or float) draws as a gap,
+    // never a zero and never Infinity: the bar is not drawn and one data warning names the rule.
+    var undrawn = 0;
     var cells = series.map(function (s2) {
       return categories.map(function (c) {
         var r = cell(c, s2);
-        if (r.num === null) return { num: null, exact: null, text: "", aggregate: null };
+        if (r.num === null || !isFinite(r.num)) {
+          if (r.num !== null) undrawn++;
+          return { num: null, exact: null, text: "", aggregate: null };
+        }
         var text = r.exact !== null ? r.exact : String(r.num);
         if (normalize) {
           var abs = 0;
           for (var t = 0; t < series.length; t++) {
             var v = cell(c, series[t]).num;
-            if (v !== null) abs += Math.abs(v);
+            if (v !== null && isFinite(v)) abs += Math.abs(v);
           }
           var share = abs ? r.num / abs : 0;
           return { num: share, exact: null, text: fmt(share), aggregate: text };
@@ -445,6 +484,7 @@
         return { num: r.num, exact: r.exact, text: fmt(r.exact !== null ? r.exact : r.num), aggregate: text };
       });
     });
+    if (undrawn) warnings.push({ field: "rule.non-finite", class: "data", message: undrawn + " bar(s) exceeded the drawable range and were not drawn." });
     var markCount = 0;
     cells.forEach(function (row) {
       row.forEach(function (c) {
@@ -548,7 +588,7 @@
     };
     [
       "mark.type", "orientation", "category.field", "category.type", "category.sort", "value.aggregate",
-      "rule.null-measure", "rule.null-category", "rule.no-data", "rule.text-as-text", "rule.tooltip-content", "rule.long-labels",
+      "rule.null-measure", "rule.null-category", "rule.no-data", "rule.non-finite", "rule.text-as-text", "rule.tooltip-content", "rule.long-labels",
     ].forEach(add);
     var text = function (v) {
       return typeof v === "string";
@@ -767,6 +807,7 @@
   var WARNING_TEXT = {
     "chart.rule.no-data": "the chart has no rows to draw",
     "chart.rule.null-category": "rows with a null category or series were not drawn",
+    "chart.rule.non-finite": "a bar's value is too large to draw and was not drawn",
   };
 
   function renderWarnings(warnings) {

@@ -1,6 +1,7 @@
 {
- "_doc": "Lane 860 A.2b model parity corpus: ONE list both sides read. fixtures/<n>.json carry spec + bindings (the 854 D/web fixtures, copied); examples/<n> = chart-examples/valid/<n>.json (modules/visualization test resources) joined to fixtures/<n>.json's bindings; numeric/<n>.json are the record's section 4.1 cases, hand-written in the fixture shape, with an expect the Kotlin test asserts.",
+ "_doc": "Lane 860 A.2b model parity corpus: ONE list both sides read. fixtures/<n>.json carry spec + bindings (the 854 D/web fixtures, copied); examples/<n> = chart-examples/valid/<n>.json (modules/visualization test resources) joined to fixtures/<n>.json's bindings; numeric/<n>.json are the record's section 4.1 cases, hand-written in the fixture shape, with an expect the Kotlin test asserts. bar-aggregate-overflow (R1: an aggregate past float64 draws as a gap) and bar-nul-keys (R2: a NUL category must not collide the pair key) are 860b's additions, spec + bindings only.",
  "fixtures": [
+  "bar-aggregate-overflow",
   "bar-bigint",
   "bar-grouped",
   "bar-horizontal",
@@ -8,8 +9,9 @@
   "bar-markup",
   "bar-negatives",
   "bar-nodata",
-  "bar-normalized",
-  "bar-nulls",
+   "bar-normalized",
+   "bar-nul-keys",
+   "bar-nulls",
   "bar-single",
   "bar-stacked",
   "bar-utc-date",
@@ -24,11 +26,12 @@
   "bar-stacked",
   "bar-normalized"
  ],
- "numeric": [
-  "numeric-bigint-order",
-  "numeric-beyond-2-53",
-  "numeric-mean-thirds",
-  "numeric-exact-sign-grammar",
-  "numeric-mean-tie"
- ]
+  "numeric": [
+   "numeric-bigint-order",
+   "numeric-beyond-2-53",
+   "numeric-mean-thirds",
+   "numeric-exact-sign-grammar",
+   "numeric-mean-tie",
+   "numeric-shortest-digits"
+  ]
 }

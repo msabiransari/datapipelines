@@ -122,7 +122,14 @@ class ChartModel private constructor(
         private class Collected {
             val cats = LinkedHashMap<String, Item>()
             val sers = LinkedHashMap<String, Item>()
-            val groups = LinkedHashMap<String, MutableList<Any?>>()
+
+            /**
+             * A band's series' values — NESTED, so a pair's identity is the two keys' PAIR (860b R2): a flat
+             * NUL-joined key collides when a category carries the NUL character itself (the join of `"a"` + NUL +
+             * `"b"` reads like `"a"` + NUL + NUL + `"b"`'s pieces), and the collision draws one cell where the
+             * browser draws two.
+             */
+            val groups = LinkedHashMap<String, LinkedHashMap<String, MutableList<Any?>>>()
             var nullCategories = 0
             var nullSeries = 0
         }
@@ -133,8 +140,11 @@ class ChartModel private constructor(
                 ch.value.encoding
                     .path("aggregate")
                     .asText()
-            val raw = seen.groups.mapValues { (_, values) -> ChartAggregates.of(values, aggregate, valueField.orEmpty()) }
-            val cell = { c: Item, s: Item -> raw[groupKey(c.key, s.key)] ?: ChartAggregates.GAP }
+            val raw =
+                seen.groups.mapValues { (_, bySeries) ->
+                    bySeries.mapValues { (_, values) -> ChartAggregates.of(values, aggregate, valueField.orEmpty()) }
+                }
+            val cell = { c: Item, s: Item -> raw[c.key]?.get(s.key) ?: ChartAggregates.GAP }
             val categoryTotal = { c: Item ->
                 seen.sers.values
                     .mapNotNull { cell(c, it).num }
@@ -154,7 +164,9 @@ class ChartModel private constructor(
                 }
             val cells =
                 series.map { s ->
-                    categories.map { c -> drawn(cell(c, s), stack) { series.sumOf { t -> cell(c, t).num?.let(Math::abs) ?: 0.0 } } }
+                    categories.map { c ->
+                        drawn(cell(c, s), stack) { series.sumOf { t -> cell(c, t).num?.takeIf(Double::isFinite)?.let(Math::abs) ?: 0.0 } }
+                    }
                 }
             return ChartModel(ch.vertical, stack, categories, series, cells, seen.nullCategories, seen.nullSeries, colorField != null)
         }
@@ -182,22 +194,27 @@ class ChartModel private constructor(
                         seen.sers.getOrPut(sk) {
                             Item(sk, s, seen.sers.size, if (colorField != null) ChartValues.text(s) else valueField ?: "count")
                         }
-                        seen.groups.getOrPut(groupKey(bk, sk)) { mutableListOf() } +=
-                            if (valueField != null) wire(valueField, row[valueField]) else COUNT_UNIT
+                        seen.groups
+                            .getOrPut(bk) { LinkedHashMap() }
+                            .getOrPut(sk) { mutableListOf() } += if (valueField != null) wire(valueField, row[valueField]) else COUNT_UNIT
                     }
                 }
             }
             return seen
         }
 
-        /** A cell as drawn: a gap stays a gap; a normalized stack draws its share of the category's [absoluteTotal]. */
+        /**
+         * A cell as drawn: a gap stays a gap; a value float64 cannot carry (860b R1 — an aggregate past ±1.7e308, exact
+         * or float) draws nothing, the same gap the browser's core draws; a normalized stack draws its share of the
+         * category's [absoluteTotal].
+         */
         private fun drawn(
             r: ChartAggregates.Result,
             stack: String?,
             absoluteTotal: () -> Double,
         ): Cell =
             when {
-                r.num == null -> {
+                r.num == null || !r.num.isFinite() -> {
                     Cell(null, null, null)
                 }
 
@@ -210,11 +227,6 @@ class ChartModel private constructor(
                     Cell(r.num, r.exact, r.text)
                 }
             }
-
-        private fun groupKey(
-            band: String,
-            series: String,
-        ): String = "$band\u0000$series"
 
         /** A value as the runtime receives it: JSON numbers are float64; an exact column's numbers are their decimal string. */
         private fun wire(

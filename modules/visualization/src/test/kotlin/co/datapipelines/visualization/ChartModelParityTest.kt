@@ -123,9 +123,11 @@ class ChartModelParityTest {
 
         /**
          * The record's three §4.1 cases, the exact-category grammar case (the decimal grammar and the trim both sides
-         * share) and the mean's half-way tie (the only case that tells HALF-EVEN from UP or HALF-UP).
+         * share) and the mean's half-way tie (the only case that tells HALF-EVEN from UP or HALF-UP), plus 860b R4's
+         * shortest-digits case (a float category's text is the browser's: the smallest subnormal is `5e-324`, not the
+         * JDK's `4.9E-324`).
          */
-        const val NUMERIC_CASES = 5
+        const val NUMERIC_CASES = 6
 
         private val mapper = ArtifactJson.mapper
 

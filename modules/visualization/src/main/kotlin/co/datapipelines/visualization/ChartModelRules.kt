@@ -3,6 +3,7 @@ package co.datapipelines.visualization
 import co.datapipelines.typesystem.LogicalType
 import com.fasterxml.jackson.databind.JsonNode
 import java.math.BigDecimal
+import java.math.MathContext
 import java.math.RoundingMode
 
 /** A wire value's identity and text, as the browser's core reads them (`typeof v + ':' + String(v)`). */
@@ -36,20 +37,36 @@ internal object ChartValues {
         }
 
     /**
-     * ECMAScript `Number::toString` of [d] (ECMA-262 §6.1.6.1.20): the shortest round-tripping digits — the JDK's
-     * `Double.toString` digits (shortest since JDK 19) — laid out plainly from 1e-7 to below 1e21, exponentially
-     * outside (`1e+21`, `1e-7`). A category of `1.0` is the text `1`, as the browser draws it.
+     * ECMAScript `Number::toString` of [d] (ECMA-262 §6.1.6.1.20): the shortest round-tripping digits, laid out
+     * plainly from 1e-6 to below 1e21, exponentially outside (`1e+21`, `5e-324`). A category of `1.0` is the text
+     * `1`, as the browser draws it.
+     *
+     * The digits are ECMA's OWN search, not the JDK's: `Double.toString` is shortest since JDK 19 but DISAGREES
+     * with ECMA on subnormals — the JDK prints `MIN_VALUE` as `4.9E-324` where every browser prints `5e-324`
+     * (measured on Temurin 21 vs node 24, 860b R4). The search rounds the binary value's exact decimal expansion
+     * to k significant digits (HALF_EVEN — ECMA's tie rule) for k = 1..17 and takes the first k whose double
+     * round-trips; at that k the HALF_EVEN rounding is the closest k-digit decimal, ties to the even digit, which
+     * is ECMA's s.
      */
-    @Suppress("MagicNumber") // the ECMA-262 layout bounds (21 and -6)
+    @Suppress("MagicNumber") // the ECMA-262 layout bounds (21 and -6) and the digit search's 17
     fun number(d: Double): String {
         if (d.isNaN()) return "NaN"
         if (d.isInfinite()) return if (d > 0) "Infinity" else "-Infinity"
         if (d == 0.0) return "0"
         val sign = if (d < 0) "-" else ""
-        val exact = BigDecimal(java.lang.Double.toString(Math.abs(d))).stripTrailingZeros()
-        val digits = exact.unscaledValue().toString()
+        val a = Math.abs(d)
+        var digits = ""
+        var scale = 0
+        for (k in 1..17) {
+            val rounded = BigDecimal(a).round(MathContext(k, RoundingMode.HALF_EVEN))
+            if (rounded.toDouble() == a) {
+                digits = rounded.unscaledValue().toString()
+                scale = rounded.scale()
+                break
+            }
+        }
         val k = digits.length
-        val n = k - exact.scale()
+        val n = k - scale
         val body =
             when {
                 n in k..21 -> {

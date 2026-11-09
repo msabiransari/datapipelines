@@ -2451,3 +2451,99 @@ test("a renderer that THROWS from renderData instead of rejecting is render.fail
     uninstallDom();
   }
 });
+
+// #860 R3 — the empty draw is bounded by the same render deadline as a data draw: a renderEmpty that
+// never acknowledges drives the SAME error status + notification, and a deadline that fires after the
+// empty draw's refresh was superseded publishes nothing (the ownership guard).
+
+test("a hung renderEmpty hits the render deadline and reports error with the render code, drawn once per refresh", async () => {
+  const calls = [];
+  const hungAdapter = scriptedAdapter({
+    mountVisualization: () =>
+      Promise.resolve({
+        renderData: () => {
+          calls.push("renderData");
+          return Promise.resolve("rendered");
+        },
+        renderEmpty: () => {
+          calls.push("renderEmpty");
+          return new Promise(() => {}); // never settles — the deadline must
+        },
+      }),
+  });
+  hungAdapter.renderStatus = (occurrence, status) =>
+    hungAdapter.log.push("status:" + occurrence.name + ":" + status.state + (status.reason ? ":" + status.reason.code : ""));
+  const fetchImpl = fakeFetch();
+  fetchImpl.on("/runtime/visualizations", (url, init) => {
+    const refreshId = JSON.parse(init.body).refresh_id;
+    return fetchImpl.stream(
+      calls.includes("renderData")
+        ? [
+            fetchImpl.frame("visualization_status", { refresh_id: refreshId, name: "chart", type: "visualization", state: "no-data" }),
+            fetchImpl.frame("refresh_completed", { refresh_id: refreshId, status: "COMPLETED", targets: { chart: { outcome: "no-data" } } }),
+          ]
+        : [
+            fetchImpl.frame("visualization_data", { refresh_id: refreshId, name: "chart", type: "visualization", bindings: { x: [1] }, rows: 1, bytes: 4 }),
+          ],
+    );
+  });
+  const { instance } = await boot({ fetch: fetchImpl, adapter: hungAdapter, initOptions: { renderTimeoutMs: 30 } });
+  try {
+    await instance.refresh({ scope: "targets", targets: ["chart"] });
+    await settle();
+    assert.deepEqual(calls, ["renderData"], "refresh 1 drew data");
+    await instance.refresh({ scope: "targets", targets: ["chart"] });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.deepEqual(calls.filter((c) => c === "renderEmpty"), ["renderEmpty"], "the status frame drew the empty state once; the completion did not repeat it");
+    assert.ok(hungAdapter.log.includes("status:chart:no-data"), hungAdapter.log.join("|"));
+    assert.ok(hungAdapter.log.includes("status:chart:error:render.timeout"), "the deadline drove the render error: " + hungAdapter.log.join("|"));
+    assert.ok(hungAdapter.log.includes("notify:render.failed"), hungAdapter.log.join("|"));
+  } finally {
+    instance.dispose();
+  }
+});
+
+test("an empty draw whose deadline fires after its refresh was superseded publishes nothing", async () => {
+  const calls = [];
+  const hungAdapter = scriptedAdapter({
+    mountVisualization: () =>
+      Promise.resolve({
+        renderData: (ref, refreshId) => {
+          calls.push("renderData:" + refreshId);
+          return Promise.resolve("rendered");
+        },
+        renderEmpty: (ref, refreshId) => {
+          calls.push("renderEmpty:" + refreshId);
+          return new Promise(() => {}); // refresh 1's empty draw never settles
+        },
+      }),
+  });
+  const fetchImpl = fakeFetch();
+  fetchImpl.on("/runtime/visualizations", (url, init) => {
+    const refreshId = JSON.parse(init.body).refresh_id;
+    return fetchImpl.stream(
+      calls.length === 0
+        ? [
+            fetchImpl.frame("visualization_status", { refresh_id: refreshId, name: "chart", type: "visualization", state: "no-data" }),
+            fetchImpl.frame("refresh_completed", { refresh_id: refreshId, status: "COMPLETED", targets: { chart: { outcome: "no-data" } } }),
+          ]
+        : [
+            fetchImpl.frame("visualization_data", { refresh_id: refreshId, name: "chart", type: "visualization", bindings: { x: [2] }, rows: 1, bytes: 4 }),
+          ],
+    );
+  });
+  const { instance, adapter } = await boot({ fetch: fetchImpl, adapter: hungAdapter, initOptions: { renderTimeoutMs: 30 } });
+  try {
+    await instance.refresh({ scope: "targets", targets: ["chart"] });
+    await settle();
+    await instance.refresh({ scope: "targets", targets: ["chart"] });
+    await settle();
+    assert.ok(adapter.log.includes("status:chart:success"), "refresh 2 drew: " + adapter.log.join("|"));
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.ok(!adapter.log.includes("status:chart:error"), "the late deadline published nothing: " + adapter.log.join("|"));
+    assert.ok(!adapter.log.includes("notify:render.failed"), adapter.log.join("|"));
+    assert.ok(!adapter.log.includes("status:chart:no-data") || adapter.log.indexOf("status:chart:success") > adapter.log.indexOf("status:chart:no-data"), "success stands: " + adapter.log.join("|"));
+  } finally {
+    instance.dispose();
+  }
+});

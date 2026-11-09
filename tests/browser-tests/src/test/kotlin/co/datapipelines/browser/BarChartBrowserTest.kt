@@ -1,5 +1,8 @@
 package co.datapipelines.browser
 
+import com.google.gson.GsonBuilder
+import com.google.gson.JsonArray
+import com.google.gson.JsonObject
 import com.microsoft.playwright.Browser
 import com.microsoft.playwright.BrowserContext
 import com.microsoft.playwright.Page
@@ -10,6 +13,7 @@ import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Paths
@@ -294,6 +298,151 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
         } finally {
             agent.close()
         }
+    }
+
+    /**
+     * #860b R1 — an aggregate float64 cannot carry (1e308 + 1e308) draws as a GAP in a real browser: three bars drawn
+     * where four rows exist, the band ticks intact, and the value axis's ticks all finite. Read off the DOM Plotly drew,
+     * like every case above.
+     */
+    @Test
+    fun `an aggregate past float64 draws as a gap - three bars, finite value-axis ticks`() {
+        startTrace()
+        val root = ready("vbaroverflow")
+        val agent = newYorkContext()
+        try {
+            val fixture = overflowFixture()
+            val preview = open(agent, "$root/charts/overflow", fixture)
+            try {
+                assertDrawn(preview, fixture)
+                val ticks =
+                    preview.evaluate(
+                        "sel => Array.from(document.querySelectorAll(sel + ' .yaxislayer-above g.ytick text')).map(t => t.textContent)",
+                        CASE,
+                    ) as List<*>
+                withClue("the value axis's ticks are all finite: $ticks") {
+                    ticks.forEach { t -> (t as String) shouldNotContain "Infinity" }
+                    ticks.forEach { t -> (t as String) shouldNotContain "NaN" }
+                }
+            } finally {
+                preview.close()
+            }
+        } finally {
+            agent.close()
+        }
+    }
+
+    private fun overflowFixture(): ChartBrowserFixtures.Fixture {
+        val spec =
+            JsonObject().apply {
+                addProperty("display_name", "Overflow")
+                add(
+                    "renderer",
+                    JsonObject().apply {
+                        addProperty("kind", "chart")
+                        addProperty("version", "1")
+                    },
+                )
+                add(
+                    "inputs",
+                    JsonObject().apply {
+                        add(
+                            "sales",
+                            JsonObject().apply {
+                                add(
+                                    "columns",
+                                    JsonArray().apply {
+                                        add(
+                                            JsonObject().apply {
+                                                addProperty("name", "region")
+                                                addProperty("type", "STRING")
+                                                addProperty("nullable", false)
+                                            },
+                                        )
+                                        add(
+                                            JsonObject().apply {
+                                                addProperty("name", "channel")
+                                                addProperty("type", "STRING")
+                                                addProperty("nullable", false)
+                                            },
+                                        )
+                                        add(
+                                            JsonObject().apply {
+                                                addProperty("name", "amount")
+                                                addProperty("type", "DECIMAL")
+                                                addProperty("nullable", false)
+                                            },
+                                        )
+                                    },
+                                )
+                            },
+                        )
+                    },
+                )
+                add(
+                    "config",
+                    JsonObject().apply {
+                        add("mark", JsonObject().apply { addProperty("type", "bar") })
+                        add(
+                            "encoding",
+                            JsonObject().apply {
+                                add(
+                                    "x",
+                                    JsonObject().apply {
+                                        addProperty("field", "region")
+                                        addProperty("type", "nominal")
+                                        addProperty("sort", "ascending")
+                                        addProperty("title", "Region")
+                                    },
+                                )
+                                add(
+                                    "y",
+                                    JsonObject().apply {
+                                        addProperty("field", "amount")
+                                        addProperty("type", "quantitative")
+                                        addProperty("aggregate", "sum")
+                                        addProperty("stack", "zero")
+                                    },
+                                )
+                                add(
+                                    "color",
+                                    JsonObject().apply {
+                                        addProperty("field", "channel")
+                                        addProperty("type", "nominal")
+                                        addProperty("sort", "ascending")
+                                        addProperty("title", "Channel")
+                                    },
+                                )
+                            },
+                        )
+                        add("title", JsonObject().apply { addProperty("text", "Overflow") })
+                    },
+                )
+            }
+        val gson = GsonBuilder().serializeNulls().create()
+        val rows =
+            listOf(
+                mapOf("region" to "North", "channel" to "Online", "amount" to 1e308),
+                mapOf("region" to "North", "channel" to "Online", "amount" to 1e308),
+                mapOf("region" to "North", "channel" to "Retail", "amount" to 500),
+                mapOf("region" to "South", "channel" to "Online", "amount" to 400),
+                mapOf("region" to "South", "channel" to "Retail", "amount" to 300),
+            ).map { gson.toJsonTree(it).asJsonObject }
+        val expect =
+            JsonObject().apply {
+                addProperty("bars", 3)
+                add(
+                    "categories",
+                    JsonArray().apply {
+                        add("North")
+                        add("South")
+                    },
+                )
+                addProperty("vertical", true)
+                add("label_texts", JsonArray())
+                add("hover", JsonArray())
+            }
+        return ChartBrowserFixtures.Fixture("bar-aggregate-overflow", spec, rows, expect)
     }
 
     private fun recordMarkerAtLoad(agent: BrowserContext) {

@@ -426,3 +426,105 @@ test("the Plotly host side touches the declared instance ONLY through react, Plo
     uninstallDom();
   }
 });
+
+// #860 R1 — tick generation is finite and bounded. The first two domains are the ones the OLD generator
+// hung on (the padded top endpoint overflowed to Infinity, the loop never terminated); the negative and
+// subnormal ranges return real stepped ticks; an ordinary range is byte-for-byte the reference's.
+
+test("niceTicks terminates on the ranges float64 can barely carry and keeps ordinary ticks exact", () => {
+  const huge = chart.core.niceTicks(0, 1.7e308, 5);
+  assert.equal(huge.lo, 0);
+  assert.equal(huge.hi, 1.7e308);
+  assert.deepEqual(huge.ticks, [0, 1.7e308], "the bounded fallback: the range's two endpoints");
+  const max = chart.core.niceTicks(0, Number.MAX_VALUE, 5);
+  assert.deepEqual(max.ticks, [0, Number.MAX_VALUE]);
+  for (const t of max.ticks) assert.ok(Number.isFinite(t), "every tick is finite: " + t);
+  const span = chart.core.niceTicks(-1.7e308, 1.7e308, 5);
+  assert.ok(Number.isFinite(span.lo) && Number.isFinite(span.hi), "a finite range in, a finite range out");
+  assert.ok(span.ticks.length > 0 && span.ticks.every((t) => Number.isFinite(t)), JSON.stringify(span.ticks));
+  const tiny = chart.core.niceTicks(0, 5e-324, 5);
+  assert.ok(tiny.ticks.length > 0 && tiny.ticks.every((t) => Number.isFinite(t)), JSON.stringify(tiny.ticks));
+  const small = chart.core.niceTicks(0, 1e-310, 5);
+  assert.ok(small.ticks.length > 0 && small.ticks.every((t) => Number.isFinite(t)), JSON.stringify(small.ticks));
+  assert.deepEqual(chart.core.niceTicks(0, 10, 5).ticks, [0, 2, 4, 6, 8, 10], "ordinary range, unchanged");
+});
+
+test("a stacked cell beyond float64 draws as a gap with the rule.non-finite warning, never a zero, and the axis stays finite", () => {
+  const model = chart.core.model(
+    spec({
+      mark: { type: "bar" },
+      encoding: {
+        x: { field: "region", type: "nominal", sort: null },
+        y: { field: "amount", type: "quantitative", aggregate: "sum", stack: "zero" },
+        color: { field: "channel", type: "nominal", sort: null },
+      },
+    }),
+    { region: ["North", "North", "North", "South", "South"], channel: ["Online", "Online", "Retail", "Online", "Retail"], amount: [1e308, 1e308, 500, 400, 300] },
+    TOKENS,
+  );
+  assert.equal(model.categories.map((c) => c.full).join("|"), "North|South");
+  assert.equal(model.series.map((s) => s.full).join("|"), "Online|Retail");
+  assert.equal(model.cells[0][0].num, null, "1e308 + 1e308 past float64: a gap");
+  assert.equal(model.cells[0][0].aggregate, null);
+  assert.equal(model.cells[0][1].num, 400);
+  assert.equal(model.cells[1][0].num, 500);
+  assert.equal(model.cells[1][1].num, 300);
+  assert.equal(model.markCount, 3);
+  assert.ok(model.warnings.some((w) => w.field === "rule.non-finite" && w.class === "data"), JSON.stringify(model.warnings));
+  assert.ok(!model.warnings.some((w) => w.field === "rule.no-data"), "three marks draw: not no-data");
+  assert.ok(Number.isFinite(model.axis.lo) && Number.isFinite(model.axis.hi) && Number.isFinite(model.axis.step), JSON.stringify(model.axis));
+  assert.ok(model.axis.ticks.every((t) => Number.isFinite(t)) && model.axis.ticks.length <= 8, JSON.stringify(model.axis.ticks));
+  // A normalized stack skips the uncarriable cell when it shares the category out.
+  const normalized = chart.core.model(
+    spec({
+      mark: { type: "bar" },
+      encoding: {
+        x: { field: "region", type: "nominal", sort: null },
+        y: { field: "amount", type: "quantitative", aggregate: "sum", stack: "normalize" },
+        color: { field: "channel", type: "nominal", sort: null },
+      },
+    }),
+    { region: ["North", "North", "North"], channel: ["Online", "Online", "Retail"], amount: [1e308, 1e308, 500] },
+    TOKENS,
+  );
+  assert.equal(normalized.cells[0][0].num, null, "the uncarriable cell still gaps under normalize");
+  assert.equal(normalized.cells[1][0].num, 1, "the drawn cell shares the finite total alone");
+});
+
+test("a NUL category keeps its (category, series) pair distinct: no flat-key collision, all four cells drawn", () => {
+  const model = chart.core.model(
+    spec({
+      mark: { type: "bar" },
+      encoding: {
+        x: { field: "region", type: "nominal", sort: null },
+        y: { field: "amount", type: "quantitative", aggregate: "sum", stack: "zero" },
+        color: { field: "channel", type: "nominal", sort: null },
+      },
+    }),
+    // The components' own keys are prefixed ("string:a" etc.), so the flat join is ambiguous only
+    // when the separator appears inside a component's TEXT: ("a", "b\0string:c") and ("a\0string:b", "c")
+    // both flat-join to string:a\0string:b\0string:c — exactly the pairs that must stay distinct.
+    { region: ["a", "a\u0000string:b", "a", "a\u0000string:b"], channel: ["b\u0000string:c", "c", "c", "b\u0000string:c"], amount: [10, 20, 30, 40] },
+    TOKENS,
+  );
+  assert.deepEqual(model.categories.map((c) => c.full), ["a", "a\u0000string:b"]);
+  assert.deepEqual(model.series.map((s) => s.full), ["b\u0000string:c", "c"]);
+  assert.deepEqual(model.cells.map((row) => row.map((c) => c.num)), [[10, 40], [30, 20]], "each pair its own cell (cells[series][category]); the flat key merged 10 and 20 into 30");
+  assert.equal(model.markCount, 4);
+});
+
+test("an authored domain at float64's edge converts: the range is the authored endpoints, every tick finite", () => {
+  const option = convert(
+    spec({
+      mark: { type: "bar" },
+      encoding: {
+        x: { field: "region", type: "nominal", sort: null },
+        y: { field: "amount", type: "quantitative", aggregate: "sum", scale: { domain: [0, 1.7e308] } },
+      },
+    }),
+    { region: ["North", "South"], amount: [1, 2] },
+    TOKENS,
+  ).option;
+  assert.deepEqual(option.layout.yaxis.range, [0, 1.7e308]);
+  assert.ok(option.layout.yaxis.tickvals.every((t) => Number.isFinite(t)), JSON.stringify(option.layout.yaxis.tickvals));
+});

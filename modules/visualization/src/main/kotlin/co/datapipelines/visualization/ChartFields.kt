@@ -65,6 +65,7 @@ object BarFieldSet {
             "rule.null-measure",
             "rule.null-category",
             "rule.no-data",
+            "rule.non-finite",
             "rule.text-as-text",
             "rule.tooltip-content",
             "rule.long-labels",

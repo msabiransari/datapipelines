@@ -79,6 +79,18 @@ class ChartModelTest {
             123e25 to "1.23e+27",
             Double.NaN to "NaN",
             Double.NEGATIVE_INFINITY to "-Infinity",
+            // 860b R4 — every expected string below was measured from node's String() the day it was written.
+            // The first two are the JDK disagreement itself: Temurin 21's Double.toString prints the smallest
+            // subnormal 4.9E-324, every browser prints 5e-324; the shortest-digits search is ECMA's own.
+            Double.MIN_VALUE to "5e-324",
+            -5e-324 to "-5e-324",
+            1e23 to "1e+23",
+            0.001 to "0.001",
+            1e7 to "10000000",
+            3e-7 to "3e-7",
+            9007199254740992.0 to "9007199254740992",
+            Double.MAX_VALUE to "1.7976931348623157e+308",
+            2.2250738585072014e-308 to "2.2250738585072014e-308",
         ).forEach { (d, text) -> withClue(d) { ChartValues.number(d) shouldBe text } }
     }
 

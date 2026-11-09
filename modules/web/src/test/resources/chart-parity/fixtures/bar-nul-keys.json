@@ -1,0 +1,83 @@
+{
+ "variant": "nul-keys",
+ "note": "860b R2: pair identity is the (category, series) key PAIR, nested - with the components' own keys prefixed (string:a etc.) the flat join is ambiguous when the separator appears inside a component's text: ('a', 'b-NUL-string:c') and ('a-NUL-string:b', 'c') both flat-join to string:a-NUL-string:b-NUL-string:c and would merge into one cell.",
+ "spec": {
+  "display_name": "NUL category keys",
+  "description": "Amount by region, stacked by channel, categories and series carrying NUL characters.",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "region",
+      "type": "STRING"
+     },
+     {
+      "name": "channel",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "region",
+     "type": "nominal",
+     "sort": "ascending",
+     "title": "Region"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "stack": "zero",
+     "format": "compact",
+     "axis": {
+      "grid": true
+     }
+    },
+    "color": {
+     "field": "channel",
+     "type": "nominal",
+     "sort": "ascending",
+     "title": "Channel"
+    }
+   },
+   "title": {
+    "text": "Amount by region"
+   }
+  }
+ },
+ "bindings": {
+  "region": [
+   "a",
+   "a\u0000string:b",
+   "a",
+   "a\u0000string:b"
+  ],
+  "channel": [
+   "b\u0000string:c",
+   "c",
+   "c",
+   "b\u0000string:c"
+  ],
+  "amount": [
+   10.0,
+   20.0,
+   30.0,
+   40.0
+  ]
+ }
+}

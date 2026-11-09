@@ -1555,14 +1555,26 @@
     } catch (error) {
       emptied = Promise.reject(error);
     }
-    emptied.then(
+    // #860 R3 — the empty draw is a render like any other: the same render deadline bounds it, and a
+    // rejection or a timeout drives the SAME error status + notification a hung renderData drives —
+    // a never-acknowledging renderEmpty must not leave the card saying no-data while nothing drew.
+    withDeadline(emptied, this._renderTimeoutMs(), function () {
+      return self._fail("render.timeout", "the renderer did not acknowledge in time");
+    }).then(
       function (acknowledged) {
         if (self._disposed || !self._owns(name, refreshId)) return;
         var warnings = acknowledged && typeof acknowledged === "object" && Array.isArray(acknowledged.warnings) ? acknowledged.warnings : [];
         self._publishRenderWarnings(name, refreshId, warnings);
       },
-      function () {
+      function (error) {
         if (self._disposed || !self._owns(name, refreshId)) return;
+        var code = isDashboardError(error) ? error.code : "render.failed";
+        self._renderOccurrenceStatus(name, {
+          state: "error",
+          stale: false,
+          reason: { code: code },
+          refreshId: refreshId,
+        });
         self._publishNotification({
           scope: name,
           severity: "error",
