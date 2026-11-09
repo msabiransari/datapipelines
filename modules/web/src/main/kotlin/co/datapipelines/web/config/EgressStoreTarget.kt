@@ -12,9 +12,15 @@ import java.net.URI
  * The forms come from probe A (lane 862 evidence, DuckDB httpfs v1.5.5 driven through a recording proxy): a virtual
  * host style authority prefixes the bucket; an explicitly declared port travels verbatim; a CONNECT tunnel always
  * carries its port (an https store is therefore `host:443`); a plain-http store on its default port puts a BARE host
- * on the wire. A blank endpoint resolves to the REGIONAL `s3.<region>.amazonaws.com` (default region us-east-1),
- * byte-identical whether the engine picks it itself or the datasource declares it — the derivation emits it
- * explicitly so one form covers both.
+ * on the wire. A blank endpoint resolves to the REGIONAL `s3.<region>.<partition DNS suffix>` (default region
+ * us-east-1), and the derivation emits it explicitly to the engine too, so engine, boot probe and proxy share one form
+ * even where the engine's own blank-endpoint default would name another partition's host.
+ *
+ * The partition table is [PARTITIONS], copied from the AWS SDK's own partition metadata (primary source:
+ * `software/amazon/awssdk/regions/internal/region/endpoints.json` in `software.amazon.awssdk:regions:2.46.7`, the
+ * SDK this build pins): each partition's `regionRegex` and `dnsSuffix`, for the three partitions whose S3 regional
+ * endpoints are `s3.<region>.<dnsSuffix>`. A region outside them (an isolated partition, a typo, an alias such as
+ * `aws-global`) is refused with a request to declare the endpoint — never widened to a guessed or wildcard host.
  *
  * The domain list is exact, never wider than observed behavior: one form per configuration, no port aliases, so the
  * proxy's allowlist cannot admit a neighbor port a client would never dial.
@@ -34,6 +40,28 @@ object EgressStoreTarget {
 
     /** The RFC 1035/2396 host bound; a longer value cannot resolve the way the engine would dial it. */
     private const val MAX_HOST_LENGTH = 253
+
+    /**
+     * One AWS partition as the SDK's partition metadata names it: the regions it owns ([regionRegex], verbatim from
+     * `endpoints.json`) and the DNS suffix its S3 regional endpoints use.
+     */
+    internal data class Partition(
+        val name: String,
+        val regionRegex: Regex,
+        val dnsSuffix: String,
+    )
+
+    /**
+     * `endpoints.json` (AWS SDK 2.46.7) `partitions[].{partition, regionRegex, dnsSuffix}` for the partitions the
+     * blank-endpoint form supports. The regexes are disjoint (`us-gov-west-1` does not match the `aws` pattern:
+     * `\w` admits no `-`). Lane 862 evidence keeps the extraction command and its output.
+     */
+    internal val PARTITIONS =
+        listOf(
+            Partition("aws", Regex("^(us|eu|ap|sa|ca|me|af|il|mx)\\-\\w+\\-\\d+$"), "amazonaws.com"),
+            Partition("aws-cn", Regex("^cn\\-\\w+\\-\\d+$"), "amazonaws.com.cn"),
+            Partition("aws-us-gov", Regex("^us\\-gov\\-\\w+\\-\\d+$"), "amazonaws.com"),
+        )
 
     /**
      * The store as every consumer of one configuration addresses it.
@@ -61,7 +89,7 @@ object EgressStoreTarget {
         val trimmed = endpoint.trim().trimEnd('/')
         val (scheme, host, port) =
             when {
-                trimmed.isEmpty() -> Triple("https", "s3.$effectiveRegion.amazonaws.com", null)
+                trimmed.isEmpty() -> Triple("https", regionalAwsHost(effectiveRegion), null)
                 trimmed.startsWith("https://", ignoreCase = true) -> parseAuthority("https", trimmed.substring("https://".length))
                 trimmed.startsWith("http://", ignoreCase = true) -> parseAuthority("http", trimmed.substring("http://".length))
                 else -> error("the endpoint '$endpoint' carries no http:// or https:// scheme (§3.36)")
@@ -81,6 +109,21 @@ object EgressStoreTarget {
         return Target(listOf(authority), probeUri, "$scheme://$host$suffix", effectiveRegion)
     }
 
+    /**
+     * The S3 regional host for a blank endpoint: `s3.<region>.<dnsSuffix>` of the ONE partition whose region regex
+     * matches; any other region is refused rather than guessed (the engine would dial another partition's host).
+     */
+    private fun regionalAwsHost(region: String): String {
+        val partition =
+            PARTITIONS.singleOrNull { it.regionRegex.matches(region) }
+                ?: error(
+                    "the region '$region' is in none of the supported AWS partitions " +
+                        "(${PARTITIONS.joinToString { it.name }}), so a blank endpoint has no verified store host: " +
+                        "declare datapipelines.lake.storage.endpoint explicitly (§3.36)",
+                )
+        return "s3.$region.${partition.dnsSuffix}"
+    }
+
     /** Splits a scheme-stripped `host[:port]` tail; a bracketed literal or malformed port is refused. */
     private fun parseAuthority(
         scheme: String,
@@ -95,6 +138,9 @@ object EgressStoreTarget {
         if (port.isEmpty() || port.any { !it.isDigit() }) {
             error("the endpoint's ':$port' is not a port (§3.36)")
         }
+        // A leading zero is a second spelling of the same number: the engine puts the declared text on the wire, so
+        // the derived authority could not equal it — refused rather than normalized into a form nobody dials.
+        if (port.length > 1 && port.startsWith('0')) error("the endpoint's port ':$port' has a leading zero (§3.36)")
         val parsed = port.toInt()
         if (parsed !in 1..MAX_PORT) error("the endpoint's port $parsed is outside 1..65535 (§3.36)")
         return Triple(scheme, tail.substring(0, colon), parsed)

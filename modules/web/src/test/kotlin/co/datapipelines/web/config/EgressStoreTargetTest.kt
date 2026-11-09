@@ -119,4 +119,71 @@ class EgressStoreTargetTest {
             EgressStoreTarget.derive(endpoint = "http://minio:9000", region = "", bucket = "  ", pathStyle = true)
         }.message shouldContain "the bucket is empty"
     }
+
+    /**
+     * Review R3: a blank endpoint takes the DNS suffix of the region's AWS partition, as the SDK's partition metadata
+     * (`software.amazon.awssdk:regions:2.46.7`, `endpoints.json`) names it — `amazonaws.com.cn` for aws-cn — and the
+     * same derived host reaches the engine's secret, the boot probe and the proxy allowlist.
+     */
+    @Test
+    fun `a blank endpoint takes the region's partition DNS suffix - aws, aws-cn and aws-us-gov`() {
+        val china = EgressStoreTarget.derive(endpoint = "", region = "cn-north-1", bucket = "dp-lake", pathStyle = false)
+        china.domains shouldBe listOf("dp-lake.s3.cn-north-1.amazonaws.com.cn:443")
+        china.duckdbEndpoint shouldBe "https://s3.cn-north-1.amazonaws.com.cn"
+        china.probeUri shouldBe URI("https://dp-lake.s3.cn-north-1.amazonaws.com.cn/")
+        EgressStoreTarget.derive(endpoint = "", region = "cn-northwest-1", bucket = "b", pathStyle = true).domains shouldBe
+            listOf("s3.cn-northwest-1.amazonaws.com.cn:443")
+        EgressStoreTarget.derive(endpoint = "", region = "us-gov-west-1", bucket = "b", pathStyle = true).domains shouldBe
+            listOf("s3.us-gov-west-1.amazonaws.com:443")
+        EgressStoreTarget.derive(endpoint = "", region = "ap-southeast-7", bucket = "b", pathStyle = true).domains shouldBe
+            listOf("s3.ap-southeast-7.amazonaws.com:443")
+        EgressStoreTarget.derive(endpoint = "", region = "mx-central-1", bucket = "b", pathStyle = true).domains shouldBe
+            listOf("s3.mx-central-1.amazonaws.com:443")
+    }
+
+    @Test
+    fun `the partition table is the SDK's - one partition per region, the regexes disjoint`() {
+        EgressStoreTarget.PARTITIONS.map { it.name to it.dnsSuffix } shouldBe
+            listOf("aws" to "amazonaws.com", "aws-cn" to "amazonaws.com.cn", "aws-us-gov" to "amazonaws.com")
+        for (region in listOf("us-east-1", "eu-central-2", "cn-north-1", "us-gov-east-1", "il-central-1")) {
+            withClue(region) { EgressStoreTarget.PARTITIONS.count { it.regionRegex.matches(region) } shouldBe 1 }
+        }
+    }
+
+    @Test
+    fun `a region outside the supported partitions is refused with a blank endpoint - never a guessed host`() {
+        for (region in listOf("us-iso-east-1", "us-isob-east-1", "eu-isoe-west-1", "eusc-de-east-1", "aws-global", "US-EAST-1", "moon-1")) {
+            withClue(region) {
+                shouldThrow<IllegalStateException> {
+                    EgressStoreTarget.derive(endpoint = "", region = region, bucket = "dp-lake", pathStyle = false)
+                }.message shouldContain "declare datapipelines.lake.storage.endpoint explicitly"
+            }
+        }
+    }
+
+    @Test
+    fun `a declared endpoint keeps any region for signing - the partition table governs the blank endpoint only`() {
+        val target = EgressStoreTarget.derive(endpoint = "http://minio:9000", region = "us-iso-east-1", bucket = "b", pathStyle = true)
+        target.domains shouldBe listOf("minio:9000")
+        target.region shouldBe "us-iso-east-1"
+    }
+
+    @Test
+    fun `a leading-zero port, userinfo or a path in the endpoint is refused - no second spelling of the authority`() {
+        shouldThrow<IllegalStateException> {
+            EgressStoreTarget.derive(endpoint = "http://minio:09000", region = "", bucket = "b", pathStyle = true)
+        }.message shouldContain "leading zero"
+        shouldThrow<IllegalStateException> {
+            EgressStoreTarget.derive(endpoint = "http://user:pw@minio:9000", region = "", bucket = "b", pathStyle = true)
+        }
+        shouldThrow<IllegalStateException> {
+            EgressStoreTarget.derive(endpoint = "http://user@minio", region = "", bucket = "b", pathStyle = true)
+        }
+        shouldThrow<IllegalStateException> {
+            EgressStoreTarget.derive(endpoint = "http://minio:9000/prefix", region = "", bucket = "b", pathStyle = true)
+        }
+        shouldThrow<IllegalStateException> {
+            EgressStoreTarget.derive(endpoint = "http://minio/prefix", region = "", bucket = "b", pathStyle = true)
+        }
+    }
 }

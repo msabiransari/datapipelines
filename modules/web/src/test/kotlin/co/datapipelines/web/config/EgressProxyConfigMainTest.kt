@@ -80,6 +80,42 @@ class EgressProxyConfigMainTest {
         }
     }
 
+    /**
+     * Review R2: the proxy's own refusal is distinguishable from a store's 403 — every deny route stamps
+     * [EgressProxyConfigMain.REFUSAL_HEADER], and the store vhost strips that header from every forwarded answer, so a
+     * store cannot make its answer look like the proxy's (or the reverse).
+     */
+    @Test
+    fun `the deny routes stamp the refusal header and the store vhost strips it from store answers`() {
+        val vhosts = virtualHosts(hcm(parse(EgressProxyConfigMain.render(960, minioVhost()))))
+        vhosts[0]["response_headers_to_remove"] shouldBe listOf("x-dp-egress-refused")
+        val stamped =
+            routes(vhosts[1]).drop(1).map { route ->
+                @Suppress("UNCHECKED_CAST")
+                val added = route["response_headers_to_add"] as List<Map<String, Map<String, String>>>
+                added.single()["header"]
+            }
+        stamped shouldBe List(2) { mapOf("key" to "x-dp-egress-refused", "value" to "store-allowlist") }
+        withClue("the declaration is never stamped: it is the proxy's own green answer") {
+            routes(vhosts[1])[0].containsKey("response_headers_to_add") shouldBe false
+        }
+    }
+
+    @Test
+    fun `the output is serialized JSON, two-space indented with newline line ends - not spliced text`() {
+        val rendered = EgressProxyConfigMain.render(960, minioVhost())
+        rendered shouldStartWith "{\n  \"static_resources\" : {\n"
+        withClue("no carriage return, one trailing newline") {
+            rendered.contains('\r') shouldBe false
+            rendered.endsWith("}\n") shouldBe true
+        }
+        withClue("the listener is the shipped one") {
+            @Suppress("UNCHECKED_CAST")
+            val listener = ((parse(rendered)["static_resources"] as Map<String, Any>)["listeners"] as List<Map<String, Any>>)[0]
+            listener["address"] shouldBe mapOf("socket_address" to mapOf("address" to "0.0.0.0", "port_value" to 3128))
+        }
+    }
+
     @Test
     fun `disabled - no store vhost exists, the proxy declares its cap and refuses everything else`() {
         val config = parse(EgressProxyConfigMain.render(960, null))
@@ -210,14 +246,15 @@ class EgressProxyConfigMainTest {
     /** The stand-in is the REAL derivation, so the test travels the same path the deployment does. */
     private fun minioVhost() = EgressStoreTarget.derive("http://minio:9000", "", "dp-lake", pathStyle = false)
 
-    /** Jackson YAML — the project's one YAML parser (libs.versions.toml §parsers); snakeyaml direct is forbidden. */
+    /**
+     * The renderer serializes JSON (Envoy's YAML loader reads it as YAML): parsed with the Jackson databind the
+     * module already compiles against — no YAML library on the test classpath (review: no new dependency).
+     */
     @Suppress("UNCHECKED_CAST")
-    private fun parse(yaml: String): Map<String, Any> =
-        com.fasterxml.jackson.dataformat.yaml.YAMLFactory().let { factory ->
-            com.fasterxml.jackson.databind
-                .ObjectMapper(factory)
-                .readValue(yaml, Map::class.java) as Map<String, Any>
-        }
+    private fun parse(rendered: String): Map<String, Any> =
+        com.fasterxml.jackson.databind
+            .ObjectMapper()
+            .readValue(rendered, Map::class.java) as Map<String, Any>
 
     @Suppress("UNCHECKED_CAST")
     private fun hcm(config: Map<String, Any>): Map<String, Any> {

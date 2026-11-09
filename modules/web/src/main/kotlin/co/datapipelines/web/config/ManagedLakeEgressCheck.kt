@@ -36,7 +36,9 @@ import java.util.concurrent.TimeoutException
  *    style) — sent through the proxy: an `https` store is a `CONNECT` tunnel, a plain-http one an absolute-form
  *    request.
  *    Unsigned on purpose — nothing but the HEAD leaves, and any answer FROM the store (`403` included) proves the
- *    path. Refused when the exchange fails (connect, tunnel, timeout) or when the proxy answers a gateway failure
+ *    path. Refused when the exchange fails (connect, tunnel, timeout); when the answer carries the proxy's refusal
+ *    marker (`x-dp-egress-refused`, #862: the proxy's allowlist names another authority — its 403 is the proxy's,
+ *    and the proxy strips the marker from every store answer); or when the proxy answers a gateway failure
  *    (502–504) that carries no `x-amz-request-id` (the proxy's own reply, not the store's).
  *
  * Each exchange is bounded: [CONNECT_TIMEOUT_SECONDS] to connect, [RESPONSE_TIMEOUT_SECONDS] for the whole answer.
@@ -96,6 +98,15 @@ object ManagedLakeEgressCheck {
 
         val reached =
             exchange(ProxySelector.of(address), storeRequest(store), "the proxy $proxy cannot reach the store $store")
+        // #862: the proxy's own allowlist refusal (a 403 like a store's, but stamped by the proxy and stripped from
+        // every store answer) — the proxy forwards to another authority than the one this app's reads dial.
+        if (reached.headers().firstValue(EgressProxyConfigMain.REFUSAL_HEADER).isPresent) {
+            refuse(
+                "the proxy $proxy refused the store $store itself (${reached.statusCode()}, " +
+                    "${EgressProxyConfigMain.REFUSAL_HEADER}): its allowlist names another authority than this app's " +
+                    "storage configuration — render the proxy from the same lake values the app reads (deployment.md §4.3)",
+            )
+        }
         if (reached.statusCode() in GATEWAY_FAILURES && reached.headers().firstValue(STORE_REQUEST_ID_HEADER).isEmpty) {
             refuse("the proxy $proxy cannot reach the store $store: it answered ${reached.statusCode()} itself")
         }

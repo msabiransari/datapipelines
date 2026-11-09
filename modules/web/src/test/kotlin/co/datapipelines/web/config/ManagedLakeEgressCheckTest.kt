@@ -81,6 +81,34 @@ class ManagedLakeEgressCheckTest {
         refusalOf(lake(egressProxy = proxy.address)) shouldContain "cannot reach the store http://store.test:9000/dp-lake"
     }
 
+    /**
+     * #862 (review R2): the shipped proxy's deny route answers a store authority it does not allowlist with a 403 —
+     * the same status a store gives an unsigned HEAD. The proxy stamps its own refusal (and strips the stamp from
+     * every store answer), so the check refuses exactly that answer and still accepts the store's own 403.
+     */
+    @Test
+    fun `the proxy's own allowlist refusal is refused - a 403 stamped by the proxy is not the store's`() {
+        val proxy =
+            scripted(
+                declaration = ok("max-age=960"),
+                store =
+                    "HTTP/1.1 403 Forbidden\r\n${EgressProxyConfigMain.REFUSAL_HEADER}: ${EgressProxyConfigMain.REFUSAL_VALUE}\r\n" +
+                        "Content-Length: 0\r\nConnection: close\r\n\r\n",
+            )
+
+        val message = refusalOf(lake(egressProxy = proxy.address))
+
+        message shouldContain "refused the store http://store.test:9000/dp-lake itself (403, x-dp-egress-refused)"
+        message shouldContain "its allowlist names another authority"
+    }
+
+    @Test
+    fun `a store's own 403 passes - with or without the store request id, it carries no proxy refusal stamp`() {
+        ManagedLakeEgressCheck.verify(lake(egressProxy = scripted(declaration = ok("max-age=960"), store = storeAnswer(403)).address))
+        val bare = "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        ManagedLakeEgressCheck.verify(lake(egressProxy = scripted(declaration = ok("max-age=960"), store = bare).address))
+    }
+
     @Test
     fun `a store's own 503 still proves the path - it carries the store request id`() {
         val proxy = scripted(declaration = ok("max-age=960"), store = storeAnswer(503))
@@ -127,6 +155,11 @@ class ManagedLakeEgressCheckTest {
         // A declared region travels into the derived form (#862's mismatch fix).
         uriIn("eu-west-1", pathStyle = false) shouldBe URI("https://dp-lake.s3.eu-west-1.amazonaws.com/")
         uriIn("eu-west-1", pathStyle = true) shouldBe URI("https://s3.eu-west-1.amazonaws.com/dp-lake")
+        // #862 (review R3): the partition's DNS suffix, from the SDK's partition metadata — never amazonaws.com
+        // for a China region, and an unsupported partition refused rather than guessed.
+        uriIn("cn-north-1", pathStyle = false) shouldBe URI("https://dp-lake.s3.cn-north-1.amazonaws.com.cn/")
+        uriIn("us-gov-west-1", pathStyle = true) shouldBe URI("https://s3.us-gov-west-1.amazonaws.com/dp-lake")
+        shouldThrow<IllegalStateException> { uriIn("us-iso-east-1", pathStyle = true) }
     }
 
     @Test

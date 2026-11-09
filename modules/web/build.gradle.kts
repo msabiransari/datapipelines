@@ -69,10 +69,6 @@ dependencies {
 
     // --- Tests -------------------------------------------------------------------
     testImplementation(libs.spring.boot.starter.test)
-    // #862: the EgressProxyConfigMainTest parses the RENDERED Envoy YAML structurally (indentation is the
-    // defect class the renderer can fail in), with the project's one YAML parser (libs.versions.toml
-    // §parsers — snakeyaml direct is forbidden). Test-scoped; datasources carries the same artifact.
-    testImplementation(libs.jackson.dataformat.yaml)
     testImplementation(libs.kotlinx.coroutines.test)
     // Module-local integration tests: a Postgres container running app's real V1
     // migration (executions + execution_events) and a Redis container for the SSE event
