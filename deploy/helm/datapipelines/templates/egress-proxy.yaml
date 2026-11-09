@@ -13,7 +13,7 @@ metadata:
   labels:
     {{- include "datapipelines.egressProxy.labels" . | nindent 4 }}
 spec:
-  replicas: {{ .Values.lake.egressProxy.replicaCount }}
+  replicas: {{ include "datapipelines.egressProxy.replicaCount" . }}
   selector:
     matchLabels:
       {{- include "datapipelines.egressProxy.selectorLabels" . | nindent 6 }}
@@ -32,6 +32,18 @@ spec:
         # text — scripts/helm-check.sh parses the rendered pod and holds the wiring in place.)
         checksum/egress-render-inputs: {{ include "datapipelines.egressRender.inputs" . | sha256sum }}
     spec:
+      {{- if .Values.lake.egressProxy.topologySpreadConstraints.enabled }}
+      # #863 — best-effort placement across topology domains. The labelSelector is the
+      # proxy's OWN selectorLabels (never an operator value), so the constraint cannot
+      # select app pods; with the proxy disabled nothing here renders.
+      topologySpreadConstraints:
+        - maxSkew: {{ include "datapipelines.egressProxy.spread.maxSkew" . }}
+          topologyKey: {{ include "datapipelines.egressProxy.spread.topologyKey" . | quote }}
+          whenUnsatisfiable: {{ include "datapipelines.egressProxy.spread.whenUnsatisfiable" . }}
+          labelSelector:
+            matchLabels:
+              {{- include "datapipelines.egressProxy.selectorLabels" . | nindent 14 }}
+      {{- end }}
       automountServiceAccountToken: false
       securityContext:
         # The distroless image's own non-root user; fsGroup gives the init container's emptyDir the same

@@ -165,6 +165,26 @@ lake:
       digest: sha256:09ca6f2140a61ad8df11779a4a30d52b48433d444466328494f9188c9c35eded
       pullPolicy: IfNotPresent
     replicaCount: 1
+    # Optional availability (#863, deployment.md §6.4). Both blocks OFF by
+    # default: the one-node default deployment renders EXACTLY the pre-#863
+    # objects. The PDB governs voluntary disruptions only (node drains,
+    # upgrades) — never an involuntary node failure — and an enabled budget
+    # whose minAvailable is not strictly below replicaCount deadlocks every
+    # voluntary eviction (refused at render). The spread's labelSelector is
+    # ALWAYS the proxy's own selector labels (never a value you supply), so no
+    # spread constraint can select app pods. On a cluster too small to satisfy
+    # the spread, ScheduleAnyway places pods anyway (capacity wins over skew —
+    # the documented example's choice), DoNotSchedule leaves them Pending; two
+    # pods on ONE node provide no node-failure tolerance either way.
+    podDisruptionBudget:
+      enabled: false
+      # When enabled: a whole number ≥ 1 and < replicaCount, render-validated.
+      minAvailable: 1
+    topologySpreadConstraints:
+      enabled: false
+      maxSkew: 1
+      whenUnsatisfiable: ScheduleAnyway
+      topologyKey: kubernetes.io/hostname
     # Whole seconds, > 0. 960 = node-query-timeout-max-seconds 900 + 60.
     maxAgeSeconds: 960
     resources: {}

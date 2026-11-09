@@ -714,6 +714,52 @@ lake:
             port: 443
 ```
 
+**The egress proxy's availability** (#863, `lake.egressProxy.podDisruptionBudget` and
+`lake.egressProxy.topologySpreadConstraints`, both OFF by default). The one-replica default renders
+exactly what a chart without them renders; raising availability is an operator decision for a
+multi-node cluster. Both settings touch only the proxy's pods — the app's own
+`podDisruptionBudget` (above) and its pod template are untouched, and the render refuses nothing
+about the app.
+
+`podDisruptionBudget.enabled: true` renders one `policy/v1` `PodDisruptionBudget` selecting only the
+proxy pods — its selector is the proxy Deployment's own labels, never a value you supply, so it
+cannot count or protect an app pod. A budget governs **voluntary** disruptions only (`kubectl
+drain`, cluster upgrades), never an involuntary node failure. `minAvailable` must be a whole number
+at least 1 and **strictly below** `lake.egressProxy.replicaCount`; the render refuses anything else.
+The strictness is the deadlock guard: a budget that demands every replica stay up can never be
+honoured during the very disruption it exists for, so an enabled `minAvailable: 1` budget on the
+one-replica default would refuse every drain of the only node — exactly the single-node upgrade you
+least want deadlocked. With two replicas, `minAvailable: 1` keeps one proxy serving through each
+drain (§8.3 states what a replaced pod costs a managed read).
+
+`topologySpreadConstraints.enabled: true` adds one constraint to the proxy pod template: across the
+`topologyKey` domain (`kubernetes.io/hostname` = one node), the per-domain pod counts may differ by
+at most `maxSkew`. The constraint's `labelSelector` is always the proxy's own selector — an
+operator-supplied selector is not a chart value, and one naming the app's labels would spread the
+wrong workload. `whenUnsatisfiable` decides a cluster too small to satisfy the spread:
+`ScheduleAnyway` (the example's choice) places pods anyway — capacity wins over skew;
+`DoNotSchedule` leaves the pod Pending until the spread can be honoured. Two pods on one node
+provide no node-failure tolerance either way: the spread is a preference that needs enough nodes to
+matter, not a guarantee.
+
+```yaml
+lake:
+  egressProxy:
+    replicaCount: 2
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+    topologySpreadConstraints:
+      enabled: true
+      maxSkew: 1
+      whenUnsatisfiable: ScheduleAnyway
+      topologyKey: kubernetes.io/hostname
+```
+
+Both blocks are render-validated only while enabled: a disabled budget or spread with nonsense
+fields renders nothing and is inert, the way the chart's other flags behave. `replicaCount` itself
+is validated whenever the proxy is enabled (a whole number of replicas greater than 0, unquoted).
+
 The pod keeps its root filesystem read-only and mounts a disk-backed `emptyDir` at `/tmp`.
 This supports JVM native libraries and the default LAKE spill directories. Set
 `temporaryStorage.sizeLimit` to bound the volume (empty by default), and set ephemeral-storage
@@ -773,7 +819,7 @@ through `extraEnv`; an `extraEnv` key that double-maps either DuckDB key fails `
 because Kubernetes does not reject duplicate `env` names and would silently honor the last one.
 CI renders the chart on every push and pull request: the `gate` job runs `scripts/helm-check.sh`,
 a pinned `helm` (version and checksum pin bumped together per DEVELOPMENT.md §10.2) running
-`helm lint --strict` plus eighty-nine verdicts — defaults render no `env:` block or driver volume, both
+`helm lint --strict` plus one hundred thirty-three verdicts — defaults render no `env:` block or driver volume, both
 DuckDB values render exactly their two quoted entries, all nine `script.js` values render exactly their
 nine quoted entries (each sizing key alone also renders its explicit zero; null renders no entry), each `extraEnv` double mapping
 (the two DuckDB keys, the nine JavaScript keys and the two `MANAGEMENT_SERVER_*` keys) is refused
@@ -788,7 +834,12 @@ management port AND the declared peers (or, under `allowAll`, every source) on t
 with `management.serviceMonitor.enabled` adding exactly one `ServiceMonitor`, and each of the
 policy's refusals (both scraper selectors empty, no app-port declaration, `allowAll` with a
 `from`, a bare label map, an unknown or empty peer, a quoted `allowAll`) exercised with its own
-message. Every successful render is also validated `-strict` against the Kubernetes 1.35.0 API
+message. The egress proxy has its own parsed contract and render cases — defaults, store/DNS
+peers, its policy off, the proxy off, the renderer inputs resolved the kubelet's way, and #863's
+availability (the two-replica example renders a PDB and a spread whose selectors are the proxy
+Deployment's own; each invalid availability value is refused with its message) — described under
+the proxy bullet above.
+Every successful render is also validated `-strict` against the Kubernetes 1.35.0 API
 schema (and the CRDs-catalog schema for the `ServiceMonitor`) by a pinned `kubeconform`
 (DEVELOPMENT.md §10.2), with every object accounted for. It exits 0 when every case passes,
 1 when a chart check fails, and 2 on a tooling failure (a download, a checksum-pin mismatch, a
@@ -1026,6 +1077,19 @@ stayed up). Finish the change with `docker compose up -d --force-recreate egress
 a changed max-age the proxy does not declare, or a changed store the proxy's allowlist does not
 name (its stamped 403) — fail-closed. Under the CHART, a lake key changed inside `existingSecret`
 is invisible to Helm (no checksum moves): restart both deployments (§6.4).
+
+**Proxy availability settings (#863).** The §6.4 availability blocks are off by default and an
+upgrade that leaves them off changes nothing: one replica renders, runs and drains exactly as
+before. When they are enabled, a drain or a rolling upgrade may replace a proxy pod. An in-flight
+managed read through that pod fails, and httpfs retries it on a fresh connection to a healthy
+replica — the same bounded retry budget that carries every read (two retries after the first
+attempt, on I/O errors; §4.3's bounds); a read whose budget is exhausted fails its query, and the
+datasource recovers on the next lease. The settings protect serving continuity, nothing else: a
+reader lease already protects its snapshot independently of the proxy's lifetime, so a replaced
+proxy never loses or corrupts a snapshot — worst case is a failed and retried read. On the
+single-node default keep the budget off: an enabled `minAvailable: 1` budget on one replica can
+never be honoured, and every voluntary disruption of that node — the upgrade itself — would
+deadlock (the render refuses exactly that configuration, §6.4).
 
 **Scheduler notification kinds (V51).**
 
@@ -1569,6 +1633,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-08 | v1.65 | #863 egress proxy availability | **§6.4:** the proxy's optional availability blocks, both OFF by default (the one-replica default render unchanged): `lake.egressProxy.replicaCount` is render-validated (whole, > 0, unquoted); `podDisruptionBudget` renders a `policy/v1` PDB selecting only the proxy pods (the Deployment's own selector, never a value), with `minAvailable` ≥ 1 and strictly below `replicaCount` — `minAvailable = replicaCount` deadlocks every voluntary eviction and is refused, enabled on the one-replica default included; `topologySpreadConstraints` renders one best-effort constraint whose `labelSelector` is always the proxy's own (`maxSkew` whole > 0; `whenUnsatisfiable` `ScheduleAnyway`/`DoNotSchedule`; non-empty `topologyKey`); disabled blocks are inert. Chart 0.3.0 → 0.4.0. **§8.3:** the availability upgrade note — a replaced proxy pod fails in-flight managed reads, retried by httpfs on a fresh connection within the bounded budget; leases protect snapshots independently; keep the budget off on one node. CI paragraph: the verdict count is re-measured (133) and the egress/availability cases named. `helm-check.sh` gains `(j)`/`(j2)` renders and ten `(j-r)` refusals. |
 | 2026-11-07 | v1.64 | #845 managed reads egress proxy | **§4.3:** the managed lake datasource's object-store requests leave through the egress proxy; what it sees, holds and refuses at boot; a temporary accommodation until duckdb-httpfs#519. **§6.3:** the compose `egress-proxy` service and why the app waits for it to start, not be healthy. **§6.4:** the chart's proxy `Deployment`/`Service`/`ConfigMap` (`lake.egressProxy.*`, ON by default; chart 0.2.1 → 0.3.0), the app env entries and `extraEnv` refusals, and the proxy's own `NetworkPolicy` (ingress from the app pods on 3128 only; egress restricted when the store is declared, plus DNS). **§8.3:** the upgrade note (the managed row is rewritten on the first boot; boot refused until the proxy answers; older instances read directly). **§9:** a checklist line for the proxy's fence. `helm-check.sh` gains the parsed egress contract (`(a-off)`, `(i)`–`(i6)`). |
 | 2026-11-04 | v1.63 | #781 merge follow-up | **§3.1:** state the version guard's detected-literal scope, ownership exclusions and uncaptured-bare-version limit; require reviewing the tracked-file inventory during a bump. |
 | 2026-11-04 | v1.62 | #781 | **§3.1:** the three-input DuckDB re-pin paragraph becomes the bump runbook: the version catalog's `duckdb-jdbc` is the one hand-edited DuckDB version, then cold locks and verification metadata, the core ARG and checksums, closures, the hand-declared `CORE` review, `DuckDbVersionSpecDriftTest`'s red and re-probe lists, and the E9 read-posture harness rerun. The notices build now refuses an ARG, reviewed core tag or core closure row that disagrees with the catalog. No version changes. |

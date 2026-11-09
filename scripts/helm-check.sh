@@ -2,8 +2,8 @@
 # helm-check.sh — render the reference Helm chart (deploy/helm/datapipelines)
 # with a PINNED helm binary: `helm lint --strict` plus the `helm template`
 # cases below — each case prints its own PASS/FAIL `verdict` line, labels
-# `(a)`–`(i6)`; a full green run printed 114 PASS lines at this commit (#862;
-# the count moves with the cases, so re-measure it after adding one) —
+# `(a)`–`(j-r)`; a full green run printed 133 PASS lines at this commit
+# (#863; the count moves with the cases, so re-measure it after adding one) —
 # whose assertions pin the chart's render-TIME behaviour, and validate every
 # successful render against the Kubernetes API schema with a PINNED
 # kubeconform (the `kubeconform` leg below; #712) — the Kotlin drift
@@ -123,6 +123,24 @@
 #         (i3) ports-only with dnsTo, (i4) its policy off, (i5) the proxy off
 #         (no proxy object, no egress env entry; an extraEnv proxy is then
 #         the operator's and renders once).
+#   (j)   #863 availability (values.yaml lake.egressProxy
+#         podDisruptionBudget / topologySpreadConstraints, both OFF by
+#         default): the documented two-replica example renders a policy/v1
+#         PDB (minAvailable from the values, strictly below replicas at
+#         render — minAvailable = replicas deadlocks every voluntary
+#         eviction) and one topologySpreadConstraint (maxSkew /
+#         topologyKey / whenUnsatisfiable from the values) whose
+#         labelSelector is ALWAYS the proxy Deployment's own selector —
+#         never the app's, never operator-supplied; replicas render from the
+#         validated replicaCount; the readiness probe is retained; the app
+#         Deployment gains no availability objects of its own. (j2) the
+#         spread alone (no PDB object).
+#   (j-r) #863 refusals, each with the template's own message verbatim:
+#         replicaCount 0 / fractional / quoted; minAvailable = replicaCount
+#         (the drain deadlock), below 1, quoted, and enabled on the
+#         one-replica default (the single-node deadlock); maxSkew 0; an
+#         unknown whenUnsatisfiable; an empty topologyKey. Disabled flags
+#         stay inert — a disabled budget/spread with nonsense fields renders.
 #   (i7)  the renderer inputs RESOLVED (#862 review R1): fixture Secrets with
 #         dummy credentials, both containers' env resolved the kubelet's way,
 #         the six inputs identical in app and init and equal to the case's
@@ -1162,6 +1180,7 @@ fi
 # np_refusal <label> <message> — renders the values on stdin with
 # networkPolicy enabled; the render must exit non-zero AND stderr must carry
 # the template's own `fail` message verbatim (never just a non-zero exit).
+# Generic by body — (j-r)'s availability refusals reuse it too.
 np_refusal() {
   local label="$1" msg="$2" slug rc=0
   slug=$(printf '%s' "$label" | tr -c 'a-z0-9' '-')
@@ -1370,7 +1389,9 @@ def main():
 
     problems = []
     kinds = sorted(d["kind"] for d in proxy)
-    want = sorted(["Deployment", "Service"] + (["NetworkPolicy"] if ep["networkPolicy"]["enabled"] is True else []))
+    want = sorted(["Deployment", "Service"]
+                  + (["NetworkPolicy"] if ep["networkPolicy"]["enabled"] is True else [])
+                  + (["PodDisruptionBudget"] if (ep.get("podDisruptionBudget") or {}).get("enabled") is True else []))
     if kinds != want:
         print(f"proxy objects {kinds} (expected exactly {want} — the #862 config is rendered in-pod, no ConfigMap)")
         sys.exit(1)
@@ -1424,6 +1445,61 @@ def main():
         problems.append("the proxy pods carry no checksum/egress-render-inputs annotation (a renderer-input change would not roll them)")
     if "checksum/config" in annotations:
         problems.append("the proxy pods still carry the #845 checksum/config annotation")
+
+    # #863 — availability: replicas render from the validated value; the readiness
+    # probe (the boot check's twin, lake.boot.egress_proxy) is retained whatever
+    # the availability settings; a PDB/spread, when enabled, is a policy/v1
+    # object whose selectors are the proxy Deployment's own — never the app's —
+    # and availability never leaks onto the app Deployment.
+    if dep["spec"].get("replicas") != ep.get("replicaCount"):
+        problems.append(f"the proxy Deployment renders replicas={dep['spec'].get('replicas')} "
+                        f"(expected the values' replicaCount {ep.get('replicaCount')})")
+    http_get = (c.get("readinessProbe") or {}).get("httpGet") or {}
+    probe_headers = {h.get("name"): h.get("value") for h in http_get.get("httpHeaders") or []}
+    if http_get.get("path") != "/dp-egress" or http_get.get("port") != "proxy" or probe_headers.get("x-dp-egress-check") != "1":
+        problems.append(f"the proxy readinessProbe {http_get} headers {probe_headers} is not the header-gated GET /dp-egress on the proxy port")
+    app_tsc = app["spec"]["template"]["spec"].get("topologySpreadConstraints")
+    if app_tsc:
+        problems.append(f"the app Deployment carries topologySpreadConstraints {app_tsc} (availability is the proxy's only)")
+
+    pdb = by_kind.get("PodDisruptionBudget")
+    pdb_values = ep.get("podDisruptionBudget") or {}
+    if pdb_values.get("enabled") is True:
+        if pdb is None:
+            problems.append("podDisruptionBudget.enabled but no proxy PodDisruptionBudget rendered")
+        else:
+            if pdb.get("apiVersion") != "policy/v1":
+                problems.append(f"the proxy PDB apiVersion {pdb.get('apiVersion')} (expected policy/v1)")
+            if pdb["spec"].get("minAvailable") != pdb_values.get("minAvailable"):
+                problems.append(f"the proxy PDB minAvailable {pdb['spec'].get('minAvailable')} "
+                                f"(expected the values' {pdb_values.get('minAvailable')})")
+            pdb_sel = (pdb["spec"].get("selector") or {}).get("matchLabels")
+            if pdb_sel != proxy_sel or not selects(pdb_sel or {}, proxy_pod):
+                problems.append(f"the proxy PDB selector {pdb_sel} is not the proxy Deployment's selector {proxy_sel}")
+            if selects(pdb_sel or {}, app_pod):
+                problems.append(f"the proxy PDB selector {pdb_sel} also selects the app pods {app_pod}")
+    elif pdb is not None:
+        problems.append("podDisruptionBudget disabled but a proxy PodDisruptionBudget rendered")
+
+    tsc = pod_spec.get("topologySpreadConstraints") or []
+    spread_values = ep.get("topologySpreadConstraints") or {}
+    if spread_values.get("enabled") is True:
+        if len(tsc) != 1:
+            problems.append(f"{len(tsc)} topologySpreadConstraints (expected exactly 1)")
+        else:
+            t = tsc[0]
+            if t.get("maxSkew") != spread_values.get("maxSkew"):
+                problems.append(f"the spread maxSkew {t.get('maxSkew')} (expected the values' {spread_values.get('maxSkew')})")
+            if t.get("topologyKey") != spread_values.get("topologyKey"):
+                problems.append(f"the spread topologyKey {t.get('topologyKey')} (expected the values' {spread_values.get('topologyKey')})")
+            if t.get("whenUnsatisfiable") != spread_values.get("whenUnsatisfiable"):
+                problems.append(f"the spread whenUnsatisfiable {t.get('whenUnsatisfiable')} (expected the values' {spread_values.get('whenUnsatisfiable')})")
+            spread_sel = (t.get("labelSelector") or {}).get("matchLabels")
+            if spread_sel != proxy_sel:
+                problems.append(f"the spread constraint's labelSelector {spread_sel} is not the proxy Deployment's selector {proxy_sel} "
+                                "(never an operator-supplied selector — it would be free to select app pods)")
+    elif tsc:
+        problems.append(f"the spread is disabled but topologySpreadConstraints {tsc} rendered")
 
     # The init container IS the config now: the app image's renderer main, fed the
     # same inputs the app container carries, writing the volume Envoy reads.
@@ -1607,6 +1683,39 @@ extraEnv:
   DATAPIPELINES_LAKE_READS_EGRESS_PROXY: corp-proxy.example:3128
 VALUES
 egress_render "(i5) proxy off" "$WORK/i5.values.yaml" "$WORK/i5.out" "$WORK/i5.err"
+
+# (j) #863 — availability. The documented two-replica example: a PDB keeps one
+# proxy through voluntary disruptions (minAvailable strictly below replicas —
+# minAvailable = replicas could never be disrupted and would deadlock every
+# drain), and a best-effort spread prefers one pod per node. The contract
+# asserts the PDB's and the spread's labelSelector are the PROXY Deployment's
+# own selector (never the app's, never operator-supplied) and the readiness
+# probe is retained.
+cat >"$WORK/j.values.yaml" <<'VALUES'
+lake:
+  egressProxy:
+    replicaCount: 2
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+    topologySpreadConstraints:
+      enabled: true
+      maxSkew: 1
+      whenUnsatisfiable: ScheduleAnyway
+      topologyKey: kubernetes.io/hostname
+VALUES
+egress_render "(j) egress proxy high availability" "$WORK/j.values.yaml" "$WORK/j.out" "$WORK/j.err"
+
+# (j2) the spread alone — a topology constraint with NO disruption budget: the
+# spread renders (proxy's own selector), no PDB object does.
+cat >"$WORK/j2.values.yaml" <<'VALUES'
+lake:
+  egressProxy:
+    replicaCount: 2
+    topologySpreadConstraints:
+      enabled: true
+VALUES
+egress_render "(j2) spread only, no budget" "$WORK/j2.values.yaml" "$WORK/j2.out" "$WORK/j2.err"
 
 # (i7) #862 review R1 — the renderer's inputs RESOLVED, not just wired. Each case
 # renders the chart, then resolves the app container's and the init container's
@@ -1911,6 +2020,84 @@ lake:
         to:
           ipBlock:
             cidr: 10.20.0.0/16
+VALUES
+
+# (j-r) #863 — the availability refusals, each with the template's own message
+# verbatim (np_refusal is generic: values on stdin, exact-message grep).
+np_refusal "(j-r) replicaCount 0 refused" \
+  'lake.egressProxy.replicaCount must be a whole number of replicas greater than 0 (deployment.md §6.4)' <<'VALUES'
+lake:
+  egressProxy:
+    replicaCount: 0
+VALUES
+np_refusal "(j-r) fractional replicaCount refused" \
+  'lake.egressProxy.replicaCount must be a whole number of replicas greater than 0 (deployment.md §6.4)' <<'VALUES'
+lake:
+  egressProxy:
+    replicaCount: 1.5
+VALUES
+np_refusal "(j-r) quoted replicaCount refused" \
+  'lake.egressProxy.replicaCount must be a whole number of replicas, unquoted (deployment.md §6.4)' <<'VALUES'
+lake:
+  egressProxy:
+    replicaCount: "2"
+VALUES
+np_refusal "(j-r) minAvailable = replicaCount refused (the drain deadlock)" \
+  'lake.egressProxy.podDisruptionBudget.minAvailable (2) must be strictly below lake.egressProxy.replicaCount (2) — minAvailable = replicaCount can never be disrupted and deadlocks every voluntary eviction (deployment.md §6.4)' <<'VALUES'
+lake:
+  egressProxy:
+    replicaCount: 2
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 2
+VALUES
+np_refusal "(j-r) minAvailable below 1 refused" \
+  'lake.egressProxy.podDisruptionBudget.minAvailable must be a whole number at least 1 (deployment.md §6.4)' <<'VALUES'
+lake:
+  egressProxy:
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 0
+VALUES
+np_refusal "(j-r) quoted minAvailable refused" \
+  'lake.egressProxy.podDisruptionBudget.minAvailable must be a whole number, unquoted (deployment.md §6.4)' <<'VALUES'
+lake:
+  egressProxy:
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: "1"
+VALUES
+np_refusal "(j-r) budget enabled on the one-replica default refused (the single-node deadlock)" \
+  'lake.egressProxy.podDisruptionBudget.minAvailable (1) must be strictly below lake.egressProxy.replicaCount (1) — minAvailable = replicaCount can never be disrupted and deadlocks every voluntary eviction (deployment.md §6.4)' <<'VALUES'
+lake:
+  egressProxy:
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+VALUES
+np_refusal "(j-r) maxSkew 0 refused" \
+  'lake.egressProxy.topologySpreadConstraints.maxSkew must be a whole number greater than 0 (deployment.md §6.4)' <<'VALUES'
+lake:
+  egressProxy:
+    topologySpreadConstraints:
+      enabled: true
+      maxSkew: 0
+VALUES
+np_refusal "(j-r) unknown whenUnsatisfiable refused" \
+  'lake.egressProxy.topologySpreadConstraints.whenUnsatisfiable must be ScheduleAnyway or DoNotSchedule, not "Sometimes" (deployment.md §6.4)' <<'VALUES'
+lake:
+  egressProxy:
+    topologySpreadConstraints:
+      enabled: true
+      whenUnsatisfiable: Sometimes
+VALUES
+np_refusal "(j-r) empty topologyKey refused" \
+  'lake.egressProxy.topologySpreadConstraints.topologyKey must be a non-empty string, e.g. kubernetes.io/hostname (deployment.md §6.4)' <<'VALUES'
+lake:
+  egressProxy:
+    topologySpreadConstraints:
+      enabled: true
+      topologyKey: ""
 VALUES
 
 if [ "$fails" -eq 0 ]; then
