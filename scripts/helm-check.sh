@@ -1620,8 +1620,8 @@ egress_render "(i5) proxy off" "$WORK/i5.values.yaml" "$WORK/i5.out" "$WORK/i5.e
 # HELM_CHECK_RENDERER_JAR=<boot jar> the REAL renderer (EgressProxyConfigMain)
 # runs on each side's resolved inputs and both outputs must be byte-identical and
 # name the expected store authority ("-" = deny-only, "!refused" = both runs must
-# exit nonzero); CI does not set it (no jar at this step), so without it the case
-# line says "renderer run SKIP" — the resolution itself is still asserted.
+# exit nonzero). CI sets it in its post-build check; the early check has no jar,
+# so its line says "renderer run SKIP" — the resolution itself is still asserted.
 egress_resolve() {  # <case-label> <values-file|-> <secret-fixture> <expected-json> <expected-authority|-|!refused>
   local label="$1" values="$2" secret="$3" expected="$4" authority="$5" rc=0 prc=0 report out err
   local -a extra=()
