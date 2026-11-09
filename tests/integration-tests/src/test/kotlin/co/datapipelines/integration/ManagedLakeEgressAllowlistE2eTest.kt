@@ -334,7 +334,11 @@ internal object AllowlistMatrix {
                 Expect.STORE,
             ),
             Case("duplicate Host, attacker second", get("http://$permitted/$OBJECT", permitted, "Host: $EVIL:$p\r\n"), Expect.STORE),
-            Case("duplicate Host, origin-form, attacker first", get("/$OBJECT", "$EVIL:$p", "Host: $permitted\r\n"), Expect.REFUSED_BY_PROXY),
+            Case(
+                "duplicate Host, origin-form, attacker first",
+                get("/$OBJECT", "$EVIL:$p", "Host: $permitted\r\n"),
+                Expect.REFUSED_BY_PROXY,
+            ),
             Case("the store's redirect to an attacker", get("http://$permitted/redirect", permitted), Expect.STORE_REDIRECT),
             Case("following that redirect", get("http://$EVIL:$w/", "$EVIL:$w"), Expect.REFUSED_BY_PROXY),
             Case(
