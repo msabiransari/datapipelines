@@ -1,0 +1,23 @@
+{{- if and .Values.lake.egressProxy.enabled .Values.lake.egressProxy.podDisruptionBudget.enabled }}
+{{/* #863 — the egress proxy's PodDisruptionBudget (deployment.md §6.4): with the
+     proxy AND the budget enabled, a voluntary disruption (node drain, upgrade)
+     keeps at least lake.egressProxy.podDisruptionBudget.minAvailable proxies
+     serving. The selector is the proxy's OWN selectorLabels — identical to the
+     Deployment's — so the budget never counts or protects an app pod; it
+     governs voluntary disruptions only, never an involuntary node failure.
+     Render-time validation (datapipelines.egressProxy.pdb.minAvailable)
+     refuses minAvailable = replicaCount, which could never be disrupted and
+     would deadlock every voluntary eviction. With either switch off, nothing
+     renders (the app's own PDB, pdb.yaml, is untouched). */}}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "datapipelines.egressProxy.fullname" . }}
+  labels:
+    {{- include "datapipelines.egressProxy.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ include "datapipelines.egressProxy.pdb.minAvailable" . }}
+  selector:
+    matchLabels:
+      {{- include "datapipelines.egressProxy.selectorLabels" . | nindent 6 }}
+{{- end }}
