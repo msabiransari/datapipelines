@@ -30,11 +30,15 @@ import java.util.concurrent.TimeoutException
  *    proxy config renders that body from the same value the app is given, so a proxy configured with another max-age,
  *    or a proxy that is not the shipped one, refuses the boot. The route is header-gated so a path-style request for
  *    a bucket literally named `dp-egress` is still forwarded to the store.
- * 2. **The store through the proxy.** `HEAD` of the bucket, addressed the way DuckDB addresses it (the endpoint's
- *    scheme decides TLS as the adapter's secret does; blank endpoint = AWS over https; path or virtual-host style),
- *    sent through the proxy: an `https` store is a `CONNECT` tunnel, a plain-http one an absolute-form request.
+ * 2. **The store through the proxy.** `HEAD` of the bucket, addressed the way DuckDB addresses it —
+ *    [EgressStoreTarget]'s one derivation (probe A, lane 862: a blank endpoint resolves to the REGIONAL
+ *    `s3.<region>.<partition DNS suffix>`, default region us-east-1; the endpoint's scheme decides TLS; path or
+ *    virtual-host style) — sent through the proxy: an `https` store is a `CONNECT` tunnel, a plain-http one an
+ *    absolute-form request.
  *    Unsigned on purpose — nothing but the HEAD leaves, and any answer FROM the store (`403` included) proves the
- *    path. Refused when the exchange fails (connect, tunnel, timeout) or when the proxy answers a gateway failure
+ *    path. Refused when the exchange fails (connect, tunnel, timeout); when the answer carries the proxy's refusal
+ *    marker (`x-dp-egress-refused`, #862: the proxy's allowlist names another authority — its 403 is the proxy's,
+ *    and the proxy strips the marker from every store answer); or when the proxy answers a gateway failure
  *    (502–504) that carries no `x-amz-request-id` (the proxy's own reply, not the store's).
  *
  * Each exchange is bounded: [CONNECT_TIMEOUT_SECONDS] to connect, [RESPONSE_TIMEOUT_SECONDS] for the whole answer.
@@ -57,7 +61,6 @@ object ManagedLakeEgressCheck {
     private const val STORE_REQUEST_ID_HEADER = "x-amz-request-id"
     private const val HTTP_OK = 200
     private val GATEWAY_FAILURES = 502..504
-    private const val AWS_S3_HOST = "s3.amazonaws.com"
     private const val NANOS_PER_MILLI = 1_000_000L
 
     private val REFUSAL = LakeBootCheck.Refusal.EGRESS_PROXY
@@ -95,6 +98,15 @@ object ManagedLakeEgressCheck {
 
         val reached =
             exchange(ProxySelector.of(address), storeRequest(store), "the proxy $proxy cannot reach the store $store")
+        // #862: the proxy's own allowlist refusal (a 403 like a store's, but stamped by the proxy and stripped from
+        // every store answer) — the proxy forwards to another authority than the one this app's reads dial.
+        if (reached.headers().firstValue(EgressProxyConfigMain.REFUSAL_HEADER).isPresent) {
+            refuse(
+                "the proxy $proxy refused the store $store itself (${reached.statusCode()}, " +
+                    "${EgressProxyConfigMain.REFUSAL_HEADER}): its allowlist names another authority than this app's " +
+                    "storage configuration — render the proxy from the same lake values the app reads (deployment.md §4.3)",
+            )
+        }
         if (reached.statusCode() in GATEWAY_FAILURES && reached.headers().firstValue(STORE_REQUEST_ID_HEADER).isEmpty) {
             refuse("the proxy $proxy cannot reach the store $store: it answered ${reached.statusCode()} itself")
         }
@@ -111,19 +123,20 @@ object ManagedLakeEgressCheck {
         )
     }
 
-    /** The bucket as DuckDB addresses it for this storage configuration (see the class KDoc, step 2). */
-    internal fun storeProbeUri(storage: LakeProperties.Storage): URI {
-        val endpoint = storage.endpoint.trim().trimEnd('/')
-        val (scheme, host) =
-            when {
-                endpoint.isEmpty() -> "https" to AWS_S3_HOST
-                endpoint.startsWith("https://", ignoreCase = true) -> "https" to endpoint.substring("https://".length)
-                endpoint.startsWith("http://", ignoreCase = true) -> "http" to endpoint.substring("http://".length)
-                else -> "http" to endpoint
-            }
-        val bucket = storage.bucket.trim()
-        return if (storage.pathStyle) URI("$scheme://$host/$bucket") else URI("$scheme://$bucket.$host/")
-    }
+    /**
+     * The bucket as DuckDB addresses it for this storage configuration — [EgressStoreTarget]'s ONE derivation
+     * (probe A, lane 862: the blank-endpoint case resolves to the REGIONAL `s3.<region>.<partition DNS suffix>`,
+     * default region us-east-1; the class KDoc's step 2), so the probe cannot succeed while the engine
+     * dials a host the proxy refuses.
+     */
+    internal fun storeProbeUri(storage: LakeProperties.Storage): URI =
+        EgressStoreTarget
+            .derive(
+                endpoint = storage.endpoint,
+                region = storage.region,
+                bucket = storage.bucket,
+                pathStyle = storage.pathStyle,
+            ).probeUri
 
     private fun declarationRequest(proxy: String): HttpRequest =
         HttpRequest

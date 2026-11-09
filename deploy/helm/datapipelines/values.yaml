@@ -24,6 +24,15 @@ existingSecret: ""
 # Optional non-secret env, merged after the Secret (same keys win here).
 # Example:
 #   DATAPIPELINES_WORKSPACES_PROVISIONING_MODE: auto-per-user
+# With lake.egressProxy enabled, the managed-lake store settings live here or in
+# existingSecret, under the EXACT env names the renderer reads (deployment.md §4.3):
+# DATAPIPELINES_LAKE_ENABLED / DATAPIPELINES_LAKE_S3_BUCKET / _S3_ENDPOINT / _S3_REGION /
+# _S3_PATH_STYLE. The proxy's renderer resolves them as the app does — extraEnv wins,
+# else the Secret's same-named key — and receives no other Secret key. The
+# relaxed-binding aliases (DATAPIPELINES_LAKE_STORAGE_*) are refused here by the chart;
+# held in the Secret they reach only the app, whose boot check then refuses the proxy's
+# allowlist refusal (lake.boot.egress_proxy). After changing a lake key in the Secret,
+# restart both deployments: Helm cannot see Secret content.
 extraEnv: {}
 
 # configuration.md §3.25 — the two DuckDB operator keys (#140). Both EMPTY by default, and an
@@ -124,7 +133,7 @@ management:
     interval: 30s
     labels: {}
 
-# #845 (configuration.md §3.36, lake.md §9, deployment.md §4.3) — the managed lake reads'
+# #845/#862 (configuration.md §3.36, lake.md §9, deployment.md §4.3) — the managed lake reads'
 # egress proxy, ON by default as in deploy/compose.yml. The app's managed LAKE datasource
 # sends every object-store request through it (DuckDB http_proxy), and Envoy resets each
 # stream at maxAgeSeconds: a store that trickles faster than curl's low-speed limit cannot
@@ -132,10 +141,19 @@ management:
 # until duckdb-httpfs#519 lands. When enabled the chart sets the app's
 # DATAPIPELINES_LAKE_READS_EGRESS_PROXY (<release>-datapipelines-egress-proxy:3128) and
 # DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS from maxAgeSeconds — the SAME value the
-# proxy's ConfigMap is rendered from — and refuses both names in extraEnv. The app refuses a
+# proxy's config is rendered from — and refuses both names in extraEnv. The app refuses a
 # max-age below datapipelines.executor.node-query-timeout-max-seconds + 30 while the proxy is
 # set (LakeRules), and refuses to boot with the lake enabled when the proxy is unreachable,
 # declares another max-age, or cannot reach the store (lake.boot.egress_proxy).
+#
+# The proxy's config (#862) is not chart text: an init container in the proxy pod runs the
+# app image's own renderer (EgressProxyConfigMain), which derives the allowlist from the
+# SAME env inputs the app container carries. Supply the store settings through extraEnv —
+# the exact env names DATAPIPELINES_LAKE_ENABLED / _S3_BUCKET / _S3_ENDPOINT / _S3_REGION /
+# _S3_PATH_STYLE; the relaxed-binding aliases (DATAPIPELINES_LAKE_STORAGE_*) bind in the
+# app but never reach the renderer, and the chart refuses them. A changed input (store env
+# or maxAgeSeconds) rolls the proxy pod via checksum/egress-render-inputs and the renderer
+# re-renders before Envoy starts; a value the renderer refuses fails the pod, fail closed.
 # Disabled: no proxy objects and no env entries; the app's reads go direct, uncapped.
 lake:
   egressProxy:

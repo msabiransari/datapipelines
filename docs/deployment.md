@@ -208,11 +208,39 @@ The app must reach:
   still reaches the store directly. The reference compose file and Helm chart ship the proxy ON: an Envoy container
   that resets every object-store stream at `datapipelines.lake.reads.egress-max-age-seconds`, so a store that
   trickles cannot hold a reader forever ([Lake §9](lake.md#9-reads); keys in
-  [Configuration §3.36](configuration.md#336-managed-lake-dp-lake-785)). It publishes no port and holds no
+  [Configuration §3.36](configuration.md#336-managed-lake-dp-lake-785)). Since #862 the shipped proxy's config is
+  an ALLOWLIST, not just a cap: it forwards only to ONE store authority — the exact `host[:port]` DuckDB puts on
+  the wire for the five non-secret lake values the app reads (`EgressStoreTarget`, the same derivation the managed
+  datasource's engine settings and the boot probe use). In virtual-host style the bucket prefixes the host (a
+  dotted bucket included); an `https://` store is `host:443` (the CONNECT line always carries the port); a
+  declared default port is dropped as the engine drops it (`http://minio:80` is the bare `minio`); a blank endpoint
+  is the regional `s3.<region>.<partition DNS suffix>` of the aws, aws-cn (`amazonaws.com.cn`) or aws-us-gov
+  partition, and any other region is refused rather than guessed. Every other authority — another host, a
+  suffix or prefix of the store's name, the store's host on another port, an IP literal, a trailing dot, a
+  leading-zero port, CONNECT or absolute-form GET alike — gets the proxy's own 403, stamped
+  `x-dp-egress-refused: store-allowlist`, before any DNS lookup or connect (a form Envoy's HTTP parser refuses
+  outright — a port past 65535, a percent-encoded host, CONNECT without a port or with userinfo — gets a 400
+  instead, equally unforwarded); the proxy strips that header from every store answer, so the app's boot check
+  tells the two 403s apart. `ManagedLakeEgressAllowlistE2eTest` runs this matrix against the shipped image with
+  recording destinations: no forbidden destination accepts a connection. The absolute-form URL decides the
+  destination: a conflicting or duplicated `Host` header or a destination-override header (`X-Forwarded-Host`,
+  `Forwarded`, `x-envoy-original-dst-host`) cannot redirect a request, a store's redirect is passed back to the client, never
+  followed, and the `/dp-egress` declaration is answered by the proxy itself on any authority, never forwarded.
+  Two forms reach the SAME store and are therefore admitted: a different letter case of the store's name, and
+  userinfo on the store's own authority (Envoy drops it). Both compose and the chart render that config with one
+  deterministic JVM main (`EgressProxyConfigMain`) reading exactly those five `DATAPIPELINES_LAKE_*` env names plus
+  the max-age — the renderer refuses to emit a config on a missing or invalid input (fail-closed), and with the
+  lake disabled it renders a deny-only config. The chart's app deployment refuses the four
+  `DATAPIPELINES_LAKE_STORAGE_*` alias names while the proxy is enabled: one spelling, one reader. Mechanics: §6.3
+  (compose) and §6.4 (chart). An allowlist names a HOST, not an address: the proxy resolves the store's name
+  itself, so it trusts the DNS answer for that one name — restrict the proxy pod's sockets with the chart's
+  `storeEgress` (§6.4) or your own network policy; the allowlist does not replace it. The proxy writes no access
+  log (a request's SigV4 headers never land in one). It publishes no port and holds no
   credential: S3 signing stays in DuckDB. For an `https://` store it sees `CONNECT host:443`; for a plain-`http://`
   endpoint (a MinIO inside your network) it sees the signed requests in clear, which is acceptable only inside the
   deployment's network. Boot refuses with `lake.boot.egress_proxy` when the proxy does not answer, declares another
-  max-age, or cannot reach the store. A temporary accommodation until
+  max-age, cannot reach the store, or refuses the store itself (its stamped 403: the proxy's allowlist names another
+  authority than the app's — a lake value changed on one side only). A temporary accommodation until
   [duckdb-httpfs#519](https://github.com/duckdb/duckdb-httpfs/issues/519) lands.
 
 The app **does not** require inbound network access beyond the HTTP/MCP ports it serves.
@@ -483,10 +511,25 @@ It also inventories every app-container environment name, refuses JVM code-loadi
 and requires a reasoned allowlist for names outside `DATAPIPELINES_*`, rejecting stale entries.
 
 The compose file also runs `egress-proxy` (#845, §4.3): Envoy pinned by digest, its image's non-root user, all
-capabilities dropped, no privilege escalation, no published port. Its root filesystem is NOT read-only under compose:
-compose copies an inline config into the container and refuses to do so on a read-only root filesystem, while a
-`file:` config would not be interpolated (the chart's proxy pod is read-only; `helm-check.sh` pins both). Its config is rendered by compose from the SAME `DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS`
-variable and default the app receives (the audit's check 10 refuses a diverged default), and the app is pointed at it
+capabilities dropped, no privilege escalation, no published port, root filesystem read-only. Since #862 its config
+is not shipped as text: an `egress-config` RENDERER service — the same app image, started through the same
+`PropertiesLauncher` main as the chart's renderer — runs once, reads the six `x-lake-render-env` names (the five
+non-secret `DATAPIPELINES_LAKE_*` store keys plus `DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS`, passed
+through with the same defaults the app receives — the audit's check 10 refuses a diverged default and check 11
+pins the renderer's inputs to exactly those six), writes `/dp-egress-config/envoy.yaml` into a shared
+`egress-config` volume and exits; a missing or invalid input leaves the file unwritten and the renderer failing.
+The renderer runs as the app image's own non-root user (no `user:` override; the audit's check 12 refuses one, and
+requires the renderer's image to be the app's in both `compose.yml` and `compose.local-build.yml`): the image ships
+`/dp-egress-config` owned by that user, so a FRESH volume takes that ownership when the renderer first mounts it.
+`egress-proxy` mounts the volume read-only at `/etc/envoy` with `nocopy: true` (check 11 pins the long form) —
+without it, a proxy that happened to mount the empty volume first would copy its image's own root-owned
+`envoy.yaml` into it and the renderer could not overwrite it. A renderer that cannot write its file refuses with
+one `egress_config: cannot write /dp-egress-config/envoy.yaml (...)` line and exit 1; the volume was created by
+something else (a pre-release build that rendered as root, or a proxy mount without `nocopy`), and the recovery is to
+drop it — it holds nothing but the rendered file: `docker compose down`, `docker volume rm <project>_egress-config`,
+`docker compose up -d`. `egress-proxy` is gated
+`depends_on: service_completed_successfully`, so a failed render never reaches a running proxy. `helm-check.sh` pins the renderer wiring on both sides. The proxy
+still publishes no port and holds no credential, and the app is pointed at it
 with the literal `egress-proxy:3128`. The app waits for it to START, not to be healthy: the distroless image has no
 shell or HTTP client to run a healthcheck with, so the app's boot check is the readiness gate.
 
@@ -558,15 +601,35 @@ Reference Helm chart in `deploy/helm/`. Includes:
   `Service`. Any `extraEnv.MANAGEMENT_SERVER_ADDRESS` / `_PORT` double mapping is refused
   (Kubernetes honours the last duplicate env name silently).
 - The managed lake reads' egress proxy (#845, §4.3), ON by default (`lake.egressProxy.enabled`):
-  a `Deployment`, `Service` and `ConfigMap` named `<release>-datapipelines-egress-proxy`, with
+  a `Deployment` and `Service` named `<release>-datapipelines-egress-proxy`, with
   their own `app.kubernetes.io/name` (`datapipelines-egress-proxy`), so no selector of the app's
   selects a proxy pod and none of the proxy's selects an app pod; and its own `NetworkPolicy`
   (below). The image is `lake.egressProxy.image` (repository, tag and a required `sha256:`
-  digest, the compose file's); the ConfigMap's Envoy config is the compose file's text, rendered
-  from `lake.egressProxy.maxAgeSeconds`, and the app's two env entries
+  digest, the compose file's). Since #862 the pod renders its own config: an init container
+  (`egress-config-render`) — the same app image, run once through `PropertiesLauncher` with
+  `-Dloader.main=...EgressProxyConfigMain` — writes the Envoy config into a shared `emptyDir`
+  volume, and the Envoy container mounts it read-only at `/etc/envoy`. The renderer's inputs are
+  `lake.egressProxy.maxAgeSeconds` and the five `DATAPIPELINES_LAKE_*` names, resolved the way the
+  app's own environment resolves them: each name is taken from `extraEnv` when set there, else
+  from the key of the same name in `existingSecret` (one optional `secretKeyRef` per name — never
+  the whole Secret, so no credential reaches the renderer), else left unset (the renderer's
+  default or refusal). The app reads `existingSecret` through `envFrom` and `extraEnv` as `env`,
+  which wins, so both pods see the same five values; `helm-check.sh` simulates that resolution
+  for a Secret-only, an override, a partial and an empty case and, given the renderer jar, runs
+  the real renderer on both sides. Exact names only: the four `DATAPIPELINES_LAKE_STORAGE_*`
+  aliases and the two egress env names are refused in `extraEnv` while the proxy is enabled; an
+  alias held in the Secret reaches only the app, whose boot check then refuses the mismatch. A
+  changed render VALUE rolls BOTH pods: the proxy pod template carries a
+  `checksum/egress-render-inputs` annotation over the same values the app Deployment reads,
+  `existingSecret`'s NAME included. Helm cannot see a Secret's CONTENT: after changing a lake key
+  in the Secret, restart both (`kubectl rollout restart deployment/<release>-datapipelines
+  deployment/<release>-datapipelines-egress-proxy`). A missing or invalid input fails the init container with a named
+  cause (`egress_config: ...` in its log), so the pod never starts Envoy on a partial config —
+  fail-closed. With the lake disabled the renderer emits a deny-only config (the proxy still
+  caps and refuses everything else), and the app's two env entries
   (`DATAPIPELINES_LAKE_READS_EGRESS_PROXY` = the Service's `name:3128`,
-  `DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS`) come from the same values. A changed max-age
-  rolls both the app and the proxy pods. While enabled, both names are refused in `extraEnv`;
+  `DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS`) come from the same values. While enabled,
+  both egress names are refused in `extraEnv`;
   disabled, nothing renders and `extraEnv` may point the app at your own proxy. The proxy pod is
   ready once `GET /dp-egress` (with the `x-dp-egress-check` header) answers. With the lake
   enabled, an app pod that boots before the proxy is ready is refused (`lake.boot.egress_proxy`)
@@ -625,8 +688,11 @@ pods; the egress proxy's own policy, below, is a separate object.
 **The egress proxy's `NetworkPolicy`** (#845, `lake.egressProxy.networkPolicy.enabled`, ON by
 default) selects only the proxy pods and leaves the app's policies untouched. Ingress: only the
 app pods (the app `Deployment`'s selector), only on TCP 3128 — the proxy holds no credential,
-so this rule is what limits who can use it. Egress is restricted only when you declare the
-store: `storeEgress.to` (a list of `NetworkPolicyPeer` objects, typically an `ipBlock` for the
+so this rule is what limits who can use it. Since #862 the config itself is an allowlist — the
+proxy 403s every authority but the one derived store authority before contacting any upstream —
+so this policy is the second layer on the same premise: the config decides which authorities
+are answered at all, and the policy decides which sockets the proxy may open. Declare the
+store here too: `storeEgress.to` (a list of `NetworkPolicyPeer` objects, typically an `ipBlock` for the
 object store's CIDR) and/or `storeEgress.ports` (a list of `NetworkPolicyPort` objects, e.g.
 TCP 443), copied verbatim; the policy then also admits DNS (UDP and TCP 53, to `dnsTo`, empty =
 any destination), because the proxy resolves each store host itself. With neither declared,
@@ -936,14 +1002,30 @@ For k8s: rolling update via `kubectl rollout`. Each terminated pod flips its rea
 `datapipelines.lake.reads.egress-proxy` (the reference compose file and Helm chart do) rewrites
 the managed lake datasource row with its `egress_proxy` key, and the next lease builds a new
 generation through the proxy; later boots leave the row unchanged. Bring the proxy up with the
-app: `./app.sh` starts the compose service, and the chart renders it by default. With the lake
+app: `./app.sh` starts the compose services (on the first `up`, compose runs the `egress-config`
+renderer to completion before `egress-proxy` starts — and a renderer that exits nonzero leaves
+`up` failing with `didn't complete successfully` and no proxy), and the chart renders it
+by default. With the lake
 enabled, a new instance whose proxy is not yet answering is refused at boot
 (`lake.boot.egress_proxy`) rather than serving uncapped reads. During a rolling update an
 older instance still reads directly until it is replaced: its connection setup ignores the key
 it does not know. An older instance that RESTARTS mid-rollout rewrites the row without the key;
 the next new instance's boot puts it back, so finish the rollout rather than pausing it. To opt
 out, set the key empty (compose) or `lake.egressProxy.enabled=false` (Helm); the next boot
-removes the key from the row.
+removes the key from the row. Upgrading a deployment that predates #862: the chart's proxy
+`ConfigMap` is gone — the config now lives in a volume rendered by the pod's init container,
+and `helm upgrade` replaces the proxy Deployment when any render input changes (the
+`checksum/egress-render-inputs` annotation rolls both pods, so the allowlist and the reader
+never disagree); compose's inline `configs:` block is replaced by
+the `egress-config` renderer service and a shared volume. Under COMPOSE, changing a lake value
+needs one extra step: `docker compose up -d` reruns the renderer and rolls the app, but the
+RUNNING proxy keeps its previous config in memory — compose does not cascade a dependency's
+recreation to its dependents (observed: `render` recreated and rerun while `egress-proxy`
+stayed up). Finish the change with `docker compose up -d --force-recreate egress-proxy` (or
+`--force-recreate` across all three services), and until then expect the boot check to refuse
+a changed max-age the proxy does not declare, or a changed store the proxy's allowlist does not
+name (its stamped 403) — fail-closed. Under the CHART, a lake key changed inside `existingSecret`
+is invisible to Helm (no checksum moves): restart both deployments (§6.4).
 
 **Scheduler notification kinds (V51).**
 
@@ -999,7 +1081,7 @@ lifecycle:
 - [ ] Redis `maxmemory-policy noeviction` (§4.2.1) — correctness, not tuning.
 - [ ] OIDC client secrets from a secret manager, not a plaintext env file; at least one provider configured (§5.1).
 - [ ] NetworkPolicy restricts app's egress.
-- [ ] With the managed lake: only the app reaches the egress proxy (the chart's proxy policy does this), and the proxy's egress is limited to the object store (`lake.egressProxy.networkPolicy.storeEgress`, §6.4). A plain-`http://` store endpoint is reachable only inside the deployment's network (the proxy sees its signed requests in clear).
+- [ ] With the managed lake: only the app reaches the egress proxy (the chart's proxy policy does this), the proxy's config forwards only to the derived store authority (§4.3), and the proxy's network egress is limited to the object store (`lake.egressProxy.networkPolicy.storeEgress`, §6.4). A plain-`http://` store endpoint is reachable only inside the deployment's network (the proxy sees its signed requests in clear).
 - [ ] Service account / IAM role has least privilege.
 - [ ] Container runs as non-root user (enforced in Dockerfile).
 - [ ] Container filesystem read-only except for configured volume mounts.

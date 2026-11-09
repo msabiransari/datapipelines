@@ -22,15 +22,72 @@ spec:
       labels:
         {{- include "datapipelines.egressProxy.selectorLabels" . | nindent 8 }}
       annotations:
-        # A changed max-age rolls the proxy pods (Envoy reads its config once, at start).
-        checksum/config: {{ include (print $.Template.BasePath "/egress-proxy-configmap.yaml") . | sha256sum }}
+        # A changed renderer INPUT rolls the proxy pods (#862): the checksum covers every chart value the init
+        # container's render reads (the max-age and each extraEnv-set input, plus the Secret NAME the other
+        # inputs are read from; datapipelines.egressRender.inputs) — the proxy rolls, its init container
+        # re-renders, and Envoy reads the new allowlist at start. A Secret's CONTENT is invisible to Helm: after
+        # changing a lake key in existingSecret, restart both deployments (deployment.md §6.4); until then the
+        # app's boot check refuses a proxy that allowlists another store (fail-closed). (The #845 ConfigMap
+        # checksum is gone with the ConfigMap itself: the config is the RENDERER's output now, not chart
+        # text — scripts/helm-check.sh parses the rendered pod and holds the wiring in place.)
+        checksum/egress-render-inputs: {{ include "datapipelines.egressRender.inputs" . | sha256sum }}
     spec:
       automountServiceAccountToken: false
       securityContext:
-        # The distroless image's own non-root user.
+        # The distroless image's own non-root user; fsGroup gives the init container's emptyDir the same
+        # group so the rendered file (written by the init container, read by Envoy) needs no world access.
         runAsNonRoot: true
         runAsUser: 65532
         runAsGroup: 65532
+        fsGroup: 65532
+      initContainers:
+        - name: egress-config-render
+          # The app image, the renderer main through PropertiesLauncher — the same main the compose
+          # stack's egress-config service runs (deployment.md §4.3). Fail closed: a bad value exits
+          # nonzero and the pod never starts the proxy. #845 rendered the config from chart text (the
+          # ConfigMap); #862 renders it from the app's OWN derivation, so the allowlist and the boot
+          # check cannot disagree about the store authority.
+          image: {{ include "datapipelines.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - java
+            - -Dloader.main=co.datapipelines.web.config.EgressProxyConfigMain
+            - -cp
+            - /app/datapipelines.jar
+            - org.springframework.boot.loader.launch.PropertiesLauncher
+            - /dp-egress-config/envoy.yaml
+          env:
+            # The chart's own max-age — the same rendered value the app container's env carries.
+            - name: DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS
+              value: {{ include "datapipelines.egressProxy.maxAgeSeconds" . | quote }}
+            # The five lake-storage inputs resolve EXACTLY as the app container's do (#862 review R1): the app
+            # reads existingSecret through envFrom and extraEnv through env, and Kubernetes lets an env entry
+            # win over envFrom. So each input here is the extraEnv value when one is set, else ONE named key of
+            # existingSecret, optional — a key the Secret lacks is unset here as it is unset in the app. Least
+            # privilege: five individual key references, never envFrom of the whole Secret; no other Secret key
+            # and no other extraEnv value (credentials included) reaches the proxy pod. scripts/helm-check.sh
+            # resolves both containers against fixture Secrets and runs the real renderer on each side.
+            {{- $secret := required "existingSecret is required — see values.yaml (deployment.md §5.1)" .Values.existingSecret }}
+            {{- range $name := splitList "," (include "datapipelines.egressRender.envNames" .) }}
+            - name: {{ $name }}
+              {{- if hasKey $.Values.extraEnv $name }}
+              value: {{ get $.Values.extraEnv $name | quote }}
+              {{- else }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: {{ $name }}
+                  optional: true
+              {{- end }}
+            {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: envoy-config
+              mountPath: /dp-egress-config
       containers:
         - name: egress-proxy
           image: {{ include "datapipelines.egressProxy.image" . }}
@@ -64,9 +121,10 @@ spec:
               mountPath: /etc/envoy
               readOnly: true
       volumes:
+        # The renderer's output (#862), filled by the init container before Envoy starts; Envoy mounts it
+        # read-only. Replaces the #845 ConfigMap: the config is derived from the app's inputs, not chart text.
         - name: envoy-config
-          configMap:
-            name: {{ include "datapipelines.egressProxy.fullname" . }}
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
