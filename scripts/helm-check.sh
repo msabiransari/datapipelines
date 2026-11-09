@@ -29,8 +29,8 @@
 #         non-strict lint exits non-zero.
 #   (a)   defaults: exit 0; NO DuckDB or JavaScript env entry, NO rendered
 #         `value: ""`, and the env: blocks hold EXACTLY the egress-proxy
-#         entries (#845) plus the renderer init container's input block
-#         (#862) — nothing else (an empty entry would override the image's own
+#         entries (#845) plus the renderer init container's six inputs
+#         (#862; five are optional Secret key references) — nothing else (an empty entry would override the image's own
 #         DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY or
 #         DATAPIPELINES_SCRIPT_JS_ISOLATE_DIR — the #140/#688 trap); no /app/lib.
 #   (a-off) lake.egressProxy.enabled=false: the pre-#845 contract — no `env:`
@@ -104,8 +104,9 @@
 #         THE WIRING instead: the init container runs the app image's renderer
 #         entrypoint, byte-equal to deploy/compose.yml's egress-config
 #         entrypoint (the one-config rule), fed the chart's max-age and ONLY
-#         the five renderer names passed through from extraEnv (least
-#         privilege; values byte-equal to what the app container carries),
+#         the five renderer names, each extraEnv's value when set there, else
+#         an optional key reference to the same-named existingSecret key — the
+#         app container's precedence; no envFrom (least privilege, review R1),
 #         writing an emptyDir that Envoy mounts read-only at /etc/envoy; the
 #         proxy and app selectors select only their own pods; the image equals
 #         deploy/compose.yml's egress-proxy image; compose's egress-proxy is
@@ -122,6 +123,13 @@
 #         (i3) ports-only with dnsTo, (i4) its policy off, (i5) the proxy off
 #         (no proxy object, no egress env entry; an extraEnv proxy is then
 #         the operator's and renders once).
+#   (i7)  the renderer inputs RESOLVED (#862 review R1): fixture Secrets with
+#         dummy credentials, both containers' env resolved the kubelet's way,
+#         the six inputs identical in app and init and equal to the case's
+#         literal expectation, no other Secret key in the init container —
+#         Secret only, extraEnv override, partial Secret + AWS region, nothing
+#         set, an alias in the Secret (app only); HELM_CHECK_RENDERER_JAR also
+#         runs the real renderer on both sides (egress_resolve).
 #   (i6)  refusals, each with the template's own message verbatim: the two
 #         extraEnv double mappings while enabled; the four relaxed-binding
 #         lake-storage aliases (they bind in the app but never reach the
@@ -589,10 +597,11 @@ else
   n_env=$(grep -c '^ *env:' "$WORK/a.out" || true)
   # Env entry names are the upper-case `- name:` lines (ports, volumes and
   # containers are lower-case); the default-ON egress proxy sets the app's
-  # two (#845) and the renderer init container's max-age input (#862) — the
+  # two (#845) and the renderer init container's six inputs (#862: the max-age
+  # value plus five optional existingSecret key references, review R1) — the
   # max-age name appears twice, once per container.
   a_names=$(grep -E '^ *- name: [A-Z_][A-Z0-9_]*$' "$WORK/a.out" | sed -E 's/^ *- name: //' | sort | tr '\n' ' ' || true)
-  a_expected="DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS DATAPIPELINES_LAKE_READS_EGRESS_PROXY "
+  a_expected="DATAPIPELINES_LAKE_ENABLED DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS DATAPIPELINES_LAKE_READS_EGRESS_PROXY DATAPIPELINES_LAKE_S3_BUCKET DATAPIPELINES_LAKE_S3_ENDPOINT DATAPIPELINES_LAKE_S3_PATH_STYLE DATAPIPELINES_LAKE_S3_REGION "
   n_lib=$(grep -c '/app/lib' "$WORK/a.out" || true)
   n_driver=$(grep -c 'name: driver-library$' "$WORK/a.out" || true)
   if [ "$n_dbu" -ne 0 ]; then
@@ -602,11 +611,11 @@ else
   elif [ "$n_emp" -ne 0 ]; then
     verdict "(a) defaults" 1 "grep -c 'value: \"\"' = $n_emp (expected 0 — an empty env value still SETS the variable)"
   elif [ "$n_env" -ne 2 ] || [ "$a_names" != "$a_expected" ]; then
-    verdict "(a) defaults" 1 "env: blocks=$n_env, entry names=[$a_names] (expected 2 blocks — the app's [$a_expected] with the max-age named twice: app container + renderer init)"
+    verdict "(a) defaults" 1 "env: blocks=$n_env, entry names=[$a_names] (expected 2 blocks — [$a_expected]: the app's two egress entries + the renderer init's six inputs, the max-age named in both)"
   elif [ "$n_lib" -ne 0 ] || [ "$n_driver" -ne 0 ]; then
     verdict "(a) defaults" 1 "/app/lib count=$n_lib; driver-library count=$n_driver (expected 0 each)"
   else
-    verdict "(a) defaults" 0 "exit 0; 0 DuckDB entries, 0 JavaScript entries, 0 rendered empty values, the env: blocks hold only the app's two egress entries plus the renderer init's max-age input, no /app/lib or driver-library"
+    verdict "(a) defaults" 0 "exit 0; 0 DuckDB entries, 0 JavaScript entries, 0 rendered empty values, the env: blocks hold only the app's two egress entries plus the renderer init's six inputs, no /app/lib or driver-library"
   fi
 fi
 if [ "$rc" -eq 0 ]; then kc_validate "(a) defaults" "$WORK/a.out"; fi
@@ -1281,15 +1290,17 @@ VALUES
 # header's (i) for every assertion; <values-file> may be "-" for defaults.
 egress_contract() {  # <case-label> <rendered-file> <values-file|->
   local label="$1" file="$2" values="$3" prc=0 report
-  report=$(trap - ERR; python3 - "$file" "$values" "$CHART_DIR/values.yaml" "$ROOT/deploy/compose.yml" <<'PY'
+  report=$(trap - ERR; python3 - "$file" "$values" "$CHART_DIR/values.yaml" "$ROOT/deploy/compose.yml" "$PLACEHOLDER" <<'PY'
 import copy
 import sys
 
 import yaml
 
 COMPONENT = "app.kubernetes.io/component"
-# #862 — the six env names the renderer reads; the init container passes through
-# ONLY the first five from extraEnv, the max-age is the chart's own value.
+# #862 — the six env names the renderer reads; the init container carries ONLY
+# these: each of the first five as extraEnv's value when set there, else as an
+# optional key reference into existingSecret (the app's own precedence, review R1);
+# the max-age is the chart's own value.
 RENDER_NAMES = [
     "DATAPIPELINES_LAKE_ENABLED",
     "DATAPIPELINES_LAKE_S3_BUCKET",
@@ -1318,7 +1329,7 @@ def merge(base, over):
 
 
 def main():
-    render, values_path, chart_values, compose_path = sys.argv[1:5]
+    render, values_path, chart_values, compose_path, secret_name = sys.argv[1:6]
     with open(render, encoding="utf-8") as f:
         docs = [d for d in yaml.safe_load_all(f) if d is not None]
     with open(chart_values, encoding="utf-8") as f:
@@ -1432,14 +1443,21 @@ def main():
         if not (isb.get("readOnlyRootFilesystem") is True and isb.get("allowPrivilegeEscalation") is False
                 and (isb.get("capabilities") or {}).get("drop") == ["ALL"]):
             problems.append(f"the init container's securityContext {isb} is not read-only/no-escalation/drop-ALL")
-        init_env = {e["name"]: e.get("value") for e in init.get("env") or []}
+        init_entries = init.get("env") or []
+        init_env = {e["name"]: e for e in init_entries}
         max_age = ep["maxAgeSeconds"]
-        if init_env.get(MAX_AGE_NAME) != str(max_age):
-            problems.append(f"the init container's {MAX_AGE_NAME}={init_env.get(MAX_AGE_NAME)!r} != the chart's maxAgeSeconds {max_age}")
-        passed = {k: v for k, v in init_env.items() if k in RENDER_NAMES}
-        want_passed = {k: str(extra[k]) for k in RENDER_NAMES if k in extra}
-        if passed != want_passed:
-            problems.append(f"the init container's pass-through env {passed} != extraEnv's renderer names {want_passed}")
+        if init_env.get(MAX_AGE_NAME) != {"name": MAX_AGE_NAME, "value": str(max_age)}:
+            problems.append(f"the init container's {MAX_AGE_NAME} entry {init_env.get(MAX_AGE_NAME)} != the chart's maxAgeSeconds {max_age}")
+        if len(init_entries) != len(init_env):
+            problems.append(f"the init container names an env entry twice ({[e['name'] for e in init_entries]})")
+        if init.get("envFrom"):
+            problems.append(f"the init container has envFrom {init.get('envFrom')} — never the whole Secret, five named keys only")
+        for name in RENDER_NAMES:
+            want = ({"name": name, "value": str(extra[name])} if name in extra else
+                    {"name": name, "valueFrom": {"secretKeyRef": {"name": secret_name, "key": name, "optional": True}}})
+            if init_env.get(name) != want:
+                problems.append(f"the init container's {name} entry {init_env.get(name)} != {want} (extraEnv wins, else "
+                                f"the Secret's same-named key, optional — the app container's precedence)")
         stray = [k for k in init_env if k != MAX_AGE_NAME and k not in RENDER_NAMES]
         if stray:
             problems.append(f"the init container carries non-renderer env {stray} (least privilege: only the six inputs)")
@@ -1589,6 +1607,228 @@ extraEnv:
   DATAPIPELINES_LAKE_READS_EGRESS_PROXY: corp-proxy.example:3128
 VALUES
 egress_render "(i5) proxy off" "$WORK/i5.values.yaml" "$WORK/i5.out" "$WORK/i5.err"
+
+# (i7) #862 review R1 — the renderer's inputs RESOLVED, not just wired. Each case
+# renders the chart, then resolves the app container's and the init container's
+# environment the way the kubelet does against a FIXTURE Secret (envFrom first,
+# then env entries in order, an env entry winning; a secretKeyRef to a missing
+# key with optional: true leaves the variable unset), and asserts: (1) the six
+# renderer inputs resolve identically in both containers; (2) they equal the
+# case's expected values literally (Secret-only, extraEnv override, a partial
+# Secret, nothing set, an alias held in the Secret); (3) no other Secret key — the
+# fixture carries dummy credentials — reaches the init container. Optional: with
+# HELM_CHECK_RENDERER_JAR=<boot jar> the REAL renderer (EgressProxyConfigMain)
+# runs on each side's resolved inputs and both outputs must be byte-identical and
+# name the expected store authority ("-" = deny-only, "!refused" = both runs must
+# exit nonzero); CI does not set it (no jar at this step), so without it the case
+# line says "renderer run SKIP" — the resolution itself is still asserted.
+egress_resolve() {  # <case-label> <values-file|-> <secret-fixture> <expected-json> <expected-authority|-|!refused>
+  local label="$1" values="$2" secret="$3" expected="$4" authority="$5" rc=0 prc=0 report out err
+  local -a extra=()
+  [ "$values" = "-" ] || extra=(-f "$values")
+  out="$WORK/resolve-$(printf '%s' "$label" | tr -c 'A-Za-z0-9' '_').out"
+  err="${out%.out}.err"
+  "$HELM" template dp "$CHART_DIR" --set "existingSecret=$PLACEHOLDER" "${extra[@]}" >"$out" 2>"$err" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    verdict "$label renders" 1 "helm template exited $rc (expected 0)"
+    return 0
+  fi
+  report=$(trap - ERR; python3 - "$out" "$secret" "$expected" "$authority" "$PLACEHOLDER" "${HELM_CHECK_RENDERER_JAR:-}" "$WORK" <<'PY'
+import json
+import os
+import subprocess
+import sys
+
+import yaml
+
+RENDER_INPUTS = [
+    "DATAPIPELINES_LAKE_ENABLED",
+    "DATAPIPELINES_LAKE_S3_BUCKET",
+    "DATAPIPELINES_LAKE_S3_ENDPOINT",
+    "DATAPIPELINES_LAKE_S3_REGION",
+    "DATAPIPELINES_LAKE_S3_PATH_STYLE",
+    "DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS",
+]
+RENDERER_MAIN = "co.datapipelines.web.config.EgressProxyConfigMain"
+LAUNCHER = "org.springframework.boot.loader.launch.PropertiesLauncher"
+
+
+def resolve(container, secrets):
+    """The kubelet's order: envFrom sources, then env entries (a later entry wins)."""
+    env = {}
+    for source in container.get("envFrom") or []:
+        ref = source.get("secretRef")
+        if ref is None:
+            raise SystemExit(f"unsupported envFrom source {source}")
+        env.update(secrets[ref["name"]])
+    for entry in container.get("env") or []:
+        name = entry["name"]
+        if "value" in entry:
+            env[name] = str(entry["value"])
+        elif "valueFrom" in entry:
+            ref = entry["valueFrom"].get("secretKeyRef")
+            if ref is None:
+                raise SystemExit(f"unsupported valueFrom {entry}")
+            data = secrets.get(ref["name"])
+            if data is None or ref["key"] not in data:
+                if not ref.get("optional"):
+                    raise SystemExit(f"{name}: a required key reference to a missing key — the pod would not start")
+                env.pop(name, None)
+            else:
+                env[name] = data[ref["key"]]
+        else:
+            env[name] = ""
+    return env
+
+
+def run_renderer(jar, env, out_path):
+    base = {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
+    proc = subprocess.run(
+        ["java", f"-Dloader.main={RENDERER_MAIN}", "-cp", jar, LAUNCHER, out_path],
+        env={**base, **env}, capture_output=True, text=True, timeout=120, check=False,
+    )
+    if proc.returncode != 0:
+        return proc.returncode, proc.stderr.strip()[:300]
+    with open(out_path, encoding="utf-8") as f:
+        return 0, f.read()
+
+
+def main():
+    render, secret_path, expected_json, authority, secret_name, jar, work = sys.argv[1:8]
+    with open(render, encoding="utf-8") as f:
+        docs = [d for d in yaml.safe_load_all(f) if d is not None]
+    with open(secret_path, encoding="utf-8") as f:
+        fixture = yaml.safe_load(f) or {}
+    secrets = {secret_name: {str(k): str(v) for k, v in fixture.items()}}
+    expected = json.loads(expected_json)
+
+    def component(d):
+        return ((d.get("metadata") or {}).get("labels") or {}).get("app.kubernetes.io/component")
+
+    deployments = [d for d in docs if d.get("kind") == "Deployment"]
+    apps = [d for d in deployments if component(d) != "egress-proxy"]
+    proxies = [d for d in deployments if component(d) == "egress-proxy"]
+    if len(apps) != 1 or len(proxies) != 1:
+        print(f"{len(apps)} app / {len(proxies)} proxy Deployment(s) (expected 1/1)")
+        sys.exit(1)
+    app_containers = apps[0]["spec"]["template"]["spec"]["containers"]
+    inits = proxies[0]["spec"]["template"]["spec"].get("initContainers") or []
+    if len(app_containers) != 1 or len(inits) != 1:
+        print(f"{len(app_containers)} app container(s) / {len(inits)} init container(s) (expected 1/1)")
+        sys.exit(1)
+    app_env = resolve(app_containers[0], secrets)
+    init_env = resolve(inits[0], secrets)
+
+    problems = []
+    app_inputs = {k: app_env[k] for k in RENDER_INPUTS if k in app_env}
+    init_inputs = {k: init_env[k] for k in RENDER_INPUTS if k in init_env}
+    if app_inputs != init_inputs:
+        problems.append(f"the renderer inputs resolve differently: app {app_inputs} vs init {init_inputs}")
+    if init_inputs != expected:
+        problems.append(f"the init container resolves {init_inputs}, expected {expected}")
+    leaked = sorted(k for k in init_env if k not in RENDER_INPUTS)
+    if leaked:
+        problems.append(f"the init container resolves non-renderer variables {leaked} (least privilege)")
+    if problems:
+        print("; ".join(problems))
+        sys.exit(1)
+
+    unset = [k for k in RENDER_INPUTS if k not in init_inputs]
+    summary = (f"{len(init_inputs)} input(s) resolve identically in app and init ({', '.join(sorted(init_inputs))}); "
+               f"unset in both: {len(unset)}; init sees {len(init_env)} variable(s), no other Secret key")
+    if not jar:
+        print(summary + "; renderer run SKIP (HELM_CHECK_RENDERER_JAR unset)")
+        return
+    (lrc, left), (rrc, right) = (run_renderer(jar, init_inputs, os.path.join(work, "resolve-init-envoy.yaml")),
+                                 run_renderer(jar, app_inputs, os.path.join(work, "resolve-app-envoy.yaml")))
+    if authority == "!refused":
+        if lrc == 0 or rrc == 0:
+            print(summary + f"; the renderer was expected to refuse these inputs (exit {lrc}/{rrc})")
+            sys.exit(1)
+        print(summary + f"; the real renderer on both sides refuses, fail-closed: {left}")
+        return
+    if lrc != 0 or rrc != 0 or left != right:
+        print(summary + f"; the renderer's output differs between the two resolved environments (exit {lrc}/{rrc})")
+        sys.exit(1)
+    config = json.loads(left)
+    vhosts = config["static_resources"]["listeners"][0]["filter_chains"][0]["filters"][0]["typed_config"]["route_config"]["virtual_hosts"]
+    domains = [d for vh in vhosts for d in vh["domains"] if d != "*"]
+    want = [] if authority == "-" else [authority]
+    if domains != want:
+        print(summary + f"; the renderer allowlists {domains}, expected {want}")
+        sys.exit(1)
+    print(summary + f"; the real renderer on both sides: byte-identical, allowlist {domains or 'deny-only'}")
+
+
+try:
+    main()
+except SystemExit:
+    raise
+except Exception as e:  # noqa: BLE001
+    print(f"crashed: {e!r}")
+    sys.exit(2)
+PY
+) || prc=$?
+  case "$prc" in
+    0) verdict "$label renderer inputs resolved" 0 "$report" ;;
+    1) verdict "$label renderer inputs resolved" 1 "$report" ;;
+    *) echo "helm-check: the renderer-input resolution crashed for $label (exit $prc) — $report (tooling, not a verdict)" >&2; exit 2 ;;
+  esac
+}
+
+# The fixture Secret's credentials are dummy local values; they exist so a leak
+# into the init container would be visible.
+cat >"$WORK/r-secret-only.secret.yaml" <<'SECRET'
+DATAPIPELINES_JWT_SECRET: dummy-local-jwt-not-a-secret
+DATAPIPELINES_LAKE_S3_ACCESS_KEY_ID: dummy-local-access-key
+DATAPIPELINES_LAKE_S3_SECRET_ACCESS_KEY: dummy-local-secret-key
+DATAPIPELINES_LAKE_ENABLED: "true"
+DATAPIPELINES_LAKE_S3_BUCKET: dp-lake
+DATAPIPELINES_LAKE_S3_ENDPOINT: http://minio.store.svc:9000
+DATAPIPELINES_LAKE_S3_PATH_STYLE: "true"
+SECRET
+egress_resolve "(i7a) lake values in the Secret only" - "$WORK/r-secret-only.secret.yaml" \
+  '{"DATAPIPELINES_LAKE_ENABLED": "true", "DATAPIPELINES_LAKE_S3_BUCKET": "dp-lake", "DATAPIPELINES_LAKE_S3_ENDPOINT": "http://minio.store.svc:9000", "DATAPIPELINES_LAKE_S3_PATH_STYLE": "true", "DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS": "960"}' \
+  "minio.store.svc:9000"
+
+cat >"$WORK/r-override.values.yaml" <<'VALUES'
+extraEnv:
+  DATAPIPELINES_LAKE_S3_BUCKET: dp-lake-override
+  DATAPIPELINES_LAKE_S3_ENDPOINT: https://store.example.test
+  DATAPIPELINES_LAKE_S3_PATH_STYLE: "false"
+VALUES
+egress_resolve "(i7b) extraEnv overrides the Secret" "$WORK/r-override.values.yaml" "$WORK/r-secret-only.secret.yaml" \
+  '{"DATAPIPELINES_LAKE_ENABLED": "true", "DATAPIPELINES_LAKE_S3_BUCKET": "dp-lake-override", "DATAPIPELINES_LAKE_S3_ENDPOINT": "https://store.example.test", "DATAPIPELINES_LAKE_S3_PATH_STYLE": "false", "DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS": "960"}' \
+  "dp-lake-override.store.example.test:443"
+
+cat >"$WORK/r-partial.secret.yaml" <<'SECRET'
+DATAPIPELINES_JWT_SECRET: dummy-local-jwt-not-a-secret
+DATAPIPELINES_LAKE_S3_REGION: eu-west-1
+SECRET
+cat >"$WORK/r-partial.values.yaml" <<'VALUES'
+extraEnv:
+  DATAPIPELINES_LAKE_ENABLED: "true"
+  DATAPIPELINES_LAKE_S3_BUCKET: dp-lake
+VALUES
+egress_resolve "(i7c) partial Secret + extraEnv, AWS regional" "$WORK/r-partial.values.yaml" "$WORK/r-partial.secret.yaml" \
+  '{"DATAPIPELINES_LAKE_ENABLED": "true", "DATAPIPELINES_LAKE_S3_BUCKET": "dp-lake", "DATAPIPELINES_LAKE_S3_REGION": "eu-west-1", "DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS": "960"}' \
+  "dp-lake.s3.eu-west-1.amazonaws.com:443"
+
+cat >"$WORK/r-none.secret.yaml" <<'SECRET'
+DATAPIPELINES_JWT_SECRET: dummy-local-jwt-not-a-secret
+SECRET
+egress_resolve "(i7d) no lake value anywhere" - "$WORK/r-none.secret.yaml" \
+  '{"DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS": "960"}' "-"
+
+# An alias held in the Secret binds in the app only (Spring relaxed binding); the
+# renderer never sees it — the app's boot check then meets the proxy's own
+# refusal and refuses (lake.boot.egress_proxy, deployment.md §4.3).
+cat >"$WORK/r-alias.secret.yaml" <<'SECRET'
+DATAPIPELINES_LAKE_ENABLED: "true"
+DATAPIPELINES_LAKE_STORAGE_BUCKET: dp-lake
+SECRET
+egress_resolve "(i7e) a relaxed-binding alias in the Secret reaches only the app" - "$WORK/r-alias.secret.yaml" \
+  '{"DATAPIPELINES_LAKE_ENABLED": "true", "DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS": "960"}' "!refused"
 
 # (i6) refusals — each with the template's own message verbatim.
 check_double_mapping "(i6) extraEnv double-maps DATAPIPELINES_LAKE_READS_EGRESS_PROXY" \
