@@ -3,6 +3,7 @@ package co.datapipelines.web.config
 import com.fasterxml.jackson.core.util.DefaultIndenter
 import com.fasterxml.jackson.core.util.DefaultPrettyPrinter
 import com.fasterxml.jackson.databind.ObjectMapper
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
@@ -57,6 +58,7 @@ object EgressProxyConfigMain {
     const val LISTENER_PORT = 3128
 
     private const val FORWARD_CLUSTER = "dynamic_forward_proxy"
+    private const val FORWARD_CLUSTER_TYPE = "type.googleapis.com/envoy.extensions.clusters.dynamic_forward_proxy.v3.ClusterConfig"
     private const val HTTP_OK = 200
     private const val HTTP_FORBIDDEN = 403
     private val DNS_CACHE = mapOf("name" to "egress_dns", "dns_lookup_family" to "V4_PREFERRED")
@@ -142,8 +144,7 @@ object EgressProxyConfigMain {
                                             "name" to "envoy.clusters.dynamic_forward_proxy",
                                             "typed_config" to
                                                 mapOf(
-                                                    "@type" to
-                                                        "type.googleapis.com/envoy.extensions.clusters.dynamic_forward_proxy.v3.ClusterConfig",
+                                                    "@type" to FORWARD_CLUSTER_TYPE,
                                                     "dns_cache_config" to DNS_CACHE,
                                                 ),
                                         ),
@@ -254,7 +255,7 @@ object EgressProxyConfigMain {
                 } else {
                     null
                 }
-            write(output, render(maxAge, target))
+            write(output, render(maxAge, target), err)
             out(
                 "event=egress_config_written output=$output max_age_seconds=$maxAge enabled=$enabled " +
                     "store=${target?.domains?.singleOrNull() ?: "none"}",
@@ -292,20 +293,30 @@ object EgressProxyConfigMain {
         return parsed
     }
 
+    /**
+     * Writes the one fixed output. An unwritable target — the read-only file a root renderer left in an old
+     * compose volume (#862 review R4, deployment.md §6.4), a path that is a directory — is the same fail-closed
+     * refusal as a bad input: one `egress_config:` line naming the path and the cause, exit 1, never a stack trace.
+     */
     private fun write(
         output: String,
         yaml: String,
+        err: (String) -> Unit,
     ) {
         val path = Path.of(output)
-        path.parent?.let { Files.createDirectories(it) }
-        Files.writeString(
-            path,
-            yaml,
-            StandardOpenOption.CREATE,
-            StandardOpenOption.TRUNCATE_EXISTING,
-            StandardOpenOption.WRITE,
-        )
-        Files.setPosixFilePermissions(path, PosixFilePermissions.fromString("rw-r--r--"))
+        try {
+            path.parent?.let { Files.createDirectories(it) }
+            Files.writeString(
+                path,
+                yaml,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING,
+                StandardOpenOption.WRITE,
+            )
+            Files.setPosixFilePermissions(path, PosixFilePermissions.fromString("rw-r--r--"))
+        } catch (unwritable: IOException) {
+            fail(err, "cannot write $output (${unwritable.javaClass.simpleName}): the config path must be writable by the renderer's user")
+        }
     }
 
     private fun fail(

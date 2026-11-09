@@ -763,8 +763,12 @@ services:
   # renderer must place envoy.yaml in it for the proxy's non-root user (the renderer writes it 0644); the
   # hardening bounds that root — caps dropped, no-new-privileges, read-only root filesystem, tmpfs /tmp.
   egress-config:
+    # The app's own image and its own non-root user (#862 review R4): the image's /dp-egress-config is owned by
+    # that user, so this fresh named volume is too (Dockerfile; the proxy's mount below copies nothing). A volume
+    # already holding a file this user cannot write is refused, exit 1, one egress_config line — deployment.md
+    # §6.4 names the `docker volume rm`. compose-env-audit.sh pins this image to the app service's, in both
+    # files, and refuses a `user:` here.
     image: ghcr.io/datapipelines/datapipelines:1.0.0
-    user: "0"
     entrypoint:
       [
         "java",
@@ -801,8 +805,18 @@ services:
   # fail-closed. scripts/helm-check.sh pins the chart's equivalent posture (checksum rolls both pods).
   egress-proxy:
     image: envoyproxy/envoy:distroless-v1.40.2@sha256:09ca6f2140a61ad8df11779a4a30d52b48433d444466328494f9188c9c35eded
+    # nocopy (#862 review R4): without it, Docker copies the Envoy image's own /etc/envoy (a root-owned
+    # default envoy.yaml) into the still-empty volume when this container is created — before the renderer
+    # runs — and the non-root renderer can then not write its file (measured with app.sh, project dp862:
+    # exit 1, AccessDeniedException). With it, the only copy-up is the renderer's own empty, app-user-owned
+    # mountpoint (Dockerfile).
     volumes:
-      - egress-config:/etc/envoy:ro
+      - type: volume
+        source: egress-config
+        target: /etc/envoy
+        read_only: true
+        volume:
+          nocopy: true
     depends_on:
       egress-config:
         condition: service_completed_successfully

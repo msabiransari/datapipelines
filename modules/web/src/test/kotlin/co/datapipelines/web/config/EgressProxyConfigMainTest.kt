@@ -220,6 +220,27 @@ class EgressProxyConfigMainTest {
         }
     }
 
+    /** #862 review R4: an unwritable output (here a directory, unwritable for any uid) refuses, not crashes. */
+    @Test
+    fun `run refuses an unwritable output - nonzero, one egress_config line naming the path`() {
+        val out = Files.createDirectories(temp.resolve("occupied.yaml"))
+        val stderr = StringBuilder()
+        val code =
+            EgressProxyConfigMain.run(
+                args = arrayOf(out.toString()),
+                env =
+                    env(
+                        EgressProxyConfigMain.ENV_ENABLED to "false",
+                        EgressProxyConfigMain.ENV_MAX_AGE to "960",
+                    ),
+                err = { stderr.appendLine(it) },
+            )
+        code shouldBe 1
+        stderr.lines().filter { it.isNotBlank() }.size shouldBe 1
+        stderr.toString().trim() shouldStartWith "egress_config: cannot write $out"
+        Files.isDirectory(out) shouldBe true
+    }
+
     @Test
     fun `run with the lake disabled still renders the deny-only fail-closed file`() {
         val out = temp.resolve("deny-only.yaml")
