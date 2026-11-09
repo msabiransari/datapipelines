@@ -103,6 +103,9 @@ internal object EgressProxyFixture {
     ): GenericContainer<*> =
         GenericContainer(DockerImageName.parse(shippedImage()))
             .withNetworkMode("host")
+            // Two E2E forks share the host's abstract socket namespace. These disposable proxies
+            // never hot-restart; disable its default socket so distinct listeners stay isolated.
+            .withCommand("-c", "/etc/envoy/envoy.yaml", "--disable-hot-restart")
             .apply { extraHosts.forEach { (name, ip) -> withExtraHost(name, ip) } }
             .withCopyToContainer(Transferable.of(config), "/etc/envoy/envoy.yaml")
             .waitingFor(Wait.forLogMessage(".*all clusters initialized.*", 1).withStartupTimeout(Duration.ofSeconds(60)))
