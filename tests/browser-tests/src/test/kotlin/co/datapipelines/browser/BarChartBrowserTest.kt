@@ -3,6 +3,7 @@ package co.datapipelines.browser
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import com.microsoft.playwright.Browser
 import com.microsoft.playwright.BrowserContext
 import com.microsoft.playwright.Page
@@ -333,92 +334,32 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
     }
 
     private fun overflowFixture(): ChartBrowserFixtures.Fixture {
-        val spec =
-            JsonObject().apply {
-                addProperty("display_name", "Overflow")
-                add(
-                    "renderer",
-                    JsonObject().apply {
-                        addProperty("kind", "chart")
-                        addProperty("version", "1")
-                    },
-                )
-                add(
-                    "inputs",
-                    JsonObject().apply {
-                        add(
-                            "sales",
-                            JsonObject().apply {
-                                add(
-                                    "columns",
-                                    JsonArray().apply {
-                                        add(
-                                            JsonObject().apply {
-                                                addProperty("name", "region")
-                                                addProperty("type", "STRING")
-                                                addProperty("nullable", false)
-                                            },
-                                        )
-                                        add(
-                                            JsonObject().apply {
-                                                addProperty("name", "channel")
-                                                addProperty("type", "STRING")
-                                                addProperty("nullable", false)
-                                            },
-                                        )
-                                        add(
-                                            JsonObject().apply {
-                                                addProperty("name", "amount")
-                                                addProperty("type", "DECIMAL")
-                                                addProperty("nullable", false)
-                                            },
-                                        )
-                                    },
-                                )
-                            },
-                        )
-                    },
-                )
-                add(
-                    "config",
-                    JsonObject().apply {
-                        add("mark", JsonObject().apply { addProperty("type", "bar") })
-                        add(
-                            "encoding",
-                            JsonObject().apply {
-                                add(
-                                    "x",
-                                    JsonObject().apply {
-                                        addProperty("field", "region")
-                                        addProperty("type", "nominal")
-                                        addProperty("sort", "ascending")
-                                        addProperty("title", "Region")
-                                    },
-                                )
-                                add(
-                                    "y",
-                                    JsonObject().apply {
-                                        addProperty("field", "amount")
-                                        addProperty("type", "quantitative")
-                                        addProperty("aggregate", "sum")
-                                        addProperty("stack", "zero")
-                                    },
-                                )
-                                add(
-                                    "color",
-                                    JsonObject().apply {
-                                        addProperty("field", "channel")
-                                        addProperty("type", "nominal")
-                                        addProperty("sort", "ascending")
-                                        addProperty("title", "Channel")
-                                    },
-                                )
-                            },
-                        )
-                        add("title", JsonObject().apply { addProperty("text", "Overflow") })
-                    },
-                )
+        val rawSpec =
+            """
+            {
+              "display_name": "Overflow",
+              "renderer": {"kind": "chart", "version": "1"},
+              "inputs": {
+                "sales": {
+                  "columns": [
+                    {"name": "region", "type": "STRING", "nullable": false},
+                    {"name": "channel", "type": "STRING", "nullable": false},
+                    {"name": "amount", "type": "DECIMAL", "nullable": false}
+                  ]
+                }
+              },
+              "config": {
+                "mark": {"type": "bar"},
+                "encoding": {
+                  "x": {"field": "region", "type": "nominal", "sort": "ascending", "title": "Region"},
+                  "y": {"field": "amount", "type": "quantitative", "aggregate": "sum", "stack": "zero"},
+                  "color": {"field": "channel", "type": "nominal", "sort": "ascending", "title": "Channel"}
+                },
+                "title": {"text": "Overflow"}
+              }
             }
+            """.trimIndent()
+        val spec = JsonParser.parseString(rawSpec).asJsonObject
         val gson = GsonBuilder().serializeNulls().create()
         val rows =
             listOf(
