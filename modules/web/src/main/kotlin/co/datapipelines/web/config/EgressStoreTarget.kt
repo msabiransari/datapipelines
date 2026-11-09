@@ -10,10 +10,12 @@ import java.net.URI
  * wire (deployment.md §4.3).
  *
  * The forms come from probe A (lane 862 evidence, DuckDB httpfs v1.5.5 driven through a recording proxy): a virtual
- * host style authority prefixes the bucket; an explicitly declared port travels verbatim; a CONNECT tunnel always
- * carries its port (an https store is therefore `host:443`); a plain-http store on its default port puts a BARE host
- * on the wire. A blank endpoint resolves to the REGIONAL `s3.<region>.<partition DNS suffix>` (default region
- * us-east-1), and the derivation emits it explicitly to the engine too, so engine, boot probe and proxy share one form
+ * host style authority prefixes the bucket; an explicitly declared non-default port travels verbatim; a CONNECT
+ * tunnel always carries its port (an https store is therefore `host:443`); a plain-http store on its default port
+ * puts a BARE host on the wire — and so does an explicitly declared `:80` (probe A2: the engine drops it from the
+ * absolute-form URL), while a declared `:443` is the CONNECT line it would carry anyway. A blank endpoint resolves
+ * to the REGIONAL `s3.<region>.<partition DNS suffix>` (default region us-east-1), and the derivation emits it
+ * explicitly to the engine too, so engine, boot probe and proxy share one form
  * even where the engine's own blank-endpoint default would name another partition's host.
  *
  * The partition table is [PARTITIONS], copied from the AWS SDK's own partition metadata (primary source:
@@ -31,6 +33,9 @@ import java.net.URI
 object EgressStoreTarget {
     /** The HTTPS default port; a CONNECT tunnel always carries it (probe A). */
     private const val HTTPS_PORT = 443
+
+    /** The plain-HTTP default port; the engine never puts it in an absolute-form URL (probe A2, case L). */
+    private const val HTTP_PORT = 80
 
     /** The inclusive top of the port range; the bottom (1) needs no name. */
     private const val MAX_PORT = 65_535
@@ -87,13 +92,17 @@ object EgressStoreTarget {
         if (name.isEmpty()) error("the bucket is empty, so no store authority can be derived (§3.36)")
         val effectiveRegion = region.trim().ifEmpty { LakeCatalogs.DEFAULT_SIGNING_REGION }
         val trimmed = endpoint.trim().trimEnd('/')
-        val (scheme, host, port) =
+        val (scheme, host, declaredPort) =
             when {
                 trimmed.isEmpty() -> Triple("https", regionalAwsHost(effectiveRegion), null)
                 trimmed.startsWith("https://", ignoreCase = true) -> parseAuthority("https", trimmed.substring("https://".length))
                 trimmed.startsWith("http://", ignoreCase = true) -> parseAuthority("http", trimmed.substring("http://".length))
                 else -> error("the endpoint '$endpoint' carries no http:// or https:// scheme (§3.36)")
             }
+        // A declared DEFAULT port is the no-port form on the wire (probe A2, lane 862 review R5): the engine writes
+        // `http://host/` for `host:80` (case L — Envoy routes on that URL authority, so `host:80` would never match)
+        // and `CONNECT host:443` for `host:443` (case M, the same line as no port). One configuration, one form.
+        val port = declaredPort?.takeUnless { it == (if (scheme == "https") HTTPS_PORT else HTTP_PORT) }
         val authorityHost = if (pathStyle) host else "$name.$host"
         validateHost(authorityHost)
         // The CONNECT port travels always; the plain-http default port is bare (probe A cases C/D).

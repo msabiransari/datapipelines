@@ -61,6 +61,29 @@ class EgressStoreTargetTest {
         target.duckdbEndpoint shouldBe "http://minio"
     }
 
+    /**
+     * #862 review R5, probe A2: a declared default port is the engine's no-port wire form — `host:80` reaches the wire
+     * as `GET http://host/` (case L; Envoy routes on that URL authority), `host:443` as `CONNECT host:443` (case M).
+     * Every consumer (allowlist, boot probe, engine endpoint) takes the one form.
+     */
+    @Test
+    fun `a declared default port is the no-port form - the engine drops 80 from the URL and 443 is the CONNECT default`() {
+        val http = EgressStoreTarget.derive(endpoint = "http://minio:80", region = "", bucket = "dp-lake", pathStyle = false)
+        http.domains shouldBe listOf("dp-lake.minio")
+        http.probeUri shouldBe URI("http://dp-lake.minio/")
+        http.duckdbEndpoint shouldBe "http://minio"
+        val https = EgressStoreTarget.derive(endpoint = "https://minio.example:443", region = "", bucket = "dp-lake", pathStyle = true)
+        https.domains shouldBe listOf("minio.example:443")
+        https.probeUri shouldBe URI("https://minio.example/dp-lake")
+        https.duckdbEndpoint shouldBe "https://minio.example"
+        withClue("the other scheme's default port is an ordinary declared port") {
+            EgressStoreTarget.derive(endpoint = "http://minio:443", region = "", bucket = "b", pathStyle = true).domains shouldBe
+                listOf("minio:443")
+            EgressStoreTarget.derive(endpoint = "https://minio:80", region = "", bucket = "b", pathStyle = true).domains shouldBe
+                listOf("minio:80")
+        }
+    }
+
     @Test
     fun `https always carries its port on the CONNECT line, as case D observed`() {
         val target = EgressStoreTarget.derive(endpoint = "https://minio.example", region = "", bucket = "dp-lake", pathStyle = false)
@@ -87,6 +110,14 @@ class EgressStoreTargetTest {
     fun `a dotted bucket stays one exact vhost form`() {
         val target = EgressStoreTarget.derive(endpoint = "http://minio:9000", region = "", bucket = "my.buckets", pathStyle = false)
         target.domains shouldBe listOf("my.buckets.minio:9000")
+        // Probe A2 (cases H, I, K): the engine keeps a dotted bucket in the vhost authority, also over TLS and on the
+        // derived AWS host — no switch to path style.
+        EgressStoreTarget
+            .derive(endpoint = "https://s3fake.test", region = "", bucket = "dp.lake.b862", pathStyle = false)
+            .domains shouldBe listOf("dp.lake.b862.s3fake.test:443")
+        EgressStoreTarget
+            .derive(endpoint = "", region = "eu-west-1", bucket = "dp.lake.b862", pathStyle = false)
+            .domains shouldBe listOf("dp.lake.b862.s3.eu-west-1.amazonaws.com:443")
     }
 
     @Test
