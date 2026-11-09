@@ -2,8 +2,8 @@
 # helm-check.sh — render the reference Helm chart (deploy/helm/datapipelines)
 # with a PINNED helm binary: `helm lint --strict` plus the `helm template`
 # cases below — each case prints its own PASS/FAIL `verdict` line, labels
-# `(a)`–`(j-r)`; a full green run printed 133 PASS lines at this commit
-# (#863; the count moves with the cases, so re-measure it after adding one) —
+# `(a)`–`(j-r)`; a full green run printed 141 PASS lines at this commit
+# (#863 review F1; the count moves with the cases, so re-measure it after adding one) —
 # whose assertions pin the chart's render-TIME behaviour, and validate every
 # successful render against the Kubernetes API schema with a PINNED
 # kubeconform (the `kubeconform` leg below; #712) — the Kotlin drift
@@ -14,9 +14,8 @@
 #
 #   ./scripts/helm-check.sh        # from the repo root; see EXIT CONTRACT
 #
-# The kubeconform leg: EVERY case that renders successfully — (a), (b), (b2),
-# (b2-single), (b2-zero) ×8, (b2-null), (g) ×2, (f), (f-pvc), (h), (h2),
-# (h2b), (h2c), (h3) — gets one more verdict, `<case> kubeconform`: the render
+# The kubeconform leg: EVERY case that renders successfully, including the
+# egress and availability cases, gets one more verdict, `<case> kubeconform`: the render
 # validated -strict against the Kubernetes 1.35.0 schema and the CRDs-catalog
 # (ServiceMonitor), every object accounted for. `helm template` is not API
 # validation: round one's (h2) rendered an invalid LabelSelector green.
@@ -134,11 +133,12 @@
 #         never the app's, never operator-supplied; replicas render from the
 #         validated replicaCount; the readiness probe is retained; the app
 #         Deployment gains no availability objects of its own. (j2) the
-#         spread alone (no PDB object).
+#         spread alone (no PDB object). (j3) Kubernetes int32 upper bounds;
+#         (j4/j5) disabled availability/proxy fields stay inert.
 #   (j-r) #863 refusals, each with the template's own message verbatim:
-#         replicaCount 0 / fractional / quoted; minAvailable = replicaCount
+#         replicaCount 0 / fractional / quoted / int32 overflow; minAvailable = replicaCount
 #         (the drain deadlock), below 1, quoted, and enabled on the
-#         one-replica default (the single-node deadlock); maxSkew 0; an
+#         one-replica default (the single-node deadlock); maxSkew 0 / int32 overflow; an
 #         unknown whenUnsatisfiable; an empty topologyKey. Disabled flags
 #         stay inert — a disabled budget/spread with nonsense fields renders.
 #   (i7)  the renderer inputs RESOLVED (#862 review R1): fixture Secrets with
@@ -1717,6 +1717,52 @@ lake:
 VALUES
 egress_render "(j2) spread only, no budget" "$WORK/j2.values.yaml" "$WORK/j2.out" "$WORK/j2.err"
 
+# (j3) The Kubernetes fields are signed int32: preserve their valid upper
+# boundary without ever asking a cluster to create these replicas.
+cat >"$WORK/j3.values.yaml" <<'VALUES'
+lake:
+  egressProxy:
+    replicaCount: 2147483647
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 2147483646
+    topologySpreadConstraints:
+      enabled: true
+      maxSkew: 2147483647
+VALUES
+egress_render "(j3) int32 upper bounds" "$WORK/j3.values.yaml" "$WORK/j3.out" "$WORK/j3.err"
+
+# (j4/j5) Validation follows consumption: disabled availability fields, and
+# every proxy field when the proxy itself is disabled, remain inert.
+cat >"$WORK/j4.values.yaml" <<'VALUES'
+lake:
+  egressProxy:
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: nonsense
+    topologySpreadConstraints:
+      enabled: false
+      maxSkew: nonsense
+      topologyKey: ""
+      whenUnsatisfiable: nonsense
+VALUES
+egress_render "(j4) disabled availability is inert" "$WORK/j4.values.yaml" "$WORK/j4.out" "$WORK/j4.err"
+cat >"$WORK/j5.values.yaml" <<'VALUES'
+lake:
+  egressProxy:
+    enabled: false
+    replicaCount: nonsense
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: nonsense
+    topologySpreadConstraints:
+      enabled: true
+      maxSkew: nonsense
+      topologyKey: ""
+      whenUnsatisfiable: nonsense
+VALUES
+egress_render "(j5) disabled proxy is inert" "$WORK/j5.values.yaml" "$WORK/j5.out" "$WORK/j5.err"
+
 # (i7) #862 review R1 — the renderer's inputs RESOLVED, not just wired. Each case
 # renders the chart, then resolves the app container's and the init container's
 # environment the way the kubelet does against a FIXTURE Secret (envFrom first,
@@ -2036,6 +2082,12 @@ lake:
   egressProxy:
     replicaCount: 1.5
 VALUES
+np_refusal "(j-r) int32-overflow replicaCount refused" \
+  'lake.egressProxy.replicaCount must not exceed 2147483647 (Kubernetes int32, deployment.md §6.4)' <<'VALUES'
+lake:
+  egressProxy:
+    replicaCount: 2147483648
+VALUES
 np_refusal "(j-r) quoted replicaCount refused" \
   'lake.egressProxy.replicaCount must be a whole number of replicas, unquoted (deployment.md §6.4)' <<'VALUES'
 lake:
@@ -2082,6 +2134,14 @@ lake:
     topologySpreadConstraints:
       enabled: true
       maxSkew: 0
+VALUES
+np_refusal "(j-r) int32-overflow maxSkew refused" \
+  'lake.egressProxy.topologySpreadConstraints.maxSkew must not exceed 2147483647 (Kubernetes int32, deployment.md §6.4)' <<'VALUES'
+lake:
+  egressProxy:
+    topologySpreadConstraints:
+      enabled: true
+      maxSkew: 2147483648
 VALUES
 np_refusal "(j-r) unknown whenUnsatisfiable refused" \
   'lake.egressProxy.topologySpreadConstraints.whenUnsatisfiable must be ScheduleAnyway or DoNotSchedule, not "Sometimes" (deployment.md §6.4)' <<'VALUES'

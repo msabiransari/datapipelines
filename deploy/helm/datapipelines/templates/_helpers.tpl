@@ -100,6 +100,9 @@ consumes or validates it and no proxy object renders.
 {{- if or (le (float64 $value) 0.0) (ne (float64 $value) (float64 (int64 $value))) -}}
 {{- fail "lake.egressProxy.replicaCount must be a whole number of replicas greater than 0 (deployment.md §6.4)" -}}
 {{- end -}}
+{{- if gt (float64 $value) 2147483647.0 -}}
+{{- fail "lake.egressProxy.replicaCount must not exceed 2147483647 (Kubernetes int32, deployment.md §6.4)" -}}
+{{- end -}}
 {{- int64 $value -}}
 {{- end -}}
 
@@ -145,6 +148,9 @@ hostname: one proxy pod per node, best effort).
 {{- end -}}
 {{- if or (le (float64 $value) 0.0) (ne (float64 $value) (float64 (int64 $value))) -}}
 {{- fail "lake.egressProxy.topologySpreadConstraints.maxSkew must be a whole number greater than 0 (deployment.md §6.4)" -}}
+{{- end -}}
+{{- if gt (float64 $value) 2147483647.0 -}}
+{{- fail "lake.egressProxy.topologySpreadConstraints.maxSkew must not exceed 2147483647 (Kubernetes int32, deployment.md §6.4)" -}}
 {{- end -}}
 {{- int64 $value -}}
 {{- end -}}
