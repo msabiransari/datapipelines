@@ -35,8 +35,10 @@ class CatalogStoreTimeoutsTest {
         val lake = LakeTestDb.repoFile("docs/lake.md").readText().replace(Regex("\\s+"), " ")
         val end = SettlementObjectReadEnd.stalledReadEndByMillis(properties)
 
-        lake shouldContain "SettlementObjectReadEnd.stalledReadEndByMillis"
-        lake shouldContain "at most ${grouped(end)} ms"
+        val function = Regex("`(SettlementObjectReadEnd[.][A-Za-z]+)`").find(lake)?.groupValues?.get(1)
+        val displayed = Regex("[*][*]at most ([0-9 ]+) ms").find(lake)?.groupValues?.get(1)
+        function shouldBe "SettlementObjectReadEnd.stalledReadEndByMillis"
+        requireNotNull(displayed).replace(" ", "").toLong() shouldBe end
     }
 
     @Test

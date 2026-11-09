@@ -39,9 +39,10 @@ sealed interface LakeMetadataRead {
  * abandoned: it is logged and counted, holds no lease and no database connection, and refuses every successor until it
  * ends, so there are never two. An abandoned read ends at its next chunk (#851): the read checks its stop between every
  * chunk the store returns, then closes its stream on its own thread and ends as [MetadataReadAbandoned]. A read blocked
- * on a store that has stopped answering sees the stop only when the client gives up: its worst-case end is
+ * on a store that has stopped answering sees the stop only when the client gives up: its conditional network-wait envelope is
  * `SettlementObjectReadEnd.stalledReadEndByMillis`, read from the same effective properties this client is built from
- * (`LakeCatalogs.catalogProperties()`), 420 400 ms with the shipped inputs (docs/lake.md §8). The file is capped at
+ * (`LakeCatalogs.catalogProperties()`), 420 400 ms under the stalled-store model in docs/lake.md §8, excluding DNS,
+ * credentials, writes, TLS setup and local scheduling/processing; there is no unconditional end-to-end timer. The file is capped at
  * [METADATA_MAX_BYTES] of JSON after decompression. The result of an abandoned read is discarded; the row is verified
  * by a later tick. There is no retry loop here, no table operations and no catalog session.
  *

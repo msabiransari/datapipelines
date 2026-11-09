@@ -386,19 +386,27 @@ adds nothing to the 16 seconds. A read that outlives the wait is abandoned and c
 checks between every chunk the store returns, so an abandoned read ends at its next chunk. On a store that trickles
 bytes it therefore ends within one gap between bytes; closing the stream then reads at most one more chunk, under the
 same timeout, before the client aborts the connection. A read blocked on a store that has stopped answering sees the
-stop only when the client gives up, and its worst-case end is derived in one function,
-`SettlementObjectReadEnd.stalledReadEndByMillis`, from the same effective client bounds the read runs under: each
-GetObject attempt is a fresh connection bounded by the 2-second connect timeout waiting at most the 10-second socket
-timeout for the response headers, six attempts end a request that never answers after at most 75 100 ms including the
-SDK's full-jitter backoff caps (measured at 62 s with real jitter), a stream the request handed back costs at most
-three socket timeouts more — the blocked body read, then the close's probe read and close — and Iceberg's S3 stream
-reopens a timed-out read up to three more times, each reopen a new request. One read is therefore four requests and
-four streams: **at most 420 400 ms — about 420 seconds — after its first request**. Not counted: DNS resolution and
-the credential chain's fetches on the read thread; a store that answers with throttles, whose retries follow the
-throttling backoff instead; a store that trickles bytes, which the chunk stop bounds. The library behavior behind
-each term — the Iceberg stream's three-reopen policy, the SDK's five default retries DP does not override, the
-backoff caps, the abortable streams that make the close probe — is observed against the shipped jars by
-`SettlementObjectReadEndCompatTest`, which fails if a dependency version or observed retry policy moves. The file is read whole and capped at 64 MiB of JSON after decompression; a larger one fails the read,
+stop only when the client gives up. Its conditional network-wait envelope is derived in
+`SettlementObjectReadEnd.stalledReadEndByMillis`, in milliseconds starting at the first GetObject request.
+The stalled-store model assumes prompt request writes and TLS setup, no throttles or redirects, and each request
+either times out waiting for headers or returns complete headers promptly followed by a stalled body. Headers and
+bodies do not trickle or make intermittent progress in this model. From the effective catalog properties and
+Iceberg's configured SDK retry policy, each request allows six attempts at 2 000 ms connect plus 10 000 ms socket,
+and five full-jitter backoff caps of 100 + 200 + 400 + 800 + 1 600 ms (100 ms base, 20 000 ms ceiling):
+75 100 ms per request. Each answered stream adds three socket timeouts — body read, close's abort probe, and close.
+Iceberg 1.12.0 permits three body-read retries, each closing the old stream and reopening with another request.
+Conservatively counting four requests and four stream tails gives
+4 × (75 100 + 3 × 10 000): **at most 420 400 ms — about 420 seconds — after its first request in this model**.
+This is model arithmetic, not an observed stalled-store runtime upper bound. The earlier ~62 s measurement
+characterized one unanswered request with real jitter; it did not prove a maximum.
+DNS resolution, credential-chain fetches, blocked request writes, TLS setup, JVM scheduling and local processing
+have no total bound here; the number is conditional on those phases completing promptly and is no arbitrary
+network or end-to-end guarantee. Throttled responses use a separate backoff; trickling headers are outside this
+model, and a body returning chunks follows the ordinary abandonment stop above. The SDK API-call and attempt
+timeouts are unset, so no enclosing total timer covers these phases. The pinned private Iceberg reopen policy,
+SDK version, configured retry/backoff policy, abort probes and close counts are guarded by
+`SettlementObjectReadEndCompatTest`. Neither the 16 s scheduler overrun nor the 31 s whole-tick bound includes
+this off-thread work. The file is read whole and capped at 64 MiB of JSON after decompression; a larger one fails the read,
 so every tick defers that table as failed (`lake.settle.deferred`, cause `MetadataFileTooLarge`) until its metadata
 file is back under the cap. The cap is this read's alone: the catalog's own table loads are not capped. While an
 abandoned read runs, every table's verification and repair are deferred on every tick without sending a read: the one
@@ -541,7 +549,7 @@ is an error. The same loss applies when the full protection-window deadline is r
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-08 | v1.18 | 866 (#866) | §8: the abandoned metadata read's worst-case end on a store that accepts and never answers is derived in one function (`SettlementObjectReadEnd.stalledReadEndByMillis`) from the effective client bounds — per request six SDK attempts at most 75 100 ms with the backoff caps, per answered stream a blocked read plus the close's probe and close, four requests in all: 420 400 ms with the shipped inputs. Corrects the v1.15 row's 10-second claim, which bounded one socket timeout, not the read. |
+| 2026-11-08 | v1.18 | 866 (#866) | §8: the abandoned metadata read's conditional stalled-store network-wait envelope is derived in `SettlementObjectReadEnd.stalledReadEndByMillis` from effective connect/socket values and Iceberg's configured retry policy: four request allowances plus all body and close reads, 420 400 ms with the shipped inputs. Pins the library assumptions and states residual phases without an end-to-end timer. Corrects the v1.15 row's one-timeout claim; the measured ~62 s remains an observation. |
 | 2026-11-08 | v1.17 | 858 (#858) | §8: the settlement tick's statements carry a socket bound (5 s + 5 s) through the runtime's own template, so against a server that accepts and never answers a statement ends with `08006` at max(10, 5 + 10) = 15 s; the exception for this tick is gone, and the paragraph states the limit's two assumptions and that a transaction's later statements and commit read under the bound. The conditional 16 s overrun and 31 s tick are unchanged. |
 | 2026-11-08 | v1.16 | 833 (#824) managed retire ceiling | §9 "The bound.": the staleness rule's ceiling term is the managed retire ceiling (`managed-retire-ceiling-seconds`, else `node-query-timeout-max-seconds` + 30); shipped 900 + 14 + 930 + 60 = 1904 ≤ 25 200 s. |
 | 2026-11-08 | v1.15 | 851 (#851) | §8: an abandoned metadata read stops itself at its next chunk, or after the store's 10-second socket timeout; the read is capped at 64 MiB of JSON after decompression; the trickle is no longer unbounded. |

@@ -10,7 +10,6 @@ import io.kotest.matchers.string.shouldContain
 import org.apache.iceberg.aws.s3.S3FileIOProperties
 import org.junit.jupiter.api.Test
 import software.amazon.awssdk.core.retry.RetryMode
-import software.amazon.awssdk.core.retry.backoff.BackoffStrategy
 import software.amazon.awssdk.core.retry.backoff.FullJitterBackoffStrategy
 import software.amazon.awssdk.http.Abortable
 import software.amazon.awssdk.services.s3.S3Client
@@ -44,7 +43,7 @@ class SettlementObjectReadEndCompatTest {
             requireNotNull(S3Client::class.java.getResourceAsStream(POM_PROPERTIES)) {
                 "sdk-core's pom.properties is not on the classpath"
             }
-        pom.readBytes().decodeToString() shouldContain "version=2.46.7"
+        pom.use { it.readBytes().decodeToString() } shouldContain "version=2.46.7"
     }
 
     @Test
@@ -65,22 +64,45 @@ class SettlementObjectReadEndCompatTest {
     @Suppress("DEPRECATION")
     @Test
     fun `the live LEGACY backoff caps are the derivation's base and ceiling`() {
-        val strategy = BackoffStrategy.defaultStrategy(RetryMode.LEGACY)
+        val clientBuilder = S3Client.builder()
+        S3FileIOProperties(properties).applyRetryConfigurations(clientBuilder)
+        clientBuilder.overrideConfiguration().apiCallTimeout().isPresent shouldBe false
+        clientBuilder.overrideConfiguration().apiCallAttemptTimeout().isPresent shouldBe false
+        val policy = clientBuilder.overrideConfiguration().retryPolicy().orElseThrow()
+        policy.retryMode() shouldBe RetryMode.LEGACY
+        policy.numRetries() shouldBe 5
+        val strategy = policy.backoffStrategy()
         (strategy is FullJitterBackoffStrategy) shouldBe true
         val builder = (strategy as FullJitterBackoffStrategy).toBuilder()
-        builder.baseDelay() shouldBe Duration.ofMillis(SettlementObjectReadEnd.SDK_BACKOFF_BASE_MILLIS)
-        builder.maxBackoffTime() shouldBe Duration.ofMillis(SettlementObjectReadEnd.SDK_BACKOFF_MAX_MILLIS)
+        builder.baseDelay() shouldBe Duration.ofMillis(100)
+        builder.maxBackoffTime() shouldBe Duration.ofMillis(20_000)
+        val inputs = SettlementObjectReadEnd.effectiveInputs(properties)
+        inputs.requestRetries shouldBe policy.numRetries()
+        inputs.backoffBaseMillis shouldBe builder.baseDelay().toMillis()
+        inputs.backoffMaxMillis shouldBe builder.maxBackoffTime().toMillis()
     }
 
     @Test
     fun `a blocked read is four GetObject calls, each answered stream probed before close`() {
         val client = ScriptedStoreClient()
         val stream = client.newInputStream("s3://lake/metadata/00000.metadata.json")
+        val policy =
+            stream.javaClass
+                .getDeclaredField("retryPolicy")
+                .apply { isAccessible = true }
+                .get(stream)
+        val config = Class.forName("dev.failsafe.RetryPolicy").getMethod("getConfig").invoke(policy)
+        config.javaClass.getMethod("getMaxRetries").invoke(config) shouldBe SettlementObjectReadEnd.PINNED_ICEBERG_STREAM_REOPENS
+        config.javaClass.getMethod("getDelay").invoke(config) shouldBe Duration.ZERO
+        config.javaClass.getMethod("getDelayFn").invoke(config) shouldBe null
+        config.javaClass.getMethod("getDelayMin").invoke(config) shouldBe null
+        config.javaClass.getMethod("getMaxDuration").invoke(config) shouldBe null
 
         shouldThrow<SocketTimeoutException> { stream.read(ByteArray(16), 0, 16) }
         runCatching { stream.close() }
-        client.objects.get() shouldBe SettlementObjectReadEnd.STREAM_REOPENS + 1
-        client.socketReads.get() shouldBe 2 * (SettlementObjectReadEnd.STREAM_REOPENS + 1)
+        client.objects.get() shouldBe SettlementObjectReadEnd.PINNED_ICEBERG_STREAM_REOPENS + 1
+        client.socketReads.get() shouldBe 2 * (SettlementObjectReadEnd.PINNED_ICEBERG_STREAM_REOPENS + 1)
+        client.closes.get() shouldBe SettlementObjectReadEnd.PINNED_ICEBERG_STREAM_REOPENS + 1
     }
 
     /**
@@ -91,6 +113,7 @@ class SettlementObjectReadEndCompatTest {
     private class ScriptedStoreClient {
         val objects = AtomicInteger()
         val socketReads = AtomicInteger()
+        val closes = AtomicInteger()
 
         private val proxy =
             Proxy.newProxyInstance(
@@ -100,7 +123,7 @@ class SettlementObjectReadEndCompatTest {
                 when (method.name) {
                     "getObject", "executeGetObject" -> {
                         objects.incrementAndGet()
-                        BlockedStream(socketReads)
+                        BlockedStream(socketReads, closes)
                     }
 
                     "toString" -> {
@@ -132,6 +155,7 @@ class SettlementObjectReadEndCompatTest {
     /** A stream whose reads block until the socket timeout: `read` always throws, `abort` never gets reached. */
     private class BlockedStream(
         private val socketReads: AtomicInteger,
+        private val closes: AtomicInteger,
     ) : InputStream(),
         Abortable {
         override fun read(): Int {
@@ -141,6 +165,10 @@ class SettlementObjectReadEndCompatTest {
 
         override fun abort() {
             error("abort must not be reached while the stream's socket never answers")
+        }
+
+        override fun close() {
+            closes.incrementAndGet()
         }
     }
 

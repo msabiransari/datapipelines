@@ -138,8 +138,9 @@ class LakeCatalogs(
          * Tighter than the SDK's 30 s and equal to the settlement tick's budget, so a store that stops answering ends the
          * read the tick abandoned: six SDK attempts, about a minute (measured, 799c). A store trickling bytes under this
          * bound is not ended by it (docs/lake.md §8). Every FileIO of the lake carries it: a write that stalls this long
-         * fails before its pointer swap, clean. The whole blocked read's end — this bound times the SDK's and Iceberg's
-         * retries — is `SettlementObjectReadEnd.stalledReadEndByMillis`, derived in one place and stated in §8.
+         * fails before its pointer swap, clean. The metadata read's conditional network-wait envelope, including both
+         * retry layers, backoff and close slack, is `SettlementObjectReadEnd.stalledReadEndByMillis` (model and residuals
+         * in §8); there is no unconditional end-to-end timer.
          */
         const val STORE_SOCKET_TIMEOUT_MILLIS = 10_000L
 

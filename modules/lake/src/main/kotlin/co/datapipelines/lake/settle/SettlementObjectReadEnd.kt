@@ -2,137 +2,112 @@ package co.datapipelines.lake.settle
 
 import co.datapipelines.lake.LakeCatalogs
 import org.apache.iceberg.aws.s3.S3FileIOProperties
+import software.amazon.awssdk.core.retry.backoff.FullJitterBackoffStrategy
+import software.amazon.awssdk.services.s3.S3Client
 import java.lang.Math.addExact
 import java.lang.Math.multiplyExact
 
 /**
- * docs/lake.md §8's stated worst-case end of the settlement tick's metadata read on a store that accepts every
- * connection and every request and never answers in time (#866): one derivation whose inputs are read back from the
- * effective catalog properties the store client is built from, so the document's number cannot drift from the
- * client's bounds.
+ * Conditional network-wait envelope in milliseconds, starting at the first GetObject request, for one metadata
+ * read abandoned by the settlement tick. This is arithmetic for a stalled-store model, not a wall-clock deadline.
+ * Each connection/request is accepted promptly, or its connect/header wait times out; any answered request hands
+ * back a body that stalls. There are no throttles, redirects, partial/trickling headers, TLS renegotiations or
+ * intervening successful body reads. DNS, credentials, request writes, TLS setup, local execution and scheduling
+ * must complete separately; idle socket timeouts do not bound those operations. No unconditional end is claimed.
  *
- * The model. A GetObject request always ends within [requestEndMillis]: each of the SDK's attempts is a fresh
- * connection bounded by the connect timeout, waiting at most the socket timeout for the response headers, with the
- * full-jitter backoff capped per gap between attempts. Whether a request is finally answered changes only what
- * follows. A stream a request handed back costs at most three socket timeouts more: the blocked body read the caller
- * asked for, then the closure's probe read and close (`S3InputStream.abortStream` reads the stream once before
- * closing it; the UrlConnection client's response streams are abortable, so the probe runs). Iceberg 1.12.0's
- * `S3InputStream` retry policy allows three retries and every retry reopens the stream (`withMaxRetries(3)`,
- * `onRetry` reopens), so one read issues at most [STREAM_REOPENS] + 1 requests and closes at most that many streams.
- * The read's end is their sum: `(STREAM_REOPENS + 1) × (request end + 3 × socket timeout)`. With the shipped inputs —
- * 2 000 ms connect, 10 000 ms socket, five SDK retries (six attempts), 3 100 ms of backoff caps — that is 420 400 ms,
- * about 420 seconds.
+ * One request costs at most `(requestRetries + 1) × (connect + socket) + sum(backoff caps)` within this model.
+ * Each answered stream adds its blocked body read, Iceberg's abort probe, and final close, conservatively allowing
+ * one socket timeout for each. The total is `(PINNED_ICEBERG_STREAM_REOPENS + 1) × (request + 3 × socket)`.
+ * Failed requests yielding no stream are overcounted deliberately. Retry-close probes are outside the SDK request
+ * envelope and counted once per stream, including the last stream's close.
  *
- * The pinned-library premises (Iceberg's retry policy and reopen, the SDK's LEGACY defaults DP never overrides, the
- * abortable streams) are observed against the shipped jars by `SettlementObjectReadEndCompatTest`: if the libraries
- * move, that test fails and this number is wrong until reviewed.
- *
- * Not counted, stated as residuals in docs/lake.md §8: DNS resolution and the credential chain's fetches on the
- * read's thread; a store answering with throttles, whose retries follow the throttling backoff instead; a store that
- * trickles bytes within the socket timeout, which the read's own stop bounds (#851).
+ * Pinned assumption: Iceberg 1.12.0 S3InputStream.read uses a Failsafe policy withMaxRetries(3); onRetry invokes
+ * resetForRetry/openStream, closing the old stream before a new GetObject. closeStream calls abortStream (one
+ * probe read) then close. Source:
+ * https://github.com/apache/iceberg/blob/apache-iceberg-1.12.0/aws/src/main/java/org/apache/iceberg/aws/s3/S3InputStream.java
+ * Compatibility tests pin both the version and the observed reopen/probe counts. The other inputs come from the
+ * same catalog properties and S3FileIOProperties.applyRetryConfigurations used by AwsClientFactories.DefaultAwsClientFactory;
+ * neither a client nor a connection is opened to derive them. SDK retries and body retries are distinct layers.
  */
 object SettlementObjectReadEnd {
-    /**
-     * `readStream(..., IN_STREAM)` recurses on a timed-out body read up to [STREAM_REOPENS] more times
-     * (`IcebergS3InputFileStream#strategyBuilder`): each reopen is one new GetObject request.
-     */
-    const val STREAM_REOPENS = 3
+    /** Iceberg 1.12.0's private fixed policy; review its source before changing this compatibility assumption. */
+    const val PINNED_ICEBERG_STREAM_REOPENS = 3
 
-    /** The AWS SDK's LEGACY full-jitter backoff base (software.amazon.awssdk.core.retry, 2.46.7). */
-    const val SDK_BACKOFF_BASE_MILLIS = 100L
-
-    /** The AWS SDK's full-jitter backoff ceiling per gap (`SdkDefaultRetrySetting.MAX_BACKOFF`), 20 s. */
-    const val SDK_BACKOFF_MAX_MILLIS = 20_000L
-
-    /**
-     * One GetObject request's worst-case end: every attempt's connect plus header wait, plus the backoff caps between
-     * attempts. A request's end does not depend on whether it is finally answered — an answer that arrives at all
-     * arrives within the same bound, and the stream it hands back is a separate term.
-     */
-    fun requestEndMillis(
-        connectTimeoutMillis: Long,
-        socketTimeoutMillis: Long,
-        requestRetries: Int,
-    ): Long =
-        addExact(
-            multiplyExact(requestRetries + 1L, addExact(connectTimeoutMillis, socketTimeoutMillis)),
-            backoffCapsMillis(requestRetries),
-        )
+    /** Effective finite millisecond inputs, or explicit alternatives for evaluating this same model. */
+    data class Inputs(
+        val connectTimeoutMillis: Long,
+        val socketTimeoutMillis: Long,
+        val requestRetries: Int,
+        val backoffBaseMillis: Long,
+        val backoffMaxMillis: Long,
+    )
 
     /**
-     * The worst-case end of one metadata read, from its first request to its last socket operation, on a store that
-     * accepts and never answers: `(STREAM_REOPENS + 1) × (request end + 3 × socket timeout)`. Inputs this model does
-     * not admit — a non-positive timeout, a retry count outside the backoff model's range — are refused, and an input
-     * whose bound overflows the clock fails the arithmetic rather than wrapping.
+     * Reads only configuration: no client build, credential resolution, reflection or I/O. Iceberg explicitly pins
+     * the deprecated LEGACY retry-policy API; inspecting that exact policy avoids substituting SDK-wide defaults.
+     * s3.retry.min-wait-ms/max-wait-ms affect throttling only, which this model excludes.
      */
-    fun stalledReadEndByMillis(
-        connectTimeoutMillis: Long,
-        socketTimeoutMillis: Long,
-        requestRetries: Int,
-    ): Long {
-        require(connectTimeoutMillis >= 1) { "the connect timeout must be positive: $connectTimeoutMillis" }
-        require(socketTimeoutMillis >= 1) { "the socket timeout must be positive: $socketTimeoutMillis" }
-        val cycle =
-            addExact(
-                requestEndMillis(connectTimeoutMillis, socketTimeoutMillis, requestRetries),
-                multiplyExact(STREAM_TAIL_SOCKET_TIMEOUTS, socketTimeoutMillis),
-            )
-        return multiplyExact(STREAM_REOPENS + 1L, cycle)
-    }
-
-    /**
-     * The same end read from the effective catalog properties ([LakeCatalogs.catalogProperties], the map the store
-     * client is built from): the two socket bounds by key, the SDK retries from the properties' own default unless
-     * the map carries the key. A key present but unparseable is refused rather than guessed.
-     */
-    fun stalledReadEndByMillis(catalogProperties: Map<String, String>): Long {
-        val connect =
-            requireNotNull(catalogProperties[LakeCatalogs.HTTP_CONNECTION_TIMEOUT_MS]?.toLongOrNull()) {
-                "the catalog properties carry no effective connect timeout (${LakeCatalogs.HTTP_CONNECTION_TIMEOUT_MS})"
-            }
-        val socket =
-            requireNotNull(catalogProperties[LakeCatalogs.HTTP_SOCKET_TIMEOUT_MS]?.toLongOrNull()) {
-                "the catalog properties carry no effective socket timeout (${LakeCatalogs.HTTP_SOCKET_TIMEOUT_MS})"
-            }
-        val retries =
-            catalogProperties[S3FileIOProperties.S3_RETRY_NUM_RETRIES]
-                ?.let(::parseRetries)
-                ?: S3FileIOProperties.S3_RETRY_NUM_RETRIES_DEFAULT
-        return stalledReadEndByMillis(connect, socket, retries)
-    }
-
-    /**
-     * The full-jitter backoff's worst case over [requestRetries] gaps: each gap at most base × 2^gap capped at the
-     * SDK's ceiling, so the caps themselves cannot hide an unbounded retry policy.
-     */
-    private fun backoffCapsMillis(requestRetries: Int): Long {
-        require(requestRetries in 0..MAX_MODELLED_GAPS) {
-            "the backoff model covers $MAX_MODELLED_GAPS gaps, not $requestRetries"
+    @Suppress("DEPRECATION")
+    fun effectiveInputs(catalogProperties: Map<String, String>): Inputs {
+        require(catalogProperties["http-client.type"] == "urlconnection") { "unsupported HTTP client" }
+        require("s3.client-factory-impl" !in catalogProperties && "client.factory" !in catalogProperties) {
+            "unsupported custom client factory"
         }
+        val builder = S3Client.builder()
+        S3FileIOProperties(catalogProperties).applyRetryConfigurations(builder)
+        val policy = builder.overrideConfiguration().retryPolicy().orElseThrow()
+        val strategy = policy.backoffStrategy()
+        require(strategy is FullJitterBackoffStrategy) { "unsupported non-throttling backoff strategy" }
+        val backoff = strategy.toBuilder()
+        return Inputs(
+            connectTimeoutMillis = timeout(catalogProperties, LakeCatalogs.HTTP_CONNECTION_TIMEOUT_MS),
+            socketTimeoutMillis = timeout(catalogProperties, LakeCatalogs.HTTP_SOCKET_TIMEOUT_MS),
+            requestRetries = policy.numRetries(),
+            backoffBaseMillis = backoff.baseDelay().toMillis(),
+            backoffMaxMillis = backoff.maxBackoffTime().toMillis(),
+        )
+    }
+
+    /** Same derivation with the catalog's effective inputs; no property value is logged. */
+    fun stalledReadEndByMillis(catalogProperties: Map<String, String>): Long = stalledReadEndByMillis(effectiveInputs(catalogProperties))
+
+    /**
+     * One pure derivation, in milliseconds from the first GetObject through the final close, under the model above.
+     * Positive timeouts must fit URLConnection's signed-int millisecond range; zero means unbounded there. Backoff
+     * values must fit the SDK's millisecond arithmetic. Invalid inputs and duration overflow fail instead of wrapping.
+     */
+    fun stalledReadEndByMillis(inputs: Inputs): Long {
+        require(inputs.connectTimeoutMillis in 1..Int.MAX_VALUE.toLong()) { "unsupported connect timeout" }
+        require(inputs.socketTimeoutMillis in 1..Int.MAX_VALUE.toLong()) { "unsupported socket timeout" }
+        require(inputs.requestRetries in 0..MAX_MODELLED_GAPS) { "unsupported request retry count" }
+        require(inputs.backoffBaseMillis in 1..Int.MAX_VALUE.toLong()) { "unsupported backoff base" }
+        require(inputs.backoffMaxMillis in inputs.backoffBaseMillis..Int.MAX_VALUE.toLong()) { "unsupported backoff maximum" }
+        val attempts = addExact(inputs.requestRetries.toLong(), 1L)
+        val requestWait = multiplyExact(attempts, addExact(inputs.connectTimeoutMillis, inputs.socketTimeoutMillis))
+        val requestEnd = addExact(requestWait, backoffCapsMillis(inputs))
+        val streamTail = multiplyExact(STREAM_TAIL_SOCKET_TIMEOUTS, inputs.socketTimeoutMillis)
+        return multiplyExact(PINNED_ICEBERG_STREAM_REOPENS + 1L, addExact(requestEnd, streamTail))
+    }
+
+    /** The SDK's exponential full-jitter ceiling, saturating at the configured maximum before doubling can wrap. */
+    private fun backoffCapsMillis(inputs: Inputs): Long {
         var total = 0L
-        for (gap in 0 until requestRetries) {
-            val doubled = 1L shl gap
-            // The uncapped gap is base × 2^gap, which overflows long before a sane retry count; saturate instead.
-            val uncapped =
-                if (SDK_BACKOFF_BASE_MILLIS > Long.MAX_VALUE / doubled) {
-                    Long.MAX_VALUE
-                } else {
-                    multiplyExact(SDK_BACKOFF_BASE_MILLIS, doubled)
-                }
-            total = addExact(total, minOf(uncapped, SDK_BACKOFF_MAX_MILLIS))
+        var cap = inputs.backoffBaseMillis
+        repeat(inputs.requestRetries) {
+            total = addExact(total, cap)
+            cap = if (cap > inputs.backoffMaxMillis / 2) inputs.backoffMaxMillis else multiplyExact(cap, 2L)
         }
         return total
     }
 
-    private fun parseRetries(raw: String): Int {
-        val parsed = raw.toIntOrNull()
-        require(parsed != null) { "the catalog properties carry an unparseable ${S3FileIOProperties.S3_RETRY_NUM_RETRIES}: $raw" }
-        return parsed
-    }
+    private fun timeout(
+        properties: Map<String, String>,
+        key: String,
+    ): Long = requireNotNull(properties[key]?.toLongOrNull()) { "missing or unparseable timeout: $key" }
 
-    /** One answered stream's tail in socket timeouts: the blocked body read, then the closure's probe read and close. */
+    /** Body read, abort probe, close. These are outside the already-counted request/header envelope. */
     private const val STREAM_TAIL_SOCKET_TIMEOUTS = 3L
 
-    /** Gaps whose doubled base still fits the model's arithmetic; the SDK's own ceiling is far below. */
+    /** Restricts this deliberately small model; a larger policy needs review, not an unbounded arithmetic loop. */
     private const val MAX_MODELLED_GAPS = 63
 }
