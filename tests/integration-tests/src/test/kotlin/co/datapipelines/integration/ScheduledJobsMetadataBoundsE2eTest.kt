@@ -1,5 +1,8 @@
 package co.datapipelines.integration
 
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.AppenderBase
 import co.datapipelines.DatapipelinesApplication
 import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.withClue
@@ -17,10 +20,8 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.api.TestMethodOrder
 import org.junit.jupiter.api.Timeout
-import org.junit.jupiter.api.extension.ExtendWith
+import org.slf4j.LoggerFactory
 import org.springframework.boot.builder.SpringApplicationBuilder
-import org.springframework.boot.test.system.CapturedOutput
-import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.context.ConfigurableApplicationContext
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -34,7 +35,9 @@ import java.sql.Connection
 import java.sql.DriverManager
 import java.util.Base64
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * #837 over the REAL application: the two waits on the metadata `DataSource` that sit outside every statement's
@@ -45,7 +48,8 @@ import java.util.concurrent.TimeUnit
  *   for one. The pool's `connection-timeout` (10 s since #837; HikariCP's 30 s default before) ends the wait: the failed-tick
  *   line (`event=execution.sweep_failed`, `error=CannotGetJdbcConnectionException`) appears 10 s after the tick STARTED,
  *   not 30. The tick's start is Spring's own observation of the execution, so a tick queued behind a sibling job on the
- *   one thread is timed from when it actually began.
+ *   one thread is timed from when it actually began. The fixture parks the next real sweep in its observation callback
+ *   before exhausting the pool, then records the start after release: preceding sibling jobs never wait on our leases.
  * - **R2, the socket** — the sweep's `UPDATE` is held behind a table lock (the shape of `ScheduledJobsSchedulerE2eTest`),
  *   then the container is `docker pause`d. The statement's `queryTimeout` (10 s) fires, but its cancel is a second
  *   connection the paused server never reads, so only the SOCKET bound (statement + 5 s = 15 s) can end the statement.
@@ -62,7 +66,6 @@ import java.util.concurrent.TimeUnit
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
-@ExtendWith(OutputCaptureExtension::class)
 @Timeout(value = 6, unit = TimeUnit.MINUTES)
 class ScheduledJobsMetadataBoundsE2eTest {
     private val postgres: PostgreSQLContainer<*> =
@@ -72,16 +75,24 @@ class ScheduledJobsMetadataBoundsE2eTest {
             .withCommand("redis-server", "--maxmemory-policy", "noeviction")
             .withExposedPorts(REDIS_PORT)
     private lateinit var app: ConfigurableApplicationContext
+    private lateinit var failures: SweepFailures
+    private val sweepLogger = LoggerFactory.getLogger("co.datapipelines.executor.StaleExecutionSweeper") as Logger
 
     @BeforeAll
     fun start() {
         postgres.start()
         redis.start()
         app = boot()
+        failures = SweepFailures(app.getBean(TickRecorder::class.java)).also { it.start() }
+        sweepLogger.addAppender(failures)
     }
 
     @AfterAll
     fun stop() {
+        if (::failures.isInitialized) {
+            sweepLogger.detachAppender(failures)
+            failures.stop()
+        }
         if (::app.isInitialized && app.isActive) app.close()
         redis.stop()
         postgres.stop()
@@ -89,25 +100,43 @@ class ScheduledJobsMetadataBoundsE2eTest {
     }
 
     @Test
+    @Order(0)
+    fun `a different scheduler thread with the same name cannot supply the failure witness`() {
+        val before = System.nanoTime()
+        val foreign = Thread({ sweepLogger.warn("event=execution.sweep_failed foreign-witness") }, "dp-scheduled")
+        foreign.start()
+        foreign.join(TimeUnit.SECONDS.toMillis(AWAIT_SECONDS))
+        foreign.isAlive shouldBe false
+        failures.since(before) shouldBe emptyList()
+    }
+
+    @Test
     @Order(1)
-    fun `R3 - with the metadata pool exhausted a sibling job's acquire fails at the pool's ten second bound, not thirty`(
-        output: CapturedOutput,
-    ) {
+    fun `R3 - with the metadata pool exhausted a sibling job's acquire fails at the pool's ten second bound, not thirty`() {
         val pool = app.getBean("dataSource") as HikariDataSource
         val recorder = app.getBean(TickRecorder::class.java)
-        val held = (1..pool.maximumPoolSize).map { pool.connection }
+        val startGate = recorder.pauseNextSweep()
+        val held = mutableListOf<Connection>()
         try {
-            val logFrom = output.out.length
+            withClue("the next real sweep reaches its setup barrier while the pool is available") {
+                startGate.awaitArrival() shouldBe true
+            }
             val ticksBefore = recorder.startsOf(SWEEP).size
+            repeat(pool.maximumPoolSize) { held += pool.connection }
+            pool.hikariPoolMXBean.activeConnections shouldBe pool.maximumPoolSize
+            startGate.release()
             awaitCondition("the sweep's next tick to start with the pool exhausted", NEXT_TICK_SECONDS) {
                 recorder.startsOf(SWEEP).size > ticksBefore
             }
-            val tickStartedAt = recorder.startsOf(SWEEP).last()
+            withClue("the setup barrier was released by the test, not its safety timeout") {
+                startGate.releasedBeforeTimeout shouldBe true
+            }
+            val tickStartedAt = recorder.startsOf(SWEEP)[ticksBefore]
             // Non-vacuity: a thread is really waiting for a connection (the tick's acquire), not a free pool.
             awaitCondition("a thread waiting for a metadata connection", AWAIT_SECONDS) {
                 pool.hikariPoolMXBean.threadsAwaitingConnection > 0
             }
-            val failure = awaitFailedLine(output, logFrom, ACQUIRE_BOUND_SECONDS + MARGIN_SECONDS, tickStartedAt)
+            val failure = awaitFailedLine(ACQUIRE_BOUND_SECONDS + MARGIN_SECONDS, tickStartedAt)
             val elapsedMs = failure.first
             println("837 R3 acquire bound under an exhausted pool: tick->failed line ${elapsedMs}ms; line=${failure.second}")
             withClue("tick->failed line ${elapsedMs}ms; line=${failure.second}") {
@@ -117,15 +146,14 @@ class ScheduledJobsMetadataBoundsE2eTest {
                 pool.connectionTimeout shouldBe TimeUnit.SECONDS.toMillis(ACQUIRE_BOUND_SECONDS)
             }
         } finally {
+            startGate.release()
             held.forEach { runCatching { it.close() } }
         }
     }
 
     @Test
     @Order(2)
-    fun `R2 - with the metadata Postgres paused the sweep's held statement ends at its socket bound, and the next tick runs`(
-        output: CapturedOutput,
-    ) {
+    fun `R2 - with the metadata Postgres paused the sweep's held statement ends at its socket bound, and the next tick runs`() {
         val recorder = app.getBean(TickRecorder::class.java)
         val docker = DockerClientFactory.instance().client()
         var paused = false
@@ -133,17 +161,15 @@ class ScheduledJobsMetadataBoundsE2eTest {
             lock.autoCommit = false
             lock.createStatement().use { it.execute("LOCK TABLE pipeline_executions IN SHARE MODE") }
             try {
-                val logFrom: Int
                 val queuedAt: Long
                 connection().use { watcher ->
                     awaitCondition("the sweep's UPDATE waiting on the lock", SWEEP_WAIT_SECONDS) { sweepWaiting(watcher) }
                     // The pause comes with the statement provably in flight on a connection the tick already holds.
-                    logFrom = output.out.length
                     queuedAt = System.nanoTime()
                     docker.pauseContainerCmd(postgres.containerId).exec()
                     paused = true
                 }
-                val failure = awaitFailedLine(output, logFrom, PAUSED_END_SECONDS + MARGIN_SECONDS, queuedAt)
+                val failure = awaitFailedLine(PAUSED_END_SECONDS + MARGIN_SECONDS, queuedAt)
                 val elapsedMs = failure.first
                 // Observed while the server is STILL paused: only the socket bound can have ended the statement.
                 println("837 R2 socket bound under a paused server: held statement->failed line ${elapsedMs}ms; line=${failure.second}")
@@ -159,38 +185,28 @@ class ScheduledJobsMetadataBoundsE2eTest {
         }
         // The server is back: the next tick starts and succeeds (a healthy UPDATE is milliseconds; no new failed line).
         val ticksAtRecovery = recorder.startsOf(SWEEP).size
-        val logFrom = output.out.length
+        val recoveryStartedAt = System.nanoTime()
         awaitCondition("the sweep's next tick after the server came back", NEXT_TICK_SECONDS) {
             recorder.startsOf(SWEEP).size > ticksAtRecovery
         }
         Thread.sleep(HEALTHY_TICK_SETTLE_MS)
         withClue("a healthy tick after recovery logs no failed-sweep line") {
-            output.out
-                .substring(logFrom)
-                .lineSequence()
-                .filter { it.contains("event=execution.sweep_failed") }
-                .toList() shouldBe emptyList()
+            failures.since(recoveryStartedAt) shouldBe emptyList()
         }
     }
 
     /**
-     * Polls the application's own log, after [from], for the stale sweep's failed-tick line; returns how many milliseconds
-     * after [anchorNanos] it was first seen, and the line. Fails at [seconds] after the anchor naming what never happened.
+     * Polls only this application's scheduler-thread failures, recorded synchronously with a monotonic timestamp.
+     * Another application in the test JVM may log the same event on a different thread with the same name.
      */
     private fun awaitFailedLine(
-        output: CapturedOutput,
-        from: Int,
         seconds: Long,
         anchorNanos: Long,
     ): Pair<Long, String> {
         val deadline = anchorNanos + TimeUnit.SECONDS.toNanos(seconds)
         while (true) {
-            val line =
-                output.out
-                    .substring(from)
-                    .lineSequence()
-                    .firstOrNull { it.contains("event=execution.sweep_failed") }
-            if (line != null) return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - anchorNanos) to line
+            val line = failures.since(anchorNanos).firstOrNull()
+            if (line != null) return TimeUnit.NANOSECONDS.toMillis(line.first - anchorNanos) to line.second
             check(System.nanoTime() < deadline) { "no event=execution.sweep_failed line within $seconds s of the anchor" }
             Thread.sleep(POLL_MS)
         }
@@ -225,14 +241,63 @@ class ScheduledJobsMetadataBoundsE2eTest {
     /** Spring's observation of each `@Scheduled` execution, with the instant it started, per job. */
     class TickRecorder : ObservationHandler<ScheduledTaskObservationContext> {
         private val ticks = ConcurrentLinkedQueue<Pair<String, Long>>()
+        private val sweepThread = AtomicReference<Thread>()
+        private val nextSweepGate = AtomicReference<SweepStartGate?>()
 
         override fun supportsContext(context: Observation.Context): Boolean = context is ScheduledTaskObservationContext
 
         override fun onStart(context: ScheduledTaskObservationContext) {
-            ticks += "${context.targetClass.name}.${context.method.name}" to System.nanoTime()
+            val job = "${context.targetClass.name}.${context.method.name}"
+            if (job == SWEEP) {
+                nextSweepGate.getAndSet(null)?.pause()
+                sweepThread.set(Thread.currentThread())
+            }
+            ticks += job to System.nanoTime()
+        }
+
+        fun pauseNextSweep(): SweepStartGate {
+            val gate = SweepStartGate()
+            check(nextSweepGate.compareAndSet(null, gate)) { "a sweep setup barrier is already armed" }
+            return gate
         }
 
         fun startsOf(job: String): List<Long> = ticks.filter { it.first == job }.map { it.second }
+
+        fun ownsCurrentThread(): Boolean = Thread.currentThread() === sweepThread.get()
+    }
+
+    /** Parks one scheduled invocation before its timing anchor; the test can then exhaust the pool without starving siblings. */
+    class SweepStartGate {
+        private val arrived = CountDownLatch(1)
+        private val proceed = CountDownLatch(1)
+
+        @Volatile
+        var releasedBeforeTimeout = false
+            private set
+
+        fun awaitArrival(): Boolean = arrived.await(NEXT_TICK_SECONDS, TimeUnit.SECONDS)
+
+        fun pause() {
+            arrived.countDown()
+            releasedBeforeTimeout = proceed.await(NEXT_TICK_SECONDS, TimeUnit.SECONDS)
+        }
+
+        fun release() = proceed.countDown()
+    }
+
+    /** Thread identity, not its shared `dp-scheduled` name, ties a failed line to this context's observed tick. */
+    private class SweepFailures(
+        private val ticks: TickRecorder,
+    ) : AppenderBase<ILoggingEvent>() {
+        private val recorded = ConcurrentLinkedQueue<Pair<Long, String>>()
+
+        override fun append(event: ILoggingEvent) {
+            if (ticks.ownsCurrentThread() && event.formattedMessage.contains("event=execution.sweep_failed")) {
+                recorded += System.nanoTime() to event.formattedMessage
+            }
+        }
+
+        fun since(anchorNanos: Long): List<Pair<Long, String>> = recorded.filter { it.first >= anchorNanos }
     }
 
     /** The recorder as a bean, so Boot registers it with the observation registry before the first tick. */

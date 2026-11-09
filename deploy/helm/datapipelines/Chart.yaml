@@ -4,9 +4,10 @@ description: >-
   datapipelines.co — declarative SQL data pipelines, self-hosted.
   The minimal reference chart deployment.md §6.4 points at: Deployment,
   Service, optional HPA and PodDisruptionBudget, and the managed lake
-  reads' egress proxy (Deployment, Service, ConfigMap, NetworkPolicy). Postgres and Redis are
+  reads' egress proxy (Deployment, Service, NetworkPolicy, and optional
+  PodDisruptionBudget and topology spread). Postgres and Redis are
   EXTERNAL (operator-managed, §4.1/§4.2) — this chart installs neither.
 type: application
 # Chart version — bump on every chart change. Independent of the app version.
-version: 0.3.0
+version: 0.4.0
 appVersion: "1.0.0"

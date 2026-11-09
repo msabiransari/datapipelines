@@ -153,6 +153,21 @@ class WebPropertiesSpecDriftTest {
         documented.getValue("datapipelines.org.timezone") shouldBe props.timezone
     }
 
+    @Test
+    fun `long descriptions and escaped pipes parse without recursive regex backtracking`() {
+        val description = "long description ".repeat(10_000) + "an escaped \\| pipe"
+        val row = "| `datapipelines.org.currency.symbol` | `$` | $description |"
+
+        val match = requireNotNull(ROW_REGEX.find(row))
+        match.groupValues[1] shouldBe "datapipelines.org.currency.symbol"
+        match.groupValues[2] shouldBe "$"
+    }
+
+    @Test
+    fun `an extra description column still refuses the whole row`() {
+        ROW_REGEX.find("| `datapipelines.org.currency.symbol` | `$` | description | extra |") shouldBe null
+    }
+
     private companion object {
         /**
          * A full `| \`datapipelines.*\` | \`default\` | description |` row of the §3 tables
@@ -161,8 +176,10 @@ class WebPropertiesSpecDriftTest {
          * does not match at all and its key DISAPPEARS from the parse (the `getValue`
          * calls then fail loudly), instead of the old behavior of silently reading
          * whichever cell happened to sit in the default position.
+         * Escaped pipes match first; possessive repetition keeps long descriptions
+         * off the regex backtracking stack without accepting additional columns.
          */
         val ROW_REGEX =
-            Regex("""^\|\s*`(datapipelines\.[a-z0-9.\-]+)`\s*\|\s*`?([A-Za-z0-9$\-]+)`?\s*\|(?:[^|\n]|\\\|)*\|$""")
+            Regex("""^\|\s*`(datapipelines\.[a-z0-9.\-]+)`\s*\|\s*`?([A-Za-z0-9$\-]+)`?\s*\|(?:\\\||[^|\n])*+\|$""")
     }
 }

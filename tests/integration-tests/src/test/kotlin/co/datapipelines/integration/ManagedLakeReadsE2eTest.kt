@@ -686,7 +686,13 @@ class ManagedLakeReadsE2eTest {
                 val cpu = awaitBurning(run)
                 // No poolFor on H from here on: only H's reaper can retire the generation.
                 val retireBy = builtAt.plusSeconds(H_MAX_AGE_SECONDS + REAPER_CADENCE_SECONDS + BOUND_SLACK_SECONDS)
-                awaitUntil(retireBy, "the reaper retires the generation with no lease") { generationBuiltAt(reader) == null }
+                // Removal precedes the retirement log; observe both before freezing the event snapshot.
+                awaitUntil(retireBy, "the reaper retires the generation with no lease") {
+                    generationBuiltAt(reader) == null &&
+                        linesOf(capture, "event=lake.generation_expired").any {
+                            "max_age_seconds=$H_MAX_AGE_SECONDS " in it.text && "trigger=reaper" in it.text && it.at >= builtAt
+                        }
+                }
                 val retiredSeenAt = Instant.now()
                 val runningAfterRetire = run.ended.count == 1L
                 val expired =
@@ -754,6 +760,8 @@ class ManagedLakeReadsE2eTest {
     fun `I1 - with the metadata pool exhausted the reaper still retires and closes an executing reader's generation in bound`() {
         val reader = bootReaderProfile(APP_I1)
         try {
+            // Isolate the reaper, as in I2: a failed keeper heartbeat would otherwise retire the generation first.
+            (reader.getBean("readerLeaseTaskScheduler") as ThreadPoolTaskScheduler).shutdown()
             val metadataPool = reader.getBean("dataSource") as HikariDataSource
             reapedUnderAdversity(reader, "I1 metadata pool exhausted") {
                 val held = (1..metadataPool.maximumPoolSize).map { metadataPool.connection }
@@ -1489,7 +1497,13 @@ class ManagedLakeReadsE2eTest {
         label: String,
     ): ReapTimeline {
         val retireBy = builtAt.plusSeconds(H_MAX_AGE_SECONDS + REAPER_CADENCE_SECONDS + BOUND_SLACK_SECONDS)
-        awaitUntil(retireBy, "$label: the reaper retires the generation with no lease") { generationBuiltAt(reader) == null }
+        // The live-map removal and its log are separate observations on the reaper thread.
+        awaitUntil(retireBy, "$label: the reaper retires the generation with no lease") {
+            generationBuiltAt(reader) == null &&
+                linesOf(capture, "event=lake.generation_expired").any {
+                    "max_age_seconds=$H_MAX_AGE_SECONDS " in it.text && "trigger=reaper" in it.text && it.at >= builtAt
+                }
+        }
         val expired =
             linesOf(capture, "event=lake.generation_expired").filter {
                 "max_age_seconds=$H_MAX_AGE_SECONDS " in it.text && "trigger=reaper" in it.text && it.at >= builtAt

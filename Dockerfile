@@ -96,6 +96,15 @@ COPY modules/app/build/generated/third-party-notices/THIRD-PARTY-NOTICES /app/TH
 RUN mkdir -p /app/lib && chmod 0555 /app/lib
 ENV LOADER_PATH=/app/lib,/opt/graaljs
 
+# #862 (review R4): the egress proxy's config renderer (EgressProxyConfigMain, deployment.md §4.3) runs from
+# THIS image as THIS image's user and writes exactly one file, /dp-egress-config/envoy.yaml. The directory is
+# the mountpoint of compose's egress-config named volume, owned by the app user 0755: Docker copies a fresh
+# volume's ownership and mode from the image directory it first mounts over (measured 2026-11-09, Docker 29:
+# a new volume mounted here is 999:999 0755), so the renderer needs neither root nor a writable root
+# filesystem, and Envoy (another uid) reads the 0644 file read-only. Nothing else in the image is writable by
+# the app user; the app itself never touches this path. The chart mounts an emptyDir here instead (fsGroup).
+RUN mkdir -p /dp-egress-config && chown datapipelines:datapipelines /dp-egress-config && chmod 0755 /dp-egress-config
+
 # Keep fresh native thread stacks for JVMs hosting the script isolate (#685).
 # Runtime overrides that add other glibc tunables must retain this entry.
 ENV GLIBC_TUNABLES=glibc.pthread.stack_cache_size=0

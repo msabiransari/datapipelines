@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries, Publication and Reads
 
-**Status:** v1.16 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling)
+**Status:** v1.18 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -383,13 +383,30 @@ the catalog row with a five-second statement, open no catalog session, and read 
 daemon thread, `dp-lake-metadata`, waiting at most what remains of the budget. So an object store that stops answering
 adds nothing to the 16 seconds. A read that outlives the wait is abandoned and counted
 (`lake.settle.metadata_read_stuck`). It holds no lease and no database connection, and it stops itself: the read
-checks between every chunk the store returns, so **an abandoned read ends at its next chunk, or after the store's
-10-second socket timeout if that chunk never comes**. On a store that trickles bytes it therefore ends within one gap
-between bytes; closing the stream then reads at most one more chunk, under the same timeout, before the client aborts
-the connection. A read blocked on a store that has stopped answering sees the stop only when the client gives up: the
-socket timeout ends each attempt, six attempts end a request that gets no response after about a minute (measured at
-62 s), and Iceberg's S3 stream reopens a body read that timed out up to three more times, each a new request under
-those attempts. The file is read whole and capped at 64 MiB of JSON after decompression; a larger one fails the read,
+checks between every chunk the store returns, so an abandoned read ends at its next chunk. On a store that trickles
+bytes it therefore ends within one gap between bytes; closing the stream then reads at most one more chunk, under the
+same timeout, before the client aborts the connection. A read blocked on a store that has stopped answering sees the
+stop only when the client gives up. Its conditional network-wait envelope is derived in
+`SettlementObjectReadEnd.stalledReadEndByMillis`, in milliseconds starting at the first GetObject request.
+The stalled-store model assumes prompt request writes and TLS setup, no throttles or redirects, and each request
+either times out waiting for headers or returns complete headers promptly followed by a stalled body. Headers and
+bodies do not trickle or make intermittent progress in this model. From the effective catalog properties and
+Iceberg's configured SDK retry policy, each request allows six attempts at 2 000 ms connect plus 10 000 ms socket,
+and five full-jitter backoff caps of 100 + 200 + 400 + 800 + 1 600 ms (100 ms base, 20 000 ms ceiling):
+75 100 ms per request. Each answered stream adds three socket timeouts — body read, close's abort probe, and close.
+Iceberg 1.12.0 permits three body-read retries, each closing the old stream and reopening with another request.
+Conservatively counting four requests and four stream tails gives
+4 × (75 100 + 3 × 10 000): **at most 420 400 ms — about 420 seconds — after its first request in this model**.
+This is model arithmetic, not an observed stalled-store runtime upper bound. The earlier ~62 s measurement
+characterized one unanswered request with real jitter; it did not prove a maximum.
+DNS resolution, credential-chain fetches, blocked request writes, TLS setup, JVM scheduling and local processing
+have no total bound here; the number is conditional on those phases completing promptly and is no arbitrary
+network or end-to-end guarantee. Throttled responses use a separate backoff; trickling headers are outside this
+model, and a body returning chunks follows the ordinary abandonment stop above. The SDK API-call and attempt
+timeouts are unset, so no enclosing total timer covers these phases. The pinned private Iceberg reopen policy,
+SDK version, configured retry/backoff policy, abort probes and close counts are guarded by
+`SettlementObjectReadEndCompatTest`. Neither the 16 s scheduler overrun nor the 31 s whole-tick bound includes
+this off-thread work. The file is read whole and capped at 64 MiB of JSON after decompression; a larger one fails the read,
 so every tick defers that table as failed (`lake.settle.deferred`, cause `MetadataFileTooLarge`) until its metadata
 file is back under the cap. The cap is this read's alone: the catalog's own table loads are not capped. While an
 abandoned read runs, every table's verification and repair are deferred on every tick without sending a read: the one
@@ -398,11 +415,20 @@ is discarded; once it has ended (`lake.settle.metadata_read_ended`, `cause=aband
 again from its first byte.
 
 A tick cannot promise more than this. Against a stalled PostgreSQL every statement it started runs to its timeout;
-a connection checkout is bounded by the metadata pool's `connection-timeout` (10 s since #837), and a commit by the
-pool's and driver's settings. Against a server that accepts and never answers, a timeout's cancel does not end the
-blocked read, and the other four jobs on this thread end such a statement at its bound plus the driver's 10 s cancel wait, through a socket bound (#837); this tick's
-statements are built in this module and do not carry one yet, so against that server a statement here has no
-wall-clock bound (#858). A healthy tick still reads the store once per table for the semantics repair's version check.
+a connection checkout is bounded by the metadata pool's `connection-timeout` (10 s since #837). Against a server that
+accepts and never answers, a timeout's cancel does not end the blocked read: the cancel is a second connection that
+server never reads. So every statement the runtime's template sends also carries a socket bound, like the other four
+jobs' on this thread (#837, #858): before each statement the template sets its connection's network timeout to the
+statement's 5 s plus 5 s. Against that server the statement ends with SQLState `08006` at the later of those 10 s and
+its 5 s plus the driver's cancel wait (pgjdbc's `cancelSignalTimeout`, 10 s by default): **15 s after it began**,
+observed on the real tick (`LakeSettlementMetadataBoundsE2eTest`), which then logs `lake.settle.sweep_deferred`. Inside
+one of the runtime's five-second transactions the connection keeps that bound until it goes back to the pool, which
+restores its own value, so the transaction's later statements, its joined audit row and its commit or rollback read
+under it too. The limit assumes two things: that the driver honours the network timeout (one that refuses it fails the
+statement rather than running it unbounded), and the driver's default cancel wait (a longer `cancelSignalTimeout`
+moves the 15 s with it). The 16 and 31 seconds above hold with PostgreSQL answering; against a server that has
+stopped, these per-statement and checkout bounds are what holds. A healthy tick still reads the store once per table
+for the semantics repair's version check.
 
 The row cursor passes over live, busy and failing deliveries and wraps when a page comes back short, so deliveries
 behind them are reached on a later tick. Cursors are held in memory; after a restart each table starts again at its
@@ -523,6 +549,8 @@ is an error. The same loss applies when the full protection-window deadline is r
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-08 | v1.18 | 866 (#866) | §8: the abandoned metadata read's conditional stalled-store network-wait envelope is derived in `SettlementObjectReadEnd.stalledReadEndByMillis` from effective connect/socket values and Iceberg's configured retry policy: four request allowances plus all body and close reads, 420 400 ms with the shipped inputs. Pins the library assumptions and states residual phases without an end-to-end timer. Corrects the v1.15 row's one-timeout claim; the measured ~62 s remains an observation. |
+| 2026-11-08 | v1.17 | 858 (#858) | §8: the settlement tick's statements carry a socket bound (5 s + 5 s) through the runtime's own template, so against a server that accepts and never answers a statement ends with `08006` at max(10, 5 + 10) = 15 s; the exception for this tick is gone, and the paragraph states the limit's two assumptions and that a transaction's later statements and commit read under the bound. The conditional 16 s overrun and 31 s tick are unchanged. |
 | 2026-11-08 | v1.16 | 833 (#824) managed retire ceiling | §9 "The bound.": the staleness rule's ceiling term is the managed retire ceiling (`managed-retire-ceiling-seconds`, else `node-query-timeout-max-seconds` + 30); shipped 900 + 14 + 930 + 60 = 1904 ≤ 25 200 s. |
 | 2026-11-08 | v1.15 | 851 (#851) | §8: an abandoned metadata read stops itself at its next chunk, or after the store's 10-second socket timeout; the read is capped at 64 MiB of JSON after decompression; the trickle is no longer unbounded. |
 | 2026-11-07 | v1.14 | 837 (#837) | §8: the sentence on what a tick cannot promise states the connection checkout's bound (10 s) and that the other jobs on `dp-scheduled` end a statement against an unresponsive server at a socket bound while this tick's statements do not yet (#858). |
