@@ -171,6 +171,27 @@ internal object LockObserver {
                 }
         }
 
+    /** How many backends WAIT (not granted) on any of [keys]' physical advisory locks, read on a fresh connection. */
+    fun waitingOn(vararg keys: PrerequisiteKey): Int {
+        val locks = keys.map { it.lock }.distinct()
+        return LockHolder.open().use { c ->
+            c
+                .prepareStatement(
+                    "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND objsubid = 2 AND (" +
+                        locks.joinToString(" OR ") { "(classid::bigint = ? AND objid::bigint = ?)" } + ")",
+                ).use { ps ->
+                    locks.forEachIndexed { i, lock ->
+                        ps.setLong(2 * i + 1, lock.lockSpace.toLong())
+                        ps.setLong(2 * i + 2, objIdOf(lock.subKey))
+                    }
+                    ps.executeQuery().use {
+                        it.next()
+                        it.getInt(1)
+                    }
+                }
+        }
+    }
+
     /** The unsigned `pg_locks.objid` a signed advisory sub-key appears as. */
     fun objIdOf(subKey: Int): Long = subKey.toLong() and 0xFFFF_FFFFL
 }

@@ -217,14 +217,59 @@ class JdbcReleaseMutationGuardDeadlineTest {
     @Test
     fun `within a class keys are sorted - a smaller key after a larger one throws, one batch is sorted for the caller`() {
         inTransaction { guard.prerequisites(listOf(KEY_B, KEY_A), CODE) }
-        jdbc.lockedPrerequisites() shouldContainExactly
-            listOf(JdbcReleaseMutationGuard.nameHash(KEY_A.name), JdbcReleaseMutationGuard.nameHash(KEY_B.name))
+        jdbc.lockedPrerequisites() shouldContainExactly listOf(KEY_A, KEY_B).map { it.lock.subKey }.sorted()
         shouldThrow<IllegalStateException> {
             inTransaction {
                 guard.workspaces(listOf(WS_2), CODE)
                 guard.workspaces(listOf(WS_1), CODE)
             }
         }.message shouldContain "Lock order violated"
+    }
+
+    @Test
+    fun `prerequisites are ordered by PHYSICAL advisory identity, not by name - the R1 collision`() {
+        // Lexically FIRST < MIDDLE < LAST, but FIRST and LAST share one physical sub-key: ordering by name would lock
+        // {FIRST, MIDDLE} as [634785596, -1807916459] and {MIDDLE, LAST} as [-1807916459, 634785596] — opposite orders of
+        // the same two locks. By physical identity both writers request [-1807916459, 634785596].
+        COLLISION_FIRST.lock shouldBe COLLISION_LAST.lock
+        listOf(COLLISION_FIRST, COLLISION_MIDDLE, COLLISION_LAST).map { it.lock.subKey } shouldContainExactly
+            listOf(COLLIDING_SUB_KEY, MIDDLE_SUB_KEY, COLLIDING_SUB_KEY)
+
+        inTransaction { guard.prerequisites(listOf(COLLISION_FIRST, COLLISION_MIDDLE), CODE) }
+        inTransaction { guard.prerequisites(listOf(COLLISION_MIDDLE, COLLISION_LAST), CODE) }
+
+        jdbc.lockedPrerequisites() shouldContainExactly listOf(MIDDLE_SUB_KEY, COLLIDING_SUB_KEY, MIDDLE_SUB_KEY, COLLIDING_SUB_KEY)
+    }
+
+    @Test
+    fun `two names sharing one physical lock take it once - in one batch and in a later re-acquisition`() {
+        inTransaction { guard.prerequisites(listOf(COLLISION_LAST, COLLISION_FIRST), CODE) }
+        jdbc.lockedPrerequisites() shouldContainExactly listOf(COLLIDING_SUB_KEY)
+
+        inTransaction {
+            guard.prerequisites(listOf(COLLISION_FIRST), CODE)
+            // The same physical lock under the other name: already held, so no statement — and no order violation.
+            guard.prerequisites(listOf(COLLISION_LAST), CODE)
+        }
+        jdbc.lockedPrerequisites() shouldContainExactly listOf(COLLIDING_SUB_KEY, COLLIDING_SUB_KEY)
+    }
+
+    @Test
+    fun `an incremental acquisition is admitted above what is held and refused below it - by physical identity`() {
+        inTransaction {
+            guard.prerequisites(listOf(COLLISION_MIDDLE), CODE)
+            guard.prerequisites(listOf(COLLISION_FIRST), CODE)
+        }
+        jdbc.lockedPrerequisites() shouldContainExactly listOf(MIDDLE_SUB_KEY, COLLIDING_SUB_KEY)
+
+        // FIRST sorts before MIDDLE by NAME, which is irrelevant; it sorts AFTER it physically, so the reverse is refused.
+        shouldThrow<IllegalStateException> {
+            inTransaction {
+                guard.prerequisites(listOf(COLLISION_LAST), CODE)
+                guard.prerequisites(listOf(COLLISION_MIDDLE), CODE)
+            }
+        }.message shouldContain "Lock order violated"
+        jdbc.lockedPrerequisites() shouldContainExactly listOf(MIDDLE_SUB_KEY, COLLIDING_SUB_KEY, COLLIDING_SUB_KEY)
     }
 
     @Test
@@ -322,6 +367,13 @@ class JdbcReleaseMutationGuardDeadlineTest {
         const val STATEMENTS_PER_ACQUISITION = 4
         val KEY_A = PrerequisiteKey.datasource("alpha-db")
         val KEY_B = PrerequisiteKey.datasource("beta-db")
+
+        /** The landing review's R1 collision: FIRST and LAST share a physical sub-key, MIDDLE sorts between them by name. */
+        val COLLISION_FIRST = PrerequisiteKey.datasource("g0-collision-006549")
+        val COLLISION_MIDDLE = PrerequisiteKey.datasource("g0-collision-006549-middle")
+        val COLLISION_LAST = PrerequisiteKey.datasource("g0-collision-029349")
+        const val COLLIDING_SUB_KEY = 634_785_596
+        const val MIDDLE_SUB_KEY = -1_807_916_459
         val WS_1: UUID = UUID.fromString("00000000-0000-0000-0000-000000000001")
         val WS_2: UUID = UUID.fromString("00000000-0000-0000-0000-000000000002")
 

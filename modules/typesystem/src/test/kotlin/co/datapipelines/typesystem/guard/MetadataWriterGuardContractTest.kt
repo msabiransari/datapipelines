@@ -19,11 +19,26 @@ import java.util.UUID
  */
 class MetadataWriterGuardContractTest {
     @Test
-    fun `prerequisite keys sort by namespace then canonical name - the acquisition order every writer shares`() {
-        val keys = listOf(PrerequisiteKey.datasource("warehouse"), PrerequisiteKey.datasource("lake"), PrerequisiteKey.datasource("m"))
+    fun `a prerequisite key's lock is its physical advisory identity - lock space, then the name's SHA-256 prefix`() {
+        val lake = PrerequisiteKey.datasource("lake")
 
-        keys.sorted().map(PrerequisiteKey::name) shouldContainExactly listOf("lake", "m", "warehouse")
-        PrerequisiteKey.datasource("lake") shouldBe PrerequisiteKey(PrerequisiteNamespace.DATASOURCE, "lake")
+        lake shouldBe PrerequisiteKey(PrerequisiteNamespace.DATASOURCE, "lake")
+        lake.lock shouldBe PrerequisiteLock(DATASOURCE_LOCK_SPACE, PrerequisiteLock.subKeyOf("lake"))
+        // Stable across JVMs and servers: the first four bytes, big-endian, of SHA-256("g0-collision-006549").
+        PrerequisiteLock.subKeyOf("g0-collision-006549") shouldBe 634_785_596
+    }
+
+    @Test
+    fun `locks sort by lock space then signed sub-key - the one total order, and colliding names are one lock`() {
+        val first = PrerequisiteKey.datasource("g0-collision-006549")
+        val middle = PrerequisiteKey.datasource("g0-collision-006549-middle")
+        val last = PrerequisiteKey.datasource("g0-collision-029349")
+
+        first.lock shouldBe last.lock
+        listOf(first, middle, last).map { it.lock }.sorted().map { it.subKey } shouldContainExactly
+            listOf(-1_807_916_459, 634_785_596, 634_785_596)
+        listOf(PrerequisiteLock(2, 0), PrerequisiteLock(1, 5), PrerequisiteLock(1, -5)).sorted() shouldContainExactly
+            listOf(PrerequisiteLock(1, -5), PrerequisiteLock(1, 5), PrerequisiteLock(2, 0))
     }
 
     @Test

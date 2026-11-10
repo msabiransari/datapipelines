@@ -7,13 +7,12 @@ import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.guard.EndpointRegistryLock
 import co.datapipelines.typesystem.guard.MetadataWriterGuard
 import co.datapipelines.typesystem.guard.PrerequisiteKey
+import co.datapipelines.typesystem.guard.PrerequisiteLock
 import co.datapipelines.typesystem.guard.WriterBusy
 import org.springframework.dao.DataAccessException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.transaction.support.TransactionSynchronization
 import org.springframework.transaction.support.TransactionSynchronizationManager
-import java.nio.ByteBuffer
-import java.security.MessageDigest
 import java.sql.SQLException
 import java.util.SortedSet
 import java.util.UUID
@@ -26,12 +25,15 @@ import java.util.concurrent.TimeUnit
  * cumulative deadline.
  *
  * **Lock classes, in order.** (1) prerequisite advisory keys: `pg_advisory_xact_lock(int4, int4)`, the namespace's own
- * lock space plus a 32-bit SHA-256 prefix of the canonical name — a collision over-serialises, never weakens exclusion,
- * and the two-key form never meets the endpoint registry's one-bigint key; (2) the EXISTING `workspaces` row
+ * lock space plus a 32-bit SHA-256 prefix of the canonical name ([PrerequisiteLock]) — a collision over-serialises, never
+ * weakens exclusion, and the two-key form never meets the endpoint registry's one-bigint key. They are deduplicated,
+ * ordered and tracked by that PHYSICAL identity, never by name (R1 of the #841 landing review: sorted names can request
+ * the same two locks in opposite orders when two of them collide); (2) the EXISTING `workspaces` row
  * `FOR NO KEY UPDATE` — no migration, cross-process because it is the database's, and it conflicts only with itself
  * and `FOR UPDATE`, never with the `FOR KEY SHARE` a child row's foreign-key check takes; (3) the endpoint registry's
  * one deployment-wide key ([EndpointRegistryLock.KEY]). Each class is acquired sorted; an earlier class (or a smaller
- * key of the same class) after a later one in the same transaction throws [IllegalStateException]. Everything is
+ * physical key of the same class) after a later one in the same transaction throws [IllegalStateException] — an
+ * incremental acquisition is admitted only above everything its class already holds. Everything is
  * transaction-scoped: commit, rollback or a cancelled connection releases it; nothing is ever held on the pooled session.
  *
  * **One cumulative deadline.** The first acquisition of a transaction (or of a [withinOneDeadline] scope spanning
@@ -79,15 +81,17 @@ class JdbcReleaseMutationGuard(
         busyCode: String,
     ) {
         val state = state()
-        val wanted = keys.toSortedSet() - state.prerequisites
+        // Physical identities: two colliding names are ONE lock (one statement), and a name whose lock this transaction
+        // already holds — under any name — needs none.
+        val wanted = keys.mapTo(sortedSetOf()) { it.lock } - state.prerequisites
         if (wanted.isEmpty()) return
         state.enter(CLASS_PREREQUISITE, "prerequisite keys")
         state.requireAfter(state.prerequisites, wanted.first(), "prerequisite key")
-        for (key in wanted) {
+        for (lock in wanted) {
             bounded(state, { WriterBusy.refusal(busyCode, lockWaitSeconds, it) }) {
-                jdbc.queryForList(LOCK_PREREQUISITE, key.namespace.lockSpace, nameHash(key.name))
+                jdbc.queryForList(LOCK_PREREQUISITE, lock.lockSpace, lock.subKey)
             }
-            state.prerequisites += key
+            state.prerequisites += lock
         }
     }
 
@@ -197,7 +201,7 @@ class JdbcReleaseMutationGuard(
         val owner: JdbcReleaseMutationGuard,
     ) : TransactionSynchronization {
         var highestClass = 0
-        val prerequisites: SortedSet<PrerequisiteKey> = sortedSetOf()
+        val prerequisites: SortedSet<PrerequisiteLock> = sortedSetOf()
         val workspaces: SortedSet<UUID> = sortedSetOf()
         var registry = false
         var deadline: Long? = null
@@ -238,8 +242,7 @@ class JdbcReleaseMutationGuard(
         /** `set_config(..., is_local => true)` is `SET LOCAL` with a bind parameter. */
         private const val SET_LOCK_TIMEOUT = "SELECT set_config('lock_timeout', ?, true)"
 
-        /** The canonical name's advisory sub-key: the first four bytes of its SHA-256, stable across JVMs and servers. */
-        fun nameHash(canonicalName: String): Int =
-            ByteBuffer.wrap(MessageDigest.getInstance("SHA-256").digest(canonicalName.toByteArray(Charsets.UTF_8))).int
+        /** The canonical name's advisory sub-key ([PrerequisiteLock.subKeyOf]); kept here for the probes that restate it. */
+        fun nameHash(canonicalName: String): Int = PrerequisiteLock.subKeyOf(canonicalName)
     }
 }

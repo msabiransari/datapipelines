@@ -156,8 +156,10 @@ class MetadataWriterGuardIntegrationTest {
 
     @Test
     fun `a deadline already passed refuses with no cause and issues no further lock statement - shape 2 on a real server`() {
-        val keyA = PrerequisiteKey.datasource(rows.datasourceName("a"))
-        val keyB = PrerequisiteKey.datasource(rows.datasourceName("b"))
+        // Ordered by PHYSICAL lock (#841 R1): the second, incremental acquisition must sort above the first, whatever the
+        // random names' hashes are — otherwise the order check, not the deadline, would answer.
+        val (keyA, keyB) =
+            listOf(rows.datasourceName("a"), rows.datasourceName("b")).map(PrerequisiteKey::datasource).sortedBy { it.lock }
         val guard = guard()
         val write =
             writer {

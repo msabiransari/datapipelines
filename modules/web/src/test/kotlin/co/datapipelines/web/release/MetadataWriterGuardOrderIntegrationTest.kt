@@ -12,6 +12,7 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
 import java.sql.SQLException
 import java.util.UUID
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
@@ -89,8 +90,63 @@ class MetadataWriterGuardOrderIntegrationTest {
         reverse.get(LockObserver.COMPLETION_ALLOWANCE_SECONDS, TimeUnit.SECONDS)
     }
 
+    /**
+     * R1 of the #841 landing review, through the PRODUCTION guard: lexically `FIRST < MIDDLE < LAST`, and FIRST and LAST
+     * share one physical advisory lock. Ordered by name, writer A (`{FIRST, MIDDLE}`) would request
+     * `[634785596, -1807916459]` and writer B (`{MIDDLE, LAST}`) `[-1807916459, 634785596]`. The interleaving is forced,
+     * not hoped for: a holder takes the colliding lock, A queues on it, B starts only once A is observed waiting and is
+     * itself observed waiting, then the holder commits. A name-ordered guard has B holding MIDDLE while A, granted the
+     * colliding lock first (FIFO), requests MIDDLE — PostgreSQL answers one of them `40P01`. Ordered by physical identity
+     * both request MIDDLE's lock first: they serialise and both commit.
+     */
+    @Test
+    fun `two writers whose names collide on one physical lock both complete - no 40P01, ordered by physical identity`() {
+        val first = PrerequisiteKey.datasource(COLLISION_FIRST)
+        val middle = PrerequisiteKey.datasource(COLLISION_MIDDLE)
+        val last = PrerequisiteKey.datasource(COLLISION_LAST)
+        check(first.lock == last.lock && first.lock != middle.lock) { "the fixture names must collide exactly as R1 states" }
+        holder.prerequisite(first)
+
+        val writerA = writer { guard.prerequisites(listOf(first, middle), CODE) }
+        awaitKeyWaiters(1, writerA, first, middle)
+        val writerB = writer { guard.prerequisites(listOf(middle, last), CODE) }
+        awaitKeyWaiters(2, writerB, first, middle)
+        holder.commit()
+
+        listOf("A" to writerA, "B" to writerB).forEach { (name, write) ->
+            try {
+                write.get(LockObserver.COMPLETION_ALLOWANCE_SECONDS, TimeUnit.SECONDS)
+            } catch (e: ExecutionException) {
+                throw AssertionError("writer $name failed (SQLSTATEs ${sqlStates(e)}; 40P01 = an order inversion)", e)
+            }
+        }
+        LockObserver.holdersOf(first) shouldBe 0
+        LockObserver.holdersOf(middle) shouldBe 0
+    }
+
+    /** Polls until [count] backends wait (not granted) on [keys]' physical advisory locks; RED when [latest] answered first. */
+    private fun awaitKeyWaiters(
+        count: Int,
+        latest: Future<*>,
+        vararg keys: PrerequisiteKey,
+    ) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(LockObserver.WAIT_PROBE_SECONDS)
+        while (LockObserver.waitingOn(*keys) < count) {
+            check(!latest.isDone) { "the writer finished without waiting: ${runCatching { latest.get() }}" }
+            check(System.nanoTime() < deadline) { "no $count waiters on the colliding locks within the probe window" }
+            Thread.sleep(POLL_MS)
+        }
+    }
+
+    private fun sqlStates(e: Throwable): List<String> =
+        generateSequence(e) {
+            it.cause.takeUnless { cause ->
+                cause === it
+            }
+        }.filterIsInstance<SQLException>().mapNotNull { it.sqlState }.toList()
+
     private fun sortedKeys(): Pair<PrerequisiteKey, PrerequisiteKey> {
-        val keys = listOf(rows.datasourceName("b"), rows.datasourceName("a")).map(PrerequisiteKey::datasource).sorted()
+        val keys = listOf(rows.datasourceName("b"), rows.datasourceName("a")).map(PrerequisiteKey::datasource).sortedBy { it.lock }
         return keys[0] to keys[1]
     }
 
@@ -128,5 +184,10 @@ class MetadataWriterGuardOrderIntegrationTest {
         const val CODE = "datasource.write.busy"
         const val BOUND_SECONDS = 20
         const val POLL_MS = 20L
+
+        /** The landing review's collision (verified there and in the unit suite): FIRST and LAST share sub-key 634785596. */
+        const val COLLISION_FIRST = "g0-collision-006549"
+        const val COLLISION_MIDDLE = "g0-collision-006549-middle"
+        const val COLLISION_LAST = "g0-collision-029349"
     }
 }
