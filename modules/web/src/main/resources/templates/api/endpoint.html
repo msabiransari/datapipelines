@@ -83,7 +83,7 @@
             <dt>Description</dt>
             <dd th:text="${page.selected.description != '' ? page.selected.description : '—'}">Revenue by region.</dd>
             <dt>Body hash</dt>
-            <dd class="ds-mono u-text-xs u-break" th:text="${page.selected.bodyHash}">9f2c…</dd>
+            <dd class="ds-mono u-text-meta u-break" th:text="${page.selected.bodyHash}">9f2c…</dd>
           </dl>
           <div class="app-page-actions" data-api-verbs>
             <th:block th:if="${page.selected.isDraft}">

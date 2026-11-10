@@ -209,7 +209,10 @@ class ReadFloorTest {
             // #400 — the dashboard family's dialogs join the pipeline and template ones: each
             // GET floors at the verb's own permission, the same rule one more family over.
             // #399 — the visualization family's seven join on the same rule.
-            floor = 24,
+            // #786 — the API family's six join too: the draft dialog is the form of the draft save (`endpoint.publish`),
+            // the release dialog `endpoint.release`, and discard / restore / purge / switch `endpoint.version.manage`.
+            // The floor is the family's measured count with them (31).
+            floor = 31,
             permissions =
                 setOf(
                     Permission.PIPELINE_VERSION_MANAGE,
@@ -227,6 +230,9 @@ class ReadFloorTest {
                     Permission.VISUALIZATION_DELETE,
                     Permission.VISUALIZATION_RELEASE,
                     Permission.VISUALIZATION_SWITCH_VERSION,
+                    Permission.ENDPOINT_PUBLISH,
+                    Permission.ENDPOINT_RELEASE,
+                    Permission.ENDPOINT_VERSION_MANAGE,
                 ),
             matches = { path -> path.contains("/lifecycle/") },
         ),
