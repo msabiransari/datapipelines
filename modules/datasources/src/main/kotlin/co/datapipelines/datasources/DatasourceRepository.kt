@@ -124,6 +124,13 @@ data class DatasourceRecentGrant(
 class DatasourceRepository(
     private val jdbc: NamedParameterJdbcTemplate,
     private val objectMapper: ObjectMapper = DEFAULT_MAPPER,
+    /**
+     * #841 (G0) — every definition write ([create], [update], [updateCredential], [softDelete]) runs under the
+     * datasource's prerequisite key and its affected workspaces, in one metadata transaction (joined when the caller
+     * has one: the registry's save holds it across its read, validation and write). [recordTestOutcome] stays
+     * outside — an observation, not a consent fact. [DatasourceWriteGuarding.UNGUARDED] is the unit-test default.
+     */
+    val writes: DatasourceWriteGuarding = DatasourceWriteGuarding.UNGUARDED,
 ) {
     /** The live (non-deleted) row for [name], or null. */
     fun findByName(name: String): DatasourceRow? =
@@ -281,8 +288,10 @@ class DatasourceRepository(
         credentialEncrypted: ByteArray?,
         createdBy: UUID,
     ): DatasourceRow =
-        mappingDuplicateName(datasource.name) {
-            jdbc.query(INSERT_SQL, insertParams(datasource, credentialEncrypted, createdBy), mapper()).single()
+        writes.definition(datasource.name, listOf(datasource.ownerWorkspaceId)) {
+            mappingDuplicateName(datasource.name) {
+                jdbc.query(INSERT_SQL, insertParams(datasource, credentialEncrypted, createdBy), mapper()).single()
+            }
         }
 
     /**
@@ -316,7 +325,9 @@ class DatasourceRepository(
         // NONE writes its NULL; every other kind keeps the stored blob when the caller sent none.
         val writesCredential = credentialEncrypted != null || datasource.credentialKind == CredentialKind.NONE
         val sql = if (writesCredential) UPDATE_WITH_CREDENTIAL_SQL else UPDATE_KEEP_CREDENTIAL_SQL
-        return jdbc.query(sql, params, mapper()).singleOrNull()
+        return writes.definition(datasource.name, listOf(datasource.ownerWorkspaceId)) {
+            jdbc.query(sql, params, mapper()).singleOrNull()
+        }
     }
 
     /**
@@ -365,14 +376,16 @@ class DatasourceRepository(
         name: String,
         credentialEncrypted: ByteArray,
     ): Boolean =
-        jdbc.update(
-            """
-            UPDATE datasources
-               SET credential_encrypted = :credentialEncrypted, updated_at = NOW()
-             WHERE name = :name AND is_deleted = FALSE
-            """.trimIndent(),
-            MapSqlParameterSource().addValue("name", name).addValue("credentialEncrypted", credentialEncrypted),
-        ) > 0
+        writes.definition(name) {
+            jdbc.update(
+                """
+                UPDATE datasources
+                   SET credential_encrypted = :credentialEncrypted, updated_at = NOW()
+                 WHERE name = :name AND is_deleted = FALSE
+                """.trimIndent(),
+                MapSqlParameterSource().addValue("name", name).addValue("credentialEncrypted", credentialEncrypted),
+            ) > 0
+        }
 
     /**
      * Every live datasource's name and `updated_at` — the §5.7 reconcile's whole input (094).
@@ -393,10 +406,12 @@ class DatasourceRepository(
 
     /** Soft-deletes [name]; false when nothing live existed. The row (and its name) survive. */
     fun softDelete(name: String): Boolean =
-        jdbc.update(
-            "UPDATE datasources SET is_deleted = TRUE, updated_at = NOW() WHERE name = :name AND is_deleted = FALSE",
-            mapOf("name" to name),
-        ) > 0
+        writes.definition(name) {
+            jdbc.update(
+                "UPDATE datasources SET is_deleted = TRUE, updated_at = NOW() WHERE name = :name AND is_deleted = FALSE",
+                mapOf("name" to name),
+            ) > 0
+        }
 
     private fun insertParams(
         datasource: Datasource,

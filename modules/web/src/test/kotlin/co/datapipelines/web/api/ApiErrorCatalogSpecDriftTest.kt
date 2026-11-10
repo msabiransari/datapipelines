@@ -362,8 +362,10 @@ class ApiErrorCatalogSpecDriftTest {
          * #799 adds the delivery/append refusals, bringing the count to 475.
          * 475 → 477 with #818: datasource.managed and lake.unavailable. Both lanes share lake.table.unavailable.
          * The merged document, constants and catalog rows carry the same union.
+         * 477 → 480 with #841 (G0): `datasource.write.busy`, `endpoint.write.busy` and `schedule.write.busy`, all 409,
+         * landed in the SAME commit as their constants and catalog rows.
          */
-        const val SECTION_13_ROW_COUNT = 477
+        const val SECTION_13_ROW_COUNT = 480
 
         /**
          * §12's distinct validation codes.

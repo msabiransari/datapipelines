@@ -132,8 +132,15 @@ class EndpointsConfiguration {
         properties: EndpointsProperties,
         // 178 — the promoter lens on the endpoint reads (visible iff the pipeline is).
         lens: co.datapipelines.application.lens.PromoterLens,
+        // #841 (G0) — publish/unpublish under the writer guard, in the metadata transaction.
+        transactionManager: org.springframework.transaction.PlatformTransactionManager,
+        writeGuard: co.datapipelines.typesystem.guard.MetadataWriterGuard,
     ): EndpointPublishService =
         EndpointPublishService(
+            transactions =
+                org.springframework.transaction.support
+                    .TransactionTemplate(transactionManager),
+            writeGuard = writeGuard,
             endpoints = endpoints,
             pipelines = pipelines,
             pipelineRepository = pipelineRepository,

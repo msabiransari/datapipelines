@@ -1,5 +1,8 @@
 package co.datapipelines.datasources
 
+import co.datapipelines.typesystem.guard.KeySetChanged
+import co.datapipelines.typesystem.guard.PrerequisiteKey
+import co.datapipelines.typesystem.guard.Replanning
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
@@ -44,6 +47,12 @@ data class DatasourceGrant(
  */
 class DatasourceGrantRepository(
     private val jdbc: NamedParameterJdbcTemplate,
+    /**
+     * #841 (G0, dependency-graph record §15.1) — every grant write takes the datasource's prerequisite key, then the
+     * workspace(s) it changes, in one metadata transaction (joined when the caller has one, as
+     * `WorkspaceService.create`'s grant-at-creation does). [DatasourceWriteGuarding.UNGUARDED] is the unit-test default.
+     */
+    val writes: DatasourceWriteGuarding = DatasourceWriteGuarding.UNGUARDED,
 ) {
     /** Every workspace [datasourceName] is granted to, name order. */
     fun grantsOf(datasourceName: String): List<DatasourceGrant> =
@@ -84,14 +93,16 @@ class DatasourceGrantRepository(
         workspaceId: UUID,
         grantedBy: UUID,
     ): Boolean =
-        jdbc.update(
-            """
-            INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by)
-            VALUES (:name, :ws, :by)
-            ON CONFLICT (datasource_name, workspace_id) DO NOTHING
-            """.trimIndent(),
-            MapSqlParameterSource().addValue("name", datasourceName).addValue("ws", workspaceId).addValue("by", grantedBy),
-        ) > 0
+        writes.grant(datasourceName, { listOf(workspaceId) }) {
+            jdbc.update(
+                """
+                INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by)
+                VALUES (:name, :ws, :by)
+                ON CONFLICT (datasource_name, workspace_id) DO NOTHING
+                """.trimIndent(),
+                MapSqlParameterSource().addValue("name", datasourceName).addValue("ws", workspaceId).addValue("by", grantedBy),
+            ) > 0
+        }
 
     /**
      * The grant a registration implies (RBAC design §4): a workspace admin who registers a
@@ -118,22 +129,44 @@ class DatasourceGrantRepository(
      * many grants were created; existing ones are left with their original actor.
      *
      * Its only caller is the `demo` seeder (see `InstanceDatasourceGrants` for why that is the
-     * one workspace this is right for). Done in ONE statement rather than a read-then-loop so
-     * a datasource registered between the two cannot be missed.
+     * one workspace this is right for).
+     *
+     * #841 (G0): the set of instance datasources is DISCOVERED, so it is the writer protocol's replanning case — read
+     * the names, take their prerequisite keys (the guard orders them by physical lock), re-read them under the keys;
+     * a different set (a datasource registered or deleted in between) rolls the transaction back and replans inside
+     * the ORIGINAL cumulative deadline ([Replanning]); an unchanged set takes the workspace row and grants exactly the
+     * locked names.
      */
     fun grantAllInstanceDatasourcesTo(
         workspaceId: UUID,
         grantedBy: UUID,
     ): Int =
-        jdbc.update(
-            """
-            INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by)
-            SELECT d.name, :ws, :by
-              FROM datasources d
-             WHERE d.owner_workspace_id IS NULL AND d.is_deleted = FALSE
-            ON CONFLICT (datasource_name, workspace_id) DO NOTHING
-            """.trimIndent(),
-            MapSqlParameterSource().addValue("ws", workspaceId).addValue("by", grantedBy),
+        Replanning.run(writes.guard) {
+            val planned = instanceDatasourceNames()
+            if (planned.isEmpty()) return@run 0
+            writes.inTransaction {
+                writes.guard.prerequisites(planned.map(PrerequisiteKey::datasource), DatasourceErrorCodes.WRITE_BUSY)
+                if (writes.isGuarded && instanceDatasourceNames() != planned) throw KeySetChanged()
+                writes.guard.workspaces(listOf(workspaceId), DatasourceErrorCodes.WRITE_BUSY)
+                jdbc.update(
+                    """
+                    INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by)
+                    SELECT d.name, :ws, :by
+                      FROM datasources d
+                     WHERE d.owner_workspace_id IS NULL AND d.is_deleted = FALSE AND d.name IN (:names)
+                    ON CONFLICT (datasource_name, workspace_id) DO NOTHING
+                    """.trimIndent(),
+                    MapSqlParameterSource().addValue("ws", workspaceId).addValue("by", grantedBy).addValue("names", planned),
+                )
+            }
+        }
+
+    /** The live instance (unowned) datasources' names, sorted — [grantAllInstanceDatasourcesTo]'s key discovery. */
+    private fun instanceDatasourceNames(): List<String> =
+        jdbc.queryForList(
+            "SELECT name FROM datasources WHERE owner_workspace_id IS NULL AND is_deleted = FALSE ORDER BY name COLLATE \"C\"",
+            MapSqlParameterSource(),
+            String::class.java,
         )
 
     /**
@@ -150,20 +183,42 @@ class DatasourceGrantRepository(
      * predates the lake, or one whose grant row was deleted by hand. The `demo` seeder has its own
      * grant path: [grantAllInstanceDatasourcesTo] includes an already-registered managed lake,
      * because that datasource is active and has no owning workspace.
+     *
+     * #841 (G0): under the datasource's prerequisite key, the live workspaces that LACK the grant — exactly the rows
+     * this insert changes, and a set no grant writer can alter while the key is held — are read and locked (sorted),
+     * and only those are granted. A pass with nothing to repair therefore locks no workspace row; a workspace created
+     * after the read receives the grant in its own creation transaction (which takes the same key) or on the next tick.
      */
     fun grantToEveryWorkspace(
         datasourceName: String,
         grantedBy: UUID,
-    ): Int =
-        jdbc.update(
+    ): Int {
+        var locked: List<UUID> = emptyList()
+        return writes.grant(datasourceName, { ungrantedWorkspaceIds(datasourceName).also { locked = it } }) {
+            val params = MapSqlParameterSource().addValue("name", datasourceName).addValue("by", grantedBy)
+            jdbc.update(
+                """
+                INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by)
+                SELECT :name, w.id, :by
+                  FROM workspaces w
+                 WHERE w.is_deleted = FALSE
+                ${if (writes.isGuarded) "AND w.id IN (:locked)" else ""}
+                ON CONFLICT (datasource_name, workspace_id) DO NOTHING
+                """.trimIndent(),
+                if (writes.isGuarded) params.addValue("locked", locked.ifEmpty { listOf(NO_WORKSPACE) }) else params,
+            )
+        }
+    }
+
+    private fun ungrantedWorkspaceIds(datasourceName: String): List<UUID> =
+        jdbc.queryForList(
             """
-            INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by)
-            SELECT :name, w.id, :by
-              FROM workspaces w
+            SELECT w.id FROM workspaces w
              WHERE w.is_deleted = FALSE
-            ON CONFLICT (datasource_name, workspace_id) DO NOTHING
+               AND NOT EXISTS (SELECT 1 FROM datasource_workspaces g WHERE g.datasource_name = :name AND g.workspace_id = w.id)
             """.trimIndent(),
-            MapSqlParameterSource().addValue("name", datasourceName).addValue("by", grantedBy),
+            MapSqlParameterSource("name", datasourceName),
+            UUID::class.java,
         )
 
     /**
@@ -176,12 +231,17 @@ class DatasourceGrantRepository(
         datasourceName: String,
         workspaceId: UUID,
     ): Boolean =
-        jdbc.update(
-            "DELETE FROM datasource_workspaces WHERE datasource_name = :name AND workspace_id = :ws",
-            MapSqlParameterSource().addValue("name", datasourceName).addValue("ws", workspaceId),
-        ) > 0
+        writes.grant(datasourceName, { listOf(workspaceId) }) {
+            jdbc.update(
+                "DELETE FROM datasource_workspaces WHERE datasource_name = :name AND workspace_id = :ws",
+                MapSqlParameterSource().addValue("name", datasourceName).addValue("ws", workspaceId),
+            ) > 0
+        }
 
     private companion object {
+        /** A uuid no workspace holds: `IN ()` is not SQL, and an empty locked set must grant nothing. */
+        val NO_WORKSPACE: UUID = UUID(0L, 0L)
+
         val MAPPER =
             RowMapper { rs, _ ->
                 DatasourceGrant(

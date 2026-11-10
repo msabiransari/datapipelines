@@ -32,11 +32,16 @@ class ReleaseConfiguration {
     @Bean
     fun releaseBounds(properties: ReleaseDependencyProperties): ReleaseBounds = properties.toBounds()
 
+    /**
+     * The writer guard, declared as its concrete type so ONE bean answers both faces: the release families'
+     * [ReleaseMutationGuard] and the family-neutral `MetadataWriterGuard` the endpoint, datasource and schedule writers
+     * take (#841 G0) — one lock order, one per-transaction bookkeeping, one cumulative deadline.
+     */
     @Bean
     fun releaseMutationGuard(
         jdbc: NamedParameterJdbcTemplate,
         bounds: ReleaseBounds,
-    ): ReleaseMutationGuard = JdbcReleaseMutationGuard(jdbc.jdbcTemplate, bounds.lockWaitSeconds)
+    ): JdbcReleaseMutationGuard = JdbcReleaseMutationGuard(jdbc.jdbcTemplate, bounds.lockWaitSeconds)
 
     /** The same JSON the general audit logger writes, so every `audit_log` reader parses a release row unchanged. */
     @Bean

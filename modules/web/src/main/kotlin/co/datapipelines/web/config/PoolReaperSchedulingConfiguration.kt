@@ -114,6 +114,7 @@ class PoolReaperSchedulingConfiguration {
         registrar: ManagedLakeDatasourceRegistrar,
         jdbc: NamedParameterJdbcTemplate,
         lakeProperties: ObjectProvider<LakeProperties>,
+        writes: co.datapipelines.datasources.DatasourceWriteGuarding,
     ): ManagedLakeFreshnessScheduler {
         val statements =
             BoundedJdbc.bounded(
@@ -129,7 +130,9 @@ class PoolReaperSchedulingConfiguration {
                     ManagedLakeTableRepository(statements),
                     enabled = lakeProperties.ifAvailable?.enabled == true,
                 ),
-            grants = DatasourceGrantRepository(statements),
+            // #841 (G0): the tick's repair grants take the datasource's prerequisite key and the workspaces they
+            // change, on the shared writer guard; its statements keep their freshness bound.
+            grants = DatasourceGrantRepository(statements, writes),
         )
     }
 

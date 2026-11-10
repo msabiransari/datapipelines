@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v2.108 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.109 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-11-03
+**Last updated:** 2026-11-10
 
 ---
 
@@ -1374,6 +1374,8 @@ A script entry may carry `implements` (7e). The import keeps the ids that resolv
 
 Datasources are environment-specific connections. See [Datasources spec](datasources.md) for the entity model.
 
+**The writer guard (#841).** Every datasource write — register, update, credential change, delete, and a grant or revoke — takes the datasource's own guard, then every workspace the change is visible in ([release-dependencies design §4.4](superpowers/specs/2026-10-13-release-dependencies-design.md#44-the-metadata-writer-protocol-amended-2026-11-10-841-g0)). A wait past [`lock-wait-seconds`](configuration.md) answers `409 datasource.write.busy` (`details.lock_wait_seconds`; nothing was written — retry).
+
 ### 9.1 Register datasource
 
 ```
@@ -2202,6 +2204,11 @@ precedence is deliberately NOT offered in v1: because ambiguity cannot be publis
 pattern can match a request, and a reader of the registry can tell what a URL does by finding the
 one row it matches. `UNIQUE (path_pattern)` is deployment-wide — a URL is global.
 
+Publish and unpublish run under the workspace's writer guard, then the deployment-wide registry key, so the
+ambiguity check reads every committed path (#841, [release-dependencies design §4.4](superpowers/specs/2026-10-13-release-dependencies-design.md#44-the-metadata-writer-protocol-amended-2026-11-10-841-g0)).
+A wait past [`lock-wait-seconds`](configuration.md) answers `409 endpoint.write.busy` (`details.lock_wait_seconds`;
+nothing was published or removed — retry).
+
 ### 19.2 What may be published
 
 The pipeline must exist in the endpoint's workspace and have a **released** version, and it must
@@ -2466,6 +2473,8 @@ A **schedule** runs a registered executor's job — in v1 the `pipeline` executo
 
 `POST /schedules` — `schedule.create`. Body: `name`, `payload`, `cron`, `timezone` (required); `executor` (default `pipeline`), `parameters` (default `{}`), `missed_run_policy` (default `skip`). Optional `Idempotency-Key`, held durably: a replay of the same request answers `200` with the original schedule; a replay with a different body is `409 idempotency.key_reused_for_different_request`. `201` with the schedule and its `ETag`. Refusals: the `schedule.validation.*` family, `409 schedule.name_taken`, `409 schedule.limit.per_workspace`, and a parameter refusal exactly as an interactive run's (§13.4).
 
+**The writer guard (#841).** A create takes the workspace's writer guard FIRST, validates the target under it, then saves, all in one transaction: a pipeline discarded, purged or switched off its current version by a write already holding the guard is seen by the validation, and the create is refused with that target code (`schedule.validation.target_not_found` / `target_not_released`), never saved against a target that just stopped existing. A wait past [`lock-wait-seconds`](configuration.md) answers `409 schedule.write.busy` (`details.lock_wait_seconds`; nothing was saved — retry).
+
 **`notifications`** (#442a) is optional: absent or JSON null creates no recipients and events `failure`, `unknown`, `blocked` (start/success off). A present object accepts optional `recipients` (list of strings) and `events` (list of the five event names); an omitted member uses its create default. Example: `{"recipients":["a@example.com"],"events":["failure","unknown","blocked"]}`. Addresses are trimmed, domains lower-cased and duplicates removed case-insensitively, preserving first spelling and order; events deduplicate. One WHATWG valid e-mail address grammar, at most 254 characters, refuses header injection. The configured recipient limit defaults to 20. The idempotency hash includes normalized effective settings; case-only duplicates and reordered event choices replay the same meaning. Pre-V49 create keys still replay when the effective notification settings are the old defaults (no recipients and the three default events); different settings cannot match that legacy hash. A schedule's `notifications` in a response is `{recipient_count, events, delivery}`, plus `recipients` for a `schedule.update` holder only; `delivery` is the DEPLOYMENT's computed state, never stored (#442b, [Scheduler §2.3](scheduler.md#23-notification-settings-442)): `{"state":"on"}`, or `{"state":"off","reason":…}` with `disabled` (the enable flag is false — the default), `mail_unconfigured` or `no_allowlist` (the `development` posture with an empty recipient-domain allowlist). Settings are saved in every state; while off nothing is queued or sent.
 
 A refused `notifications` object is `400 schedule.validation.notifications_invalid` (#442a; the catalogue row is pipeline-contract §13.19). `details` contains only `{field, reason}`: `notifications`, `notifications.recipients`, an indexed recipient or event field; `not_an_object`, `not_a_list`, `not_a_string`, `syntax`, `too_long`, `too_many`, `unknown_event`, and `domain_not_allowed` (#442b: a recipient outside a non-empty `recipient-domains` allowlist, [Configuration §3.29](configuration.md#329-scheduler-9)). No address is echoed
@@ -2495,7 +2504,7 @@ Keywords are an exact allowlist — `TODAY` and `YESTERDAY`, uppercase — and a
 
 ### 20.5 Edit a schedule
 
-`PUT /schedules/{id}` with `If-Match: "<revision>"` — `schedule.update`. Body as §20.2 (the whole schedule), `parameter_bindings` included — replacing the saved bindings wholesale, like every other body field. A stale revision is `409 schedule.revision_conflict` (`details.current_revision`); a missing `If-Match` is refused as on §5.5. Changing the cron or timezone recomputes `next_due_at` from now — occurrences of the old pattern are not "missed". Runs already recorded keep the revision they were recorded under.
+`PUT /schedules/{id}` with `If-Match: "<revision>"` — `schedule.update`. Body as §20.2 (the whole schedule), `parameter_bindings` included — replacing the saved bindings wholesale, like every other body field. A stale revision is `409 schedule.revision_conflict` (`details.current_revision`); a missing `If-Match` is refused as on §5.5. An edit that changes the executor or its payload re-validates the target under the workspace's writer guard, exactly as a create does (§20.2); an edit that keeps them stays on the revision check alone. Changing the cron or timezone recomputes `next_due_at` from now — occurrences of the old pattern are not "missed". Runs already recorded keep the revision they were recorded under.
 
 **Additive frozen-contract rule (#442a):** absent or JSON-null `notifications` KEEPS the stored settings, so clients written before this field cannot wipe them. A present object replaces each supplied member; an omitted member keeps its stored value. `recipients: []` turns mail off; `events: []` selects no events. Neither omission resets a member to its create default.
 
@@ -2886,6 +2895,7 @@ browser persistence. Clients must reject foreign/stale responses even after abor
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-10 | v2.109 | #841 metadata writer protocol (G0) | **§9, §19, §20.2, §20.5:** datasource writes (register, update, credential, delete, grant, revoke), endpoint publish/unpublish, a schedule create and a target-changing schedule edit run under the metadata writer guard (release-dependencies design §4.4); an exhausted wait is `409 datasource.write.busy` / `endpoint.write.busy` / `schedule.write.busy` (`details.lock_wait_seconds`, nothing written). A schedule create validates its target under the guard. Additive: new refusals on existing routes, no route or field change. |
 | 2026-11-03 | v2.108 | #782 logout CSRF | **§16.4:** the root-level browser logout has a narrow same-origin Fetch Metadata exemption; other callers retain double-submit validation. A refused browser navigation gets the 403 page and preserves its session; machine callers keep JSON. |
 | 2026-11-01 | v2.107 | 758 (#758) | **§24:** fixes the tree search whitespace alphabet on both client and server, after the shared raw-term bound; names the code points and empty-term browse behavior. |
 | 2026-10-27 | v2.106 | 464 (#464) | §24: the tree routes' refusals carry catalogued codes ([pipeline-contract §13.24](pipeline-contract.md#1324-navigation-trees)) instead of the stand-in `pipeline.execution.aborted`: `400 navigation.request.invalid`, `503 navigation.view.unavailable` (now with `Retry-After: 5`, no `details`) and `503 navigation.metadata.too_large`. Statuses are unchanged. |

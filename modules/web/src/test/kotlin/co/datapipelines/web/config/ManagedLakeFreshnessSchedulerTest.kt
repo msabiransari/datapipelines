@@ -2,9 +2,11 @@ package co.datapipelines.web.config
 
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
+import co.datapipelines.datasources.DatasourceErrorCodes
 import co.datapipelines.datasources.DatasourceGrantRepository
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.ManagedLakeCatalog
+import co.datapipelines.typesystem.guard.WriterBusy
 import co.datapipelines.web.capturingLogEvents
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
@@ -95,6 +97,20 @@ class ManagedLakeFreshnessSchedulerTest {
             listOf(Level.WARN to "event=lake.freshness_tick_failed step=regrant error=QueryTimeoutException sql_state=57014")
     }
 
+    @Test
+    fun `a regrant refused busy by the writer guard is one WARN with the lock-timeout state and does not escape - #841 G0`() {
+        val (datasources, registrar) = collaborators(retired = 0)
+        every { registrar.regrant(grants) } throws
+            WriterBusy.refusal(DatasourceErrorCodes.WRITE_BUSY, LOCK_WAIT_SECONDS, SQLException("lock timeout", "55P03"))
+
+        val events = capturingLogEvents(logger) { scheduler(datasources, registrar).tick() }
+
+        // Fail closed at the loop's existing boundary: nothing written (the guard's transaction rolled back), one WARN,
+        // and the next tick retries the same idempotent repair on its own cadence.
+        events.map { it.level to it.formattedMessage.substringBefore(" message=") } shouldBe
+            listOf(Level.WARN to "event=lake.freshness_tick_failed step=regrant error=DatapipelinesException sql_state=55P03")
+    }
+
     /** What Spring raises for a Postgres statement cancelled at its `queryTimeout`. */
     private fun cancelled() = QueryTimeoutException("statement cancelled", SQLException("canceling statement", "57014"))
 
@@ -108,4 +124,8 @@ class ManagedLakeFreshnessSchedulerTest {
             mockk { every { refreshManagedGenerations(catalog) } returns retired },
             mockk { every { regrant(grants) } returns Unit },
         )
+
+    private companion object {
+        const val LOCK_WAIT_SECONDS = 5
+    }
 }

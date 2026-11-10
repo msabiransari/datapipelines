@@ -207,8 +207,15 @@ class ScheduledJobsStatementBoundsTest {
             }
 
         PoolReaperSchedulingConfiguration()
-            .managedLakeFreshnessScheduler(datasources, registrar, jdbc, providerOf(LAKE_PROPERTIES))
-            .tick()
+            // UNGUARDED: this pins the tick's OWN statements' bounds; the writer guard's lock statements are G0's
+            // (JdbcReleaseMutationGuard tests) and would only add rows to the count.
+            .managedLakeFreshnessScheduler(
+                datasources,
+                registrar,
+                jdbc,
+                providerOf(LAKE_PROPERTIES),
+                co.datapipelines.datasources.DatasourceWriteGuarding.UNGUARDED,
+            ).tick()
 
         recording.timeoutOf("SELECT t.namespace, t.name") shouldBe FRESHNESS_BOUND
         recording.timeoutOf("INSERT INTO datasource_workspaces") shouldBe FRESHNESS_BOUND
