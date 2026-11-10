@@ -40,7 +40,9 @@ class TemplatesPurgeDraftToolTest {
             pipelines,
             visualizationPins,
         )
-    private val tool = TemplatesPurgeDraftTool(templates, usage, AuthoringGuard(true), McpFixtures.EVERYTHING_LENS)
+    // #841: the purge runs on the draft service's guarded transaction; DIRECT + NONE here (no transaction, no lock).
+    private val drafts = co.datapipelines.templates.TemplateDraftService(templates, AuthoringGuard(true), mockk(relaxed = true))
+    private val tool = TemplatesPurgeDraftTool(templates, usage, AuthoringGuard(true), McpFixtures.EVERYTHING_LENS, drafts)
     private val ctx = McpFixtures.ctx()
 
     /** The promoter's lens over parameter sets (178) — admits only the names given. */
@@ -183,6 +185,7 @@ class TemplatesPurgeDraftToolTest {
                 usage,
                 AuthoringGuard(true),
                 narrowedSetLens("acme/other/nowhere"),
+                drafts,
             )
         every { templates.existsId(McpFixtures.WORKSPACE_ID, id) } returns true
         every { templates.listVersions(McpFixtures.WORKSPACE_ID, id) } returns listOf(draftSummary())
@@ -263,7 +266,7 @@ class TemplatesPurgeDraftToolTest {
 
     @Test
     fun `a visualization pin the caller's lens hides still refuses the purge - flagged, never named or counted (320)`() {
-        val narrowedTool = TemplatesPurgeDraftTool(templates, usage, AuthoringGuard(true), narrowedVisualizationLens("acme/other/nowhere"))
+        val narrowedTool = TemplatesPurgeDraftTool(templates, usage, AuthoringGuard(true), narrowedVisualizationLens("acme/other/nowhere"), drafts)
         stubSoleDraft()
         stubVisualizationPins(visualizationPin("acme/charts/secret"), visualizationPin("acme/charts/secret"))
 
@@ -282,7 +285,7 @@ class TemplatesPurgeDraftToolTest {
 
     @Test
     fun `a lens that admits only some visualizations names those and flags the rest`() {
-        val narrowedTool = TemplatesPurgeDraftTool(templates, usage, AuthoringGuard(true), narrowedVisualizationLens("acme/charts/shown"))
+        val narrowedTool = TemplatesPurgeDraftTool(templates, usage, AuthoringGuard(true), narrowedVisualizationLens("acme/charts/shown"), drafts)
         stubSoleDraft()
         stubVisualizationPins(visualizationPin("acme/charts/shown"), visualizationPin("acme/charts/secret"))
 

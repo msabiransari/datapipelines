@@ -6,6 +6,7 @@ import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.SearchNeedle
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.pipeline.WriteSurface
+import co.datapipelines.pipeline.release.RaceSavepoint
 import co.datapipelines.typesystem.Dialect
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
@@ -603,7 +604,8 @@ class TemplateRepository(
         block: () -> T,
     ): T =
         try {
-            block()
+            // #841 (G0): inside the writer guard's transaction the losing statement rolls back to a savepoint only.
+            RaceSavepoint.attempt(jdbc.jdbcTemplate, block)
         } catch (e: org.springframework.dao.DuplicateKeyException) {
             if (e.mostSpecificCause.message?.contains(NAME_CONSTRAINT) != true) throw e
             throw co.datapipelines.typesystem.DatapipelinesException(
@@ -625,6 +627,9 @@ class TemplateRepository(
      * order. Measured by the forced race in `TemplateRepositoryIntegrationTest`; the index-only
      * mapping answered it with a raw `DuplicateKeyException`. `PipelineRepository` and
      * `ParameterSetRepository` map the same pair.
+     *
+     * Inside the writer guard's transaction (#841 G0, the #517 precedent) the statement runs under a savepoint, so the
+     * winner read below still answers instead of failing on an aborted transaction.
      */
     private fun <T> mappingDraftRace(
         workspaceId: UUID,
@@ -632,7 +637,7 @@ class TemplateRepository(
         block: () -> T,
     ): T =
         try {
-            block()
+            RaceSavepoint.attempt(jdbc.jdbcTemplate, block)
         } catch (e: org.springframework.dao.DuplicateKeyException) {
             val violated = e.mostSpecificCause.message.orEmpty()
             if (DRAFT_INDEX !in violated && DRAFT_PK !in violated) throw e

@@ -145,7 +145,9 @@ class DomainConfiguration {
         datasources: DatasourceRegistry,
         rules: co.datapipelines.web.datasources.DatasourceWorkspaceRules,
         grants: co.datapipelines.datasources.DatasourceGrantRepository,
-    ): DatasourceCreateService = DatasourceCreateService(datasources, rules::resolveCreateBinding, grants)
+        // #841 (G0) — the registration and its grant commit together under the datasource writer guard.
+        writes: DatasourceWriteGuarding,
+    ): DatasourceCreateService = DatasourceCreateService(datasources, rules::resolveCreateBinding, grants, writes)
 
     /**
      * The ONE gated datasource-update path behind `PUT /api/v1/datasources/{name}` and the

@@ -26,7 +26,20 @@ class TemplateLifecycleConfiguration {
         authoring: AuthoringGuard,
         // 7e — the citation rows the write lands `implements` in (inherit or replace).
         citations: co.datapipelines.templates.TemplateImplementsRepository,
-    ): TemplateDraftService = TemplateDraftService(templates, authoring, citations)
+        // #841 (G0, #744) — the reference re-check, the metadata transaction and the workspace writer guard every
+        // create and draft write (and the MCP sole-draft purge) acquires first.
+        validator: TemplateValidator,
+        transactionManager: org.springframework.transaction.PlatformTransactionManager,
+        guard: co.datapipelines.pipeline.release.ReleaseMutationGuard,
+    ): TemplateDraftService =
+        TemplateDraftService(
+            templates,
+            authoring,
+            citations,
+            validator = validator,
+            transactions = org.springframework.transaction.support.TransactionTemplate(transactionManager),
+            guard = guard,
+        )
 
     @Bean
     fun parameterSetTemplatePins(jdbc: NamedParameterJdbcTemplate): co.datapipelines.parameters.ParameterSetTemplatePins =

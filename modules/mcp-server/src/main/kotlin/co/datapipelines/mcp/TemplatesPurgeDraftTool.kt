@@ -6,6 +6,7 @@ import co.datapipelines.auth.Permission
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.templates.TemplateDraftService
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.typesystem.DatapipelinesException
 import io.modelcontextprotocol.spec.McpSchema
@@ -31,6 +32,11 @@ import io.modelcontextprotocol.spec.McpSchema
  * The purge itself is [TemplateRepository.purgeDraft] with the draft's current `body_hash` as
  * the §4.2 precondition: a concurrent edit between the guard reads and the delete is a
  * `template.version.conflict`, never a silent delete of someone else's save.
+ *
+ * #841 (G0, #744): the existence, lifecycle, creator and pinner checks and the delete run in ONE metadata transaction
+ * that acquires the workspace writer guard first ([TemplateDraftService.guarded], the template writers' shared seam), so
+ * a pin committed by a concurrent writer is either seen by the scans (`template.in_use`) or waits for the purge to
+ * commit — it can never land between the scan and the delete.
  */
 class TemplatesPurgeDraftTool(
     private val templates: TemplateRepository,
@@ -41,6 +47,8 @@ class TemplatesPurgeDraftTool(
      * guard's rule); the lens decides only which pinned names the refusal may ECHO.
      */
     private val lens: PromoterLens,
+    /** #841 — the template writers' guarded transaction ([TemplateDraftService.guarded]). */
+    private val drafts: TemplateDraftService,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -171,6 +179,15 @@ class TemplatesPurgeDraftTool(
         authoring.requireTemplateAuthoring()
         val workspaceId = ctx.principal.requireWorkspace().id
         val id = args.requiredString("id")
+        return drafts.guarded(workspaceId) { purgeGuarded(workspaceId, id, ctx) }
+    }
+
+    /** [call]'s checks and delete, under the workspace writer guard. */
+    private fun purgeGuarded(
+        workspaceId: java.util.UUID,
+        id: String,
+        ctx: McpToolContext,
+    ): Any {
         if (!templates.existsId(workspaceId, id)) throw McpNotFound.template(id)
 
         val versions = templates.listVersions(workspaceId, id)

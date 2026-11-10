@@ -283,6 +283,11 @@ class ScheduledJobsSchedulerTest {
             registerBean(DatasourceRegistry::class.java, Supplier { datasources })
             // #818 — the freshness tick's regrant half; the lake is not under test here.
             registerBean(ManagedLakeDatasourceRegistrar::class.java, Supplier { mockk<ManagedLakeDatasourceRegistrar>(relaxed = true) })
+            // #841 — the regrant's writer guarding (DomainConfiguration's bean in production); no lock in this slice.
+            registerBean(
+                co.datapipelines.datasources.DatasourceWriteGuarding::class.java,
+                Supplier { co.datapipelines.datasources.DatasourceWriteGuarding.UNGUARDED },
+            )
             environment.propertySources.addFirst(MapPropertySource("freshness", mapOf(FRESHNESS_TICK_KEY to "1")))
             registerBean(MeterRegistry::class.java, Supplier { SimpleMeterRegistry() })
             registerBean(ExecutionEventRepository::class.java, Supplier { events })

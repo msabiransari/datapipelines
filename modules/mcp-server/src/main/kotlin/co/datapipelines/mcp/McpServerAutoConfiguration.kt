@@ -392,7 +392,8 @@ class McpServerAutoConfiguration {
             // route calls, a plain parameter by the 068/074 pattern.
             TemplatesEvaluateTool(templateEvaluateService),
             // 107 — the bounded purge: sole-DRAFT, author-owned, unpinned only.
-            TemplatesPurgeDraftTool(templates, usage, authoring, lens),
+            // #841 — the purge runs on the draft service's guarded transaction (the shared template writer seam).
+            TemplatesPurgeDraftTool(templates, usage, authoring, lens, templateDrafts),
         )
 
     /** The two pipeline read tools, extracted at 194d when the list passed detekt's length. */
