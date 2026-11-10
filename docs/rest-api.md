@@ -2172,7 +2172,7 @@ The whole batch rolls back on any of the above. The sender's own refusals — `p
 
 ## 19. Published Endpoints
 
-A released pipeline served as a **`GET` API** at `/api/<category>/<version>/<path…>`, whose
+One exact version of a read-only pipeline served as a **`GET` API** at `/api/<category>/<version>/<path…>`, whose
 response is the `data_ready` payload — the first page plus the cursor — with no event handling on
 the client (this section is the contract). Ruling R-EP5: the **category** is the engineer's
 namespace — a business domain, a team, a product line — and the product's own API is simply its
@@ -2214,8 +2214,11 @@ nothing was published or removed — retry).
 
 ### 19.2 What may be published
 
-The pipeline must exist in the endpoint's workspace and have a **released** version, and it must
-be **side-effect-free**: every node of the current released version is `DQL` with `output.target`
+The API pins **one exact pipeline version** (`pipeline_version`, #786; dependency-graph record §24).
+That version must exist in the endpoint's workspace — a missing or DISCARDED one is
+`400 endpoint.pipeline_version.not_found` — and be eligible under the deployment's posture: RELEASED always, a
+DRAFT only where authoring is enabled (`409 endpoint.pipeline_version.not_eligible`). It must
+be **side-effect-free**: every node of the pinned version is `DQL` with `output.target`
 in {`tempdb`, `caller`}, a `DML`/`DDL` node whose `source` is `tempdb`, or a `PIPELINE` node whose
 pinned child satisfies the same rule transitively. `tempdb` is the execution's own in-memory H2,
 created for the run and discarded with it — a statement against it cannot outlive the request, so
@@ -2225,9 +2228,10 @@ read's type — refuses publication with `409 endpoint.pipeline_not_readonly` na
 the datasource.
 
 That rule is what makes `GET` safe here, and it is not a formality: `GET` is retried on timeout,
-preloaded by browsers and followed by crawlers. It is **re-checked on every serve**, because an
-endpoint pins a pipeline and serves its latest released version — a later release can put a write
-under a live URL.
+preloaded by browsers and followed by crawlers. It is checked when the API is created and at every draft save,
+and **re-checked on every serve** of the exact pipeline version the API's current version pins. The pin never
+moves when the pipeline's current version moves: a later pipeline release reaches the URL only through a new API
+version that pins it, released or switched to explicitly.
 
 Every path variable must name a declared parameter of that version
 (`400 endpoint.path_variable_unknown`); the pipeline may declare more, and they come from the
@@ -2242,7 +2246,7 @@ and a session is `401`. Authorisation is the key's hierarchical bindings
 `api_caller`) serves what is bound to it, the MCP key is refused here by kind, and so **a published
 path with no binding on any ancestor serves no one until a key is bound to it** (#215 B3).
 
-The accepted parameters are the released version's declared ones: **path variables** bind by
+The accepted parameters are the pinned pipeline version's declared ones: **path variables** bind by
 name, and the **query string** supplies the rest. Validation is strict and **reports every defect
 at once** — one `400 endpoint.request.invalid` whose `details.errors[]` carries
 `{parameter, code, message}` per problem, because a client fixes a request once:
@@ -2307,7 +2311,45 @@ answers a **promoter** through the lens (178, [Auth §11A.1](auth.md#11a1-the-40
 listed iff its pipeline is visible to that principal, so a hidden pipeline never leaks through
 the endpoint that publishes it.
 
-Both bodies (publish, and the binding in `POST /endpoints/bindings`) are read through the strict request mapper (#333): a number or boolean where a string is declared (`path`, `pipeline`, `description`, `path_prefix`, `api_key_name`, `api_key_id`) or a string or float for `timeout_seconds` is `400 pipeline.execution.invalid_parameter_type` with `details.reason: "wrong_type"` and `details.path`; an unknown key is `reason: "unknown_key"`; a missing required key is `reason: "missing"`. Before #333 a missing `path` answered `endpoint.path_invalid` with `reason: malformed_json`.
+**Create (#786).** `POST /api/v1/endpoints` takes `path`, `pipeline`, **`pipeline_version`** (REQUIRED, an integer of
+at least 1 — the exact pin, an authored input like a pipeline node's `template_version`), `timeout_seconds` and
+`description`, and answers `201` with the entity. It writes the entity and its **v1 DRAFT** in one transaction —
+no path leaves an entity without a version — and that draft is the API's current version: on an authoring-enabled
+deployment it serves under the normal runtime checks (the entity is enabled, the caller's key is bound, the pinned
+pipeline version is eligible). Creation is an authoring operation: a deployment with authoring disabled refuses it
+with `409 endpoint.authoring_disabled`, and there is no release to perform there. A promotion receiver creates an
+absent API through its own receiver-only import (§18), never through this route.
+
+**Versions (#786).** An API is versioned like a pipeline (record §24): each version is an immutable body — `pipeline`,
+`pipeline_version`, `timeout_seconds`, `description` — with a `status` (DRAFT, RELEASED, DISCARDED) and a
+`body_hash`; at most one DRAFT exists, and the entity's current pointer names the version that serves. The
+resources are addressed by the entity id (a path contains `/`):
+
+| Route | Permission | What it does |
+|---|---|---|
+| `GET /api/v1/endpoints/{id}/versions` | `endpoint.read` | Every version, newest first: `version`, `status`, `pipeline`, `pipeline_version`, `timeout_seconds`, `description`, `body_hash`, `is_current`, `eligible` (under the caller's posture), `created_at`, `released_at`. Never bindings or key data — those are the entity's |
+| `GET /api/v1/endpoints/{id}/versions/{version}` | `endpoint.read` | One version, the same fields; `404 endpoint.version.not_found` for an unknown number or an API the caller cannot see — one answer for both |
+| `PUT /api/v1/endpoints/{id}/draft` | `endpoint.publish` | Save the working draft — a repin, or new serve settings. `If-Match` is the body hash the edit is based on (the draft, or the current version when there is none; `409 endpoint.version.conflict` otherwise). The pin is checked as at create. An `mcp` key may call it |
+
+The lifecycle verbs are **session-only** (a key is `403 auth.session.required`), like a pipeline's (§5.10–§5.14),
+and every one of them — like create and the draft save — refuses on an authoring-disabled deployment regardless
+of role:
+
+| Route | Permission | What it does |
+|---|---|---|
+| `POST /api/v1/endpoints/{id}/release` | `endpoint.release` | Release the working draft through the shared release planner (`If-Match` = the draft's hash; an optional plan body carries `tree_hash`, `include_dependencies`, `check_overrides`). A DRAFT pipeline version below it is `409 endpoint.release.dependency_not_released` unless the plan releases it; the release moves the current pointer to the released version |
+| `POST /api/v1/endpoints/{id}/draft/discard` | `endpoint.version.manage` | Purge the working draft (`If-Match`; there is no discarded-draft status); the sole version takes the entity, `204` |
+| `POST /api/v1/endpoints/{id}/versions/{version}/discard` | `endpoint.version.manage` | Discard a RELEASED version (`409 endpoint.version.not_released` otherwise); answers `version`, `current_version_before`, `current_version_after` — the pointer recomputes by the pipeline rule |
+| `POST /api/v1/endpoints/{id}/versions/{version}/restore` | `endpoint.version.manage` | Restore a DISCARDED version to RELEASED after rechecking its pin transitively: a missing or DISCARDED pinned version is `400 endpoint.pipeline_version.not_found`, a DRAFT one is `409 endpoint.release.dependency_not_released` (`reason: not_released`); nothing is written on a refusal |
+| `DELETE /api/v1/endpoints/{id}/versions/{version}` | `endpoint.version.manage` | Purge a DRAFT version (`409 endpoint.version.not_draft` otherwise); the sole version takes the entity, `204` |
+| `POST /api/v1/endpoints/{id}/current` | `endpoint.version.manage` | Switch the API's current version, body `{"version": n}`: the target must be eligible under the posture (`409 endpoint.version.not_eligible`) and its pin is rechecked. This explicit switch is how an older pin serves again |
+
+An API version pins a pipeline version, so the pipeline's own discard and purge refuse while a live (DRAFT or
+RELEASED) API version pins it — `409 pipeline.version.pinned` with `details.referencing_api_versions` (§5.11, §5.12, §5.14).
+Audit kinds: `endpoint.draft_saved`, `endpoint.released`, `endpoint.version_discarded`, `endpoint.version_restored`,
+`endpoint.version_purged`, `endpoint.current_switched` ([Enums](enums.md)).
+
+The create, draft and binding bodies are read through the strict request mapper (#333): a number or boolean where a string is declared (`path`, `pipeline`, `description`, `path_prefix`, `api_key_name`, `api_key_id`) or a string or float for `timeout_seconds` or `pipeline_version` is `400 pipeline.execution.invalid_parameter_type` with `details.reason: "wrong_type"` and `details.path`; an unknown key is `reason: "unknown_key"`; a missing required key is `reason: "missing"`. Before #333 a missing `path` answered `endpoint.path_invalid` with `reason: malformed_json`.
 
 **Legacy rows (#274).** A stored row whose `path_pattern` predates the current grammar — fewer
 than three segments, saved before R-EP5 — is **retired, never fatal**: it cannot boot-refuse the
@@ -2353,7 +2395,7 @@ The same operations exist as MCP tools ([MCP Server §6.2](mcp-server.md#62-tool
 | 406 | An `Accept` this surface cannot satisfy |
 | 429 | Rate limit or concurrency limit, with `Retry-After` |
 | 500 / 502 | Pipeline failure, mapped by [Pipeline Contract §13](pipeline-contract.md#13-error-code-catalog) (datasource connection failures are `502`) |
-| 503 | The pipeline has no released version, or is no longer side-effect-free |
+| 503 | The API's current version, or the exact pipeline version it pins, is not servable under this deployment's posture, or is no longer side-effect-free. The body names no version |
 
 ### 19.7 Not in v1
 
