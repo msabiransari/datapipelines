@@ -1,5 +1,9 @@
 package co.datapipelines.web.endpoints
 
+import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.application.endpoints.EndpointVersionBody
+import co.datapipelines.application.endpoints.PublishedEndpointVersion
+import co.datapipelines.application.endpoints.PublishedEndpointVersionRepository
 import co.datapipelines.application.endpoints.EndpointAuthorizer
 import co.datapipelines.application.endpoints.EndpointKeyBinding
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
@@ -93,9 +97,6 @@ class PublishedEndpointServeAuditOutcomeTest {
             id = UUID.randomUUID(),
             workspaceId = workspaceId,
             pathPattern = "/x/v1/p",
-            pipelineId = UUID.randomUUID(),
-            timeoutSeconds = 1,
-            description = "",
             isEnabled = true,
             createdBy = UUID.randomUUID(),
             createdAt = Instant.now(),
@@ -108,6 +109,9 @@ class PublishedEndpointServeAuditOutcomeTest {
         }
 
     private val pipelines = mockk<PipelineService>()
+    private val pipelineRepository = mockk<PipelineRepository>()
+    private val versions = mockk<PublishedEndpointVersionRepository>()
+    private val pipelineId = UUID.randomUUID()
     private val principal = endpointUserKey()
     private val request =
         EndpointRequestValidator.Request(
@@ -119,8 +123,21 @@ class PublishedEndpointServeAuditOutcomeTest {
         )
 
     private fun service(): PublishedEndpointServeService {
-        every { pipelines.findRecord(workspaceId, any(), endpoint.pipelineId) } returns record()
-        every { pipelines.findCurrentVersion(workspaceId, any(), endpoint.pipelineId) } returns versionDetail()
+        // #786: the API's current version pins x/p@3 exactly, and carries the serve timeout (1 s).
+        every { versions.findCurrent(endpoint.id) } returns
+            PublishedEndpointVersion(
+                endpointId = endpoint.id,
+                version = 1,
+                status = PipelineVersionStatus.RELEASED,
+                body = EndpointVersionBody("x/p", 3, 1, ""),
+                bodyHash = "api-hash",
+                createdAt = Instant.EPOCH,
+                createdBy = principal.userId,
+                releasedAt = Instant.EPOCH,
+                releasedBy = principal.userId,
+            )
+        every { pipelineRepository.findByName(workspaceId, "x/p") } returns record()
+        every { pipelineRepository.findVersionDetail(workspaceId, pipelineId, 3) } returns versionDetail()
         every { pipelines.findExecutable(workspaceId, any(), any(), 3) } returns executable()
         val bindings = mockk<EndpointKeyBindingRepository>()
         // #215 B3: an unbound path serves no one, so the key is bound at the endpoint's root node.
@@ -129,6 +146,8 @@ class PublishedEndpointServeAuditOutcomeTest {
         every { readOnlyRule.check(any(), any()) } returns ValidationResult(emptyList())
         return PublishedEndpointServeService(
             registry = registry,
+            versions = versions,
+            pipelineRepository = pipelineRepository,
             bindings = bindings,
             authorizer = EndpointAuthorizer(),
             readOnlyRule = readOnlyRule,
@@ -241,7 +260,7 @@ class PublishedEndpointServeAuditOutcomeTest {
 
     private fun record() =
         PipelineRecord(
-            id = endpoint.pipelineId,
+            id = pipelineId,
             name = "x/p",
             displayName = "p",
             description = "",
@@ -253,7 +272,7 @@ class PublishedEndpointServeAuditOutcomeTest {
 
     private fun versionDetail() =
         PipelineVersionDetail(
-            pipelineId = endpoint.pipelineId,
+            pipelineId = pipelineId,
             version = 3,
             status = PipelineVersionStatus.RELEASED,
             bodyHash = "hash",

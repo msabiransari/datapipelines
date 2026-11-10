@@ -1,5 +1,9 @@
 package co.datapipelines.web.pipelines
 
+import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.application.endpoints.EndpointVersionBody
+import co.datapipelines.application.endpoints.CurrentVersion
+import co.datapipelines.application.endpoints.EndpointPromotionImport
 import co.datapipelines.application.endpoints.EndpointKeyBinding
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointKeyService
@@ -50,6 +54,9 @@ class PromotionEndpointKeysTest {
     private val auditLogger = mockk<AuditLogger>(relaxed = true)
     private val publishing = mockk<EndpointPublishService>(relaxed = true)
     private val endpointKeys = mockk<EndpointKeyService>(relaxed = true)
+
+    /** #786 F.2 — the receiver-only import every promoted entry goes through (#879 owns promotion's richer shape). */
+    private val importer = mockk<EndpointPromotionImport>(relaxed = true)
     private val apiKeys = mockk<ApiKeyRepository>()
     private val endpoints = mockk<PublishedEndpointRepository>()
 
@@ -59,7 +66,7 @@ class PromotionEndpointKeysTest {
     private val bindings = mockk<EndpointKeyBindingRepository>()
     private val pipelines = mockk<PipelineRepository>()
 
-    private val promotion = EndpointPromotion(publishing, endpointKeys, endpoints, bindings, apiKeys, pipelines)
+    private val promotion = EndpointPromotion(publishing, importer, endpointKeys, endpoints, bindings, apiKeys, pipelines)
 
     private val service =
         PromotionReceiveService(
@@ -92,8 +99,7 @@ class PromotionEndpointKeysTest {
         val pipelineId = UUID.randomUUID()
         val record = record("lending_home", pipelineId)
         every { pipelines.findByName(WORKSPACE_ID, "lending_home") } returns record
-        every { pipelines.findById(WORKSPACE_ID, pipelineId) } returns record
-        every { endpoints.findByWorkspace(WORKSPACE_ID) } returns listOf(published("/lending/v1/home", pipelineId))
+        every { endpoints.findByWorkspace(WORKSPACE_ID) } returns listOf(published("/lending/v1/home", "lending_home"))
         every { endpoints.findLegacy(WORKSPACE_ID) } returns emptyList()
         every { bindings.findByWorkspace(WORKSPACE_ID) } returns
             listOf(binding("/lending/v1/home", "dpk_AAAAAAAAAAAA", WORKSPACE_ID))
@@ -149,7 +155,7 @@ class PromotionEndpointKeysTest {
 
         shouldThrow<DatapipelinesException> { service.apply(batch("absent"), peer) }
 
-        verify(exactly = 0) { publishing.publish(any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { importer.importPromoted(any(), any(), any(), any(), any(), any()) }
         verify(exactly = 0) { endpointKeys.bind(any(), any(), any()) }
     }
 
@@ -161,7 +167,9 @@ class PromotionEndpointKeysTest {
 
         service.apply(batch("ci-lending"), peer)
 
-        verify(exactly = 1) { publishing.publish(any(), "/lending/home", "lending_home", 30, "") }
+        // #786 changed assertion (#879 owns the promotion-shape follow-up): the receiver imports through the dedicated
+        // receiver-only port, as the System actor, rather than through the native create path.
+        verify(exactly = 1) { importer.importPromoted(WORKSPACE_ID, ACTOR, "/lending/home", "lending_home", 30, "") }
         verify(exactly = 1) { endpointKeys.bind(any(), "dpk_AAAAAAAAAAAA", "/lending/home") }
     }
 
@@ -257,18 +265,16 @@ class PromotionEndpointKeysTest {
 
     private fun published(
         pathPattern: String,
-        pipelineId: UUID,
+        pipelineName: String,
     ) = PublishedEndpoint.of(
         id = UUID.randomUUID(),
         workspaceId = WORKSPACE_ID,
         pathPattern = pathPattern,
-        pipelineId = pipelineId,
-        timeoutSeconds = 30,
-        description = "",
         isEnabled = true,
         createdBy = ACTOR,
         createdAt = Instant.EPOCH,
         updatedAt = Instant.EPOCH,
+        current = CurrentVersion(1, PipelineVersionStatus.RELEASED, EndpointVersionBody(pipelineName, 1, 30, "")),
     )
 
     private fun binding(

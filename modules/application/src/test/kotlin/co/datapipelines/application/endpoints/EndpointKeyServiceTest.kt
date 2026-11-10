@@ -1,5 +1,6 @@
 package co.datapipelines.application.endpoints
 
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.auth.ApiKey
 import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.ApiKeyService
@@ -275,13 +276,11 @@ class EndpointKeyServiceTest {
             id = UUID.randomUUID(),
             workspaceId = WORKSPACE,
             pathPattern = pattern,
-            pipelineId = UUID.randomUUID(),
-            timeoutSeconds = 60,
-            description = "",
             isEnabled = true,
             createdBy = ACTOR,
             createdAt = Instant.EPOCH,
             updatedAt = Instant.EPOCH,
+            current = CurrentVersion(1, PipelineVersionStatus.RELEASED, EndpointVersionBody("test/pipeline", 1, 60, "")),
         )
 
     private fun stubIssue() {

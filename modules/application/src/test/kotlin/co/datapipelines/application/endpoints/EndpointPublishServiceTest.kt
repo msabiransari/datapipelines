@@ -6,6 +6,7 @@ import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.Node
 import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.pipeline.NodeType
@@ -46,24 +47,44 @@ import java.util.UUID
  */
 class EndpointPublishServiceTest {
     private val endpoints = mockk<PublishedEndpointRepository>()
+    private val versions = mockk<PublishedEndpointVersionRepository>(relaxed = true)
     private val pipelines = mockk<PipelineService>()
     private val pipelineRepository = mockk<PipelineRepository>()
     private val registry = mockk<EndpointRegistry>(relaxed = true)
     private val audit = mockk<AuditEventSink>(relaxed = true)
 
     private fun service(
-        readOnly: Boolean = true,
         lens: PromoterLens? = null,
-    ) = EndpointPublishService(
-        endpoints = endpoints,
-        pipelines = pipelines,
-        pipelineRepository = pipelineRepository,
-        readOnlyRule = ReadOnlyPipelineRule(PipelineResolver { _, _, _ -> null }, MAX_DEPTH),
-        registry = registry,
-        audit = audit,
-        timeouts = EndpointPublishService.TimeoutBounds(defaultSeconds = 30, minSeconds = 1, maxSeconds = 300),
-        lens = lens,
-    ).also { if (!readOnly) stubPipeline(writes = true) }
+        authoringEnabled: Boolean = true,
+    ) = AuthoringGuard(authoringEnabled).let { authoring ->
+        EndpointPublishService(
+            endpoints = endpoints,
+            versions = versions,
+            pins =
+                EndpointPinValidator(
+                    pipelineRepository = pipelineRepository,
+                    pipelines = pipelines,
+                    readOnlyRule = ReadOnlyPipelineRule(PipelineResolver { _, _, _ -> null }, MAX_DEPTH),
+                    authoring = authoring,
+                ),
+            registry = registry,
+            audit = audit,
+            timeouts = EndpointPublishService.TimeoutBounds(defaultSeconds = 30, minSeconds = 1, maxSeconds = 300),
+            authoring = authoring,
+            lens = lens,
+        )
+    }
+
+    /** The one creation call, pinned to version 1 of [pipeline] (#786: an exact pin, never "the latest released"). */
+    @Suppress("LongParameterList")
+    private fun EndpointPublishService.publish(
+        principal: AuthenticatedPrincipal,
+        path: String,
+        pipeline: String,
+        timeoutSeconds: Int?,
+        description: String,
+        pipelineVersion: Int = 1,
+    ) = create(principal, path, pipeline, pipelineVersion, timeoutSeconds, description)
 
     // ------------------------------------------------------------------ 178, the promoter lens
 
@@ -86,20 +107,18 @@ class EndpointPublishServiceTest {
     fun `listLegacy carries the workspace's legacy rows, and the same lens hides a hidden pipeline's row`() {
         // #274's listing half: without a lens every legacy row of the caller's workspace and no pipeline
         // read; under a narrowing lens the row of a hidden pipeline is absent, as a valid endpoint's would be.
-        val hiddenPipeline = UUID.fromString("00000000-0000-0000-0000-0000000000e6")
-
         fun legacy(
             path: String,
-            pipelineId: UUID,
+            pipelineName: String,
         ) = EndpointRow.Legacy(
             id = UUID.randomUUID(),
             workspaceId = WORKSPACE,
             pathPattern = path,
-            pipelineId = pipelineId,
+            pipelineName = pipelineName,
             reason = "a path needs at least 3 segments",
             enabled = false,
         )
-        every { endpoints.findLegacy(WORKSPACE) } returns listOf(legacy("/nyc/mine", PIPELINE_ID), legacy("/nyc/hidden", hiddenPipeline))
+        every { endpoints.findLegacy(WORKSPACE) } returns listOf(legacy("/nyc/mine", PIPELINE_NAME), legacy("/nyc/hidden", HIDDEN_PIPELINE_NAME))
 
         service().listLegacy(principal()).map { it.pathPattern } shouldBe listOf("/nyc/mine", "/nyc/hidden")
 
@@ -123,9 +142,17 @@ class EndpointPublishServiceTest {
 
     @Test
     fun `under a narrowing lens an endpoint is visible iff its pipeline is`() {
-        val hiddenPipeline = UUID.fromString("00000000-0000-0000-0000-0000000000e6")
+        // #786: visibility follows the pipeline the API's CURRENT version pins, by name.
         val visible = endpoint()
-        val hidden = endpoint().copy(id = UUID.randomUUID(), pathPattern = "/mine/v1/hidden", pipelineId = hiddenPipeline)
+        val hidden =
+            endpoint().let {
+                it.copy(
+                    id = UUID.randomUUID(),
+                    pathPattern = "/mine/v1/hidden",
+                    parsed = EndpointPath.parse("/mine/v1/hidden").getOrThrow(),
+                    current = it.current?.let { c -> c.copy(body = c.body.copy(pipelineName = HIDDEN_PIPELINE_NAME)) },
+                )
+            }
         every { endpoints.findByWorkspace(WORKSPACE) } returns listOf(visible, hidden)
         every { endpoints.findByPath("/mine/v1/x") } returns visible
         every { endpoints.findByPath("/mine/v1/hidden") } returns hidden
@@ -181,7 +208,9 @@ class EndpointPublishServiceTest {
     fun `one api prefix is normalised away, and the second one is the reserved category`() {
         stubPipeline()
         val stored = slot<PublishedEndpoint>()
-        every { endpoints.insert(capture(stored)) } answers { stored.captured }
+        val body = slot<EndpointVersionBody>()
+        every { endpoints.insert(capture(stored), any()) } answers { stored.captured }
+        every { versions.insert(any(), 1, PipelineVersionStatus.DRAFT, capture(body), ACTOR) } returns Unit
 
         // R-EP5: normalisation, not refusal — the stored form is always the part after /api.
         service().publish(principal(), "/api/nyc/v1/{borough}", PIPELINE_NAME, null, "")
@@ -221,21 +250,47 @@ class EndpointPublishServiceTest {
     }
 
     @Test
-    fun `a pipeline whose current version is a DRAFT is refused as not released`() {
-        // §5.1's rule met at publish: an endpoint serves the latest RELEASED version, so
-        // publishing over something that has never been released would create a URL that can
-        // only ever answer 503.
+    fun `a DRAFT pipeline version is an eligible pin where authoring is enabled - creation saves a DRAFT v1 (R3, R4)`() {
+        // #786 changed assertion: before, a DRAFT current version was `endpoint.pipeline_not_released`. Now the pin is
+        // EXACT and eligibility is `eligibleForPointer(status, posture)`: a DRAFT is eligible where authoring is enabled,
+        // and creation itself saves the API's version 1 as a DRAFT pointed at by `current_version`.
         stubPipeline(status = PipelineVersionStatus.DRAFT)
+        every { endpoints.insert(any(), any()) } answers { firstArg() }
 
-        shouldThrow<DatapipelinesException> { service().publish(principal(), "/a/v1/b", PIPELINE_NAME, null, "") }
-            .code shouldBe PipelineErrorCodes.Endpoint.PIPELINE_NOT_RELEASED
+        val created = service().publish(principal(), "/a/v1/b", PIPELINE_NAME, null, "")
+
+        assertAll(
+            { created.current?.status shouldBe PipelineVersionStatus.DRAFT },
+            { created.current?.body?.pipelineVersion shouldBe 1 },
+            { verify(exactly = 1) { versions.insert(created.id, 1, PipelineVersionStatus.DRAFT, any(), ACTOR) } },
+            { verify(exactly = 1) { versions.setCurrent(created.id, 1) } },
+        )
     }
 
     @Test
-    fun `a freshly created pipeline - never released, no pointer at all - is refused as not released`() {
-        // The D55 shape, which is now the state EVERY new pipeline starts in: `current_version` is
-        // null, so there is no current-version row to read at all. The publish path must refuse it
-        // by the same catalogued code, and the message must name the way forward.
+    fun `an authoring-disabled deployment refuses creation before any read - endpoint authoring_disabled`() {
+        // R4: creation is an authoring operation; a promotion receiver gets its APIs only through promotion.
+        val refused = shouldThrow<DatapipelinesException> { service(authoringEnabled = false).publish(principal(), "/a/v1/b", "any", null, "") }
+
+        assertAll(
+            { refused.code shouldBe PipelineErrorCodes.Endpoint.AUTHORING_DISABLED },
+            { verify(exactly = 0) { pipelineRepository.findByName(any(), any()) } },
+            { verify(exactly = 0) { endpoints.insert(any(), any()) } },
+        )
+    }
+
+    @Test
+    fun `a DISCARDED pinned version is refused as pipeline_version not_found`() {
+        stubPipeline(status = PipelineVersionStatus.DISCARDED)
+
+        shouldThrow<DatapipelinesException> { service().publish(principal(), "/a/v1/b", PIPELINE_NAME, null, "") }
+            .code shouldBe PipelineErrorCodes.Endpoint.PIPELINE_VERSION_NOT_FOUND
+    }
+
+    @Test
+    fun `a pin naming a version the pipeline does not have is refused as pipeline_version not_found`() {
+        // #786 changed assertion: before, a pipeline with no current version was `endpoint.pipeline_not_released`. The
+        // pin is now an exact number, so the refusal is about THAT number: version 7 does not exist.
         every { pipelineRepository.findByName(WORKSPACE, PIPELINE_NAME) } returns
             PipelineRecord(
                 id = PIPELINE_ID,
@@ -247,13 +302,15 @@ class EndpointPublishServiceTest {
                 createdAt = Instant.EPOCH,
                 updatedAt = Instant.EPOCH,
             )
-        every { pipelines.findCurrentVersion(WORKSPACE, any(), PIPELINE_ID) } returns null
+        every { pipelineRepository.findVersionDetail(WORKSPACE, PIPELINE_ID, 7) } returns null
 
-        val refused = shouldThrow<DatapipelinesException> { service().publish(principal(), "/a/v1/b", PIPELINE_NAME, null, "") }
+        val refused =
+            shouldThrow<DatapipelinesException> { service().publish(principal(), "/a/v1/b", PIPELINE_NAME, null, "", pipelineVersion = 7) }
 
         assertAll(
-            { refused.code shouldBe PipelineErrorCodes.Endpoint.PIPELINE_NOT_RELEASED },
-            { refused.message.shouldContain("Release it from the UI first") },
+            { refused.code shouldBe PipelineErrorCodes.Endpoint.PIPELINE_VERSION_NOT_FOUND },
+            { refused.details["pipeline_version"] shouldBe 7 },
+            { verify(exactly = 0) { endpoints.insert(any(), any()) } },
         )
     }
 
@@ -288,14 +345,16 @@ class EndpointPublishServiceTest {
         // comes from the query string instead.
         stubPipeline()
         val stored = slot<PublishedEndpoint>()
-        every { endpoints.insert(capture(stored)) } answers { stored.captured }
+        val body = slot<EndpointVersionBody>()
+        every { endpoints.insert(capture(stored), any()) } answers { stored.captured }
+        every { versions.insert(any(), 1, PipelineVersionStatus.DRAFT, capture(body), ACTOR) } returns Unit
 
         service().publish(principal(), "/nyc/v1/{borough}", PIPELINE_NAME, null, "revenue")
 
         assertAll(
             { stored.captured.pathPattern shouldBe "/nyc/v1/{borough}" },
             { stored.captured.pathVariables shouldBe listOf("borough") },
-            { stored.captured.description shouldBe "revenue" },
+            { body.captured.description shouldBe "revenue" },
         )
     }
 
@@ -303,28 +362,30 @@ class EndpointPublishServiceTest {
     fun `the timeout is clamped, and an omitted one takes the configured default`() {
         stubPipeline()
         val stored = slot<PublishedEndpoint>()
-        every { endpoints.insert(capture(stored)) } answers { stored.captured }
+        val body = slot<EndpointVersionBody>()
+        every { endpoints.insert(capture(stored), any()) } answers { stored.captured }
+        every { versions.insert(any(), 1, PipelineVersionStatus.DRAFT, capture(body), ACTOR) } returns Unit
 
         val timeouts =
             listOf(null to 30, 0 to 1, 5 to 5, 9_999 to 300).map { (requested, expected) ->
                 service().publish(principal(), "/nyc/v1/{borough}", PIPELINE_NAME, requested, "")
-                stored.captured.timeoutSeconds to expected
+                body.captured.timeoutSeconds to expected
             }
 
         assertAll(timeouts.map { (actual, expected) -> { actual shouldBe expected } })
     }
 
     @Test
-    fun `a successful publish invalidates the registry AFTER the write, and is audited`() {
+    fun `a successful create invalidates the registry AFTER the write, and is audited as a draft save`() {
         // Order matters: invalidating before the row is written would let a peer reload the
         // pre-write state and cache it again.
         stubPipeline()
-        every { endpoints.insert(any()) } answers { firstArg() }
+        every { endpoints.insert(any(), any()) } answers { firstArg() }
 
         service().publish(principal(), "/nyc/v1/{borough}", PIPELINE_NAME, null, "")
 
         verify(exactly = 1) { registry.invalidate() }
-        verify(exactly = 1) { audit.log("endpoint.published", any(), any(), any(), any(), any()) }
+        verify(exactly = 1) { audit.log("endpoint.draft_saved", any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -362,7 +423,7 @@ class EndpointPublishServiceTest {
                 id = UUID.nameUUIDFromBytes("/nyc/revenue-by-borough".toByteArray()),
                 workspaceId = WORKSPACE,
                 pathPattern = "/nyc/revenue-by-borough",
-                pipelineId = UUID.randomUUID(),
+                pipelineName = PIPELINE_NAME,
                 reason = "Path has 2 segment(s); an endpoint is at least 3 — /<category>/<version>/<path…> (R-EP5).",
                 enabled = false,
             )
@@ -391,7 +452,7 @@ class EndpointPublishServiceTest {
                 updatedAt = Instant.EPOCH,
             )
         every { pipelineRepository.findByName(WORKSPACE, PIPELINE_NAME) } returns record
-        every { pipelines.findCurrentVersion(WORKSPACE, any(), PIPELINE_ID) } returns
+        every { pipelineRepository.findVersionDetail(WORKSPACE, PIPELINE_ID, 1) } returns
             PipelineVersionDetail(
                 pipelineId = PIPELINE_ID,
                 version = 1,
@@ -446,13 +507,11 @@ class EndpointPublishServiceTest {
             id = UUID.randomUUID(),
             workspaceId = workspaceId,
             pathPattern = "/mine/v1/x",
-            pipelineId = PIPELINE_ID,
-            timeoutSeconds = 30,
-            description = "",
             isEnabled = true,
             createdBy = ACTOR,
             createdAt = Instant.EPOCH,
             updatedAt = Instant.EPOCH,
+            current = CurrentVersion(1, PipelineVersionStatus.RELEASED, EndpointVersionBody(PIPELINE_NAME, 1, 30, "")),
         )
 
     private fun principal() =
@@ -471,6 +530,7 @@ class EndpointPublishServiceTest {
         val ACTOR: UUID = UUID.fromString("00000000-0000-0000-0000-000000000001")
         val PIPELINE_ID: UUID = UUID.fromString("00000000-0000-0000-0000-0000000000e5")
         const val PIPELINE_NAME = "nyc/mobility/revenue_by_borough"
+        const val HIDDEN_PIPELINE_NAME = "nyc/mobility/hidden"
         const val MAX_DEPTH = 5
     }
 }

@@ -1,5 +1,8 @@
 package co.datapipelines.web.release
 
+import co.datapipelines.pipeline.AuthoringGuard
+import co.datapipelines.application.endpoints.EndpointPinValidator
+import co.datapipelines.application.endpoints.PublishedEndpointVersionRepository
 import co.datapipelines.application.endpoints.EndpointInvalidationPublisher
 import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.application.endpoints.EndpointRegistry
@@ -67,12 +70,18 @@ class EndpointInvalidationAfterCommitIntegrationTest {
     private val notifications = mutableListOf<Observation>()
     private val audit = mockk<AuditEventSink>(relaxed = true)
 
+    private val authoring = AuthoringGuard(enabled = true)
     private val service =
         EndpointPublishService(
             endpoints = PublishedEndpointRepository(NamedParameterJdbcTemplate(dataSource)),
-            pipelines = pipelines(),
-            pipelineRepository = pipelineRepository(),
-            readOnlyRule = ReadOnlyPipelineRule(PipelineResolver { _, _, _ -> null }, MAX_DEPTH),
+            versions = PublishedEndpointVersionRepository(NamedParameterJdbcTemplate(dataSource)),
+            pins =
+                EndpointPinValidator(
+                    pipelineRepository = pipelineRepository(),
+                    pipelines = pipelines(),
+                    readOnlyRule = ReadOnlyPipelineRule(PipelineResolver { _, _, _ -> null }, MAX_DEPTH),
+                    authoring = authoring,
+                ),
             registry =
                 EndpointRegistry(
                     PublishedEndpointRepository(NamedParameterJdbcTemplate(dataSource)),
@@ -80,6 +89,7 @@ class EndpointInvalidationAfterCommitIntegrationTest {
                 ),
             audit = audit,
             timeouts = EndpointPublishService.TimeoutBounds(defaultSeconds = 30, minSeconds = 1, maxSeconds = 300),
+            authoring = authoring,
             transactions = TransactionTemplate(transactionManager),
             writeGuard = JdbcReleaseMutationGuard(JdbcTemplate(dataSource), BOUND_SECONDS),
         )
@@ -104,19 +114,19 @@ class EndpointInvalidationAfterCommitIntegrationTest {
     @Test
     fun `a publish joined to an outer transaction notifies only after the outer commit - committed and unlocked by then`() {
         outer.executeWithoutResult {
-            service.publish(principal(), path, pipelineName, null, "")
+            service.create(principal(), path, pipelineName, 1, null, "")
             withClue("no notification while the owning (outer) transaction is still open") { notifications.shouldBeEmpty() }
         }
 
         notifications shouldContainExactly listOf(Observation(rows = 1, workspaceFree = true, registryFree = true))
-        verify(exactly = 1) { audit.log(event = "endpoint.published", userId = any(), keyId = any(), details = any()) }
+        verify(exactly = 1) { audit.log(event = "endpoint.draft_saved", userId = any(), keyId = any(), details = any()) }
     }
 
     @Test
     fun `a publish whose outer transaction rolls back notifies nobody - and nothing was published`() {
         shouldThrow<RolledBack> {
             outer.executeWithoutResult {
-                service.publish(principal(), path, pipelineName, null, "")
+                service.create(principal(), path, pipelineName, 1, null, "")
                 throw RolledBack()
             }
         }
@@ -127,7 +137,7 @@ class EndpointInvalidationAfterCommitIntegrationTest {
 
     @Test
     fun `an unpublish joined to an outer transaction notifies only after the outer commit - the row is gone and unlocked`() {
-        outer.executeWithoutResult { service.publish(principal(), path, pipelineName, null, "") }
+        outer.executeWithoutResult { service.create(principal(), path, pipelineName, 1, null, "") }
         notifications.clear()
 
         outer.executeWithoutResult {
@@ -141,7 +151,7 @@ class EndpointInvalidationAfterCommitIntegrationTest {
 
     @Test
     fun `an unpublish whose outer transaction rolls back notifies nobody - and the endpoint stays`() {
-        outer.executeWithoutResult { service.publish(principal(), path, pipelineName, null, "") }
+        outer.executeWithoutResult { service.create(principal(), path, pipelineName, 1, null, "") }
         notifications.clear()
 
         shouldThrow<RolledBack> {
@@ -157,7 +167,7 @@ class EndpointInvalidationAfterCommitIntegrationTest {
 
     @Test
     fun `with no outer transaction the service's own transaction owns the write - notified after its commit`() {
-        service.publish(principal(), path, pipelineName, null, "")
+        service.create(principal(), path, pipelineName, 1, null, "")
 
         notifications shouldContainExactly listOf(Observation(rows = 1, workspaceFree = true, registryFree = true))
     }
@@ -242,7 +252,15 @@ class EndpointInvalidationAfterCommitIntegrationTest {
     /** The pipeline reads are not under test here (their guard proofs are elsewhere): a released, read-only version. */
     private fun pipelines(): PipelineService =
         mockk<PipelineService>().also { pipelines ->
-            every { pipelines.findCurrentVersion(workspace, any(), pipelineId) } returns
+            every { pipelines.findExecutable(workspace, any(), any(), 1) } returns
+                PipelineService.ExecutablePipeline(record(), 1, "{}", body())
+        }
+
+    /** The pin's reads: the named pipeline and its exact version 1, RELEASED (#786). */
+    private fun pipelineRepository(): PipelineRepository =
+        mockk<PipelineRepository>().also {
+            every { it.findByName(workspace, pipelineName) } returns record()
+            every { it.findVersionDetail(workspace, pipelineId, 1) } returns
                 PipelineVersionDetail(
                     pipelineId = pipelineId,
                     version = 1,
@@ -255,12 +273,7 @@ class EndpointInvalidationAfterCommitIntegrationTest {
                     updatedBy = null,
                     updatedAt = Instant.EPOCH,
                 )
-            every { pipelines.findExecutable(workspace, any(), any(), 1) } returns
-                PipelineService.ExecutablePipeline(record(), 1, "{}", body())
         }
-
-    private fun pipelineRepository(): PipelineRepository =
-        mockk<PipelineRepository>().also { every { it.findByName(workspace, pipelineName) } returns record() }
 
     private fun body() =
         Pipeline(

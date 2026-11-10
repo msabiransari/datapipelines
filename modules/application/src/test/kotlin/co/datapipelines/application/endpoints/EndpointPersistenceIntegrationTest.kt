@@ -3,6 +3,7 @@ package co.datapipelines.application.endpoints
 import co.datapipelines.application.SharedPostgres
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.pipeline.PipelineVersionStatus
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
@@ -47,6 +48,7 @@ class EndpointPersistenceIntegrationTest {
     private lateinit var jdbc: NamedParameterJdbcTemplate
     private lateinit var transactions: TransactionTemplate
     private lateinit var endpoints: PublishedEndpointRepository
+    private lateinit var versions: PublishedEndpointVersionRepository
     private lateinit var bindings: EndpointKeyBindingRepository
     private lateinit var serveAudit: EndpointServeAudit
 
@@ -65,6 +67,7 @@ class EndpointPersistenceIntegrationTest {
         // production; this template is that supply here.
         transactions = TransactionTemplate(DataSourceTransactionManager(dataSource))
         endpoints = PublishedEndpointRepository(jdbc)
+        versions = PublishedEndpointVersionRepository(jdbc)
         bindings = EndpointKeyBindingRepository(jdbc)
         serveAudit = EndpointServeAudit(jdbc)
     }
@@ -119,7 +122,10 @@ class EndpointPersistenceIntegrationTest {
 
         val byPath = endpoints.findByPath("/lending/v1/{borough}/home")
         byPath.shouldNotBeNull()
-        byPath.pipelineId shouldBe pipelineId
+        // #786: the pin is the current VERSION's, by pipeline name and exact number — never the legacy column.
+        byPath.pipelineName shouldBe pipelineName()
+        byPath.current?.body shouldBe EndpointVersionBody(pipelineName(), 1, 60, "")
+        byPath.current?.status shouldBe PipelineVersionStatus.RELEASED
         byPath.isEnabled shouldBe true
         // The parse travels with the row, so the matcher and the screens share ONE parse.
         byPath.pathVariables shouldContainExactly listOf("borough")
@@ -237,14 +243,12 @@ class EndpointPersistenceIntegrationTest {
                     id = UUID.randomUUID(),
                     workspaceId = workspaceId,
                     pathPattern = "/nyc/v1/{borough}/revenue",
-                    pipelineId = pipelineId,
-                    timeoutSeconds = 60,
-                    description = "",
                     isEnabled = true,
                     createdBy = userId,
                     createdAt = Instant.EPOCH,
                     updatedAt = Instant.EPOCH,
                 ),
+                LegacyEndpointColumns(pipelineId, 60, ""),
             )
         }!!
 
@@ -382,24 +386,34 @@ class EndpointPersistenceIntegrationTest {
 
     // ------------------------------------------------------------------------- helpers
 
-    /** Publishes [path] inside a transaction, as the service layer does. */
+    /** The seeded pipeline's name — what an API version pins (#786). */
+    private fun pipelineName() = "p_${pipelineId.toString().replace("-", "")}"
+
+    /**
+     * Publishes [path] inside a transaction, as the service layer does: the entity, then its version 1 RELEASED pinned to
+     * the seeded pipeline at version 1, pointed at by `current_version` (#786: no creation path leaves an entity versionless).
+     */
     private fun publish(path: String): PublishedEndpoint =
         transactions.execute {
-            endpoints.insert(
+            insertWithVersion(path)
+        }!!.let { requireNotNull(endpoints.findById(it.id)) { "the endpoint just published is not readable" } }
+
+    private fun insertWithVersion(path: String): PublishedEndpoint =
+        endpoints.insert(
                 PublishedEndpoint.of(
                     id = UUID.randomUUID(),
                     workspaceId = workspaceId,
                     pathPattern = path,
-                    pipelineId = pipelineId,
-                    timeoutSeconds = 60,
-                    description = "",
                     isEnabled = true,
                     createdBy = userId,
                     createdAt = Instant.EPOCH,
                     updatedAt = Instant.EPOCH,
                 ),
-            )
-        }!!
+                LegacyEndpointColumns(pipelineId, 60, ""),
+            ).also {
+                versions.insert(it.id, 1, PipelineVersionStatus.RELEASED, EndpointVersionBody(pipelineName(), 1, 60, ""), userId)
+                versions.setCurrent(it.id, 1)
+            }
 
     /**
      * A row exactly as a pre-R-EP5 boot left it — raw SQL, bypassing [PublishedEndpoint.of],

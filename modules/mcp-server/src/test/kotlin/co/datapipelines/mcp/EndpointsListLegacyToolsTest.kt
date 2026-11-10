@@ -1,5 +1,8 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.application.endpoints.EndpointVersionBody
+import co.datapipelines.application.endpoints.CurrentVersion
 import co.datapipelines.application.endpoints.EndpointPath
 import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.application.endpoints.EndpointRow
@@ -82,13 +85,11 @@ class EndpointsListLegacyToolsTest {
             id = UUID.nameUUIDFromBytes("/nyc/v1/revenue/{borough}".toByteArray()),
             workspaceId = WORKSPACE,
             pathPattern = "/nyc/v1/revenue/{borough}",
-            pipelineId = UUID.randomUUID(),
-            timeoutSeconds = 30,
-            description = "",
             isEnabled = true,
             createdBy = UUID.randomUUID(),
             createdAt = Instant.EPOCH,
             updatedAt = Instant.EPOCH,
+            current = CurrentVersion(1, PipelineVersionStatus.RELEASED, EndpointVersionBody("test/pipeline", 1, 30, "")),
         )
 
     private fun legacyRow(path: String = "/nyc/revenue-by-borough"): EndpointRow.Legacy =
@@ -96,7 +97,7 @@ class EndpointsListLegacyToolsTest {
             id = UUID.nameUUIDFromBytes(path.toByteArray()),
             workspaceId = WORKSPACE,
             pathPattern = path,
-            pipelineId = UUID.randomUUID(),
+            pipelineName = "test/pipeline",
             reason = REASON,
             enabled = false,
         )

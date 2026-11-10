@@ -345,7 +345,13 @@ internal class RecordingAuthorization(
 ) : ReleaseAuthorization {
     override fun principal(): AuthenticatedPrincipal = principal
 
-    override fun requireRelease(family: ReleaseFamily) {
+    override fun requireRelease(family: ReleaseFamily) = requireRelease(principal, family)
+
+    /** #786 — the explicit-principal recheck (a boot-time root release); logged under the same name. */
+    override fun requireRelease(
+        principal: AuthenticatedPrincipal,
+        family: ReleaseFamily,
+    ) {
         log += "auth:${family.wire}"
         if (family in refused) throw DatapipelinesException(code = "auth.role_required", message = "refused ${family.wire}")
     }

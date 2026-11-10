@@ -279,7 +279,7 @@ class ApiConsoleRenderTest {
                     id = java.util.UUID.randomUUID(),
                     workspaceId = java.util.UUID.randomUUID(),
                     pathPattern = long,
-                    pipelineId = java.util.UUID.randomUUID(),
+                    pipelineName = "test/pipeline",
                     reason = "Path is ${long.length} characters; the limit is 200 (§4.1).",
                     enabled = true,
                 ),
