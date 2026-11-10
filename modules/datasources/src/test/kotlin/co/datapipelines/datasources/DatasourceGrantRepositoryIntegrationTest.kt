@@ -1,13 +1,27 @@
 package co.datapipelines.datasources
 
+import co.datapipelines.typesystem.guard.MetadataWriterGuard
+import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.longs.shouldBeInRange
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import org.springframework.jdbc.datasource.DataSourceTransactionManager
+import org.springframework.transaction.TransactionTimedOutException
+import org.springframework.transaction.support.TransactionTemplate
+import java.sql.DriverManager
+import java.sql.SQLException
+import java.time.Duration
 import java.util.UUID
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * [DatasourceGrantRepository] against the shipped schema — `datasource_workspaces` as V23
@@ -128,6 +142,93 @@ class DatasourceGrantRepositoryIntegrationTest {
         datasources.findByName("shared")?.isDeleted shouldBe false
     }
 
+    @Test
+    fun `a budgeted guarded repair grants every lacking workspace inside its budget - #841 R4`() {
+        register("shared", owner = null)
+        repository.grant("shared", alpha, actor) shouldBe true
+
+        budgeted(Duration.ofSeconds(REPAIR_BUDGET_SECONDS)).grantToEveryWorkspace("shared", actor) shouldBe 1
+
+        grantees("shared") shouldBe setOf(alpha, beta)
+    }
+
+    @Test
+    fun `a budgeted repair's INSERT queued behind a conflicting writer is cancelled at the budget, nothing granted - #841 R4`() {
+        register("shared", owner = null)
+        val executor = Executors.newSingleThreadExecutor()
+        // A conflicting writer in flight: its uncommitted grant of alpha makes the repair's INSERT wait on its transaction.
+        val holder =
+            DriverManager.getConnection(
+                SharedPostgres.postgres.jdbcUrl,
+                SharedPostgres.postgres.username,
+                SharedPostgres.postgres.password,
+            )
+        try {
+            holder.autoCommit = false
+            holder
+                .prepareStatement("INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by) VALUES ('shared', ?, ?)")
+                .use { ps ->
+                    ps.setObject(1, alpha)
+                    ps.setObject(2, actor)
+                    ps.executeUpdate()
+                }
+            val repair = budgeted(Duration.ofMillis(SHORT_BUDGET_MILLIS))
+            val started = System.nanoTime()
+            val outcome = executor.submit<Throwable?> { runCatching { repair.grantToEveryWorkspace("shared", actor) }.exceptionOrNull() }
+            // Generous and named: it bounds only a red run (an uncapped INSERT waits until the holder ends).
+            val failure = outcome.get(OUTCOME_WAIT_SECONDS, TimeUnit.SECONDS)
+            val elapsed = Duration.ofNanos(System.nanoTime() - started).toMillis()
+
+            withClue("the repair failed on its statement bound: $failure") { sqlStatesOf(failure) shouldContain "57014" }
+            withClue("cancelled at the budget, not before it") { elapsed shouldBeInRange BUDGET_WINDOW_MS }
+            withClue("the conflicting writer is untouched") { holder.isClosed shouldBe false }
+        } finally {
+            holder.rollback()
+            holder.close()
+            executor.shutdownNow()
+        }
+        withClue("the rolled-back repair granted nothing") { grantees("shared") shouldBe emptySet() }
+    }
+
+    @Test
+    fun `a budget spent before the repair's next statement refuses it with nothing granted - #841 R4`() {
+        register("shared", owner = null)
+        // The first read fixes the deadline; every later read is past it.
+        val reads = AtomicInteger()
+        val clock = { if (reads.getAndIncrement() == 0) 0L else TimeUnit.SECONDS.toNanos(REPAIR_BUDGET_SECONDS * 2) }
+
+        shouldThrow<TransactionTimedOutException> {
+            budgeted(Duration.ofSeconds(REPAIR_BUDGET_SECONDS), clock).grantToEveryWorkspace("shared", actor)
+        }
+
+        grantees("shared") shouldBe emptySet()
+    }
+
+    /**
+     * The freshness tick's shape (#841 R4): guarded writes in a real metadata transaction on the SAME DataSource as the
+     * repository's template (so its statements join it), the no-op guard (the lock protocol is the web module's proof),
+     * and a repair budget.
+     */
+    private fun budgeted(
+        budget: Duration,
+        clock: () -> Long = System::nanoTime,
+    ): DatasourceGrantRepository {
+        val dataSource = checkNotNull(jdbc.jdbcTemplate.dataSource) { "the template has a DataSource" }
+        val writes = DatasourceWriteGuarding(jdbc, TransactionTemplate(DataSourceTransactionManager(dataSource)), MetadataWriterGuard.NONE)
+        return DatasourceGrantRepository(jdbc, writes, repairBudget = budget, nanoTime = clock)
+    }
+
+    private fun grantees(datasource: String): Set<UUID> =
+        jdbc
+            .queryForList(
+                "SELECT workspace_id FROM datasource_workspaces WHERE datasource_name = :name",
+                mapOf("name" to datasource),
+                UUID::class.java,
+            ).toSet()
+
+    private fun sqlStatesOf(failure: Throwable?): List<String> =
+        generateSequence(failure) { it.cause }.filterIsInstance<SQLException>().mapNotNull { it.sqlState }.toList()
+
     private fun register(
         name: String,
         owner: UUID?,
@@ -160,4 +261,13 @@ class DatasourceGrantRepositoryIntegrationTest {
                 UUID::class.java,
             ),
         )
+
+    private companion object {
+        const val REPAIR_BUDGET_SECONDS = 5L
+        const val SHORT_BUDGET_MILLIS = 1_500L
+        const val OUTCOME_WAIT_SECONDS = 20L
+
+        /** The short budget, less the start-up of the repair's first statements, up to a slack of 2 s. */
+        val BUDGET_WINDOW_MS = 1_000L..3_500L
+    }
 }
