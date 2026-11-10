@@ -118,7 +118,9 @@ class ChartModelParityTest {
         const val JS_RESULT = "build/chart-parity/js-model.json"
 
         const val MIN_VALIDATION_CASES = 20
-        const val MIN_MODELLED = 17
+
+        /** 25 at the first delivery; 860b's two fixtures and one numeric case raise it to 28 — dropping any corpus entry goes red. */
+        const val MIN_MODELLED = 28
         const val MIN_NON_EMPTY = 15
 
         /**
