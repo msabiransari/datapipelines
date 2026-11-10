@@ -1,0 +1,19 @@
+{
+  "case" : "depth-over-limit",
+  "bounds" : {
+    "max_depth" : 32,
+    "max_versions" : 1024,
+    "max_edges" : 4096,
+    "max_blockers" : 100,
+    "max_wire_bytes" : 1048576
+  },
+  "outcome" : "refused",
+  "refusal" : {
+    "code" : "pipeline.release.dependency_limit",
+    "message" : "Release blocked: the dependencies exceed the configured depth bound of 32.",
+    "details" : {
+      "limit" : "depth",
+      "maximum" : 32
+    }
+  }
+}

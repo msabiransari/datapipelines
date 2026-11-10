@@ -1,0 +1,72 @@
+{
+  "case" : "missing-and-discarded-leaves",
+  "bounds" : {
+    "max_depth" : 32,
+    "max_versions" : 1024,
+    "max_edges" : 4096,
+    "max_blockers" : 100,
+    "max_wire_bytes" : 1048576
+  },
+  "outcome" : "closure",
+  "nodes" : [
+    {
+      "node_id" : "n0",
+      "family" : "pipeline",
+      "entity_id" : "orders",
+      "version" : 1,
+      "name" : "acme/orders",
+      "status" : "DRAFT",
+      "body_hash" : "hash-pipeline-orders-1",
+      "current_version" : null,
+      "entity_uuid" : "aacb0166-8bcd-3d8e-906a-bf1e16f67daf"
+    },
+    {
+      "node_id" : "n1",
+      "family" : "template",
+      "entity_id" : "gone",
+      "version" : 1,
+      "name" : "acme/gone",
+      "status" : "MISSING",
+      "body_hash" : null,
+      "current_version" : null,
+      "entity_uuid" : null
+    },
+    {
+      "node_id" : "n2",
+      "family" : "template",
+      "entity_id" : "old",
+      "version" : 1,
+      "name" : "acme/old",
+      "status" : "DISCARDED",
+      "body_hash" : "hash-template-old-1",
+      "current_version" : null,
+      "entity_uuid" : "10f6f48d-62a4-34a3-b478-6354ecec5102"
+    }
+  ],
+  "edges" : [
+    {
+      "from" : "n0",
+      "to" : "n1",
+      "path" : "nodes[0].template"
+    },
+    {
+      "from" : "n0",
+      "to" : "n2",
+      "path" : "nodes[1].template"
+    },
+    {
+      "from" : "n0",
+      "to" : "n1",
+      "path" : "nodes[2].template"
+    }
+  ],
+  "depth" : 1,
+  "dependency_first" : [
+    "n1",
+    "n2",
+    "n0"
+  ],
+  "canonical" : "{\"format\":\"v1\",\"workspace\":\"00000000-0000-0000-0000-000000000868\",\"root\":[\"pipeline\",\"orders\",1],\"nodes\":[{\"id\":[\"pipeline\",\"orders\",1],\"entity_uuid\":\"aacb0166-8bcd-3d8e-906a-bf1e16f67daf\",\"status\":\"DRAFT\",\"body_hash\":\"hash-pipeline-orders-1\",\"current\":null},{\"id\":[\"template\",\"gone\",1],\"entity_uuid\":null,\"status\":\"MISSING\",\"body_hash\":null,\"current\":null},{\"id\":[\"template\",\"old\",1],\"entity_uuid\":\"10f6f48d-62a4-34a3-b478-6354ecec5102\",\"status\":\"DISCARDED\",\"body_hash\":\"hash-template-old-1\",\"current\":null}],\"edges\":[{\"from\":[\"pipeline\",\"orders\",1],\"to\":[\"template\",\"gone\",1],\"path\":\"nodes[0].template\"},{\"from\":[\"pipeline\",\"orders\",1],\"to\":[\"template\",\"gone\",1],\"path\":\"nodes[2].template\"},{\"from\":[\"pipeline\",\"orders\",1],\"to\":[\"template\",\"old\",1],\"path\":\"nodes[1].template\"}]}",
+  "wire_bound" : 1048576,
+  "digest" : "v1:255d1af11abecd22b0a8f1b138ad7fb2f8e31e62248e9f4fb8bce36aeb2b7543"
+}

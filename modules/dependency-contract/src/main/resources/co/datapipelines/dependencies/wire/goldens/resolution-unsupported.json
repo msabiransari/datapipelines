@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "roots": [
+    "n0"
+  ],
+  "nodes": [
+    {
+      "node_id": "n0",
+      "family": "dashboard",
+      "name": "test_widget/sales",
+      "display_name": "Sales",
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 3
+      },
+      "resolution": "resolved",
+      "lifecycle": "DRAFT",
+      "operational": null,
+      "current_version": null,
+      "body_hash": "aa6437b217a798ee9828ba0535c8217f58104ab6627b8359673ae46bae71aabd",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    },
+    {
+      "node_id": "n1",
+      "family": "visualization",
+      "name": "test_widget/chart",
+      "display_name": null,
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 2
+      },
+      "resolution": "unsupported",
+      "lifecycle": null,
+      "operational": null,
+      "current_version": null,
+      "body_hash": null,
+      "capabilities": {
+        "release": "NONE",
+        "promotion": "NONE"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "e0",
+      "from": "n0",
+      "to": "n1",
+      "relationship": "VISUALIZATION",
+      "source_path": "/visualizations/0/visualization",
+      "requested_selector": {
+        "kind": "exact_version",
+        "number": 2
+      },
+      "resolved_version": null,
+      "constraints": []
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "UNSUPPORTED_FAMILY",
+      "node_id": "n1",
+      "edge_id": null,
+      "message": "A referenced object belongs to a family this graph cannot read."
+    }
+  ],
+  "complete": false,
+  "acyclic": null,
+  "observed_at": "2026-11-10T00:00:00Z"
+}

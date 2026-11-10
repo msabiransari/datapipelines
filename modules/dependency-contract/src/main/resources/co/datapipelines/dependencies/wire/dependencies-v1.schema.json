@@ -1,0 +1,985 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://datapipelines.co/schemas/dependencies/v1/dependencies-v1.schema.json",
+  "title": "Dependency tree wire contract v1 (design record 2026-11-02 section 11.1)",
+  "$comment": "The root validates the 200 data object; #/$defs/error_details validates a request refusal's details; #/$defs/request states the query rules. Envelopes, catalog codes and HTTP statuses are G4's.",
+  "$ref": "#/$defs/data",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "roots",
+        "nodes",
+        "edges",
+        "diagnostics",
+        "complete",
+        "acyclic",
+        "observed_at"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "roots": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/node"
+          }
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/edge"
+          }
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/diagnostic"
+          }
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "acyclic": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "observed_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "complete": {
+                "const": false
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "acyclic": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "complete": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "acyclic": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "node_id",
+        "family",
+        "name",
+        "display_name",
+        "subtype",
+        "version",
+        "resolution",
+        "lifecycle",
+        "operational",
+        "current_version",
+        "body_hash",
+        "capabilities"
+      ],
+      "properties": {
+        "node_id": {
+          "$ref": "#/$defs/id"
+        },
+        "family": {
+          "$ref": "#/$defs/family"
+        },
+        "name": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "minLength": 1
+            }
+          ]
+        },
+        "display_name": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "subtype": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "minLength": 1
+            }
+          ]
+        },
+        "version": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "number"
+          ],
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/version_kind"
+            },
+            "number": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                }
+              ]
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "kind": {
+                    "const": "unversioned"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "number": {
+                    "type": "null"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "resolution": {
+          "$ref": "#/$defs/resolution"
+        },
+        "lifecycle": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/lifecycle"
+            }
+          ]
+        },
+        "operational": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/operational_schedule"
+            },
+            {
+              "$ref": "#/$defs/operational_api_endpoint"
+            },
+            {
+              "$ref": "#/$defs/operational_datasource"
+            },
+            {
+              "$ref": "#/$defs/operational_visualization"
+            }
+          ]
+        },
+        "current_version": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          ]
+        },
+        "body_hash": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "minLength": 1
+            }
+          ]
+        },
+        "capabilities": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "release",
+            "promotion"
+          ],
+          "properties": {
+            "release": {
+              "$ref": "#/$defs/release_capability"
+            },
+            "promotion": {
+              "$ref": "#/$defs/promotion_capability"
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "family": {
+                "const": "pipeline"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "operational": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "family": {
+                "const": "template"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "operational": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "family": {
+                "const": "parameter_set"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "operational": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "family": {
+                "const": "visualization"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "operational": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/$defs/operational_visualization"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "family": {
+                "const": "dashboard"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "operational": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "family": {
+                "const": "api_endpoint"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "operational": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/$defs/operational_api_endpoint"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "family": {
+                "const": "schedule"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "operational": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/$defs/operational_schedule"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "family": {
+                "const": "datasource"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "operational": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/$defs/operational_datasource"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "resolution": {
+                "not": {
+                  "const": "resolved"
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "lifecycle": {
+                "type": "null"
+              },
+              "operational": {
+                "type": "null"
+              },
+              "current_version": {
+                "type": "null"
+              },
+              "body_hash": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "edge_id",
+        "from",
+        "to",
+        "relationship",
+        "source_path",
+        "requested_selector",
+        "resolved_version",
+        "constraints"
+      ],
+      "properties": {
+        "edge_id": {
+          "$ref": "#/$defs/id"
+        },
+        "from": {
+          "$ref": "#/$defs/id"
+        },
+        "to": {
+          "$ref": "#/$defs/id"
+        },
+        "relationship": {
+          "$ref": "#/$defs/relationship"
+        },
+        "source_path": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^(/([^/~]|~[01])*)+$"
+            }
+          ]
+        },
+        "requested_selector": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "number"
+          ],
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/selector_kind"
+            },
+            "number": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                }
+              ]
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "kind": {
+                    "const": "exact_version"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "number": {
+                    "type": "integer"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "kind": {
+                    "not": {
+                      "const": "exact_version"
+                    }
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "number": {
+                    "type": "null"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "resolved_version": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          ]
+        },
+        "constraints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/constraint"
+          }
+        }
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "node_id",
+        "edge_id",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/diagnostic_code"
+        },
+        "node_id": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/id"
+            }
+          ]
+        },
+        "edge_id": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/id"
+            }
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "INCOMPLETE_VIEW"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "node_id": {
+                "type": "null"
+              },
+              "edge_id": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "constraint": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "names"
+          ],
+          "properties": {
+            "kind": {
+              "const": "parameter_names"
+            },
+            "names": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "mode"
+          ],
+          "properties": {
+            "kind": {
+              "const": "datasource_access"
+            },
+            "mode": {
+              "$ref": "#/$defs/access_mode"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "dialect"
+          ],
+          "properties": {
+            "kind": {
+              "const": "datasource_dialect"
+            },
+            "dialect": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "family"
+      ],
+      "properties": {
+        "family": {
+          "$ref": "#/$defs/family"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 200,
+          "minLength": 1
+        },
+        "id": {
+          "type": "string",
+          "maxLength": 200,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "version": {
+          "type": "string",
+          "maxLength": 200,
+          "pattern": "^[1-9][0-9]{0,9}$"
+        }
+      },
+      "$comment": "The query fields as strings (GET /api/v1/dependencies). The grammar a schema can state: the 200-character ceiling, the UUID and decimal forms and which fields each family takes; the native name grammars and the 2147483647 ceiling are the route's validators (G4).",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "family": {
+                "const": "schedule"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "id"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "name"
+                  ]
+                },
+                {
+                  "required": [
+                    "version"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "family": {
+                "const": "datasource"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "name"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "id"
+                  ]
+                },
+                {
+                  "required": [
+                    "version"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "family": {
+                "enum": [
+                  "api_endpoint",
+                  "dashboard",
+                  "parameter_set",
+                  "pipeline",
+                  "template",
+                  "visualization"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "name",
+              "version"
+            ],
+            "not": {
+              "required": [
+                "id"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "error_details": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field",
+        "reason"
+      ],
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/request_field"
+        },
+        "reason": {
+          "$ref": "#/$defs/refusal_reason"
+        }
+      }
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "family": {
+      "enum": [
+        "pipeline",
+        "template",
+        "parameter_set",
+        "visualization",
+        "dashboard",
+        "api_endpoint",
+        "schedule",
+        "datasource"
+      ]
+    },
+    "version_kind": {
+      "enum": [
+        "artifact",
+        "revision",
+        "unversioned"
+      ]
+    },
+    "selector_kind": {
+      "enum": [
+        "exact_version",
+        "current",
+        "entity"
+      ]
+    },
+    "resolution": {
+      "enum": [
+        "resolved",
+        "missing",
+        "unsupported"
+      ]
+    },
+    "lifecycle": {
+      "enum": [
+        "DRAFT",
+        "RELEASED",
+        "DISCARDED"
+      ]
+    },
+    "schedule_condition": {
+      "enum": [
+        "enabled",
+        "paused",
+        "blocked"
+      ]
+    },
+    "release_capability": {
+      "enum": [
+        "ARTIFACT_RELEASE",
+        "NONE"
+      ]
+    },
+    "promotion_capability": {
+      "enum": [
+        "VERSIONED_ARTIFACT",
+        "NONE"
+      ]
+    },
+    "relationship": {
+      "enum": [
+        "TEMPLATE",
+        "CHILD_PIPELINE",
+        "DATASOURCE",
+        "IMPORT",
+        "PARAMETER_SOURCE_TEMPLATE",
+        "PARAMETER_SOURCE_DATASOURCE",
+        "TRANSFORM_TEMPLATE",
+        "PARAMETER_SET",
+        "SOURCE_PIPELINE",
+        "VISUALIZATION",
+        "PIPELINE_PIN",
+        "EXECUTOR_TARGET"
+      ]
+    },
+    "access_mode": {
+      "enum": [
+        "read",
+        "write"
+      ]
+    },
+    "diagnostic_code": {
+      "enum": [
+        "MISSING",
+        "DISCARDED",
+        "UNSUPPORTED_FAMILY",
+        "CYCLE",
+        "LIMIT",
+        "INCOMPLETE_VIEW"
+      ]
+    },
+    "request_field": {
+      "enum": [
+        "family",
+        "name",
+        "id",
+        "version"
+      ]
+    },
+    "refusal_reason": {
+      "enum": [
+        "family_unknown",
+        "selector_incompatible",
+        "name_invalid",
+        "id_invalid",
+        "version_invalid",
+        "value_too_long"
+      ]
+    },
+    "operational_schedule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "condition"
+      ],
+      "properties": {
+        "condition": {
+          "$ref": "#/$defs/schedule_condition"
+        }
+      }
+    },
+    "operational_api_endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "operational_datasource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "readonly"
+      ],
+      "properties": {
+        "readonly": {
+          "type": "boolean"
+        }
+      }
+    },
+    "operational_visualization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_ready"
+      ],
+      "properties": {
+        "evidence_ready": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

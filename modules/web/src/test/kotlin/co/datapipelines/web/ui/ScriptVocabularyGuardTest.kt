@@ -297,6 +297,15 @@ class ScriptVocabularyGuardTest {
                     "the visualization §13.21/§13.22 rows (the block pin) — a future node noun stays red here",
                 ),
                 Triple(
+                    Regex(
+                        "^modules/(?:dependency-contract/src/|application/src/test/(?:kotlin/co/datapipelines/application/" +
+                            "dependencies/|resources/dependencies/release-goldens/))",
+                    ),
+                    Regex("TRANSFORM_TEMPLATE|transform\\.template|/transform/template"),
+                    "the visualization block pin as the dependency-graph record's §6/§11.1 edge (#868): the TRANSFORM_TEMPLATE " +
+                        "token, the `transform.template` path and its JSON pointer — a node noun stays red here",
+                ),
+                Triple(
                     Regex("^docs/rest-api\\.md$"),
                     Regex("transform pin|transform template|the transform|transform,|transform`", setOf(IGNORE_CASE)),
                     "the visualization/dashboard rows and the runtime stage list (the block)",
@@ -509,6 +518,8 @@ class ScriptVocabularyGuardTest {
         /** Restored kept-sense lines (#640, #663) a path entry must admit — path to line. */
         private val ADMITTED =
             listOf(
+                "modules/dependency-contract/src/main/kotlin/co/datapipelines/dependencies/Vocabularies.kt" to
+                    "    TRANSFORM_TEMPLATE(FamilyKey.VISUALIZATION, FamilyKey.TEMPLATE),",
                 XSLT_POLICY_PATH to "    $XSLT_POLICY_LINE",
                 "guard.css" to "transform: translateX(0);",
                 "guard.css" to "text-transform: uppercase;",
@@ -544,6 +555,8 @@ class ScriptVocabularyGuardTest {
         /** The node noun in those same files stays red: the path entries admit the block, not the word. */
         private val NOT_ADMITTED =
             listOf(
+                "modules/dependency-contract/src/main/kotlin/co/datapipelines/dependencies/Families.kt" to
+                    "val TRANSFORM = FamilyKey(\"transform\")",
                 XSLT_POLICY_PATH to "val transformNode = 1",
                 XSLT_POLICY_PATH to "$XSLT_POLICY_LINE // a TRANSFORM node",
                 "guard.css" to ".type-transform {",

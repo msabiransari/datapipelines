@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "roots": [
+    "n0"
+  ],
+  "nodes": [
+    {
+      "node_id": "n0",
+      "family": "pipeline",
+      "name": "test_widget/report",
+      "display_name": "Report",
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 2
+      },
+      "resolution": "resolved",
+      "lifecycle": "DRAFT",
+      "operational": null,
+      "current_version": null,
+      "body_hash": "422e7cac3262ec9493294e377829fc06f7adda0ed2273670b0f495d2a50d5273",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    },
+    {
+      "node_id": "n1",
+      "family": "pipeline",
+      "name": "test_widget/child",
+      "display_name": "Child",
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 1
+      },
+      "resolution": "resolved",
+      "lifecycle": "DRAFT",
+      "operational": null,
+      "current_version": null,
+      "body_hash": "063e3a14d389a86a0bbb52bac00f1fc97a3a8964a559bc26b62a88179d50d0a6",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "e0",
+      "from": "n0",
+      "to": "n1",
+      "relationship": "CHILD_PIPELINE",
+      "source_path": "/nodes/1/pipeline",
+      "requested_selector": {
+        "kind": "exact_version",
+        "number": 1
+      },
+      "resolved_version": 1,
+      "constraints": []
+    },
+    {
+      "edge_id": "e1",
+      "from": "n1",
+      "to": "n0",
+      "relationship": "CHILD_PIPELINE",
+      "source_path": "/nodes/0/pipeline",
+      "requested_selector": {
+        "kind": "exact_version",
+        "number": 2
+      },
+      "resolved_version": 2,
+      "constraints": []
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "CYCLE",
+      "node_id": "n0",
+      "edge_id": "e1",
+      "message": "The dependencies form a cycle."
+    }
+  ],
+  "complete": true,
+  "acyclic": false,
+  "observed_at": "2026-11-10T00:00:00Z"
+}

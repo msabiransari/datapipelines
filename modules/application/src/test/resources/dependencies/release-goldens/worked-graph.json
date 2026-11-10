@@ -1,0 +1,174 @@
+{
+  "case" : "worked-graph",
+  "bounds" : {
+    "max_depth" : 32,
+    "max_versions" : 1024,
+    "max_edges" : 4096,
+    "max_blockers" : 100,
+    "max_wire_bytes" : 1048576
+  },
+  "outcome" : "closure",
+  "nodes" : [
+    {
+      "node_id" : "n0",
+      "family" : "dashboard",
+      "entity_id" : "sales",
+      "version" : 3,
+      "name" : "acme/sales",
+      "status" : "DRAFT",
+      "body_hash" : "hash-dashboard-sales-3",
+      "current_version" : 2,
+      "entity_uuid" : "4e50033b-0a7c-31c4-b3ea-9cff5efe6b56"
+    },
+    {
+      "node_id" : "n1",
+      "family" : "parameter_set",
+      "entity_id" : "filters",
+      "version" : 2,
+      "name" : "acme/filters",
+      "status" : "DRAFT",
+      "body_hash" : "hash-parameter_set-filters-2",
+      "current_version" : 1,
+      "entity_uuid" : "04014937-1263-3bd5-aed4-aa6398f7aa30"
+    },
+    {
+      "node_id" : "n2",
+      "family" : "template",
+      "entity_id" : "selector",
+      "version" : 5,
+      "name" : "acme/selector",
+      "status" : "RELEASED",
+      "body_hash" : "hash-template-selector-5",
+      "current_version" : 5,
+      "entity_uuid" : "9576a0a2-31e1-34ff-8436-8c559898f999"
+    },
+    {
+      "node_id" : "n3",
+      "family" : "template",
+      "entity_id" : "common",
+      "version" : 4,
+      "name" : "acme/common",
+      "status" : "RELEASED",
+      "body_hash" : "hash-template-common-4",
+      "current_version" : 4,
+      "entity_uuid" : "b8437a7c-4fd9-3b6a-bb70-0e8772c04c78"
+    },
+    {
+      "node_id" : "n4",
+      "family" : "pipeline",
+      "entity_id" : "report",
+      "version" : 7,
+      "name" : "acme/report",
+      "status" : "DRAFT",
+      "body_hash" : "hash-pipeline-report-7",
+      "current_version" : 6,
+      "entity_uuid" : "6fe81959-008a-32dc-aaa7-3a2477ad01cf"
+    },
+    {
+      "node_id" : "n5",
+      "family" : "pipeline",
+      "entity_id" : "totals",
+      "version" : 2,
+      "name" : "acme/totals",
+      "status" : "RELEASED",
+      "body_hash" : "hash-pipeline-totals-2",
+      "current_version" : 2,
+      "entity_uuid" : "24f8744a-3259-36f0-9361-47bd9426f0a1"
+    },
+    {
+      "node_id" : "n6",
+      "family" : "template",
+      "entity_id" : "query",
+      "version" : 6,
+      "name" : "acme/query",
+      "status" : "RELEASED",
+      "body_hash" : "hash-template-query-6",
+      "current_version" : 6,
+      "entity_uuid" : "ecffb353-ff38-3e22-81e2-8fef51573660"
+    },
+    {
+      "node_id" : "n7",
+      "family" : "visualization",
+      "entity_id" : "chart",
+      "version" : 2,
+      "name" : "acme/chart",
+      "status" : "DRAFT",
+      "body_hash" : "hash-visualization-chart-2",
+      "current_version" : null,
+      "entity_uuid" : "40d6baa4-00c8-3dac-917e-28a1518e6e5c"
+    },
+    {
+      "node_id" : "n8",
+      "family" : "template",
+      "entity_id" : "formatter",
+      "version" : 3,
+      "name" : "acme/formatter",
+      "status" : "RELEASED",
+      "body_hash" : "hash-template-formatter-3",
+      "current_version" : 3,
+      "entity_uuid" : "b5c56646-0468-371e-9f3b-bc01dc23a7bb"
+    }
+  ],
+  "edges" : [
+    {
+      "from" : "n0",
+      "to" : "n1",
+      "path" : "parameter_set"
+    },
+    {
+      "from" : "n1",
+      "to" : "n2",
+      "path" : "parameters[0].source.template"
+    },
+    {
+      "from" : "n2",
+      "to" : "n3",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n0",
+      "to" : "n4",
+      "path" : "sources[0].pipeline"
+    },
+    {
+      "from" : "n4",
+      "to" : "n5",
+      "path" : "nodes[0].pipeline"
+    },
+    {
+      "from" : "n5",
+      "to" : "n6",
+      "path" : "nodes[0].template"
+    },
+    {
+      "from" : "n6",
+      "to" : "n3",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n0",
+      "to" : "n7",
+      "path" : "visualizations[0].visualization"
+    },
+    {
+      "from" : "n7",
+      "to" : "n8",
+      "path" : "transform.template"
+    }
+  ],
+  "depth" : 4,
+  "dependency_first" : [
+    "n3",
+    "n2",
+    "n1",
+    "n6",
+    "n5",
+    "n4",
+    "n8",
+    "n7",
+    "n0"
+  ],
+  "canonical" : "{\"format\":\"v1\",\"workspace\":\"00000000-0000-0000-0000-000000000868\",\"root\":[\"dashboard\",\"sales\",3],\"nodes\":[{\"id\":[\"dashboard\",\"sales\",3],\"entity_uuid\":\"4e50033b-0a7c-31c4-b3ea-9cff5efe6b56\",\"status\":\"DRAFT\",\"body_hash\":\"hash-dashboard-sales-3\",\"current\":2},{\"id\":[\"parameter_set\",\"filters\",2],\"entity_uuid\":\"04014937-1263-3bd5-aed4-aa6398f7aa30\",\"status\":\"DRAFT\",\"body_hash\":\"hash-parameter_set-filters-2\",\"current\":1},{\"id\":[\"pipeline\",\"report\",7],\"entity_uuid\":\"6fe81959-008a-32dc-aaa7-3a2477ad01cf\",\"status\":\"DRAFT\",\"body_hash\":\"hash-pipeline-report-7\",\"current\":6},{\"id\":[\"pipeline\",\"totals\",2],\"entity_uuid\":\"24f8744a-3259-36f0-9361-47bd9426f0a1\",\"status\":\"RELEASED\",\"body_hash\":\"hash-pipeline-totals-2\",\"current\":2},{\"id\":[\"template\",\"common\",4],\"entity_uuid\":\"b8437a7c-4fd9-3b6a-bb70-0e8772c04c78\",\"status\":\"RELEASED\",\"body_hash\":\"hash-template-common-4\",\"current\":4},{\"id\":[\"template\",\"formatter\",3],\"entity_uuid\":\"b5c56646-0468-371e-9f3b-bc01dc23a7bb\",\"status\":\"RELEASED\",\"body_hash\":\"hash-template-formatter-3\",\"current\":3},{\"id\":[\"template\",\"query\",6],\"entity_uuid\":\"ecffb353-ff38-3e22-81e2-8fef51573660\",\"status\":\"RELEASED\",\"body_hash\":\"hash-template-query-6\",\"current\":6},{\"id\":[\"template\",\"selector\",5],\"entity_uuid\":\"9576a0a2-31e1-34ff-8436-8c559898f999\",\"status\":\"RELEASED\",\"body_hash\":\"hash-template-selector-5\",\"current\":5},{\"id\":[\"visualization\",\"chart\",2],\"entity_uuid\":\"40d6baa4-00c8-3dac-917e-28a1518e6e5c\",\"status\":\"DRAFT\",\"body_hash\":\"hash-visualization-chart-2\",\"current\":null}],\"edges\":[{\"from\":[\"dashboard\",\"sales\",3],\"to\":[\"parameter_set\",\"filters\",2],\"path\":\"parameter_set\"},{\"from\":[\"dashboard\",\"sales\",3],\"to\":[\"pipeline\",\"report\",7],\"path\":\"sources[0].pipeline\"},{\"from\":[\"dashboard\",\"sales\",3],\"to\":[\"visualization\",\"chart\",2],\"path\":\"visualizations[0].visualization\"},{\"from\":[\"parameter_set\",\"filters\",2],\"to\":[\"template\",\"selector\",5],\"path\":\"parameters[0].source.template\"},{\"from\":[\"pipeline\",\"report\",7],\"to\":[\"pipeline\",\"totals\",2],\"path\":\"nodes[0].pipeline\"},{\"from\":[\"pipeline\",\"totals\",2],\"to\":[\"template\",\"query\",6],\"path\":\"nodes[0].template\"},{\"from\":[\"template\",\"query\",6],\"to\":[\"template\",\"common\",4],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"selector\",5],\"to\":[\"template\",\"common\",4],\"path\":\"imports[0]\"},{\"from\":[\"visualization\",\"chart\",2],\"to\":[\"template\",\"formatter\",3],\"path\":\"transform.template\"}]}",
+  "wire_bound" : 1048576,
+  "digest" : "v1:d294cd84b2c4be15de1a89506e43e7655c4e7fb8539b236caa9914062b9d07d0"
+}

@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "roots": [
+    "n0"
+  ],
+  "nodes": [
+    {
+      "node_id": "n0",
+      "family": "visualization",
+      "name": "test_widget/chart",
+      "display_name": "Chart",
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 2
+      },
+      "resolution": "resolved",
+      "lifecycle": "DRAFT",
+      "operational": {
+        "evidence_ready": true
+      },
+      "current_version": null,
+      "body_hash": "ff3be3096b25a42205d097e90c9facfa38d24546f8588f42e20062d0ef575504",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    },
+    {
+      "node_id": "n1",
+      "family": "template",
+      "name": "test_widget/query",
+      "display_name": "Query",
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 1
+      },
+      "resolution": "resolved",
+      "lifecycle": "RELEASED",
+      "operational": null,
+      "current_version": null,
+      "body_hash": "3598dfc037267beecb8d096f0b4edce2c80c42860b4e6444ef94865c95f1587f",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "e0",
+      "from": "n0",
+      "to": "n1",
+      "relationship": "TRANSFORM_TEMPLATE",
+      "source_path": "/transform/template",
+      "requested_selector": {
+        "kind": "exact_version",
+        "number": 1
+      },
+      "resolved_version": 1,
+      "constraints": []
+    }
+  ],
+  "diagnostics": [],
+  "complete": true,
+  "acyclic": true,
+  "observed_at": "2026-11-10T00:00:00Z"
+}

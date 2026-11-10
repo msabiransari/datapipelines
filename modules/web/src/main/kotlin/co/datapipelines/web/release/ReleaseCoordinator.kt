@@ -1,11 +1,11 @@
 package co.datapipelines.web.release
 
+import co.datapipelines.application.dependencies.ReleasePlanningWalk
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.pipeline.PipelineReleaseService
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.release.ClosureNode
-import co.datapipelines.pipeline.release.DependencySource
 import co.datapipelines.pipeline.release.LegacyReleaseAlias
 import co.datapipelines.pipeline.release.PipelineDependencySource
 import co.datapipelines.pipeline.release.PipelineReleaseCoordination
@@ -19,7 +19,6 @@ import co.datapipelines.pipeline.release.ReleaseClosure
 import co.datapipelines.pipeline.release.ReleaseContext
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseFlip
-import co.datapipelines.pipeline.release.ReleaseGraph
 import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import co.datapipelines.pipeline.release.ReleaseNodeIdentity
 import co.datapipelines.pipeline.release.ReleaseNodeStatus
@@ -60,7 +59,12 @@ import java.util.UUID
 class ReleaseCoordinator(
     private val releases: PipelineReleaseService,
     private val pipelines: PipelineRepository,
-    sources: Map<ReleaseFamily, DependencySource>,
+    /**
+     * The closure reads (#868 G1): the plan's first walk in its own read-only REPEATABLE READ transaction, the guarded
+     * re-walk and the compatibility walk inside the release transaction — both through the neutral walk and the release
+     * adapter, byte-identical to the former `ReleaseGraph`.
+     */
+    private val planning: ReleasePlanningWalk,
     participants: List<ReleaseParticipant>,
     private val authorization: ReleaseAuthorization,
     private val guard: ReleaseMutationGuard,
@@ -78,7 +82,6 @@ class ReleaseCoordinator(
     private val legacyAliasAdmitted: Boolean = LegacyReleaseAlias.LEGACY_ALIAS_WITHOUT_PLAN_ADMITTED,
 ) : PipelineReleaseCoordination {
     private val participants = participants.associateBy { it.family }
-    private val graph = ReleaseGraph(sources, bounds)
 
     override fun release(request: PipelineReleaseRequest): PipelineReleaseService.Released {
         val plan = request.plan?.takeIf { it.present }
@@ -110,7 +113,7 @@ class ReleaseCoordinator(
                 val rootRecord =
                     pipelines.findById(request.workspaceId, request.pipelineId) ?: throw ReleaseRefusals.planConflict(ROOT)
                 val rootIdentity = PipelineDependencySource.identity(request.workspaceId, rootRecord.name, prepared.draft.version)
-                val closure = walk(rootIdentity)
+                val closure = guardedWalk(rootIdentity, request.actor)
                 val included = if (request.releasePinnedTemplates) LegacyReleaseAlias.selection(closure) else emptySet()
                 refuseBlockers(closure, included)
                 val order = LegacyReleaseAlias.order(closure, included).map(closure::node)
@@ -137,7 +140,8 @@ class ReleaseCoordinator(
         treeHash: String,
     ): PipelineReleaseService.Released {
         val rootIdentity = rootIdentity(request)
-        val closure = walk(rootIdentity)
+        // Step 2: one read-only REPEATABLE READ snapshot, committed before anything is built from it (record §7.2, §7.3).
+        val closure = plannedWalk(rootIdentity, request.actor)
         // Step 3: the digest first, before any validation or check work — a stale preview costs nothing.
         if (TreeHash.of(closure, bounds.maxWireBytes) != treeHash) throw ReleaseRefusals.planConflict(ROOT)
         val selection = selection(closure, plan, request.releasePinnedTemplates)
@@ -163,7 +167,9 @@ class ReleaseCoordinator(
             inTransaction { status ->
                 // Step 5: the guard, then the closure re-resolved and compared under it.
                 guard.acquire(request.workspaceId, ROOT)
-                if (TreeHash.of(walk(rootIdentity), bounds.maxWireBytes) != treeHash) throw ReleaseRefusals.planConflict(ROOT)
+                if (TreeHash.of(guardedWalk(rootIdentity, request.actor), bounds.maxWireBytes) != treeHash) {
+                    throw ReleaseRefusals.planConflict(ROOT)
+                }
                 families.forEach(authorization::requireRelease)
                 // Step 6: dependencies first, root last; each CAS at its consented hash.
                 val dependencies = prepared.map { it to participant(it.node).commitPrepared(it, status) }
@@ -191,7 +197,17 @@ class ReleaseCoordinator(
         return PipelineDependencySource.identity(request.workspaceId, record.name, draft.version)
     }
 
-    private fun walk(root: ReleaseNodeIdentity): ReleaseClosure = graph.walk(root) ?: throw ReleaseRefusals.planConflict(ROOT)
+    /** The plan's first closure read, in its own read-only REPEATABLE READ planning transaction. */
+    private fun plannedWalk(
+        root: ReleaseNodeIdentity,
+        actor: UUID,
+    ): ReleaseClosure = planning.plan(root, actor) ?: throw ReleaseRefusals.planConflict(ROOT)
+
+    /** The closure read inside the release transaction, under the guard. */
+    private fun guardedWalk(
+        root: ReleaseNodeIdentity,
+        actor: UUID,
+    ): ReleaseClosure = planning.walkInCurrentTransaction(root, actor) ?: throw ReleaseRefusals.planConflict(ROOT)
 
     private fun refuseBlockers(
         closure: ReleaseClosure,

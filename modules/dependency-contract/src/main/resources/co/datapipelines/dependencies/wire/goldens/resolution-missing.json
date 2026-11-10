@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "roots": [
+    "n0"
+  ],
+  "nodes": [
+    {
+      "node_id": "n0",
+      "family": "pipeline",
+      "name": "test_widget/report",
+      "display_name": "Report",
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 2
+      },
+      "resolution": "resolved",
+      "lifecycle": "RELEASED",
+      "operational": null,
+      "current_version": null,
+      "body_hash": "422e7cac3262ec9493294e377829fc06f7adda0ed2273670b0f495d2a50d5273",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    },
+    {
+      "node_id": "n1",
+      "family": "template",
+      "name": "test_widget/query",
+      "display_name": null,
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 3
+      },
+      "resolution": "missing",
+      "lifecycle": null,
+      "operational": null,
+      "current_version": null,
+      "body_hash": null,
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "e0",
+      "from": "n0",
+      "to": "n1",
+      "relationship": "TEMPLATE",
+      "source_path": "/nodes/0/template",
+      "requested_selector": {
+        "kind": "exact_version",
+        "number": 3
+      },
+      "resolved_version": null,
+      "constraints": []
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "MISSING",
+      "node_id": "n1",
+      "edge_id": null,
+      "message": "A referenced object does not exist or is not visible."
+    }
+  ],
+  "complete": true,
+  "acyclic": true,
+  "observed_at": "2026-11-10T00:00:00Z"
+}
