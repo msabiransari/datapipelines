@@ -199,6 +199,12 @@ class G0NativeLifecycleWritersE2eTest {
 
     private fun nameOf(family: Family) = "test/g0l/${family.table}"
 
+    /** How many [family] artifacts carry [name] (names are unique forever, so 0 or 1). */
+    private fun named(
+        family: Family,
+        name: String,
+    ): Int = jdbc().queryForObject("SELECT count(*) FROM ${family.table} WHERE name = ?", Int::class.java, name) ?: 0
+
     /** Every stored version, `version:STATUS` ascending, then `@current` — the persisted state a refusal must not move. */
     private fun state(
         family: Family,
@@ -433,6 +439,19 @@ class G0NativeLifecycleWritersE2eTest {
         auditedOnce("${family.audit}.purged", "${family.audit}_id", sole)
     }
 
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(Family::class)
+    @Order(15)
+    fun `draft create over REST - busy, nothing created - then it is created`(family: Family) {
+        val name = "${nameOf(family)}_created"
+        val post = { json(G0Lifecycle.document(mapper, family, name, "v1")).post("/api/v1/${family.path}") }
+        assertBusy(exhausts(post), family.busy)
+        named(family, name) shouldBe 0
+
+        control(post(), 201)
+        named(family, name) shouldBe 1
+    }
+
     // ---- the visualization evidence start -------------------------------------------------------------------------
 
     @Test
@@ -644,115 +663,4 @@ class G0NativeLifecycleWritersE2eTest {
             }
         }
     }
-}
-
-/** The fixture documents and names of [G0NativeLifecycleWritersE2eTest], outside the class body. */
-private object G0Lifecycle {
-    const val TEMPLATE = "test/g0l/shared.sql"
-    const val LIFECYCLE_TEMPLATE = "test/g0l/lifecycle.sql"
-    const val SOLE_TEMPLATE = "test/g0l/sole.sql"
-    const val SOURCE = "test/g0l/source"
-    const val SOURCE_CHART = "test/g0l/source_chart"
-    const val DATASOURCE = "h2-g0l-841"
-
-    fun templateArguments(id: String): Map<String, Any?> =
-        mapOf(
-            "id" to id,
-            "dialect" to "H2",
-            "display_name" to "G0 lifecycle",
-            "description" to "Expects: nothing (plain SQL).",
-            "body" to "SELECT 1 AS n",
-        )
-
-    /** The family's full document for [name], [revision] in its `description` (a body change, so a real edit). */
-    fun document(
-        mapper: ObjectMapper,
-        family: G0NativeLifecycleWritersE2eTest.Family,
-        name: String,
-        revision: String,
-    ): String =
-        when (family) {
-            G0NativeLifecycleWritersE2eTest.Family.PIPELINE -> {
-                pipeline(mapper, name, revision)
-            }
-
-            G0NativeLifecycleWritersE2eTest.Family.VISUALIZATION -> {
-                """
-                {"name": "$name", "display_name": "G0 chart", "description": "$revision",
-                 "renderer": {"kind": "plotly", "version": "4"},
-                 "inputs": {"revenue": {"columns": [{"name": "month", "type": "DATE", "nullable": false},
-                                                    {"name": "amount", "type": "DECIMAL", "nullable": false}]}},
-                 "config": {"data": [{"type": "bar", "x": [], "y": []}]},
-                 "bindings": {"data[0].x": "month", "data[0].y": "amount"},
-                 "tests": {"cases": [{"name": "one month", "fixtures": {"revenue": [{"month": "2026-01-01", "amount": 10.5}]},
-                                      "assertions": [{"kind": "rendered"}]}]}}
-                """.trimIndent()
-            }
-
-            G0NativeLifecycleWritersE2eTest.Family.DASHBOARD -> {
-                """
-                {"name": "$name", "display_name": "G0 board", "description": "$revision",
-                 "sources": [{"name": "rows_source", "pipeline": {"name": "$SOURCE", "version": 1}}],
-                 "visualizations": [{"name": "rows_chart", "type": "visualization",
-                                     "visualization": {"name": "$SOURCE_CHART", "version": 1},
-                                     "inputs": {"revenue": {"source": "rows_source"}}}],
-                 "layout": {"grid": [{"name": "rows_chart", "x": 0, "y": 0, "w": 6, "h": 4}]}}
-                """.trimIndent()
-            }
-
-            G0NativeLifecycleWritersE2eTest.Family.PARAMETER_SET -> {
-                parameterSet(mapper, name, revision)
-            }
-        }
-
-    private fun pipeline(
-        mapper: ObjectMapper,
-        name: String,
-        revision: String,
-    ): String =
-        mapper.writeValueAsString(
-            mapOf(
-                "schema_version" to 1,
-                "name" to name,
-                "display_name" to "G0 lifecycle",
-                "description" to revision,
-                "nodes" to
-                    listOf(
-                        mapOf(
-                            "id" to "n0",
-                            "type" to "DQL",
-                            "source" to DATASOURCE,
-                            "description" to "One row",
-                            "template" to mapOf("id" to TEMPLATE, "version" to 1),
-                            "depends_on" to emptyList<String>(),
-                        ),
-                    ),
-            ),
-        )
-
-    private fun parameterSet(
-        mapper: ObjectMapper,
-        name: String,
-        revision: String,
-    ): String =
-        mapper.writeValueAsString(
-            mapOf(
-                "name" to name,
-                "display_name" to "G0 filters",
-                "description" to revision,
-                "parameters" to
-                    listOf(
-                        mapOf(
-                            "name" to "min_amount",
-                            "label" to "Minimum amount",
-                            "type" to "DECIMAL",
-                            "precision" to 12,
-                            "scale" to 2,
-                            "kind" to "INPUT",
-                            "required" to false,
-                            "default_value" to 0,
-                        ),
-                    ),
-            ),
-        )
 }
