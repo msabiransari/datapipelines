@@ -103,7 +103,8 @@ class VocabularyTest {
             ResolveContext::class.java.declaredFields
                 .filterNot { it.isSynthetic }
                 .map { it.name }
-        fields shouldContainExactly listOf("workspaceId", "snapshot", "purpose", "authority", "deadline")
+        // readIsolation (#868 R1, round 3) is chosen by the server code that opened the transaction, never by a client.
+        fields shouldContainExactly listOf("workspaceId", "snapshot", "purpose", "authority", "deadline", "readIsolation")
         fields.none { Regex("(?i)ignore|permission|flag|client|override").containsMatchIn(it) } shouldBe true
     }
 
