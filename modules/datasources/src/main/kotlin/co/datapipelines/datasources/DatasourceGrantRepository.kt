@@ -132,9 +132,10 @@ class DatasourceGrantRepository(
      * one workspace this is right for).
      *
      * #841 (G0): the set of instance datasources is DISCOVERED, so it is the writer protocol's replanning case — read
-     * the names, take their prerequisite keys (the guard orders them by physical lock), re-read them under the keys; a different set (a datasource
-     * registered or deleted in between) rolls the transaction back and replans inside the ORIGINAL cumulative
-     * deadline ([Replanning]); an unchanged set takes the workspace row and grants exactly the locked names.
+     * the names, take their prerequisite keys (the guard orders them by physical lock), re-read them under the keys;
+     * a different set (a datasource registered or deleted in between) rolls the transaction back and replans inside
+     * the ORIGINAL cumulative deadline ([Replanning]); an unchanged set takes the workspace row and grants exactly the
+     * locked names.
      */
     fun grantAllInstanceDatasourcesTo(
         workspaceId: UUID,

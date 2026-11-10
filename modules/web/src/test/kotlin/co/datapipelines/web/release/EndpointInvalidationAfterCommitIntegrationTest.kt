@@ -37,6 +37,7 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
+import java.sql.Connection
 import java.sql.SQLException
 import java.time.Instant
 import java.util.UUID
@@ -172,37 +173,43 @@ class EndpointInvalidationAfterCommitIntegrationTest {
         LockHolder.open().use { c ->
             c.autoCommit = false
             try {
-                val stored =
-                    c.prepareStatement("SELECT count(*) FROM published_endpoints WHERE path_pattern = ?").use { ps ->
-                        ps.setString(1, path)
-                        ps.executeQuery().use {
-                            it.next()
-                            it.getInt(1)
-                        }
-                    }
-                val workspaceFree =
-                    try {
-                        c.prepareStatement("SELECT id FROM workspaces WHERE id = ? FOR NO KEY UPDATE NOWAIT").use { ps ->
-                            ps.setObject(1, workspace)
-                            ps.executeQuery().close()
-                        }
-                        true
-                    } catch (e: SQLException) {
-                        if (e.sqlState != LOCK_NOT_AVAILABLE) throw e
-                        c.rollback()
-                        false
-                    }
-                val registryFree =
-                    c.prepareStatement("SELECT pg_try_advisory_xact_lock(?)").use { ps ->
-                        ps.setLong(1, EndpointRegistryLock.KEY)
-                        ps.executeQuery().use {
-                            it.next()
-                            it.getBoolean(1)
-                        }
-                    }
-                Observation(stored, workspaceFree, registryFree)
+                Observation(committedRows(c), workspaceFree(c), registryFree(c))
             } finally {
                 c.rollback()
+            }
+        }
+
+    /** The committed rows for [path], as a fresh connection sees them. */
+    private fun committedRows(c: Connection): Int =
+        c.prepareStatement("SELECT count(*) FROM published_endpoints WHERE path_pattern = ?").use { ps ->
+            ps.setString(1, path)
+            ps.executeQuery().use {
+                it.next()
+                it.getInt(1)
+            }
+        }
+
+    /** True when the workspace row can be locked NOWAIT (nobody holds it); a `55P03` rolls back and answers false. */
+    private fun workspaceFree(c: Connection): Boolean =
+        try {
+            c.prepareStatement("SELECT id FROM workspaces WHERE id = ? FOR NO KEY UPDATE NOWAIT").use { ps ->
+                ps.setObject(1, workspace)
+                ps.executeQuery().close()
+            }
+            true
+        } catch (e: SQLException) {
+            if (e.sqlState != LOCK_NOT_AVAILABLE) throw e
+            c.rollback()
+            false
+        }
+
+    /** True when the registry's advisory key can be taken at once (nobody holds it). */
+    private fun registryFree(c: Connection): Boolean =
+        c.prepareStatement("SELECT pg_try_advisory_xact_lock(?)").use { ps ->
+            ps.setLong(1, EndpointRegistryLock.KEY)
+            ps.executeQuery().use {
+                it.next()
+                it.getBoolean(1)
             }
         }
 
