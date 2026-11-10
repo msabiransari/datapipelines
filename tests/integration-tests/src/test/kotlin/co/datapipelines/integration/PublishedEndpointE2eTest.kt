@@ -693,6 +693,88 @@ class PublishedEndpointE2eTest {
         restored.getString("data.body_hash") shouldBe apiHash
     }
 
+    // -------------------------------------------------------------------------------------
+    // #786 Skill — endpoints_create over MCP carries the exact pin (A06 over MCP)
+    // -------------------------------------------------------------------------------------
+
+    @Test
+    fun `endpoints_create over MCP pins the exact pipeline_version and the pin holds when CURRENT moves (A06 over MCP)`() {
+        val name = "test/mcp_a06"
+        val pipelineId = pipeline(pinnedPipelineBody("v1", name))
+        releaseNext(pipelineId, "v2", name)
+        val created = mcpTool("endpoints_create", mapOf("path" to "/nyc/v1/mcp-a06", "pipeline" to name, "pipeline_version" to 1))
+        created.getBoolean("result.isError") shouldBe false
+        releaseNext(pipelineId, "v3", name)
+
+        val apiId =
+            given()
+                .port(port)
+                .asSession(ADMIN_SESSION)
+                .queryParam("path", "/nyc/v1/mcp-a06")
+                .`when`()
+                .get("/api/v1/endpoints")
+                .then()
+                .statusCode(200)
+                .extract()
+                .jsonPath()
+                .getString("data.id")
+        val v1 = apiVersion(apiId, 1)
+        v1.getString("data.status") shouldBe "DRAFT"
+        v1.getInt("data.pipeline_version") shouldBe 1
+        // Authoring-enabled deployment: the draft is current and serves once enabled and bound (/nyc is bound).
+        val executionId =
+            given()
+                .port(port)
+                .header(API_KEY_HEADER, endpointKey)
+                .`when`()
+                .get("/api/nyc/v1/mcp-a06")
+                .then()
+                .statusCode(200)
+                .extract()
+                .header("DP-Execution-Id")
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .`when`()
+            .get("/api/v1/executions/$executionId")
+            .then()
+            .statusCode(200)
+            .body("data.pipeline_version", equalTo(1))
+    }
+
+    @Test
+    fun `endpoints_create over MCP without pipeline_version is refused and creates nothing`() {
+        val refused = mcpTool("endpoints_create", mapOf("path" to "/nyc/v1/mcp-unpinned", "pipeline" to "test/a06_pinned"))
+        // The SDK validates the call against the tool's input schema before the tool runs: a tool result with isError.
+        refused.getBoolean("result.isError") shouldBe true
+        refused.getString("result.content[0].text").contains("required property 'pipeline_version' not found") shouldBe true
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .queryParam("path", "/nyc/v1/mcp-unpinned")
+            .`when`()
+            .get("/api/v1/endpoints")
+            .then()
+            .statusCode(404)
+    }
+
+    /** One JSON-RPC `tools/call` over `/mcp` with the workspace's MCP key; the whole response. */
+    private fun mcpTool(
+        name: String,
+        arguments: Map<String, Any?>,
+    ) = given()
+        .port(port)
+        .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+        .contentType(ContentType.JSON)
+        .accept("application/json, text/event-stream")
+        .body(mapOf("jsonrpc" to "2.0", "id" to 1, "method" to "tools/call", "params" to mapOf("name" to name, "arguments" to arguments)))
+        .`when`()
+        .post("/mcp")
+        .then()
+        .statusCode(200)
+        .extract()
+        .jsonPath()
+
     private fun apiVersion(
         apiId: String,
         version: Int,

@@ -1,23 +1,30 @@
 ---
 area: endpoints
 layer: guide
-purpose: A released read-only pipeline has to answer a plain HTTP GET.
+purpose: One exact version of a read-only pipeline has to answer a plain HTTP GET.
 ---
 
 # Published endpoints
 
-A released, **read-only** pipeline can be served at a stable URL —
+An API serves one exact version of a **read-only** pipeline at a stable URL —
 `/api/<category>/<version>/<path…>` — so an application fetches rows with one `GET` and no
 event handling. The category is YOUR namespace (a business domain, a team); `v<number>` and
 `api` are reserved to the product and refused with `endpoint.path_reserved`. The version is
 one free-form segment (`v1` by convention); path variables come after it. Three steps:
-publish, bind a key, call it.
+create, bind a key, call it.
 
 ```
 endpoints_create {"path": "/finance/v1/revenue/{region}", "pipeline": "revenue_by_region",
-                  "timeout_seconds": 60}
+                  "pipeline_version": 3, "timeout_seconds": 60}
 → url: /api/finance/v1/revenue/{region}
 ```
+
+`endpoints_create` creates the API's first DRAFT version pinned to the exact `pipeline_version`
+given. Creation is an authoring operation: a deployment with authoring disabled refuses it
+(`endpoint.authoring_disabled`); there is no release to perform there. In an authoring-enabled
+deployment the draft is the entity's current version and serves under the normal runtime
+checks — the entity is enabled, the caller's key is bound, and the pinned pipeline version is
+eligible. The pin never moves when the pipeline's current version moves.
 
 The stored form is always the part after `/api`: write the path without the prefix (one
 prefix, if present, is stripped — never stored).
@@ -49,9 +56,8 @@ request, so it does not make `GET` unsafe. A `DML`/`DDL` node against a register
 — or a DQL node writing back to a datasource, which is a write wearing a read's type — is
 refused with `endpoint.pipeline_not_readonly` naming the node and the datasource. This is not
 a formality: `GET` is retried on timeout, preloaded by browsers and followed by crawlers, so a
-write behind one of these URLs would happen repeatedly and unbidden. The rule is re-checked on
-every serve, because an endpoint pins a pipeline and serves its latest RELEASED version — a
-later release can change the body.
+write behind one of these URLs would happen repeatedly and unbidden. The rule is checked when
+the API is created and re-checked on every serve of the exact pipeline version it pins.
 
 **An unknown query parameter is a `400`, on purpose.** `?start_dt=2024-01-01` on an endpoint
 declaring `start_date` is refused with `endpoint.request.parameter_unknown` rather than
@@ -83,9 +89,10 @@ fix.
 
 ## Common mistakes and references
 
-Treating a `202` as a failure and retrying into a second execution; publishing before the
-pipeline is released (an endpoint serves the released version only); trying to mint a key
-yourself — there is no tool for it; ask an admin.
+Treating a `202` as a failure and retrying into a second execution; expecting an API to follow
+the pipeline's newer versions (it serves the exact `pipeline_version` it pins — a new pin is a
+new API version, made by a person in the UI); omitting `pipeline_version` (refused); trying to
+mint a key yourself — there is no tool for it; ask an admin.
 
 - **`endpoints-tools`** — the area's tools, generated from their shipped descriptions.
 - **`executions`** — the runs an endpoint's key started, and the result cursor.
