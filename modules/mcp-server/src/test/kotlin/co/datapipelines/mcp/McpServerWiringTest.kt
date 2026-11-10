@@ -114,10 +114,7 @@ class McpServerWiringTest {
             CalculatorsGetTool(),
             // 074 — the four published-endpoint tools, appended the way the shipped bean does.
         ) +
-            EndpointsTools.all(
-                mockk<co.datapipelines.application.endpoints.EndpointPublishService>(),
-                mockk<co.datapipelines.pipeline.PipelineRepository>(),
-            ) +
+            EndpointsTools.all(mockk<co.datapipelines.application.endpoints.EndpointPublishService>()) +
             // 089 §A — the three dp-lake catalog tools, appended after the endpoint tools.
             LakeTableTools.all(
                 datasources,

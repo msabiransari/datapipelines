@@ -236,7 +236,7 @@ class McpServerAutoConfiguration {
                 cancellationService,
                 mcpCallAudit,
             ) +
-            EndpointsTools.all(endpointPublishService, pipelines) +
+            EndpointsTools.all(endpointPublishService) +
             LakeTableTools.all(datasources, lakeTableRegistryService) +
             SemanticsTools.all(datasources, semanticsService, introspector, lens) +
             DocsTools.all { docSet.getObject() } +

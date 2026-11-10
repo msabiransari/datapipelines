@@ -126,6 +126,8 @@ class ReleaseCoordinatorAuthorizationTest {
                 ReleaseFamily.PARAMETER_SET to Permission.PARAMETER_SET_RELEASE,
                 ReleaseFamily.VISUALIZATION to Permission.VISUALIZATION_RELEASE,
                 ReleaseFamily.DASHBOARD to Permission.DASHBOARD_RELEASE,
+                // #786 — the API family's own native release row (brief Roles table: cells copied from pipeline.release).
+                ReleaseFamily.ENDPOINT to Permission.ENDPOINT_RELEASE,
             )
     }
 }

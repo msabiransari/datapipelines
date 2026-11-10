@@ -5,7 +5,6 @@ import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.application.endpoints.EndpointRow
 import co.datapipelines.application.endpoints.PublishedEndpoint
 import co.datapipelines.pipeline.PipelineErrorCodes
-import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.typesystem.DatapipelinesException
 import io.modelcontextprotocol.spec.McpSchema
 
@@ -35,14 +34,11 @@ import io.modelcontextprotocol.spec.McpSchema
  */
 object EndpointsTools {
     /** The four tools, in `tools/list` order. */
-    fun all(
-        publishing: EndpointPublishService,
-        pipelines: PipelineRepository,
-    ): List<McpTool> =
+    fun all(publishing: EndpointPublishService): List<McpTool> =
         listOf(
-            CreateTool(publishing, pipelines),
-            ListTool(publishing, pipelines),
-            GetTool(publishing, pipelines),
+            CreateTool(publishing),
+            ListTool(publishing),
+            GetTool(publishing),
             DeleteTool(publishing),
         )
 
@@ -53,7 +49,7 @@ object EndpointsTools {
      * version answers them null.
      */
     @Suppress("UnusedParameter") // the receiver shape every caller passes; the pin is the version's own name now
-    internal fun PublishedEndpoint.toResponse(pipelines: PipelineRepository): Map<String, Any?> =
+    internal fun PublishedEndpoint.toResponse(): Map<String, Any?> =
         mapOf(
             "path" to pathPattern,
             "pipeline" to current?.body?.pipelineName,
@@ -71,8 +67,7 @@ object EndpointsTools {
      * no parse. Unpublishing it (`endpoints_delete`) is the fix. The path is echoed bounded too
      * (#286, [EndpointPath.echoBounded]).
      */
-    @Suppress("UnusedParameter") // the receiver shape every caller passes; the pin is the version's own name now
-    internal fun EndpointRow.Legacy.toLegacyResponse(pipelines: PipelineRepository): Map<String, Any?> {
+    internal fun EndpointRow.Legacy.toLegacyResponse(): Map<String, Any?> {
         val echoed = EndpointPath.echoBounded(pathPattern)
         return mapOf(
             "path" to echoed,
@@ -87,7 +82,6 @@ object EndpointsTools {
     /** `endpoints_create` (mcp-server.md §6.2.23). Permission: `endpoint.publish`. Mutating. */
     class CreateTool(
         private val publishing: EndpointPublishService,
-        private val pipelines: PipelineRepository,
     ) : McpTool {
         override val definition: McpSchema.Tool =
             McpTools.tool(
@@ -135,7 +129,7 @@ object EndpointsTools {
                     timeoutSeconds =
                         args.rawMap()["timeout_seconds"]?.let { args.int("timeout_seconds", MIN_TIMEOUT, MIN_TIMEOUT, MAX_TIMEOUT) },
                     description = args.string("description").orEmpty(),
-                ).toResponse(pipelines)
+                ).toResponse()
 
         private companion object {
             const val MIN_TIMEOUT = 1
@@ -162,7 +156,6 @@ object EndpointsTools {
     /** `endpoints_list` (mcp-server.md §6.2.24). Permission: `endpoint.read`. */
     class ListTool(
         private val publishing: EndpointPublishService,
-        private val pipelines: PipelineRepository,
     ) : McpTool {
         override val definition: McpSchema.Tool =
             McpTools.tool(
@@ -185,8 +178,8 @@ object EndpointsTools {
             mapOf(
                 "endpoints" to
                     (
-                        publishing.list(ctx.principal).map { it.toResponse(pipelines) } +
-                            publishing.listLegacy(ctx.principal).map { it.toLegacyResponse(pipelines) }
+                        publishing.list(ctx.principal).map { it.toResponse() } +
+                            publishing.listLegacy(ctx.principal).map { it.toLegacyResponse() }
                     ),
             )
     }
@@ -194,7 +187,6 @@ object EndpointsTools {
     /** `endpoints_get` (mcp-server.md §6.2.25). Permission: `endpoint.read`. */
     class GetTool(
         private val publishing: EndpointPublishService,
-        private val pipelines: PipelineRepository,
     ) : McpTool {
         override val definition: McpSchema.Tool =
             McpTools.tool(
@@ -217,7 +209,7 @@ object EndpointsTools {
                         message = "No endpoint published at '$path'.",
                         details = mapOf("path" to path),
                     )
-            return endpoint.toResponse(pipelines)
+            return endpoint.toResponse()
         }
     }
 
