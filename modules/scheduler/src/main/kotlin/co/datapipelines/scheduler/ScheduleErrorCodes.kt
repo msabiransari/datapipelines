@@ -34,6 +34,12 @@ object ScheduleErrorCodes {
     /** 409 — the workspace already holds `max-schedules-per-workspace` live schedules (B18, L4). */
     const val LIMIT_PER_WORKSPACE = "schedule.limit.per_workspace"
 
+    /**
+     * 409 — #841 (G0, dependency-graph record §15.1): a create, or an edit that changes the target reference, waited
+     * past the writer guard's cumulative `lock-wait-seconds` for its workspace; nothing was written.
+     */
+    const val WRITE_BUSY = "schedule.write.busy"
+
     /** 404 — no notification delivery with that id on that run (#442b). */
     const val NOTIFICATION_NOT_FOUND = "schedule.notification.not_found"
 
@@ -104,6 +110,7 @@ object ScheduleErrorCodes {
             BLOCKED,
             NOT_BLOCKED,
             LIMIT_PER_WORKSPACE,
+            WRITE_BUSY,
             NOTIFICATION_NOT_FOUND,
             NOTIFICATION_NOT_RESENDABLE,
             NOTIFICATION_BACKLOG_FULL,

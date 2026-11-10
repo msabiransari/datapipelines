@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.85 (revised — see Change Log)
+**Status:** v1.86 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-11-08
@@ -1214,6 +1214,7 @@ Defined and described in [Datasources §9–10](datasources.md#9-validation-rule
 | `datasource.validation.workspace_forbidden` | 400 | Workspaces D8 refusal: non-admin attempted the `global` flag (or any mutation of a global datasource), a `readonly` flip on a global datasource, or a workspace binding the caller is not in — including member CUD while `member-datasources-enabled` is off (workspaces design §8) |
 | `datasource.in_use` | 409 | Delete blocked: pipelines reference this datasource |
 | `datasource.managed` | 409 | An edit or a delete of the managed lake datasource, or a revoke of its grant to a workspace (`properties.dialect.managed = true`, [Datasources §8C.10](datasources.md#8c10-the-managed-lake-datasource)): the server creates and re-syncs that row from `datapipelines.lake.*` at every boot, so no surface may change it, and the server, not a person, holds its workspace grants (#823). The edit and delete are refused in the registry, below every surface (#818); the revoke is refused by the REST and UI grant handlers |
+| `datasource.write.busy` | 409 | A datasource definition, credential, delete or grant write (REST, UI, bootstrap, the managed lake's registrar, a workspace creation's managed grant) waited past `datapipelines.release.dependencies.lock-wait-seconds` — ONE cumulative budget across the datasource's prerequisite key and every affected workspace — for another writer holding them (#841, dependency-graph writer protocol). Nothing was written; `details` is exactly `{lock_wait_seconds}`. A boot or repair caller fails closed with the same code and retries on its own cadence |
 | `datasource.not_found` | 404 | Datasource name unknown on a read/mutate/test path (added 2026-08-11, gate C) |
 | `datasource.grant_required` | 404 | The datasource exists on the instance but is not GRANTED to the caller's workspace ([RBAC design §4](superpowers/specs/2026-09-10-rbac-design.md), D-R7). A 404 and not a 403 because the 404 rule has no exception for datasources: an ungranted datasource is INVISIBLE, and "this exists, you may not see it" turns the flat, global datasource namespace into an enumeration oracle — every name on the instance probeable one request at a time |
 | `datasource.driver_not_loaded` | 400 | JDBC driver JAR for the dialect is not on the classpath |
@@ -1382,6 +1383,7 @@ response whose `details.errors[]` names every defect at once.
 | `endpoint.path_invalid` | 400 | `path_pattern` is not a legal path ([REST API §19.1](rest-api.md#191-the-path-grammar)): wrong segment alphabet, fewer than three or more than 10 segments, over 200 characters, a trailing slash, a `**`, a malformed `{variable}`, or a variable in the category or version segment |
 | `endpoint.path_reserved` | 400 | The pattern's category segment is reserved (172, R-EP5): it matches `v[0-9]+` — the product's own API namespace — or it is the literal `api`. `details.segment` names it. Re-checked when the serve registry is built, so a row written around the publish path is never served |
 | `endpoint.path_conflict` | 409 | The pattern could match the same URL as an already-published one (`/a/{x}` against `/a/b`); `details.conflicting_path` names the other. Ambiguity is refused, never resolved by precedence — at request time at most one pattern may match |
+| `endpoint.write.busy` | 409 | A publish or unpublish waited past `datapipelines.release.dependencies.lock-wait-seconds` — one cumulative budget across its workspace's writer guard and the deployment-wide endpoint registry key — for another writer holding them (#841). Nothing was written; `details` is exactly `{lock_wait_seconds}` |
 | `endpoint.path_variable_unknown` | 400 | A `{variable}` in the path names no declared parameter of the pipeline's released version |
 | `endpoint.pipeline_not_readonly` | 409 | The pipeline is not side-effect-free: a `DML`/`DDL` node whose `source` is a registered datasource (`tempdb` is exempt — #171), or a DQL node writing back to a datasource, transitively through `PIPELINE` children; `details.node_id` names the offender. Raised at publish. The SAME code is returned as `503` at serve time ([REST API §19.4](rest-api.md#194-the-response)) when a later release breaks the rule under a live endpoint — the endpoint is not run |
 | `endpoint.pipeline_not_released` | 503 | The published pipeline has no servable version: nothing its pointer names is eligible — RELEASED always, a DRAFT only under development posture ([Versioning D63](versioning.md#2-decision-log)) |
@@ -1469,6 +1471,7 @@ The scheduler's refusals (#9; [Scheduler](scheduler.md), the scheduler design re
 | `schedule.notification.not_resendable` | 409 | resend of a notification that is `pending` or `accepted` — only a `failed` or `uncertain` one can be queued again (#442b); `details.state` names the state it is in |
 | `schedule.notification.backlog_full` | 409 | resend refused at the strict deployment pending-delivery cap; `details.pending` and `details.backlog_max`; the delivery stays unchanged |
 | `schedule.limit.per_workspace` | 409 | the workspace already holds `datapipelines.scheduler.max-schedules-per-workspace` live schedules |
+| `schedule.write.busy` | 409 | A create, or an edit that changes the schedule's target reference, waited past `datapipelines.release.dependencies.lock-wait-seconds` for its workspace's writer guard, which it holds across the target's validation and the write (#841, dependency-graph record §15.1). Nothing was written; `details` is exactly `{lock_wait_seconds}`. Edits that keep the target, deletes and run bookkeeping are not guarded |
 | `schedule.validation.request_invalid` | 400 | a missing or ill-typed request field |
 | `schedule.validation.name_invalid` | 400 | the name breaks the folder-path grammar pipelines and templates use |
 | `schedule.validation.cron_invalid` | 400 | not a five-field Unix cron — a seconds field, the disabled pattern `-` and an out-of-range field are all this |
@@ -1999,6 +2002,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-10 | v1.86 | #841 G0 writer protocol | §13.8 gains `datasource.write.busy` (409), §13.14 `endpoint.write.busy` (409), §13.19 `schedule.write.busy` (409): the exhausted writer-guard wait of the newly guarded datasource, endpoint and schedule writers, with the release families' message and `{lock_wait_seconds}` details, landed in the SAME commit as their constants and `ApiErrorCatalog` rows (merged §13 row count 477 → 480). |
 | 2026-11-08 | v1.85 | #823 managed grant at creation | §13.8: `datasource.managed` (409) also answers a revoke of the managed lake's grant (REST `DELETE .../grants/{workspace}` and the UI's revoke). No new code. |
 | 2026-11-04 | v1.84 | 818 (#818) | dp-lake P5 managed reads. §13.8 gains `datasource.managed` (409); §13.25 gains `lake.unavailable` (503) and `lake.table.unavailable` (409), landed in the SAME commit as their `PipelineErrorCodes` constants and `ApiErrorCatalog` rows (merged §13 row count 475 → 477; P4 and P5 share `lake.table.unavailable`). |
 | 2026-11-05 | v1.83 | 799 (#799) | §13.25 adds admission, target status and immutable delivery identity refusals. |

@@ -49,7 +49,11 @@ class DatasourceCreateServiceTest {
      * green precisely when the registration forgot its grant, and the datasource would then be
      * registered into a workspace that cannot see it.
      */
-    private val grants = mockk<co.datapipelines.datasources.DatasourceGrantRepository>(relaxed = true)
+    private val grants =
+        mockk<co.datapipelines.datasources.DatasourceGrantRepository>(relaxed = true) {
+            // #841: the create joins the grant repository's writer guarding; unit tests run it unguarded (no transaction).
+            every { writes } returns co.datapipelines.datasources.DatasourceWriteGuarding.UNGUARDED
+        }
     private val otherWorkspaceId = UUID.randomUUID()
 
     private val principal =

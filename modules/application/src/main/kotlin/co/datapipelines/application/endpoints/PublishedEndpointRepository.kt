@@ -172,9 +172,10 @@ class PublishedEndpointRepository(
     private companion object {
         /**
          * The advisory-lock key the registry serialises publishes on. An arbitrary constant, but
-         * a NAMED one: any other advisory lock this application takes must not reuse it.
+         * a NAMED one: any other advisory lock this application takes must not reuse it. Shared
+         * with the writer guard's class-3 acquisition (#841), so both name the same lock.
          */
-        const val REGISTRY_LOCK_KEY = 74_0001L
+        const val REGISTRY_LOCK_KEY = co.datapipelines.typesystem.guard.EndpointRegistryLock.KEY
 
         val SELECT_COLUMNS =
             """

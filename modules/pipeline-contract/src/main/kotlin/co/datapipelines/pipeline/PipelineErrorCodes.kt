@@ -771,6 +771,13 @@ object PipelineErrorCodes {
 
         /** #818 — an edit or delete of the managed lake datasource, which the server owns (§13.8). 409. */
         const val MANAGED = "datasource.managed"
+
+        /**
+         * #841 (G0) — a datasource definition, credential, delete or grant write waited past the writer guard's
+         * cumulative `lock-wait-seconds` for the datasource's prerequisite key or an affected workspace; nothing was
+         * written (§13.8). 409; `details` exactly `{lock_wait_seconds}`.
+         */
+        const val WRITE_BUSY = "datasource.write.busy"
         const val NOT_FOUND = "datasource.not_found"
         const val DRIVER_NOT_LOADED = "datasource.driver_not_loaded"
 
@@ -1335,6 +1342,13 @@ object PipelineErrorCodes {
      */
     object Endpoint {
         /**
+         * #841 (G0) — a publish or unpublish waited past the writer guard's cumulative `lock-wait-seconds` for its
+         * workspace or the endpoint registry key; nothing was written (§13.14). 409; `details` exactly
+         * `{lock_wait_seconds}`.
+         */
+        const val WRITE_BUSY = "endpoint.write.busy"
+
+        /**
          * §4.1 — a `path_pattern` that is not a legal path: wrong segment alphabet, fewer than
          * three or more than 10 segments, over 200 characters, a trailing slash, a `**`, a
          * malformed `{variable}`, or a variable in the category or version segment (R-EP5).
@@ -1592,6 +1606,13 @@ object PipelineErrorCodes {
 
         /** 409 — the workspace already holds `max-schedules-per-workspace` live schedules. */
         const val LIMIT_PER_WORKSPACE = "schedule.limit.per_workspace"
+
+        /**
+         * 409 — #841 (G0): a create, or an edit that changes the schedule's target reference, waited past the writer
+         * guard's cumulative `lock-wait-seconds` for its workspace; nothing was written. `details` exactly
+         * `{lock_wait_seconds}`.
+         */
+        const val WRITE_BUSY = "schedule.write.busy"
 
         /** 404 — no notification delivery with that id on that run (#442b). */
         const val NOTIFICATION_NOT_FOUND = "schedule.notification.not_found"

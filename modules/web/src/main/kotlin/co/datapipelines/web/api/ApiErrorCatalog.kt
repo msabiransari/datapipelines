@@ -268,6 +268,10 @@ object ApiErrorCatalog {
             // #818 (dp-lake record §6) — the managed lake datasource is configuration's, so an edit or a delete
             // conflicts with the server's ownership of the row: 409, like `datasource.in_use`.
             PipelineErrorCodes.Datasource.MANAGED to HttpStatus.CONFLICT,
+            // #841 (G0) — an exhausted writer-guard wait: another change holds the lock, retry later, like every
+            // `<family>.release.busy`. `datasource.` and `endpoint.` have no 409 family default; `schedule.` does.
+            PipelineErrorCodes.Datasource.WRITE_BUSY to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Endpoint.WRITE_BUSY to HttpStatus.CONFLICT,
             // #818 (record §10) — the catalog read a new managed generation needs failed, so none was built:
             // the metadata database is the dependency, and the condition is temporary.
             PipelineErrorCodes.Lake.UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
@@ -585,6 +589,10 @@ object ApiErrorCatalog {
 
     private const val GENERIC_USER_MESSAGE = "Something went wrong on our side. Quote the correlation id when reporting this."
 
+    /** #841 (G0): the exhausted writer-guard wait — another change holds the lock; nothing was written, retry. */
+    private const val WRITER_BUSY_USER_MESSAGE =
+        "Another change in this workspace is in progress. Nothing was written; try again in a moment."
+
     /** versioning §5.5: both authoring-disabled mirrors share one actionable sentence. */
     private const val RECEIVER_USER_MESSAGE =
         "This server doesn't allow creating or editing — it only receives promoted content. " +
@@ -746,6 +754,10 @@ object ApiErrorCatalog {
                 "This connection's database user isn't allowed to read that table. Ask the database owner for access.",
             PipelineErrorCodes.Datasource.LAKE_TABLE_UNAVAILABLE to
                 "A registered table on this data lake couldn't be read. The recorded reason is in the error details.",
+            // #841 (G0) — the exhausted writer-guard wait; the family lines do not say "try again".
+            PipelineErrorCodes.Datasource.WRITE_BUSY to WRITER_BUSY_USER_MESSAGE,
+            PipelineErrorCodes.Endpoint.WRITE_BUSY to WRITER_BUSY_USER_MESSAGE,
+            PipelineErrorCodes.Schedule.WRITE_BUSY to WRITER_BUSY_USER_MESSAGE,
             // #818 — the "lake." family line ("busy with another change") describes neither of these.
             PipelineErrorCodes.Datasource.MANAGED to
                 "This connection is the server's managed lake. It is set in the server configuration and can't be changed here.",

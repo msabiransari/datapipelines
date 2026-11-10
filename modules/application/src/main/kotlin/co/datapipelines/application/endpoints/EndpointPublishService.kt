@@ -9,6 +9,8 @@ import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.guard.MetadataWriterGuard
+import org.springframework.transaction.support.TransactionOperations
 import java.time.Instant
 import java.util.UUID
 
@@ -53,7 +55,28 @@ class EndpointPublishService(
      * Nullable so the deployments and tests wired before 178 keep the unlensed behaviour.
      */
     private val lens: PromoterLens? = null,
+    /**
+     * #841 (G0, dependency-graph record §15.1) — the metadata transaction the guarded publish and unpublish run in
+     * (joining the caller's when there is one: the REST routes are transactional). Null runs the block bare — the
+     * directly constructed unit-test shape, with [writeGuard] at [MetadataWriterGuard.NONE].
+     */
+    private val transactions: TransactionOperations? = null,
+    /**
+     * #841 — the writer guard: the publishing workspace FIRST (pipeline writers take the same row, so the pipeline,
+     * its released version and its read-only shape cannot change between validation and insert), then the single
+     * deployment-wide registry key around the overlap check and the insert/delete. Exhausting the cumulative wait
+     * refuses `endpoint.write.busy` (409) with nothing written.
+     */
+    private val writeGuard: MetadataWriterGuard = MetadataWriterGuard.NONE,
 ) {
+    /** [block] in the metadata transaction (joined when one is open), or bare when none is wired. */
+    private fun <T> inTransaction(block: () -> T): T {
+        val tx = transactions ?: return block()
+        var result: Result<T>? = null
+        tx.executeWithoutResult { result = Result.success(block()) }
+        return requireNotNull(result) { "the transaction callback did not run" }.getOrThrow()
+    }
+
     /** The §5.5 clamp, passed in so `modules/application` reads no configuration itself. */
     data class TimeoutBounds(
         val defaultSeconds: Int,
@@ -99,27 +122,33 @@ class EndpointPublishService(
             )
         }
 
-        val record = pipelineRepository.findByName(workspaceId, pipelineName) ?: throw pipelineNotFound(pipelineName)
-        val version = releasedVersion(workspaceId, record) ?: throw notReleased(pipelineName)
-
-        requireReadOnly(version, workspaceId, pipelineName)
-        requireDeclaredVariables(parsed, version, pipelineName, pathPattern)
-
         val endpoint =
-            endpoints.insert(
-                PublishedEndpoint.of(
-                    id = UUID.randomUUID(),
-                    workspaceId = workspaceId,
-                    pathPattern = parsed.pattern,
-                    pipelineId = record.id,
-                    timeoutSeconds = timeouts.clamp(timeoutSeconds),
-                    description = description,
-                    isEnabled = true,
-                    createdBy = principal.userId,
-                    createdAt = Instant.now(),
-                    updatedAt = Instant.now(),
-                ),
-            )
+            inTransaction {
+                // #841: workspace guard → validation under it → registry key → overlap check + insert (record §15.1
+                // order: workspace rows, then the single registry key).
+                writeGuard.workspaces(listOf(workspaceId), PipelineErrorCodes.Endpoint.WRITE_BUSY)
+                val record = pipelineRepository.findByName(workspaceId, pipelineName) ?: throw pipelineNotFound(pipelineName)
+                val version = releasedVersion(workspaceId, record) ?: throw notReleased(pipelineName)
+
+                requireReadOnly(version, workspaceId, pipelineName)
+                requireDeclaredVariables(parsed, version, pipelineName, pathPattern)
+
+                writeGuard.endpointRegistry(PipelineErrorCodes.Endpoint.WRITE_BUSY)
+                endpoints.insert(
+                    PublishedEndpoint.of(
+                        id = UUID.randomUUID(),
+                        workspaceId = workspaceId,
+                        pathPattern = parsed.pattern,
+                        pipelineId = record.id,
+                        timeoutSeconds = timeouts.clamp(timeoutSeconds),
+                        description = description,
+                        isEnabled = true,
+                        createdBy = principal.userId,
+                        createdAt = Instant.now(),
+                        updatedAt = Instant.now(),
+                    ),
+                )
+            }
 
         // AFTER the write, so a peer that reloads on the message cannot read the pre-write state.
         registry.invalidate()
@@ -159,7 +188,14 @@ class EndpointPublishService(
         // the same not-found discipline every workspace-scoped read follows.
         if (existing.workspaceId != workspaceId && !principal.isSuperAdmin) return false
 
-        val removed = endpoints.deleteByPath(stored)
+        // #841: the delete changes path absence, so it takes the row's workspace guard and the registry key like a
+        // publish; the row is re-read under them, so a concurrent unpublish/republish is judged on what is stored.
+        val removed =
+            inTransaction {
+                writeGuard.workspaces(listOf(existing.workspaceId), PipelineErrorCodes.Endpoint.WRITE_BUSY)
+                writeGuard.endpointRegistry(PipelineErrorCodes.Endpoint.WRITE_BUSY)
+                endpoints.findRowByPath(stored)?.takeIf { it.id == existing.id }?.let { endpoints.deleteByPath(stored) } ?: false
+            }
         if (removed) {
             registry.invalidate()
             audit.log(

@@ -12,6 +12,7 @@ import co.datapipelines.datasources.DatasourceReference
 import co.datapipelines.datasources.DatasourceReferences
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceRepository
+import co.datapipelines.datasources.DatasourceWriteGuarding
 import co.datapipelines.datasources.DatasourceValidator
 import co.datapipelines.datasources.DefaultDatasourceRegistry
 import co.datapipelines.datasources.DialectAdapters
@@ -89,8 +90,24 @@ import co.datapipelines.pipeline.DatasourceRegistry as ContractDatasourceRegistr
 // `datasourceUpdateService`.
 @Suppress("TooManyFunctions")
 class DomainConfiguration {
+    /**
+     * #841 (G0, dependency-graph record §15.1) — the datasource writers' guarding: the datasource's prerequisite key,
+     * then its affected workspaces, in the metadata transaction, on the ONE writer guard. Shared by the definition and
+     * grant repositories (and the freshness tick's bounded grant repository), never [DatasourceWriteGuarding.UNGUARDED].
+     */
     @Bean
-    fun datasourceRepository(jdbc: NamedParameterJdbcTemplate): DatasourceRepository = DatasourceRepository(jdbc)
+    fun datasourceWriteGuarding(
+        jdbc: NamedParameterJdbcTemplate,
+        transactionManager: org.springframework.transaction.PlatformTransactionManager,
+        writeGuard: co.datapipelines.typesystem.guard.MetadataWriterGuard,
+    ): DatasourceWriteGuarding =
+        DatasourceWriteGuarding(jdbc, org.springframework.transaction.support.TransactionTemplate(transactionManager), writeGuard)
+
+    @Bean
+    fun datasourceRepository(
+        jdbc: NamedParameterJdbcTemplate,
+        writes: DatasourceWriteGuarding,
+    ): DatasourceRepository = DatasourceRepository(jdbc, writes = writes)
 
     /**
      * `datasource_workspaces` (metadata-db §4.16) — the table that replaced
@@ -99,8 +116,10 @@ class DomainConfiguration {
      * management half.
      */
     @Bean
-    fun datasourceGrantRepository(jdbc: NamedParameterJdbcTemplate): co.datapipelines.datasources.DatasourceGrantRepository =
-        co.datapipelines.datasources.DatasourceGrantRepository(jdbc)
+    fun datasourceGrantRepository(
+        jdbc: NamedParameterJdbcTemplate,
+        writes: DatasourceWriteGuarding,
+    ): co.datapipelines.datasources.DatasourceGrantRepository = co.datapipelines.datasources.DatasourceGrantRepository(jdbc, writes)
 
     /** The D8 rules the REST datasource surface and the UI's form partial share (workspaces design §8). */
     @Bean

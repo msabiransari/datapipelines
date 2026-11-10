@@ -1,6 +1,7 @@
 package co.datapipelines.scheduler
 
 import co.datapipelines.pipeline.PipelineNameGrammar
+import co.datapipelines.typesystem.guard.MetadataWriterGuard
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.dao.DuplicateKeyException
@@ -42,6 +43,14 @@ class ScheduleService(
     /** #442b — the outbox: a run's deliveries for its detail, and the explicit resend. */
     private val notifications: NotificationRepository,
     /**
+     * #841 (G0, dependency-graph record §15.1) — the metadata writer guard. A create, and an edit that changes the
+     * target reference, acquire the schedule's workspace FIRST in one metadata transaction, validate the reference
+     * through the executor UNDER it, then write (insert / revision CAS): revision CAS alone sees other schedule edits,
+     * never a pipeline discard or purge. Production wires the JDBC guard; [MetadataWriterGuard.NONE] is the directly
+     * constructed test default.
+     */
+    private val writeGuard: MetadataWriterGuard = MetadataWriterGuard.NONE,
+    /**
      * The system identity's user id (R2) — every run's `actor_user_id`. LAST on purpose: a
      * call site may pass it as a trailing lambda, which binds to the final parameter (#250
      * lane note — placing [targetReads] after it silently stole every trailing lambda).
@@ -71,9 +80,13 @@ class ScheduleService(
                 ?.takeIf { notifications.recipients.isEmpty() && notifications.events == NotificationEvent.DEFAULT }
                 ?.let { hashOf(request, null) }
         key?.let { replayCreate(workspaceId, actor, it, hash!!, legacyHash) }?.let { return it }
-        val validated = validate(workspaceId, request)
         return try {
             transactions.execute {
+                // #841: the writer guard first, then the reference's validation under it, then the insert — one
+                // transaction, so a pipeline writer (which takes the same workspace guard) can neither interleave
+                // between the target's validation and the insert nor be overtaken by it.
+                writeGuard.workspaces(listOf(workspaceId), ScheduleErrorCodes.WRITE_BUSY)
+                val validated = validate(workspaceId, request)
                 // The workspace row's lock serialises the cap's count with every concurrent insert
                 // (#253): count-then-insert under read committed alone lets N creates at the cap
                 // all pass the count and overshoot. One row, one workspace, held to the commit.
@@ -127,6 +140,29 @@ class ScheduleService(
     ): Schedule {
         val current = schedules.findLive(workspaceId, id) ?: throw notFound(id)
         if (current.revision != expectedRevision) throw revisionConflict(current)
+        // #841 (record §15.1): an edit that leaves the executor and its payload — the reference — unchanged keeps
+        // revision CAS alone; one that sets or changes the reference joins the writer protocol: guard, validate the
+        // reference under it, revision-CAS write, all in one metadata transaction.
+        if (request.executor == current.executorId && request.payload == current.payload) {
+            return edit(workspaceId, id, actor, expectedRevision, request, current)
+        }
+        return checkNotNull(
+            transactions.execute {
+                writeGuard.workspaces(listOf(workspaceId), ScheduleErrorCodes.WRITE_BUSY)
+                edit(workspaceId, id, actor, expectedRevision, request, current)
+            },
+        )
+    }
+
+    /** [update]'s validate-then-write: the caller decides whether it runs under the writer guard. */
+    private fun edit(
+        workspaceId: UUID,
+        id: UUID,
+        actor: UUID,
+        expectedRevision: Int,
+        request: ScheduleRequest,
+        current: Schedule,
+    ): Schedule {
         val validated = validate(workspaceId, request)
         val notifications =
             NotificationSettings.resolve(request.notifications, current, properties.notifications.maxRecipients, notificationPolicy)
