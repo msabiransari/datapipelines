@@ -84,7 +84,10 @@ class ReleaseAdaptersTest {
                 context = context,
                 present = listOf(ReleaseDependencyFamilies.request(root), ReleaseDependencyFamilies.request(child)),
                 absent = listOf(absent),
-                referenceFields = mapOf(ReleaseDependencyFamilies.request(root) to setOf("nodes[0].template", "nodes[1].pipeline")),
+                references =
+                    ProviderConformance.References.Fields(
+                        mapOf(ReleaseDependencyFamilies.request(root) to setOf("nodes[0].template", "nodes[1].pipeline")),
+                    ),
             )
         ProviderConformance.check(fixture).shouldBeEmpty()
     }

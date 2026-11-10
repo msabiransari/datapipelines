@@ -74,7 +74,7 @@ class RegistryAndSyntheticFamilyTest {
                 context = context(),
                 present = listOf(present),
                 absent = listOf(exact(TEST_WIDGET, "nothing", 1)),
-                referenceFields = mapOf(present to setOf("parts[0]", "parts[1]")),
+                references = ProviderConformance.References.Fields(mapOf(present to setOf("parts[0]", "parts[1]"))),
             )
         ProviderConformance.check(fixture).shouldBeEmpty()
     }
@@ -88,13 +88,19 @@ class RegistryAndSyntheticFamilyTest {
         broken.unsupported = setOf(absent)
         val violations =
             ProviderConformance.check(
-                ProviderConformance.Fixture(broken.descriptor(), context(), listOf(present), listOf(absent), mapOf(present to setOf("y"))),
+                ProviderConformance.Fixture(
+                    broken.descriptor(),
+                    context(),
+                    listOf(present),
+                    listOf(absent),
+                    ProviderConformance.References.Fields(mapOf(present to setOf("y"))),
+                ),
             )
         violations.any { "not MISSING" in it } shouldBe true
         violations.any { "is not a §6 row" in it } shouldBe true
         violations.any { "field y" in it } shouldBe true
-        ProviderConformance
-            .check(ProviderConformance.Fixture(broken.descriptor(), context(), emptyList(), emptyList(), emptyMap()))
-            .size shouldBe 3 // vacuous fixtures are refused, never green
+        val nothing = ProviderConformance.References.Fields(emptyMap())
+        val vacuous = ProviderConformance.Fixture(broken.descriptor(), context(), emptyList(), emptyList(), nothing)
+        ProviderConformance.check(vacuous).size shouldBe 3 // vacuous fixtures are refused, never green
     }
 }
