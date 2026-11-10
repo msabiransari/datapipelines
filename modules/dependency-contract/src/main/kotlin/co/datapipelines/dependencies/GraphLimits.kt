@@ -15,7 +15,11 @@ data class GraphLimits(
     val nodes: Int,
     /** Edge occurrences. */
     val edges: Int,
-    /** Retained non-LIMIT diagnostics (and the cycle trail's length). */
+    /**
+     * Retained non-LIMIT diagnostics; the overflow appends one LIMIT `diagnostics`. It does not bound a cycle's trail —
+     * the trail is the whole cycle on the active path, already bounded by [depth] + 1 — and the FIRST cycle and every
+     * LIMIT are retained beyond it, because a release plan's refusal is decided by them.
+     */
     val diagnostics: Int,
     /** The serialized payload budget a surface enforces after projection (§7.2 step 8); the walk does not serialize. */
     val wireBytes: Int,
