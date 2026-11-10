@@ -2,6 +2,7 @@ package co.datapipelines.typesystem.guard
 
 import java.nio.ByteBuffer
 import java.security.MessageDigest
+import java.time.Duration
 import java.util.UUID
 
 /**
@@ -54,6 +55,19 @@ interface MetadataWriterGuard {
      */
     fun <T> withinOneDeadline(block: () -> T): T
 
+    /**
+     * [withinOneDeadline] under a caller's CEILING (#841 R4): the scope's deadline is no later than [ceiling] after the
+     * scope OPENS — `D = min(t0 + bound, opened + ceiling)` — so a caller whose own wall-clock budget is shorter than
+     * the configured lock wait never waits longer than that budget, whatever the bound is set to. Its first user is the
+     * managed lake's freshness repair, which shares the jobs' one `dp-scheduled` thread: its lock waits, its discovery
+     * read and its INSERT together fit one statement bound. Nested in an open scope, a ceiling only ever TIGHTENS the
+     * open scope's deadline, never loosens it.
+     */
+    fun <T> withinOneDeadline(
+        ceiling: Duration,
+        block: () -> T,
+    ): T
+
     companion object {
         /** No database, no lock — the unit-test construction default. Production never wires it. */
         val NONE: MetadataWriterGuard =
@@ -71,6 +85,11 @@ interface MetadataWriterGuard {
                 override fun endpointRegistry(busyCode: String) = Unit
 
                 override fun <T> withinOneDeadline(block: () -> T): T = block()
+
+                override fun <T> withinOneDeadline(
+                    ceiling: Duration,
+                    block: () -> T,
+                ): T = block()
             }
     }
 }

@@ -7,7 +7,10 @@ import co.datapipelines.executor.ExecutorConfig
 import co.datapipelines.parameters.ParametersConfig
 import co.datapipelines.visualization.DashboardRuntimeConfig
 import co.datapipelines.web.dashboards.runtime.DashboardRuntimeConfiguration
+import co.datapipelines.web.release.JdbcReleaseMutationGuard
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainAll
+import io.kotest.matchers.longs.shouldBeInRange
 import io.kotest.matchers.shouldBe
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
@@ -15,7 +18,10 @@ import io.mockk.mockk
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.beans.factory.support.StaticListableBeanFactory
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import org.springframework.jdbc.datasource.DataSourceTransactionManager
+import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
 import java.util.UUID
 
@@ -225,6 +231,58 @@ class ScheduledJobsStatementBoundsTest {
     }
 
     /**
+     * #841 R4 — the same production bean with the REAL writer guard (configured at the 60 s maximum
+     * `lock-wait-seconds` admits) and a real transaction manager over the recording DataSource: the regrant's whole
+     * transaction runs on ONE connection that carries the tick's socket bound from its FIRST statement, the guard's
+     * statements included, and every wait it can start is capped at the 5 s budget — the guard's `lock_timeout` grants
+     * and the budget's `statement_timeout` settings alike — though the guard alone would grant 60 000 ms.
+     */
+    @Test
+    fun `the guarded regrant carries the freshness socket bound from its first statement and caps every wait at 5 s - #841 R4`() {
+        val recording = RecordingTimeoutDataSource(LAKE, recordPlainStatements = true)
+        val jdbc = NamedParameterJdbcTemplate(recording)
+        val registrar = scheduledJobsRegistrar(jdbc, LAKE_PROPERTIES).also { it.register() }
+        recording.clear()
+        val datasources = mockk<DatasourceRegistry> { every { refreshManagedGenerations(any()) } returns 0 }
+        val writes =
+            co.datapipelines.datasources.DatasourceWriteGuarding(
+                jdbc,
+                TransactionTemplate(DataSourceTransactionManager(recording)),
+                JdbcReleaseMutationGuard(JdbcTemplate(recording), MAX_LOCK_WAIT_SECONDS),
+            )
+
+        PoolReaperSchedulingConfiguration()
+            .managedLakeFreshnessScheduler(datasources, registrar, jdbc, providerOf(LAKE_PROPERTIES), writes)
+            .tick()
+
+        val trace = recording.trace()
+        withClue("the regrant's statements, in order: $trace") {
+            trace.first().first shouldBe "SELECT current_setting('statement_timeout')"
+            trace.map { it.third }.toSet() shouldBe setOf(FRESHNESS_SOCKET)
+            trace
+                .map { it.first }
+                .filter {
+                    it.startsWith(
+                        "SELECT pg_advisory_xact_lock",
+                    ) || it.contains("FOR NO KEY UPDATE")
+                }.size shouldBe
+                2
+            trace.count { it.first.startsWith("INSERT INTO datasource_workspaces") } shouldBe 1
+            val waits =
+                trace
+                    .filter {
+                        it.first.startsWith("SELECT set_config('lock_timeout'") ||
+                            it.first.startsWith("SELECT set_config('statement_timeout'")
+                    }.map { it.second.single() }
+                    .filter { it.endsWith("ms") }
+                    .map { it.removeSuffix("ms").toLong() }
+            // Key, workspace row (lock_timeout), discovery and INSERT (statement_timeout): four budgeted waits.
+            waits.size shouldBe 4
+            waits.forEach { it shouldBeInRange 1L..FRESHNESS_BUDGET_MILLIS }
+        }
+    }
+
+    /**
      * #833 — the read that BUILDS a managed generation runs on the lease's thread inside `poolFor`, so it carries a bound
      * of its own: the production bean wraps the shared template in a dedicated bounded one. The negative half: the
      * shared template the bean was built over is unchanged, so a sibling statement on it (the registrar's boot grant)
@@ -324,6 +382,10 @@ class ScheduledJobsStatementBoundsTest {
 
         /** #818b A: the freshness tick's bound, two statements of it inside the 5 s reaper's cadence each. */
         const val FRESHNESS_BOUND = 5
+
+        /** #841 R4: the regrant step's one budget (the freshness bound), and the largest lock wait the binder admits. */
+        const val FRESHNESS_BUDGET_MILLIS = 5_000L
+        const val MAX_LOCK_WAIT_SECONDS = 60
 
         /** #833: the build's catalog read, its own bound (the tick's twin value, on a template of its own). */
         const val BUILD_READ_BOUND = 5

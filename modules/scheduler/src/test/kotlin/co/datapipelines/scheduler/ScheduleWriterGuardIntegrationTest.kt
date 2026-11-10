@@ -196,6 +196,11 @@ class ScheduleWriterGuardIntegrationTest {
         override fun endpointRegistry(busyCode: String) = error("the schedule writer takes no registry key")
 
         override fun <T> withinOneDeadline(block: () -> T): T = block()
+
+        override fun <T> withinOneDeadline(
+            ceiling: java.time.Duration,
+            block: () -> T,
+        ): T = block()
     }
 
     private companion object {

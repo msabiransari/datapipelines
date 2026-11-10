@@ -6,15 +6,20 @@ import co.datapipelines.datasources.DatasourceErrorCodes
 import co.datapipelines.datasources.DatasourceGrantRepository
 import co.datapipelines.datasources.DatasourceRepository
 import co.datapipelines.datasources.DatasourceWriteGuarding
+import co.datapipelines.executor.BoundedJdbc
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.guard.PrerequisiteKey
 import co.datapipelines.web.SharedPostgres
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContain
+import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
+import io.kotest.matchers.longs.shouldBeInRange
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.jdbc.core.JdbcTemplate
@@ -22,6 +27,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
 import java.sql.SQLException
+import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
@@ -170,6 +176,138 @@ class DatasourceWriterGuardIntegrationTest {
         rows.grantees(name).shouldBeEmpty()
     }
 
+    // ------------------------------------------------------------------ #841 R4: the freshness repair's one budget
+
+    /**
+     * #841 R4 — the repair as the freshness tick builds it: its statements on a template bounded at the tick's 5 s, a
+     * [REPAIR_BUDGET_SECONDS] budget for the whole guarded write, and the guard configured at [BOUND_SECONDS] (20 s, far
+     * above the budget — `lock-wait-seconds` admits up to 60) so that only the budget can end a wait inside it.
+     */
+    private fun tickRepair() =
+        DatasourceGrantRepository(
+            BoundedJdbc.bounded(named, REPAIR_BUDGET_SECONDS, "REPAIR_BUDGET_SECONDS"),
+            writes(),
+            repairBudget = Duration.ofSeconds(REPAIR_BUDGET_SECONDS.toLong()),
+        )
+
+    /**
+     * A conflicting writer that does not take the key: its uncommitted grant row makes the repair's INSERT wait on the
+     * unique key — the test's table lock in `ManagedLakeReadsE2eTest`, narrowed to one row of this test's own datasource
+     * so the module's other suites on the shared database never wait on it.
+     */
+    private fun conflictingRow(
+        name: String,
+        workspace: UUID,
+    ) = LockHolder().execute(
+        "INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by) VALUES (?, ?, ?)",
+        name,
+        workspace,
+        rows.user,
+    )
+
+    @Test
+    fun `the budgeted repair that owns the key has its INSERT cancelled 57014 at the budget - nothing granted - #841 R4`() {
+        val lacking = rows.workspace()
+        val name = rows.datasource("budget-insert")
+        conflictingRow(name, lacking).use { row ->
+            val started = System.nanoTime()
+            val repair = async { tickRepair().grantToEveryWorkspace(name, rows.user) }
+            val waiter = LockObserver.awaitWaiter(row, repair).shouldNotBeNull()
+            withClue("the INSERT-owning repair waits on the conflicting row, holding the datasource's key: $waiter") {
+                waiter.query shouldContain "INSERT INTO datasource_workspaces"
+                LockObserver.holdersOf(PrerequisiteKey.datasource(name)) shouldBe 1
+            }
+            val failure = failureOf(repair)
+            val elapsed = millisSince(started)
+            withClue("the INSERT's own statement bound fired: $failure") { sqlStatesOf(failure) shouldContain "57014" }
+            withClue("queued INSERT ended at the budget, elapsed=$elapsed ms") { elapsed shouldBeInRange BUDGET_WINDOW_MS }
+            withClue("the conflicting writer's transaction is still open: its row was never released") {
+                openTransaction(row.pid) shouldBe
+                    true
+            }
+        }
+        withClue("the rolled-back repair granted nothing") { rows.grantees(name).shouldBeEmpty() }
+        LockObserver.holdersOf(PrerequisiteKey.datasource(name)) shouldBe 0
+    }
+
+    @Test
+    fun `a budgeted repair waiting on the held key refuses busy 55P03 at the budget, not at the 20 s lock wait - #841 R4`() {
+        rows.workspace()
+        val name = rows.datasource("budget-key")
+        holder.prerequisite(PrerequisiteKey.datasource(name))
+        val started = System.nanoTime()
+        val repair = async { tickRepair().grantToEveryWorkspace(name, rows.user) }
+
+        awaitBlockedBy(repair)
+        val failure = failureOf(repair)
+        val elapsed = millisSince(started)
+        withClue("the peer refused at the key, never reaching its INSERT: $failure") {
+            (failure as? DatapipelinesException)?.code shouldBe DatasourceErrorCodes.WRITE_BUSY
+            sqlStatesOf(failure) shouldContain "55P03"
+        }
+        withClue("refused at the budget, elapsed=$elapsed ms (the guard's own bound is ${BOUND_SECONDS}s)") {
+            elapsed shouldBeInRange BUDGET_WINDOW_MS
+        }
+        withClue("the holder still holds the key") { LockObserver.holdersOf(PrerequisiteKey.datasource(name)) shouldBe 1 }
+        rows.grantees(name).shouldBeEmpty()
+    }
+
+    @Test
+    fun `a key wait and the INSERT wait after it share ONE budget - the repair never runs two bounds back to back - #841 R4`() {
+        val lacking = rows.workspace()
+        val name = rows.datasource("budget-both")
+        conflictingRow(name, lacking).use { row ->
+            holder.prerequisite(PrerequisiteKey.datasource(name))
+            val started = System.nanoTime()
+            val repair = async { tickRepair().grantToEveryWorkspace(name, rows.user) }
+            awaitBlockedBy(repair)
+            // The held key spends part of the budget — the gate-red interleaving: a sibling's repair held the key while
+            // its own INSERT waited. Before R4 the INSERT then got a full bound of its own (2.5 + 5 s).
+            Thread.sleep(KEY_HOLD_MILLIS)
+            holder.commit()
+            val insertWaiter = LockObserver.awaitWaiter(row, repair)
+            withClue("after the key was released the repair reached its INSERT, queued on the conflicting row") {
+                insertWaiter.shouldNotBeNull().query shouldContain "INSERT INTO datasource_workspaces"
+            }
+            val failure = failureOf(repair)
+            val elapsed = millisSince(started)
+            withClue("the INSERT was cancelled at what was left of the budget: $failure") { sqlStatesOf(failure) shouldContain "57014" }
+            withClue("key wait + INSERT wait = one budget, elapsed=$elapsed ms (two bounds would be ~${KEY_HOLD_MILLIS + 5_000} ms)") {
+                elapsed shouldBeInRange BUDGET_WINDOW_MS
+            }
+        }
+        rows.grantees(name).shouldBeEmpty()
+    }
+
+    @Test
+    fun `the budgeted repair with nothing in its way grants and commits - #841 R4`() {
+        val lacking = rows.workspace()
+        val name = rows.datasource("budget-free")
+        tickRepair().grantToEveryWorkspace(name, rows.user) shouldBeGreaterThanOrEqual 1
+        rows.grantees(name) shouldContain lacking
+    }
+
+    /** Whether backend [pid] is inside an open transaction, read on a fresh connection. */
+    private fun openTransaction(pid: Int): Boolean =
+        rows.jdbc.queryForObject("SELECT state = 'idle in transaction' FROM pg_stat_activity WHERE pid = ?", Boolean::class.java, pid) ==
+            true
+
+    /** What [writer] failed with (it must fail), unwrapped from the executor. */
+    private fun failureOf(writer: Future<*>): Throwable {
+        val thrown = runCatching { writer.get(LockObserver.COMPLETION_ALLOWANCE_SECONDS, TimeUnit.SECONDS) }.exceptionOrNull()
+        withClue("the repair was expected to fail at its budget") { thrown.shouldNotBeNull() }
+        return (thrown as? ExecutionException)?.cause ?: checkNotNull(thrown)
+    }
+
+    private fun sqlStatesOf(e: Throwable): List<String> =
+        generateSequence(e) {
+            it.cause.takeUnless { cause ->
+                cause === it
+            }
+        }.filterIsInstance<SQLException>().mapNotNull { it.sqlState }.toList()
+
+    private fun millisSince(started: Long): Long = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+
     @Test
     fun `the instance-grant replan picks up a datasource registered while it waited - under the original deadline`() {
         val target = rows.workspace()
@@ -270,5 +408,18 @@ class DatasourceWriterGuardIntegrationTest {
 
     private companion object {
         const val BOUND_SECONDS = 20
+
+        /** #841 R4: the freshness tick's bound and budget, a literal (never read back from the class under test). */
+        const val REPAIR_BUDGET_SECONDS = 5
+
+        /** How long the key holder keeps the key after the repair queued on it: half the budget. */
+        const val KEY_HOLD_MILLIS = 2_500L
+
+        /**
+         * Start-to-failure of a budgeted repair: at least the budget less one second (the start is taken before the
+         * repair's own clock), at most the budget plus a NAMED 1.5 s allowance for the executor hand-off and the
+         * statements' round trips. Two consecutive bounds (the pre-R4 shape) land at 7.5 s or 20 s, outside it.
+         */
+        val BUDGET_WINDOW_MS = (REPAIR_BUDGET_SECONDS * 1_000L - 1_000L)..(REPAIR_BUDGET_SECONDS * 1_000L + 1_500L)
     }
 }

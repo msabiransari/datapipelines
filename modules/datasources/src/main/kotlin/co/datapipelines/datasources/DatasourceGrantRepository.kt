@@ -7,8 +7,11 @@ import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import org.springframework.transaction.TransactionTimedOutException
+import java.time.Duration
 import java.time.OffsetDateTime
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 /**
  * One row of `datasource_workspaces` (metadata-db §4.16): a datasource is visible to a
@@ -53,6 +56,14 @@ class DatasourceGrantRepository(
      * `WorkspaceService.create`'s grant-at-creation does). [DatasourceWriteGuarding.UNGUARDED] is the unit-test default.
      */
     val writes: DatasourceWriteGuarding = DatasourceWriteGuarding.UNGUARDED,
+    /**
+     * #841 R4 — the freshness tick's repository only (null everywhere else): ONE wall-clock budget for a whole guarded
+     * [grantToEveryWorkspace] — its lock waits, its discovery read and its INSERT together — so the repair holds the
+     * jobs' shared `dp-scheduled` thread at most one statement bound, as it did before it took the writer guard.
+     */
+    private val repairBudget: Duration? = null,
+    /** The monotonic clock [repairBudget] is measured on. */
+    private val nanoTime: () -> Long = System::nanoTime,
 ) {
     /** Every workspace [datasourceName] is granted to, name order. */
     fun grantsOf(datasourceName: String): List<DatasourceGrant> =
@@ -188,26 +199,100 @@ class DatasourceGrantRepository(
      * this insert changes, and a set no grant writer can alter while the key is held — are read and locked (sorted),
      * and only those are granted. A pass with nothing to repair therefore locks no workspace row; a workspace created
      * after the read receives the grant in its own creation transaction (which takes the same key) or on the next tick.
+     *
+     * #841 R4 — with a [repairBudget] (the freshness tick's repository), the guarded repair runs in phases that share
+     * ONE deadline, `start + repairBudget`: (1) the transaction's first statement, on this repository's template, reads
+     * the server's `statement_timeout` — so the connection carries the template's socket bound before the guard's own
+     * statements run on it; (2) the guard takes the datasource's key, its `lock_timeout` capped at the same deadline
+     * ([co.datapipelines.typesystem.guard.MetadataWriterGuard.withinOneDeadline] with a ceiling); (3) the discovery
+     * read, its `statement_timeout` the time left; (4) the workspace rows it found, on the guard's capped
+     * `lock_timeout`; (5) the INSERT, its `statement_timeout` the time left. A repair whose key wait spent part of
+     * the budget therefore has only the rest for its INSERT: a peer waits at the key and refuses busy (`55P03`)
+     * inside the budget, an INSERT queued behind a table lock is cancelled (`57014`) at the deadline, and either way
+     * the transaction rolls back, nothing is written and the next tick retries. A budget spent before a statement
+     * refuses with [TransactionTimedOutException] and issues none.
      */
     fun grantToEveryWorkspace(
         datasourceName: String,
         grantedBy: UUID,
     ): Int {
-        var locked: List<UUID> = emptyList()
-        return writes.grant(datasourceName, { ungrantedWorkspaceIds(datasourceName).also { locked = it } }) {
-            val params = MapSqlParameterSource().addValue("name", datasourceName).addValue("by", grantedBy)
-            jdbc.update(
-                """
-                INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by)
-                SELECT :name, w.id, :by
-                  FROM workspaces w
-                 WHERE w.is_deleted = FALSE
-                ${if (writes.isGuarded) "AND w.id IN (:locked)" else ""}
-                ON CONFLICT (datasource_name, workspace_id) DO NOTHING
-                """.trimIndent(),
-                if (writes.isGuarded) params.addValue("locked", locked.ifEmpty { listOf(NO_WORKSPACE) }) else params,
-            )
+        val budget = repairBudget?.takeIf { writes.isGuarded } ?: return repair(datasourceName, grantedBy, deadline = null)
+        val deadline = RepairDeadline(nanoTime() + budget.toNanos())
+        return writes.guard.withinOneDeadline(Duration.ofNanos(maxOf(1L, deadline.at - nanoTime()))) {
+            writes.inTransaction {
+                // The transaction's first statement, on this repository's template: the connection now carries the
+                // template's socket bound for every later statement of the transaction, the guard's included.
+                deadline.serverSetting = currentStatementTimeout()
+                repair(datasourceName, grantedBy, deadline)
+            }
         }
+    }
+
+    /** [grantToEveryWorkspace]'s guarded write; with a [deadline], each of this repository's statements is capped at it. */
+    private fun repair(
+        datasourceName: String,
+        grantedBy: UUID,
+        deadline: RepairDeadline?,
+    ): Int {
+        var locked: List<UUID> = emptyList()
+        val discover = { within(deadline) { ungrantedWorkspaceIds(datasourceName).also { locked = it } } }
+        return writes.grant(datasourceName, discover) {
+            val params = MapSqlParameterSource().addValue("name", datasourceName).addValue("by", grantedBy)
+            within(deadline) {
+                jdbc.update(
+                    """
+                    INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by)
+                    SELECT :name, w.id, :by
+                      FROM workspaces w
+                     WHERE w.is_deleted = FALSE
+                    ${if (writes.isGuarded) "AND w.id IN (:locked)" else ""}
+                    ON CONFLICT (datasource_name, workspace_id) DO NOTHING
+                    """.trimIndent(),
+                    if (writes.isGuarded) params.addValue("locked", locked.ifEmpty { listOf(NO_WORKSPACE) }) else params,
+                )
+            }
+        }
+    }
+
+    /**
+     * Runs [block] — one of this repository's own statements — with the transaction's `statement_timeout` set to what is
+     * left before [deadline] (whole milliseconds, rounded down, at least one: Postgres reads `0` as "no limit"), then
+     * restores the server's setting, so the guard's lock statements between them keep theirs and end on their own
+     * `lock_timeout` (`55P03`, the native busy refusal). Once nothing is left it refuses without a statement. Without a
+     * deadline (boot, REST, the unguarded unit-test shape) it is just [block].
+     */
+    private fun <T> within(
+        deadline: RepairDeadline?,
+        block: () -> T,
+    ): T {
+        if (deadline == null) return block()
+        val remaining = deadline.at - nanoTime()
+        if (remaining <= 0) throw TransactionTimedOutException("the repair's budget was spent before its next statement")
+        setStatementTimeout("${maxOf(1L, TimeUnit.NANOSECONDS.toMillis(remaining))}ms")
+        val result = block()
+        setStatementTimeout(deadline.serverSetting)
+        return result
+    }
+
+    private fun currentStatementTimeout(): String =
+        checkNotNull(
+            jdbc.queryForObject("SELECT current_setting('statement_timeout')", MapSqlParameterSource(), String::class.java),
+        ) { "current_setting answered null" }
+
+    /** `set_config(..., is_local => true)`: `SET LOCAL` with a bind parameter; it ends with the transaction. */
+    private fun setStatementTimeout(value: String) {
+        jdbc.queryForObject(
+            "SELECT set_config('statement_timeout', :timeout, true)",
+            MapSqlParameterSource("timeout", value),
+            String::class.java,
+        )
+    }
+
+    /** One budgeted repair's deadline on [nanoTime], and the server's `statement_timeout` its statements restore. */
+    private class RepairDeadline(
+        val at: Long,
+    ) {
+        var serverSetting: String = "0"
     }
 
     private fun ungrantedWorkspaceIds(datasourceName: String): List<UUID> =
