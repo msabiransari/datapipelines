@@ -1,5 +1,10 @@
 package co.datapipelines.web.release
 
+import co.datapipelines.application.dependencies.ReleaseDependencyFamilies
+import co.datapipelines.application.dependencies.ReleasePlanningDeadline
+import co.datapipelines.application.dependencies.ReleasePlanningWalk
+import co.datapipelines.dependencies.FamilyDescriptor
+import co.datapipelines.dependencies.FamilyRegistry
 import co.datapipelines.pipeline.PipelineReleaseService
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.release.PipelineDependencySource
@@ -9,6 +14,7 @@ import co.datapipelines.pipeline.release.ReleaseBounds
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import co.datapipelines.pipeline.release.ReleasedVersionObserver
+import co.datapipelines.pipeline.release.ResolvedNode
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.web.config.ReleaseDependencyProperties
 import co.datapipelines.web.templates.TemplateReleaseService
@@ -24,7 +30,13 @@ import org.springframework.transaction.support.TransactionTemplate
  * The release-dependencies assembly (record §4.2: contracts in `pipeline-contract`, adapters and the coordinator here):
  * the configured bounds (configuration §3.35), the workspace writer guard every pin-affecting writer acquires, the
  * strict release audit sink, the S1 dependency sources and participants, and the pipeline coordinator — all on the ONE
- * `metadataTransactionManager` (never a customer, staging or new manager; never REQUIRES_NEW).
+ * `metadataTransactionManager` (never a customer, staging or new manager). The release write transaction never runs
+ * REQUIRES_NEW; the plan's first closure read is its own read-only REPEATABLE READ transaction, REQUIRES_NEW on the same
+ * manager so it never joins a weaker caller (#868 G1, record §7.2 step 2).
+ *
+ * The neutral dependency registry (#868 G1, record §3.2) is assembled here by DI from the descriptor beans: in G1 the
+ * pipeline and template release sources only. [FamilyRegistry.production] refuses a duplicate key and a key outside
+ * `FamilyKey.PRODUCTION`, so either fails the context at startup.
  */
 @Configuration
 @EnableConfigurationProperties(ReleaseDependencyProperties::class)
@@ -53,13 +65,36 @@ class ReleaseConfiguration {
     @Bean
     fun releaseAuthorization(): ReleaseAuthorization = MatrixReleaseAuthorization()
 
+    /** The pipeline family over its release source (record §4; G2 adds the other artifact families). */
+    @Bean
+    fun pipelineDependencyFamily(pipelines: PipelineRepository): FamilyDescriptor<ResolvedNode> =
+        ReleaseDependencyFamilies.descriptor(ReleaseFamily.PIPELINE, PipelineDependencySource(pipelines))
+
+    /** The template family over its release source (no pins today: #518 adds the import arm). */
+    @Bean
+    fun templateDependencyFamily(templates: TemplateRepository): FamilyDescriptor<ResolvedNode> =
+        ReleaseDependencyFamilies.descriptor(ReleaseFamily.TEMPLATE, TemplateDependencySource(templates))
+
+    /** Every descriptor bean, one registry; a duplicate or non-production key fails the context here. */
+    @Bean
+    fun dependencyFamilyRegistry(descriptors: List<FamilyDescriptor<*>>): FamilyRegistry = FamilyRegistry.production(descriptors)
+
+    /**
+     * The release planning deadline: unbounded in G1 (today's plan path has no timeout, and G1 adds no refusal code).
+     * #786 replaces this one bean with deadlines bound to `metadata-timeout-seconds` and flips
+     * `ReleasePlanningDeadlineWiringTest` (owner ruling 2026-11-08, 868 review R1-4 option 1).
+     */
+    @Bean
+    fun releasePlanningDeadline(): ReleasePlanningDeadline = ReleasePlanningDeadline.NONE
+
     @Bean
     @Suppress("LongParameterList") // the coordinator's collaborators, one per step of the record's algorithm
     fun pipelineReleaseCoordinator(
         releases: PipelineReleaseService,
         pipelines: PipelineRepository,
-        templates: TemplateRepository,
         templateReleases: TemplateReleaseService,
+        registry: FamilyRegistry,
+        deadline: ReleasePlanningDeadline,
         authorization: ReleaseAuthorization,
         guard: ReleaseMutationGuard,
         audit: ReleaseAuditSink,
@@ -71,10 +106,12 @@ class ReleaseConfiguration {
         ReleaseCoordinator(
             releases = releases,
             pipelines = pipelines,
-            sources =
-                mapOf(
-                    ReleaseFamily.PIPELINE to PipelineDependencySource(pipelines),
-                    ReleaseFamily.TEMPLATE to TemplateDependencySource(templates),
+            planning =
+                ReleasePlanningWalk(
+                    registry = registry,
+                    bounds = bounds,
+                    planningTransactions = ReleasePlanningWalk.planningTransaction(metadataTransactionManager),
+                    deadline = deadline,
                 ),
             participants = listOf(PipelineReleaseParticipant(releases, pipelines), TemplateReleaseParticipant(templateReleases)),
             authorization = authorization,

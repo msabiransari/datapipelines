@@ -204,7 +204,9 @@ class DependencyWalker(
         ) {
             cyclic = true
             val active = stack.map { it.index }
-            val trail = (active.subList(active.indexOf(target), active.size) + target).take(limits.diagnostics)
+            // Bounded without truncation: the active path never holds more than depth + 1 frames (the depth bound is
+            // enforced before a frame is entered), so the trail is the whole cycle — what the release refusal names.
+            val trail = active.subList(active.indexOf(target), active.size) + target
             diagnostics.add(
                 Diagnostic(DiagnosticKind.CYCLE, nodes[target].nodeId, edge.edgeId, CYCLE_MESSAGE, trail = trail.map { nodes[it].nodeId }),
             )

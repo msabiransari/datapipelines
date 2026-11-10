@@ -1,5 +1,8 @@
 package co.datapipelines.web.release
 
+import co.datapipelines.application.dependencies.ReleaseDependencyFamilies
+import co.datapipelines.application.dependencies.ReleasePlanningDeadline
+import co.datapipelines.application.dependencies.ReleasePlanningWalk
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.pipeline.Pipeline
@@ -33,6 +36,7 @@ import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.TransactionStatus
 import org.springframework.transaction.support.SimpleTransactionStatus
+import org.springframework.transaction.support.TransactionOperations
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
 import java.util.UUID
@@ -63,7 +67,10 @@ internal class CoordinatorFixture(
 
     private val graph = LinkedHashMap<ReleaseNodeIdentity, ResolvedNode>()
     private val records = HashMap<String, PipelineRecord>()
-    private val source = DependencySource { identity -> graph[identity] }
+
+    /** Every dependency-source read, in order — kept apart from [log] so the write-order assertions stay unchanged. */
+    val reads = mutableListOf<ReleaseNodeIdentity>()
+    private val source = DependencySource { identity -> graph[identity].also { reads += identity } }
     val sources: Map<ReleaseFamily, DependencySource> = mapOf(ReleaseFamily.PIPELINE to source, ReleaseFamily.TEMPLATE to source)
 
     val pipelines = mockk<PipelineRepository>()
@@ -299,10 +306,19 @@ internal class CoordinatorFixture(
     fun coordinator(
         authorization: ReleaseAuthorization = RecordingAuthorization(log, principal()),
         legacyAliasAdmitted: Boolean = true,
+        planningTransactions: TransactionOperations = TransactionOperations.withoutTransaction(),
     ) = ReleaseCoordinator(
         releases = releases,
         pipelines = pipelines,
-        sources = sources,
+        // By default the planning read has no transaction of its own, so the fixture's transaction log stays the release
+        // transaction's alone; ReleasePlanningTransactionTest passes the production template and pins its order.
+        planning =
+            ReleasePlanningWalk(
+                ReleaseDependencyFamilies.registry(sources),
+                bounds,
+                planningTransactions,
+                ReleasePlanningDeadline.NONE,
+            ),
         participants = listOf(PipelineReleaseParticipant(releases, pipelines), TemplateReleaseParticipant(templateReleases)),
         authorization = authorization,
         guard = guard,
