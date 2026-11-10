@@ -45,6 +45,7 @@ datapipelines/
 ├── modules/
 │   ├── typesystem/                      # [Type System spec]
 │   ├── graph/                           # the generic Dag<T> primitive, layer 0 (§5.17)
+│   ├── dependency-contract/             # the neutral business-object dependency contract, layer 0, #868 (§5.22)
 │   ├── persistence/                     # the generic batching writer — ordered group commit, layer 0 (§5.19)
 │   ├── calculators/                     # [Calculators catalog] — pure kinds, layer 0 (§5.14)
 │   ├── scripting/                       # Script engine seam, layer 0 (§5.15)
@@ -74,6 +75,7 @@ datapipelines/
 |---|---|---|---|
 | `typesystem` | [type-system.md](type-system.md) | The 11 canonical types, per-dialect mappers, H2 mapping, schema envelope. Foundation. | — (no persistence) |
 | `graph` | [dag-executor.md §3](dag-executor.md#3-dag-data-structure) (this spec, §5.17) | The generic DAG primitive — `Dag<T>`, `DagBuilder<T>` (topological order, cycle detection, reverse index). Stdlib only, no internal dependencies: moved out of `dag` (#194) so a module below the executor can build a graph without inheriting the executor's dependency set. Package `co.datapipelines.dag`, kept on purpose. | — (no persistence) |
+| `dependency-contract` | (this spec, §5.22; the dependency-graph design record) | The neutral business-object dependency contract (#868 G1): immutable graph types (`ObjectRequest`, `Node`, `Edge`, `GraphSnapshot`), the closed §11.1 vocabularies, the provider contract and its conformance harness, the DI-assembled `FamilyRegistry`, the bounded `DependencyWalker` and its internal fingerprint, `GraphLimits` and `Deadline`; the §11.1 wire schema and payload goldens as main resources. Kotlin/JDK only, no internal dependencies. | — (no persistence; providers read through their families' repositories in `application/dependencies`) |
 | `persistence` | [DAG Executor §10](dag-executor.md#10-sse-event-integration), [Auth §10](auth.md) (this spec, §5.19) | The generic batching writer (#266) — `BatchingWriter<T>`: an ordered, bounded, partitioned group commit in front of ONE store, with a bounded wait that falls back to the caller's own write, a singles retry that isolates a poison row, and a bounded shutdown drain. Knows no store: each supplies a `BatchSink`. Stdlib, coroutines and slf4j only. | — (writes whatever its sinks write; owns no table) |
 | `scripting` | (this spec, §5.15) | The script engine seam: `ScriptEngine` (JSONata in-process; JavaScript in a GraalJS isolate, #8), one registry wired in web and injected into the validator, test runner and node support, the evaluation pool, the type gate, canonical JSON. Pure library — evaluates untrusted script bodies with no I/O surface. | — (no persistence) |
 | `pipeline-contract` | [pipeline-contract.md](pipeline-contract.md) | Pipeline JSON model, validation, ExecutionContext type. | `PipelineRepository` → `pipelines`, `pipeline_versions` |
@@ -110,9 +112,9 @@ This diagram is a **rendering of the normative table in §4.2** — it carries n
 
 ```
 layer 0 — no internal deps
-┌──────────────┐ ┌─────────┐ ┌───────────────┐
-│  typesystem  │ │  graph  │ │  persistence  │
-└──────────────┘ └─────────┘ └───────────────┘
+┌──────────────┐ ┌─────────┐ ┌───────────────┐ ┌─────────────────────┐
+│  typesystem  │ │  graph  │ │  persistence  │ │ dependency-contract │
+└──────────────┘ └─────────┘ └───────────────┘ └─────────────────────┘
 
 layer 1 — typesystem (auth also persistence)
 ┌──────────────┐ ┌─────────────┐ ┌──────────────┐ ┌───────────┐ ┌────────┐
@@ -145,7 +147,8 @@ layer 5
 layer 6
 ┌──────────────┐
 │ application  │  ← typesystem, scripting, pipeline-contract, templates,
-│ (use cases)  │    datasources, dag, auth, parameters, visualization
+│ (use cases)  │    datasources, dag, auth, parameters, visualization,
+│              │    dependency-contract (allowed ahead: scheduler)
 └──────────────┘
 
 layer 7
@@ -158,7 +161,7 @@ layer 8
 ┌──────────────┐
 │     web      │  ← typesystem, calculators, scripting, pipeline-contract, templates,
 │              │    datasources, staging, dag, auth, application, mcp-server, scheduler,
-│              │    parameters, persistence, visualization, lake
+│              │    parameters, persistence, visualization, lake, dependency-contract
 │              │    (declared explicitly, not transitively)
 └──────────────┘
 
@@ -183,6 +186,7 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 |---|---|
 | `typesystem` | *(none)* |
 | `graph` | *(none)* |
+| `dependency-contract` | *(none)* |
 | `persistence` | *(none)* |
 | `calculators` | `typesystem` |
 | `scripting` | `typesystem` |
@@ -196,9 +200,9 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 | `parameters` | `typesystem`, `graph`, `pipeline-contract`, `templates`, `datasources` |
 | `visualization` | `typesystem`, `pipeline-contract`, `templates`, `parameters` |
 | `lake` | `typesystem`, `persistence`, `datasources`, `staging`, `pipeline-contract`, `scheduler`, `auth` |
-| `application` | `typesystem`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `parameters`, `visualization` |
+| `application` | `typesystem`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `parameters`, `visualization`, `dependency-contract`, `scheduler` |
 | `mcp-server` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `application`, `parameters`, `visualization` |
-| `web` | `typesystem`, `calculators`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server`, `scheduler`, `parameters`, `persistence`, `visualization`, `lake` |
+| `web` | `typesystem`, `calculators`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server`, `scheduler`, `parameters`, `persistence`, `visualization`, `lake`, `dependency-contract` |
 | `app` | `web` |
 | `tests/integration-tests` | `app` |
 | `tests/browser-tests` | `app`, `web` |
@@ -210,6 +214,7 @@ Notes on the shape (explanatory, not additional rules):
 - `scheduler` lists `pipeline-contract` for exactly ONE thing, the published `PipelineNameGrammar` (a schedule is named like a pipeline — scheduler design revision §6, A2); its `SchedulerBoundaryTest` fails on any other `co.datapipelines.pipeline` import, so the edge cannot quietly become pipeline knowledge. It lists no `dag`, `auth` or `application`: the executor adapter, the capacity lease and the system principal live on `web`'s side of its port.
 - `auth` (#504b) lists `pipeline-contract` for exactly ONE thing, the shared search-needle rule — `SearchNeedle` and its typed refusal, the same rule every search-owning service applies at its door; its `AuthBoundaryTest` fails on any other `co.datapipelines.pipeline` import, so the edge cannot quietly become pipeline knowledge.
 - `parameters` (#194) declares all five of its edges — `typesystem` (the shared value validator, `LogicalType`), `graph` (`Dag<T>`), `pipeline-contract` (`TemplateRef`, the name grammars, the `TemplateDryRenderer` / `DatasourceRegistry` / `TemplateVersionStatuses` / `TemplateReleaser` ports it validates and releases through, `ReadLens`, `AuthoringGuard`), and since lane C `templates` (the selector runtime renders a pinned template through `WorkspaceTemplateEngines`) and `datasources` (it runs through the registry's pools, `ReadOnlyStatementLease` and `ResultRowReader`). Since lane D the `parameters` edges of `application`, `mcp-server` and `web` are DECLARED (the record's §2.4): the surfaces compile against the engine, the reverse-arrow composition in `application`, the six tools in `mcp-server`, the routes and the wiring in `web`.
+- `dependency-contract` (#868) is the third empty row beside `graph` and `persistence`: the dependency-graph record's neutral core (§3.1) must give datasource, API and schedule identities a home that is not pipeline-specific, and it must stay below every family so each family's adapter can sit on it. `application` declares it (the release adapters and the REPEATABLE READ planning walk in `application/dependencies`) and `web` declares it (the release wiring). `application` also lists `scheduler`, allowed ahead for the schedule family's provider (G2/#786) and undeclared until something compiles against it; the edge is acyclic because `scheduler` depends only on `typesystem` and `pipeline-contract` (record §3.1 [R31; F7]).
 - `persistence` (#266) is the second empty row beside `graph`, for the same reason: it is a primitive every store-owning module can sit on. `auth` lists it for the audit log's writer and `web` for the execution-event record's and the replay log's; `dag` does NOT — its repository offers the batch statement (`ExecutionEventRepository.appendAll`) and knows nothing of the queue in front of it, which is `web`'s wiring.
 - `visualization` (#10) sits above `parameters` and below `application`: it declares `typesystem`, `pipeline-contract` (the name grammar, `ReadLens`, `AuthoringGuard`, the template ports it validates and releases through) and `parameters` (the production `ParameterSetFacts` reads a pinned set release through `ParameterSetRepository`). `templates` is allowed and NOT declared — every template fact reaches it through `pipeline-contract`'s ports. The pipeline facts a dashboard needs (released? read-only? the caller output columns) arrive through its `PipelineReleaseFacts` port, which `application` implements over `ReadOnlyPipelineRule` (L1b), so no `dag` edge exists. Since L1b the `visualization` edges of `application` (`PipelineReleaseFactsReader`, that port's implementation), `mcp-server` (the eleven `visualizations_*` / `dashboards_*` tools) and `web` (the two controllers and `VisualizationConfiguration`, the module's only Spring wiring) are DECLARED.
 - `lake` (#785) is the dp-lake design record's module (§3a, call 12) with the record's full edge set: `typesystem`, `persistence` (`FailureShape`, the SQLState walk a catalog failure is classified by) and `pipeline-contract` (`PipelineErrorCodes.Lake`) are declared by P2, and `auth` by P3 (#798: the definitions write their audit rows through `AuditEventSink`); `datasources`, `staging` and `scheduler` are allowed ahead for the later phases (staging hand-off, deliveries, maintenance) and stay undeclared until something compiles against them. `web` lists `lake` for the after-Flyway boot check (`LakeCatalogStartupCheck`).
@@ -786,6 +791,27 @@ build's `allowedInternalDependencies` map carries the same closed set).
 **Why it is its own module.** The record's §3a: the lake is a storage product with its own catalog, lease protocol and object-store client, and its library stack (Iceberg, Hadoop, Parquet, the AWS SDK) must not leak onto the class path of modules that do not use it.
 
 **Tests:** the lease statements against Postgres with the shipped migrations applied (`LakeLeasesIntegrationTest`, incl. the past-deadline insert-path refusal); the fence (`LakeFenceIntegrationTest` — DP001/DP002, the rename OLD-name check, the takeover waiting on the `FOR SHARE` lock); the fenced pool (`FencedPoolIntegrationTest` — session settings, DP's Hikari pool carries none, no connection outlives the pool, a stock pool's lost-acknowledgement replay red beside the fenced pool's `OutcomeUnknown`); Iceberg's own schema check finding V53's shape and altering nothing (`CatalogShapeIntegrationTest`, A0); namespace, table and a Parquet append end to end on MinIO (`LakeCatalogBootstrapIntegrationTest`); the boot check's refusals (`LakeBootCheckIntegrationTest`, `LakeBootCheckTest`); the configuration keys pinned across the doc, `application.yml` and the binding (`LakeConfigKeysSpecDriftTest`).
+
+### 5.22 `dependency-contract`
+
+**Dependencies (internal):** none — layer 0 beside `graph` and `persistence`. **Dependencies (external):** none in main — Kotlin stdlib and the JDK only (the dependency-graph design record §3.1). Tests only: the networknt JSON Schema validator (the catalog entry #860 added) with Jackson held at the product's pin by `enforcedPlatform`, for the wire schema test.
+
+**What it must never depend on:** Spring, JDBC (`java.sql`), `jakarta`, or any family module — `pipeline-contract`, `templates`, `scheduler`, `auth`, `datasources`, `visualization`. Persistence, transactions and the family adapters live in `application/dependencies`; the Spring composition in `web`. `DependencyContractBoundaryTest` refuses those imports in the main sources (fully-qualified spellings included); the empty §4.2 row refuses the Gradle edge.
+
+**Public API (#868 G1, package `co.datapipelines.dependencies`; G2, #786 and G3 build on it):**
+- The record's §5.1 types, immutable: `ObjectAddress` / `LookupScope`, `Selector` (`ExactVersion` / `Current` / `Entity`), `ObjectRequest`, `ResolvedIdentity` / `OwnerScope`, `VersionInfo` (`Artifact` / `Revision` / `Unversioned`), `Node`, `Edge`, `GraphSnapshot`; the §5.2 dimensions as separate types — `Resolution` (no hidden value), `Lifecycle`, the sealed family-specific `Operational`, `Observation`.
+- `FamilyKey` — a value type over the wire string; `FamilyKey.PRODUCTION`, the frozen eight §4 keys with their `Capabilities` (`ReleaseCapability` / `PromotionCapability`) pairs. The closed set is a property of production admission (`FamilyRegistry.production`), not of the type, so a test family joins a test-built registry with no walker change.
+- The closed §11.1 vocabularies, each with a `wire` token: `Relationship`, `ConstraintKind` / `Constraint`, `DiagnosticKind`, `LimitKind`, `SelectorKind`, `VersionKind`, `OperationalKind`, `ScheduleCondition`.
+- `DependencyProvider` (`resolveMany(requests, context)` — one `Outcome` per request, MISSING/UNSUPPORTED as values, infrastructure failures propagate; `outgoing(resolved)` — deterministic `Reference`s over the loaded body), `FamilyDescriptor` (wire key, root selectors, capabilities, extractor schema version, provider, safe-summary projector) and `FamilyRegistry` (a duplicate key throws at construction).
+- `ResolveContext` — workspace, `MetadataSnapshot`, `Purpose`, server-built `Authority`, `Deadline` (the cumulative metadata deadline over an injectable clock; `Deadline.none()` is unbounded); no client flag. `DeadlineExceeded` — the walk's refusal to start a batch after expiry, never a partial graph.
+- `GraphLimits` — the one injected limits object (depth, nodes, edges, diagnostics, wire bytes, lock wait, and the record's §25.4 `resolveBatchSize` / `metadataTimeout` / `statementTimeout` with their defaults as named constants).
+- `DependencyWalker` — the record's §7.2 bounded walk (request and identity memos, every edge occurrence, explicit stack, provider batches of at most `resolveBatchSize` clamped by the node budget with the deadline checked before each, longest-path depth, a bounded cycle trail, `LIMIT` diagnostics, `dependencyFirst` only for a complete acyclic graph) and `GraphFingerprint` (the §5.3 internal fingerprint; never on the wire, never `tree_hash`).
+- `co.datapipelines.dependencies.conformance.ProviderConformance` — the provider conformance harness every family's test runs (one outcome per request, MISSING as a value, deterministic `outgoing`, every declared reference-bearing field produces a reference). In main, framework-free, because a `testFixtures` source set would be a self-edge `verifyModuleDependencies` refuses.
+- Resources: `co/datapipelines/dependencies/wire/dependencies-v1.schema.json` (the §11.1 shapes as JSON Schema 2020-12) and `co/datapipelines/dependencies/wire/goldens/` (one synthetic payload per named case) — G4 serves them, G6 renders them.
+
+**Why it is its own module.** The record's §3.1: a datasource, API or schedule identity must not get a permanent home in a pipeline-specific module, and `pipeline-contract` is not JDK-only (its release participant imports Spring's `TransactionStatus`). The diagnostic business graph is not the executor's `Dag<T>` either: `graph` rejects dangling nodes and cycles, while this walk reports them.
+
+**Tests:** the walk's acceptance goldens (A02 identity memo, A03 longest path, A04 every limit at and over, A05 leaves, A28 the synthetic `test_widget` family), the batch call counts and the fake-clock deadline, the fingerprint golden and each excluded input varied, every vocabulary enumerated with its count, the conformance harness over the synthetic family, the wire suite (every golden validates against the schema, schema enums equal the types' tokens both ways, every token/variant/reason covered by a golden), `DependencyContractBoundaryTest`.
 
 ## 6. Version Catalog
 

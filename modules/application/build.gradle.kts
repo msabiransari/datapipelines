@@ -28,6 +28,11 @@ dependencies {
     // #10 L1b: the dashboard validator's pipeline-release port (PipelineReleaseFactsReader) implements a
     // `visualization` interface over the read-only rule this module owns — the edge the root map allowed ahead.
     implementation(project(":modules:visualization"))
+    // #868 G1 (dependency-graph record §3.1): application/dependencies — the release family descriptors over the
+    // existing DependencySource reads, the snapshot → ReleaseClosure adapter and the REPEATABLE READ planning walk.
+    // `scheduler` is allowed by the root map for the G2/#786 schedule provider and NOT declared: nothing here
+    // compiles against it yet (declared = what is used).
+    implementation(project(":modules:dependency-contract"))
 
     // #10 L2: RefreshEngine — the dashboard refresh's fan-out, deadlines and non-cancellable end are coroutines
     // (the executor's `execute` is `suspend`). The catalog's existing version, already locked and verified for `dag`.

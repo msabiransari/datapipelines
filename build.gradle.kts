@@ -138,6 +138,12 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
     // the executor's dependency set. Stdlib only; an entry here is a reason to stop and ask why a
     // graph needs it.
     ":modules:graph" to emptySet(),
+    // #868 G1 (dependency-graph record §3.1) — layer 0 beside `graph`: the neutral business-object dependency
+    // contract (immutable graph types, the provider contract, the family registry, the bounded walk and its
+    // fingerprint). Kotlin/JDK only — no Spring, JDBC, auth, pipeline, template, scheduler or renderer — so that
+    // datasource/API/schedule identities never get a permanent pipeline-specific home. An entry here is the change
+    // a reviewer must refuse; DependencyContractBoundaryTest fences the import side.
+    ":modules:dependency-contract" to emptySet(),
     // #266 — layer 0 beside typesystem: the generic batching writer (an ordered, bounded group
     // commit in front of a store). Stdlib, coroutines and slf4j only; the stores' sinks live with
     // the modules that own the stores (`auth`, `web`). An entry here would teach the primitive
@@ -226,6 +232,12 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         ":modules:parameters",
         // #10 — DashboardRuntime and the promotion of the two artifacts (L2, L1c); allowed ahead, undeclared.
         ":modules:visualization",
+        // #868 G1 (record §3.1) — application/dependencies: the DI-assembled registry's release adapters
+        // (DependencySource → provider, snapshot → ReleaseClosure) and the REPEATABLE READ planning walk.
+        ":modules:dependency-contract",
+        // #868 G1 (record §3.1 [R31; F7]) — the schedule family's provider adapter (G2/#786) reads the scheduler's
+        // model; acyclic because `scheduler` depends only on typesystem and pipeline-contract. Allowed ahead, undeclared.
+        ":modules:scheduler",
     ),
     ":modules:mcp-server" to setOf(
         ":modules:typesystem",
@@ -263,6 +275,9 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         ":modules:visualization",
         // #785 — the managed lake's after-Flyway boot check (LakeCatalogStartupCheck, web/config).
         ":modules:lake",
+        // #868 G1 — the release wiring assembles the production family registry, the GraphLimits object and the
+        // ReleasePlanningDeadline seam (web/release/ReleaseConfiguration).
+        ":modules:dependency-contract",
     ),
     ":modules:app" to setOf(":modules:web"),
     ":tests:integration-tests" to setOf(":modules:app"),
