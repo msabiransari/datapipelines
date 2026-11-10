@@ -155,6 +155,8 @@ class PromotionEndpointKeysTest {
 
         shouldThrow<DatapipelinesException> { service.apply(batch("absent"), peer) }
 
+        // #786 changed assertion (#879 owns the promotion-shape follow-up): "nothing published" is now "nothing imported"
+        // through the receiver-only port, which replaced the native publish call on the receiver path.
         verify(exactly = 0) { importer.importPromoted(any(), any(), any(), any(), any(), any()) }
         verify(exactly = 0) { endpointKeys.bind(any(), any(), any()) }
     }
