@@ -590,6 +590,107 @@ class PublishedEndpointE2eTest {
     }
 
     // -------------------------------------------------------------------------------------
+    // #786 A06 — an API serves its EXACT pin, never the pipeline's current
+    // -------------------------------------------------------------------------------------
+
+    @Test
+    fun `an API pinned to pipeline v2 serves v2 while the pipeline's current is v3 (A06)`() {
+        // Three RELEASED versions of one pipeline; the pipeline's own current is v3.
+        val id = pipeline(pinnedPipelineBody("v1"))
+        releaseNext(id, "v2")
+        releaseNext(id, "v3")
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .`when`()
+            .get("/api/v1/pipelines/$id")
+            .then()
+            .statusCode(200)
+            .body("data.current_version", equalTo(3))
+        // Under /nyc: the endpoint key's existing binding covers it.
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .asSession(ADMIN_SESSION)
+            .body("""{"path": "/nyc/v1/a06-pinned", "pipeline": "test/a06_pinned", "pipeline_version": 2, "timeout_seconds": 60}""")
+            .`when`()
+            .post("/api/v1/endpoints")
+            .then()
+            .statusCode(201)
+
+        val executionId =
+            given()
+                .port(port)
+                .header(API_KEY_HEADER, endpointKey)
+                .`when`()
+                .get("/api/nyc/v1/a06-pinned")
+                .then()
+                .statusCode(200)
+                .extract()
+                .header("DP-Execution-Id")
+        // The execution record says which pipeline version RAN: the pin, not the pipeline's current.
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .`when`()
+            .get("/api/v1/executions/$executionId")
+            .then()
+            .statusCode(200)
+            .body("data.pipeline_version", equalTo(2))
+    }
+
+    private fun pinnedPipelineBody(label: String) =
+        """
+        {"schema_version": 1, "name": "test/a06_pinned", "display_name": "A06 pinned",
+         "description": "786 A06 $label.", "parameters": {},
+         "nodes": [{"id": "summary", "description": "All rows", "type": "DQL",
+                    "source": "ep-source", "template": {"id": "test/trade_summary.sql", "version": 1},
+                    "depends_on": []}]}
+        """.trimIndent()
+
+    /** Saves the next draft of [id] over its released current and releases it: the pipeline's current moves on. */
+    private fun releaseNext(
+        id: String,
+        label: String,
+    ) {
+        val current =
+            given()
+                .port(port)
+                .asSession(ADMIN_SESSION)
+                .`when`()
+                .get("/api/v1/pipelines/$id")
+                .then()
+                .statusCode(200)
+                .extract()
+                .jsonPath()
+                .getString("data.body_hash")
+        val draftHash =
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .asSession(ADMIN_SESSION)
+                .header("If-Match", current)
+                .body(pinnedPipelineBody(label))
+                .`when`()
+                .put("/api/v1/pipelines/$id")
+                .then()
+                .statusCode(200)
+                .body("data.status", equalTo("DRAFT"))
+                .extract()
+                .jsonPath()
+                .getString("data.body_hash")
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .header("If-Match", draftHash)
+            .`when`()
+            .post("/api/v1/pipelines/$id/release")
+            .then()
+            .statusCode(200)
+            .body("data.status", equalTo("RELEASED"))
+    }
+
+    // -------------------------------------------------------------------------------------
     // Fixture
     // -------------------------------------------------------------------------------------
 
@@ -799,8 +900,8 @@ class PublishedEndpointE2eTest {
     }
 
     /**
-     * Creates the pipeline and RELEASES it — an endpoint serves the latest RELEASED version and
-     * nothing else (§5.1), and since D55 a create lands a DRAFT, so a fixture that only created
+     * Creates the pipeline and RELEASES it — an API pins an exact version and serves it only when
+     * eligible (§5.1, #786), and since D55 a create lands a DRAFT, so a fixture that only created
      * would be publishing over something this surface is right to refuse. The release is the human
      * step the product requires, done here the way a person does it.
      */
