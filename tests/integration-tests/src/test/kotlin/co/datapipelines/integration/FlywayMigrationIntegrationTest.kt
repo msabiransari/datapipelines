@@ -184,6 +184,9 @@ class FlywayMigrationIntegrationTest {
                 "56|lake reader leases|true",
                 // #844 (V57) — the settlement page's (table_id, id) partial index replaces V55's (table_id, state) one.
                 "57|lake deliveries keyset index|true",
+                // #786 (V58) — API versions with exact pipeline pins and the entity's own current pointer
+                // (metadata-db §4.13a); no data backfill in SQL (the conversion is code).
+                "58|published endpoint versions|true",
             )
     }
 
@@ -1600,8 +1603,8 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    @Suppress("LongMethod") // the inventory IS the assertion: one line per table of metadata-db §4 (53 after #799)
-    fun `creates exactly the fifty-three tables of metadata-db §4`() {
+    @Suppress("LongMethod") // the inventory IS the assertion: one line per table of metadata-db §4 (54 after #786)
+    fun `creates exactly the fifty-four tables of metadata-db §4`() {
         val tables =
             query(
                 """
@@ -1675,6 +1678,8 @@ class FlywayMigrationIntegrationTest {
                 "pipeline_executions",
                 "pipeline_versions",
                 "pipelines",
+                // #786 (V58) — one row per API version, the exact pipeline pin (metadata-db §4.13a).
+                "published_endpoint_versions",
                 "published_endpoints",
                 // 7e (V36) — a transform version's cited facts (metadata-db §4.21).
                 "template_implements",
@@ -1828,6 +1833,10 @@ class FlywayMigrationIntegrationTest {
                 "pipelines.idx_pipelines_owner",
                 "pipelines.pipelines_pkey",
                 "pipelines.uq_pipelines_workspace_name",
+                // #786 (V58) — the PK, the one-draft partial index and the "who pins this pipeline version?" lookup.
+                "published_endpoint_versions.idx_published_endpoint_versions_pin",
+                "published_endpoint_versions.published_endpoint_versions_pkey",
+                "published_endpoint_versions.uq_published_endpoint_versions_one_draft",
                 "published_endpoints.idx_published_endpoints_pipeline",
                 "published_endpoints.idx_published_endpoints_workspace",
                 "published_endpoints.published_endpoints_path_pattern_key",
@@ -2050,6 +2059,14 @@ class FlywayMigrationIntegrationTest {
                 // 102 (V20): the write-surface stamps — 'session' | 'api_key' | 'mcp', both
                 // columns, the ruling's CHECK so a key id can never drift back in as a value.
                 "chk_pipeline_versions_via",
+                // #786 (V58) — the API version's stamps, exact pin floor, status and version floor, and the
+                // entity pointer's floor (its row link is the deferrable composite FK, not a CHECK).
+                "chk_published_endpoint_versions_discard_stamps",
+                "chk_published_endpoint_versions_pin",
+                "chk_published_endpoint_versions_release_stamps",
+                "chk_published_endpoint_versions_status",
+                "chk_published_endpoint_versions_version",
+                "chk_published_endpoints_current_version",
                 // #442b (V51) — the outbox's CHECKs (metadata-db §4.39–§4.40): a delivery's state list, its due/sending/
                 // accepted/failure pairings and counts; an event's checkbox list, its event/outcome pairing and sequence.
                 "chk_schedule_notification_deliveries_accepted",

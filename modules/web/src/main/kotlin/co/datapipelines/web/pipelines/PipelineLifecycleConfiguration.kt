@@ -110,6 +110,9 @@ class PipelineLifecycleConfiguration {
         templateReleaser: TemplateReleaser,
         reviewMarks: TemplateReviewMarks,
         dashboards: PipelineVersionConsumers,
+        // #786 B.4 — the live API versions and schedules that pin a draft refuse its purge (record §14, A39).
+        endpointVersions: co.datapipelines.pipeline.EndpointVersionConsumers,
+        schedules: co.datapipelines.pipeline.ScheduleConsumers,
         bounds: co.datapipelines.pipeline.release.ReleaseBounds,
     ): PipelineReleaseService =
         PipelineReleaseService(
@@ -122,6 +125,8 @@ class PipelineLifecycleConfiguration {
             transactions = TransactionTemplate(metadataTransactionManager),
             reviewMarks = reviewMarks,
             dashboards = dashboards,
+            endpointVersions = endpointVersions,
+            schedules = schedules,
             bounds = bounds,
         )
 
@@ -213,6 +218,9 @@ class PipelineLifecycleConfiguration {
         draftTemplates: ExclusiveDraftTemplates,
         // #320 — the dashboards that pin a release: `pipeline.version.pinned`'s `referencing_dashboards`.
         dashboards: PipelineVersionConsumers,
+        // #786 B.4 — the live API versions and schedules that pin a version refuse its discard or purge (record §14, A39).
+        endpointVersions: co.datapipelines.pipeline.EndpointVersionConsumers,
+        schedules: co.datapipelines.pipeline.ScheduleConsumers,
         // #517 — every release through the one coordinator; every pin-affecting verb under the workspace writer guard.
         coordination: PipelineReleaseCoordination,
         guard: ReleaseMutationGuard,
@@ -230,6 +238,8 @@ class PipelineLifecycleConfiguration {
             authoring,
             draftTemplates,
             dashboards,
+            endpointVersions = endpointVersions,
+            schedules = schedules,
             coordination = coordination,
             guard = guard,
             templateStatuses = templateStatuses,

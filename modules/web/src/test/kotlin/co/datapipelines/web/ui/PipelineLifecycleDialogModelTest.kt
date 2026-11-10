@@ -54,6 +54,38 @@ class PipelineLifecycleDialogModelTest {
             ) = pinnedByDashboards.toList()
         }
 
+    /** #786 B.4 — the live API versions pinning a version: none unless a case fills [pinnedByApiVersions]. */
+    private val pinnedByApiVersions = mutableListOf<co.datapipelines.pipeline.EndpointVersionPin>()
+    private val endpointVersions =
+        object : co.datapipelines.pipeline.EndpointVersionConsumers {
+            override fun liveVersionPins(
+                workspaceId: java.util.UUID,
+                pipelineName: String,
+                version: Int,
+            ) = pinnedByApiVersions.filter { it.pipelineVersion == version }
+
+            override fun anyVersionPins(
+                workspaceId: java.util.UUID,
+                pipelineName: String,
+            ) = pinnedByApiVersions.toList()
+        }
+
+    /** #786 B.4 — the live schedules running a version: none unless a case fills [runBySchedules]. */
+    private val runBySchedules = mutableListOf<co.datapipelines.pipeline.SchedulePin>()
+    private val scheduleConsumers =
+        object : co.datapipelines.pipeline.ScheduleConsumers {
+            override fun liveVersionPins(
+                workspaceId: java.util.UUID,
+                pipelineName: String,
+                version: Int,
+            ) = runBySchedules.filter { it.pipelineVersion == version }
+
+            override fun anyVersionPins(
+                workspaceId: java.util.UUID,
+                pipelineName: String,
+            ) = runBySchedules.toList()
+        }
+
     private val model =
         PipelineLifecycleDialogModel(
             repository,
@@ -65,6 +97,8 @@ class PipelineLifecycleDialogModelTest {
             usage,
             schedules = schedules,
             dashboards = dashboards,
+            endpointVersions = endpointVersions,
+            scheduleConsumers = scheduleConsumers,
         )
 
     @Test
@@ -155,6 +189,8 @@ class PipelineLifecycleDialogModelTest {
                 marks,
                 schedules = schedules,
                 dashboards = dashboards,
+                endpointVersions = endpointVersions,
+                scheduleConsumers = scheduleConsumers,
             )
         every { repository.findById(any(), any()) } returns recordOf(current = 1)
         every { repository.findDraftDetail(any(), any()) } returns detail(status = DRAFT)
@@ -254,6 +290,8 @@ class PipelineLifecycleDialogModelTest {
                 usage,
                 schedules = schedules,
                 dashboards = scope,
+                endpointVersions = endpointVersions,
+                scheduleConsumers = scheduleConsumers,
             )
         every { repository.listVersions(WS, ID) } returns
             listOf(co.datapipelines.pipeline.PipelineVersionRecord(ID, 1, DRAFT, "h1", T0, USER))
@@ -351,6 +389,83 @@ class PipelineLifecycleDialogModelTest {
 
         dialog.pinnerPipelines shouldBe emptyList()
         dialog.pinnerDashboards shouldBe listOf(co.datapipelines.pipeline.DashboardPin("acme/boards/revenue", 4, RELEASED))
+    }
+
+    /**
+     * #786 B.4 — the live API versions and schedules that run the version are BLOCKERS, read through the services' own
+     * pin guard: the exact version only (a pin on another version, or a schedule following another CURRENT, is not one).
+     */
+    @Test
+    fun `discard - the API versions and schedules that run the version are blockers, read from the guard's ports (786)`() {
+        every { repository.findByIdAnyStatus(any(), any()) } returns recordOf(current = 2)
+        every { repository.findVersionDetail(any(), any(), any()) } returns detail(status = RELEASED)
+        every { repository.findLiveParentsPinningVersion(any(), any(), any()) } returns emptyList()
+        every { repository.listVersions(any(), any()) } returns emptyList()
+        every { schedules.listByTarget(any(), any(), any()) } returns emptyList()
+        val exact = co.datapipelines.pipeline.EndpointVersionPin("/acme/v1/rides", 3, DRAFT, 2)
+        pinnedByApiVersions += exact
+        pinnedByApiVersions += co.datapipelines.pipeline.EndpointVersionPin("/acme/v1/older", 1, RELEASED, 1)
+        runBySchedules += co.datapipelines.pipeline.SchedulePin("reports/nightly", 2)
+
+        val dialog = model.discard(WS, ID, 2, TargetViewer.EVERYONE)
+
+        dialog.pinnerApiVersions shouldBe listOf(exact)
+        dialog.pinnerSchedules shouldBe listOf(co.datapipelines.pipeline.SchedulePin("reports/nightly", 2))
+        dialog.blocked shouldBe true
+        model.discard(WS, ID, 1, TargetViewer.EVERYONE).pinnerSchedules shouldBe emptyList()
+    }
+
+    @Test
+    fun `discard - with no pinner of any family the dialog is not blocked (786)`() {
+        every { repository.findByIdAnyStatus(any(), any()) } returns recordOf(current = 2)
+        every { repository.findVersionDetail(any(), any(), any()) } returns detail(status = RELEASED)
+        every { repository.findLiveParentsPinningVersion(any(), any(), any()) } returns emptyList()
+        every { repository.listVersions(any(), any()) } returns emptyList()
+        every { schedules.listByTarget(any(), any(), any()) } returns emptyList()
+
+        model.discard(WS, ID, 1, TargetViewer.EVERYONE).blocked shouldBe false
+    }
+
+    /** #786 B.4 — a nonsole draft's purge asks the exact version; a sole draft's asks every version (the entity scope). */
+    @Test
+    fun `purge - a live API version pinning the draft blocks it, exact for a nonsole draft and entity-wide for a sole one (786)`() {
+        every { repository.findByIdAnyStatus(WS, ID) } returns recordOf(current = 1)
+        every { repository.findVersionDetail(WS, ID, 2) } returns detail(status = DRAFT)
+        every { repository.findLiveParentsPinningVersion(any(), any(), any()) } returns emptyList()
+        every { runStats.runsByVersion(ID) } returns emptyMap()
+        every { repository.listVersions(WS, ID) } returns
+            listOf(
+                co.datapipelines.pipeline.PipelineVersionRecord(ID, 1, RELEASED, "h1", T0, USER),
+                co.datapipelines.pipeline.PipelineVersionRecord(ID, 2, DRAFT, "h2", T0, USER),
+            )
+        val onDraft = co.datapipelines.pipeline.EndpointVersionPin("/acme/v1/next", 1, DRAFT, 2)
+        val onRelease = co.datapipelines.pipeline.EndpointVersionPin("/acme/v1/live", 1, RELEASED, 1)
+        pinnedByApiVersions += onDraft
+        pinnedByApiVersions += onRelease
+
+        model.purge(WS, ID, 2).pinnerApiVersions shouldBe listOf(onDraft)
+
+        every { repository.listVersions(WS, ID) } returns
+            listOf(co.datapipelines.pipeline.PipelineVersionRecord(ID, 2, DRAFT, "h2", T0, USER))
+        model.purge(WS, ID, 2).pinnerApiVersions shouldBe listOf(onDraft, onRelease)
+    }
+
+    /** #786 B.4 — the entity purge's sole draft: a schedule targeting the pipeline blocks even with no CURRENT. */
+    @Test
+    fun `purge entity - a schedule targeting the pipeline blocks the sole draft's purge (786)`() {
+        every { repository.findByIdAnyStatus(WS, ID) } returns recordOf(current = null)
+        every { repository.listVersions(WS, ID) } returns
+            listOf(co.datapipelines.pipeline.PipelineVersionRecord(ID, 1, DRAFT, "h1", T0, USER))
+        every { runStats.totalRuns(ID) } returns 0
+        every { exclusive.exclusiveIds(WS, ID) } returns emptyList()
+        every { exclusive.keptIds(WS, ID) } returns emptyList()
+        every { repository.findLiveParentsPinningVersion(WS, "test/probe", 1) } returns emptyList()
+        runBySchedules += co.datapipelines.pipeline.SchedulePin("reports/waiting", null)
+
+        val dialog = model.purgeEntity(WS, ID)
+
+        dialog.pinnerSchedules shouldBe listOf(co.datapipelines.pipeline.SchedulePin("reports/waiting", null))
+        dialog.blocked shouldBe true
     }
 
     /** A `schedules` row with only the fields the evidence read touches (the rest are inert). */
@@ -568,6 +683,8 @@ class PipelineLifecycleDialogModelTest {
             usage,
             schedules = schedules,
             dashboards = scope,
+            endpointVersions = endpointVersions,
+            scheduleConsumers = scheduleConsumers,
         )
 
     @Test
@@ -593,6 +710,8 @@ class PipelineLifecycleDialogModelTest {
                 usage,
                 schedules = schedules,
                 dashboards = dashboards,
+                endpointVersions = endpointVersions,
+                scheduleConsumers = scheduleConsumers,
             )
         val hard = hardened.switch(WS, ID)
         hard.options.first { it.version == 2 }.eligible shouldBe false

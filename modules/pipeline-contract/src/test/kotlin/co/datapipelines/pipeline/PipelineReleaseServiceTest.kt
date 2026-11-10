@@ -45,12 +45,12 @@ class PipelineReleaseServiceTest {
     private val templates = mockk<TemplateVersionStatuses>()
     private val validator = mockk<PipelineValidator>()
     private val dashboards = mockk<PipelineVersionConsumers>(relaxed = true)
-    private val service = PipelineReleaseService(pipelines, templates, validator, AuthoringGuard(true), dashboards = dashboards)
+    private val service = PipelineReleaseService(pipelines, templates, validator, AuthoringGuard(true), dashboards = dashboards, endpointVersions = NoApiVersionPins, schedules = NoSchedulePins)
 
     @Test
     fun `release and purge refuse when authoring is disabled`() {
         // versioning §5.5: release and the draft purge are authoring actions — a receiver refuses.
-        val receiver = PipelineReleaseService(pipelines, templates, validator, AuthoringGuard(false), dashboards = dashboards)
+        val receiver = PipelineReleaseService(pipelines, templates, validator, AuthoringGuard(false), dashboards = dashboards, endpointVersions = NoApiVersionPins, schedules = NoSchedulePins)
 
         val release =
             shouldThrow<DatapipelinesException> {
@@ -255,7 +255,7 @@ class PipelineReleaseServiceTest {
     fun `a pin citing a retired fact warns and the release proceeds`() {
         val marks = mockk<TemplateReviewMarks>()
         val withMarks =
-            PipelineReleaseService(pipelines, templates, validator, AuthoringGuard(true), reviewMarks = marks, dashboards = dashboards)
+            PipelineReleaseService(pipelines, templates, validator, AuthoringGuard(true), reviewMarks = marks, dashboards = dashboards, endpointVersions = NoApiVersionPins, schedules = NoSchedulePins)
         every { pipelines.findDraftDetail(workspaceId, pipelineId) } returns draftDetail()
         every { pipelines.findVersionBody(workspaceId, pipelineId, 2) } returns draftBody
         every { validator.validateOrThrow(any(), workspaceId) } answers { firstArg() }
@@ -284,7 +284,7 @@ class PipelineReleaseServiceTest {
     fun `a clean pin carries no warning, and a refused release never reads the marks`() {
         val marks = mockk<TemplateReviewMarks>()
         val withMarks =
-            PipelineReleaseService(pipelines, templates, validator, AuthoringGuard(true), reviewMarks = marks, dashboards = dashboards)
+            PipelineReleaseService(pipelines, templates, validator, AuthoringGuard(true), reviewMarks = marks, dashboards = dashboards, endpointVersions = NoApiVersionPins, schedules = NoSchedulePins)
         every { pipelines.findDraftDetail(workspaceId, pipelineId) } returns draftDetail()
         every { pipelines.findVersionBody(workspaceId, pipelineId, 2) } returns draftBody
         every { validator.validateOrThrow(any(), workspaceId) } answers { firstArg() }
@@ -364,6 +364,8 @@ class PipelineReleaseServiceTest {
                 AuthoringGuard(true),
                 checkGate = ReleaseCheckGate { _, _, _, _, _ -> listOf(outcome(CheckRunVerdict.FAIL)) },
                 dashboards = dashboards,
+                endpointVersions = NoApiVersionPins,
+                schedules = NoSchedulePins,
             )
 
         val error = shouldThrow<DatapipelinesException> { gated.release(workspaceId, pipelineId, "draft-hash", userId) }
@@ -387,6 +389,8 @@ class PipelineReleaseServiceTest {
                 AuthoringGuard(true),
                 checkGate = ReleaseCheckGate { _, _, _, _, _ -> listOf(outcome(CheckRunVerdict.ERROR)) },
                 dashboards = dashboards,
+                endpointVersions = NoApiVersionPins,
+                schedules = NoSchedulePins,
             )
 
         shouldThrow<DatapipelinesException> { gated.release(workspaceId, pipelineId, "draft-hash", userId) }
@@ -404,6 +408,8 @@ class PipelineReleaseServiceTest {
                 AuthoringGuard(true),
                 checkGate = ReleaseCheckGate { _, _, _, _, _ -> listOf(outcome(CheckRunVerdict.FAIL)) },
                 dashboards = dashboards,
+                endpointVersions = NoApiVersionPins,
+                schedules = NoSchedulePins,
             )
 
         val released =
@@ -424,6 +430,8 @@ class PipelineReleaseServiceTest {
                 AuthoringGuard(true),
                 checkGate = ReleaseCheckGate { _, _, _, _, _ -> listOf(outcome(CheckRunVerdict.FAIL)) },
                 dashboards = dashboards,
+                endpointVersions = NoApiVersionPins,
+                schedules = NoSchedulePins,
             )
 
         shouldThrow<DatapipelinesException> { gated.release(workspaceId, pipelineId, "draft-hash", userId, overrideChecksReason = "ok") }
@@ -447,6 +455,8 @@ class PipelineReleaseServiceTest {
                         listOf(outcome(CheckRunVerdict.PASS))
                     },
                 dashboards = dashboards,
+                endpointVersions = NoApiVersionPins,
+                schedules = NoSchedulePins,
             )
 
         gated.release(workspaceId, pipelineId, "draft-hash", userId).checksOverridden shouldBe emptyList()
@@ -522,6 +532,8 @@ class PipelineReleaseServiceTest {
             checkGate = checkGate,
             templateReleaser = releaser,
             dashboards = dashboards,
+            endpointVersions = NoApiVersionPins,
+            schedules = NoSchedulePins,
         )
     } else {
         PipelineReleaseService(
@@ -533,6 +545,8 @@ class PipelineReleaseServiceTest {
             templateReleaser = releaser,
             transactions = transactions,
             dashboards = dashboards,
+            endpointVersions = NoApiVersionPins,
+            schedules = NoSchedulePins,
         )
     }
 

@@ -342,6 +342,9 @@ class UiConfig {
         schedules: co.datapipelines.scheduler.ScheduleService,
         // #320 — the dashboards that pin a release, the port the service's discard guard asks.
         dashboards: co.datapipelines.pipeline.PipelineVersionConsumers,
+        // #786 B.4 — the live API versions and schedules that pin a version: the guard's two new ports.
+        endpointVersions: co.datapipelines.pipeline.EndpointVersionConsumers,
+        scheduleConsumers: co.datapipelines.pipeline.ScheduleConsumers,
     ): PipelineLifecycleDialogModel =
         PipelineLifecycleDialogModel(
             repository,
@@ -355,6 +358,8 @@ class UiConfig {
             co.datapipelines.pipeline.PipelineDeserializer(),
             schedules,
             dashboards,
+            endpointVersions,
+            scheduleConsumers,
         )
 
     /** 102: the template twin of [pipelineLifecycleDialogModel]. */

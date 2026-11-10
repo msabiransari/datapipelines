@@ -139,7 +139,8 @@ class ScheduleNotificationDeliveryE2eTest {
     fun `a run that could not start mails that, and the block it causes is mailed once`() {
         val pipelineId = createPipeline(REFUSED_PIPELINE, OK_TEMPLATE)
         val schedule = createSchedule("test/notify_refused", REFUSED_PIPELINE, listOf(REFUSED))
-        session(ADMIN_SESSION).post("/api/v1/pipelines/$pipelineId/versions/1/discard").then().statusCode(200)
+        // #786 B.4 protects the release a live schedule runs, so a NULL pointer under one is legacy data: plant it as such.
+        sql("UPDATE pipelines SET current_version = NULL WHERE id = '$pipelineId'")
         val run = runNow(schedule)
         val detail = awaitRun(schedule, run)
         detail["state"].asText() shouldBe "not_started"

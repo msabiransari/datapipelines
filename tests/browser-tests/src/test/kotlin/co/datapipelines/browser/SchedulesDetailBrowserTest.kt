@@ -41,9 +41,12 @@ class SchedulesDetailBrowserTest : SchedulesBrowserSuite() {
         page.locator("[data-verb='schedule-resume']").click()
         page.waitForFunction("() => (document.querySelector('#schedule-detail [data-slot=condition]') || {}).textContent === 'enabled'")
 
-        // The pipeline loses its current version (its only release discarded): a Run now is
-        // refused before anything starts, and the schedule BLOCKS with that cause (§5.2).
-        send(page, "POST", "/api/v1/pipelines/$pipelineId/versions/1/discard").status shouldBe 200
+        // #786 B.4: the release a live schedule runs is protected, so the discard verb is refused.
+        send(page, "POST", "/api/v1/pipelines/$pipelineId/versions/1/discard").status shouldBe 409
+        // The pipeline loses its current version the only way left — legacy data (its only release
+        // discarded before #786): a Run now is refused before anything starts, and the schedule
+        // BLOCKS with that cause (§5.2).
+        plantLegacyDiscardedRelease(pipelineId)
         page.locator("[data-verb='schedule-run']").click()
         val blocked = page.locator("#schedule-detail [data-slot='blocked']:not([hidden])")
         blocked.waitFor()

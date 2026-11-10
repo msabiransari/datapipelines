@@ -19,13 +19,25 @@ import java.util.UUID
  * the version is admitted by the caller's [Admission], then the read-only rule and the path variables against THAT
  * version's body. Eligibility reads [AuthoringGuard.developmentPosture] — the posture the refusal path reads — and
  * never the mail policy's posture (A37).
+ *
+ * [pipelines] is resolved on first use: the pipeline service reaches the release coordinator, whose API participant
+ * reaches this validator, so an eager reference is a construction cycle (the assembly passes a deferred lookup).
  */
 class EndpointPinValidator(
     private val pipelineRepository: PipelineRepository,
-    private val pipelines: PipelineService,
+    pipelines: Lazy<PipelineService>,
     private val readOnlyRule: ReadOnlyPipelineRule,
     private val authoring: AuthoringGuard,
 ) {
+    private val pipelines by pipelines
+
+    constructor(
+        pipelineRepository: PipelineRepository,
+        pipelines: PipelineService,
+        readOnlyRule: ReadOnlyPipelineRule,
+        authoring: AuthoringGuard,
+    ) : this(pipelineRepository, lazyOf(pipelines), readOnlyRule, authoring)
+
     /** What a pin's status must be for the caller. */
     enum class Admission {
         /** A save or a current switch: `eligibleForPointer(status, posture)` (R3). */

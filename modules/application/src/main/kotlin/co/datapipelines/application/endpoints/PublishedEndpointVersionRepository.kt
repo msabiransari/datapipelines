@@ -308,14 +308,19 @@ class PublishedEndpointVersionRepository(
         )
 
     /**
-     * EVERY stored version — DISCARDED included — pinning ANY version of [pipelineName]: the pipeline entity purge's
-     * evidence (a restore would resurrect a dangling pin, the dashboards' R12 rule).
+     * The LIVE API versions pinning ANY version of [pipelineName]: the pipeline entity purge's blockers. DISCARDED
+     * protects nothing here either (record §14): unlike a dashboard's history (R12), a DISCARDED API version's restore
+     * revalidates its outbound pin first, so a purged pipeline makes that restore refuse rather than resurrect a dangling pin.
      */
-    fun anyPins(
+    fun livePinsAnyVersion(
         workspaceId: UUID,
         pipelineName: String,
     ): List<Pin> =
-        jdbc.query("$SELECT_PIN ORDER BY e.path_pattern, v.version", mapOf("ws" to workspaceId, "name" to pipelineName), PIN_MAPPER)
+        jdbc.query(
+            "$SELECT_PIN AND v.status IN ('DRAFT', 'RELEASED') ORDER BY e.path_pattern, v.version",
+            mapOf("ws" to workspaceId, "name" to pipelineName),
+            PIN_MAPPER,
+        )
 
     /** One API version pinning a pipeline version: what a refusal names (path, version, status) within visibility. */
     data class Pin(

@@ -364,8 +364,12 @@ class ApiErrorCatalogSpecDriftTest {
          * The merged document, constants and catalog rows carry the same union.
          * 477 → 480 with #841 (G0): `datasource.write.busy`, `endpoint.write.busy` and `schedule.write.busy`, all 409,
          * landed in the SAME commit as their constants and catalog rows.
+         * 480 → 505 with #786: §13.14 gains the API version lifecycle, pin and authoring rows (11) and the API
+         * family's nine `endpoint.release.*` refusals; §13.9/§13.13/§13.20/§13.22/§13.23 each gain
+         * `<family>.release.metadata_unavailable` (503) — 20 + 5. Re-derived from the document's own parse with
+         * [STATUS_ROW_REGEX], landed in the SAME commit as the constants and catalog rows.
          */
-        const val SECTION_13_ROW_COUNT = 480
+        const val SECTION_13_ROW_COUNT = 505
 
         /**
          * §12's distinct validation codes.

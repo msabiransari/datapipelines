@@ -1,6 +1,6 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.55 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.56 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
 **Last updated:** 2026-11-08
@@ -620,11 +620,12 @@ CREATE TABLE published_endpoints (
     id               UUID        PRIMARY KEY,
     workspace_id     UUID        NOT NULL REFERENCES workspaces(id),
     path_pattern     TEXT        NOT NULL,   -- '/lending/v1/{borough}/home'
-    pipeline_id      UUID        NOT NULL REFERENCES pipelines(id),
-    timeout_seconds  INTEGER     NOT NULL,   -- clamped by config at write time
-    description      TEXT        NOT NULL DEFAULT '',
+    pipeline_id      UUID        NOT NULL REFERENCES pipelines(id),   -- #786: legacy, the conversion's SOURCE only
+    timeout_seconds  INTEGER     NOT NULL,   -- #786: legacy creation snapshot; the version row's value serves
+    description      TEXT        NOT NULL DEFAULT '',                 -- #786: legacy, as timeout_seconds
     is_enabled       BOOLEAN     NOT NULL DEFAULT TRUE,
     retired_reason   TEXT        NULL,       -- NULL = a normal row; 'pre-R-EP5 path' = retired (#274)
+    current_version  INTEGER     NULL,       -- #786 (V58): the API's OWN runtime pointer, see §4.13a
     created_by       UUID        NOT NULL REFERENCES users(id),
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -639,9 +640,60 @@ CREATE INDEX idx_published_endpoints_pipeline ON published_endpoints(pipeline_id
 - **`UNIQUE (path_pattern)` is deployment-wide, not per-workspace, on purpose.** A URL is global: `GET /api/lending/v1/home` has exactly one meaning on a deployment, so two workspaces cannot both own it. `workspace_id` says who may manage the row and whose datasources the pipeline runs against — it does not namespace the path. A per-workspace constraint would let two rows claim one URL and make request-time resolution ambiguous.
 - **`retired_reason` (V41, #274) — a stored row that fails a later grammar is retired, never fatal.** R-EP5 (2026-09-19) made three segments the floor, and rows written before that day under the then-legal two-segment grammar parse against nothing: the row mapper threw inside the demo seeder's conflict check and refused the whole boot. V41 disables every row whose path has fewer than three segments and records why (`retired_reason = 'pre-R-EP5 path'`; NULL is a normal row). Rows are never deleted — the listing shows them flagged with the reason, and unpublishing one is the operator's deliberate act. Independently of this column, the repository maps a row whose path no longer parses as a legacy value and keeps it out of the serve registry and the conflict check, so a database V41 has not reached yet still boots; the column is what makes the row read back as an ordinary disabled row everywhere else. The migration's down path (documented in the file's header) re-enables every row the reason names — V41 cannot distinguish "disabled by V41" from "disabled by an operator before V41" — and drops the column. The column is an audit marker, not the source of the listing's flag: `legacy` and `reason` come from parsing the stored path on every read (the mapper), and V41's predicate is the two-segment shape only — a row malformed another way (an illegal segment, an empty path) stays `is_enabled = TRUE` in the table, is mapped legacy on every read and is never served. **What sees a legacy row (#286).** Only the legacy read (`findLegacy`, workspace-scoped — there is no deployment-wide read) and the row-level read unpublish needs (`findRowByPath`); every valid-endpoint read skips it — the serve registry, the conflict check, the workspace listing, `EndpointKeyService.requireInsideWorkspace` (a node only a legacy path lies under is not inside the workspace's tree, so no key binds there) and the pipeline explorer's Usage tab (`findByPipeline`: a pipeline served only by a legacy row reads as unpublished, which it is). A promotion batch omits it and the sender logs the count. `path_pattern` is `TEXT` with no CHECK, so the surfaces that echo a legacy path (REST, `endpoints_list`, the console) cut it at the grammar's 200 characters (`EndpointPath.echoBounded`); the column keeps the stored value, because unpublish is by path. The once-per-JVM `event=endpoint.legacy_rows` WARN names the FIRST query's count as `at_least` — after V41 the registry warm-up reads enabled rows only, so it is a floor, not the deployment's total.
 - The constraint is not the whole uniqueness rule. `/a/{x}` and `/a/b` are different strings that match the same URL; that overlap is refused at publish time in the application (`endpoint.path_conflict`), under a transaction-scoped advisory lock so two concurrent publishes cannot both pass the check. The constraint is the second line, catching exact duplication.
-- The row pins a **pipeline, not a version**: the latest RELEASED version is resolved at request time, which is why the read-only rule is re-checked on every serve and not only at publish.
+- **Since #786 (V58) the entity pins nothing itself.** Its `current_version` names one of its API versions (§4.13a), and that version pins an EXACT pipeline version; serving reads this pointer and that pin, never the pipeline's CURRENT. The pointer is tied to a version row by the composite foreign key `fk_published_endpoints_current_version (id, current_version) → published_endpoint_versions (endpoint_id, version)`, `DEFERRABLE INITIALLY DEFERRED` (a constraint, not a trigger: a transaction that purges the current version and moves the pointer is checked once, at commit); NULL serves nothing. `pipeline_id`, `timeout_seconds` and `description` stay as the in-place conversion's SOURCE — read once for an entity with no version row — and as a new entity's creation snapshot; no serve statement reads them. (Before #786 the row pinned a pipeline, not a version, and the latest RELEASED version was resolved at request time; the read-only rule is still re-checked on every serve.)
 - `timeout_seconds` is clamped to the `datapipelines.endpoints.timeout-min-seconds` / `datapipelines.endpoints.timeout-max-seconds` bounds when written, deliberately **not** by a CHECK constraint — the bounds are configuration an operator may retune, and a row written under the old bounds must keep serving rather than make the table unreadable.
 - Matching reads the enabled rows whole and matches them in memory (the set is small and cached per instance, invalidated over the same Redis channel datasource pools use), so no query plan depends on the shape of `path_pattern`.
+
+### 4.13a `published_endpoint_versions`
+
+One row per API version (V58, #786; dependency-graph record §5.3, §24): DRAFT, RELEASED or DISCARDED, the exact pipeline pin by portable NAME and version NUMBER (never a pipeline UUID), the timeout and the description, and the house body hash. See [REST API §19](rest-api.md#19-published-endpoints).
+
+```sql
+CREATE TABLE published_endpoint_versions (
+    endpoint_id      UUID        NOT NULL REFERENCES published_endpoints(id) ON DELETE CASCADE,
+    version          INTEGER     NOT NULL,
+    status           TEXT        NOT NULL DEFAULT 'DRAFT',   -- chk_published_endpoint_versions_status: DRAFT | RELEASED | DISCARDED
+    pipeline_name    TEXT        NOT NULL,   -- the portable pipeline identity (pipeline-contract §11.1)
+    pipeline_version INTEGER     NOT NULL,   -- the EXACT pin: never 'current', never re-resolved
+    timeout_seconds  INTEGER     NOT NULL,   -- clamped by config at write time
+    description      TEXT        NOT NULL DEFAULT '',
+    body_hash        TEXT        NOT NULL,
+    released_at      TIMESTAMPTZ NULL,
+    released_by      UUID        REFERENCES users(id),
+    discarded_at     TIMESTAMPTZ NULL,
+    discarded_by     UUID        REFERENCES users(id),
+    updated_at       TIMESTAMPTZ NULL,
+    updated_by       UUID        REFERENCES users(id),
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by       UUID        NOT NULL REFERENCES users(id),
+    PRIMARY KEY (endpoint_id, version),
+    CONSTRAINT chk_published_endpoint_versions_version CHECK (version >= 1),
+    CONSTRAINT chk_published_endpoint_versions_pin CHECK (pipeline_version >= 1),
+    CONSTRAINT chk_published_endpoint_versions_release_stamps CHECK (
+        (status = 'DRAFT' AND released_at IS NULL AND released_by IS NULL)
+        OR (status <> 'DRAFT' AND released_at IS NOT NULL)),
+    CONSTRAINT chk_published_endpoint_versions_discard_stamps CHECK (
+        (status = 'DISCARDED' AND discarded_at IS NOT NULL)
+        OR (status <> 'DISCARDED' AND discarded_at IS NULL AND discarded_by IS NULL))
+);
+
+CREATE UNIQUE INDEX uq_published_endpoint_versions_one_draft
+    ON published_endpoint_versions (endpoint_id) WHERE status = 'DRAFT';
+CREATE INDEX idx_published_endpoint_versions_pin ON published_endpoint_versions (pipeline_name, pipeline_version);
+
+ALTER TABLE published_endpoints ADD COLUMN current_version INTEGER NULL
+    CONSTRAINT chk_published_endpoints_current_version CHECK (current_version IS NULL OR current_version >= 1);
+ALTER TABLE published_endpoints ADD CONSTRAINT fk_published_endpoints_current_version
+    FOREIGN KEY (id, current_version) REFERENCES published_endpoint_versions (endpoint_id, version)
+    DEFERRABLE INITIALLY DEFERRED;
+```
+
+**Notes:**
+- **At most one working DRAFT per API** — the V39 partial-unique pattern; a second insert surfaces as `endpoint.version.draft_exists`. A draft save is a CAS on the body hash (`endpoint.version.conflict`).
+- **The body hash is ONE SQL expression** (`PublishedEndpointVersionRepository.API_BODY_HASH_EXPR`, quoted byte-equal in V58's header and drift-tested): `sha256` over `jsonb_build_object('pipeline', 'pipeline_version', 'timeout_seconds', 'description')`. jsonb canonicalises key order, so equal bodies hash equally on every deployment; the path, the entity and pipeline UUIDs, `is_enabled` and the key bindings are not inputs (acceptance A44).
+- **Who pins a pipeline version** — `idx_published_endpoint_versions_pin` serves the pipeline discard/purge protection (#786 B.4): a DRAFT or RELEASED API version — noncurrent, or of a disabled entity, included — refuses `pipeline.version.pinned` with `referencing_api_versions`; a DISCARDED one protects nothing (its restore rechecks the pin).
+- **No data is backfilled in SQL.** Existing APIs are converted IN PLACE by a startup step in `modules/app` under the writer guard and the shared hash expression (owner ruling 2026-11-08): v1 pins the legacy pipeline's CURRENT version exactly, RELEASED when that version is RELEASED and DRAFT otherwise, and `current_version = 1`. Every path that creates an entity writes its v1 in the same transaction, so a version-less entity is legacy data only.
+- The release participant flips a version RELEASED inside the release coordinator's one transaction; `released_at` survives a discard and a restore.
 
 ### 4.14 `endpoint_key_bindings`
 
@@ -2081,6 +2133,9 @@ ALTER TABLE pipeline_versions ADD COLUMN writes_managed_lake BOOLEAN NOT NULL DE
 | `published_endpoints` | `published_endpoints_path_pattern_key` | via UNIQUE | One meaning per URL, deployment-wide ([§4.13](#413-published_endpoints)) |
 | `published_endpoints` | `idx_published_endpoints_workspace` | explicit | A workspace's endpoints — the management listing |
 | `published_endpoints` | `idx_published_endpoints_pipeline` | explicit | "Does any endpoint publish this pipeline?" — what a pipeline delete and the read-only re-check ask |
+| `published_endpoint_versions` | `published_endpoint_versions_pkey` | via PK | One row per `(endpoint_id, version)` ([§4.13a](#413a-published_endpoint_versions), #786) |
+| `published_endpoint_versions` | `uq_published_endpoint_versions_one_draft` | explicit (partial UNIQUE) | At most one working DRAFT per API |
+| `published_endpoint_versions` | `idx_published_endpoint_versions_pin` | explicit | "Which API versions pin this pipeline version?" — the pipeline discard/purge protection (#786 B.4) |
 | `endpoint_key_bindings` | `endpoint_key_bindings_pkey` | via PK | `(path_prefix, api_key_id)` — one key binds a node once |
 | `endpoint_key_bindings` | `idx_endpoint_key_bindings_key` | explicit | Which nodes a key binds — the key detail view and a revoke's blast radius |
 | `dashboard_key_bindings` | `dashboard_key_bindings_pkey` | via PK | `(name_prefix, api_key_id)` — one key binds a folder once (§4.36) |
@@ -2212,6 +2267,7 @@ table and the test's expected-table list in the same commit.
 | `pipeline_executions` | derived | Execution | — | `execution_id` | Produced by running; each environment's history is its own (versioning §9.3: "its own history references its own numbers") |
 | `execution_events` | derived | Event | — | `(execution_id, event_id)` | The durable SSE trail of local executions |
 | `audit_log` | derived | AuditEvent | — | — | Records local activity; not authored, not transferable |
+| `published_endpoint_versions` | promotable | PublishedEndpoint | `version` (per API) | `(path_pattern, version)` | An API version is authored content (#786). Until follow-up #879 carries exact versions on the wire, promotion keeps today's by-path transfer: the receiver's import creates an absent API's v1 pinned to the TARGET pipeline's CURRENT, never a transmitted version or hash |
 | `published_endpoints` | promotable | PublishedEndpoint | — (follows the pipeline it publishes) | `path_pattern` | The URL contract is authored, and an endpoint that exists in dev and not in prod is the whole point of promoting it. The row references its pipeline by NAME in the batch, like everything promoted; `workspace_id`, `created_by` and the timestamps are resolved locally on the target |
 | `endpoint_key_bindings` | promotable | EndpointKeyBinding | — | `(path_prefix, api key name)` | Which node a key authorises is authored topology, not local state, so it travels. It is carried by key NAME because [`api_keys`](#42-api_keys) itself is environment-local — a target missing that key name refuses the batch with `endpoint.promotion.key_missing` before anything is pushed, rather than importing a binding to nothing |
 | `dashboard_key_bindings` | promotable | DashboardKeyBinding | — | — | The `endpoint_key_bindings` twin's OWN class, by the same reasoning (L5 #367's lane decision, recorded in the handback): a folder binding is authored topology. TODAY it has no promotion carrier (no batch row, no entity registered with the transfer) — the class states what it WOULD travel as; when a batch carries it, it travels by key NAME exactly like its twin |
@@ -2566,6 +2622,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-10 | v1.56 | V58 (#786 U1) | New **§4.13a `published_endpoint_versions`** — one row per API version (DRAFT/RELEASED/DISCARDED), the exact pipeline pin by name and number, the shared body-hash expression (A44), the one-draft partial index and the pin lookup; **§4.13 `published_endpoints` gains `current_version`**, the API's own pointer, tied to a version row by the deferrable composite FK `fk_published_endpoints_current_version`; the legacy `pipeline_id` / `timeout_seconds` / `description` stay as the in-place conversion's source and the creation snapshot, never served. The "pins a pipeline, not a version" note is corrected. §5 gains the three indexes; §5A classifies the table promotable (by-path transfer until #879). No SQL backfill: the conversion is code (owner ruling 2026-11-08). |
 | 2026-11-08 | v1.55 | 851 (#844) | V57 replaces `idx_lake_deliveries_unsettled (table_id, state)` with `idx_lake_deliveries_unsettled_page (table_id, id)` under the same partial predicate (§4.53, §5): the settlement page is an index range scan with no sort. |
 | 2026-11-06 | v1.54 | 818e (#818) | V56 widens the lease kind and adds reader metadata pins, their check and index; writer fencing is unchanged. |
 | 2026-11-04 | v1.53 | 799 (#799, dp-lake P4) | V55 adds permanent deliveries (§4.53), publication attempts (§4.54), and the derived pipeline version `writes_managed_lake` flag. |

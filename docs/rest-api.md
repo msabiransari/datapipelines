@@ -444,7 +444,10 @@ refuses before the pin check), plus `409 pipeline.version.pinned`: live parent p
 pinning the exact draft, and live dashboard versions pinning it. A sole-draft purge takes the
 entity and checks stored dashboard pins to any version (DISCARDED included for a dashboard with
 a live version); parent scope remains live/exact. `details.pinned_by` names `{pipeline, version, node}`;
-`details.referencing_dashboards` names `{dashboard, version, status}` when non-empty. Refusal
+`details.referencing_dashboards` names `{dashboard, version, status}` when non-empty; since #786
+`details.referencing_api_versions` (`{path, version, status, pipeline_version}`) and
+`details.referencing_schedules` (`{schedule, pipeline_version}`) name the live API versions and schedules the
+same way (any version for a sole-draft purge). Refusal
 precedes all deletion and preserves executions, hash and pointer.
 
 ### 5.12 Discard pipeline version
@@ -458,7 +461,7 @@ its executions and promotion history stay — and the sticky pointer recomputes 
 WAS the pointer (D60: highest eligible live version, else NULL; a DRAFT is eligible only
 under development posture). Refusals: `409 pipeline.version.not_released` (a draft is
 purged, never discarded; an already-discarded version needs restore), `409
-pipeline.version.pinned` (a live parent version — or, since #320, a live dashboard version whose source — exact-pins v; `details.pinned_by` names the pipelines, `details.referencing_dashboards` the dashboards), `404
+pipeline.version.pinned` (a live parent version — or, since #320, a live dashboard version whose source — exact-pins v; `details.pinned_by` names the pipelines, `details.referencing_dashboards` the dashboards; since #786 a live API version pinning v or a live schedule running it refuses too, `details.referencing_api_versions` / `details.referencing_schedules`), `404
 pipeline.execution.not_found` (unknown version), `403 pipeline.authoring.disabled`
 (hardened). **Session-only**; audited as `pipeline.version.discarded` (pointer
 before/after in `details`).

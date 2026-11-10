@@ -422,10 +422,12 @@ reach them through a port `application` implements — no module's SQL names ano
 |---|---|---|---|
 | visualization `transform.template` → template | draft purge, version purge, discard, entity purge, the exclusive-draft offer | `template.in_use` | `referencing_visualizations` (names), beside `pinned_by` and `referencing_parameter_sets` |
 | dashboard `sources[].pipeline` → pipeline version | draft purge, version purge, discard, entity purge | `pipeline.version.pinned` | `referencing_dashboards`: `[{dashboard, version, status}]`, beside `pinned_by` |
+| API version `(pipeline, pipeline_version)` → pipeline version (#786) | draft purge, version purge, discard, entity purge | `pipeline.version.pinned` | `referencing_api_versions`: `[{path, version, status, pipeline_version}]` — DRAFT and RELEASED API versions, noncurrent and disabled entities included; DISCARDED protects nothing |
+| schedule target → the pipeline version it runs (#786) | draft purge, version purge, discard, entity purge | `pipeline.version.pinned` | `referencing_schedules`: `[{schedule, pipeline_version}]` — every non-deleted schedule, paused and blocked included; a schema-1 payload runs CURRENT (null while CURRENT is NULL, counted by the entity purge only) |
 | dashboard `parameter_set` → parameter-set release | draft purge, version purge, discard, entity purge | `parameter.in_use` | `pinned_by`: `[{dashboard, version, status}]`, `id`, `version` (absent for an entity purge) |
 | dashboard `visualizations[].visualization` → visualization | draft purge, version purge, discard, entity purge | `visualization.version.pinned` (L1a) | `pinned_by`: `["dashboard@version"]` |
 
-Endpoints and schedules pin nothing (pointer edges, rule 2): no arm exists for them.
+Since #786 API versions pin an exact pipeline version, and a live schedule protects the version it runs (until U2 stores exact schedule pins, the one CURRENT names at the check); both arms are in the table above. The entity purge asks both for any version.
 
 **Which question each verb asks.** A discard and a draft purge that keeps other versions ask the LIVE exact-pin question
 (rule 1: DRAFT or RELEASED dependent versions pinning exactly this version). An entity purge, and a draft purge that

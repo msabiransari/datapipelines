@@ -1,15 +1,20 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.pipeline.AuthoringGuard
+import co.datapipelines.pipeline.EndpointVersionConsumers
+import co.datapipelines.pipeline.EndpointVersionPin
 import co.datapipelines.pipeline.ExclusiveDraftTemplates
 import co.datapipelines.pipeline.PipelineDeserializer
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.PipelinePurgePinGuard
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.PipelineVersionStatus.RELEASED
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.RetiredFactCitation
+import co.datapipelines.pipeline.ScheduleConsumers
+import co.datapipelines.pipeline.SchedulePin
 import co.datapipelines.pipeline.TemplateReviewMarks
 import co.datapipelines.pipeline.TemplateVersionStatuses
 import co.datapipelines.pipeline.WriteSurface
@@ -58,8 +63,18 @@ class PipelineLifecycleDialogModel(
      */
     private val schedules: co.datapipelines.scheduler.ScheduleService,
     /** #320 — the dashboards that pin a release: the SAME port `PipelineService.refuseIfPinned` asks, so the dialog and the POST agree. */
-    private val dashboards: co.datapipelines.pipeline.PipelineVersionConsumers,
+    dashboards: co.datapipelines.pipeline.PipelineVersionConsumers,
+    /** #786 B.4 — the live API versions that pin a version: the SAME port the services' pin guard asks (record §14, A39). */
+    endpointVersions: EndpointVersionConsumers,
+    /** #786 B.4 — the live schedules that run a version, paused and blocked included: the guard's port too. */
+    scheduleConsumers: ScheduleConsumers,
 ) {
+    /**
+     * #786 B.4 — the services' own pin guard over the same four ports, so every blocker list a dialog shows is the
+     * list the POST would refuse with, read by the same code.
+     */
+    private val pinGuard = PipelinePurgePinGuard(repository, dashboards, endpointVersions, scheduleConsumers)
+
     /** "v3 is not draft" and friends: a dialog for a shape the table refuses still OPENS. */
     data class Refusal(
         val code: String,
@@ -256,7 +271,15 @@ class PipelineLifecycleDialogModel(
         val expected: String,
         val pinnerPipelines: List<PinnerView> = emptyList(),
         val pinnerDashboards: List<co.datapipelines.pipeline.DashboardPin> = emptyList(),
-    )
+        /** #786 B.4 — the live API versions pinning the draft (the entity scope for a sole draft); each refuses the purge. */
+        val pinnerApiVersions: List<EndpointVersionPin> = emptyList(),
+        /** #786 B.4 — the live schedules running the draft (the entity scope for a sole draft); each refuses the purge. */
+        val pinnerSchedules: List<SchedulePin> = emptyList(),
+    ) {
+        /** Any blocker at all: the dialog then lists them and carries no button. */
+        val blocked: Boolean
+            get() = pinnerPipelines.isNotEmpty() || pinnerDashboards.isNotEmpty() || pinnerApiVersions.isNotEmpty() || pinnerSchedules.isNotEmpty()
+    }
 
     @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal the dialog renders
     fun purge(
@@ -275,22 +298,18 @@ class PipelineLifecycleDialogModel(
                 details = mapOf("pipeline_id" to id.toString(), "version" to version, "status" to detail.status.name),
             )
         }
+        // The guard's own scope rule: a sole draft takes the entity, so its consumers are read across every version.
+        val pinners = pinGuard.pinnersOf(workspaceId, record, version, entityPurge = repository.listVersions(workspaceId, id).size == 1)
         return PurgeDialog(
             id = id,
             name = record.name,
             version = version,
             runCount = runStats.runsByVersion(id)[version] ?: 0,
             expected = "v$version",
-            pinnerPipelines =
-                repository.findLiveParentsPinningVersion(workspaceId, record.name, version).map {
-                    PinnerView(it.pipelineName, it.pipelineVersion, it.nodeId)
-                },
-            pinnerDashboards =
-                if (repository.listVersions(workspaceId, id).size == 1) {
-                    dashboards.anyVersionPins(workspaceId, record.name)
-                } else {
-                    dashboards.liveVersionPins(workspaceId, record.name, version)
-                },
+            pinnerPipelines = pinners.pipelines.map { PinnerView(it.pipelineName, it.pipelineVersion, it.nodeId) },
+            pinnerDashboards = pinners.dashboards,
+            pinnerApiVersions = pinners.endpointVersions,
+            pinnerSchedules = pinners.schedules,
         )
     }
 
@@ -319,11 +338,23 @@ class PipelineLifecycleDialogModel(
         /** What §3.4's fallback will do when THIS version is the pointer; null when it is not. */
         val fallback: String?,
         val pinnerPipelines: List<PinnerView>,
-        /** #273 — the live schedules that run this pipeline, by name; empty renders no section. */
+        /**
+         * #273 — the live schedules that run this pipeline, by name, through the caller's lens; empty renders no section.
+         * Since #786 B.4 the ones that run THIS version are blockers ([pinnerSchedules]); the rest follow a current
+         * version the discard leaves in place.
+         */
         val schedules: List<ScheduleEvidence> = emptyList(),
         /** #320 — the live dashboard versions whose sources pin this version (`referencing_dashboards`); each refuses the discard. */
         val pinnerDashboards: List<co.datapipelines.pipeline.DashboardPin> = emptyList(),
-    )
+        /** #786 B.4 — the live API versions pinning this version (`referencing_api_versions`); each refuses the discard. */
+        val pinnerApiVersions: List<EndpointVersionPin> = emptyList(),
+        /** #786 B.4 — the live schedules running this version (`referencing_schedules`); each refuses the discard. */
+        val pinnerSchedules: List<SchedulePin> = emptyList(),
+    ) {
+        /** Any blocker at all: the dialog then lists them and carries no button. */
+        val blocked: Boolean
+            get() = pinnerPipelines.isNotEmpty() || pinnerDashboards.isNotEmpty() || pinnerApiVersions.isNotEmpty() || pinnerSchedules.isNotEmpty()
+    }
 
     @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal the dialog renders
     fun discard(
@@ -346,11 +377,7 @@ class PipelineLifecycleDialogModel(
                 details = mapOf("pipeline_id" to id.toString(), "version" to version, "status" to detail.status.name),
             )
         }
-        val pinners =
-            repository.findLiveParentsPinningVersion(workspaceId, record.name, version).map {
-                PinnerView(it.pipelineName, it.pipelineVersion, it.nodeId)
-            }
-        val pinnerDashboards = dashboards.liveVersionPins(workspaceId, record.name, version)
+        val pinners = pinGuard.pinnersOf(workspaceId, record, version)
         val isCurrent = record.currentVersion == version
         val fallback =
             if (isCurrent) {
@@ -372,7 +399,18 @@ class PipelineLifecycleDialogModel(
             schedules
                 .listByTarget(workspaceId, PipelineJobExecutor.TARGET_PREFIX + record.name, viewer)
                 .map { ScheduleEvidence(it.id, it.name, it.condition, it.nextDueAt?.let(RelativeTime::absolute)) }
-        return DiscardDialog(id, record.name, version, isCurrent, fallback, pinners, runsOnIt, pinnerDashboards)
+        return DiscardDialog(
+            id = id,
+            name = record.name,
+            version = version,
+            isCurrent = isCurrent,
+            fallback = fallback,
+            pinnerPipelines = pinners.pipelines.map { PinnerView(it.pipelineName, it.pipelineVersion, it.nodeId) },
+            schedules = runsOnIt,
+            pinnerDashboards = pinners.dashboards,
+            pinnerApiVersions = pinners.endpointVersions,
+            pinnerSchedules = pinners.schedules,
+        )
     }
 
     // ------------------------------------------------------------------ restore
@@ -447,7 +485,15 @@ class PipelineLifecycleDialogModel(
         val pinnerPipelines: List<PinnerView> = emptyList(),
         /** #471 — the dashboard versions pinning any stored version, the entity scope's evidence. */
         val pinnerDashboards: List<co.datapipelines.pipeline.DashboardPin> = emptyList(),
-    )
+        /** #786 B.4 — the live API versions pinning any version of the pipeline, the entity scope's blockers. */
+        val pinnerApiVersions: List<EndpointVersionPin> = emptyList(),
+        /** #786 B.4 — the live schedules targeting the pipeline, the entity scope's blockers. */
+        val pinnerSchedules: List<SchedulePin> = emptyList(),
+    ) {
+        /** Any blocker at all: the dialog then lists them and carries no button. */
+        val blocked: Boolean
+            get() = pinnerPipelines.isNotEmpty() || pinnerDashboards.isNotEmpty() || pinnerApiVersions.isNotEmpty() || pinnerSchedules.isNotEmpty()
+    }
 
     /** A draft-only template the purge leaves in place, and the parameter sets and visualizations that hold it (#335). */
     data class KeptTemplate(
@@ -473,6 +519,9 @@ class PipelineLifecycleDialogModel(
                 )
         val versions = repository.listVersions(workspaceId, id)
         val soleDraft = versions.size == 1 && versions.single().status == PipelineVersionStatus.DRAFT
+        // #471/#786: the guard's own reads, asked only for the sole draft — the shape the POST would purge: the exact sole
+        // version for the parents, the entity scope for dashboards, API versions and schedules.
+        val pinners = if (soleDraft) pinGuard.pinnersOf(workspaceId, record, versions.single().version, entityPurge = true) else null
         return PurgeEntityDialog(
             id = id,
             name = record.name,
@@ -492,18 +541,10 @@ class PipelineLifecycleDialogModel(
                 } else {
                     emptyList()
                 },
-            // #471: the guard's own two reads, asked only for the sole draft — the shape the
-            // POST would purge. The entity scope for the dashboards (anyVersionPins), the
-            // exact sole version for the parents.
-            pinnerPipelines =
-                if (soleDraft) {
-                    repository.findLiveParentsPinningVersion(workspaceId, record.name, versions.single().version).map {
-                        PinnerView(it.pipelineName, it.pipelineVersion, it.nodeId)
-                    }
-                } else {
-                    emptyList()
-                },
-            pinnerDashboards = if (soleDraft) dashboards.anyVersionPins(workspaceId, record.name) else emptyList(),
+            pinnerPipelines = pinners?.pipelines.orEmpty().map { PinnerView(it.pipelineName, it.pipelineVersion, it.nodeId) },
+            pinnerDashboards = pinners?.dashboards.orEmpty(),
+            pinnerApiVersions = pinners?.endpointVersions.orEmpty(),
+            pinnerSchedules = pinners?.schedules.orEmpty(),
             expected = record.name,
             refusal =
                 if (soleDraft) {

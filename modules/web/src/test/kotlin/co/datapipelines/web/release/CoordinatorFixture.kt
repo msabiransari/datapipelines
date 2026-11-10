@@ -100,6 +100,8 @@ internal class CoordinatorFixture(
                             )
                         },
                     dashboards = mockk(relaxed = true),
+                    endpointVersions = co.datapipelines.web.NO_API_VERSION_PINS,
+                    schedules = co.datapipelines.web.NO_SCHEDULE_PINS,
                 ),
             )
         } else {

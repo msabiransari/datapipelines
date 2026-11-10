@@ -853,10 +853,12 @@ class VersionLifecycleModelTest {
             pipelines = repository,
             validator = validator,
             drafts = PipelineDraftService(repository, guard),
-            releases = PipelineReleaseService(repository, statuses, validator, guard, dashboards = NoDashboards),
+            releases = PipelineReleaseService(repository, statuses, validator, guard, dashboards = NoDashboards, endpointVersions = NoApiVersionPins, schedules = NoSchedulePins),
             authoring = guard,
             draftTemplates = NoExclusiveDraftTemplates,
             dashboards = NoDashboards,
+            endpointVersions = NoApiVersionPins,
+            schedules = NoSchedulePins,
             // The model's templates are always RELEASED, so a restore's pin recheck (#517 round three) passes.
             templateStatuses = statuses,
         )

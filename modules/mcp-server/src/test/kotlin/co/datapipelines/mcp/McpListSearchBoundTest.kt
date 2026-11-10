@@ -50,6 +50,8 @@ class McpListSearchBoundTest {
             mockk<AuthoringGuard>(),
             mockk<ExclusiveDraftTemplates>(),
             mockk<PipelineVersionConsumers>(),
+            mockk<co.datapipelines.pipeline.EndpointVersionConsumers>(),
+            mockk<co.datapipelines.pipeline.ScheduleConsumers>(),
         )
     private val templates = TemplateService(TemplateRepository(jdbc))
 

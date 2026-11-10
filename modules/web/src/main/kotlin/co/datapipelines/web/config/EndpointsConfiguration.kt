@@ -1,6 +1,7 @@
 package co.datapipelines.web.config
 
 import co.datapipelines.application.dependencies.EndpointDependencySource
+import co.datapipelines.application.dependencies.EndpointVersionPipelineConsumers
 import co.datapipelines.application.dependencies.ReleaseDependencyFamilies
 import co.datapipelines.application.dependencies.ReleasePlanningWalk
 import co.datapipelines.application.endpoints.EndpointAuthorizer
@@ -27,6 +28,7 @@ import co.datapipelines.executor.ResultConfig
 import co.datapipelines.executor.ResultStore
 import co.datapipelines.executor.ResultUrlFactory
 import co.datapipelines.pipeline.AuthoringGuard
+import co.datapipelines.pipeline.EndpointVersionConsumers
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineResolver
 import co.datapipelines.pipeline.PipelineService
@@ -42,6 +44,7 @@ import co.datapipelines.web.executions.ResultCursor
 import co.datapipelines.web.pipelines.RecordingExecutionRunner
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.dao.DataAccessException
@@ -135,16 +138,25 @@ class EndpointsConfiguration {
         PublishedEndpointVersionRepository(jdbc)
 
     /**
+     * #786 B.4 — the pipeline aggregate's answer to "which API versions pin this release?" (record §14, A39): a pipeline
+     * version discard or purge refuses while a DRAFT or RELEASED API version pins it.
+     */
+    @Bean
+    fun endpointVersionConsumers(versions: PublishedEndpointVersionRepository): EndpointVersionConsumers =
+        EndpointVersionPipelineConsumers(versions)
+
+    /**
      * #786 — the native checks of an API version's exact pipeline pin, shared by creation, a draft save, the current
      * switch, the release participant and the receiver import, so no surface stores a pin another would refuse.
      */
     @Bean
     fun endpointPinValidator(
         pipelineRepository: PipelineRepository,
-        pipelines: PipelineService,
+        // Deferred: pipelineService → release coordinator → API participant → this validator is a construction cycle.
+        pipelines: ObjectProvider<PipelineService>,
         readOnlyRule: ReadOnlyPipelineRule,
         authoring: AuthoringGuard,
-    ): EndpointPinValidator = EndpointPinValidator(pipelineRepository, pipelines, readOnlyRule, authoring)
+    ): EndpointPinValidator = EndpointPinValidator(pipelineRepository, lazy { pipelines.getObject() }, readOnlyRule, authoring)
 
     /**
      * Creation and entity deletion (§4.2/§6; #786: a create is the entity + its v1 DRAFT) — the ONE validated path REST

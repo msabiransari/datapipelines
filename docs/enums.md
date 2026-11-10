@@ -422,8 +422,14 @@ Pre-created and fixed: the three member roles are the ONLY roles an `mcp` key ca
 | `endpoint.key_unbound` | An API key's binding to a node was removed |
 | `dashboard.key_bound` (L5, #367) | A `dashboard` key was bound to a folder of the dashboard name space; `details.name_prefix` and `workspace_id` |
 | `dashboard.key_unbound` (L5, #367) | A `dashboard` key's folder binding was removed; `details.name_prefix` |
-| `endpoint.published` | An endpoint was published over a released pipeline |
+| `endpoint.published` | An endpoint was published over a released pipeline. **Retired from new writes by #786** (an API is created as its v1 DRAFT, `endpoint.draft_saved`); kept for the history rows written before it |
 | `endpoint.unpublished` | An endpoint was deleted |
+| `endpoint.draft_saved` (#786) | An API version DRAFT was saved — the create's v1 included; `details` carry the path, the version, the pinned `pipeline` and `pipeline_version` and the body hash |
+| `endpoint.released` (#786) | An API version was released, by its own release or as the root of a release cascade (strict audit: the release rolls back if this row cannot be written) |
+| `endpoint.version_discarded` (#786) | A RELEASED API version was discarded (reversible) |
+| `endpoint.version_restored` (#786) | A DISCARDED API version was restored after its pin was rechecked |
+| `endpoint.version_purged` (#786) | An API DRAFT version was purged |
+| `endpoint.current_switched` (#786) | The API's runtime current version was switched; `details.from` and `details.to` carry both numbers |
 
 > Password and lockout events exist only for the optional local accounts ([Auth §5A](auth.md#5a-local-password-accounts-optional)); an OIDC-only deployment never writes them. No event in this table ever carries credential material.
 
