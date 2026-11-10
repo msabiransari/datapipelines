@@ -2,6 +2,7 @@ package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
 import co.datapipelines.integration.E2eSession.asSession
+import io.kotest.matchers.shouldBe
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import org.hamcrest.Matchers.equalTo
@@ -639,9 +640,85 @@ class PublishedEndpointE2eTest {
             .body("data.pipeline_version", equalTo(2))
     }
 
-    private fun pinnedPipelineBody(label: String) =
-        """
-        {"schema_version": 1, "name": "test/a06_pinned", "display_name": "A06 pinned",
+    // -------------------------------------------------------------------------------------
+    // #786 C.4 — an API restore rechecks its pin (record §25.4 "For API restore")
+    // -------------------------------------------------------------------------------------
+
+    @Test
+    fun `restoring an API version whose pinned pipeline version was discarded is 400 and changes nothing (C4)`() {
+        val name = "test/c4_restore"
+        val pipelineId = pipeline(pinnedPipelineBody("v1", name))
+        releaseNext(pipelineId, "v2", name)
+        val apiId =
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .asSession(ADMIN_SESSION)
+                .body("""{"path": "/nyc/v1/c4-restore", "pipeline": "$name", "pipeline_version": 1, "timeout_seconds": 60}""")
+                .`when`()
+                .post("/api/v1/endpoints")
+                .then()
+                .statusCode(201)
+                .extract()
+                .jsonPath()
+                .getString("data.id")
+        val apiHash = apiVersion(apiId, 1).getString("data.body_hash")
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .header("If-Match", apiHash)
+            .`when`()
+            .post("/api/v1/endpoints/$apiId/release")
+            .then()
+            .statusCode(200)
+            .body("data.status", equalTo("RELEASED"))
+        lifecycle("/api/v1/endpoints/$apiId/versions/1/discard").statusCode(200)
+        // A DISCARDED API version protects nothing: the pipeline version it pins may now be discarded.
+        lifecycle("/api/v1/pipelines/$pipelineId/versions/1/discard").statusCode(200)
+
+        lifecycle("/api/v1/endpoints/$apiId/versions/1/restore")
+            .statusCode(400)
+            .body("error.code", equalTo("endpoint.pipeline_version.not_found"))
+            .body("error.details.pipeline", equalTo(name))
+            .body("error.details.pipeline_version", equalTo(1))
+            .body("error.details.path", equalTo("pipeline_version"))
+        apiVersion(apiId, 1).getString("data.status") shouldBe "DISCARDED"
+
+        // Control: once the pinned version is live again, the same restore lands RELEASED — no repin, no release.
+        lifecycle("/api/v1/pipelines/$pipelineId/versions/1/restore").statusCode(200)
+        lifecycle("/api/v1/endpoints/$apiId/versions/1/restore").statusCode(200)
+        val restored = apiVersion(apiId, 1)
+        restored.getString("data.status") shouldBe "RELEASED"
+        restored.getInt("data.pipeline_version") shouldBe 1
+        restored.getString("data.body_hash") shouldBe apiHash
+    }
+
+    private fun apiVersion(
+        apiId: String,
+        version: Int,
+    ) = given()
+        .port(port)
+        .asSession(ADMIN_SESSION)
+        .`when`()
+        .get("/api/v1/endpoints/$apiId/versions/$version")
+        .then()
+        .statusCode(200)
+        .extract()
+        .jsonPath()
+
+    private fun lifecycle(path: String) =
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .`when`()
+            .post(path)
+            .then()
+
+    private fun pinnedPipelineBody(
+        label: String,
+        name: String = "test/a06_pinned",
+    ) = """
+        {"schema_version": 1, "name": "$name", "display_name": "A06 pinned",
          "description": "786 A06 $label.", "parameters": {},
          "nodes": [{"id": "summary", "description": "All rows", "type": "DQL",
                     "source": "ep-source", "template": {"id": "test/trade_summary.sql", "version": 1},
@@ -652,6 +729,7 @@ class PublishedEndpointE2eTest {
     private fun releaseNext(
         id: String,
         label: String,
+        name: String = "test/a06_pinned",
     ) {
         val current =
             given()
@@ -670,7 +748,7 @@ class PublishedEndpointE2eTest {
                 .contentType(ContentType.JSON)
                 .asSession(ADMIN_SESSION)
                 .header("If-Match", current)
-                .body(pinnedPipelineBody(label))
+                .body(pinnedPipelineBody(label, name))
                 .`when`()
                 .put("/api/v1/pipelines/$id")
                 .then()
