@@ -1,0 +1,483 @@
+{
+  "schema_version": 1,
+  "roots": [
+    "n0",
+    "n10",
+    "n12"
+  ],
+  "nodes": [
+    {
+      "node_id": "n0",
+      "family": "dashboard",
+      "name": "test_widget/sales",
+      "display_name": "Sales",
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 3
+      },
+      "resolution": "resolved",
+      "lifecycle": "DRAFT",
+      "operational": null,
+      "current_version": null,
+      "body_hash": "aa6437b217a798ee9828ba0535c8217f58104ab6627b8359673ae46bae71aabd",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    },
+    {
+      "node_id": "n1",
+      "family": "parameter_set",
+      "name": "test_widget/filters",
+      "display_name": "Filters",
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 2
+      },
+      "resolution": "resolved",
+      "lifecycle": "DRAFT",
+      "operational": null,
+      "current_version": null,
+      "body_hash": "86fb8a708c6822e52f93b07c618fa1316a0741c58815c35feaa33aba0b79510c",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    },
+    {
+      "node_id": "n2",
+      "family": "template",
+      "name": "test_widget/selector",
+      "display_name": "Selector",
+      "subtype": "sql",
+      "version": {
+        "kind": "artifact",
+        "number": 5
+      },
+      "resolution": "resolved",
+      "lifecycle": "RELEASED",
+      "operational": null,
+      "current_version": null,
+      "body_hash": "f5be552ab5457e6fa865b8eab2a712e16be2620e89faf650572b8298ae7d649c",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    },
+    {
+      "node_id": "n3",
+      "family": "template",
+      "name": "test_widget/common",
+      "display_name": "Common",
+      "subtype": "sql",
+      "version": {
+        "kind": "artifact",
+        "number": 4
+      },
+      "resolution": "resolved",
+      "lifecycle": "RELEASED",
+      "operational": null,
+      "current_version": null,
+      "body_hash": "bbcc196d3786469c9a1ef7ce70214617eeb3cfd42e6bb77d2e47f2ddfea94a8e",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    },
+    {
+      "node_id": "n4",
+      "family": "datasource",
+      "name": "test_widget_warehouse",
+      "display_name": "Test Widget Warehouse",
+      "subtype": null,
+      "version": {
+        "kind": "unversioned",
+        "number": null
+      },
+      "resolution": "resolved",
+      "lifecycle": null,
+      "operational": {
+        "readonly": true
+      },
+      "current_version": null,
+      "body_hash": null,
+      "capabilities": {
+        "release": "NONE",
+        "promotion": "NONE"
+      }
+    },
+    {
+      "node_id": "n5",
+      "family": "pipeline",
+      "name": "test_widget/report",
+      "display_name": "Report",
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 7
+      },
+      "resolution": "resolved",
+      "lifecycle": "DRAFT",
+      "operational": null,
+      "current_version": 6,
+      "body_hash": "cfaead47e1f01229512d9b3fe7f73fd0b0354e920f086a23709711b4064a9c7f",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    },
+    {
+      "node_id": "n6",
+      "family": "pipeline",
+      "name": "test_widget/totals",
+      "display_name": "Totals",
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 2
+      },
+      "resolution": "resolved",
+      "lifecycle": "RELEASED",
+      "operational": null,
+      "current_version": null,
+      "body_hash": "203d6951a8a623508a9a7d389fb8eab8cf3ceb98f7bffba52abccd2b8916d172",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    },
+    {
+      "node_id": "n7",
+      "family": "template",
+      "name": "test_widget/query",
+      "display_name": "Query",
+      "subtype": "sql",
+      "version": {
+        "kind": "artifact",
+        "number": 6
+      },
+      "resolution": "resolved",
+      "lifecycle": "RELEASED",
+      "operational": null,
+      "current_version": null,
+      "body_hash": "fd2b809aeda8cbe3184bf0647542060fafe57be6a1aab9f2d2fc7be5820f31ac",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    },
+    {
+      "node_id": "n8",
+      "family": "visualization",
+      "name": "test_widget/chart",
+      "display_name": "Chart",
+      "subtype": "bar",
+      "version": {
+        "kind": "artifact",
+        "number": 2
+      },
+      "resolution": "resolved",
+      "lifecycle": "DRAFT",
+      "operational": {
+        "evidence_ready": true
+      },
+      "current_version": null,
+      "body_hash": "ff3be3096b25a42205d097e90c9facfa38d24546f8588f42e20062d0ef575504",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    },
+    {
+      "node_id": "n9",
+      "family": "template",
+      "name": "test_widget/formatter",
+      "display_name": "Formatter",
+      "subtype": "python",
+      "version": {
+        "kind": "artifact",
+        "number": 3
+      },
+      "resolution": "resolved",
+      "lifecycle": "RELEASED",
+      "operational": null,
+      "current_version": null,
+      "body_hash": "d61ff31fa83d57ba939154a1f0fcf65a358e2ff78dbd1a897a21e58229e14035",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    },
+    {
+      "node_id": "n10",
+      "family": "api_endpoint",
+      "name": "/test-widget/sales/report",
+      "display_name": "Report",
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 2
+      },
+      "resolution": "resolved",
+      "lifecycle": "RELEASED",
+      "operational": {
+        "enabled": true
+      },
+      "current_version": null,
+      "body_hash": "109c26afa2d5031714b05c5ed24fcc241c13edce0f3817e957585f43942e1ea4",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    },
+    {
+      "node_id": "n11",
+      "family": "pipeline",
+      "name": "test_widget/report",
+      "display_name": "Report",
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 6
+      },
+      "resolution": "resolved",
+      "lifecycle": "RELEASED",
+      "operational": null,
+      "current_version": 6,
+      "body_hash": "2ea8a032720340b517a26efe1edde46c3823c94287df0ed375a392a1a0bbd7ac",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    },
+    {
+      "node_id": "n12",
+      "family": "schedule",
+      "name": "nightly test widget",
+      "display_name": "Nightly Test Widget",
+      "subtype": null,
+      "version": {
+        "kind": "revision",
+        "number": 9
+      },
+      "resolution": "resolved",
+      "lifecycle": null,
+      "operational": {
+        "condition": "paused"
+      },
+      "current_version": null,
+      "body_hash": null,
+      "capabilities": {
+        "release": "NONE",
+        "promotion": "NONE"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "e0",
+      "from": "n0",
+      "to": "n1",
+      "relationship": "PARAMETER_SET",
+      "source_path": "/parameter_set",
+      "requested_selector": {
+        "kind": "exact_version",
+        "number": 2
+      },
+      "resolved_version": 2,
+      "constraints": [
+        {
+          "kind": "parameter_names",
+          "names": [
+            "region"
+          ]
+        }
+      ]
+    },
+    {
+      "edge_id": "e1",
+      "from": "n1",
+      "to": "n2",
+      "relationship": "PARAMETER_SOURCE_TEMPLATE",
+      "source_path": "/parameters/0/source/template",
+      "requested_selector": {
+        "kind": "exact_version",
+        "number": 5
+      },
+      "resolved_version": 5,
+      "constraints": []
+    },
+    {
+      "edge_id": "e2",
+      "from": "n2",
+      "to": "n3",
+      "relationship": "IMPORT",
+      "source_path": "/imports/0",
+      "requested_selector": {
+        "kind": "exact_version",
+        "number": 4
+      },
+      "resolved_version": 4,
+      "constraints": []
+    },
+    {
+      "edge_id": "e3",
+      "from": "n1",
+      "to": "n4",
+      "relationship": "PARAMETER_SOURCE_DATASOURCE",
+      "source_path": "/parameters/1/source/datasource",
+      "requested_selector": {
+        "kind": "entity",
+        "number": null
+      },
+      "resolved_version": null,
+      "constraints": [
+        {
+          "kind": "datasource_dialect",
+          "dialect": "postgresql"
+        }
+      ]
+    },
+    {
+      "edge_id": "e4",
+      "from": "n0",
+      "to": "n5",
+      "relationship": "SOURCE_PIPELINE",
+      "source_path": "/sources/0/pipeline",
+      "requested_selector": {
+        "kind": "exact_version",
+        "number": 7
+      },
+      "resolved_version": 7,
+      "constraints": []
+    },
+    {
+      "edge_id": "e5",
+      "from": "n5",
+      "to": "n6",
+      "relationship": "CHILD_PIPELINE",
+      "source_path": "/nodes/0/pipeline",
+      "requested_selector": {
+        "kind": "exact_version",
+        "number": 2
+      },
+      "resolved_version": 2,
+      "constraints": []
+    },
+    {
+      "edge_id": "e6",
+      "from": "n6",
+      "to": "n7",
+      "relationship": "TEMPLATE",
+      "source_path": "/nodes/0/template",
+      "requested_selector": {
+        "kind": "exact_version",
+        "number": 6
+      },
+      "resolved_version": 6,
+      "constraints": []
+    },
+    {
+      "edge_id": "e7",
+      "from": "n7",
+      "to": "n3",
+      "relationship": "IMPORT",
+      "source_path": "/imports/0",
+      "requested_selector": {
+        "kind": "exact_version",
+        "number": 4
+      },
+      "resolved_version": 4,
+      "constraints": []
+    },
+    {
+      "edge_id": "e8",
+      "from": "n6",
+      "to": "n4",
+      "relationship": "DATASOURCE",
+      "source_path": "/nodes/1/datasource",
+      "requested_selector": {
+        "kind": "entity",
+        "number": null
+      },
+      "resolved_version": null,
+      "constraints": [
+        {
+          "kind": "datasource_access",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "edge_id": "e9",
+      "from": "n0",
+      "to": "n8",
+      "relationship": "VISUALIZATION",
+      "source_path": "/visualizations/0/visualization",
+      "requested_selector": {
+        "kind": "exact_version",
+        "number": 2
+      },
+      "resolved_version": 2,
+      "constraints": []
+    },
+    {
+      "edge_id": "e10",
+      "from": "n8",
+      "to": "n9",
+      "relationship": "TRANSFORM_TEMPLATE",
+      "source_path": "/transform/template",
+      "requested_selector": {
+        "kind": "exact_version",
+        "number": 3
+      },
+      "resolved_version": 3,
+      "constraints": []
+    },
+    {
+      "edge_id": "e11",
+      "from": "n10",
+      "to": "n11",
+      "relationship": "PIPELINE_PIN",
+      "source_path": "/pipeline",
+      "requested_selector": {
+        "kind": "exact_version",
+        "number": 6
+      },
+      "resolved_version": 6,
+      "constraints": []
+    },
+    {
+      "edge_id": "e12",
+      "from": "n11",
+      "to": "n6",
+      "relationship": "CHILD_PIPELINE",
+      "source_path": "/nodes/0/pipeline",
+      "requested_selector": {
+        "kind": "exact_version",
+        "number": 2
+      },
+      "resolved_version": 2,
+      "constraints": []
+    },
+    {
+      "edge_id": "e13",
+      "from": "n12",
+      "to": "n11",
+      "relationship": "EXECUTOR_TARGET",
+      "source_path": "/payload/pipeline",
+      "requested_selector": {
+        "kind": "exact_version",
+        "number": 6
+      },
+      "resolved_version": 6,
+      "constraints": []
+    }
+  ],
+  "diagnostics": [],
+  "complete": true,
+  "acyclic": true,
+  "observed_at": "2026-11-10T00:00:00Z"
+}

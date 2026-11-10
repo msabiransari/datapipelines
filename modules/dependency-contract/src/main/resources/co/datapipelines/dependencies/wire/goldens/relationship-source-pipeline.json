@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "roots": [
+    "n0"
+  ],
+  "nodes": [
+    {
+      "node_id": "n0",
+      "family": "dashboard",
+      "name": "test_widget/sales",
+      "display_name": "Sales",
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 2
+      },
+      "resolution": "resolved",
+      "lifecycle": "DRAFT",
+      "operational": null,
+      "current_version": null,
+      "body_hash": "f67de88a0c84609a2ebdb5c9521ed9c7c25ae10547102be873c09a240e010737",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    },
+    {
+      "node_id": "n1",
+      "family": "pipeline",
+      "name": "test_widget/report",
+      "display_name": "Report",
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 1
+      },
+      "resolution": "resolved",
+      "lifecycle": "RELEASED",
+      "operational": null,
+      "current_version": null,
+      "body_hash": "ae0191ef1515992787f850c67fd003e0e656a3166a0fc2d0e4f5249ecaeae32b",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "e0",
+      "from": "n0",
+      "to": "n1",
+      "relationship": "SOURCE_PIPELINE",
+      "source_path": "/sources/0/pipeline",
+      "requested_selector": {
+        "kind": "exact_version",
+        "number": 1
+      },
+      "resolved_version": 1,
+      "constraints": []
+    }
+  ],
+  "diagnostics": [],
+  "complete": true,
+  "acyclic": true,
+  "observed_at": "2026-11-10T00:00:00Z"
+}

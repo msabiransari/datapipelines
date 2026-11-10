@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "roots": [
+    "n0"
+  ],
+  "nodes": [
+    {
+      "node_id": "n0",
+      "family": "dashboard",
+      "name": "test_widget/sales",
+      "display_name": "Sales",
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 2
+      },
+      "resolution": "resolved",
+      "lifecycle": "DRAFT",
+      "operational": null,
+      "current_version": null,
+      "body_hash": "f67de88a0c84609a2ebdb5c9521ed9c7c25ae10547102be873c09a240e010737",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    },
+    {
+      "node_id": "n1",
+      "family": "parameter_set",
+      "name": "test_widget/filters",
+      "display_name": "Filters",
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 1
+      },
+      "resolution": "resolved",
+      "lifecycle": "RELEASED",
+      "operational": null,
+      "current_version": null,
+      "body_hash": "d5a88823aab6536e717c18da1275c114ab44996e54cc42ba1bba9cffb3c2eb12",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "e0",
+      "from": "n0",
+      "to": "n1",
+      "relationship": "PARAMETER_SET",
+      "source_path": "/parameter_set",
+      "requested_selector": {
+        "kind": "exact_version",
+        "number": 1
+      },
+      "resolved_version": 1,
+      "constraints": [
+        {
+          "kind": "parameter_names",
+          "names": [
+            "country",
+            "region"
+          ]
+        }
+      ]
+    }
+  ],
+  "diagnostics": [],
+  "complete": true,
+  "acyclic": true,
+  "observed_at": "2026-11-10T00:00:00Z"
+}

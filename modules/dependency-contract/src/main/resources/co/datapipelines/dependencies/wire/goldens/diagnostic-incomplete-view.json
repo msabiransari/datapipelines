@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "roots": [
+    "n0"
+  ],
+  "nodes": [
+    {
+      "node_id": "n0",
+      "family": "dashboard",
+      "name": "test_widget/sales",
+      "display_name": "Sales",
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 3
+      },
+      "resolution": "resolved",
+      "lifecycle": "RELEASED",
+      "operational": null,
+      "current_version": null,
+      "body_hash": "aa6437b217a798ee9828ba0535c8217f58104ab6627b8359673ae46bae71aabd",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    },
+    {
+      "node_id": "n1",
+      "family": "parameter_set",
+      "name": "test_widget/filters",
+      "display_name": "Filters",
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 2
+      },
+      "resolution": "resolved",
+      "lifecycle": "RELEASED",
+      "operational": null,
+      "current_version": null,
+      "body_hash": "86fb8a708c6822e52f93b07c618fa1316a0741c58815c35feaa33aba0b79510c",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "e0",
+      "from": "n0",
+      "to": "n1",
+      "relationship": "PARAMETER_SET",
+      "source_path": "/parameter_set",
+      "requested_selector": {
+        "kind": "exact_version",
+        "number": 2
+      },
+      "resolved_version": 2,
+      "constraints": [
+        {
+          "kind": "parameter_names",
+          "names": [
+            "region"
+          ]
+        }
+      ]
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "INCOMPLETE_VIEW",
+      "node_id": null,
+      "edge_id": null,
+      "message": "Some dependencies are not visible to you; the graph is incomplete."
+    }
+  ],
+  "complete": false,
+  "acyclic": null,
+  "observed_at": "2026-11-10T00:00:00Z"
+}

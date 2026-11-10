@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "roots": [
+    "n0"
+  ],
+  "nodes": [
+    {
+      "node_id": "n0",
+      "family": "template",
+      "name": "test_widget/query",
+      "display_name": "Query",
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 2
+      },
+      "resolution": "resolved",
+      "lifecycle": "DRAFT",
+      "operational": null,
+      "current_version": null,
+      "body_hash": "1ace997112c5d72e08981ca2a14ccc490ca53c1bbcc5d21f12967cb3d549209a",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    },
+    {
+      "node_id": "n1",
+      "family": "template",
+      "name": "test_widget/query_child",
+      "display_name": "Query Child",
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 1
+      },
+      "resolution": "resolved",
+      "lifecycle": "RELEASED",
+      "operational": null,
+      "current_version": null,
+      "body_hash": "7191bfd5e1389ab9fb19db08b3f87fb68905baf2422db999357315aeddc43f26",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "e0",
+      "from": "n0",
+      "to": "n1",
+      "relationship": "IMPORT",
+      "source_path": "/imports/0",
+      "requested_selector": {
+        "kind": "exact_version",
+        "number": 1
+      },
+      "resolved_version": 1,
+      "constraints": []
+    }
+  ],
+  "diagnostics": [],
+  "complete": true,
+  "acyclic": true,
+  "observed_at": "2026-11-10T00:00:00Z"
+}

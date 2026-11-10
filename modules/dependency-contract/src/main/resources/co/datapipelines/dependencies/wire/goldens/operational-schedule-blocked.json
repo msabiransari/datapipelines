@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "roots": [
+    "n0"
+  ],
+  "nodes": [
+    {
+      "node_id": "n0",
+      "family": "schedule",
+      "name": "nightly test widget",
+      "display_name": "Nightly Test Widget",
+      "subtype": null,
+      "version": {
+        "kind": "revision",
+        "number": 3
+      },
+      "resolution": "resolved",
+      "lifecycle": null,
+      "operational": {
+        "condition": "blocked"
+      },
+      "current_version": null,
+      "body_hash": null,
+      "capabilities": {
+        "release": "NONE",
+        "promotion": "NONE"
+      }
+    },
+    {
+      "node_id": "n1",
+      "family": "pipeline",
+      "name": "test_widget/report",
+      "display_name": "Report",
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 5
+      },
+      "resolution": "resolved",
+      "lifecycle": "RELEASED",
+      "operational": null,
+      "current_version": null,
+      "body_hash": "3ff4ee71f51b01fede131fddc1d646bf3f39cee7abf13f1e4959fcf31784dae9",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "e0",
+      "from": "n0",
+      "to": "n1",
+      "relationship": "EXECUTOR_TARGET",
+      "source_path": "/payload/pipeline",
+      "requested_selector": {
+        "kind": "exact_version",
+        "number": 5
+      },
+      "resolved_version": 5,
+      "constraints": []
+    }
+  ],
+  "diagnostics": [],
+  "complete": true,
+  "acyclic": true,
+  "observed_at": "2026-11-10T00:00:00Z"
+}
