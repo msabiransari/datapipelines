@@ -1,6 +1,7 @@
 package co.datapipelines.application.dependencies
 
 import co.datapipelines.dependencies.Authority
+import co.datapipelines.dependencies.CycleHandling
 import co.datapipelines.dependencies.Deadline
 import co.datapipelines.dependencies.DependencyWalker
 import co.datapipelines.dependencies.FamilyRegistry
@@ -64,7 +65,8 @@ class ReleasePlanningWalk(
     private val deadline: ReleasePlanningDeadline,
     clock: Clock = Clock.systemUTC(),
 ) {
-    private val walker = DependencyWalker(registry, ReleaseGraphLimits.of(bounds), clock)
+    /** Stops at the first cycle, as `ReleaseGraph` refused there: no read after the refusal can overtake it (#868 R1). */
+    private val walker = DependencyWalker(registry, ReleaseGraphLimits.of(bounds), clock, CycleHandling.STOP)
 
     /** The closure of [root] in the planning transaction; null when the root does not resolve. */
     fun plan(

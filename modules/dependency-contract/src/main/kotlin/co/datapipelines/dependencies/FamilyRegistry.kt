@@ -19,14 +19,23 @@ class FamilyDescriptor<B : Any>(
     }
 
     /**
-     * Resolves [requests] (all of this family) and binds each resolved outcome to this provider's [DependencyProvider.outgoing],
-     * so the walk holds no generic body type. Refuses a provider that answers a different key set than it was asked.
+     * The provider's answer for [requests] (all of this family), unchecked — the ONE call that touches infrastructure, so
+     * the walk can tell a provider's failure (an exception from here) from a contract defect ([bind]'s checks).
      */
-    internal fun load(
+    internal fun fetch(
         requests: List<ObjectRequest>,
         context: ResolveContext,
+    ): Map<ObjectRequest, Outcome<B>> = provider.resolveMany(requests, context)
+
+    /**
+     * Binds each of [answers]' resolved outcomes to this provider's [DependencyProvider.outgoing], so the walk holds no
+     * generic body type. Refuses (a defect, never swallowed) a provider that answered a different key set than it was
+     * asked or resolved another family's identity.
+     */
+    internal fun bind(
+        requests: List<ObjectRequest>,
+        answers: Map<ObjectRequest, Outcome<B>>,
     ): Map<ObjectRequest, Loaded> {
-        val answers = provider.resolveMany(requests, context)
         check(answers.keys == requests.toSet()) {
             "family $key answered ${answers.size} outcomes for ${requests.toSet().size} requests; every request needs exactly one"
         }

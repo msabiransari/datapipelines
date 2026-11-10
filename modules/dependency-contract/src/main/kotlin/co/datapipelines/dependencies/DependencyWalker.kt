@@ -8,12 +8,22 @@ import java.time.Clock
  * - **Memoised twice** (§5.1): request → outcome and identity → node, so an alias or a moving selector neither loads a
  *   body twice nor loses an edge's provenance; every edge OCCURRENCE is retained.
  * - **Explicit stack** with an active-path set, never the host stack. A reference to a node on the active path is a
- *   CYCLE diagnostic with a bounded trail; the walk records it and does not descend, so `acyclic` is false.
+ *   CYCLE diagnostic whose trail is the cycle on the active path (bounded by depth + 1); the walk records it and does
+ *   not descend, so `acyclic` is false. Under [CycleHandling.STOP] — a planner that refuses on the first cycle — the
+ *   walk also stops there and reads nothing more; under [CycleHandling.DIAGNOSE] it enumerates every cycle.
  * - **Longest-path depth**: a node reached later by a longer path is measured on that path, because a memoised node's
  *   height is added to the depth it is reached at.
- * - **Batched reads** (§25.4): when a target is not yet resolved, the walk resolves it together with every other pending
- *   reference of the nodes it has expanded, grouped per family, at most [GraphLimits.resolveBatchSize] per provider call
- *   and clamped by the remaining node budget; the [Deadline] is checked before EVERY call ([DeadlineExceeded]).
+ * - **Batched reads** (§25.4, [Resolutions]): when a target is not yet resolved, the walk resolves it together with
+ *   pending references of the nodes it has expanded (and the later roots), grouped per family, at most
+ *   [GraphLimits.resolveBatchSize] per provider call and clamped by the remaining node capacity; the [Deadline] is checked
+ *   before EVERY call ([DeadlineExceeded]). Speculative reads never decide the outcome: a refusal the walk reaches is
+ *   never overtaken by a failing read it did not need yet, and a failure on a read it does need propagates.
+ * - **Checks before reads**, in the order today's release closure applied them: the edges bound, then — for a target
+ *   not yet read — the depth bound, and only then the read; the nodes bound once the read tells a new node from a known
+ *   one. A target first read at the depth bound is refused there even if it would have aliased a node on the active
+ *   path (an alias resolves to an identity already walked; only its read can tell, and the bound is not exceeded by
+ *   reading). A root is read only while the distinct requests read are below [GraphLimits.nodes]; past it the walk
+ *   stops at the `nodes` limit before any provider call, so an oversized root list costs at most `nodes` requests.
  * - **Leaves**: MISSING and UNSUPPORTED nodes are leaves; a DISCARDED node is terminal and makes the graph incomplete
  *   (its definitions are not expanded); RELEASED nodes are walked like DRAFT ones (§7.2 step 5).
  * - **Bounds**: edges, depth and nodes stop the walk with a LIMIT diagnostic naming the limit and its maximum
@@ -27,6 +37,7 @@ class DependencyWalker(
     private val registry: FamilyRegistry,
     private val limits: GraphLimits,
     private val clock: Clock = Clock.systemUTC(),
+    private val cycles: CycleHandling = CycleHandling.DIAGNOSE,
 ) {
     /**
      * Walks [roots] in order, sharing one memo. Refuses (IllegalArgumentException) an empty root list or a root whose
@@ -51,8 +62,7 @@ class DependencyWalker(
         private val roots: List<ObjectRequest>,
         private val context: ResolveContext,
     ) {
-        private val resolutions = HashMap<ObjectRequest, Loaded>()
-        private val pending = LinkedHashSet<ObjectRequest>()
+        private val resolutions = Resolutions(registry, limits, context)
         private val nodeIndex = HashMap<NodeKey, Int>()
         private val nodes = ArrayList<Node>()
         private val edges = ArrayList<Edge>()
@@ -66,7 +76,7 @@ class DependencyWalker(
         private var incomplete = false
 
         fun run(): GraphSnapshot {
-            prefetch(roots)
+            resolutions.expect(roots)
             val rootIds = ArrayList<String>()
             for (root in roots) {
                 if (!visitRoot(root, rootIds)) break
@@ -80,7 +90,11 @@ class DependencyWalker(
             rootIds: MutableList<String>,
         ): Boolean {
             if (stopped) return false
-            val loaded = resolve(root)
+            if (resolutions[root] == null && resolutions.size >= limits.nodes) {
+                stop(LimitKind.NODES, limits.nodes)
+                return false
+            }
+            val loaded = resolutions.resolve(root)
             val existing = nodeIndex[keyOf(root, loaded)]
             val index = existing ?: discover(root, loaded, spelledName = null) ?: return false
             rootIds.add(nodes[index].nodeId)
@@ -106,20 +120,28 @@ class DependencyWalker(
             reference: Reference,
         ) {
             if (edges.size + 1 > limits.edges) return stop(LimitKind.EDGES, limits.edges)
-            val loaded = resolve(reference.request)
-            val existing = nodeIndex[keyOf(reference.request, loaded)]
-            if (existing == null) {
-                if (frame.depth + 1 > limits.depth) return stop(LimitKind.DEPTH, limits.depth)
-                val index = discover(reference.request, loaded, reference.spelledName) ?: return
-                addEdge(frame, index, reference)
-                enter(index, loaded, frame.depth + 1)
-                return
-            }
+            val known = resolutions[reference.request]
+            // Today's release order: a target not read yet is refused at the depth bound BEFORE it is read.
+            if (known == null && frame.depth + 1 > limits.depth) return stop(LimitKind.DEPTH, limits.depth)
+            val loaded = known ?: resolutions.resolve(reference.request)
+            val existing = nodeIndex[keyOf(reference.request, loaded)] ?: return followNew(frame, reference, loaded)
             val edge = addEdge(frame, existing, reference)
             when {
                 existing in onPath -> cycle(existing, edge)
                 frame.depth + 1 + height.getValue(existing) > limits.depth -> stop(LimitKind.DEPTH, limits.depth)
             }
+        }
+
+        /** A reference to a node not discovered yet: the depth bound, then the nodes bound, then the node is entered. */
+        private fun followNew(
+            frame: Frame,
+            reference: Reference,
+            loaded: Loaded,
+        ) {
+            if (frame.depth + 1 > limits.depth) return stop(LimitKind.DEPTH, limits.depth)
+            val index = discover(reference.request, loaded, reference.spelledName) ?: return
+            addEdge(frame, index, reference)
+            enter(index, loaded, frame.depth + 1)
         }
 
         private fun finish(frame: Frame) {
@@ -153,7 +175,7 @@ class DependencyWalker(
             val node = nodes[index]
             if (loaded is Loaded.Found && node.lifecycle != Lifecycle.DISCARDED) {
                 val references = loaded.references()
-                references.forEach { if (it.request !in resolutions) pending.add(it.request) }
+                resolutions.expect(references.map { it.request })
                 onPath.add(index)
                 stack.addLast(Frame(index, depth, references))
                 return
@@ -210,6 +232,7 @@ class DependencyWalker(
             diagnostics.add(
                 Diagnostic(DiagnosticKind.CYCLE, nodes[target].nodeId, edge.edgeId, CYCLE_MESSAGE, trail = trail.map { nodes[it].nodeId }),
             )
+            if (cycles == CycleHandling.STOP) stopped = true
         }
 
         private fun stop(
@@ -218,41 +241,6 @@ class DependencyWalker(
         ) {
             stopped = true
             diagnostics.add(Diagnostic(DiagnosticKind.LIMIT, null, null, limitMessage(limit, maximum), limit, maximum))
-        }
-
-        private fun resolve(request: ObjectRequest): Loaded = resolutions[request] ?: prefetch(listOf(request)).getValue(request)
-
-        /**
-         * Resolves [needed] (always) plus pending references up to the remaining node budget, grouped per family in
-         * first-seen order, at most [GraphLimits.resolveBatchSize] per provider call, the deadline checked before each.
-         */
-        private fun prefetch(needed: List<ObjectRequest>): Map<ObjectRequest, Loaded> {
-            val wanted = LinkedHashSet<ObjectRequest>(needed.filter { it !in resolutions })
-            val budget = limits.nodes - resolutions.size - wanted.size
-            pending
-                .asSequence()
-                .filter { it !in resolutions && it !in wanted }
-                .take(budget.coerceAtLeast(0))
-                .forEach(wanted::add)
-            wanted.groupBy { it.family }.forEach { (family, requests) -> load(family, requests) }
-            pending.removeAll(wanted)
-            return resolutions
-        }
-
-        /** One family's share of a prefetch: UNSUPPORTED when unregistered, else batched with the deadline checked per batch. */
-        private fun load(
-            family: FamilyKey,
-            requests: List<ObjectRequest>,
-        ) {
-            val descriptor = registry[family]
-            if (descriptor == null) {
-                requests.forEach { resolutions[it] = Loaded.Unsupported }
-                return
-            }
-            requests.chunked(limits.resolveBatchSize).forEach { chunk ->
-                if (context.deadline.expired()) throw DeadlineExceeded(family)
-                resolutions.putAll(descriptor.load(chunk, context))
-            }
         }
 
         private fun nodeOf(
@@ -388,4 +376,16 @@ class DependencyWalker(
             maximum: Int,
         ): String = "The ${limit.wire} limit ($maximum) was reached; the graph is incomplete."
     }
+}
+
+/** What a walk does at a reference that closes a cycle (record §7.2 steps 4 and 7). */
+enum class CycleHandling {
+    /** Record the CYCLE diagnostic and keep enumerating — an interactive view lists every cycle. */
+    DIAGNOSE,
+
+    /**
+     * Record the FIRST cycle and stop the walk there, reading nothing more — a planner that refuses on a cycle (release
+     * planning) must not let a later read overtake that refusal. The snapshot is incomplete, like a LIMIT stop.
+     */
+    STOP,
 }

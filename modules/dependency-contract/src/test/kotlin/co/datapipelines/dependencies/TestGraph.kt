@@ -54,6 +54,12 @@ internal class FakeFamily(
     var beforeBatch: (List<ObjectRequest>) -> Unit = {}
     var unsupported: Set<ObjectRequest> = emptySet()
 
+    /** Requests a batch holding them FAILS on (an infrastructure failure, `metadata source unavailable: <key>`). */
+    var failing: Set<ObjectRequest> = emptySet()
+
+    /** Requests the provider leaves out of its answer — a contract defect, not a failure. */
+    var omitted: Set<ObjectRequest> = emptySet()
+
     fun put(
         request: ObjectRequest,
         facts: NodeFacts,
@@ -70,7 +76,10 @@ internal class FakeFamily(
     ): Map<ObjectRequest, Outcome<FakeBody>> {
         calls.add(requests)
         beforeBatch(requests)
-        return requests.associateWith { if (it in unsupported) Outcome.Unsupported else objects[it] ?: Outcome.Missing }
+        requests.firstOrNull { it in failing }?.let { error("metadata source unavailable: ${it.address.lookupKey}") }
+        return requests
+            .filter { it !in omitted }
+            .associateWith { if (it in unsupported) Outcome.Unsupported else objects[it] ?: Outcome.Missing }
     }
 
     override fun outgoing(resolved: Outcome.Resolved<FakeBody>): List<Reference> = resolved.body.references
