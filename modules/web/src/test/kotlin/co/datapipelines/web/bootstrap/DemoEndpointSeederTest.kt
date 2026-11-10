@@ -1,5 +1,7 @@
 package co.datapipelines.web.bootstrap
 
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.Logger
 import co.datapipelines.application.endpoints.CurrentVersion
 import co.datapipelines.application.endpoints.EndpointKeyBinding
 import co.datapipelines.application.endpoints.EndpointKeyService
@@ -23,6 +25,7 @@ import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineVersionDetail
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.release.ReleaseFamily
+import co.datapipelines.web.capturingLogEvents
 import co.datapipelines.web.config.EndpointsProperties
 import co.datapipelines.web.config.KeyRequestBudget
 import co.datapipelines.web.release.ReleaseCoordinator
@@ -33,6 +36,7 @@ import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
+import org.slf4j.LoggerFactory
 import java.time.Instant
 import java.util.UUID
 
@@ -450,15 +454,43 @@ class DemoEndpointSeederTest {
         val stale = endpoint("/demo/nyc/mobility/gone_away", "nyc/mobility/gone_away")
         every { endpointRepository.findByWorkspace(demoId) } returns listOf(stale)
 
-        seeder(authoringEnabled = false).afterSingletonsInstantiated()
+        val lines = logLines { seeder(authoringEnabled = false).afterSingletonsInstantiated() }
 
         assertAll(
+            // One explicit capability line, and no refusal: nothing was attempted, so nothing failed.
+            { lines.count { it.second.startsWith("event=demo.endpoints_authoring_disabled") } shouldBe 1 },
+            { lines.filter { it.first.isGreaterOrEqual(Level.WARN) } shouldBe emptyList() },
             { verify(exactly = 0) { publishService.create(any(), any(), any(), any(), any(), any()) } },
             { verify(exactly = 0) { releases.releaseRoot(any()) } },
             { verify(exactly = 0) { endpointVersions.findDraft(any()) } },
             // Retirement and key reconciliation run exactly as before.
             { verify(exactly = 1) { publishService.unpublish(any(), "/demo/nyc/mobility/gone_away") } },
             { verify(exactly = 1) { keyService.issue(any(), "demo-public-key", null, ApiKeyKind.ENDPOINT, any(), null, key) } },
+        )
+    }
+
+    @Test
+    fun `an authoring-disabled deployment with nothing wanted retracts the key and retires exactly as before`() {
+        happyStubs()
+        every { examples.seedablePipelines(demoId) } returns emptyList()
+        val stale = endpoint("/demo/nyc/mobility/gone_away", "nyc/mobility/gone_away")
+        every { endpointRepository.findByWorkspace(demoId) } returns listOf(stale)
+        val managed = issued(key).record
+        every { keyRepository.findByWorkspaceAndName(demoId, "demo-public-key") } returns listOf(managed)
+        every { apiKeyService.revokeWorkspaceEndpointKey(managed.id, demoId, systemActorId) } returns true
+
+        val lines = logLines { seeder(authoringEnabled = false).afterSingletonsInstantiated() }
+
+        assertAll(
+            { verify(exactly = 1) { publishService.unpublish(any(), "/demo/nyc/mobility/gone_away") } },
+            { verify(exactly = 1) { apiKeyService.revokeWorkspaceEndpointKey(managed.id, demoId, systemActorId) } },
+            { verify(exactly = 0) { keyService.issue(any(), any(), any(), any(), any(), any(), any()) } },
+            { verify(exactly = 0) { publishService.create(any(), any(), any(), any(), any(), any()) } },
+            // The empty branch decides first: the capability line belongs to a NON-empty wanted set only.
+            {
+                lines.map { it.second.substringBefore(' ') } shouldBe
+                    listOf("event=demo.endpoint_retired", "event=demo.api_key_revoked", "event=demo.api_key_no_endpoints")
+            },
         )
     }
 
@@ -501,6 +533,11 @@ class DemoEndpointSeederTest {
         DemoEndpointPaths.pathFor("trade/balance_by_partner") shouldBe "/demo/trade/balance-by-partner"
         DemoEndpointPaths.pathFor("trade/fx/imports_in_partner_currency") shouldBe "/demo/trade/fx/imports-in-partner-currency"
     }
+
+    /** The seeder's own log lines during [block], as level and formatted message. */
+    private fun logLines(block: () -> Unit): List<Pair<Level, String>> =
+        capturingLogEvents(LoggerFactory.getLogger(DemoEndpointSeeder::class.java) as Logger, block = block)
+            .map { it.level to it.formattedMessage }
 
     private fun binding(
         prefix: String,
