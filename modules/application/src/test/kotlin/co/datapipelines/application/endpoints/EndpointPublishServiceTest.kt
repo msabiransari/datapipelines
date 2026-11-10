@@ -118,7 +118,8 @@ class EndpointPublishServiceTest {
             reason = "a path needs at least 3 segments",
             enabled = false,
         )
-        every { endpoints.findLegacy(WORKSPACE) } returns listOf(legacy("/nyc/mine", PIPELINE_NAME), legacy("/nyc/hidden", HIDDEN_PIPELINE_NAME))
+        every { endpoints.findLegacy(WORKSPACE) } returns
+            listOf(legacy("/nyc/mine", PIPELINE_NAME), legacy("/nyc/hidden", HIDDEN_PIPELINE_NAME))
 
         service().listLegacy(principal()).map { it.pathPattern } shouldBe listOf("/nyc/mine", "/nyc/hidden")
 
@@ -270,7 +271,8 @@ class EndpointPublishServiceTest {
     @Test
     fun `an authoring-disabled deployment refuses creation before any read - endpoint authoring_disabled`() {
         // R4: creation is an authoring operation; a promotion receiver gets its APIs only through promotion.
-        val refused = shouldThrow<DatapipelinesException> { service(authoringEnabled = false).publish(principal(), "/a/v1/b", "any", null, "") }
+        val refused =
+            shouldThrow<DatapipelinesException> { service(authoringEnabled = false).publish(principal(), "/a/v1/b", "any", null, "") }
 
         assertAll(
             { refused.code shouldBe PipelineErrorCodes.Endpoint.AUTHORING_DISABLED },

@@ -286,7 +286,16 @@ class PipelineBrowseModel(
         val served =
             endpoints
                 .findByPipeline(record.id)
-                .map { UsageView.EndpointUse(it.pathPattern, it.isEnabled, it.current?.body?.description.orEmpty()) }
+                .map {
+                    UsageView.EndpointUse(
+                        it.pathPattern,
+                        it.isEnabled,
+                        it.current
+                            ?.body
+                            ?.description
+                            .orEmpty(),
+                    )
+                }
         val runsOnIt = runSchedules(workspaceId, record, principal)
         // #320: the dashboards whose sources pin a version — the SAME question `PipelineService.refuseIfPinned` asks per
         // version (`pipeline.version.pinned`'s `referencing_dashboards`), through the dashboard lens (a hidden dashboard

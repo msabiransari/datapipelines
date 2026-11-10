@@ -29,8 +29,11 @@ class PublishedEndpointVersionRepository(
         version: Int,
     ): PublishedEndpointVersion? =
         jdbc
-            .query("$SELECT_VERSION WHERE endpoint_id = :id AND version = :version", mapOf("id" to endpointId, "version" to version), MAPPER)
-            .singleOrNull()
+            .query(
+                "$SELECT_VERSION WHERE endpoint_id = :id AND version = :version",
+                mapOf("id" to endpointId, "version" to version),
+                MAPPER,
+            ).singleOrNull()
 
     /** Every version of one API, newest first. */
     fun list(endpointId: UUID): List<PublishedEndpointVersion> =
@@ -78,7 +81,8 @@ class PublishedEndpointVersionRepository(
                 """.trimIndent(),
                 mapOf("ws" to workspaceId, "path" to pathPattern, "version" to version),
             ) { rs, n ->
-                val pointer = EntityPointer(rs.getObject("entity_id", UUID::class.java), rs.getInt("entity_current").takeUnless { rs.wasNull() })
+                val pointer =
+                    EntityPointer(rs.getObject("entity_id", UUID::class.java), rs.getInt("entity_current").takeUnless { rs.wasNull() })
                 pointer to requireNotNull(MAPPER.mapRow(rs, n)) { "the version mapper answers a row" }
             }.singleOrNull()
 

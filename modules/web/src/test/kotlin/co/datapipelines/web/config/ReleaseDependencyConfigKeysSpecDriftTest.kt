@@ -1,5 +1,6 @@
 package co.datapipelines.web.config
 
+import co.datapipelines.application.dependencies.ReleasePlanningLimits
 import co.datapipelines.pipeline.release.ReleaseBounds
 import co.datapipelines.web.TestRepoFiles
 import io.kotest.assertions.throwables.shouldThrow
@@ -11,6 +12,7 @@ import org.springframework.boot.env.YamlPropertySourceLoader
 import org.springframework.core.env.EnumerablePropertySource
 import org.springframework.core.io.ByteArrayResource
 import java.lang.reflect.Modifier
+import java.time.Duration
 
 /**
  * The `datapipelines.release.dependencies.*` keys (configuration.md §3.35), pinned in the four places they have to
@@ -102,6 +104,30 @@ class ReleaseDependencyConfigKeysSpecDriftTest {
         bounds shouldBe ReleaseBounds(7, 8, 9, 2, 2048, 3)
     }
 
+    @Test
+    fun `the three planning keys are range-checked naming their key, and toPlanningLimits hands the walk the same numbers`() {
+        shouldThrow<IllegalArgumentException> { ReleaseDependencyProperties(maxResolveBatchSize = 0) }.message shouldContain
+            "$PREFIX.max-resolve-batch-size"
+        shouldThrow<IllegalArgumentException> { ReleaseDependencyProperties(maxResolveBatchSize = 257) }.message shouldContain
+            "$PREFIX.max-resolve-batch-size"
+        shouldThrow<IllegalArgumentException> { ReleaseDependencyProperties(metadataTimeoutSeconds = 0) }.message shouldContain
+            "$PREFIX.metadata-timeout-seconds"
+        shouldThrow<IllegalArgumentException> { ReleaseDependencyProperties(metadataTimeoutSeconds = 121) }.message shouldContain
+            "$PREFIX.metadata-timeout-seconds"
+        shouldThrow<IllegalArgumentException> { ReleaseDependencyProperties(statementTimeoutSeconds = 0) }.message shouldContain
+            "$PREFIX.statement-timeout-seconds"
+        shouldThrow<IllegalArgumentException> { ReleaseDependencyProperties(statementTimeoutSeconds = 31) }.message shouldContain
+            "$PREFIX.statement-timeout-seconds"
+        // Never above the plan's own deadline (record §25.4).
+        shouldThrow<IllegalArgumentException> {
+            ReleaseDependencyProperties(metadataTimeoutSeconds = 4, statementTimeoutSeconds = 5)
+        }.message shouldContain "$PREFIX.statement-timeout-seconds"
+
+        ReleaseDependencyProperties(maxResolveBatchSize = 17, metadataTimeoutSeconds = 9, statementTimeoutSeconds = 2)
+            .toPlanningLimits() shouldBe ReleasePlanningLimits(17, Duration.ofSeconds(9), Duration.ofSeconds(2))
+        ReleaseDependencyProperties().toPlanningLimits() shouldBe ReleasePlanningLimits(256, Duration.ofSeconds(30), Duration.ofSeconds(5))
+    }
+
     private fun section(
         text: String,
         start: String,
@@ -142,8 +168,11 @@ class ReleaseDependencyConfigKeysSpecDriftTest {
                 "$PREFIX.max-blockers",
                 "$PREFIX.max-depth",
                 "$PREFIX.max-edges",
+                "$PREFIX.max-resolve-batch-size",
                 "$PREFIX.max-versions",
                 "$PREFIX.max-wire-bytes",
+                "$PREFIX.metadata-timeout-seconds",
+                "$PREFIX.statement-timeout-seconds",
             )
     }
 }

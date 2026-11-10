@@ -89,7 +89,8 @@ class PublishedEndpointRepository(
             .filterIsInstance<EndpointRow.Legacy>()
 
     /** One valid endpoint by id. */
-    fun findById(id: UUID): PublishedEndpoint? = queryRows("$SELECT_COLUMNS WHERE e.id = :id", mapOf("id" to id)).validEndpoints().singleOrNull()
+    fun findById(id: UUID): PublishedEndpoint? =
+        queryRows("$SELECT_COLUMNS WHERE e.id = :id", mapOf("id" to id)).validEndpoints().singleOrNull()
 
     /**
      * The endpoints with a LIVE (DRAFT or RELEASED) version pinning any version of the pipeline [pipelineId] — the
@@ -269,7 +270,9 @@ class PublishedEndpointRepository(
             val status = rs.getString("current_status") ?: return null
             return CurrentVersion(
                 version = version,
-                status = co.datapipelines.pipeline.PipelineVersionStatus.valueOf(status),
+                status =
+                    co.datapipelines.pipeline.PipelineVersionStatus
+                        .valueOf(status),
                 body =
                     EndpointVersionBody(
                         pipelineName = rs.getString("pipeline_name"),

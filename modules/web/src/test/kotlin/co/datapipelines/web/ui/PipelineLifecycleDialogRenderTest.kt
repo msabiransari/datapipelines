@@ -605,11 +605,11 @@ class PipelineLifecycleDialogRenderTest {
         html shouldNotContain "<b>parent</b>"
     }
 
-    /** #471 — the unpinned dialog is exactly today's: empty lists render the form, never the pinned block. */
     /** #786 B.4 — the entity scope: a schedule that targets the pipeline blocks its purge even with no CURRENT to run. */
     @Test
     fun `purge entity - a schedule targeting the pipeline is a blocker and offers NO form`() {
-        val html = renderPurgeEntity(refusal = null, pinnerSchedules = listOf(co.datapipelines.pipeline.SchedulePin("reports/waiting", null)))
+        val html =
+            renderPurgeEntity(refusal = null, pinnerSchedules = listOf(co.datapipelines.pipeline.SchedulePin("reports/waiting", null)))
 
         html shouldContain "cannot be purged"
         html shouldContain "data-purge-pinner-schedule"
@@ -617,6 +617,7 @@ class PipelineLifecycleDialogRenderTest {
         html shouldNotContain "<form"
     }
 
+    /** #471 — the unpinned dialog is exactly today's: empty lists render the form, never the pinned block. */
     @Test
     fun `purge entity - an unpinned dialog renders the form and no pinned block (#471)`() {
         val html = renderPurgeEntity(refusal = null, exclusive = listOf("test/only_here.sql"))

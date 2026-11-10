@@ -23,6 +23,7 @@ import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseNodeStatus
 import co.datapipelines.pipeline.release.ReleasePin
 import co.datapipelines.pipeline.release.ResolvedNode
+import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
@@ -215,8 +216,13 @@ class ReleaseAdaptersTest {
                 expired,
                 clock,
             )
-        shouldThrow<DeadlineExceeded> { walk.plan(root, ACTOR) }.family shouldBe FamilyKey.PIPELINE
-        shouldThrow<DeadlineExceeded> { walk.walkInCurrentTransaction(root, ACTOR) }
+        // #786 §E.3: the walk maps the contract's DeadlineExceeded to the ROOT family's refusal (record §25.4 erratum 6);
+        // the contract's exception stays the cause, naming the family whose batch it refused to start.
+        listOf({ walk.plan(root, ACTOR) }, { walk.walkInCurrentTransaction(root, ACTOR) }).forEach { entry ->
+            val refused = shouldThrow<DatapipelinesException> { entry() }
+            refused.code shouldBe "pipeline.release.metadata_unavailable"
+            (refused.cause as DeadlineExceeded).family shouldBe FamilyKey.PIPELINE
+        }
         opened shouldBe 2
         reads.shouldBeEmpty()
     }

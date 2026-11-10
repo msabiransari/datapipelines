@@ -853,7 +853,16 @@ class VersionLifecycleModelTest {
             pipelines = repository,
             validator = validator,
             drafts = PipelineDraftService(repository, guard),
-            releases = PipelineReleaseService(repository, statuses, validator, guard, dashboards = NoDashboards, endpointVersions = NoApiVersionPins, schedules = NoSchedulePins),
+            releases =
+                PipelineReleaseService(
+                    repository,
+                    statuses,
+                    validator,
+                    guard,
+                    dashboards = NoDashboards,
+                    endpointVersions = NoApiVersionPins,
+                    schedules = NoSchedulePins,
+                ),
             authoring = guard,
             draftTemplates = NoExclusiveDraftTemplates,
             dashboards = NoDashboards,

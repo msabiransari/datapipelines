@@ -165,7 +165,11 @@ class EndpointVersionService(
         val (endpoint, moved) =
             guarded(principal, endpointId) { endpoint ->
                 val found = versions.find(endpoint.id, version) ?: throw notFound(endpoint.id, version)
-                if (found.status != PipelineVersionStatus.RELEASED) throw wrongStatus(PipelineErrorCodes.Endpoint.VERSION_NOT_RELEASED, found)
+                if (found.status !=
+                    PipelineVersionStatus.RELEASED
+                ) {
+                    throw wrongStatus(PipelineErrorCodes.Endpoint.VERSION_NOT_RELEASED, found)
+                }
                 refuseIfPinned(endpoint, found)
                 versions.discard(endpoint.id, version, principal.userId, draftEligible = authoring.developmentPosture)
                 endpoint to Moved(version, endpoint.current?.version, pointerOf(endpoint.id))
@@ -236,7 +240,13 @@ class EndpointVersionService(
                 }
                 endpoint to Purged(found.version, entityDeleted = sole)
             }
-        auditOf(principal, AUDIT_VERSION_PURGED, endpoint, purged.version, mapOf("scope" to if (purged.entityDeleted) "entity" else "version"))
+        auditOf(
+            principal,
+            AUDIT_VERSION_PURGED,
+            endpoint,
+            purged.version,
+            mapOf("scope" to if (purged.entityDeleted) "entity" else "version"),
+        )
         return purged
     }
 

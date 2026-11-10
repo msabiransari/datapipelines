@@ -98,7 +98,8 @@ object EndpointsTools {
                         "'api' are reserved to the product and refused with endpoint.path_reserved. The version is one " +
                         "free-form segment (v1 by convention); path variables come after it. The pinned pipeline version " +
                         "must be eligible here (RELEASED; a DRAFT only where authoring is enabled — else " +
-                        "endpoint.pipeline_version.not_eligible) and must be side-effect-free: every node DQL into tempdb or the caller, a " +
+                        "endpoint.pipeline_version.not_eligible) and must be side-effect-free: " +
+                        "every node DQL into tempdb or the caller, a " +
                         "DML/DDL node whose source is tempdb, transitively through PIPELINE nodes. A DML/DDL node against a " +
                         "registered datasource, or a DQL node writing back to a datasource, is refused with " +
                         "endpoint.pipeline_not_readonly naming the node and the datasource — that rule is what makes " +
@@ -122,7 +123,9 @@ object EndpointsTools {
                     principal = ctx.principal,
                     pathPattern = args.requiredString("path"),
                     pipelineName = args.requiredString("pipeline"),
-                    pipelineVersion = args.version("pipeline_version") ?: throw McpArguments.invalidParams("Missing required argument 'pipeline_version'."),
+                    pipelineVersion =
+                        args.version("pipeline_version")
+                            ?: throw McpArguments.invalidParams("Missing required argument 'pipeline_version'."),
                     // Absent means "the configured default", which the service applies — so the
                     // sentinel is null, not a number this layer would have to keep in step with
                     // datapipelines.endpoints.timeout-default-seconds.

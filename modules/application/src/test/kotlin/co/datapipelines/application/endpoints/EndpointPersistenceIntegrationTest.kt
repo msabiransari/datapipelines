@@ -2,8 +2,8 @@ package co.datapipelines.application.endpoints
 
 import co.datapipelines.application.SharedPostgres
 import co.datapipelines.pipeline.PipelineErrorCodes
-import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
@@ -394,12 +394,15 @@ class EndpointPersistenceIntegrationTest {
      * the seeded pipeline at version 1, pointed at by `current_version` (#786: no creation path leaves an entity versionless).
      */
     private fun publish(path: String): PublishedEndpoint =
-        transactions.execute {
-            insertWithVersion(path)
-        }!!.let { requireNotNull(endpoints.findById(it.id)) { "the endpoint just published is not readable" } }
+        transactions
+            .execute {
+                insertWithVersion(path)
+            }!!
+            .let { requireNotNull(endpoints.findById(it.id)) { "the endpoint just published is not readable" } }
 
     private fun insertWithVersion(path: String): PublishedEndpoint =
-        endpoints.insert(
+        endpoints
+            .insert(
                 PublishedEndpoint.of(
                     id = UUID.randomUUID(),
                     workspaceId = workspaceId,

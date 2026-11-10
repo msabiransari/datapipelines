@@ -102,7 +102,13 @@ class PipelinePurgePinGuard(
                     put("version", version)
                     put(
                         "pinned_by",
-                        pinners.pipelines.map { mapOf("pipeline" to it.pipelineName, "version" to it.pipelineVersion, "node" to it.nodeId) },
+                        pinners.pipelines.map {
+                            mapOf(
+                                "pipeline" to it.pipelineName,
+                                "version" to it.pipelineVersion,
+                                "node" to it.nodeId,
+                            )
+                        },
                     )
                     if (pinners.dashboards.isNotEmpty()) {
                         put(
@@ -114,7 +120,12 @@ class PipelinePurgePinGuard(
                         put(
                             "referencing_api_versions",
                             pinners.endpointVersions.map {
-                                mapOf("path" to it.path, "version" to it.version, "status" to it.status.name, "pipeline_version" to it.pipelineVersion)
+                                mapOf(
+                                    "path" to it.path,
+                                    "version" to it.version,
+                                    "status" to it.status.name,
+                                    "pipeline_version" to it.pipelineVersion,
+                                )
                             },
                         )
                     }

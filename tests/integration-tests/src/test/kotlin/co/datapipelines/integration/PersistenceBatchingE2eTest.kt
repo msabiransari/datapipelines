@@ -789,7 +789,7 @@ class PersistenceBatchingE2eTest {
             .port(port)
             .contentType(ContentType.JSON)
             .asSession(ADMIN_SESSION)
-            .body("""{"path": "/$NAMESPACE/v1/probe", "pipeline": "$PIPELINE_READ", "timeout_seconds": 60}""")
+            .body("""{"path": "/$NAMESPACE/v1/probe", "pipeline": "$PIPELINE_READ", "pipeline_version": 1, "timeout_seconds": 60}""")
             .`when`()
             .post("/api/v1/endpoints")
             .then()

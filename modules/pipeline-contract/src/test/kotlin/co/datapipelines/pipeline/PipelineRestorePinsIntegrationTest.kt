@@ -75,7 +75,16 @@ class PipelineRestorePinsIntegrationTest {
             pipelines = repository,
             validator = validator,
             drafts = PipelineDraftService(repository, authoring),
-            releases = PipelineReleaseService(repository, statusesPort, validator, authoring, dashboards = NoDashboards, endpointVersions = NoApiVersionPins, schedules = NoSchedulePins),
+            releases =
+                PipelineReleaseService(
+                    repository,
+                    statusesPort,
+                    validator,
+                    authoring,
+                    dashboards = NoDashboards,
+                    endpointVersions = NoApiVersionPins,
+                    schedules = NoSchedulePins,
+                ),
             authoring = authoring,
             draftTemplates = NoDraftTemplates,
             dashboards = NoDashboards,

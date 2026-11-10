@@ -1,20 +1,14 @@
 package co.datapipelines.web.bootstrap
 
-import co.datapipelines.pipeline.release.ReleaseFamily
-import co.datapipelines.web.release.RootReleaseRequest
-import co.datapipelines.web.release.ReleaseCoordinator
-import co.datapipelines.pipeline.AuthoringGuard
-import co.datapipelines.pipeline.PipelineVersionDetail
-import co.datapipelines.pipeline.PipelineVersionStatus
-import co.datapipelines.application.endpoints.EndpointVersionBody
 import co.datapipelines.application.endpoints.CurrentVersion
-import co.datapipelines.application.endpoints.PublishedEndpointVersion
-import co.datapipelines.application.endpoints.PublishedEndpointVersionRepository
 import co.datapipelines.application.endpoints.EndpointKeyBinding
 import co.datapipelines.application.endpoints.EndpointKeyService
 import co.datapipelines.application.endpoints.EndpointPublishService
+import co.datapipelines.application.endpoints.EndpointVersionBody
 import co.datapipelines.application.endpoints.PublishedEndpoint
 import co.datapipelines.application.endpoints.PublishedEndpointRepository
+import co.datapipelines.application.endpoints.PublishedEndpointVersion
+import co.datapipelines.application.endpoints.PublishedEndpointVersionRepository
 import co.datapipelines.auth.ApiKey
 import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.ApiKeyRepository
@@ -23,10 +17,16 @@ import co.datapipelines.auth.SecretHasher
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.Workspace
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineVersionDetail
+import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.web.config.EndpointsProperties
 import co.datapipelines.web.config.KeyRequestBudget
+import co.datapipelines.web.release.ReleaseCoordinator
+import co.datapipelines.web.release.RootReleaseRequest
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
@@ -315,7 +315,10 @@ class DemoEndpointSeederTest {
         val stalePath = "/demo/nyc/mobility/revenue-by-borough"
         val foreignPath = "/demo/custom/v1/thing"
         every { endpointRepository.findByWorkspace(demoId) } returns
-            listOf(endpoint(stalePath, "nyc/mobility/revenue_by_borough"), endpoint(foreignPath, "custom/thing", createdBy = UUID.randomUUID()))
+            listOf(
+                endpoint(stalePath, "nyc/mobility/revenue_by_borough"),
+                endpoint(foreignPath, "custom/thing", createdBy = UUID.randomUUID()),
+            )
         every { publishService.unpublish(any(), stalePath) } returns true
         val managed = issued(key).record
         every { keyRepository.findByWorkspaceAndName(demoId, "demo-public-key") } returns listOf(managed)

@@ -48,7 +48,7 @@ import java.util.UUID
  * - **execute with NO version returns the draft's rows** — the whole of D56. The draft body
  *   selects a different column set from the released one, so running the wrong version cannot
  *   produce the right rows.
- * - **publishing an endpoint over it is refused** — released-only surfaces did not move, and this
+ * - **an API over it pins that exact draft** (#786: an exact pin, eligible where authoring is enabled), and this
  *   is the one an author meets immediately.
  * - **a human releases over `POST /pipelines/{id}/release`** — the first release of a pipeline,
  *   which before 099 could not exist (v1 was born released).
@@ -177,20 +177,24 @@ class DraftFirstGoldenPathE2eTest {
 
     @Test
     @Order(3)
-    fun `an endpoint cannot be published over it until a human has released it`() {
-        val refused =
+    fun `an API over it pins that exact draft - authoring-enabled - and never follows the pipeline's pointer`() {
+        // #786 (record §24, ruling 4): creation is an authoring DRAFT save of an exact pin. Before #786 an endpoint over
+        // an unreleased pipeline was refused `endpoint.pipeline_not_released` because the endpoint followed the
+        // pipeline's RELEASED pointer; it now pins the version it names, and a DRAFT is eligible where authoring is on.
+        val created =
             given()
                 .port(port)
                 .contentType(ContentType.JSON)
                 .asSession(ADMIN_SESSION)
-                .body("""{"path": "/draftfirst/v1/rows", "pipeline": "$PIPELINE_NAME"}""")
+                .body("""{"path": "/draftfirst/v1/rows", "pipeline": "$PIPELINE_NAME", "pipeline_version": 1}""")
                 .`when`()
                 .post("/api/v1/endpoints")
                 .thenReturn()
 
-        withClue("released-only surfaces did not move; the refusal names the way forward") {
-            refused.jsonPath().getString("error.code") shouldBe "endpoint.pipeline_not_released"
-            refused.jsonPath().getString("error.message").contains("Release it from the UI first") shouldBe true
+        withClue("the API's v1 is a DRAFT pinned to the pipeline's draft v1 — the exact pin, not a pointer") {
+            created.statusCode shouldBe 201
+            created.jsonPath().getInt("data.pipeline_version") shouldBe 1
+            created.jsonPath().getInt("data.current_version") shouldBe 1
         }
     }
 

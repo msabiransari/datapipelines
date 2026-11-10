@@ -1,12 +1,12 @@
 package co.datapipelines.mcp
 
-import co.datapipelines.pipeline.PipelineVersionStatus
-import co.datapipelines.application.endpoints.EndpointVersionBody
 import co.datapipelines.application.endpoints.CurrentVersion
 import co.datapipelines.application.endpoints.EndpointPath
 import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.application.endpoints.EndpointRow
+import co.datapipelines.application.endpoints.EndpointVersionBody
 import co.datapipelines.application.endpoints.PublishedEndpoint
+import co.datapipelines.pipeline.PipelineVersionStatus
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk

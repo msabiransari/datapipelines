@@ -310,6 +310,7 @@ internal class CoordinatorFixture(
         authorization: ReleaseAuthorization = RecordingAuthorization(log, principal()),
         legacyAliasAdmitted: Boolean = true,
         planningTransactions: TransactionOperations = TransactionOperations.withoutTransaction(),
+        deadline: ReleasePlanningDeadline = ReleasePlanningDeadline.NONE,
     ) = ReleaseCoordinator(
         releases = releases,
         pipelines = pipelines,
@@ -321,7 +322,7 @@ internal class CoordinatorFixture(
                 bounds,
                 planningTransactions,
                 ReadIsolation.NONE,
-                ReleasePlanningDeadline.NONE,
+                deadline,
             ),
         participants = listOf(PipelineReleaseParticipant(releases, pipelines), TemplateReleaseParticipant(templateReleases)),
         authorization = authorization,

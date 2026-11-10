@@ -149,7 +149,7 @@ class ScriptNodeE2eTest {
             .port(port)
             .contentType(ContentType.JSON)
             .asSession(ADMIN_SESSION)
-            .body("""{"path": "/script/v1/summary", "pipeline": "test/script_node"}""")
+            .body("""{"path": "/script/v1/summary", "pipeline": "test/script_node", "pipeline_version": 1}""")
             .`when`()
             .post("/api/v1/endpoints")
             .then()

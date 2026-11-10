@@ -1,13 +1,13 @@
 package co.datapipelines.web.config
 
-import co.datapipelines.pipeline.PipelineVersionStatus
-import co.datapipelines.application.endpoints.EndpointVersionBody
-import co.datapipelines.application.endpoints.LegacyEndpointColumns
-import co.datapipelines.application.endpoints.PublishedEndpointVersionRepository
 import co.datapipelines.application.endpoints.EndpointInvalidationPublisher
 import co.datapipelines.application.endpoints.EndpointRegistry
+import co.datapipelines.application.endpoints.EndpointVersionBody
+import co.datapipelines.application.endpoints.LegacyEndpointColumns
 import co.datapipelines.application.endpoints.PublishedEndpoint
 import co.datapipelines.application.endpoints.PublishedEndpointRepository
+import co.datapipelines.application.endpoints.PublishedEndpointVersionRepository
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.SharedPostgres
 import co.datapipelines.web.TestRedis
@@ -231,21 +231,22 @@ class PublishedEndpointRegistryIntegrationTest {
      */
     private fun publish(pattern: String): PublishedEndpoint =
         transactions.execute {
-            repository.insert(
-                PublishedEndpoint.of(
-                    id = UUID.randomUUID(),
-                    workspaceId = WORKSPACE_ID,
-                    pathPattern = pattern,
-                    isEnabled = true,
-                    createdBy = USER_ID,
-                    createdAt = Instant.now(),
-                    updatedAt = Instant.now(),
-                ),
-                LegacyEndpointColumns(PIPELINE_ID, 30, ""),
-            ).also {
-                versions.insert(it.id, 1, PipelineVersionStatus.RELEASED, EndpointVersionBody(PIPELINE_NAME, 1, 30, ""), USER_ID)
-                versions.setCurrent(it.id, 1)
-            }
+            repository
+                .insert(
+                    PublishedEndpoint.of(
+                        id = UUID.randomUUID(),
+                        workspaceId = WORKSPACE_ID,
+                        pathPattern = pattern,
+                        isEnabled = true,
+                        createdBy = USER_ID,
+                        createdAt = Instant.now(),
+                        updatedAt = Instant.now(),
+                    ),
+                    LegacyEndpointColumns(PIPELINE_ID, 30, ""),
+                ).also {
+                    versions.insert(it.id, 1, PipelineVersionStatus.RELEASED, EndpointVersionBody(PIPELINE_NAME, 1, 30, ""), USER_ID)
+                    versions.setCurrent(it.id, 1)
+                }
         }!!
 
     /** The PRODUCTION publisher, so the message shape under test is the shipped one. */

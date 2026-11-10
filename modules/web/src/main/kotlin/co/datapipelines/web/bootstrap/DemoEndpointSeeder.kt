@@ -432,8 +432,9 @@ class DemoEndpointSeeder(
         val principal = bootstrapPrincipal(system, demoId, DemoWorkspaceSeeder.DEMO_WORKSPACE)
         val pipeline = pipelineRepository.findById(demoId, target.pipelineId)
         val current = pipeline?.currentVersion
-        val released = current != null && pipelineRepository.findVersionDetail(demoId, target.pipelineId, current)?.status ==
-            PipelineVersionStatus.RELEASED
+        val released =
+            current != null && pipelineRepository.findVersionDetail(demoId, target.pipelineId, current)?.status ==
+                PipelineVersionStatus.RELEASED
         if (!released) {
             log.warn(
                 "event=demo.pipeline_not_released pipeline={} message=\"the seeded pipeline has no RELEASED current " +

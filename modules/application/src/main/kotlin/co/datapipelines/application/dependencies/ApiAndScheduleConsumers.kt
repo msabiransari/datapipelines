@@ -3,8 +3,8 @@ package co.datapipelines.application.dependencies
 import co.datapipelines.application.endpoints.PublishedEndpointVersionRepository
 import co.datapipelines.pipeline.EndpointVersionConsumers
 import co.datapipelines.pipeline.EndpointVersionPin
-import co.datapipelines.pipeline.SchedulePin
 import co.datapipelines.pipeline.ScheduleConsumers
+import co.datapipelines.pipeline.SchedulePin
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import java.util.UUID
 

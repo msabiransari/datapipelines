@@ -1,7 +1,10 @@
 package co.datapipelines.web.config
 
+import co.datapipelines.application.dependencies.ReleasePlanningLimits
+import co.datapipelines.dependencies.GraphLimits
 import co.datapipelines.pipeline.release.ReleaseBounds
 import org.springframework.boot.context.properties.ConfigurationProperties
+import java.time.Duration
 
 /**
  * The `datapipelines.release.dependencies.*` keys ([Configuration §3.35](configuration.md), the one definition) — the
@@ -24,6 +27,12 @@ data class ReleaseDependencyProperties(
     val maxWireBytes: Int = ReleaseBounds.DEFAULT_MAX_WIRE_BYTES,
     /** Seconds the workspace mutation guard waits for its lock before `<family>.release.busy`. */
     val lockWaitSeconds: Int = ReleaseBounds.DEFAULT_LOCK_WAIT_SECONDS,
+    /** #786 §E.3 (record §25.4) — at most this many requests of one family per provider call in a release plan. */
+    val maxResolveBatchSize: Int = DEFAULT_MAX_RESOLVE_BATCH_SIZE,
+    /** #786 §E.3 — the ONE cumulative deadline of a release plan's metadata reads; expired → `<family>.release.metadata_unavailable`. */
+    val metadataTimeoutSeconds: Int = DEFAULT_METADATA_TIMEOUT_SECONDS,
+    /** #786 §E.3 — the ceiling of any one provider statement inside the plan's deadline; never above [metadataTimeoutSeconds]. */
+    val statementTimeoutSeconds: Int = DEFAULT_STATEMENT_TIMEOUT_SECONDS,
 ) {
     init {
         require(maxDepth in 1..MAX_DEPTH_CEILING) { "$PREFIX.max-depth must be 1..$MAX_DEPTH_CEILING, was $maxDepth" }
@@ -40,7 +49,25 @@ data class ReleaseDependencyProperties(
         require(lockWaitSeconds in 1..MAX_LOCK_WAIT_SECONDS) {
             "$PREFIX.lock-wait-seconds must be 1..$MAX_LOCK_WAIT_SECONDS, was $lockWaitSeconds"
         }
+        require(maxResolveBatchSize in 1..GraphLimits.MAX_RESOLVE_BATCH_SIZE) {
+            "$PREFIX.max-resolve-batch-size must be 1..${GraphLimits.MAX_RESOLVE_BATCH_SIZE}, was $maxResolveBatchSize"
+        }
+        require(metadataTimeoutSeconds in 1..MAX_METADATA_TIMEOUT_SECONDS) {
+            "$PREFIX.metadata-timeout-seconds must be 1..$MAX_METADATA_TIMEOUT_SECONDS, was $metadataTimeoutSeconds"
+        }
+        require(statementTimeoutSeconds in 1..MAX_STATEMENT_TIMEOUT_SECONDS && statementTimeoutSeconds <= metadataTimeoutSeconds) {
+            "$PREFIX.statement-timeout-seconds must be 1..$MAX_STATEMENT_TIMEOUT_SECONDS and at most " +
+                "$PREFIX.metadata-timeout-seconds ($metadataTimeoutSeconds), was $statementTimeoutSeconds"
+        }
     }
+
+    /** The planning walk's batch and time bounds (record §25.4). */
+    fun toPlanningLimits(): ReleasePlanningLimits =
+        ReleasePlanningLimits(
+            resolveBatchSize = maxResolveBatchSize,
+            metadataTimeout = Duration.ofSeconds(metadataTimeoutSeconds.toLong()),
+            statementTimeout = Duration.ofSeconds(statementTimeoutSeconds.toLong()),
+        )
 
     /** The plain value the core reads. */
     fun toBounds(): ReleaseBounds =
@@ -66,5 +93,12 @@ data class ReleaseDependencyProperties(
 
         /** A lock wait longer than a minute would hold an HTTP request thread past any sane client timeout. */
         const val MAX_LOCK_WAIT_SECONDS = 60
+
+        /** #786 §E.3 defaults and ranges (configuration.md §3.35; record §25.4). */
+        const val DEFAULT_MAX_RESOLVE_BATCH_SIZE = GraphLimits.DEFAULT_RESOLVE_BATCH_SIZE
+        const val DEFAULT_METADATA_TIMEOUT_SECONDS = 30
+        const val MAX_METADATA_TIMEOUT_SECONDS = 120
+        const val DEFAULT_STATEMENT_TIMEOUT_SECONDS = 5
+        const val MAX_STATEMENT_TIMEOUT_SECONDS = 30
     }
 }

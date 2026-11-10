@@ -1,9 +1,9 @@
 package co.datapipelines.web.release
 
 import co.datapipelines.application.dependencies.ReleaseDependencyFamilies
-import co.datapipelines.application.endpoints.EndpointReleaseSteps
 import co.datapipelines.application.dependencies.ReleasePlanningDeadline
 import co.datapipelines.application.dependencies.ReleasePlanningWalk
+import co.datapipelines.application.endpoints.EndpointReleaseSteps
 import co.datapipelines.dependencies.FamilyDescriptor
 import co.datapipelines.dependencies.FamilyRegistry
 import co.datapipelines.pipeline.PipelineReleaseService
@@ -80,12 +80,13 @@ class ReleaseConfiguration {
     fun dependencyFamilyRegistry(descriptors: List<FamilyDescriptor<*>>): FamilyRegistry = FamilyRegistry.production(descriptors)
 
     /**
-     * The release planning deadline: unbounded in G1 (today's plan path has no timeout, and G1 adds no refusal code).
-     * #786 replaces this one bean with deadlines bound to `metadata-timeout-seconds` and flips
-     * `ReleasePlanningDeadlineWiringTest` (owner ruling 2026-11-08, 868 review R1-4 option 1).
+     * The release planning deadline (#786 §E.3; owner ruling 2026-11-08, 868 review R1-4 option 1): every plan opens a
+     * fresh deadline of `metadata-timeout-seconds`; an expired plan is refused `<family>.release.metadata_unavailable`.
+     * G1 pinned this bean to `Deadline.none()`; `ReleasePlanningDeadlineWiringTest` asserts the finite one.
      */
     @Bean
-    fun releasePlanningDeadline(): ReleasePlanningDeadline = ReleasePlanningDeadline.NONE
+    fun releasePlanningDeadline(properties: ReleaseDependencyProperties): ReleasePlanningDeadline =
+        ReleasePlanningDeadline.after(properties.toPlanningLimits().metadataTimeout)
 
     /**
      * G1's planner walk as ONE bean (#786): the coordinator plans with it, and an API restore rechecks its pin's closure
@@ -97,6 +98,7 @@ class ReleaseConfiguration {
         deadline: ReleasePlanningDeadline,
         metadataTransactionManager: PlatformTransactionManager,
         bounds: ReleaseBounds,
+        properties: ReleaseDependencyProperties,
     ): ReleasePlanningWalk =
         ReleasePlanningWalk(
             registry = registry,
@@ -105,6 +107,7 @@ class ReleaseConfiguration {
             // #868 R1: a failed speculative read rolls back to its savepoint and never aborts the walk's transaction.
             speculativeReads = ReleasePlanningWalk.speculativeReads(metadataTransactionManager),
             deadline = deadline,
+            planning = properties.toPlanningLimits(),
         )
 
     @Bean

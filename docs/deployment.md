@@ -1,9 +1,9 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.64
+**Status:** v1.67
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-11-09
+**Last updated:** 2026-11-10
 
 ---
 
@@ -980,6 +980,16 @@ Operators should run a quarterly restore drill: restore metadata DB from backup 
 - Applied automatically on app startup.
 - Forward-only; no rollback (restore from backup if needed).
 
+**Upgrading to API versions (#786).** This upgrade converts every existing API in place: stop the one server, apply
+the new version, and start it. After Flyway and before it serves a request, the server gives each API that has no
+version a v1 pinning its pipeline's current version — RELEASED when that pipeline version is released, DRAFT
+otherwise — and logs one `event=endpoint.conversion.converted` line per API and an `event=endpoint.conversion.summary`
+total. A restart converts nothing twice. If any API's pipeline has no current version to pin (it was never released,
+or its current version was discarded), the server **refuses to start** and writes nothing: one
+`event=endpoint.conversion.refused` ERROR line per API (path, pipeline, `reason=no_current|no_versions|missing_pipeline`)
+and an `event=endpoint.conversion.refused_summary` line with the fix — on the previous version, release that pipeline
+or delete the API, then upgrade again. There is no version floor, no `Recreate` step and no other runbook.
+
 ### 8.3 Upgrade procedure (recommended)
 
 1. Review release notes for breaking changes.
@@ -1642,6 +1652,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-10 | v1.67 | #786 API versions, exact pins (U1) | **§8.2:** the upgrade to API versions — stop the one server, apply, read the conversion report, or the refusal list with its fix (release the pipeline or delete the API on the previous version, then upgrade). No floor, no `Recreate`. Schedules join the same step in #786's second unit. |
 | 2026-11-09 | v1.66 | #863 merge follow-up | **§6.4/§8.3:** clarify Eviction API versus Deployment-rollout protection, soft versus hard skew, and single-domain scheduling without `minDomains`; document signed 32-bit availability limits. Correct the default-environment description and render verdict count (141), including upper-bound and disabled-field checks. |
 | 2026-11-08 | v1.65 | #863 egress proxy availability | **§6.4:** the proxy's optional availability blocks, both OFF by default (the one-replica default render unchanged): `lake.egressProxy.replicaCount` is render-validated (whole, > 0, unquoted); `podDisruptionBudget` renders a `policy/v1` PDB selecting only the proxy pods (the Deployment's own selector, never a value), with `minAvailable` ≥ 1 and strictly below `replicaCount` — `minAvailable = replicaCount` deadlocks every voluntary eviction and is refused, enabled on the one-replica default included; `topologySpreadConstraints` renders one best-effort constraint whose `labelSelector` is always the proxy's own (`maxSkew` whole > 0; `whenUnsatisfiable` `ScheduleAnyway`/`DoNotSchedule`; non-empty `topologyKey`); disabled blocks are inert. Chart 0.3.0 → 0.4.0. **§8.3:** the availability upgrade note — a replaced proxy pod fails in-flight managed reads, retried by httpfs on a fresh connection within the bounded budget; leases protect snapshots independently; keep the budget off on one node. CI paragraph: the verdict count is re-measured (133) and the egress/availability cases named. `helm-check.sh` gains `(j)`/`(j2)` renders and ten `(j-r)` refusals. |
 | 2026-11-07 | v1.64 | #845 managed reads egress proxy | **§4.3:** the managed lake datasource's object-store requests leave through the egress proxy; what it sees, holds and refuses at boot; a temporary accommodation until duckdb-httpfs#519. **§6.3:** the compose `egress-proxy` service and why the app waits for it to start, not be healthy. **§6.4:** the chart's proxy `Deployment`/`Service`/`ConfigMap` (`lake.egressProxy.*`, ON by default; chart 0.2.1 → 0.3.0), the app env entries and `extraEnv` refusals, and the proxy's own `NetworkPolicy` (ingress from the app pods on 3128 only; egress restricted when the store is declared, plus DNS). **§8.3:** the upgrade note (the managed row is rewritten on the first boot; boot refused until the proxy answers; older instances read directly). **§9:** a checklist line for the proxy's fence. `helm-check.sh` gains the parsed egress contract (`(a-off)`, `(i)`–`(i6)`). |

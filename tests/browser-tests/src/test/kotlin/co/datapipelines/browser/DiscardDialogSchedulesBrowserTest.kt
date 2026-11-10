@@ -50,7 +50,11 @@ class DiscardDialogSchedulesBrowserTest : BrowserSuite() {
         val blocked = page.locator("#pe-dialog [data-lifecycle-dialog='pipeline-discard']")
         blocked.waitFor()
         withClue("#786 B.4: v1 is CURRENT, both schedules run it (paused included), so they block and there is no confirm") {
-            blocked.locator("[data-discard-pinner-schedule]").allInnerTexts().map { it.substringBefore(' ').trim() }.sorted() shouldBe
+            blocked
+                .locator("[data-discard-pinner-schedule]")
+                .allInnerTexts()
+                .map { it.substringBefore(' ').trim() }
+                .sorted() shouldBe
                 listOf("dd273/backfill", "dd273/nightly")
             blocked.innerText() shouldContain "cannot be discarded"
             blocked.locator("button[data-verb='pipeline-discard-confirm']").count() shouldBe 0

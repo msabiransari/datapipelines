@@ -278,7 +278,9 @@ class PipelineLifecycleDialogModel(
     ) {
         /** Any blocker at all: the dialog then lists them and carries no button. */
         val blocked: Boolean
-            get() = pinnerPipelines.isNotEmpty() || pinnerDashboards.isNotEmpty() || pinnerApiVersions.isNotEmpty() || pinnerSchedules.isNotEmpty()
+            get() =
+                pinnerPipelines.isNotEmpty() || pinnerDashboards.isNotEmpty() || pinnerApiVersions.isNotEmpty() ||
+                    pinnerSchedules.isNotEmpty()
     }
 
     @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal the dialog renders
@@ -353,7 +355,9 @@ class PipelineLifecycleDialogModel(
     ) {
         /** Any blocker at all: the dialog then lists them and carries no button. */
         val blocked: Boolean
-            get() = pinnerPipelines.isNotEmpty() || pinnerDashboards.isNotEmpty() || pinnerApiVersions.isNotEmpty() || pinnerSchedules.isNotEmpty()
+            get() =
+                pinnerPipelines.isNotEmpty() || pinnerDashboards.isNotEmpty() || pinnerApiVersions.isNotEmpty() ||
+                    pinnerSchedules.isNotEmpty()
     }
 
     @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal the dialog renders
@@ -492,7 +496,9 @@ class PipelineLifecycleDialogModel(
     ) {
         /** Any blocker at all: the dialog then lists them and carries no button. */
         val blocked: Boolean
-            get() = pinnerPipelines.isNotEmpty() || pinnerDashboards.isNotEmpty() || pinnerApiVersions.isNotEmpty() || pinnerSchedules.isNotEmpty()
+            get() =
+                pinnerPipelines.isNotEmpty() || pinnerDashboards.isNotEmpty() || pinnerApiVersions.isNotEmpty() ||
+                    pinnerSchedules.isNotEmpty()
     }
 
     /** A draft-only template the purge leaves in place, and the parameter sets and visualizations that hold it (#335). */
