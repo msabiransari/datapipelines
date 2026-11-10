@@ -7,6 +7,7 @@ import co.datapipelines.auth.RequiredScope
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.release.ReleaseBounds
 import co.datapipelines.pipeline.release.ReleaseFamily
+import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.api.ApiResponse
 import co.datapipelines.web.api.currentPrincipal
@@ -201,11 +202,17 @@ class EndpointVersionsController(
     private fun EndpointVersionService.Moved.toResponse(): Map<String, Any?> =
         mapOf("version" to version, "current_version_before" to currentBefore, "current_version_after" to currentAfter)
 
+    /**
+     * An unreadable release plan body — not JSON, or past the request mapper's bounds (#291's nesting depth): the
+     * house shape every string-body route answers (`details.reason = "malformed_json"`, the parser's own message), under
+     * the code the API family already answers an unusable body with (the endpoint family has no body code of its own).
+     */
     private fun malformedBody(cause: JsonProcessingException) =
         ApiException(
             PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
-            "The release plan body is not valid JSON.",
-            mapOf("reason" to "body_malformed", "detail" to cause.originalMessage.take(MAX_CAUSE_CHARS)),
+            "Request body is not valid JSON: ${cause.message?.take(MAX_CAUSE_CHARS)}",
+            mapOf(ApiErrors.REASON to ApiErrors.MALFORMED_JSON),
+            cause,
         )
 
     private fun versionMissing() =

@@ -693,6 +693,44 @@ class PublishedEndpointE2eTest {
         restored.getString("data.body_hash") shouldBe apiHash
     }
 
+    @Test
+    fun `an unreadable API release plan body is the house malformed_json 400 and releases nothing`() {
+        val name = "test/c2_release_body"
+        pipeline(pinnedPipelineBody("v1", name))
+        val apiId =
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .asSession(ADMIN_SESSION)
+                .body("""{"path": "/nyc/v1/c2-release-body", "pipeline": "$name", "pipeline_version": 1, "timeout_seconds": 60}""")
+                .`when`()
+                .post("/api/v1/endpoints")
+                .then()
+                .statusCode(201)
+                .extract()
+                .jsonPath()
+                .getString("data.id")
+        val apiHash = apiVersion(apiId, 1).getString("data.body_hash")
+        // The request mapper's nesting bound is 100 (#291, RequestNestingDepthE2eTest pins it): one level past it.
+        val overBound = "[".repeat(NESTING_BOUND + 1) + "]".repeat(NESTING_BOUND + 1)
+        listOf("""{"tree_hash": """ to "not valid JSON", overBound to "nesting depth").forEach { (body, says) ->
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .asSession(ADMIN_SESSION)
+                .header("If-Match", apiHash)
+                .body(body)
+                .`when`()
+                .post("/api/v1/endpoints/$apiId/release")
+                .then()
+                .statusCode(400)
+                .body("error.code", equalTo("pipeline.execution.invalid_parameter_type"))
+                .body("error.details.reason", equalTo("malformed_json"))
+                .body("error.message", org.hamcrest.Matchers.containsString(says))
+        }
+        apiVersion(apiId, 1).getString("data.status") shouldBe "DRAFT"
+    }
+
     // -------------------------------------------------------------------------------------
     // #786 Skill — endpoints_create over MCP carries the exact pin (A06 over MCP)
     // -------------------------------------------------------------------------------------
@@ -1168,6 +1206,9 @@ class PublishedEndpointE2eTest {
 
     companion object {
         private const val API_KEY_HEADER = "DP-API-Key"
+
+        /** The request mapper's nesting bound (#291): `RequestNestingDepthE2eTest` reads it off the injected mapper. */
+        private const val NESTING_BOUND = 100
         private const val DEFAULT_WORKSPACE = "defa0000-0000-0000-0000-000000000001"
         private const val OTHER_WORKSPACE = "defa0000-0000-0000-0000-0000000000ee"
         private val ADMIN_USER: String = UUID.randomUUID().toString()
