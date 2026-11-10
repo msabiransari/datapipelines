@@ -124,6 +124,16 @@ enum class Permission(
     ENDPOINT_READ("endpoint.read"),
     ENDPOINT_PUBLISH("endpoint.publish"),
     ENDPOINT_UNPUBLISH("endpoint.unpublish"),
+
+    /** #786 — release an API draft version through the shared planner (cells copied from `pipeline.release`). */
+    ENDPOINT_RELEASE("endpoint.release"),
+
+    /**
+     * #786 — an API's version lifecycle: discard the draft, discard/restore/purge a version, and the explicit current
+     * switch (record §24 assigns lifecycle management here and proposes no third constant; cells copied from
+     * `template.version.manage`).
+     */
+    ENDPOINT_VERSION_MANAGE("endpoint.version.manage"),
     ENDPOINT_SERVE("endpoint.serve"),
     SEMANTIC_READ("semantic.read"),
     SEMANTIC_RECORD("semantic.record"),

@@ -101,6 +101,64 @@ class ReleaseCoordinator(
         return planned(request, plan, treeHash)
     }
 
+    /**
+     * A release whose root is NOT a pipeline (#786 C.2: the API is the second root) — the same algorithm through the
+     * family's [ReleaseRoot]: the plan's snapshot, the digest before any work, the selection covering every reachable
+     * DRAFT, each flipped family's permission, every node prepared outside, and inside ONE transaction the guard, the
+     * re-walk compared again, dependencies first and the root last, then the strict audit rows. Without a plan only the
+     * root flips: a DRAFT anywhere below it is `dependency_not_released`, read again under the guard.
+     */
+    fun releaseRoot(request: RootReleaseRequest): RootReleased {
+        val rootFamily = request.family
+        val root = rootOf(rootFamily)
+        val plan = request.plan?.takeIf { it.present }
+        val treeHash =
+            plan?.let {
+                val hash = it.treeHash ?: throw ReleaseRefusals.planRequired(rootFamily)
+                if (!TreeHash.SHAPE.matches(hash)) throw ReleaseRefusals.planInvalid(rootFamily, "tree_hash", "not a tree hash")
+                hash
+            }
+        val principal = request.principal ?: authorization.principal()
+        val rootIdentity = root.rootIdentity(request.workspaceId, request.entityId)
+        val closure = plannedWalk(rootIdentity, request.actor)
+        if (treeHash != null && TreeHash.of(closure, bounds.maxWireBytes) != treeHash) throw ReleaseRefusals.planConflict(rootFamily)
+        val selection = if (plan == null) emptySet() else selection(closure, plan, alias = false)
+        val overrides = if (plan == null) emptyMap() else overrides(closure, plan, null, selection)
+        refuseBlockers(closure, selection)
+        val order = closure.dependencyFirst.filter { it.identity in selection }
+        val families = (order.map { it.identity.family } + rootFamily).distinct()
+        families.forEach { authorization.requireRelease(principal, it) }
+
+        val flipping = selection + rootIdentity
+
+        fun context(
+            node: ClosureNode,
+            expectedHash: String,
+        ) = ReleaseContext(request.actor, closure, flipping, expectedHash, overrides[node.identity])
+        val prepared = order.map { node -> participant(node).prepare(node, context(node, requireNotNull(node.bodyHash))) }
+        val preparedRoot = root.prepare(closure.rootNode, context(closure.rootNode, request.expectedHash))
+
+        val releaseId = releaseIds()
+        return inTransaction { status ->
+            guard.acquire(request.workspaceId, rootFamily)
+            val guarded = guardedWalk(rootIdentity, request.actor)
+            if (treeHash != null && TreeHash.of(guarded, bounds.maxWireBytes) != treeHash) throw ReleaseRefusals.planConflict(rootFamily)
+            if (treeHash == null) refuseBlockers(guarded, emptySet())
+            families.forEach { authorization.requireRelease(principal, it) }
+            val dependencies = prepared.map { it to participant(it.node).commitPrepared(it, status) }
+            val flipped = root.commitPrepared(preparedRoot, status)
+            observeDependencyFlips(request.workspaceId, dependencies)
+            val released = dependencies.map { (it, _) -> released(it.node) }
+            val common = writeDependencyAudit(principal, closure, releaseId, request.entityId, dependencies)
+            val (event, details) = root.auditRow(principal, request.entityId, flipped)
+            record(principal, request.workspaceId, event, details + common + ("dependencies_released" to released.map { it.toWire() }))
+            RootReleased(flipped, released)
+        }
+    }
+
+    private fun rootOf(family: ReleaseFamily): ReleaseRoot =
+        participants[family] as? ReleaseRoot ?: throw IllegalArgumentException("$family is not a registered release root")
+
     /** The compatibility path (record §6): native preparation, then the legacy closure check and flips under the guard. */
     private fun compatible(request: PipelineReleaseRequest): PipelineReleaseService.Released {
         val prepared = releases.prepare(request.workspaceId, request.pipelineId, request.actor, request.overrideChecksReason)
@@ -201,13 +259,13 @@ class ReleaseCoordinator(
     private fun plannedWalk(
         root: ReleaseNodeIdentity,
         actor: UUID,
-    ): ReleaseClosure = planning.plan(root, actor) ?: throw ReleaseRefusals.planConflict(ROOT)
+    ): ReleaseClosure = planning.plan(root, actor) ?: throw ReleaseRefusals.planConflict(root.family)
 
     /** The closure read inside the release transaction, under the guard. */
     private fun guardedWalk(
         root: ReleaseNodeIdentity,
         actor: UUID,
-    ): ReleaseClosure = planning.walkInCurrentTransaction(root, actor) ?: throw ReleaseRefusals.planConflict(ROOT)
+    ): ReleaseClosure = planning.walkInCurrentTransaction(root, actor) ?: throw ReleaseRefusals.planConflict(root.family)
 
     private fun refuseBlockers(
         closure: ReleaseClosure,
@@ -225,16 +283,17 @@ class ReleaseCoordinator(
         alias: Boolean,
     ): Set<ReleaseNodeIdentity> {
         if (alias) return LegacyReleaseAlias.selection(closure)
+        val root = closure.root.family
         val ids = plan.includeDependencies ?: return emptySet()
-        if (ids.size > bounds.maxVersions) throw ReleaseRefusals.planInvalid(ROOT, "include_dependencies", "too many entries")
+        if (ids.size > bounds.maxVersions) throw ReleaseRefusals.planInvalid(root, "include_dependencies", "too many entries")
         val seen = HashSet<String>()
         return ids
             .mapIndexed { index, id ->
                 val field = "include_dependencies[$index]"
-                if (!seen.add(id)) throw ReleaseRefusals.planInvalid(ROOT, field, "a node is included twice")
-                val node = closure.nodeById(id) ?: throw ReleaseRefusals.planInvalid(ROOT, field, "not a node of the plan")
-                if (node.identity == closure.root) throw ReleaseRefusals.planInvalid(ROOT, field, "the root is released by the action")
-                if (node.status != ReleaseNodeStatus.DRAFT) throw ReleaseRefusals.planInvalid(ROOT, field, "only a DRAFT can be included")
+                if (!seen.add(id)) throw ReleaseRefusals.planInvalid(root, field, "a node is included twice")
+                val node = closure.nodeById(id) ?: throw ReleaseRefusals.planInvalid(root, field, "not a node of the plan")
+                if (node.identity == closure.root) throw ReleaseRefusals.planInvalid(root, field, "the root is released by the action")
+                if (node.status != ReleaseNodeStatus.DRAFT) throw ReleaseRefusals.planInvalid(root, field, "only a DRAFT can be included")
                 node.identity
             }.toSet()
     }
@@ -248,17 +307,18 @@ class ReleaseCoordinator(
         selection: Set<ReleaseNodeIdentity>,
     ): Map<ReleaseNodeIdentity, String> {
         val entries = plan.checkOverrides.orEmpty()
-        if (entries.size > bounds.maxVersions) throw ReleaseRefusals.planInvalid(ROOT, "check_overrides", "too many entries")
+        val root = closure.root.family
+        if (entries.size > bounds.maxVersions) throw ReleaseRefusals.planInvalid(root, "check_overrides", "too many entries")
         val reasons = HashMap<ReleaseNodeIdentity, String>()
         if (rootReason != null) reasons[closure.root] = rootReason
         entries.forEachIndexed { index, entry ->
             val field = "check_overrides[$index]"
-            val node = closure.nodeById(entry.nodeId) ?: throw ReleaseRefusals.planInvalid(ROOT, field, "not a node of the plan")
+            val node = closure.nodeById(entry.nodeId) ?: throw ReleaseRefusals.planInvalid(root, field, "not a node of the plan")
             if (node.identity != closure.root && node.identity !in selection) {
-                throw ReleaseRefusals.planInvalid(ROOT, field, "the node is not released by this plan")
+                throw ReleaseRefusals.planInvalid(root, field, "the node is not released by this plan")
             }
             if (reasons.putIfAbsent(node.identity, entry.reason) != null) {
-                throw ReleaseRefusals.planInvalid(ROOT, field, "a node's override is given twice")
+                throw ReleaseRefusals.planInvalid(root, field, "a node's override is given twice")
             }
         }
         return reasons
@@ -270,14 +330,22 @@ class ReleaseCoordinator(
         root: PipelineRepository.Released,
         dependencies: List<Pair<PreparedRelease, ReleaseFlip>>,
     ) {
+        observeDependencyFlips(request.workspaceId, dependencies)
+        observer.released(ReleasedVersion(request.workspaceId, ReleaseFamily.PIPELINE, request.pipelineId, root.version.version))
+    }
+
+    /** #778 — every PIPELINE dependency a release flipped, whatever its root's family. */
+    private fun observeDependencyFlips(
+        workspaceId: UUID,
+        dependencies: List<Pair<PreparedRelease, ReleaseFlip>>,
+    ) {
         dependencies
             .map { (prepared, _) -> prepared.node }
             .filter { it.identity.family == ReleaseFamily.PIPELINE }
             .forEach { node ->
                 val entityId = checkNotNull(node.entityUuid) { "a flipped pipeline ${node.name} has no id" }
-                observer.released(ReleasedVersion(request.workspaceId, ReleaseFamily.PIPELINE, entityId, node.identity.version))
+                observer.released(ReleasedVersion(workspaceId, ReleaseFamily.PIPELINE, entityId, node.identity.version))
             }
-        observer.released(ReleasedVersion(request.workspaceId, ReleaseFamily.PIPELINE, request.pipelineId, root.version.version))
     }
 
     private fun participant(node: ClosureNode): ReleaseParticipant =
@@ -320,11 +388,29 @@ class ReleaseCoordinator(
         dependencies: List<Pair<PreparedRelease, ReleaseFlip>>,
         root: PipelineReleaseService.Released,
     ) {
+        val common = writeDependencyAudit(principal, closure, releaseId, pipelineId, dependencies)
+        val rootDetails =
+            LifecycleVerbs.releaseDetails(principal, pipelineId, root) + common +
+                ("dependencies_released" to root.dependenciesReleased.map { it.toWire() })
+        record(principal, closure.root.workspaceId, LifecycleVerbs.AUDIT_VERSION_RELEASED, rootDetails)
+    }
+
+    /**
+     * The dependency rows of step 7, whatever the root's family: one row per dependency flip in release order, each with
+     * `cascade_root` naming the root's family, id and version. Answers the details every row of this release shares.
+     */
+    private fun writeDependencyAudit(
+        principal: AuthenticatedPrincipal,
+        closure: ReleaseClosure,
+        releaseId: UUID,
+        rootEntityId: UUID,
+        dependencies: List<Pair<PreparedRelease, ReleaseFlip>>,
+    ): Map<String, Any?> {
         val workspaceId = closure.root.workspaceId
         val rootVersion = closure.root.version
         val common = linkedMapOf<String, Any?>("scope" to "version", "release_id" to releaseId.toString())
-        val cascadeRoot = linkedMapOf("family" to ROOT.wire, "id" to pipelineId.toString(), "version" to rootVersion)
-        val source = LifecycleVerbs.CascadeSource(pipelineId, rootVersion)
+        val cascadeRoot = linkedMapOf("family" to closure.root.family.wire, "id" to rootEntityId.toString(), "version" to rootVersion)
+        val source = LifecycleVerbs.CascadeSource(rootEntityId, rootVersion)
         dependencies.forEach { (prepared, flip) ->
             val (event, details) =
                 when (val result = flip.result) {
@@ -349,10 +435,7 @@ class ReleaseCoordinator(
                 }
             record(principal, workspaceId, event, details + common + ("cascade_root" to cascadeRoot))
         }
-        val rootDetails =
-            LifecycleVerbs.releaseDetails(principal, pipelineId, root) + common +
-                ("dependencies_released" to root.dependenciesReleased.map { it.toWire() })
-        record(principal, workspaceId, LifecycleVerbs.AUDIT_VERSION_RELEASED, rootDetails)
+        return common
     }
 
     private fun record(

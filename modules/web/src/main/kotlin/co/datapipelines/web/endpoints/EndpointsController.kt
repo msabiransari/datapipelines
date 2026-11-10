@@ -12,7 +12,6 @@ import co.datapipelines.auth.ApiKeyRepository
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.pipeline.PipelineErrorCodes
-import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.api.ApiResponse
@@ -31,12 +30,17 @@ import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 
-/** §19.5 publish body. The pipeline is named, not id'd — the name is the portable identity. */
+/**
+ * §19.5 create body. The pipeline is named, not id'd — the name is the portable identity — and pinned at the exact
+ * `pipeline_version` the request names (#786, owner ruling 2026-11-08 (4): an authored input like `template_version`).
+ */
 data class CreateEndpointRequest(
     @field:JsonProperty("path") @get:JsonProperty("path") @param:JsonProperty("path")
     val path: String,
     @field:JsonProperty("pipeline") @get:JsonProperty("pipeline") @param:JsonProperty("pipeline")
     val pipeline: String,
+    @field:JsonProperty("pipeline_version") @get:JsonProperty("pipeline_version") @param:JsonProperty("pipeline_version")
+    val pipelineVersion: Int,
     @field:JsonProperty("timeout_seconds") @get:JsonProperty("timeout_seconds") @param:JsonProperty("timeout_seconds")
     val timeoutSeconds: Int? = null,
     @field:JsonProperty("description") @get:JsonProperty("description") @param:JsonProperty("description")
@@ -82,11 +86,10 @@ class EndpointsController(
     private val endpointKeys: EndpointKeyService,
     private val bindings: EndpointKeyBindingRepository,
     private val apiKeys: ApiKeyRepository,
-    private val pipelines: PipelineRepository,
 ) {
     /**
-     * §19.5 — publish. Transactional because the §4.1 ambiguity check takes a
-     * transaction-scoped advisory lock; without one it would be released at the SELECT.
+     * §19.5 — create: the entity and its v1 DRAFT pinned to `pipeline_version` (#786). Transactional because the §4.1
+     * ambiguity check takes a transaction-scoped advisory lock; without one it would be released at the SELECT.
      */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
@@ -99,10 +102,11 @@ class EndpointsController(
         val body = StrictRequestBodies.bind<CreateEndpointRequest>(tree)
         return ApiResponse.of(
             publishing
-                .publish(
+                .create(
                     principal = currentPrincipal(),
                     pathPattern = body.path,
                     pipelineName = body.pipeline,
+                    pipelineVersion = body.pipelineVersion,
                     timeoutSeconds = body.timeoutSeconds,
                     description = body.description.orEmpty(),
                 ).toResponse(),
@@ -257,14 +261,19 @@ class EndpointsController(
 
     /**
      * The outbound shape. The pipeline travels by NAME, so a reader gets the portable identity;
-     * `url` is the full served URL (R-EP5: the stored pattern plus the `/api` root).
+     * `url` is the full served URL (R-EP5: the stored pattern plus the `/api` root). Since #786 the
+     * pipeline, its exact `pipeline_version`, the timeout and the description are the CURRENT API
+     * version's body (null while the API has no current version); `id` addresses the version routes.
      */
     private fun PublishedEndpoint.toResponse(): Map<String, Any?> =
         mapOf(
+            "id" to id.toString(),
             "path" to pathPattern,
-            "pipeline" to pipelines.findById(workspaceId, pipelineId)?.name,
-            "timeout_seconds" to timeoutSeconds,
-            "description" to description,
+            "pipeline" to current?.body?.pipelineName,
+            "pipeline_version" to current?.body?.pipelineVersion,
+            "current_version" to current?.version,
+            "timeout_seconds" to current?.body?.timeoutSeconds,
+            "description" to current?.body?.description,
             "enabled" to isEnabled,
             "path_variables" to pathVariables,
             "url" to "/api$pathPattern",
@@ -287,7 +296,7 @@ class EndpointsController(
         val echoed = EndpointPath.echoBounded(pathPattern)
         return mapOf(
             "path" to echoed,
-            "pipeline" to pipelines.findById(workspaceId, pipelineId)?.name,
+            "pipeline" to pipelineName,
             "enabled" to enabled,
             "legacy" to true,
             "reason" to reason,

@@ -47,15 +47,18 @@ object EndpointsTools {
         )
 
     /**
-     * The wire shape of one endpoint. The pipeline travels by NAME — the portable identity
-     * (pipeline-contract §11.1) — so an agent reading this can act on it in any environment.
+     * The wire shape of one endpoint, unchanged by #786 (no get/list field is added — record §24): `pipeline`,
+     * `timeout_seconds` and `description` are the API's CURRENT version's, the pipeline by NAME — the portable identity
+     * (pipeline-contract §11.1) — so an agent reading this can act on it in any environment. An API with no current
+     * version answers them null.
      */
+    @Suppress("UnusedParameter") // the receiver shape every caller passes; the pin is the version's own name now
     internal fun PublishedEndpoint.toResponse(pipelines: PipelineRepository): Map<String, Any?> =
         mapOf(
             "path" to pathPattern,
-            "pipeline" to pipelines.findById(workspaceId, pipelineId)?.name,
-            "timeout_seconds" to timeoutSeconds,
-            "description" to description,
+            "pipeline" to current?.body?.pipelineName,
+            "timeout_seconds" to current?.body?.timeoutSeconds,
+            "description" to current?.body?.description,
             "enabled" to isEnabled,
             "path_variables" to pathVariables,
             "url" to "/api$pathPattern",
@@ -68,11 +71,12 @@ object EndpointsTools {
      * no parse. Unpublishing it (`endpoints_delete`) is the fix. The path is echoed bounded too
      * (#286, [EndpointPath.echoBounded]).
      */
+    @Suppress("UnusedParameter") // the receiver shape every caller passes; the pin is the version's own name now
     internal fun EndpointRow.Legacy.toLegacyResponse(pipelines: PipelineRepository): Map<String, Any?> {
         val echoed = EndpointPath.echoBounded(pathPattern)
         return mapOf(
             "path" to echoed,
-            "pipeline" to pipelines.findById(workspaceId, pipelineId)?.name,
+            "pipeline" to pipelineName,
             "enabled" to enabled,
             "legacy" to true,
             "reason" to reason,
@@ -89,11 +93,18 @@ object EndpointsTools {
             McpTools.tool(
                 name = "endpoints_create",
                 description =
-                    "Publish a released pipeline as a GET endpoint at /api/<category>/<version>/<path>. The category " +
+                    "Create a GET endpoint at /api/<category>/<version>/<path>: this creates the API's first DRAFT version " +
+                        "pinned to the exact pipeline_version given. Creation is an authoring operation: a deployment " +
+                        "with authoring disabled refuses it (endpoint.authoring_disabled); there is no release to perform " +
+                        "there. In an authoring-enabled deployment the draft is the entity's current version and serves " +
+                        "under the normal runtime checks — the entity is enabled, the caller's key is bound, and the " +
+                        "pinned pipeline version is eligible. The pin never moves when the pipeline's current version " +
+                        "moves. The category " +
                         "is your namespace (a business domain, a team); categories matching v<number> and the literal " +
                         "'api' are reserved to the product and refused with endpoint.path_reserved. The version is one " +
-                        "free-form segment (v1 by convention); path variables come after it. The pipeline must have a " +
-                        "RELEASED version and must be side-effect-free: every node DQL into tempdb or the caller, a " +
+                        "free-form segment (v1 by convention); path variables come after it. The pinned pipeline version " +
+                        "must be eligible here (RELEASED; a DRAFT only where authoring is enabled — else " +
+                        "endpoint.pipeline_version.not_eligible) and must be side-effect-free: every node DQL into tempdb or the caller, a " +
                         "DML/DDL node whose source is tempdb, transitively through PIPELINE nodes. A DML/DDL node against a " +
                         "registered datasource, or a DQL node writing back to a datasource, is refused with " +
                         "endpoint.pipeline_not_readonly naming the node and the datasource — that rule is what makes " +
@@ -113,10 +124,11 @@ object EndpointsTools {
             ctx: McpToolContext,
         ): Any =
             publishing
-                .publish(
+                .create(
                     principal = ctx.principal,
                     pathPattern = args.requiredString("path"),
                     pipelineName = args.requiredString("pipeline"),
+                    pipelineVersion = args.version("pipeline_version") ?: throw McpArguments.invalidParams("Missing required argument 'pipeline_version'."),
                     // Absent means "the configured default", which the service applies — so the
                     // sentinel is null, not a number this layer would have to keep in step with
                     // datapipelines.endpoints.timeout-default-seconds.
@@ -133,11 +145,12 @@ object EndpointsTools {
                 """
                 {
                   "type": "object",
-                  "required": ["path", "pipeline"],
+                  "required": ["path", "pipeline", "pipeline_version"],
                   "additionalProperties": false,
                   "properties": {
                     "path": {"type": "string", "description": "e.g. /finance/v1/revenue/{region} — category, version, then the path; no /api prefix (one is stripped, not refused), no trailing slash."},
-                    "pipeline": {"type": "string", "description": "The pipeline NAME. It must have a released version."},
+                    "pipeline": {"type": "string", "description": "The pipeline NAME."},
+                    "pipeline_version": {"type": "integer", "minimum": 1, "description": "The EXACT pipeline version the API's first draft pins. It never moves when the pipeline's current version moves."},
                     "timeout_seconds": {"type": "integer", "description": "Clamped by datapipelines.endpoints.timeout-min-seconds/max-seconds. On timeout the endpoint answers 202 and the execution keeps running."},
                     "description": {"type": "string"}
                   }

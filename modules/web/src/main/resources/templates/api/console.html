@@ -61,7 +61,7 @@
             <span class="app-path"
                   th:text="${e.servedVersion != null} ? ('v' + ${e.servedVersion} + (${e.servedDraft} ? ' · draft' : '')) : 'nothing to serve'">v3</span>
           </td>
-          <td class="num" th:text="${e.timeoutSeconds} + ' s'">30 s</td>
+          <td class="num" th:text="${e.timeoutSeconds != null ? e.timeoutSeconds + ' s' : '—'}">30 s</td>
           <td>
             <!-- 179 (D17): the API keys ASSOCIATED at this exact path, by name — the count
                  chip this replaced answered "how many" when the operator's question is

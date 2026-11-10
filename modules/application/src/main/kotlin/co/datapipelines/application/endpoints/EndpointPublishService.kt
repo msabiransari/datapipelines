@@ -3,102 +3,60 @@ package co.datapipelines.application.endpoints
 import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineErrorCodes
-import co.datapipelines.pipeline.PipelineRecord
-import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
-import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.guard.MetadataWriterGuard
 import org.springframework.transaction.support.TransactionOperations
-import org.springframework.transaction.support.TransactionSynchronization
-import org.springframework.transaction.support.TransactionSynchronizationManager
-import java.time.Instant
-import java.util.UUID
 
 /**
- * Publishing and unpublishing endpoints (published-endpoints design §4.2, §6) — the one validated
- * path the REST surface, the MCP tools and promotion all go through.
+ * Creating, listing and deleting API entities (published-endpoints design §4.2, §6; dependency-graph record §24, #786) —
+ * the one validated path the REST surface and the MCP tool share.
  *
- * That sharing is the point, and it is 049's rule applied again: three entry points, one
- * validated path. A publish that skipped the read-only rule because it arrived over MCP instead
- * of REST would be a hole in the property the whole feature rests on.
+ * ## Creation saves a DRAFT (R4, owner ruling 4 of 2026-11-08)
+ *
+ * [create] writes the entity AND its version 1 — a DRAFT pinned to the EXACT pipeline version the caller names — in one
+ * transaction under the G0 protocol: the workspace guard, the pin's checks under it, then the registry key (path
+ * absence matters) and the inserts. Creation is an authoring operation: a deployment with authoring disabled refuses it
+ * (`endpoint.authoring_disabled`). In an authoring-enabled deployment that draft is the entity's current version and
+ * serves under the normal runtime checks; the pin never moves when the pipeline's current version moves. Releasing it
+ * is the release coordinator's (`POST /api/v1/endpoints/{id}/release`), never a creation shortcut.
  *
  * ## Pipelines are named, not id'd
  *
- * A publish names its pipeline the way everything portable does (pipeline-contract §11.1): the
- * NAME is the cross-environment identity, and an id is local. That is what lets promotion carry
- * an endpoint row to another deployment at all — the target resolves the same name to its own
- * pipeline id.
+ * A version names its pipeline the way everything portable does (pipeline-contract §11.1): the NAME and the exact
+ * version number, so the same body means the same thing on every deployment (record §5.3, A44).
  *
  * ## Order of checks
  *
- * Grammar, then existence, then released-ness, then read-only, then path variables, then the
- * clamp, then the conflict. Cheapest and most-specific first, so the message an author gets names
- * the thing they can act on: "that path is malformed" rather than "that pipeline has no released
- * version" when both are true.
+ * Capability, grammar, then the pin (existence, exact version, eligibility, read-only, path variables — the shared
+ * [EndpointPinValidator]), then the clamp, then the conflict: cheapest and most specific first.
  */
+@Suppress("LongParameterList") // one collaborator per concern of the one creation path
 class EndpointPublishService(
     private val endpoints: PublishedEndpointRepository,
-    private val pipelines: PipelineService,
-    /**
-     * Name lookup lives on the repository, not the service — an endpoint names its pipeline the
-     * way everything portable does, and `PipelineService` exposes no by-name read.
-     */
-    private val pipelineRepository: co.datapipelines.pipeline.PipelineRepository,
-    private val readOnlyRule: ReadOnlyPipelineRule,
-    private val registry: EndpointRegistry,
+    versions: PublishedEndpointVersionRepository,
+    private val pins: EndpointPinValidator,
+    registry: EndpointRegistry,
     private val audit: AuditEventSink,
     private val timeouts: TimeoutBounds,
+    private val authoring: AuthoringGuard,
     /**
-     * 178 — the promoter lens on the two reads: an endpoint is visible iff its pipeline is
-     * (auth.md §7.6 puts `endpoints_list/get` and `GET /api/v1/endpoints` in the promoter's
-     * `lens` cell), so a hidden pipeline never leaks through the endpoint that publishes it.
-     * Nullable so the deployments and tests wired before 178 keep the unlensed behaviour.
+     * 178 — the promoter lens on the reads: an API is visible iff the pipeline its current version pins is (auth.md §7.6
+     * puts `endpoints_list/get` and `GET /api/v1/endpoints` in the promoter's `lens` cell), so a hidden pipeline never
+     * leaks through the API that serves it. Null keeps the unlensed behaviour.
      */
     private val lens: PromoterLens? = null,
     /**
-     * #841 (G0, dependency-graph record §15.1) — the metadata transaction the guarded publish and unpublish run in
-     * (joining the caller's when there is one: the REST routes are transactional). Null runs the block bare — the
-     * directly constructed unit-test shape, with [writeGuard] at [MetadataWriterGuard.NONE].
+     * #841 (G0) — the metadata transaction creation and deletion run in (joining the caller's when there is one). Null
+     * runs the block bare — the directly constructed unit-test shape, with [writeGuard] at [MetadataWriterGuard.NONE].
      */
-    private val transactions: TransactionOperations? = null,
-    /**
-     * #841 — the writer guard: the publishing workspace FIRST (pipeline writers take the same row, so the pipeline,
-     * its released version and its read-only shape cannot change between validation and insert), then the single
-     * deployment-wide registry key around the overlap check and the insert/delete. Exhausting the cumulative wait
-     * refuses `endpoint.write.busy` (409) with nothing written.
-     */
-    private val writeGuard: MetadataWriterGuard = MetadataWriterGuard.NONE,
+    transactions: TransactionOperations? = null,
+    /** #841 — the writer guard; an exhausted wait refuses `endpoint.write.busy` (409) with nothing written. */
+    writeGuard: MetadataWriterGuard = MetadataWriterGuard.NONE,
 ) {
-    /** [block] in the metadata transaction (joined when one is open), or bare when none is wired. */
-    private fun <T> inTransaction(block: () -> T): T {
-        val tx = transactions ?: return block()
-        var result: Result<T>? = null
-        tx.executeWithoutResult { result = Result.success(block()) }
-        return requireNotNull(result) { "the transaction callback did not run" }.getOrThrow()
-    }
-
-    /**
-     * Invalidates the serve registry — locally and on every peer (a Redis publish) — once the transaction that OWNS this
-     * write commits, and never when it rolls back (#841 G0, R2 of the landing review). Returning from [inTransaction] is
-     * not that moment: the REST routes and a promotion receive supply an OUTER transaction which the callback joins, so
-     * the row and the workspace/registry guards are still uncommitted and held when it returns. Invalidating there would
-     * make an outbound call under those locks and let a peer reload — and cache — the pre-commit registry. Registered
-     * inside the transaction, the synchronization belongs to whichever transaction is actual: the outer one when joined,
-     * this service's own otherwise. With no transaction at all (the directly constructed test shape) it runs at once.
-     */
-    private fun invalidateAfterCommit() {
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            registry.invalidate()
-            return
-        }
-        TransactionSynchronizationManager.registerSynchronization(
-            object : TransactionSynchronization {
-                override fun afterCommit() = registry.invalidate()
-            },
-        )
-    }
+    private val writes = EndpointWrites(endpoints, versions, registry, transactions, writeGuard)
 
     /** The §5.5 clamp, passed in so `modules/application` reads no configuration itself. */
     data class TimeoutBounds(
@@ -110,119 +68,71 @@ class EndpointPublishService(
     }
 
     /**
-     * Publishes [pathPattern] over the pipeline named [pipelineName].
-     *
-     * MUST run inside a transaction: [PublishedEndpointRepository.insert] takes a
-     * transaction-scoped advisory lock to make the §4.1 ambiguity check race-proof.
+     * Creates the API at [pathPattern] with its version 1 DRAFT pinned to [pipelineName] at exactly [pipelineVersion]
+     * (R3: the pinned version must be eligible under this deployment's posture — `endpoint.pipeline_version.not_eligible`).
      */
-    @Suppress("ThrowsCount") // each §4.2 precondition is its own refusal, and each names itself
-    fun publish(
+    @Suppress("LongParameterList") // the authored creation inputs, each its own field of the request
+    fun create(
         principal: AuthenticatedPrincipal,
         pathPattern: String,
         pipelineName: String,
+        pipelineVersion: Int,
         timeoutSeconds: Int?,
         description: String,
     ): PublishedEndpoint {
+        EndpointWrites.requireAuthoring(authoring)
         val workspaceId = principal.requireWorkspace().id
-        val parsed =
-            EndpointPath.parse(pathPattern).getOrElse {
-                throw DatapipelinesException(
-                    code = PipelineErrorCodes.Endpoint.PATH_INVALID,
-                    message = it.message.orEmpty(),
-                    details = mapOf("path_pattern" to pathPattern),
-                )
-            }
-        // R-EP5 — the category is the engineer's namespace; the product's (`v<n>`, and the
-        // literal `api`) is reserved. Refused here and re-checked when the serve registry is
-        // built, so a row written around this check is never served either.
-        EndpointPath.reservedCategory(parsed)?.let { segment ->
-            throw DatapipelinesException(
-                code = PipelineErrorCodes.Endpoint.PATH_RESERVED,
-                message =
-                    "The category '$segment' is reserved: v<number> is the product's own API namespace and 'api' " +
-                        "re-opens the stripped prefix. Pick your own namespace — a business domain, a team, a product line.",
-                details = mapOf("path_pattern" to parsed.pattern, "segment" to segment),
-            )
-        }
-
+        val parsed = EndpointWrites.parsePath(pathPattern)
+        val body = EndpointWrites.bodyOf(pipelineName, pipelineVersion, timeouts.clamp(timeoutSeconds), description)
         val endpoint =
-            inTransaction {
-                // #841: workspace guard → validation under it → registry key → overlap check + insert (record §15.1
-                // order: workspace rows, then the single registry key).
-                writeGuard.workspaces(listOf(workspaceId), PipelineErrorCodes.Endpoint.WRITE_BUSY)
-                val record = pipelineRepository.findByName(workspaceId, pipelineName) ?: throw pipelineNotFound(pipelineName)
-                val version = releasedVersion(workspaceId, record) ?: throw notReleased(pipelineName)
-
-                requireReadOnly(version, workspaceId, pipelineName)
-                requireDeclaredVariables(parsed, version, pipelineName, pathPattern)
-
-                writeGuard.endpointRegistry(PipelineErrorCodes.Endpoint.WRITE_BUSY)
-                val inserted =
-                    endpoints.insert(
-                        PublishedEndpoint.of(
-                            id = UUID.randomUUID(),
-                            workspaceId = workspaceId,
-                            pathPattern = parsed.pattern,
-                            pipelineId = record.id,
-                            timeoutSeconds = timeouts.clamp(timeoutSeconds),
-                            description = description,
-                            isEnabled = true,
-                            createdBy = principal.userId,
-                            createdAt = Instant.now(),
-                            updatedAt = Instant.now(),
-                        ),
-                    )
-                // After the OWNING transaction commits, so a peer that reloads on the message cannot read the pre-write
-                // state, and no outbound call runs under the guards (#841 R2).
-                invalidateAfterCommit()
-                inserted
+            writes.inTransaction {
+                // #841: workspace guard → the pin's checks under it → registry key → overlap check + inserts.
+                writes.writeGuard.workspaces(listOf(workspaceId), PipelineErrorCodes.Endpoint.WRITE_BUSY)
+                val resolved = pins.check(workspaceId, parsed, body, EndpointPinValidator.Admission.ELIGIBLE)
+                writes.createWithFirstVersion(workspaceId, parsed, resolved.record.id, body, PipelineVersionStatus.DRAFT, principal.userId)
             }
-
         audit.log(
-            event = AUDIT_PUBLISHED,
+            event = AUDIT_DRAFT_SAVED,
             userId = principal.userId,
             keyId = principal.keyId,
             details =
                 mapOf(
                     "endpoint_id" to endpoint.id.toString(),
                     "path_pattern" to endpoint.pathPattern,
-                    "pipeline" to pipelineName,
-                    "timeout_seconds" to endpoint.timeoutSeconds,
+                    "version" to EndpointWrites.FIRST_VERSION,
+                    "pipeline" to body.pipelineName,
+                    "pipeline_version" to body.pipelineVersion,
+                    "timeout_seconds" to body.timeoutSeconds,
+                    "created" to true,
                 ),
         )
         return endpoint
     }
 
     /**
-     * Unpublishes by path. Returns false when nothing was published there.
-     *
-     * Reads the ROW (valid or legacy), not just the endpoint: unpublishing a legacy row IS the
-     * fix for it (#274), so the write path is the one read that must see what every other read
-     * skips. The visible-or-super-admin rule and the audit are identical for both row kinds.
+     * Deletes the API at a path, every version with it (entity deletion, unchanged). Returns false when nothing exists
+     * there. Reads the ROW (valid or legacy): deleting a legacy row IS the fix for it (#274).
      */
     fun unpublish(
         principal: AuthenticatedPrincipal,
         pathPattern: String,
     ): Boolean {
         val workspaceId = principal.requireWorkspace().id
-        // Normalised like a publish (R-EP5): the stored form never carries the `/api` prefix,
-        // so an addressed `/api/trade/v1/x` names the row published as `/trade/v1/x`.
+        // Normalised like a creation (R-EP5): the stored form never carries the `/api` prefix.
         val stored = EndpointPath.normalize(pathPattern)
         val existing = endpoints.findRowByPath(stored) ?: return false
-        // A URL is global, but managing one is not: an endpoint belongs to the workspace that
-        // published it, and another workspace's endpoint is invisible rather than forbidden —
-        // the same not-found discipline every workspace-scoped read follows.
+        // Another workspace's API is invisible rather than forbidden — the not-found discipline of every scoped read.
         if (existing.workspaceId != workspaceId && !principal.isSuperAdmin) return false
 
-        // #841: the delete changes path absence, so it takes the row's workspace guard and the registry key like a
-        // publish; the row is re-read under them, so a concurrent unpublish/republish is judged on what is stored.
+        // #841: the delete changes path absence, so it takes the row's workspace guard and the registry key; the row is
+        // re-read under them, so a concurrent delete/re-create is judged on what is stored.
         val removed =
-            inTransaction {
-                writeGuard.workspaces(listOf(existing.workspaceId), PipelineErrorCodes.Endpoint.WRITE_BUSY)
-                writeGuard.endpointRegistry(PipelineErrorCodes.Endpoint.WRITE_BUSY)
+            writes.inTransaction {
+                writes.writeGuard.workspaces(listOf(existing.workspaceId), PipelineErrorCodes.Endpoint.WRITE_BUSY)
+                writes.writeGuard.endpointRegistry(PipelineErrorCodes.Endpoint.WRITE_BUSY)
                 val deleted =
                     endpoints.findRowByPath(stored)?.takeIf { it.id == existing.id }?.let { endpoints.deleteByPath(stored) } ?: false
-                if (deleted) invalidateAfterCommit()
+                if (deleted) writes.invalidateAfterCommit()
                 deleted
             }
         if (removed) {
@@ -236,123 +146,56 @@ class EndpointPublishService(
         return removed
     }
 
-    /** The endpoints of the caller's workspace (§6's listing). */
+    /** The APIs of the caller's workspace (§6's listing), through the promoter lens. */
     fun list(principal: AuthenticatedPrincipal): List<PublishedEndpoint> {
-        val workspaceId = principal.requireWorkspace().id
-        val all = endpoints.findByWorkspace(workspaceId)
-        val visiblePipelines = visiblePipelineIds(principal, workspaceId) ?: return all
-        return all.filter { it.pipelineId in visiblePipelines }
+        val all = endpoints.findByWorkspace(principal.requireWorkspace().id)
+        val lensed = pipelineLens(principal) ?: return all
+        return all.filter { visible(it, lensed) }
     }
 
-    /**
-     * The legacy rows of the caller's workspace, flagged (#274) — the listing half of
-     * [list], which returns valid endpoints only. The same promoter lens applies: a hidden
-     * pipeline never leaks through the row that publishes it, so a legacy row whose pipeline
-     * the lens hides is absent here exactly as a valid one would be from [list].
-     */
+    /** The legacy rows of the caller's workspace, flagged (#274), through the same lens as [list]. */
     fun listLegacy(principal: AuthenticatedPrincipal): List<EndpointRow.Legacy> {
-        val workspaceId = principal.requireWorkspace().id
-        val legacy = endpoints.findLegacy(workspaceId)
-        val visiblePipelines = visiblePipelineIds(principal, workspaceId) ?: return legacy
-        return legacy.filter { it.pipelineId in visiblePipelines }
+        val legacy = endpoints.findLegacy(principal.requireWorkspace().id)
+        val lensed = pipelineLens(principal) ?: return legacy
+        return legacy.filter { row -> row.pipelineName?.let(lensed::admits) ?: false }
     }
 
-    /** One endpoint by path, or null when it does not exist, belongs to another workspace, or serves a pipeline the lens hides. */
+    /** One API by path, or null when absent, in another workspace, or serving a pipeline the lens hides. */
     fun get(
         principal: AuthenticatedPrincipal,
         pathPattern: String,
-    ): PublishedEndpoint? {
-        val found =
-            endpoints.findByPath(EndpointPath.normalize(pathPattern))?.takeIf {
-                it.workspaceId == principal.requireWorkspace().id || principal.isSuperAdmin
-            } ?: return null
-        val visiblePipelines = visiblePipelineIds(principal, found.workspaceId) ?: return found
-        return found.takeIf { it.pipelineId in visiblePipelines }
-    }
+    ): PublishedEndpoint? = visibleOrNull(principal, endpoints.findByPath(EndpointPath.normalize(pathPattern)))
 
-    /**
-     * The ids of the pipelines [principal]'s view admits in [workspaceId], or null when the
-     * view is not a narrowing one (every role but the promoter — no read, no cost). An
-     * endpoint names its pipeline by id, the lens by name, so the admitted index rows are
-     * read once and matched by id.
-     */
-    private fun visiblePipelineIds(
+    /** One API by id, under the same visibility as [get]. */
+    fun getById(
         principal: AuthenticatedPrincipal,
-        workspaceId: UUID,
-    ): Set<UUID>? {
+        id: java.util.UUID,
+    ): PublishedEndpoint? = visibleOrNull(principal, endpoints.findById(id))
+
+    private fun visibleOrNull(
+        principal: AuthenticatedPrincipal,
+        endpoint: PublishedEndpoint?,
+    ): PublishedEndpoint? {
+        val found = endpoint?.takeIf { it.workspaceId == principal.requireWorkspace().id || principal.isSuperAdmin } ?: return null
+        val lensed = pipelineLens(principal) ?: return found
+        return found.takeIf { visible(it, lensed) }
+    }
+
+    /** The promoter's pipeline lens, or null when the view does not narrow (every role but the promoter — no cost). */
+    private fun pipelineLens(principal: AuthenticatedPrincipal): ReadLens? {
         val view = lens?.viewFor(principal) ?: return null
-        if (!view.isLensed) return null
-        return pipelines.list(workspaceId, view.pipelines).mapTo(HashSet()) { it.id }
+        return view.pipelines.takeIf { view.isLensed }
     }
 
-    /** §4.2 — the rule that makes serving over GET defensible, re-checked on every serve too. */
-    private fun requireReadOnly(
-        version: PipelineService.ExecutablePipeline,
-        workspaceId: UUID,
-        pipelineName: String,
-    ) {
-        val verdict = readOnlyRule.check(version.pipeline, workspaceId)
-        if (verdict.isValid) return
-        val first = verdict.failures.first()
-        throw DatapipelinesException(
-            code = PipelineErrorCodes.Endpoint.PIPELINE_NOT_READONLY,
-            message =
-                "'$pipelineName' cannot be published as a GET endpoint: ${first.message} " +
-                    "A published endpoint serves GET, which must be side-effect-free.",
-            details = mapOf("pipeline" to pipelineName, "node_id" to first.details["node_id"], "via" to first.details["via"]),
-        )
-    }
+    /** An API with no current version pins nothing a lens could admit, so a lensed reader never sees it. */
+    private fun visible(
+        endpoint: PublishedEndpoint,
+        lensed: ReadLens,
+    ): Boolean = endpoint.pipelineName?.let(lensed::admits) ?: false
 
-    /**
-     * §4.2 — every path variable names a declared parameter.
-     *
-     * A SUBSET check, not an equality one: the pipeline may declare more parameters than the path
-     * binds, and those come from the query string.
-     */
-    private fun requireDeclaredVariables(
-        parsed: EndpointPath.Parsed,
-        version: PipelineService.ExecutablePipeline,
-        pipelineName: String,
-        pathPattern: String,
-    ) {
-        val undeclared = parsed.variableNames.filterNot { it in version.pipeline.parameters }
-        if (undeclared.isEmpty()) return
-        throw DatapipelinesException(
-            code = PipelineErrorCodes.Endpoint.PATH_VARIABLE_UNKNOWN,
-            message =
-                "The path binds ${undeclared.joinToString(", ") { "{$it}" }}, which '$pipelineName' " +
-                    "v${version.version} does not declare. It declares: ${version.pipeline.parameters.keys.sorted()}.",
-            details = mapOf("path_pattern" to pathPattern, "undeclared" to undeclared),
-        )
-    }
-
-    private fun releasedVersion(
-        workspaceId: UUID,
-        record: PipelineRecord,
-    ): PipelineService.ExecutablePipeline? {
-        val detail = pipelines.findCurrentVersion(workspaceId, ReadLens.Everything, record.id) ?: return null
-        if (detail.status != PipelineVersionStatus.RELEASED) return null
-        return pipelines.findExecutable(workspaceId, ReadLens.Everything, record, detail.version)
-    }
-
-    private fun pipelineNotFound(name: String) =
-        DatapipelinesException(
-            code = PipelineErrorCodes.Execution.NOT_FOUND,
-            message = "No pipeline named '$name' in this workspace.",
-            details = mapOf("pipeline" to name),
-        )
-
-    private fun notReleased(name: String) =
-        DatapipelinesException(
-            code = PipelineErrorCodes.Endpoint.PIPELINE_NOT_RELEASED,
-            // D55: a freshly authored pipeline has NO released version — the commonest case now,
-            // so the message names the way forward instead of restating the rule.
-            message = "'$name' has no released version. Release it from the UI first, then publish an endpoint over it.",
-            details = mapOf("pipeline" to name),
-        )
-
-    private companion object {
-        const val AUDIT_PUBLISHED = "endpoint.published"
+    companion object {
+        /** enums.md — every API draft save, creation included (`created: true`); `endpoint.published` is history only. */
+        const val AUDIT_DRAFT_SAVED = "endpoint.draft_saved"
         const val AUDIT_UNPUBLISHED = "endpoint.unpublished"
     }
 }

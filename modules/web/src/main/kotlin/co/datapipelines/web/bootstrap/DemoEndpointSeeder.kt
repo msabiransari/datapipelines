@@ -4,6 +4,7 @@ import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointKeyService
 import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.application.endpoints.PublishedEndpointRepository
+import co.datapipelines.application.endpoints.PublishedEndpointVersionRepository
 import co.datapipelines.auth.ApiKey
 import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.ApiKeyRepository
@@ -15,8 +16,13 @@ import co.datapipelines.auth.SecretHasher
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.web.config.EndpointsProperties
+import co.datapipelines.web.release.ReleaseCoordinator
+import co.datapipelines.web.release.RootReleaseRequest
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.SmartInitializingSingleton
 import java.util.UUID
@@ -92,6 +98,12 @@ class DemoEndpointSeeder(
     private val apiKeyService: ApiKeyService,
     private val secretHasher: SecretHasher,
     private val users: UserService,
+    /** #786 A.5 — the capability decision: the posture the refusal path reads, asked BEFORE any creation. */
+    private val authoring: AuthoringGuard,
+    /** #786 A.5 — v1's body hash, the consent the native release is asked for. */
+    private val endpointVersions: PublishedEndpointVersionRepository,
+    /** #786 A.5 — v1 is released through the native coordinator as the system actor: no shortcut. */
+    private val releases: ReleaseCoordinator,
 ) : SmartInitializingSingleton {
     private val log = LoggerFactory.getLogger(DemoEndpointSeeder::class.java)
 
@@ -146,7 +158,22 @@ class DemoEndpointSeeder(
             return
         }
 
-        val published = publishWanted(system, demo.id, wanted)
+        // #786 A.5 — an EXPLICIT capability decision before any creation: the wanted set is not
+        // the decision (it keys on configured examples and datasource visibility, so an
+        // authoring-disabled deployment can have a non-empty one). Disabled → one line, no draft
+        // save and no release; retirement and key reconciliation below run exactly as before.
+        val published =
+            if (authoring.developmentPosture) {
+                publishWanted(system, demo.id, wanted)
+            } else {
+                log.info(
+                    "event=demo.endpoints_authoring_disabled workspace={} wanted={} message=\"authoring is disabled " +
+                        "on this deployment, so no demo API is created or released; existing ones keep serving\"",
+                    demo.name,
+                    wanted.size,
+                )
+                0
+            }
         val retired = retireStaleEndpoints(system, demo.id, actor.userId, wantedPaths)
 
         val keyId = reconcileKey(demo.id, actor, plaintext, wantedPaths)
@@ -265,18 +292,15 @@ class DemoEndpointSeeder(
                 val existing = endpointRepository.findByPath(target.path)
                 when {
                     existing == null -> {
-                        publishService.publish(
-                            bootstrapPrincipal(system, demoId, DemoWorkspaceSeeder.DEMO_WORKSPACE),
-                            target.path,
-                            target.name,
-                            timeoutSeconds = null,
-                            description = DESCRIPTION,
-                        )
-                        published++
+                        if (createAndRelease(system, demoId, target)) published++
                     }
 
-                    existing.workspaceId == demoId && existing.pipelineId == target.pipelineId -> {
-                        // Already ours, already right: the idempotent boot's most common branch.
+                    existing.workspaceId == demoId && existing.current?.body?.pipelineName == target.name -> {
+                        // Already ours, already right: the idempotent boot's most common branch. A v1 a
+                        // previous boot created but could not release is released now.
+                        if (existing.current?.status == PipelineVersionStatus.DRAFT) {
+                            release(bootstrapPrincipal(system, demoId, DemoWorkspaceSeeder.DEMO_WORKSPACE), existing.id)
+                        }
                     }
 
                     else -> {
@@ -378,10 +402,10 @@ class DemoEndpointSeeder(
             try {
                 val removed = publishService.unpublish(actorForRetirement(system, demoId), endpoint.pathPattern)
                 log.info(
-                    "event=demo.endpoint_retired path={} removed={} pipeline_id={}",
+                    "event=demo.endpoint_retired path={} removed={} pipeline={}",
                     endpoint.pathPattern,
                     removed,
-                    endpoint.pipelineId,
+                    endpoint.current?.body?.pipelineName,
                 )
             } catch (e: Exception) {
                 log.error(
@@ -393,6 +417,60 @@ class DemoEndpointSeeder(
             }
         }
         return stale.size
+    }
+
+    /**
+     * #786 A.5 — the native creation (v1 DRAFT pinned to the seeded pipeline's RELEASED current), then v1 released
+     * through the coordinator as the system actor — the same consent (v1's body hash), the same matrix question and the
+     * same strict audit as a user's. A pipeline with no RELEASED current gets no endpoint (one WARN). True when created.
+     */
+    private fun createAndRelease(
+        system: co.datapipelines.auth.User,
+        demoId: UUID,
+        target: Wanted,
+    ): Boolean {
+        val principal = bootstrapPrincipal(system, demoId, DemoWorkspaceSeeder.DEMO_WORKSPACE)
+        val pipeline = pipelineRepository.findById(demoId, target.pipelineId)
+        val current = pipeline?.currentVersion
+        val released = current != null && pipelineRepository.findVersionDetail(demoId, target.pipelineId, current)?.status ==
+            PipelineVersionStatus.RELEASED
+        if (!released) {
+            log.warn(
+                "event=demo.pipeline_not_released pipeline={} message=\"the seeded pipeline has no RELEASED current " +
+                    "version to pin; no endpoint created\"",
+                target.name,
+            )
+            return false
+        }
+        val created =
+            publishService.create(
+                principal,
+                target.path,
+                target.name,
+                pipelineVersion = requireNotNull(current),
+                timeoutSeconds = null,
+                description = DESCRIPTION,
+            )
+        release(principal, created.id)
+        return true
+    }
+
+    /** Releases the API's working draft at its own body hash, as [principal], through the native coordinator. */
+    private fun release(
+        principal: AuthenticatedPrincipal,
+        endpointId: UUID,
+    ) {
+        val draft = endpointVersions.findDraft(endpointId) ?: return
+        releases.releaseRoot(
+            RootReleaseRequest(
+                family = ReleaseFamily.ENDPOINT,
+                workspaceId = principal.requireWorkspace().id,
+                entityId = endpointId,
+                expectedHash = draft.bodyHash,
+                actor = principal.userId,
+                principal = principal,
+            ),
+        )
     }
 
     /**
