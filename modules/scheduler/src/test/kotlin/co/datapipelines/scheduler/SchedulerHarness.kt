@@ -1,5 +1,6 @@
 package co.datapipelines.scheduler
 
+import co.datapipelines.typesystem.guard.MetadataWriterGuard
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.JsonNodeFactory
 import com.github.kagkarlsson.scheduler.testhelper.ManualScheduler
@@ -37,6 +38,8 @@ internal class SchedulerHarness(
     val deployment: NotificationDeployment = NotificationDeployment.UNKNOWN,
     val mailer: CapturingMailer = CapturingMailer(),
     val workerName: String = "instance-" + UUID.randomUUID().toString().take(4),
+    /** #841 (G0) — the service's metadata writer guard; [MetadataWriterGuard.NONE] unless a suite proves the seam. */
+    val writeGuard: MetadataWriterGuard = MetadataWriterGuard.NONE,
 ) {
     val clock: Clock = SettableJavaClock(settable)
     val registry = SimpleMeterRegistry()
@@ -97,6 +100,7 @@ internal class SchedulerHarness(
             ScheduleTargetReads(SchedulerTestDb.jdbc),
             policy,
             notifications,
+            writeGuard,
         ) {
             SchedulerTestDb.SYSTEM_ACTOR
         }
@@ -174,11 +178,18 @@ internal class FakeExecutor : JobExecutor {
      */
     @Volatile var duringPrepare: ((Admission) -> Unit)? = null
 
+    /** #841 (G0) — how many times [validate] ran, and a hook that runs inside it (a test parks the save there). */
+    val validateCalls = AtomicInteger()
+
+    @Volatile var duringValidate: (() -> Unit)? = null
+
     override fun validate(
         workspaceId: UUID,
         payload: JsonNode,
         parameters: JsonNode,
     ): String {
+        validateCalls.incrementAndGet()
+        duringValidate?.invoke()
         val job = payload.path("job").asText()
         if (job.isBlank()) throw ScheduleException(ScheduleErrorCodes.PAYLOAD_INVALID, "no job", mapOf("reason" to "job_missing"))
         if (job == "missing") throw ScheduleException(ScheduleErrorCodes.TARGET_NOT_FOUND, "no such job", mapOf("job" to job))
