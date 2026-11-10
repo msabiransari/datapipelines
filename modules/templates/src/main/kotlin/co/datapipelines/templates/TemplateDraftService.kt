@@ -143,7 +143,6 @@ class TemplateDraftService(
         actor: UUID,
         via: co.datapipelines.pipeline.WriteSurface,
     ): TemplateVersionDetail {
-
         // The WORKING version, not the released one (D55): between a template's creation and its
         // first release there IS no released projection, and reading one would refuse the second
         // write to a draft the same caller had just created.

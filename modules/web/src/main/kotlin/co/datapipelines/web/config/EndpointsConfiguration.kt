@@ -137,7 +137,9 @@ class EndpointsConfiguration {
         writeGuard: co.datapipelines.typesystem.guard.MetadataWriterGuard,
     ): EndpointPublishService =
         EndpointPublishService(
-            transactions = org.springframework.transaction.support.TransactionTemplate(transactionManager),
+            transactions =
+                org.springframework.transaction.support
+                    .TransactionTemplate(transactionManager),
             writeGuard = writeGuard,
             endpoints = endpoints,
             pipelines = pipelines,

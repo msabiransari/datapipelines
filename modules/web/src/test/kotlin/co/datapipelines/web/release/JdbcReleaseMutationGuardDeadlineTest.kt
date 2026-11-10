@@ -247,7 +247,8 @@ class JdbcReleaseMutationGuardDeadlineTest {
             guard.prerequisites(listOf(KEY_A), CODE)
             guard.endpointRegistry(CODE)
         }
-        jdbc.statements shouldContain "LOCK prerequisite ${PrerequisiteNamespace.DATASOURCE.lockSpace}:${JdbcReleaseMutationGuard.nameHash(KEY_A.name)}"
+        jdbc.statements shouldContain
+            "LOCK prerequisite ${PrerequisiteNamespace.DATASOURCE.lockSpace}:${JdbcReleaseMutationGuard.nameHash(KEY_A.name)}"
         jdbc.statements shouldContain "LOCK registry ${EndpointRegistryLock.KEY}"
     }
 

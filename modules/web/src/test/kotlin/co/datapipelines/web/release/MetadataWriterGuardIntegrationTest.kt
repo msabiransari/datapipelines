@@ -53,7 +53,8 @@ class MetadataWriterGuardIntegrationTest {
             }
         }
 
-    private fun guard(boundSeconds: Int = BOUND_SECONDS) = JdbcReleaseMutationGuard(counting, boundSeconds) { System.nanoTime() + skew.get() }
+    private fun guard(boundSeconds: Int = BOUND_SECONDS) =
+        JdbcReleaseMutationGuard(counting, boundSeconds) { System.nanoTime() + skew.get() }
 
     private fun holder() = LockHolder().also { holders += it }
 
@@ -117,7 +118,7 @@ class MetadataWriterGuardIntegrationTest {
     }
 
     @Test
-    fun `an exhausted real wait refuses with the caller code, exactly lock_wait_seconds and the 55P03 cause - and leaves no lock`() {
+    fun `an exhausted real wait refuses with the caller code, exactly lock_wait_seconds and the 55P03 cause - a later writer acquires`() {
         val ws = rows.workspace()
         val holder = holder().workspace(ws)
         val guard = guard(boundSeconds = 1)
@@ -127,6 +128,10 @@ class MetadataWriterGuardIntegrationTest {
         refusal.code shouldBe CODE
         refusal.details shouldBe mapOf("lock_wait_seconds" to 1)
         sqlStateOnCauseChain(refusal) shouldBe LOCK_NOT_AVAILABLE
+
+        // The refused transaction rolled back holding nothing: once the holder ends, a later writer acquires the row.
+        holder.close()
+        writer { guard.workspaces(listOf(ws), CODE) }.get(LockObserver.COMPLETION_ALLOWANCE_SECONDS, TimeUnit.SECONDS)
     }
 
     @Test

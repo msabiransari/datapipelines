@@ -37,7 +37,9 @@ class TemplateLifecycleConfiguration {
             authoring,
             citations,
             validator = validator,
-            transactions = org.springframework.transaction.support.TransactionTemplate(transactionManager),
+            transactions =
+                org.springframework.transaction.support
+                    .TransactionTemplate(transactionManager),
             guard = guard,
         )
 

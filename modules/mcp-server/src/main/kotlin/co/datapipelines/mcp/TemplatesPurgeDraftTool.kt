@@ -183,6 +183,7 @@ class TemplatesPurgeDraftTool(
     }
 
     /** [call]'s checks and delete, under the workspace writer guard. */
+    @Suppress("ThrowsCount") // the purge's own refusals, moved here unchanged from [call] (an override detekt exempts) by #841
     private fun purgeGuarded(
         workspaceId: java.util.UUID,
         id: String,

@@ -19,7 +19,10 @@ import java.util.concurrent.TimeUnit
  */
 internal class LockHolder : AutoCloseable {
     val connection: Connection = open().apply { autoCommit = false }
-    val pid: Int = connection.createStatement().use { s -> s.executeQuery("SELECT pg_backend_pid()").use { it.next().let { _ -> it.getInt(1) } } }
+    val pid: Int =
+        connection.createStatement().use { s ->
+            s.executeQuery("SELECT pg_backend_pid()").use { it.next().let { _ -> it.getInt(1) } }
+        }
 
     /** The prerequisite key's two-int advisory lock, exactly as the guard issues it. */
     fun prerequisite(key: PrerequisiteKey): LockHolder =
@@ -226,7 +229,12 @@ internal class GuardRows : AutoCloseable {
         datasource: String,
         workspace: UUID,
     ) {
-        jdbc.update("INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by) VALUES (?, ?, ?)", datasource, workspace, user)
+        jdbc.update(
+            "INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by) VALUES (?, ?, ?)",
+            datasource,
+            workspace,
+            user,
+        )
     }
 
     fun grantees(datasource: String): Set<UUID> =

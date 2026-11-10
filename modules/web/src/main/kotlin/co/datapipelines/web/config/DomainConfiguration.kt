@@ -12,8 +12,8 @@ import co.datapipelines.datasources.DatasourceReference
 import co.datapipelines.datasources.DatasourceReferences
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceRepository
-import co.datapipelines.datasources.DatasourceWriteGuarding
 import co.datapipelines.datasources.DatasourceValidator
+import co.datapipelines.datasources.DatasourceWriteGuarding
 import co.datapipelines.datasources.DefaultDatasourceRegistry
 import co.datapipelines.datasources.DialectAdapters
 import co.datapipelines.datasources.LakeIntrospectionCache
@@ -101,7 +101,12 @@ class DomainConfiguration {
         transactionManager: org.springframework.transaction.PlatformTransactionManager,
         writeGuard: co.datapipelines.typesystem.guard.MetadataWriterGuard,
     ): DatasourceWriteGuarding =
-        DatasourceWriteGuarding(jdbc, org.springframework.transaction.support.TransactionTemplate(transactionManager), writeGuard)
+        DatasourceWriteGuarding(
+            jdbc,
+            org.springframework.transaction.support
+                .TransactionTemplate(transactionManager),
+            writeGuard,
+        )
 
     @Bean
     fun datasourceRepository(

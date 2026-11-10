@@ -157,6 +157,20 @@ class DatasourceWriterGuardIntegrationTest {
     }
 
     @Test
+    fun `the managed-lake repair fails closed on an exhausted wait - the busy refusal propagates, nothing is granted`() {
+        rows.workspace() // a live workspace lacking the grant: the repair has a row to change
+        val name = rows.datasource("lake-busy")
+        holder.prerequisite(PrerequisiteKey.datasource(name))
+
+        // The repair's caller (the freshness tick) turns this into one WARN and retries on its next tick
+        // (`ManagedLakeFreshnessSchedulerTest`); the boot pass lets it fail the boot step.
+        val refusal = shouldThrow<DatapipelinesException> { grants(writes(boundSeconds = 1)).grantToEveryWorkspace(name, rows.user) }
+        refusal.code shouldBe DatasourceErrorCodes.WRITE_BUSY
+        generateSequence(refusal.cause) { it.cause }.filterIsInstance<SQLException>().first().sqlState shouldBe "55P03"
+        rows.grantees(name).shouldBeEmpty()
+    }
+
+    @Test
     fun `the instance-grant replan picks up a datasource registered while it waited - under the original deadline`() {
         val target = rows.workspace()
         val existing = rows.datasource("i1")

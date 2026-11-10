@@ -7,6 +7,7 @@ import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.springframework.jdbc.core.JdbcTemplate
 import java.sql.Connection
 import java.sql.SQLException
 import java.util.UUID
@@ -76,8 +77,15 @@ class ScheduleWriterGuardIntegrationTest {
         // The reference (executor + payload) is unchanged: no guard, so the held workspace row does not stop it.
         val renamed =
             pool
-                .submit<Schedule> { h.service.update(SchedulerTestDb.WORKSPACE, schedule.id, CREATOR, 1, h.request(name = "guard/renamed")) }
-                .get(ALLOWANCE_SECONDS, TimeUnit.SECONDS)
+                .submit<Schedule> {
+                    h.service.update(
+                        SchedulerTestDb.WORKSPACE,
+                        schedule.id,
+                        CREATOR,
+                        1,
+                        h.request(name = "guard/renamed"),
+                    )
+                }.get(ALLOWANCE_SECONDS, TimeUnit.SECONDS)
         val validatedBefore = h.executor.validateCalls.get()
 
         val retargeted =
@@ -98,14 +106,21 @@ class ScheduleWriterGuardIntegrationTest {
 
     @Test
     fun `refusals keep their codes and write nothing under the guard - target not found and revision conflict`() {
-        val missing = shouldThrow<ScheduleException> { h.create(h.request(name = "guard/missing", payload = FakeExecutor.payload("missing"))) }
+        val missing =
+            shouldThrow<ScheduleException> { h.create(h.request(name = "guard/missing", payload = FakeExecutor.payload("missing"))) }
         missing.code shouldBe ScheduleErrorCodes.TARGET_NOT_FOUND
         h.service.countLive(SchedulerTestDb.WORKSPACE) shouldBe 0
 
         val schedule = h.create(h.request(name = "guard/cas"))
         val stale =
             shouldThrow<ScheduleException> {
-                h.service.update(SchedulerTestDb.WORKSPACE, schedule.id, CREATOR, schedule.revision + 1, h.request(payload = FakeExecutor.payload("job-c")))
+                h.service.update(
+                    SchedulerTestDb.WORKSPACE,
+                    schedule.id,
+                    CREATOR,
+                    schedule.revision + 1,
+                    h.request(payload = FakeExecutor.payload("job-c")),
+                )
             }
         stale.code shouldBe ScheduleErrorCodes.REVISION_CONFLICT
         h.service.countLive(SchedulerTestDb.WORKSPACE) shouldBe 1
@@ -118,7 +133,12 @@ class ScheduleWriterGuardIntegrationTest {
         }
     }
 
-    private fun holderPid(): Int = holder.createStatement().use { s -> s.executeQuery("SELECT pg_backend_pid()").use { it.next().let { _ -> it.getInt(1) } } }
+    private fun holderPid(): Int =
+        holder.createStatement().use { s ->
+            s.executeQuery("SELECT pg_backend_pid()").use {
+                it.next().let { _ -> it.getInt(1) }
+            }
+        }
 
     /** Polls, on its own connection, until a backend waits on the holder — or fails when [writer] finished first. */
     private fun awaitBlockedByHolder(writer: Future<*>) {
@@ -127,17 +147,16 @@ class ScheduleWriterGuardIntegrationTest {
         while (true) {
             check(!writer.isDone) { "the write finished without waiting on the held workspace row (guard absent?)" }
             check(System.nanoTime() < deadline) { "no backend waited on the holder within the probe window" }
-            val waiting =
-                SchedulerTestDb.dataSource.connection.use { c ->
-                    c.prepareStatement("SELECT count(*) FROM pg_stat_activity WHERE ? = ANY(pg_blocking_pids(pid))").use { ps ->
-                        ps.setInt(1, pid)
-                        ps.executeQuery().use { rs -> rs.next().let { _ -> rs.getInt(1) } }
-                    }
-                }
-            if (waiting > 0) return
+            if (waitersOn(pid) > 0) return
             Thread.sleep(POLL_MS)
         }
     }
+
+    /** Backends blocked by [pid], read on a connection of its own (inside a transaction the view would be frozen). */
+    private fun waitersOn(pid: Int): Int =
+        JdbcTemplate(SchedulerTestDb.dataSource)
+            .queryForObject("SELECT count(*) FROM pg_stat_activity WHERE ? = ANY(pg_blocking_pids(pid))", Int::class.java, pid)
+            ?: 0
 
     /** True when nobody holds the workspace row: a NOWAIT lock on a fresh connection, rolled back at once. */
     private fun rowIsFree(): Boolean =

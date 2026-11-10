@@ -215,8 +215,7 @@ class ScheduledJobsStatementBoundsTest {
                 jdbc,
                 providerOf(LAKE_PROPERTIES),
                 co.datapipelines.datasources.DatasourceWriteGuarding.UNGUARDED,
-            )
-            .tick()
+            ).tick()
 
         recording.timeoutOf("SELECT t.namespace, t.name") shouldBe FRESHNESS_BOUND
         recording.timeoutOf("INSERT INTO datasource_workspaces") shouldBe FRESHNESS_BOUND

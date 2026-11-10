@@ -147,12 +147,17 @@ class JdbcReleaseMutationGuard(
             try {
                 statement()
             } catch (e: DataAccessException) {
-                if (sqlStates(e).none { it == LOCK_NOT_AVAILABLE }) throw e
-                throw refusal(e)
+                throw lockTimeoutRefusal(e, refusal) ?: e
             }
         jdbc.queryForObject(SET_LOCK_TIMEOUT, String::class.java, previous)
         return result
     }
+
+    /** [refusal] carrying [e] when [e] is a lock timeout (`55P03` on its cause chain), else null: any other failure propagates. */
+    private fun lockTimeoutRefusal(
+        e: DataAccessException,
+        refusal: (Throwable?) -> DatapipelinesException,
+    ): DatapipelinesException? = if (sqlStates(e).any { it == LOCK_NOT_AVAILABLE }) refusal(e) else null
 
     /** `D`, fixed once: by the open scope when there is one, else by this transaction's first acquisition. */
     private fun deadlineFor(state: TxState): Long {

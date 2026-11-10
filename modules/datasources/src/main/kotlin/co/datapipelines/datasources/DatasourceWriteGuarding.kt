@@ -42,8 +42,7 @@ class DatasourceWriteGuarding(
         name: String,
         extraWorkspaces: Collection<UUID?> = emptyList(),
         block: () -> T,
-    ): T =
-        guarded(name, { affectedBy(name) + extraWorkspaces.filterNotNull() }, block)
+    ): T = guarded(name, { affectedBy(name) + extraWorkspaces.filterNotNull() }, block)
 
     /** A grant write of [name]: the key, then the workspaces [workspaces] answers (read under the key), then [block]. */
     fun <T> grant(

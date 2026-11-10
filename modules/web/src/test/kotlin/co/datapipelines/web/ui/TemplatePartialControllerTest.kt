@@ -8,6 +8,7 @@ import co.datapipelines.pipeline.LifecycleBucket
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.Template
+import co.datapipelines.templates.TemplateDraftService
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.typesystem.DatapipelinesException
@@ -46,7 +47,14 @@ class TemplatePartialControllerTest {
     private val browse = mockk<TemplateBrowseModel>(relaxed = true)
     private val validator = mockk<TemplateValidator>(relaxed = true)
     private val controller =
-        TemplatePartialController(templates, browse, validator, AuthoringGuard(true), co.datapipelines.web.EVERYTHING_LENS)
+        TemplatePartialController(
+            templates,
+            browse,
+            validator,
+            AuthoringGuard(true),
+            co.datapipelines.web.EVERYTHING_LENS,
+            TemplateDraftService(templates, AuthoringGuard(true), mockk(relaxed = true)),
+        )
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -278,6 +286,7 @@ class TemplatePartialControllerTest {
                 validator,
                 AuthoringGuard(false),
                 co.datapipelines.web.EVERYTHING_LENS,
+                TemplateDraftService(templates, AuthoringGuard(false), mockk(relaxed = true)),
             )
         every { templates.existsId(workspaceId, "acme/y") } returns false
 
