@@ -1,4 +1,7 @@
-<!-- #786 B.3 — the API purge dialog. The GET pre-reads the version; the POST re-runs the service's guard. -->
+<!-- #786 B.3 — the API purge dialog, THE irreversible API verb. The GET pre-reads the version; the POST re-runs the
+     service's guard. The button needs the typed confirm `v<n>` (ui-screens §5.1, the pipeline and template purge
+     mold): disabled client-side until the field matches, refused server-side as endpoint.version.confirm_mismatch
+     before the service runs. -->
 <div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" data-lifecycle-dialog="endpoint-purge">
   <div class="ds-card app-modal app-modal-md" role="dialog" aria-modal="true" aria-labelledby="axpurge-title">
     <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
@@ -9,9 +12,15 @@
     <p class="u-text-sm">Pins <span class="u-mono" th:text="${dlg.pinLabel}">finance/revenue@3</span>.</p>
     <p class="u-secondary u-text-sm" th:text="${dlg.isSoleVersion} ? 'This is the only version: purging it removes the API. This cannot be undone.' : 'The draft is gone for good. This cannot be undone.'">The draft is gone for good.</p>
     <form th:attr="hx-post=@{'/partials/endpoints/{id}/lifecycle/purge'(id=${dlg.id},version=${dlg.version})}" hx-swap="none">
+      <label class="ds-form-label u-mt-md" th:for="'axpurge-confirm'">
+        Type <span class="u-mono" th:text="'v' + ${dlg.version}">v2</span> to confirm
+      </label>
+      <input class="ds-input u-mono" id="axpurge-confirm" data-confirm-input name="confirm" autocomplete="off"
+             spellcheck="false" th:attr="data-confirm-expect='v' + ${dlg.version}">
       <div class="app-page-actions">
         <button type="button" class="ds-button ds-button-ghost" data-lifecycle-close>Cancel</button>
-        <button type="submit" class="ds-button ds-button-primary" data-api-submit>Purge</button>
+        <button type="submit" class="ds-button ds-button-danger" data-api-submit data-typed-confirm disabled
+                hx-disabled-elt="this" th:text="'Purge v' + ${dlg.version}">Purge v2</button>
       </div>
     </form>
   </div>

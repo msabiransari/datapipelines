@@ -368,8 +368,10 @@ class ApiErrorCatalogSpecDriftTest {
          * family's nine `endpoint.release.*` refusals; §13.9/§13.13/§13.20/§13.22/§13.23 each gain
          * `<family>.release.metadata_unavailable` (503) — 20 + 5. Re-derived from the document's own parse with
          * [STATUS_ROW_REGEX], landed in the SAME commit as the constants and catalog rows.
+         * 505 → 506 with #786: §13.14 gains `endpoint.version.confirm_mismatch` (400), the API purge dialog's typed
+         * confirm, landed in the SAME commit as its constant and catalog row.
          */
-        const val SECTION_13_ROW_COUNT = 505
+        const val SECTION_13_ROW_COUNT = 506
 
         /**
          * §12's distinct validation codes.

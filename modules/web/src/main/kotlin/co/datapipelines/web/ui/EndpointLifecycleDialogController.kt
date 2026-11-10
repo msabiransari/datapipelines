@@ -3,8 +3,10 @@ package co.datapipelines.web.ui
 import co.datapipelines.application.endpoints.EndpointVersionService
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
+import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleasePlanRequest
+import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.pipelines.LifecycleVerbs
 import co.datapipelines.web.release.ReleaseCoordinator
@@ -183,8 +185,12 @@ class EndpointLifecycleDialogController(
     fun purge(
         @PathVariable id: UUID,
         @RequestParam version: Int,
+        @RequestParam(required = false) confirm: String?,
     ): ResponseEntity<String> {
-        val purged = versions.purgeVersion(LifecycleVerbs.requireSession(), id, version)
+        val principal = LifecycleVerbs.requireSession()
+        // The typed confirm (ui-screens §5.1) BEFORE the service: a mismatched or scripted dialog never reaches the verb.
+        requireTypedConfirm(confirm, "v$version")
+        val purged = versions.purgeVersion(principal, id, version)
         // The sole version's purge took the API with it (record §24): the page it lived on is gone, so the console list.
         return if (purged.entityDeleted) {
             ResponseEntity.ok().header(HX_REDIRECT, "/api-console?ok=api_purged").body("")
@@ -228,6 +234,20 @@ class EndpointLifecycleDialogController(
     ): ResponseEntity<String> {
         val query = listOfNotNull(version?.let { "version=$it" }, "ok=$code").joinToString("&")
         return ResponseEntity.ok().header(HX_REDIRECT, "/api-console/endpoints/$id?$query").body("")
+    }
+
+    /** The purge's typed-confirm guard, the pipeline and template dialogs' twin (`*.version.confirm_mismatch`, 400). */
+    private fun requireTypedConfirm(
+        confirm: String?,
+        expected: String,
+    ) {
+        if (confirm != expected) {
+            throw DatapipelinesException(
+                code = PipelineErrorCodes.Endpoint.VERSION_CONFIRM_MISMATCH,
+                message = "Type $expected to confirm — the typed confirm did not match.",
+                details = mapOf("expected" to expected),
+            )
+        }
     }
 
     private companion object {

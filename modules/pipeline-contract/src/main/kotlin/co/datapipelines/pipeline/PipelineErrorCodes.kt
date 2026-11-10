@@ -1455,6 +1455,12 @@ object PipelineErrorCodes {
         const val VERSION_NOT_DISCARDED = "endpoint.version.not_discarded"
 
         /**
+         * #786 — 400: the purge dialog's typed confirm (ui-screens §5.1) did not name the version it asked for (`v2`);
+         * checked before the lifecycle service runs. The pipeline and template purge twins are `*.version.confirm_mismatch`.
+         */
+        const val VERSION_CONFIRM_MISMATCH = "endpoint.version.confirm_mismatch"
+
+        /**
          * #786 (R3) — 409: the current switch names an API version this deployment's posture may not serve (a DRAFT
          * where authoring is disabled, or a DISCARDED version anywhere).
          */

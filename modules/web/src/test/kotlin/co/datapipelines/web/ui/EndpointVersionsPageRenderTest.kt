@@ -153,6 +153,17 @@ class EndpointVersionsPageRenderTest {
             doc.select("[data-lifecycle-close]").size shouldBe 2
         }
         partial("partials/endpoint-lifecycle-purge", dialog.copy(isSoleVersion = true)).text() shouldContain "removes the API"
+
+        // The purge alone is irreversible: its button waits for the typed confirm `v2` (ui-screens §5.1).
+        val purge = partial("partials/endpoint-lifecycle-purge", dialog)
+        purge.select("input[name=confirm][data-confirm-input]").attr("data-confirm-expect") shouldBe "v2"
+        val button = purge.select("[data-api-submit]")
+        button.hasAttr("data-typed-confirm") shouldBe true
+        button.hasAttr("disabled") shouldBe true
+        button.hasClass("ds-button-danger") shouldBe true
+        listOf("discard", "restore", "switch").forEach { verb ->
+            partial("partials/endpoint-lifecycle-$verb", dialog).select("[data-confirm-input]").size shouldBe 0
+        }
     }
 
     private fun verbs(page: EndpointVersionsPageModel.Page): List<String> =

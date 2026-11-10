@@ -474,6 +474,8 @@ object ApiErrorCatalog {
             // the family's 400. `endpoint.pipeline_version.not_found` keeps the 400: the request names a version that
             // is not there (a restore's missing pin is the native 400, record §25.4).
             PipelineErrorCodes.Endpoint.VERSION_NOT_FOUND to HttpStatus.NOT_FOUND,
+            // The purge dialog's typed confirm is the caller's input, never the version's state: 400, as its twins.
+            PipelineErrorCodes.Endpoint.VERSION_CONFIRM_MISMATCH to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Endpoint.PIPELINE_VERSION_NOT_ELIGIBLE to HttpStatus.CONFLICT,
             PipelineErrorCodes.Endpoint.AUTHORING_DISABLED to HttpStatus.CONFLICT,
             // 118 §13.15 — the learned semantic layer. Bare `semantics.` codes with no family
