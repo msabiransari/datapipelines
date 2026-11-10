@@ -3,7 +3,7 @@
 **Status:** v1.69 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-11-08
+**Last updated:** 2026-11-10
 
 ---
 

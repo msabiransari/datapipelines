@@ -43,10 +43,11 @@ import java.util.UUID
  * evaluations' sweep UPDATE and retention DELETE at the retention bound; the runtime's SHARED
  * `DashboardRefreshRepository` bean stays unbounded.
  *
- * #818b A — the managed lake's freshness tick, the fifth job on that thread: its two statements (the managed
- * catalog read, the regrant INSERT) carry the freshness bound through the production scheduler bean, while the
- * registrar's boot-time grant stays on the unbounded shared template. That the bound then cancels a held statement
- * on the real scheduler is `ManagedLakeReadsE2eTest`'s.
+ * #818b A — the managed lake's freshness tick, the fifth job on that thread: the catalog read carries the freshness
+ * bound through the production scheduler bean, while the registrar's boot-time grant stays on the shared template.
+ * #841 R4 — the guarded regrant's key, workspace-row, discovery and INSERT waits share one freshness budget; its
+ * first statement applies the socket bound to their transaction connection. Cancellation under held locks on the
+ * real scheduler is `ManagedLakeReadsE2eTest`'s.
  *
  * #833 — the build's catalog read (the generation build inside `poolFor`) carries its own bound through the production
  * repository bean, on a dedicated template; the shared template stays unbounded.
@@ -54,7 +55,7 @@ import java.util.UUID
  * #837 — the same statements carry a SOCKET bound too: the connection a bounded statement runs on has its network
  * timeout set to the statement's bound plus five seconds — 15 000, 30 000, 15 000 and 10 000
  * milliseconds for the sweep, the retention, the dashboard refresh sweep and the freshness tick, and 10 000 for the
- * build read — and every statement on the shared, unbounded template runs on a connection with none. The numbers are
+ * build read — while shared-template statements outside a transaction carrying a bound have none. The numbers are
  * literals, like the statement bounds. That a paused server then ends the statement at the socket bound is
  * `ScheduledJobsMetadataBoundsE2eTest`'s.
  *
@@ -380,7 +381,7 @@ class ScheduledJobsStatementBoundsTest {
         const val REFRESH_SWEEP_SOCKET = 15_000
         const val FRESHNESS_SOCKET = 10_000
 
-        /** #818b A: the freshness tick's bound, two statements of it inside the 5 s reaper's cadence each. */
+        /** #818b A, #841 R4: each freshness step's held-lock bound; the reaper runs on its own thread. */
         const val FRESHNESS_BOUND = 5
 
         /** #841 R4: the regrant step's one budget (the freshness bound), and the largest lock wait the binder admits. */
