@@ -156,6 +156,21 @@ class ReleaseCoordinator(
         }
     }
 
+    /**
+     * The plan a release dialog shows for a non-pipeline root (#786 C.3): the closure read in its own planning snapshot and
+     * its tree hash, which the dialog posts back as `tree_hash` so a closure changed after the dialog opened is
+     * `plan_conflict` rather than released silently. Reads only; the POST re-runs every check.
+     */
+    fun previewRoot(
+        family: ReleaseFamily,
+        workspaceId: UUID,
+        entityId: UUID,
+        actor: UUID,
+    ): RootPreview {
+        val closure = plannedWalk(rootOf(family).rootIdentity(workspaceId, entityId), actor)
+        return RootPreview(closure, TreeHash.of(closure, bounds.maxWireBytes))
+    }
+
     private fun rootOf(family: ReleaseFamily): ReleaseRoot =
         participants[family] as? ReleaseRoot ?: throw IllegalArgumentException("$family is not a registered release root")
 

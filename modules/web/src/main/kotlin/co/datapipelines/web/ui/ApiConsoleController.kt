@@ -100,6 +100,7 @@ class ApiConsoleController(
             endpoints.map { endpoint ->
                 val name = names[endpoint.id]
                 EndpointRow(
+                    id = endpoint.id,
                     url = PUBLISHED_PREFIX + endpoint.pathPattern,
                     segments = endpoint.parsed.segments.map { segment -> segment is EndpointPath.Segment.Variable },
                     pipelineDisplayName = name?.displayName ?: name?.name ?: DELETED_PIPELINE,
@@ -133,6 +134,8 @@ class ApiConsoleController(
      * count — the reader's question is "which", not "how many").
      */
     data class EndpointRow(
+        /** #786: the API's id — the row links to its versions page, `/api-console/endpoints/{id}`. */
+        val id: java.util.UUID,
         val url: String,
         val segments: List<Boolean>,
         val pipelineDisplayName: String,

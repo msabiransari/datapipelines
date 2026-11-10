@@ -47,7 +47,9 @@
                  `Allow: GET`, so the tag is a fact about the surface, not a column that
                  could vary. -->
             <span class="app-method">GET</span>
-            <span class="ds-mono" th:text="${e.url}">/api/nyc/v1/mobility/briefing</span>
+            <!-- #786: the path opens the API's versions page (every version, its exact pin, the lifecycle verbs). -->
+            <a class="ds-mono" th:href="@{'/api-console/endpoints/{id}'(id=${e.id})}" th:text="${e.url}"
+               data-api-versions-link>/api/nyc/v1/mobility/briefing</a>
             <span class="app-chip app-chip-warn" th:unless="${e.enabled}"><i class="ds-status"></i>Disabled</span>
           </td>
           <td>

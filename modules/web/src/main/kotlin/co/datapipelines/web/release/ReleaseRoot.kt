@@ -1,6 +1,7 @@
 package co.datapipelines.web.release
 
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.pipeline.release.ReleaseClosure
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseFlip
 import co.datapipelines.pipeline.release.ReleaseNodeIdentity
@@ -52,4 +53,10 @@ data class RootReleaseRequest(
 data class RootReleased(
     val root: ReleaseFlip,
     val dependenciesReleased: List<ReleasedDependency>,
+)
+
+/** A release plan read for a dialog (#786 C.3): the walked closure and the tree hash the release posts back. */
+data class RootPreview(
+    val closure: ReleaseClosure,
+    val treeHash: String,
 )

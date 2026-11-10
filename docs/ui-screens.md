@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.229
+**Status:** v1.230
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-11-08
+**Last updated:** 2026-11-10
 ---
 
 ## 1. Purpose
@@ -2196,6 +2196,33 @@ prompt with zero requests; screenshots at
 
 ---
 
+### 4.18b API versions page (#786)
+
+`GET /api-console/endpoints/{id}` (`endpoint.read`; `EndpointLifecycleDialogController#page`, `api/endpoint.html`) — one
+API's versions, reached from the path on the API section's endpoint table (§4.18). Two cards are kept apart because the
+dependency-graph record §24 keeps them apart: the **version** card (the selected version's exact pipeline pin
+`name@version`, timeout, description, status and body hash) and the **API** card (`enabled` and the API keys bound at the
+path — the entity's, identical whichever version is viewed). The versions table lists every version visible to the
+caller, newest first, with its status, its pin, `current` and whether it is eligible under this deployment's posture.
+Selecting a row is a link (`?version=n`): it changes what the page shows, never what the API serves.
+
+The verbs open native lifecycle dialogs in `#ax-dialog` (lifecycle-dialog.js), each a GET partial whose pre-read is the
+service's guard and a POST that re-runs it and answers `HX-Redirect` with an `api_*` flash code:
+
+| Dialog | Route (GET + POST) | Row | Offered on |
+|---|---|---|---|
+| New draft / Edit draft | `/partials/endpoints/{id}/lifecycle/draft` | `endpoint.publish` | authoring-enabled only; a new draft starts from the current version, the working draft keeps its pin (a noncurrent pin is preserved) |
+| Release | `/partials/endpoints/{id}/lifecycle/release` | `endpoint.release` | the DRAFT; the shared planner's DRAFT dependencies under one consent box, MISSING/DISCARDED pins as blockers with no button, `tree_hash` posted back |
+| Purge draft | `/partials/endpoints/{id}/lifecycle/purge` | `endpoint.version.manage` | the DRAFT; the sole version's purge removes the API and lands on `/api-console` |
+| Make current | `/partials/endpoints/{id}/lifecycle/switch` | `endpoint.version.manage` | a RELEASED, eligible, noncurrent version |
+| Discard | `/partials/endpoints/{id}/lifecycle/discard` | `endpoint.version.manage` | a RELEASED version |
+| Restore | `/partials/endpoints/{id}/lifecycle/restore` | `endpoint.version.manage` | a DISCARDED version (its pin rechecked) |
+
+The draft dialog's picker lists the chosen pipeline's live versions with status and eligibility; an ineligible version is
+listed and disabled, never hidden. Design tokens and the vendored lucide sprite only. Guard: `ApiVersionsBrowserTest`.
+
+---
+
 ### 4.19 API keys (keys v2 — the ONE creation path for every kind)
 
 | Attribute | Value |
@@ -3148,6 +3175,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-10 | v1.230 | #786 U1 API versions | **§4.18b (new): the API versions page** — the versions table, the version and API cards kept apart, and six native lifecycle dialogs (draft, release, purge, switch, discard, restore) over the REST twins' rows; §4.18's endpoint path links to it. |
 | 2026-11-08 | v1.229 | 860 (#860) the chart kind | **§4.21, §4.22, §4.24 JS rows:** the board, the preview and the visualization workspace load the `chart` kind with its Plotly converter beside `table` and `kpi` (the `plotly` kind is retired); the board's glue and the preview's declare their chart library at init. |
 | 2026-11-06 | v1.228 | #800/#801 board dock defaults and shared handle | **§4.21:** the board starts collapsed below a 320px board-if-open threshold unless a height is remembered, follows resizes until the first gesture, and expands on a tab click. Both dock grips share app.css geometry, states and cursor locks. |
 | 2026-10-25 | v1.227 — renumbered at merge after v1.226 | #628 borders on every adjacent surface | **§3.1 item 5:** re-vendored design-tokens 0.5.0 adjusts private border values upstream. The upstream audit and `VendoredNonTextContrastTest` cover default/hover/focus at 3:1 and subtle at 2:1 on page/default/raised/inset/hover (20 pairs plus selection). The widened audit also found and fixed hover/focus border misses. `ComponentBoundariesBrowserTest` has no exceptions. |

@@ -151,7 +151,18 @@ class ApiConsoleRenderTest {
         timeout: Int = 30,
         boundKeyNames: List<String> = listOf("ci", "nightly"),
         enabled: Boolean = true,
-    ) = ApiConsoleController.EndpointRow(url, listOf(false), displayName, path, served, draft, timeout, boundKeyNames, enabled)
+    ) = ApiConsoleController.EndpointRow(
+        java.util.UUID.nameUUIDFromBytes(url.toByteArray()),
+        url,
+        listOf(false),
+        displayName,
+        path,
+        served,
+        draft,
+        timeout,
+        boundKeyNames,
+        enabled,
+    )
 
     @Test
     fun `the two cards render, and the tool count is the catalog's size`() {
