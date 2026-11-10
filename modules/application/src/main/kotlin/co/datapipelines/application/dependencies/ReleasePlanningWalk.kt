@@ -8,6 +8,7 @@ import co.datapipelines.dependencies.FamilyRegistry
 import co.datapipelines.dependencies.GraphLimits
 import co.datapipelines.dependencies.MetadataSnapshot
 import co.datapipelines.dependencies.Purpose
+import co.datapipelines.dependencies.ReadIsolation
 import co.datapipelines.dependencies.ResolveContext
 import co.datapipelines.pipeline.release.ReleaseBounds
 import co.datapipelines.pipeline.release.ReleaseClosure
@@ -57,11 +58,16 @@ object ReleaseGraphLimits {
  *   provider batch reads the one snapshot (record §7.2 step 2, §7.3).
  * - [walkInCurrentTransaction] — the compatibility path's walk and the plan path's guarded re-walk, inside the release
  *   write transaction the coordinator already holds (unchanged: its isolation, its guard, its re-compare).
+ *
+ * Both walks fence their speculative reads with `speculativeReads` — in production a [SavepointReadIsolation] on the
+ * same `metadataTransactionManager`, built by the companion's factory of that name — so a speculative read that fails
+ * cannot leave either transaction aborted and turn into the walk's outcome (#868 R1, round 3).
  */
 class ReleasePlanningWalk(
     registry: FamilyRegistry,
     bounds: ReleaseBounds,
     private val planningTransactions: TransactionOperations,
+    private val speculativeReads: ReadIsolation,
     private val deadline: ReleasePlanningDeadline,
     clock: Clock = Clock.systemUTC(),
 ) {
@@ -85,7 +91,15 @@ class ReleasePlanningWalk(
         actor: UUID,
         snapshot: MetadataSnapshot,
     ): ReleaseClosure? {
-        val context = ResolveContext(root.workspaceId, snapshot, Purpose.RELEASE_PLANNING, Authority.Member(actor), deadline.open())
+        val context =
+            ResolveContext(
+                root.workspaceId,
+                snapshot,
+                Purpose.RELEASE_PLANNING,
+                Authority.Member(actor),
+                deadline.open(),
+                speculativeReads,
+            )
         return ReleaseClosureAdapter.closure(root, walker.walk(listOf(ReleaseDependencyFamilies.request(root)), context))
     }
 
@@ -104,5 +118,12 @@ class ReleasePlanningWalk(
 
         /** The planning transaction's name, for a reader of the transaction log. */
         const val PLANNING_TRANSACTION_NAME = "release-planning-snapshot"
+
+        /**
+         * The speculative-read fence on [metadataTransactionManager]: a savepoint in whichever transaction the walk reads
+         * in — the planning transaction, or the guarded caller's write transaction.
+         */
+        fun speculativeReads(metadataTransactionManager: PlatformTransactionManager): ReadIsolation =
+            SavepointReadIsolation(metadataTransactionManager)
     }
 }

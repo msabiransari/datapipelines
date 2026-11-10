@@ -17,7 +17,8 @@ internal val FIXED_CLOCK: Clock = Clock.fixed(Instant.parse("2026-11-10T00:00:00
 internal fun context(
     deadline: Deadline = Deadline.none(),
     purpose: Purpose = Purpose.INTERACTIVE_READ,
-) = ResolveContext(WS, MetadataSnapshot.READ_COMMITTED, purpose, Authority.System, deadline)
+    isolation: ReadIsolation = ReadIsolation.NONE,
+) = ResolveContext(WS, MetadataSnapshot.READ_COMMITTED, purpose, Authority.System, deadline, isolation)
 
 internal fun exact(
     family: FamilyKey,
@@ -57,6 +58,9 @@ internal class FakeFamily(
     /** Requests a batch holding them FAILS on (an infrastructure failure, `metadata source unavailable: <key>`). */
     var failing: Set<ObjectRequest> = emptySet()
 
+    /** Runs as a batch fails, before it throws — what a failed statement does to a transaction (ReadIsolationTest). */
+    var onFailure: () -> Unit = {}
+
     /** Requests the provider leaves out of its answer — a contract defect, not a failure. */
     var omitted: Set<ObjectRequest> = emptySet()
 
@@ -76,7 +80,10 @@ internal class FakeFamily(
     ): Map<ObjectRequest, Outcome<FakeBody>> {
         calls.add(requests)
         beforeBatch(requests)
-        requests.firstOrNull { it in failing }?.let { error("metadata source unavailable: ${it.address.lookupKey}") }
+        requests.firstOrNull { it in failing }?.let {
+            onFailure()
+            error("metadata source unavailable: ${it.address.lookupKey}")
+        }
         return requests
             .filter { it !in omitted }
             .associateWith { if (it in unsupported) Outcome.Unsupported else objects[it] ?: Outcome.Missing }
@@ -117,7 +124,8 @@ internal class TestGraph {
     fun walk(
         vararg roots: ObjectRequest,
         limits: GraphLimits = LIMITS,
-    ): GraphSnapshot = walker(limits).walk(roots.toList(), context())
+        isolation: ReadIsolation = ReadIsolation.NONE,
+    ): GraphSnapshot = walker(limits).walk(roots.toList(), context(isolation = isolation))
 
     companion object {
         val LIMITS = GraphLimits(depth = 32, nodes = 1024, edges = 4096, diagnostics = 100, wireBytes = 1_048_576, lockWaitSeconds = 5)

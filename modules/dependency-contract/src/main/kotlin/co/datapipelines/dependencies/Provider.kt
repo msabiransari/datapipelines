@@ -65,8 +65,10 @@ data class Reference(
 
 /**
  * What a walk tells every provider (§7.1): the workspace, the metadata snapshot it reads in, its purpose, the
- * SERVER-BUILT authority and the cumulative [Deadline]. Deliberately no client flag (never `ignorePermissions`): the
- * core receives authorized outcomes, not a backdoor repository.
+ * SERVER-BUILT authority and the cumulative [Deadline] — and the [ReadIsolation] the walk fences a read it may forgive
+ * with, chosen by whoever opened the [snapshot]'s transaction (never defaulted: an unfenced read over a transaction is
+ * the #868 R1 defect). Deliberately no client flag (never `ignorePermissions`): the core receives authorized outcomes,
+ * not a backdoor repository.
  */
 data class ResolveContext(
     val workspaceId: UUID,
@@ -74,7 +76,40 @@ data class ResolveContext(
     val purpose: Purpose,
     val authority: Authority,
     val deadline: Deadline,
+    val readIsolation: ReadIsolation,
 )
+
+/**
+ * How the walk fences a read whose failure it may forgive (#868 R1): a SPECULATIVE read — requests the walk does not
+ * need yet, carried on another read's provider call ([GraphLimits.resolveBatchSize]) — runs inside [isolate], so that
+ * when it fails, the state every provider of the walk reads through is as it was before the read, and the walk's next
+ * read sees exactly what a walk that never attempted it would see.
+ *
+ * A provider over a database transaction needs a real fence: a failed statement aborts a PostgreSQL transaction, and
+ * every later statement in it fails (SQLSTATE 25P02) — catching the exception does not clear that state, and a
+ * speculative failure would then decide the walk's outcome. The release planning walk fences with a savepoint in the
+ * current transaction (`application/dependencies`, `SavepointReadIsolation`); a savepoint rollback keeps the
+ * transaction's snapshot, so the walk still reads ONE snapshot (§7.3). [NONE] is only for providers whose failure
+ * leaves no shared state behind (in-memory sources, tests).
+ *
+ * The contract: [isolate] returns what [read] returned, or rethrows the SAME exception [read] threw once the state is
+ * restored. Anything else it throws — the fence could not be set up, or the state could not be restored — is not
+ * [read]'s failure, and the walk propagates it, never forgives it. A needed read is never isolated: its failure is the
+ * walk's outcome.
+ */
+interface ReadIsolation {
+    fun <T> isolate(read: () -> T): T
+
+    companion object {
+        /** No fence: for providers whose failures leave nothing behind. */
+        val NONE: ReadIsolation =
+            object : ReadIsolation {
+                override fun <T> isolate(read: () -> T): T = read()
+
+                override fun toString(): String = "ReadIsolation.NONE"
+            }
+    }
+}
 
 /** The metadata consistency a walk reads in (§7.2 step 2, §7.3). */
 enum class MetadataSnapshot {

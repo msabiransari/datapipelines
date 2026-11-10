@@ -11,6 +11,7 @@ import co.datapipelines.dependencies.ObjectAddress
 import co.datapipelines.dependencies.ObjectRequest
 import co.datapipelines.dependencies.Outcome
 import co.datapipelines.dependencies.Purpose
+import co.datapipelines.dependencies.ReadIsolation
 import co.datapipelines.dependencies.Relationship
 import co.datapipelines.dependencies.ResolveContext
 import co.datapipelines.dependencies.Selector
@@ -53,7 +54,14 @@ class ReleaseAdaptersTest {
             child to "nodes[1].pipeline",
         )
     private val context =
-        ResolveContext(g.workspaceId, MetadataSnapshot.READ_COMMITTED, Purpose.RELEASE_PLANNING, Authority.System, Deadline.none())
+        ResolveContext(
+            g.workspaceId,
+            MetadataSnapshot.READ_COMMITTED,
+            Purpose.RELEASE_PLANNING,
+            Authority.System,
+            Deadline.none(),
+            ReadIsolation.NONE,
+        )
 
     @Test
     fun `a release family is an exact-version family with the artifact capability pair and section 6 pins`() {
@@ -180,6 +188,7 @@ class ReleaseAdaptersTest {
                 ),
                 ReleaseBounds(),
                 recording,
+                ReadIsolation.NONE,
                 ReleasePlanningDeadline.NONE,
             )
         walk.plan(root, ACTOR)?.nodes?.size shouldBe 3
@@ -202,6 +211,7 @@ class ReleaseAdaptersTest {
                 ReleaseDependencyFamilies.registry(mapOf(ReleaseFamily.PIPELINE to source)),
                 ReleaseBounds(),
                 TransactionOperations.withoutTransaction(),
+                ReadIsolation.NONE,
                 expired,
                 clock,
             )
@@ -216,6 +226,7 @@ class ReleaseAdaptersTest {
             ReleaseDependencyFamilies.registry(sources),
             ReleaseBounds(),
             TransactionOperations.withoutTransaction(),
+            ReadIsolation.NONE,
             ReleasePlanningDeadline.NONE,
         )
 

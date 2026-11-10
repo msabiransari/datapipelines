@@ -127,12 +127,18 @@ class DependencyPlanningSnapshotIntegrationTest {
                     "planningTransaction",
                     PlatformTransactionManager::class.java,
                 ).invoke(companion, manager)
+        // #868 R1: the production speculative-read fence, a savepoint on the same manager.
+        val speculativeReads =
+            companion.javaClass
+                .getMethod("speculativeReads", PlatformTransactionManager::class.java)
+                .invoke(companion, manager)
         val constructor = walkType.constructors.single { it.parameterCount == WALK_CONSTRUCTOR_PARAMETERS }
         val walk =
             constructor.newInstance(
                 registry,
                 context.getBean("releaseBounds"),
                 planning,
+                speculativeReads,
                 context.getBean("releasePlanningDeadline"),
                 Clock.systemUTC(),
             )
@@ -445,8 +451,8 @@ class DependencyPlanningSnapshotIntegrationTest {
         private const val FAMILIES = "co.datapipelines.application.dependencies.ReleaseDependencyFamilies"
         private const val PLANNING_WALK = "co.datapipelines.application.dependencies.ReleasePlanningWalk"
 
-        /** registry, bounds, planning transactions, deadline, clock. */
-        private const val WALK_CONSTRUCTOR_PARAMETERS = 5
+        /** registry, bounds, planning transactions, speculative-read fence, deadline, clock. */
+        private const val WALK_CONSTRUCTOR_PARAMETERS = 6
 
         /** Three versions, three repository reads each (record §7.2: statement-count tests enforce batching). */
         private const val EXPECTED_STATEMENTS = 9

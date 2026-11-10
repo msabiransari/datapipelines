@@ -5,6 +5,7 @@ import co.datapipelines.application.dependencies.ReleasePlanningDeadline
 import co.datapipelines.application.dependencies.ReleasePlanningWalk
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.dependencies.ReadIsolation
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineReleaseService
@@ -317,6 +318,7 @@ internal class CoordinatorFixture(
                 ReleaseDependencyFamilies.registry(sources),
                 bounds,
                 planningTransactions,
+                ReadIsolation.NONE,
                 ReleasePlanningDeadline.NONE,
             ),
         participants = listOf(PipelineReleaseParticipant(releases, pipelines), TemplateReleaseParticipant(templateReleases)),

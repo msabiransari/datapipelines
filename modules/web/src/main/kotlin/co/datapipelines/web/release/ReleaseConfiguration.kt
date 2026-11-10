@@ -111,6 +111,8 @@ class ReleaseConfiguration {
                     registry = registry,
                     bounds = bounds,
                     planningTransactions = ReleasePlanningWalk.planningTransaction(metadataTransactionManager),
+                    // #868 R1: a failed speculative read rolls back to its savepoint and never aborts the walk's transaction.
+                    speculativeReads = ReleasePlanningWalk.speculativeReads(metadataTransactionManager),
                     deadline = deadline,
                 ),
             participants = listOf(PipelineReleaseParticipant(releases, pipelines), TemplateReleaseParticipant(templateReleases)),

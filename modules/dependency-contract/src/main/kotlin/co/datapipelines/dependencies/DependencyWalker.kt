@@ -17,7 +17,9 @@ import java.time.Clock
  *   pending references of the nodes it has expanded (and the later roots), grouped per family, at most
  *   [GraphLimits.resolveBatchSize] per provider call and clamped by the remaining node capacity; the [Deadline] is checked
  *   before EVERY call ([DeadlineExceeded]). Speculative reads never decide the outcome: a refusal the walk reaches is
- *   never overtaken by a failing read it did not need yet, and a failure on a read it does need propagates.
+ *   never overtaken by a failing read it did not need yet — a speculative call runs inside the context's
+ *   [ReadIsolation], so its failure cannot leave a shared transaction aborted for the reads after it — and a failure on
+ *   a read it does need propagates.
  * - **Checks before reads**, in the order today's release closure applied them: the edges bound, then — for a target
  *   not yet read — the depth bound, and only then the read; the nodes bound once the read tells a new node from a known
  *   one. A target first read at the depth bound is refused there even if it would have aliased a node on the active

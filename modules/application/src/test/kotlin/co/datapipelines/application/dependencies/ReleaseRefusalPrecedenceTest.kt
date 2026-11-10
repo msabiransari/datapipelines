@@ -1,5 +1,6 @@
 package co.datapipelines.application.dependencies
 
+import co.datapipelines.dependencies.ReadIsolation
 import co.datapipelines.pipeline.release.DependencySource
 import co.datapipelines.pipeline.release.ReleaseBounds
 import co.datapipelines.pipeline.release.ReleaseClosure
@@ -154,6 +155,7 @@ class ReleaseRefusalPrecedenceTest {
                 ReleaseDependencyFamilies.registry(sources),
                 bounds,
                 TransactionOperations.withoutTransaction(),
+                ReadIsolation.NONE,
                 ReleasePlanningDeadline.NONE,
             )
 

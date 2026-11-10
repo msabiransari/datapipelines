@@ -1,5 +1,6 @@
 package co.datapipelines.application.dependencies
 
+import co.datapipelines.dependencies.ReadIsolation
 import co.datapipelines.pipeline.release.DependencySource
 import co.datapipelines.pipeline.release.ReleaseBounds
 import co.datapipelines.pipeline.release.ReleaseClosure
@@ -109,6 +110,7 @@ class ReleaseGoldenParityTest {
             ReleaseDependencyFamilies.registry(case.sources),
             case.bounds,
             TransactionOperations.withoutTransaction(),
+            ReadIsolation.NONE,
             ReleasePlanningDeadline.NONE,
         )
 
