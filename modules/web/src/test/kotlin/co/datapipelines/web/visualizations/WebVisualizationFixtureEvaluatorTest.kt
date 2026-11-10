@@ -113,7 +113,7 @@ class WebVisualizationFixtureEvaluatorTest {
 
     @Test
     fun `real adapter keeps explicit nullable null keys through the full mechanical report`() {
-        listOf("data[0].y", "data[0].z[0]").forEach { path ->
+        listOf("columns[0].values", "value").forEach { path ->
             val check = mechanicalCheck(nullable = true)
             every { evaluate.evaluate(any(), any(), any(), any()) } returns
                 TemplateEvaluateService.Evaluation(listOf(mapOf("amount" to null)), emptyList(), emptyList())
@@ -144,7 +144,7 @@ class WebVisualizationFixtureEvaluatorTest {
         val check = mechanicalCheck(nullable = false)
         every { evaluate.evaluate(any(), any(), any(), any()) } returns
             TemplateEvaluateService.Evaluation(listOf(mapOf("amount" to null)), emptyList(), emptyList())
-        val invalid = check.run(workspace, mechanicalBody("data[0].y"))
+        val invalid = check.run(workspace, mechanicalBody("value"))
         invalid.ok shouldBe false
         invalid.cases.getValue("rows").ok shouldBe false
         invalid.failures.single().let {
@@ -154,7 +154,7 @@ class WebVisualizationFixtureEvaluatorTest {
 
         every { evaluate.evaluate(any(), any(), any(), any()) } throws
             DatapipelinesException("template.type_gate_refused", "row 0 column 'amount' is not nullable")
-        val refused = check.run(workspace, mechanicalBody("data[0].y"))
+        val refused = check.run(workspace, mechanicalBody("value"))
         refused.ok shouldBe false
         refused.cases.getValue("rows").ok shouldBe false
         refused.dropped shouldBe 0
@@ -174,7 +174,7 @@ class WebVisualizationFixtureEvaluatorTest {
             )
         every { contracts.scriptContract(any(), any()) } returns contract
         return VisualizationMechanicalCheck(
-            renderers = RendererConfigValidators.deep(),
+            renderers = RendererConfigValidators.default(),
             fixtures = WebVisualizationFixtureEvaluator(evaluate, contracts),
             templates = TemplateContractFacts { _, _ -> TemplatePin.Transform(PipelineVersionStatus.RELEASED, contract) },
         )
@@ -186,10 +186,10 @@ class WebVisualizationFixtureEvaluatorTest {
                 ObjectMapper().readTree(
                     """
                     {"name":"finance/visualizations/null_contract","display_name":"Nullable output",
-                     "renderer":{"kind":"plotly","version":"4"},
+                     "renderer":{"kind":"${if (path == "value") "kpi" else "table"}","version":"1"},
                      "inputs":{"revenue":{"columns":[{"name":"amount","type":"DECIMAL","nullable":false}]}},
                      "transform":{"template":{"name":"${pin.name}","version":${pin.version}},"inputs":{"rows":"revenue"}},
-                     "config":{"data":[${if (path.endsWith("z[0]")) """{"type":"heatmap","z":[[]]}""" else """{"type":"bar","y":[]}"""}]},
+                     "config":${if (path == "value") """{"value":null}""" else """{"columns":[{"label":"Amount","values":[]}]}"""},
                      "bindings":{"$path":"amount"},
                      "tests":{"cases":[{"name":"rows","fixtures":{"revenue":[{"amount":1}]},"assertions":[{"kind":"rendered"}]}]}}
                     """.trimIndent(),

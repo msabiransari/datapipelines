@@ -12,11 +12,13 @@ import co.datapipelines.visualization.ArtifactRecord
 import co.datapipelines.visualization.ArtifactValidationException
 import co.datapipelines.visualization.ArtifactVersion
 import co.datapipelines.visualization.ArtifactVersionDetail
+import co.datapipelines.visualization.ArtifactWarning
 import co.datapipelines.visualization.DashboardService
 import co.datapipelines.visualization.VisualizationBody
 import co.datapipelines.visualization.VisualizationDocument
 import co.datapipelines.visualization.VisualizationErrorCodes
 import co.datapipelines.visualization.VisualizationReader
+import co.datapipelines.visualization.VisualizationSaved
 import co.datapipelines.visualization.VisualizationService
 import com.fasterxml.jackson.core.type.TypeReference
 import io.kotest.assertions.throwables.shouldThrow
@@ -84,7 +86,7 @@ class VisualizationsToolsTest {
         every { dashboards.pinnedBy(workspaceId, ReadLens.Everything, NAME) } returns emptyList()
         val whole = VisualizationsGetTool(visualizations, dashboards, McpFixtures.EVERYTHING_LENS).call(args(), ctx) as Map<*, *>
         (whole["draft"] as Map<*, *>)["body_hash"] shouldBe "hash-1"
-        (whole["document"] as com.fasterxml.jackson.databind.JsonNode).get("renderer").get("kind").asText() shouldBe "plotly"
+        (whole["document"] as com.fasterxml.jackson.databind.JsonNode).get("renderer").get("kind").asText() shouldBe "chart"
 
         val lensed = ReadLens.Only(setOf(NAME))
         val boards = ReadLens.Only(setOf("acme/boards/revenue"))
@@ -118,13 +120,22 @@ class VisualizationsToolsTest {
         every { visualizations.listChildFolders(workspaceId, ReadLens.Everything, null) } returns listOf(ArtifactFolder("acme", "acme", 1))
         val document = slot<VisualizationDocument>()
         every { visualizations.create(workspaceId, capture(document), McpFixtures.USER, WriteSurface.MCP) } returns
-            loaded(PipelineVersionStatus.DRAFT)
+            VisualizationSaved(loaded(PipelineVersionStatus.DRAFT), emptyList())
         val tool = VisualizationsCreateTool(visualizations, reader, McpFixtures.EVERYTHING_LENS)
 
         val answer = tool.call(McpArguments(documentArgs()), ctx) as Map<*, *>
-        answer shouldBe mapOf("id" to id.toString(), "name" to NAME, "version" to 1, "status" to "DRAFT", "body_hash" to "hash-1")
+        // `warnings` is ALWAYS present (#860): `[]` on a clean save.
+        answer shouldBe
+            mapOf(
+                "id" to id.toString(),
+                "name" to NAME,
+                "version" to 1,
+                "status" to "DRAFT",
+                "body_hash" to "hash-1",
+                "warnings" to emptyList<Any>(),
+            )
         document.captured.name shouldBe NAME
-        document.captured.body.renderer.version shouldBe "4"
+        document.captured.body.renderer.version shouldBe "1"
 
         val newRoot =
             shouldThrow<DatapipelinesException> { tool.call(McpArguments(documentArgs() + ("name" to "finance/charts/revenue")), ctx) }
@@ -136,7 +147,7 @@ class VisualizationsToolsTest {
     fun `visualizations_create - the reader's refusal comes before the service`() {
         every { visualizations.listChildFolders(workspaceId, ReadLens.Everything, null) } returns listOf(ArtifactFolder("acme", "acme", 1))
         // A key the reader's nested table does not know (the schema's additionalProperties guards the top level).
-        val wrong = documentArgs() + ("renderer" to mapOf("kind" to "plotly", "version" to "4", "theme" to "dark"))
+        val wrong = documentArgs() + ("renderer" to mapOf("kind" to "chart", "version" to "1", "theme" to "dark"))
 
         val refused =
             shouldThrow<ArtifactValidationException> {
@@ -152,13 +163,18 @@ class VisualizationsToolsTest {
     @Test
     fun `visualizations_update writes at expected_hash, and the tool-only arguments never reach the reader`() {
         every { visualizations.write(workspaceId, id, any(), "hash-0", McpFixtures.USER, WriteSurface.MCP) } returns
-            loaded(PipelineVersionStatus.DRAFT)
+            VisualizationSaved(
+                loaded(PipelineVersionStatus.DRAFT),
+                listOf(ArtifactWarning("chart.degraded.title", "config.title", "plotly")),
+            )
 
         val answer =
             VisualizationsUpdateTool(visualizations, reader)
                 .call(McpArguments(documentArgs() + mapOf("id" to id.toString(), "expected_hash" to "hash-0")), ctx) as Map<*, *>
 
         answer["body_hash"] shouldBe "hash-1"
+        // A warned save (#860): one {code, path, library} per degraded field, never document text.
+        answer["warnings"] shouldBe listOf(mapOf("code" to "chart.degraded.title", "path" to "config.title", "library" to "plotly"))
     }
 
     @Test
@@ -224,10 +240,12 @@ class VisualizationsToolsTest {
         val DOCUMENT =
             """
             {"name": "$NAME", "display_name": "Revenue", "description": "",
-             "renderer": {"kind": "plotly", "version": "4"},
-             "inputs": {"revenue": {"columns": [{"name": "amount", "type": "DECIMAL", "nullable": false}]}},
-             "config": {"data": [{"type": "bar", "y": []}]},
-             "bindings": {"data[0].y": "amount"}}
+             "renderer": {"kind": "chart", "version": "1"},
+             "inputs": {"revenue": {"columns": [{"name": "region", "type": "STRING", "nullable": false},
+                                                {"name": "amount", "type": "DECIMAL", "nullable": false}]}},
+             "config": {"mark": {"type": "bar"}, "encoding": {"x": {"field": "region", "type": "nominal", "sort": null},
+                        "y": {"field": "amount", "type": "quantitative", "aggregate": "sum"}}},
+             "bindings": {"amount": "amount", "region": "region"}}
             """.trimIndent()
     }
 }

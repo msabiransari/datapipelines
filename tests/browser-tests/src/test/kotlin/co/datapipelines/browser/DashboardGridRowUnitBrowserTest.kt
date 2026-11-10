@@ -485,20 +485,14 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
     }
 
     private fun visualization(name: String): String =
-        """
-        {"name": "$name", "display_name": "Row unit", "description": "",
-         "renderer": {"kind": "plotly", "version": "4"},
-         "inputs": {"sales": {"columns": [{"name": "month", "type": "STRING", "nullable": false},
-                                          {"name": "units", "type": "INTEGER", "nullable": false}]}},
-         "config": {"data": [{"type": "bar", "x": [], "y": []}], "layout": {"title": {"text": "Units"}}},
-         "bindings": {"data[0].x": "month", "data[0].y": "units"},
-         "presentation": {"title": "Units"},
-         "tests": {"cases": [
-            {"name": "three months", "fixtures": {"sales": [{"month": "Jan", "units": 3},
-                                                           {"month": "Feb", "units": 5},
-                                                           {"month": "Mar", "units": 2}]},
-             "assertions": [{"kind": "rendered"}]}]}}
-        """.trimIndent()
+        ChartBrowserFixtures.barDocument(
+            name,
+            "Row unit",
+            "month" to "STRING",
+            "units" to "INTEGER",
+            title = "Units",
+            cases = listOf(ChartBrowserFixtures.WORKSPACE_DATA_CASE to ChartBrowserFixtures.THREE_MONTHS),
+        )
 
     private companion object {
         val THEMES = listOf("light", "dark")

@@ -1,0 +1,65 @@
+{
+ "variant": "numeric-bigint-order",
+ "note": "BIGINTEGER categories 2 and 10 ascending order by value: 2, 10 (the reference compared code points: 10, 2)",
+ "spec": {
+  "display_name": "Big integer order",
+  "description": "A hand-written numeric case of design record 2026-11-06 section 4.1 (lane 860 A.2b).",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "n",
+      "type": "BIGINTEGER"
+     },
+     {
+      "name": "amount",
+      "type": "INTEGER"
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar",
+    "labels": "values"
+   },
+   "encoding": {
+    "x": {
+     "field": "n",
+     "type": "nominal",
+     "sort": "ascending",
+     "title": "N"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Amount"
+    }
+   },
+   "title": {
+    "text": "Big integer order"
+   }
+  }
+ },
+ "bindings": {
+  "n": [
+   "10",
+   "2"
+  ],
+  "amount": [
+   1,
+   2
+  ]
+ },
+ "expect": {
+  "categories_full": [
+   "2",
+   "10"
+  ]
+ }
+}

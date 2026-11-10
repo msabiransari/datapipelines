@@ -83,16 +83,16 @@ internal class ReleaseDialogStaleHashFixtures(
                 }
 
                 "visualization" -> {
-                    """
-                    {"name":"$name","display_name":"Units","description":"453",
-                     "renderer":{"kind":"plotly","version":"4"},
-                     "inputs":{"sales":{"columns":[{"name":"month","type":"STRING","nullable":false},
-                                                        {"name":"units","type":"INTEGER","nullable":false}]}},
-                     "config":{"data":[{"type":"bar","x":[],"y":[]}]},
-                     "bindings":{"data[0].x":"month","data[0].y":"units"},"presentation":{"title":"$title"},
-                     "tests":{"cases":[{"name":"one month","fixtures":{"sales":[{"month":"Jan","units":3}]},
-                                          "assertions":[{"kind":"rendered"},{"kind":"trace_count","equals":1}]}]}}
-                    """.trimIndent()
+                    // #860: a bar chart; the variant's title is the in-chart title, so A and B hash apart.
+                    ChartBrowserFixtures.barDocument(
+                        name,
+                        "Units",
+                        "month" to "STRING",
+                        "units" to "INTEGER",
+                        description = "453",
+                        title = title,
+                        cases = listOf("one month" to listOf(mapOf("month" to "Jan", "units" to 3))),
+                    )
                 }
 
                 else -> {

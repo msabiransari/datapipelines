@@ -1,0 +1,146 @@
+{
+ "library": "plotly",
+ "source": "design-records/charts-evidence/854-chart-matrix/matrix/fields-bar.csv (lane 854), the plotly rows; sha256 of the source file 1079e4b521d8c1543af4de581914d274cc00827b8454fb8f47f95fc4f55e1c17",
+ "fields": {
+  "category.axis.grid": {
+   "kind": "presentation",
+   "class": "direct"
+  },
+  "category.field": {
+   "kind": "meaning",
+   "class": "direct"
+  },
+  "category.format": {
+   "kind": "presentation",
+   "class": "direct"
+  },
+  "category.sort": {
+   "kind": "meaning",
+   "class": "direct"
+  },
+  "category.title": {
+   "kind": "presentation",
+   "class": "direct"
+  },
+  "category.type": {
+   "kind": "meaning",
+   "class": "direct"
+  },
+  "color.field": {
+   "kind": "meaning",
+   "class": "direct"
+  },
+  "color.legend.orient": {
+   "kind": "presentation",
+   "class": "direct"
+  },
+  "color.legend=null": {
+   "kind": "presentation",
+   "class": "direct"
+  },
+  "color.sort": {
+   "kind": "meaning",
+   "class": "direct"
+  },
+  "color.title": {
+   "kind": "presentation",
+   "class": "direct"
+  },
+  "description": {
+   "kind": "presentation",
+   "class": "direct"
+  },
+  "mark.labels": {
+   "kind": "presentation",
+   "class": "direct"
+  },
+  "mark.type": {
+   "kind": "meaning",
+   "class": "direct"
+  },
+  "orientation": {
+   "kind": "meaning",
+   "class": "direct"
+  },
+  "rule.exact-big-numbers": {
+   "kind": "meaning",
+   "class": "direct"
+  },
+  "rule.long-labels": {
+   "kind": "presentation",
+   "class": "direct"
+  },
+  "rule.no-data": {
+   "kind": "meaning",
+   "class": "direct"
+  },
+  "rule.null-category": {
+   "kind": "meaning",
+   "class": "direct"
+  },
+  "rule.null-measure": {
+   "kind": "meaning",
+   "class": "direct"
+  },
+  "rule.stack-sign": {
+   "kind": "meaning",
+   "class": "direct"
+  },
+  "rule.text-as-text": {
+   "kind": "meaning",
+   "class": "direct"
+  },
+  "rule.tooltip-content": {
+   "kind": "meaning",
+   "class": "direct"
+  },
+  "rule.utc": {
+   "kind": "meaning",
+   "class": "direct"
+  },
+  "title.subtitle": {
+   "kind": "presentation",
+   "class": "direct"
+  },
+  "title.text": {
+   "kind": "presentation",
+   "class": "direct"
+  },
+  "value.aggregate": {
+   "kind": "meaning",
+   "class": "direct"
+  },
+  "value.axis.grid": {
+   "kind": "presentation",
+   "class": "direct"
+  },
+  "value.field": {
+   "kind": "meaning",
+   "class": "direct"
+  },
+  "value.format": {
+   "kind": "presentation",
+   "class": "direct"
+  },
+  "value.scale.domain": {
+   "kind": "presentation",
+   "class": "direct"
+  },
+  "value.stack=normalize": {
+   "kind": "meaning",
+   "class": "direct"
+  },
+  "value.stack=null": {
+   "kind": "meaning",
+   "class": "direct"
+  },
+  "value.stack=zero": {
+   "kind": "meaning",
+   "class": "direct"
+  },
+  "value.title": {
+   "kind": "presentation",
+   "class": "direct"
+  }
+ }
+}

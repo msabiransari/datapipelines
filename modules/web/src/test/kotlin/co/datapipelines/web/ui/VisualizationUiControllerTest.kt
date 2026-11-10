@@ -99,16 +99,17 @@ class VisualizationUiControllerTest {
     }
 
     @Test
-    fun `a named draft is viewed as the draft, and a 3d trace declares the 3d bundle`() {
+    fun `a named draft is viewed as the draft, and every version declares the 2d bundle since the plotly kind retired`() {
         authenticate(workspaceId, WorkspaceRole.AUTHOR)
-        releasedWithDraft(config = VisualizationUiFixtures.TRACES_3D)
+        // A retired 3D trace name spelled into the released version's config selects nothing any more.
+        releasedWithDraft(config = """{"data":[{"type":"surface"}]}""")
 
         open(version = "2").let {
             it["viewedLabel"] shouldBe "v2 · draft"
             it["viewedIsDraft"] shouldBe true
             it["bundle"] shouldBe "2d"
         }
-        open(version = "1")["bundle"] shouldBe "3d"
+        open(version = "1")["bundle"] shouldBe "2d"
     }
 
     @Test

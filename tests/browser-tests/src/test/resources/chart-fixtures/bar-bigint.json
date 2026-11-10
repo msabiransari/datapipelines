@@ -1,0 +1,143 @@
+{
+ "variant": "bigint",
+ "note": "BIGINTEGER sums above 2^53 aggregate and print exactly (9,007,199,254,740,993; a double prints ...992)",
+ "spec": {
+  "display_name": "Big integers",
+  "description": "Total amount per region, 2024 to 2025.",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "region",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "BIGINTEGER"
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar",
+    "labels": "values"
+   },
+   "encoding": {
+    "x": {
+     "field": "region",
+     "type": "nominal",
+     "sort": "ascending",
+     "title": "Region"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Amount",
+     "format": "integer"
+    }
+   },
+   "title": {
+    "text": "Amount by region"
+   }
+  }
+ },
+ "bindings": {
+  "region": [
+   "A",
+   "A",
+   "B"
+  ],
+  "amount": [
+   "9007199254740992",
+   "1",
+   "18014398509481985"
+  ]
+ },
+ "expect": {
+  "vertical": true,
+  "stack": null,
+  "categories": [
+   "A",
+   "B"
+  ],
+  "categories_full": [
+   "A",
+   "B"
+  ],
+  "series": [
+   "amount"
+  ],
+  "values": [
+   [
+    9007199254740992.0,
+    1.8014398509481984e+16
+   ]
+  ],
+  "exact": [
+   [
+    "9007199254740993",
+    "18014398509481985"
+   ]
+  ],
+  "intervals": [
+   [
+    [
+     0,
+     9007199254740992.0
+    ],
+    [
+     0,
+     1.8014398509481984e+16
+    ]
+   ]
+  ],
+  "totals": [
+   {
+    "pos": 9007199254740992.0,
+    "neg": 0
+   },
+   {
+    "pos": 1.8014398509481984e+16,
+    "neg": 0
+   }
+  ],
+  "bars": 2,
+  "data_warnings": 0,
+  "degraded": {
+   "plotly": [],
+   "echarts": [],
+   "chartjs": [
+    "mark.labels"
+   ],
+   "apexcharts": [],
+   "vegalite": []
+  },
+  "hover": [
+   {
+    "si": 0,
+    "ci": 0,
+    "contains": [
+     "9,007,199,254,740,993"
+    ]
+   }
+  ],
+  "label_texts": [
+   {
+    "si": 0,
+    "ci": 0,
+    "text": "9,007,199,254,740,993"
+   },
+   {
+    "si": 0,
+    "ci": 1,
+    "text": "18,014,398,509,481,985"
+   }
+  ]
+ }
+}

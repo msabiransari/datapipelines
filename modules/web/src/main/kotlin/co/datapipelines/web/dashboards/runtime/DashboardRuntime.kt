@@ -97,7 +97,7 @@ class DashboardRuntime internal constructor(
         principal: AuthenticatedPrincipal,
         id: UUID,
         version: Int? = null,
-    ): ObjectNode = RuntimeViews.config(resolve(principal, id, version), config)
+    ): ObjectNode = resolve(principal, id, version).let { RuntimeViews.config(it, config, resolver.chartColumns(it)) }
 
     // ---- POST /runtime/parameters -------------------------------------------------------------------------
 

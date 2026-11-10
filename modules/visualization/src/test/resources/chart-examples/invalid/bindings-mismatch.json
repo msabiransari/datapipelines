@@ -1,0 +1,87 @@
+{
+ "display_name": "Monthly amount by channel",
+ "description": "Monthly amount, stacked by channel, in UTC months.",
+ "renderer": {
+  "kind": "chart",
+  "version": "1"
+ },
+ "inputs": {
+  "sales": {
+   "columns": [
+    {
+     "name": "region",
+     "type": "STRING"
+    },
+    {
+     "name": "month",
+     "type": "DATE"
+    },
+    {
+     "name": "channel",
+     "type": "STRING"
+    },
+    {
+     "name": "amount",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "units",
+     "type": "INTEGER"
+    },
+    {
+     "name": "payload",
+     "type": "BINARY",
+     "nullable": true
+    },
+    {
+     "name": "segment",
+     "type": "STRING",
+     "nullable": true
+    }
+   ]
+  }
+ },
+ "config": {
+  "mark": {
+   "type": "bar"
+  },
+  "encoding": {
+   "x": {
+    "field": "month",
+    "type": "temporal",
+    "sort": "ascending",
+    "format": "month",
+    "title": "Month"
+   },
+   "y": {
+    "field": "amount",
+    "type": "quantitative",
+    "aggregate": "sum",
+    "stack": "zero",
+    "format": "compact",
+    "axis": {
+     "grid": true
+    }
+   },
+   "color": {
+    "field": "channel",
+    "type": "nominal",
+    "sort": "descending",
+    "title": "Channel",
+    "legend": {
+     "orient": "bottom"
+    }
+   }
+  },
+  "title": {
+   "text": "Monthly amount by channel",
+   "subtitle": "Stacked"
+  }
+ },
+ "bindings": {
+  "x": "month",
+  "y": "amount",
+  "color": "channel"
+ }
+}

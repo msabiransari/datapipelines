@@ -900,12 +900,13 @@ class PromotionTwoDeploymentE2eTest {
         val body =
             """
             {"name": "$name", "display_name": "Promotion viz", "description": "promotion round trip",
-             "renderer": {"kind": "plotly", "version": "4"},
+             "renderer": {"kind": "chart", "version": "1"},
              "inputs": {"revenue": {"columns": [{"name": "month", "type": "DATE", "nullable": false},
                                                 {"name": "amount", "type": "DECIMAL", "nullable": false}]}},
-             "config": {"data": [{"type": "bar", "x": [], "y": []}], "layout": {}},
-             "bindings": {"data[0].x": "month", "data[0].y": "amount"},
-             "presentation": {"title": "Revenue", "tokens": {"series": "categorical"}},
+             "config": {"title": {"text": "Revenue"}, "mark": {"type": "bar"},
+                        "encoding": {"x": {"field": "month", "type": "temporal", "sort": "ascending"},
+                                     "y": {"field": "amount", "type": "quantitative", "aggregate": "sum"}}},
+             "bindings": {"amount": "amount", "month": "month"},
              "tests": {"cases": [{"name": "twelve months", "fixtures": {"revenue": [{"month": "2026-01-01", "amount": 10.5}]},
                                   "assertions": [{"kind": "rendered"}]}]}}
             """.trimIndent()

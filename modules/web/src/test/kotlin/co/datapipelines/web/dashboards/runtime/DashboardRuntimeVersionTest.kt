@@ -110,6 +110,8 @@ class DashboardRuntimeVersionTest {
     @Test
     fun `a named version reaches the resolver on the config route`() {
         every { resolver.resolve(workspaceId, any(), dashboardId, 2) } returns resolved()
+        // The config route reads the charts' columns of what it resolved (#860); the board pins no chart.
+        every { resolver.chartColumns(any()) } returns emptyMap()
         runtime.config(sessionPrincipal(), dashboardId, 2)
         verify(exactly = 1) { resolver.resolve(workspaceId, any(), dashboardId, 2) }
     }
@@ -117,6 +119,7 @@ class DashboardRuntimeVersionTest {
     @Test
     fun `absent is today's call - the resolver sees null, never a derived default`() {
         every { resolver.resolve(workspaceId, any(), dashboardId, null) } returns resolved()
+        every { resolver.chartColumns(any()) } returns emptyMap()
         runtime.config(sessionPrincipal(), dashboardId)
         // Exactly one resolve, and its version argument is the literal null: a call with a number
         // would not match this verification, so the count pins the absent case byte-for-byte.

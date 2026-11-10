@@ -70,7 +70,8 @@ class VisualizationsControllerTest {
     fun `create reads the document with the reader and lands version 1 DRAFT through the service`() {
         authenticate()
         val document = slot<co.datapipelines.visualization.VisualizationDocument>()
-        every { service.create(workspaceId, capture(document), userId, WriteSurface.SESSION) } returns draft()
+        every { service.create(workspaceId, capture(document), userId, WriteSurface.SESSION) } returns
+            co.datapipelines.visualization.VisualizationSaved(draft(), emptyList())
 
         val response = controller.create(DOCUMENT)
 
@@ -88,8 +89,10 @@ class VisualizationsControllerTest {
                 response.data
                     .get("renderer")
                     .get("kind")
-                    .asText() shouldBe "plotly"
+                    .asText() shouldBe "chart"
             },
+            // #860: `warnings` is ALWAYS present on a save, `[]` when clean.
+            { response.data.get("warnings").toString() shouldBe "[]" },
         )
     }
 
@@ -133,13 +136,16 @@ class VisualizationsControllerTest {
     @Test
     fun `update writes the draft at the If-Match hash`() {
         authenticate()
-        every { service.write(workspaceId, id, any(), "hash-v0", userId, WriteSurface.SESSION) } returns draft()
+        every { service.write(workspaceId, id, any(), "hash-v0", userId, WriteSurface.SESSION) } returns
+            co.datapipelines.visualization.VisualizationSaved(
+                draft(),
+                listOf(co.datapipelines.visualization.ArtifactWarning("chart.degraded.title", "config.title", "plotly")),
+            )
 
-        controller
-            .update(id, "hash-v0", DOCUMENT)
-            .data
-            .get("version")
-            .asInt() shouldBe 1
+        val data = controller.update(id, "hash-v0", DOCUMENT).data
+        data.get("version").asInt() shouldBe 1
+        // #860: a warned save carries {code, path, library} per degraded field, never document text.
+        data.get("warnings").toString() shouldBe """[{"code":"chart.degraded.title","path":"config.title","library":"plotly"}]"""
     }
 
     // ---- reads: the caller's lens, never Everything -----------------------------------------------------
@@ -423,15 +429,15 @@ class VisualizationsControllerTest {
         val DOCUMENT =
             """
             {"name": "$NAME", "display_name": "Monthly revenue", "description": "",
-             "renderer": {"kind": "plotly", "version": "4"},
+             "renderer": {"kind": "chart", "version": "1"},
              "inputs": {"revenue": {"columns": [{"name": "month", "type": "DATE", "nullable": false},
                                                 {"name": "amount", "type": "DECIMAL", "nullable": false}]}},
              "transform": {"template": {"name": "finance/scripts/revenue_bars", "version": 2}, "inputs": {"rows": "revenue"}},
-             "config": {"data": [{"type": "bar", "x": "${'$'}.x", "y": "${'$'}.y"}], "layout": {"title": {"text": "Revenue"}}},
-             "bindings": {"data[0].x": "month_labels", "data[0].y": "amounts"},
-             "presentation": {"title": "Monthly revenue", "tokens": {"series": "categorical"}},
+             "config": {"mark": {"type": "bar"}, "encoding": {"x": {"field": "month_labels", "type": "nominal", "sort": null, "title": "Month"},
+               "y": {"field": "amounts", "type": "quantitative", "aggregate": "sum", "title": "Revenue", "format": "compact"}}, "title": {"text": "Revenue"}},
+             "bindings": {"amounts": "amounts", "month_labels": "month_labels"},
              "tests": {"cases": [{"name": "twelve months", "fixtures": {"revenue": [{"month": "2026-01-01", "amount": 10.5}]},
-                                  "assertions": [{"kind": "rendered"}, {"kind": "trace_count", "equals": 1}]}]}}
+                                  "assertions": [{"kind": "rendered"}, {"kind": "mark_count", "equals": 1}]}]}}
             """.trimIndent()
     }
 }

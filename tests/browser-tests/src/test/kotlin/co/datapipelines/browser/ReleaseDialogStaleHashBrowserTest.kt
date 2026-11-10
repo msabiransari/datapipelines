@@ -156,7 +156,11 @@ class ReleaseDialogStaleHashBrowserTest : VisualizationBrowserSuite() {
                 .locator("section[data-dp-case='one month'] .plotly .main-svg")
                 .first()
                 .waitFor()
-            preview.page.evaluate("() => document.querySelector('.js-plotly-plot')._fullData.length") shouldBe 1
+            // #860: the one month's bar, read off the drawn paths.
+            preview.page.evaluate(
+                "() => Array.from(document.querySelectorAll(\"section[data-dp-case='one month'] .barlayer .point path\"))" +
+                    ".filter(p => p.getAttribute('d') && p.getAttribute('d') !== 'M0,0Z').length",
+            ) shouldBe 1
         } finally {
             preview.close()
         }

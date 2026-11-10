@@ -8,6 +8,8 @@ import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.visualization.ChartLibrarySupport.Companion.DEGRADED
+import co.datapipelines.visualization.ChartLibrarySupport.Companion.PRESENTATION
 import co.datapipelines.visualization.DocumentFixtures.obj
 import co.datapipelines.visualization.VisualizationTestDb.AUTHOR
 import co.datapipelines.visualization.VisualizationTestDb.WORKSPACE
@@ -39,14 +41,15 @@ class VisualizationServiceIntegrationTest {
         val v1 = h.createVisualization()
         val released1 = h.visualizations.release(WORKSPACE, v1.record.id, v1.detail.bodyHash, AUTHOR).version
         val v2draft =
-            h.visualizations.write(
-                WORKSPACE,
-                v1.record.id,
-                h.visualizationDocument { it.obj("presentation").put("title", "Second") },
-                released1.detail.bodyHash,
-                AUTHOR,
-                WriteSurface.MCP,
-            )
+            h.visualizations
+                .write(
+                    WORKSPACE,
+                    v1.record.id,
+                    h.visualizationDocument { it.obj("config.title").put("text", "Second") },
+                    released1.detail.bodyHash,
+                    AUTHOR,
+                    WriteSurface.MCP,
+                ).version
         val v2 = h.visualizations.release(WORKSPACE, v1.record.id, v2draft.detail.bodyHash, AUTHOR).version
         v2.detail.version shouldBe 2
         // Discard the CURRENT version: the pair from the result — before = 2, after = 1.
@@ -61,18 +64,54 @@ class VisualizationServiceIntegrationTest {
         h.visualizations.purgeDraft(WORKSPACE, sole.record.id, sole.detail.bodyHash).scope shouldBe "entity"
         // A draft beside a release purges alone: scope = version.
         val beside =
-            h.visualizations.write(
-                WORKSPACE,
-                v1.record.id,
-                h.visualizationDocument { it.obj("presentation").put("title", "Beside") },
-                v1.detail.bodyHash,
-                AUTHOR,
-                WriteSurface.MCP,
-            )
+            h.visualizations
+                .write(
+                    WORKSPACE,
+                    v1.record.id,
+                    h.visualizationDocument { it.obj("config.title").put("text", "Beside") },
+                    v1.detail.bodyHash,
+                    AUTHOR,
+                    WriteSurface.MCP,
+                ).version
         h.visualizations.purgeDraft(WORKSPACE, v1.record.id, beside.detail.bodyHash).scope shouldBe "version"
         // The entity purge is entity by definition — the only version is a DRAFT.
         val onlyDraft = h.createVisualization("acme/viz/only_draft")
         h.visualizations.purgeEntity(WORKSPACE, onlyDraft.record.id) shouldBe Purged.Entity
+    }
+
+    @Test
+    fun `a save answers the rules' warnings beside the version - recomputed on every save, never stored (860)`() {
+        val warned =
+            LifecycleHarness(
+                charts =
+                    ChartDocumentRules(
+                        support =
+                            ChartLibrarySupport(
+                                "plotly",
+                                mapOf("category.title" to ChartLibrarySupport.Support(PRESENTATION, DEGRADED)),
+                            ),
+                    ),
+            )
+        val created = warned.visualizations.create(WORKSPACE, warned.visualizationDocument(), AUTHOR, WriteSurface.MCP)
+        created.warnings shouldBe listOf(ArtifactWarning("chart.degraded.category.title", "config.encoding.x.title", "plotly"))
+        // Never stored: the version read back carries no trace of the caveat.
+        val stored = checkNotNull(warned.visualizationRepository.findVersion(WORKSPACE, created.version.record.id, 1))
+        ArtifactJson.mapper.writeValueAsString(stored.body).contains("degraded") shouldBe false
+        // Recomputed: the same visualization saved without the degraded field answers none.
+        val untitled =
+            warned.visualizations.write(
+                WORKSPACE,
+                created.version.record.id,
+                warned.visualizationDocument { it.obj("config.encoding.x").remove("title") },
+                created.version.detail.bodyHash,
+                AUTHOR,
+                WriteSurface.MCP,
+            )
+        untitled.warnings shouldBe emptyList()
+        // The shipped table (every row direct) warns on nothing.
+        h.visualizations
+            .create(WORKSPACE, h.visualizationDocument("acme/viz/clean"), AUTHOR, WriteSurface.MCP)
+            .warnings shouldBe emptyList()
     }
 
     private fun rows(): Int =
@@ -96,12 +135,13 @@ class VisualizationServiceIntegrationTest {
     @Test
     fun `release needs a case, a released or consented transform pin - and cascades the draft pin in the release's transaction`() {
         val noCases =
-            h.visualizations.create(
-                WORKSPACE,
-                h.visualizationDocument("acme/viz/none") { it.remove("tests") },
-                AUTHOR,
-                WriteSurface.MCP,
-            )
+            h.visualizations
+                .create(
+                    WORKSPACE,
+                    h.visualizationDocument("acme/viz/none") { it.remove("tests") },
+                    AUTHOR,
+                    WriteSurface.MCP,
+                ).version
         refusal { h.visualizations.release(WORKSPACE, noCases.record.id, noCases.detail.bodyHash, AUTHOR) }.details["reason"] shouldBe
             "no_cases"
 
@@ -125,7 +165,7 @@ class VisualizationServiceIntegrationTest {
         released.version.detail.status shouldBe PipelineVersionStatus.RELEASED
         h.templatesReleased shouldBe listOf(TemplateRef("finance/scripts/revenue_bars", 2))
 
-        val missing = h.visualizations.create(WORKSPACE, h.visualizationDocument("acme/viz/missing"), AUTHOR, WriteSurface.MCP)
+        val missing = h.visualizations.create(WORKSPACE, h.visualizationDocument("acme/viz/missing"), AUTHOR, WriteSurface.MCP).version
         h.templateStatuses.clear()
         refusal { h.visualizations.release(WORKSPACE, missing.record.id, missing.detail.bodyHash, AUTHOR, releasePinnedTemplates = true) }
             .details["template_status"] shouldBe "MISSING"
@@ -181,16 +221,17 @@ class VisualizationServiceIntegrationTest {
         pinned.details["pinned_by"] shouldBe listOf("${DocumentFixtures.DASHBOARD_NAME}@1")
         refusal { h.visualizations.purgeEntity(WORKSPACE, v1.record.id) }.code shouldBe VisualizationErrorCodes.VERSION_PINNED
         val v2 =
-            h.visualizations.write(
-                WORKSPACE,
-                v1.record.id,
-                h.visualizationDocument {
-                    it.put("display_name", "v2")
-                },
-                v1.detail.bodyHash,
-                AUTHOR,
-                WriteSurface.MCP,
-            )
+            h.visualizations
+                .write(
+                    WORKSPACE,
+                    v1.record.id,
+                    h.visualizationDocument {
+                        it.put("display_name", "v2")
+                    },
+                    v1.detail.bodyHash,
+                    AUTHOR,
+                    WriteSurface.MCP,
+                ).version
         h.visualizations.purgeDraft(WORKSPACE, v1.record.id, v2.detail.bodyHash)
         h.dashboards.purgeEntity(WORKSPACE, dashboard.record.id)
         h.visualizations

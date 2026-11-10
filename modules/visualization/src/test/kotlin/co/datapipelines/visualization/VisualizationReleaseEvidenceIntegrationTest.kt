@@ -4,6 +4,7 @@ import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.visualization.DocumentFixtures.obj
+import com.fasterxml.jackson.databind.node.ArrayNode
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
@@ -73,7 +74,7 @@ class VisualizationReleaseEvidenceIntegrationTest {
         val current = h.visualizationRepository.findDraft(TestEvidenceHarness.WORKSPACE, created.detail.artifactId)!!
         val edited =
             ValidatorFakes.visualizationDocument(
-                DocumentFixtures.visualization().also { it.obj("presentation").put("title", "v2") },
+                DocumentFixtures.visualization().also { it.obj("config.title").put("text", "v2") },
             )
         h.visualizations.write(
             TestEvidenceHarness.WORKSPACE,
@@ -199,6 +200,23 @@ class VisualizationReleaseEvidenceIntegrationTest {
         h.fixtureRefusal = FixtureEvaluation.Refused("template.type_gate_refused", "row 0 is not a number")
         evidenceFor(candidate).shouldBeRefused(VisualizationErrorCodes.RELEASE_MECHANICAL_FAILED, "mechanical")
         h.fixtureRefusal = null
+        evidenceFor(candidate) shouldBe EvidenceVerdict.Pass
+    }
+
+    @Test
+    fun `an UNJUDGED chart text assertion is not a mechanical failure - a GREEN run releases`() {
+        val created =
+            h.createVisualization {
+                (it.obj("tests.cases[0]")["assertions"] as ArrayNode)
+                    .add(ArtifactJson.mapper.readTree("""{"kind":"text_visible","text":"Only the browser draws this"}"""))
+            }
+        val candidate = candidateOf(created.detail)
+        // Non-vacuity: the assertion IS unjudged on the mechanical report the gate reads.
+        h.mechanical.run(TestEvidenceHarness.WORKSPACE, candidate.body).let {
+            it.ok shouldBe true
+            it.unjudged.map { u -> u.path } shouldBe listOf("tests.cases[0].assertions[2]")
+        }
+        greenRun(candidate)
         evidenceFor(candidate) shouldBe EvidenceVerdict.Pass
     }
 
