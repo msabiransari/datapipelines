@@ -123,7 +123,7 @@ function configPayload() {
     layout: { columns: 12, grid: [] },
     parameter_set: null,
     visualizations: [
-      { name: "chart", renderer: { kind: "plotly", version: "4" }, config: {}, bindings: {}, presentation: null, timeout_seconds: 120 },
+      { name: "chart", renderer: { kind: "stub", version: "1" }, config: {}, bindings: {}, presentation: null, timeout_seconds: 120 },
     ],
     groups: [],
     actions: [],
@@ -166,7 +166,7 @@ async function boot(version) {
   fetchImpl.on("/runtime/parameters", () => fetchImpl.envelope({ valid: true, values: {}, parameters: [], overrides_applied: {}, parents: [], parameter_revision: 0 }));
   const runtime = require(runtimePath);
   const registered = runtime._internal.renderers();
-  if (!registered.plotly) runtime.registerRenderer({ kind: "plotly", version: "4", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
+  if (!registered.stub) runtime.registerRenderer({ kind: "stub", version: "1", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
   const container = fakeElement("div");
   const instance = runtime.init({
     server: { baseUrl: "", credentials: "session" },

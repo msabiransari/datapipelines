@@ -73,7 +73,7 @@ class VisualizationsController(
         val principal = currentPrincipal()
         val document = reader.readOrThrow(ArtifactHttp.readTree(FAMILY, body))
         val saved = visualizations.create(principal.requireWorkspace().id, document, principal.userId, principal.writeSurface())
-        return ApiResponse.of(ArtifactResponses.full(saved, ArtifactResponses.draftOf(saved)))
+        return ApiResponse.of(ArtifactResponses.saved(saved))
     }
 
     /** §22 — the WORKING version's full JSON: the draft when one exists, else the current release (versioning §7.1). */
@@ -136,7 +136,7 @@ class VisualizationsController(
                 actor = principal.userId,
                 via = principal.writeSurface(),
             )
-        return ApiResponse.of(ArtifactResponses.full(written, ArtifactResponses.draftOf(written)))
+        return ApiResponse.of(ArtifactResponses.saved(written))
     }
 
     /**

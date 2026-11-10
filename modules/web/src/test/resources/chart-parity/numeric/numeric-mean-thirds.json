@@ -1,0 +1,68 @@
+{
+ "variant": "numeric-mean-thirds",
+ "note": "the exact mean of 1, 1, 0 rounds half-even at scale + 6: 0.666667 (the reference truncated: 0.666666)",
+ "spec": {
+  "display_name": "Mean of thirds",
+  "description": "A hand-written numeric case of design record 2026-11-06 section 4.1 (lane 860 A.2b).",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "n",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "BIGINTEGER"
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar",
+    "labels": "values"
+   },
+   "encoding": {
+    "x": {
+     "field": "n",
+     "type": "nominal",
+     "sort": "ascending",
+     "title": "N"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "mean",
+     "title": "Amount"
+    }
+   },
+   "title": {
+    "text": "Mean of thirds"
+   }
+  }
+ },
+ "bindings": {
+  "n": [
+   "A",
+   "A",
+   "A"
+  ],
+  "amount": [
+   "1",
+   "1",
+   "0"
+  ]
+ },
+ "expect": {
+  "exact": [
+   [
+    "0.666667"
+   ]
+  ]
+ }
+}

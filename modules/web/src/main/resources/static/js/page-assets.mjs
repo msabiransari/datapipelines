@@ -13,6 +13,7 @@ const mounted = new WeakMap(); // catalog node -> its one mount attempt
 /** The global each singleton provides: a source whose global already exists never executes again. */
 const PROVIDED = {
   "/js/datapipelines-dashboard.js": "DatapipelinesDashboard",
+  "/js/datapipelines-dashboard-chart.js": "DatapipelinesDashboardChart",
   "/js/datapipelines-dashboard-plotly.js": "DatapipelinesDashboardPlotly",
   "/js/datapipelines-dashboard-table.js": "DatapipelinesDashboardTable",
   "/js/datapipelines-dashboard-kpi.js": "DatapipelinesDashboardKpi",

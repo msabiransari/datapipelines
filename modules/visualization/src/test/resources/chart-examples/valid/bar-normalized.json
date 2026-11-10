@@ -1,0 +1,71 @@
+{
+ "display_name": "Channel share by region",
+ "description": "Each region's amount split by channel, as a share of the region.",
+ "renderer": {
+  "kind": "chart",
+  "version": "1"
+ },
+ "inputs": {
+  "sales": {
+   "columns": [
+    {
+     "name": "region",
+     "type": "STRING"
+    },
+    {
+     "name": "month",
+     "type": "DATE"
+    },
+    {
+     "name": "channel",
+     "type": "STRING"
+    },
+    {
+     "name": "amount",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "units",
+     "type": "INTEGER"
+    },
+    {
+     "name": "payload",
+     "type": "BINARY",
+     "nullable": true
+    },
+    {
+     "name": "segment",
+     "type": "STRING",
+     "nullable": true
+    }
+   ]
+  }
+ },
+ "config": {
+  "mark": {
+   "type": "bar",
+   "labels": "values"
+  },
+  "encoding": {
+   "x": {
+    "field": "region",
+    "type": "nominal",
+    "sort": "ascending"
+   },
+   "y": {
+    "field": "amount",
+    "type": "quantitative",
+    "aggregate": "sum",
+    "stack": "normalize",
+    "format": "percent"
+   },
+   "color": {
+    "field": "channel",
+    "type": "nominal",
+    "sort": "ascending",
+    "legend": null
+   }
+  }
+ }
+}

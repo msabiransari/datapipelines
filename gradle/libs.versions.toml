@@ -193,6 +193,16 @@ kotest = "6.2.3"
 konsist = "0.17.3"
 # MCP SDK — GATE G1 CLOSED, see [libraries] below.
 mcp-sdk = "2.0.0"
+# JSON Schema validator for the chart document v1 (#860; design record
+# 2026-11-06-neutral-chart-grammar §4.2, draft 2020-12). Vetted 2026-11-07 (Maven
+# Central metadata + GitHub API): 2.0.8 (published 2026-10-02, Apache-2.0) is the
+# latest of the Jackson-2 line; 3.0.x targets Jackson 3 (tools.jackson.core) and is
+# out for a Jackson 2.x stack. 0 GitHub advisories for the package (positive
+# control: jackson-databind returns advisories). Already on the runtime classpath
+# at 2.0.0 through mcp-json-jackson2; this pin lifts that edge to 2.0.8 too.
+# Its POM asks for Jackson 2.22.1; modules/visualization holds the `jackson` pin
+# with enforcedPlatform(jackson-bom), the lake module's precedent for Iceberg.
+json-schema-validator = "2.0.8"
 # Playwright for Java — the browser suite's driver AND pinned browser set
 # (a Playwright release pins its bundled chromium build). Current stable on
 # Maven Central, verified 2026-09-11. 1.52.0 refused to install chromium on
@@ -376,6 +386,7 @@ commonmark-ext-gfm-strikethrough = { module = "org.commonmark:commonmark-ext-gfm
 # Jackson majors on one classpath.
 mcp-core = { module = "io.modelcontextprotocol.sdk:mcp-core", version.ref = "mcp-sdk" }
 mcp-json-jackson2 = { module = "io.modelcontextprotocol.sdk:mcp-json-jackson2", version.ref = "mcp-sdk" }
+json-schema-validator = { module = "com.networknt:json-schema-validator", version.ref = "json-schema-validator" }
 
 # --- UI assets (NOT BOM-managed) ---------------------------------------------
 

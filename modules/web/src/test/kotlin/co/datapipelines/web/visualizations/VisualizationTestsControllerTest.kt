@@ -452,9 +452,11 @@ class VisualizationTestsControllerTest {
                 ArtifactJson.mapper.readTree(
                     """
                     {"name": "finance/visualizations/monthly_revenue", "display_name": "Monthly revenue", "description": "",
-                     "renderer": {"kind": "plotly", "version": "4"},
+                     "renderer": {"kind": "chart", "version": "1"},
                      "inputs": {"revenue": {"columns": [{"name": "month", "type": "STRING", "nullable": false}]}},
-                     "config": {"data": [{"type": "bar", "x": []}]}, "bindings": {"data[0].x": "month"},
+                     "config": {"mark": {"type": "bar"}, "encoding": {"x": {"field": "month", "type": "nominal", "sort": null},
+                                "y": {"type": "quantitative", "aggregate": "count"}}},
+                     "bindings": {"month": "month"},
                      "tests": {"cases": [{"name": "twelve months", "fixtures": {"revenue": [{"month": "Jan"}]}, "assertions": [{"kind": "rendered"}]}]}}
                     """.trimIndent(),
                 ),

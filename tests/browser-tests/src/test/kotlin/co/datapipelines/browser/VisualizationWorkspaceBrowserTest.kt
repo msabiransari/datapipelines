@@ -22,7 +22,8 @@ import java.nio.file.Paths
  * tab renders the version's test-case FIXTURES one case at a time with no data request; the tab strip swaps panes in
  * page and carries `?tab=`; Evidence shows a run's screenshot only once one was stored; the Release dialog lists its
  * refusals before the button and its POST releases through the service; a viewer's and a promoter's pages issue no
- * lifecycle request; the 3d bundle; every tab ZERO-CSP in both themes (the suite's after-each), at three widths.
+ * lifecycle request; the shell's one bundle; every tab ZERO-CSP in both themes (the suite's after-each), at three
+ * widths. #860: the fixture is the bar chart of `ChartBrowserFixtures.workspaceDocument`, its marks read off the DOM.
  *
  * #426 — the strip's tab switches ride the shared history helper (workspace/history.js, family `visualizations`):
  * Back/Forward re-select in page, a restored root wires once, and another family's entry runs none of this glue.
@@ -46,12 +47,13 @@ class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
         page.locator("script[data-dp-plotly-bundle]").getAttribute("data-dp-plotly-bundle") shouldBe "3d"
         page.locator("#viz-tab-preview").innerText() shouldContain "test fixtures"
         page.waitForSelector("#viz-pane-preview section[data-viz-case-index='0'][data-dp-ready='true']")
-        val traces =
+        val bars =
             page.evaluate(
-                "() => { const g = document.querySelector(\"#viz-pane-preview section[data-viz-case-index='0'] .js-plotly-plot\");" +
-                    " return g && g._fullData ? g._fullData.length : -1; }",
+                "() => Array.from(document.querySelectorAll(" +
+                    "\"#viz-pane-preview section[data-viz-case-index='0'] .barlayer .point path\"))" +
+                    ".filter(p => { const d = p.getAttribute('d'); return !!d && d !== 'M0,0Z'; }).length",
             ) as Number
-        withClue("case 'two series' renders its two traces") { traces.toInt() shouldBe 2 }
+        withClue("case 'three months' draws its three bars") { bars.toInt() shouldBe ChartBrowserFixtures.WORKSPACE_BARS }
         // One case at a time: the second is hidden and NOT mounted until it is selected.
         page.locator("#viz-pane-preview section[data-viz-case-index='1']").getAttribute("hidden") shouldBe "hidden"
         page.locator("#viz-pane-preview section[data-viz-case-index='1'][data-dp-ready]").count() shouldBe 0
@@ -117,7 +119,7 @@ class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
             api(
                 "POST",
                 "/api/v1/visualizations/$id/tests/sessions/$sessionId/results",
-                """{"cases":[{"name":"two series","verdict":"green"},{"name":"empty","verdict":"green"}],
+                """{"cases":[{"name":"three months","verdict":"green"},{"name":"empty","verdict":"green"}],
                    "environment":{"browser":"chromium (playwright)","theme":"light","viewport":"1440x900"}}""",
             )
         submitted.at("data", "status") shouldBe "GREEN"
@@ -134,7 +136,7 @@ class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
         val image = page.screenshot()
         val stored =
             page.request().post(
-                "$baseUrl${upload["url"]}?case=two%20series",
+                "$baseUrl${upload["url"]}?case=${ChartBrowserFixtures.WORKSPACE_DATA_CASE.replace(" ", "%20")}",
                 RequestOptions
                     .create()
                     .setHeader(upload["header"] as String, upload["token"] as String)
@@ -210,12 +212,11 @@ class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
 
     @Test
     @Order(4)
-    fun `every tab is CSP-clean in both themes at three widths, and a 3d trace declares the 3d bundle`() {
+    fun `every tab is CSP-clean in both themes at three widths`() {
         startTrace()
         page.setViewportSize(DESKTOP_W, DESKTOP_H)
         val root = ready("vshot")
         val (id, _) = createVisualization("$root/charts/units")
-        val (surface, _) = createVisualization("$root/charts/hill", trace3d = true)
 
         for (theme in listOf("light", "dark")) {
             page.setViewportSize(DESKTOP_W, DESKTOP_H) // the theme toggle lives in the desktop top bar
@@ -226,71 +227,6 @@ class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
             }
         }
 
-        for (theme in listOf("light", "dark")) {
-            page.setViewportSize(DESKTOP_W, DESKTOP_H)
-            ensureTheme(theme)
-            page.navigate("$baseUrl/visualizations/$surface")
-            page.waitForSelector("script[data-dp-plotly-bundle]", Page.WaitForSelectorOptions().setState(WaitForSelectorState.ATTACHED))
-            page.locator("script[data-dp-plotly-bundle]").count() shouldBe 1
-            page.locator("script[data-dp-plotly-bundle]").getAttribute("data-dp-plotly-bundle") shouldBe "3d"
-            page.waitForSelector("#viz-pane-preview section[data-viz-case-index='0'][data-dp-ready='true']")
-            // #525: the surface's colorbar draws, its fills are painted, and neither the draw nor a redraw is refused.
-            PlotlyColorbarProbe.assertPainted(page, "the 3d surface in $theme", previewCase(0))
-            shot("workspace-preview-3d-$theme")
-            withClue("CSP on the 3d surface in $theme (the colorbar draw)") { drainCspViolations().shouldBeEmpty() }
-            PlotlyColorbarProbe.redraw(page, "the 3d surface in $theme", previewCase(0))
-            PlotlyColorbarProbe.assertPainted(page, "the 3d surface in $theme after a redraw", previewCase(0))
-            withClue("CSP on the 3d surface in $theme after a redraw") { drainCspViolations().shouldBeEmpty() }
-        }
-        ensureTheme("light")
-    }
-
-    @Test
-    @Order(8)
-    fun `#525 - a heatmap's colorbar draws under the policy in both themes, across a case swap, a redraw and a reload`() {
-        startTrace()
-        page.setViewportSize(DESKTOP_W, DESKTOP_H)
-        val root = ready("vheat")
-        val (heat, _) = createVisualization("$root/charts/heat", heatmap = true)
-
-        for (theme in listOf("light", "dark")) {
-            page.setViewportSize(DESKTOP_W, DESKTOP_H)
-            ensureTheme(theme)
-            page.navigate("$baseUrl/visualizations/$heat")
-            page.waitForSelector("script[data-dp-plotly-bundle]", Page.WaitForSelectorOptions().setState(WaitForSelectorState.ATTACHED))
-            // The signed-in shell loads the 3d superset for 2d artifacts too (#460); the 2d bundle's colorbar is the
-            // session-less preview's case in VisualizationPreviewBrowserTest.
-            page.locator("script[data-dp-plotly-bundle]").getAttribute("data-dp-plotly-bundle") shouldBe "3d"
-            page.waitForSelector("#viz-pane-preview section[data-viz-case-index='0'][data-dp-ready='true']")
-            PlotlyColorbarProbe.assertPainted(page, "the heatmap in $theme", previewCase(0))
-            withClue("#531 - the default heatmap keeps crisp cells in $theme") {
-                page
-                    .locator("${previewCase(0)} .heatmaplayer image")
-                    .evaluate("image => getComputedStyle(image).imageRendering") shouldBe "pixelated"
-            }
-            shot("workspace-heatmap-$theme")
-            withClue("CSP on the heatmap in $theme (the colorbar draw)") { drainCspViolations().shouldBeEmpty() }
-
-            // The second case mounts a second graph with its own colorbar over a different range.
-            page.selectOption("[data-viz-case-select]", "1")
-            page.waitForSelector("#viz-pane-preview section[data-viz-case-index='1'][data-dp-ready='true']")
-            PlotlyColorbarProbe.assertPainted(page, "the heatmap's second case in $theme", previewCase(1))
-            withClue("CSP on the heatmap's second case in $theme") { drainCspViolations().shouldBeEmpty() }
-
-            // A redraw of live graphs reuses the existing fill rectangles (the first site of the fix).
-            PlotlyColorbarProbe.redraw(page, "the heatmap's second case in $theme", previewCase(1))
-            PlotlyColorbarProbe.assertPainted(page, "the heatmap's second case in $theme after a redraw", previewCase(1))
-            page.selectOption("[data-viz-case-select]", "0")
-            PlotlyColorbarProbe.redraw(page, "the heatmap in $theme", previewCase(0))
-            PlotlyColorbarProbe.assertPainted(page, "the heatmap in $theme after a redraw", previewCase(0))
-            withClue("CSP on the heatmap in $theme after the redraws") { drainCspViolations().shouldBeEmpty() }
-
-            // A reload re-mounts the page from nothing: the same draw, the same silence.
-            page.reload()
-            page.waitForSelector("#viz-pane-preview section[data-viz-case-index='0'][data-dp-ready='true']")
-            PlotlyColorbarProbe.assertPainted(page, "the heatmap in $theme after a reload", previewCase(0))
-            withClue("CSP on the heatmap in $theme after a reload") { drainCspViolations().shouldBeEmpty() }
-        }
         ensureTheme("light")
     }
 
@@ -543,9 +479,9 @@ class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
               const o = window.__v444, b = document.querySelector('#viz-preview-data');
               if (!s || s.hidden || s.closest('[data-dp-pane]').hidden || !o.mounts.some(m => m.block === b && m.index === Number(i) && m.ready)) return false;
               if (i === '1') return s.querySelector('.dp-dashboard-status')?.getAttribute('data-dp-state') === 'no-data';
-              const g = s.querySelector('.js-plotly-plot');
-              return g && g._fullData && g._fullData.length === 2 && JSON.stringify(Array.from(g._fullData[0].y)) === '[3,5,2]' &&
-                JSON.stringify(Array.from(g._fullData[1].y)) === '[4,4,4]';
+              const bars = Array.from(s.querySelectorAll('.barlayer .point path')).filter(p => p.getAttribute('d') && p.getAttribute('d') !== 'M0,0Z');
+              const ticks = Array.from(s.querySelectorAll('.xtick text')).map(t => t.textContent);
+              return bars.length === 3 && JSON.stringify(ticks) === '["Jan","Feb","Mar"]';
             }""",
             index,
         )
@@ -616,8 +552,6 @@ class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
         requested.filter { it.contains("/api/v1/") && !BROWSER_TREE_READ.containsMatchIn(it) }
 
     /** The card of preview case [index], as the probes address it. */
-    private fun previewCase(index: Int): String = "#viz-pane-preview section[data-viz-case-index='$index']"
-
     private fun shot(name: String) {
         Files.createDirectories(SHOTS)
         page.screenshot(Page.ScreenshotOptions().setPath(SHOTS.resolve("$name.png")).setFullPage(false))

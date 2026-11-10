@@ -6,6 +6,7 @@ import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateReleaser
 import co.datapipelines.pipeline.TemplateVersionStatuses
 import co.datapipelines.pipeline.WriteSurface
+import com.fasterxml.jackson.databind.node.ObjectNode
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
@@ -53,7 +54,7 @@ internal class TestEvidenceHarness(
 
     val mechanical =
         VisualizationMechanicalCheck(
-            renderers = RendererConfigValidators.deep(),
+            renderers = RendererConfigValidators.default(),
             fixtures = fixtureEvaluator,
             templates = templates,
             rendered = RenderedStateCheck.NOT_AVAILABLE,
@@ -64,7 +65,7 @@ internal class TestEvidenceHarness(
     val visualizations =
         VisualizationService(
             repository = visualizationRepository,
-            validator = VisualizationValidator(templates, RendererConfigValidators.deep()),
+            validator = VisualizationValidator(templates, RendererConfigValidators.default()),
             dashboards = DashboardRepository(jdbc),
             authoring = AuthoringGuard(true),
             templateStatuses = TemplateVersionStatuses { _, name, version -> templateStatuses[ArtifactRef(name, version)] },
@@ -118,14 +119,18 @@ internal class TestEvidenceHarness(
         templateStatuses[ValidatorFakes.TRANSFORM_REF] = PipelineVersionStatus.RELEASED
     }
 
-    /** A visualization created as v1 DRAFT from the spec's document, in the harness workspace. */
-    fun createVisualization(name: String = DocumentFixtures.VISUALIZATION_NAME): ArtifactVersion<VisualizationBody> =
-        visualizations.create(
-            VisualizationTestDb.WORKSPACE,
-            VisualizationDocument(name, ValidatorFakes.visualizationDocument(DocumentFixtures.visualization()).body),
-            VisualizationTestDb.AUTHOR,
-            WriteSurface.MCP,
-        )
+    /** A visualization created as v1 DRAFT from the spec's document ([edit] applied first), in the harness workspace. */
+    fun createVisualization(
+        name: String = DocumentFixtures.VISUALIZATION_NAME,
+        edit: (ObjectNode) -> Unit = {},
+    ): ArtifactVersion<VisualizationBody> =
+        visualizations
+            .create(
+                VisualizationTestDb.WORKSPACE,
+                VisualizationDocument(name, ValidatorFakes.visualizationDocument(DocumentFixtures.visualization().also(edit)).body),
+                VisualizationTestDb.AUTHOR,
+                WriteSurface.MCP,
+            ).version
 
     fun now(): Instant = Instant.now()
 

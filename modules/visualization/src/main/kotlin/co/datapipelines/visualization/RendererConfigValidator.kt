@@ -4,12 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 
 /**
- * Judges a visualization's renderer-native `config` against its renderer's schema (the spec's §3.1, §11.3
- * step 1). A port so the tests lane (L4) can put the reduced Plotly plot-schema behind the SAME call; this
- * module's [RendererConfigValidators.default] owns the `table` and `kpi` schemas (ours — Dashboards §2.1.2)
- * and, for `plotly`, the shape the spec names: `data` an array of objects each with a `type` from the vendored
- * bundles' list (§10.4), `layout` and Plotly's own `config` objects. The configuration is never interpreted
- * beyond this (D4): what passes is stored verbatim.
+ * Judges a visualization's `config` against its renderer's house schema (the spec's §3.1, §11.3 step 1):
+ * [RendererConfigValidators.default] owns the `table` and `kpi` schemas (ours — Dashboards §2.1.2). A `chart`
+ * document is judged as a WHOLE body by [ChartDocumentRules] (design record 2026-11-06 §4.4), so this port answers
+ * no problems for it. What passes is stored verbatim.
  */
 fun interface RendererConfigValidator {
     /** Every problem of [config] for [kind]; a path is relative to `config` (`data[0].type`). */
@@ -26,18 +24,20 @@ data class ConfigProblem(
     val message: String,
 )
 
-/** The module's renderer schemas — the production [RendererConfigValidator] until L4 deepens Plotly's. */
+/** The module's renderer schemas — the production [RendererConfigValidator]. */
 object RendererConfigValidators {
-    /** The 2D bundle's traces (the spec's §10.4, D63 — confirmed 2026-09-28). */
+    /**
+     * The trace types the vendored Plotly 2D bundle is BUILT with (the spec's §10.4, D63 — confirmed 2026-09-28).
+     * They describe the library bundles the dashboard runtime loads for the chart kind's Plotly converter, not a
+     * document vocabulary: `VendoredPlotlyAuditTest` pins the manifest's lists to these.
+     */
     val PLOTLY_2D_TRACES: List<String> = listOf("scatter", "bar", "pie", "histogram", "box", "heatmap")
 
-    /** The 3D bundle's additions — a dashboard with one loads the 3D bundle (§10.4). */
+    /** The 3D bundle's additions (the vendored `plotly-3d` build). */
     val PLOTLY_3D_TRACES: List<String> = listOf("scatter3d", "surface", "mesh3d")
 
-    /** Every trace type a Plotly `config` may name. */
+    /** Every trace type the vendored bundles carry. */
     val PLOTLY_TRACES: List<String> = PLOTLY_2D_TRACES + PLOTLY_3D_TRACES
-
-    val PLOTLY_KEYS: Set<String> = setOf("data", "layout", "config")
     val TABLE_KEYS: Set<String> = setOf("columns", "page_size")
     val TABLE_COLUMN_KEYS: Set<String> = setOf("label", "values", "format", "align")
     val TABLE_FORMATS: List<String> = listOf("text", "number", "integer", "percent", "date", "datetime")
@@ -49,81 +49,23 @@ object RendererConfigValidators {
     /** A table shows at most this many columns and pages at most this many rows (the schema's own bounds). */
     const val MAX_TABLE_COLUMNS = 64
     const val MAX_PAGE_SIZE = 1_000
-    const val MAX_TRACES = 64
     const val MAX_LABEL_CHARS = 120
     const val MAX_UNIT_CHARS = 16
 
-    /** The production validator: the three renderable kinds; a reserved kind has no schema (the validator refuses it first). */
+    /**
+     * The production validator: the house `table` and `kpi` schemas; `chart` is a document-level kind
+     * ([ChartDocumentRules]) and a reserved kind has no schema (the validator refuses it first).
+     */
     fun default(): RendererConfigValidator =
         RendererConfigValidator { kind, config ->
             val problems = mutableListOf<ConfigProblem>()
             when (kind) {
-                RendererKind.PLOTLY -> plotly(config, problems)
                 RendererKind.TABLE -> table(config, problems)
                 RendererKind.KPI -> kpi(config, problems)
-                RendererKind.HTML, RendererKind.SVG -> Unit
+                RendererKind.CHART, RendererKind.HTML, RendererKind.SVG -> Unit
             }
             problems
         }
-
-    /**
-     * The L4a production validator (the spec's §11.3 step 1): Plotly goes through [PlotlySchemaValidator] —
-     * the reduced 4.1.1 plot-schema, unknown attributes and wrong types refused with the path, the house
-     * data-array checks kept in force — while `table` and `kpi` stay the house schemas. Save, submit and
-     * release all read through THIS composition, so they refuse the same configurations.
-     */
-    fun deep(schema: PlotlySchemaValidator = PlotlySchemaValidator()): RendererConfigValidator =
-        RendererConfigValidator { kind, config ->
-            when (kind) {
-                RendererKind.PLOTLY -> schema.validate(kind, config)
-                else -> default().validate(kind, config)
-            }
-        }
-
-    private fun plotly(
-        config: ObjectNode,
-        problems: MutableList<ConfigProblem>,
-    ) {
-        unknownKeys(config, PLOTLY_KEYS, "", problems)
-        val data = config.get("data")
-        when {
-            data == null || !data.isArray || data.isEmpty -> {
-                problems += ConfigProblem("data", "traces_missing", "A Plotly config needs a non-empty data array of traces.")
-            }
-
-            data.size() > MAX_TRACES -> {
-                problems += ConfigProblem("data", "too_many_traces", "At most $MAX_TRACES traces.")
-            }
-
-            else -> {
-                data.forEachIndexed { index, trace -> trace(trace, "data[$index]", problems) }
-            }
-        }
-        listOf("layout", "config").forEach { key ->
-            config.get(key)?.takeUnless { it.isObject }?.let { problems += ConfigProblem(key, "wrong_type", "'$key' must be an object.") }
-        }
-    }
-
-    private fun trace(
-        trace: JsonNode,
-        path: String,
-        problems: MutableList<ConfigProblem>,
-    ) {
-        val type = trace.get("type")
-        when {
-            !trace.isObject -> {
-                problems += ConfigProblem(path, "wrong_type", "A trace is an object.")
-            }
-
-            type == null || !type.isTextual -> {
-                problems += ConfigProblem("$path.type", "trace_type_missing", "A trace names its type.")
-            }
-
-            type.asText() !in PLOTLY_TRACES -> {
-                problems += ConfigProblem("$path.type", "trace_type_unsupported", "Trace types are $PLOTLY_TRACES (the vendored bundles).")
-            }
-        }
-    }
 
     private fun table(
         config: ObjectNode,

@@ -283,6 +283,8 @@
     this._server = initOptions.server;
     this._fixtures = initOptions.server.fixtures || null;
     this._options = initOptions.options || {};
+    // Record 2026-11-06 §5.2: the host's chart library, validated at init; handed to the chart kind at mount only.
+    this._charts = initOptions.charts || null;
     this._config = null;
     this._parameters = null;
     this._baseline = null;
@@ -752,11 +754,14 @@
 
   /**
    * The renderer/bundle judgement (§10.4): every occurrence's renderer must be a kind the adapter side
-   * registered, at the major version it declared, and the ONE Plotly bundle on the page must carry
-   * every trace the board needs. All of it fails here — before any execution.
+   * registered, at the major version it declared; a kind may judge its own occurrences (the chart kind:
+   * `chart.library_undeclared`, `chart.converter_missing` — record 2026-11-06 §5.2) and declare the Plotly
+   * bundle an occurrence needs (`needsBundle(occurrence) → "2d" | "3d"`), which the ONE bundle on the page
+   * must cover. All of it fails here — before any execution.
    */
   DashboardInstance.prototype._judgeRenderers = function () {
     var renderers = this._env.renderers;
+    // The server's `renderer.bundle` (spec §10.4) is the board-wide need; a kind's `needsBundle` adds its own.
     var bundle = this._config.renderer && this._config.renderer.bundle ? this._config.renderer.bundle : "2d";
     var declaredBundles = this._env.declaredPlotlyBundles();
     if (declaredBundles.length > 1) {
@@ -783,7 +788,12 @@
           { kind: renderer.kind, name: occurrence.name },
         );
       }
-      if (renderer.kind === "plotly" && bundle === "3d" && declaredBundles[0] === "2d") {
+      if (typeof implementation.judge === "function") {
+        var refusal = implementation.judge(occurrence, { charts: this._charts });
+        if (refusal) throw this._fail(refusal.code, refusal.message, refusal.details);
+      }
+      var needs = typeof implementation.needsBundle === "function" ? implementation.needsBundle(occurrence) : bundle;
+      if ((needs === "3d" || bundle === "3d") && declaredBundles[0] === "2d") {
         throw this._fail("renderer.bundle_insufficient", "the dashboard needs the 3D bundle; the page loaded the 2D bundle", {
           name: occurrence.name,
         });
@@ -1420,7 +1430,9 @@
     if (!this._owns(name, refreshId)) return; // a newer run owns it
     var state = payload.state;
     if (state === "no-data") {
+      if (this._occurrences[name].emptyRenderFailed === refreshId) return;
       this._renderOccurrenceStatus(name, { state: "no-data", stale: false, reason: null, refreshId: refreshId });
+      this._renderEmpty(name, refreshId);
       return;
     }
     if (state === "error" || state === "abort") {
@@ -1442,21 +1454,33 @@
     var occurrence = this._occurrences[name];
     if (!occurrence || !occurrence.renderer) return;
     var renderer = occurrence.renderer;
+    this._supersedeRenderWarnings(name, refreshId);
     this._renderOccurrenceStatus(name, { state: "in-progress", stale: false, reason: null, refreshId: refreshId });
-    var render = Promise.resolve(
-      renderer.renderData({ name: name, type: "visualization", occurrence: occurrence.occurrence }, payload.rows, payload.bindings || {}),
-    );
+    var render;
+    try {
+      render = Promise.resolve(
+        renderer.renderData({ name: name, type: "visualization", occurrence: occurrence.occurrence }, payload.rows, payload.bindings || {}),
+      );
+    } catch (error) {
+      // A renderer that throws instead of rejecting is the same failure: it must not escape the frame loop.
+      render = Promise.reject(error);
+    }
     withDeadline(render, this._renderTimeoutMs(), function () {
       return self._fail("render.timeout", "the renderer did not acknowledge in time");
     }).then(
-      function (outcome) {
+      function (acknowledged) {
         if (self._disposed || !self._owns(name, refreshId)) return; // a late acknowledgment cannot publish (§5.3)
+        // A renderer acknowledges with "rendered" | "no-data", or (the chart kind) {outcome, warnings}.
+        var outcome = acknowledged && typeof acknowledged === "object" ? acknowledged.outcome : acknowledged;
+        var warnings = acknowledged && typeof acknowledged === "object" && Array.isArray(acknowledged.warnings) ? acknowledged.warnings : [];
         if (outcome === "no-data") {
+          occurrence.emptied = refreshId; // the renderer drew this refresh's empty state itself
           self._renderOccurrenceStatus(name, { state: "no-data", stale: false, reason: null, refreshId: refreshId });
         } else {
           self._renderOccurrenceStatus(name, { state: "success", stale: false, reason: null, refreshId: refreshId });
           self._scheduleSuccessSettle(name, refreshId);
         }
+        self._publishRenderWarnings(name, refreshId, warnings);
       },
       function (error) {
         if (self._disposed || !self._owns(name, refreshId)) return;
@@ -1512,6 +1536,99 @@
     }, SUCCESS_SETTLE_MS);
   };
 
+  /**
+   * Record 2026-11-06 §5.2 — a zero-row refresh sends no data frame, only `no-data`. For a renderer with an empty
+   * state of its own (the chart kind's `renderEmpty`: the no-marks option, the previous refresh's marks gone), an
+   * OWNED no-data draws it once per refresh; the callers check ownership before calling. A no-data the renderer
+   * already attempted for this refresh (`emptied`) is not drawn twice, and a failed attempt stays an error.
+   */
+  DashboardInstance.prototype._renderEmpty = function (name, refreshId) {
+    var self = this;
+    var occurrence = this._occurrences[name];
+    var renderer = occurrence && occurrence.renderer;
+    if (!renderer || typeof renderer.renderEmpty !== "function" || !refreshId) return;
+    if (occurrence.emptied === refreshId) return;
+    occurrence.emptied = refreshId;
+    this._supersedeRenderWarnings(name, refreshId);
+    var emptied;
+    try {
+      emptied = Promise.resolve(renderer.renderEmpty());
+    } catch (error) {
+      emptied = Promise.reject(error);
+    }
+    // #860 R3 — the empty draw is a render like any other: the same render deadline bounds it, and a
+    // rejection or a timeout drives the SAME error status + notification a hung renderData drives —
+    // a never-acknowledging renderEmpty must not leave the card saying no-data while nothing drew.
+    withDeadline(emptied, this._renderTimeoutMs(), function () {
+      return self._fail("render.timeout", "the renderer did not acknowledge in time");
+    }).then(
+      function (acknowledged) {
+        if (self._disposed || !self._owns(name, refreshId)) return;
+        var warnings = acknowledged && typeof acknowledged === "object" && Array.isArray(acknowledged.warnings) ? acknowledged.warnings : [];
+        self._publishRenderWarnings(name, refreshId, warnings);
+      },
+      function (error) {
+        if (self._disposed || !self._owns(name, refreshId)) return;
+        occurrence.emptyRenderFailed = refreshId;
+        var code = isDashboardError(error) ? error.code : "render.failed";
+        self._renderOccurrenceStatus(name, {
+          state: "error",
+          stale: false,
+          reason: { code: code },
+          refreshId: refreshId,
+        });
+        self._publishNotification({
+          scope: name,
+          severity: "error",
+          code: "render.failed",
+          message: "the visualization could not be rendered",
+          retryable: false,
+          recover: null,
+          refreshId: refreshId,
+        });
+      },
+    );
+  };
+
+  /**
+   * Render warnings (record 2026-11-06 §5.2): `{scope: "render", severity: "warning", code, name, refreshId}`, each
+   * code ONCE per occurrence per refresh. The renderer supplies codes and fixed sentences only — never document text
+   * or a bound value.
+   */
+  DashboardInstance.prototype._publishRenderWarnings = function (name, refreshId, warnings) {
+    var occurrence = this._occurrences[name];
+    if (!occurrence || !warnings.length) return;
+    var record = occurrence.renderWarnings;
+    if (!record || record.refreshId !== refreshId) record = occurrence.renderWarnings = { refreshId: refreshId, keys: [] };
+    for (var i = 0; i < warnings.length; i++) {
+      var warning = warnings[i];
+      if (!warning || typeof warning.code !== "string" || typeof warning.message !== "string") continue;
+      var key = "render:" + name + ":" + refreshId + ":" + warning.code;
+      if (record.keys.indexOf(key) !== -1) continue;
+      record.keys.push(key);
+      this._publishNotification({
+        scope: "render",
+        severity: "warning",
+        code: warning.code,
+        message: warning.message,
+        name: name,
+        refreshId: refreshId,
+        retryable: false,
+        recover: null,
+        dedupe: key,
+      });
+    }
+  };
+
+  /** The next refresh's data frame (or empty state) supersedes the previous refresh's render warnings. */
+  DashboardInstance.prototype._supersedeRenderWarnings = function (name, refreshId) {
+    var occurrence = this._occurrences[name];
+    var record = occurrence && occurrence.renderWarnings;
+    if (!record || record.refreshId === refreshId) return;
+    for (var i = 0; i < record.keys.length; i++) delete this._notifications[record.keys[i]];
+    occurrence.renderWarnings = null;
+  };
+
   DashboardInstance.prototype._onRefreshCompleted = function (refresh, payload) {
     refresh.ended = true;
     this._closeStream(refresh.id);
@@ -1519,6 +1636,7 @@
     for (var i = 0; i < refresh.targets.length; i++) {
       var name = refresh.targets[i];
       if (!this._owns(name, refresh.id)) continue; // a newer run owns it — completion cannot clear it
+      var occurrence = this._occurrences[name];
       var outcome = targets[name] || {};
       // The REAL wire's target outcomes (RefreshJob's TargetOutcome): "ok" | "no-data" | "error" |
       // "abort". "ok" — the server delivered the data — behaves like a data frame already applied:
@@ -1529,7 +1647,6 @@
         // "abort"): an abort chip still standing at completion is this client's own optimistic render
         // from an abort whose confirmation never decided it (#356) — the terminal frame's truth
         // restores the delivered state.
-        var occurrence = this._occurrences[name];
         if (occurrence && occurrence.status === "abort") {
           this._renderOccurrenceStatus(name, { state: "success", stale: false, reason: null, refreshId: refresh.id });
           this._scheduleSuccessSettle(name, refresh.id);
@@ -1537,7 +1654,9 @@
         continue;
       }
       if (outcome.outcome === "no-data") {
+        if (occurrence.emptyRenderFailed === refresh.id) continue;
         this._renderOccurrenceStatus(name, { state: "no-data", stale: false, reason: null, refreshId: refresh.id });
+        this._renderEmpty(name, refresh.id);
       } else if (outcome.outcome === "abort") {
         this._renderOccurrenceStatus(name, { state: "abort", stale: false, reason: outcome.reason || null, refreshId: refresh.id });
       } else if (outcome.outcome) {
@@ -1930,6 +2049,8 @@
       retryable: notification.retryable === true,
       recover: notification.recover || null,
       refreshId: notification.refreshId || null,
+      // The occurrence a render warning belongs to (record 2026-11-06 §5.2); null for every other notification.
+      name: typeof notification.name === "string" ? notification.name : null,
       pending: notification.pending || null,
       configurationStale: notification.configurationStale === true,
       at: this._env.now(),
@@ -2132,7 +2253,7 @@
     var visualizations = (this._config && this._config.visualizations) || [];
     var mounts = visualizations.map(function (occurrence) {
       return Promise.resolve(
-        self._adapter.mountVisualization(occurrence, occurrence.renderer),
+        self._adapter.mountVisualization(occurrence, occurrence.renderer, { charts: self._charts }),
       ).then(function (handle) {
         if (!handle || typeof handle.renderData !== "function") {
           throw self._fail("adapter.mount_incomplete", "mountVisualization returned no renderer for '" + occurrence.name + "'", {
@@ -2195,6 +2316,7 @@
       throw DashboardError("init.invalid", "proxy credentials require proxyBaseUrl");
     }
     validateAdapter(options.adapter);
+    if (options.charts !== undefined) validateCharts(options.charts);
 
     var env = {
       uuid: randomUuid,
@@ -2283,6 +2405,26 @@
     return instance;
   }
 
+  /**
+   * `options.charts = {library, instance}` (record 2026-11-06 §5.2, frozen): `library` one of the chart kind's library
+   * identities, `instance` the library's entry value as the library documents it — an object or a constructor
+   * function. Refused synchronously, like every other init refusal; the message never echoes the host's value.
+   */
+  function validateCharts(charts) {
+    if (!isPlainObject(charts)) throw DashboardError("init.invalid", "charts is { library, instance }");
+    var chart = REGISTERED_RENDERERS.chart;
+    if (!chart || !Array.isArray(chart.libraries)) {
+      throw DashboardError("init.invalid", "charts needs the chart renderer (datapipelines-dashboard-chart.js) loaded before init");
+    }
+    if (typeof charts.library !== "string" || chart.libraries.indexOf(charts.library) === -1) {
+      throw DashboardError("init.invalid", "charts.library is not one of the chart library identities", { libraries: chart.libraries.slice() });
+    }
+    var type = typeof charts.instance;
+    if (charts.instance === null || (type !== "object" && type !== "function")) {
+      throw DashboardError("init.invalid", "charts.instance is the library's entry value: an object or a constructor function");
+    }
+  }
+
   /** The `<script data-dp-plotly-bundle="2d|3d">` declarations — the host names the bundle it loaded. */
   function declaredPlotlyBundles() {
     if (typeof document === "undefined" || !document.querySelectorAll) return [];
@@ -2298,8 +2440,10 @@
 
   /**
    * Renderer registration: the first-party adapters call this at load — `kind`, the major `version`
-   * the wire's `renderer.version` is matched against, and `create(context) → {renderData, renderStatus?,
-   * resize?, dispose?}`. A host registers its own kind the same way, before init.
+   * the wire's `renderer.version` is matched against, and `create(context) → {renderData, renderEmpty?,
+   * renderStatus?, resize?, dispose?}`; optionally `judge(occurrence, {charts}) → null | {code, message, details}`,
+   * `needsBundle(occurrence) → "2d" | "3d"` and `libraries` (the chart kind's identities). A host registers its own
+   * kind the same way, before init.
    */
   function registerRenderer(spec) {
     if (!isPlainObject(spec) || typeof spec.kind !== "string" || typeof spec.create !== "function") {
@@ -2309,6 +2453,10 @@
       kind: spec.kind,
       version: spec.version === undefined ? "1" : String(spec.version),
       create: spec.create,
+      // Optional (record 2026-11-06 §5.2): a kind's own mount judgement, the bundle it needs, its library identities.
+      judge: typeof spec.judge === "function" ? spec.judge : null,
+      needsBundle: typeof spec.needsBundle === "function" ? spec.needsBundle : null,
+      libraries: Array.isArray(spec.libraries) ? spec.libraries.slice() : null,
     };
     return api;
   }
@@ -2685,7 +2833,7 @@
         }
         return Promise.resolve(undefined);
       },
-      mountVisualization: function (occurrence, renderer) {
+      mountVisualization: function (occurrence, renderer, mount) {
         try {
           var slot = this.grid && this.grid[occurrence.name] ? this.grid[occurrence.name] : this.defaultSlot;
           // #473 — every visualization renders INSIDE a card: a bordered shell with a heading (the
@@ -2742,6 +2890,8 @@
             instanceId: null,
             host: body,
             occurrence: occurrence,
+            // The host's declared chart library (init's `charts`): only the chart kind reads it.
+            charts: mount && mount.charts ? mount.charts : null,
             notify: this.notify,
             signal: function (name, payload) {
               if (listeners.commit && name === "commit") listeners.commit(payload);

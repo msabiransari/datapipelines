@@ -1,6 +1,6 @@
 // The dashboard adapters (#10, the implementation spec's §10.3): the composite adapter's contract
-// functions, the Plotly substitution/escaping/theme mapping, and the table/KPI renderers' text-only
-// DOM. Node's built-in runner; the fake DOM is the same shape the runtime tests install.
+// functions and the table/KPI renderers' text-only DOM. Node's built-in runner; the fake DOM is the
+// same shape the runtime tests install.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -317,171 +317,9 @@ for (const withHook of [true, false]) {
 
 // --------------------------------------------------------------------------------------------------- tests
 
-test("the plotly substitution lands bound arrays at their paths and escapes every bound value", async () => {
-  const plotly = require(resolveStatic("datapipelines-dashboard-plotly.js"));
-  const stored = {
-    data: [{ type: "bar", x: null, y: null, marker: {} }],
-    layout: { title: { text: "Stored title" } },
-  };
-  const out = plotly._internal.substitute(
-    stored,
-    {
-      "data[0].x": ['<img src=x onerror="alert(1)">', "2026-01"],
-      "data[0].y": [10, 20],
-      "layout.title.text": "<a href='javascript:alert(1)'>steal</a>",
-    },
-    plotly._internal.escapeMarkup,
-  );
-  // The stored configuration is never mutated.
-  assert.equal(stored.data[0].x, null);
-  assert.equal(stored.layout.title.text, "Stored title");
-  // Bound strings arrive escaped: the img, its handler and the javascript: URL are TEXT.
-  assert.equal(out.data[0].x[0], "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;".replace(/&quot;/g, '"') === "" ? "" : "&lt;img src=x onerror=\"alert(1)\"&gt;".replace("<", "&lt;").replace(">", "&gt;") || out.data[0].x[0]);
-  assert.ok(!out.data[0].x[0].includes("<"), "no raw < from data: " + out.data[0].x[0]);
-  assert.ok(out.data[0].x[0].startsWith("&lt;img"), "the tag is escaped text: " + out.data[0].x[0]);
-  assert.equal(out.data[0].y[0], 10, "numbers pass through unescaped");
-  assert.ok(!out.layout.title.text.includes("<a href"), "the javascript: anchor is escaped text: " + out.layout.title.text);
-  // A path that resolves nowhere is skipped, never invented.
-  const skipped = plotly._internal.substitute({ data: [] }, { "data[5].x": [1] }, plotly._internal.escapeMarkup);
-  assert.deepEqual(skipped.data, []);
-});
-
-test("the xss trio renders as text through the plotly adapter's escaping", async () => {
-  const plotly = require(resolveStatic("datapipelines-dashboard-plotly.js"));
-  for (const nasty of ['<img onerror="alert(1)">', '<a href="javascript:alert(1)">click</a>', "<b>bold</b>"]) {
-    const escaped = plotly._internal.escapeMarkup(nasty);
-    assert.ok(!escaped.includes("<"), nasty + " survived as markup: " + escaped);
-    assert.ok(!escaped.includes("<a") && !escaped.includes("<img") && !escaped.includes("<b>"), "no element survives: " + escaped);
-  }
-});
-
-test("the theme mapping reads the chart tokens through a probe and never invents a colour", async () => {
-  installDom();
-  try {
-    const plotly = require(resolveStatic("datapipelines-dashboard-plotly.js"));
-    let probes = 0;
-    const realCreate = globalThis.document.createElement;
-    globalThis.document.createElement = (tag) => {
-      probes += 1;
-      return realCreate(tag);
-    };
-    globalThis.document.body.removeChild = () => {};
-    const theme = plotly._internal.themeLayout({ tokens: { series: "categorical" } });
-    assert.ok(probes > 0, "the tokens were resolved through probe elements");
-    // getComputedStyle answers color(srgb …); the mapping normalises to rgb() for Plotly's validation.
-    assert.match(theme.paper_bgcolor, /^rgb\(/, String(theme.paper_bgcolor));
-    assert.match(theme.plot_bgcolor, /^rgb\(/);
-    assert.ok(Array.isArray(theme.colorway) && theme.colorway.length === 6, "the six series hues");
-    for (const colour of theme.colorway) assert.match(colour, /^rgb\(/);
-    // An unknown token name changes nothing (the open map is ignored).
-    const unknown = plotly._internal.themeLayout({ tokens: { series: "striped" } });
-    assert.equal(unknown.colorway, undefined, "only the known names are honoured");
-    // Without a DOM there is no colour and no invention.
-    delete globalThis.document;
-    const bare = plotly._internal.themeLayout({});
-    assert.deepEqual(bare, {});
-  } finally {
-    uninstallDom();
-  }
-});
-
-test("#386: the size defaults sit UNDER the author — compact margin, automargin on the axes, the stored keys win", async () => {
-  const plotly = require(resolveStatic("datapipelines-dashboard-plotly.js"));
-  const { withSizeDefaults, mergeLayout, COMPACT_MARGIN, COMPACT_TITLED_TOP } = plotly._internal;
-  // Absent margin: the compact one, every side — never Plotly's own (the key would be absent).
-  const bare = withSizeDefaults({});
-  assert.deepEqual(bare.margin, { l: COMPACT_MARGIN.l, r: COMPACT_MARGIN.r, t: COMPACT_MARGIN.t, b: COMPACT_MARGIN.b, pad: 0 });
-  assert.ok(COMPACT_MARGIN.t < 20 && COMPACT_MARGIN.l < 20, "compact means well under Plotly's 80/100: " + JSON.stringify(COMPACT_MARGIN));
-  assert.equal(bare.xaxis.automargin, true, "x automargin defaults on");
-  assert.equal(bare.yaxis.automargin, true, "y automargin defaults on");
-  assert.deepEqual(withSizeDefaults(undefined).margin, bare.margin, "no stored layout at all is the same case");
-  // A title opens the top margin (both title shapes), an empty one does not.
-  assert.equal(withSizeDefaults({ title: { text: "Units" } }).margin.t, COMPACT_TITLED_TOP);
-  assert.equal(withSizeDefaults({ title: "Units" }).margin.t, COMPACT_TITLED_TOP);
-  assert.equal(withSizeDefaults({ title: { text: "" } }).margin.t, COMPACT_MARGIN.t);
-  // The author's margin wins KEY BY KEY: t survives, the absent sides take the compact default.
-  const stored = { margin: { t: 120 }, title: { text: "Units" }, xaxis: { automargin: false, title: { text: "Month" } } };
-  const merged = withSizeDefaults(stored);
-  assert.equal(merged.margin.t, 120, "the stored top margin survives the defaults");
-  assert.equal(merged.margin.l, COMPACT_MARGIN.l, "an absent side is compact");
-  assert.equal(merged.xaxis.automargin, false, "the author's automargin=false stands");
-  assert.equal(merged.xaxis.title.text, "Month", "the rest of the axis is untouched");
-  assert.equal(merged.yaxis.automargin, true, "the other axis still defaults on");
-  assert.equal(stored.margin.l, undefined, "the stored configuration is never mutated");
-  assert.equal(stored.yaxis, undefined);
-  // A numbered axis the author declared defaults on too.
-  assert.equal(withSizeDefaults({ yaxis2: { overlaying: "y" } }).yaxis2.automargin, true);
-  // The theme still wins over the author's COLOURS and leaves the size keys alone (the opposite precedence).
-  const themed = mergeLayout(merged, { paper_bgcolor: "rgb(1,2,3)", xaxis: { gridcolor: "rgb(4,5,6)" } });
-  assert.equal(themed.paper_bgcolor, "rgb(1,2,3)");
-  assert.equal(themed.xaxis.gridcolor, "rgb(4,5,6)");
-  assert.equal(themed.xaxis.automargin, false, "the theme does not touch automargin");
-  assert.equal(themed.margin.t, 120, "the theme does not touch the margin");
-});
-
-test("#386: the plotly renderer hands Plotly the compact margin and automargin on every render", async () => {
-  installDom();
-  try {
-    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
-    const plotly = require(resolveStatic("datapipelines-dashboard-plotly.js"));
-    plotly.register(runtime);
-    const calls = [];
-    globalThis.window.Plotly = {
-      react: (el, data, layout, config) => {
-        calls.push({ layout });
-        return Promise.resolve();
-      },
-      Plots: { resize: () => {} },
-      purge: () => {},
-    };
-    const host = fakeElement("div");
-    const handle = runtime._internal.renderers().plotly.create({
-      host,
-      occurrence: { name: "v", config: { data: [{ type: "bar", x: null }], layout: { margin: { r: 40 } } }, presentation: null },
-    });
-    assert.equal(await handle.renderData({ name: "v" }, 2, { "data[0].x": [1, 2] }), "rendered");
-    const layout = calls[0].layout;
-    assert.equal(layout.margin.t, plotly._internal.COMPACT_MARGIN.t, "no title: the compact top");
-    assert.equal(layout.margin.r, 40, "the stored right margin wins");
-    assert.equal(layout.xaxis.automargin, true);
-    assert.equal(layout.yaxis.automargin, true);
-  } finally {
-    uninstallDom();
-  }
-});
-
-test("the plotly renderer resolves rendered on the plot and answers no-data for empty rows", async () => {
-  installDom();
-  try {
-    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
-    const plotly = require(resolveStatic("datapipelines-dashboard-plotly.js"));
-    plotly.register(runtime);
-    const host = fakeElement("div");
-    const handle = runtime._internal.renderers().plotly.create({
-      host,
-      occurrence: { name: "v", config: { data: [{ type: "bar", x: null }] }, presentation: null },
-    });
-    assert.equal(await handle.renderData({ name: "v" }, 0, {}), "no-data");
-    // A fake Plotly: react records the call; the afterplot event races the promise — both settle.
-    const calls = [];
-    globalThis.window.Plotly = {
-      react: (el, data, layout, config) => {
-        calls.push({ data, layout, config });
-        return Promise.resolve();
-      },
-      Plots: { resize: () => {} },
-      purge: () => {},
-    };
-    const outcome = await handle.renderData({ name: "v" }, 2, { "data[0].x": ["<b>not markup</b>", "y"] });
-    assert.equal(outcome, "rendered");
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].data[0].x[0], "&lt;b&gt;not markup&lt;/b&gt;", "the bound markup arrives escaped");
-    assert.ok(calls[0].config.responsive, "the shipped config defaults hold");
-    assert.equal(calls[0].config.displaylogo, false);
-  } finally {
-    uninstallDom();
-  }
-});
+// The plotly kind retired (design record 2026-11-06 §5.1): its substitution, escaping, theme and #386 size tests went
+// with it. The chart kind's equivalents — every Plotly sink escaped, the tokens, Q-L4, rendered/no-data — are in
+// dashboard-chart.test.mjs.
 
 test("the table renderer builds text-only cells, formats, caps at page_size, and answers no-data", async () => {
   installDom();
@@ -623,8 +461,8 @@ test("the composite adapter builds the grid, mounts renderers by kind and render
     runtime._internal.resetRenderers();
     const mounted = [];
     runtime.registerRenderer({
-      kind: "plotly",
-      version: "4",
+      kind: "stub",
+      version: "1",
       create: (context) => {
         mounted.push(context.occurrence.name);
         return { renderData: () => Promise.resolve("rendered"), dispose: () => {} };
@@ -634,7 +472,7 @@ test("the composite adapter builds the grid, mounts renderers by kind and render
     const adapter = runtime.adapters(container);
     await adapter.mountLayout({ columns: 12, grid: [{ name: "chart", x: 0, y: 0, w: 6, h: 4 }] });
     assert.equal(container.children[0].style.gridTemplateColumns, "repeat(12, minmax(0, 1fr))");
-    await adapter.mountVisualization({ name: "chart", renderer: { kind: "plotly", version: "4" }, config: {} }, { kind: "plotly", version: "4" });
+    await adapter.mountVisualization({ name: "chart", renderer: { kind: "stub", version: "1" }, config: {} }, { kind: "stub", version: "1" });
     assert.deepEqual(mounted, ["chart"]);
     // An unknown kind refuses at mount.
     await assert.rejects(
@@ -739,16 +577,16 @@ test("#412: host width crossings re-place and resize once per crossing, then dis
     runtime._internal.resetRenderers();
     const resized = [];
     runtime.registerRenderer({
-      kind: "plotly",
-      version: "4",
+      kind: "stub",
+      version: "1",
       create: (context) => ({ renderData: () => Promise.resolve("rendered"), resize: () => resized.push(context.occurrence.name) }),
     });
     const container = fakeElement("div");
     container.clientWidth = 640;
     const adapter = runtime.adapters(container);
     await adapter.mountLayout({ columns: 12, grid: SEEDED_GRID });
-    await adapter.mountVisualization({ name: "revenue", renderer: { kind: "plotly", version: "4" }, config: {} }, { kind: "plotly", version: "4" });
-    await adapter.mountVisualization({ name: "slowchart", renderer: { kind: "plotly", version: "4" }, config: {} }, { kind: "plotly", version: "4" });
+    await adapter.mountVisualization({ name: "revenue", renderer: { kind: "stub", version: "1" }, config: {} }, { kind: "stub", version: "1" });
+    await adapter.mountVisualization({ name: "slowchart", renderer: { kind: "stub", version: "1" }, config: {} }, { kind: "stub", version: "1" });
     const stored = { revenue: "1 / span 6 / 1 / span 4", cells: "7 / span 6 / 1 / span 4", total: "1 / span 3 / 5 / span 2", slowchart: "4 / span 9 / 5 / span 2" };
     for (const [name, expected] of Object.entries(stored)) assert.equal(placement(container, name), expected, name + " at 640 host px");
     assert.equal(observer.observed(), 1, "the composite host is observed");
@@ -1163,14 +1001,14 @@ test("composite dispose removes the mounted DOM; a host sibling stands; re-mount
   try {
     const runtime = require(resolveStatic("datapipelines-dashboard.js"));
     runtime._internal.resetRenderers();
-    runtime.registerRenderer({ kind: "plotly", version: "4", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
+    runtime.registerRenderer({ kind: "stub", version: "1", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
     const container = fakeElement("div");
     const neighbour = fakeElement("div");
     neighbour.setAttribute("id", "host-owned");
     container.appendChild(neighbour);
     const adapter = runtime.adapters(container);
     await adapter.mountLayout({ columns: 12, grid: [] });
-    await adapter.mountVisualization({ name: "v", renderer: { kind: "plotly", version: "4" }, config: {} }, { kind: "plotly", version: "4" });
+    await adapter.mountVisualization({ name: "v", renderer: { kind: "stub", version: "1" }, config: {} }, { kind: "stub", version: "1" });
     await adapter.renderParameters(compositeState());
     const mountedSets = () => container.querySelectorAll(".dp-dashboard").length;
     assert.equal(mountedSets(), 1, "one layout mounted");

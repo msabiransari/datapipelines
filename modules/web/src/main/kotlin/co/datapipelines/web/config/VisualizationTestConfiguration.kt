@@ -34,8 +34,9 @@ import org.springframework.transaction.support.TransactionTemplate
  * - the fixture evaluator — [WebVisualizationFixtureEvaluator], the mechanical test's step 3 over the
  *   real bounded evaluator ([TemplateEvaluateService]), admitting DRAFT pins as authoring does;
  * - the rendered-state check — the spec's §11.3 step 5 no-op, recording `not_available` (L6 renders);
- * - the mechanical check — §11.3's steps 1–4 over the deep renderer validator (the reduced Plotly
- *   schema the save-time validator also reads) and the template facts;
+ * - the mechanical check — §11.3's steps 1–4 over the renderer validator the save-time validator also reads
+ *   (the house `table`/`kpi` schemas; a `chart` document judged whole by the shared `ChartDocumentRules`)
+ *   and the template facts;
  * - the release evidence — [VisualizationReleaseEvidence], the production `ReleaseEvidence`: the exact
  *   draft locked, the latest run judged, the mechanics re-run at release;
  * - the session service — start/submit/screenshot/expiry, TTL-bound by `VisualizationConfig`.

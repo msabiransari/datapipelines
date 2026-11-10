@@ -1,0 +1,347 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://datapipelines.co/schemas/chart/1/bar.schema.json",
+  "$comment": "Product copy of the 854 lane schema (lane #860, design record 2026-11-06-neutral-chart-grammar §4.3), unchanged except this comment. Served at /schemas/chart/1/bar.schema.json.",
+  "title": "datapipelines chart document, version 1, family bar",
+  "description": "A skeleton document whose config is a bar config (spec/bar.md). Orientation is not a field: it is derived from which channel is quantitative (y = vertical bars, x = horizontal bars); exactly one of the two encodings matches.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "skeleton.schema.json"
+    }
+  ],
+  "properties": {
+    "config": {
+      "$ref": "#/$defs/config"
+    }
+  },
+  "$defs": {
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mark",
+        "encoding"
+      ],
+      "properties": {
+        "title": {
+          "$ref": "skeleton.schema.json#/$defs/title"
+        },
+        "mark": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "bar"
+            },
+            "labels": {
+              "description": "values = each bar carries its formatted value; none (default) = no value labels.",
+              "enum": [
+                "none",
+                "values"
+              ]
+            }
+          }
+        },
+        "encoding": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/vertical"
+            },
+            {
+              "$ref": "#/$defs/horizontal"
+            }
+          ]
+        }
+      }
+    },
+    "vertical": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "x": {
+          "$ref": "#/$defs/bandVertical"
+        },
+        "y": {
+          "$ref": "#/$defs/value"
+        },
+        "color": {
+          "$ref": "#/$defs/series"
+        }
+      },
+      "if": {
+        "type": "object",
+        "required": [
+          "color"
+        ]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "y": {
+            "type": "object",
+            "required": [
+              "stack"
+            ]
+          }
+        }
+      },
+      "else": {
+        "type": "object",
+        "properties": {
+          "y": {
+            "not": {
+              "type": "object",
+              "required": [
+                "stack"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "horizontal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "y": {
+          "$ref": "#/$defs/bandHorizontal"
+        },
+        "x": {
+          "$ref": "#/$defs/value"
+        },
+        "color": {
+          "$ref": "#/$defs/series"
+        }
+      },
+      "if": {
+        "type": "object",
+        "required": [
+          "color"
+        ]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "x": {
+            "type": "object",
+            "required": [
+              "stack"
+            ]
+          }
+        }
+      },
+      "else": {
+        "type": "object",
+        "properties": {
+          "x": {
+            "not": {
+              "type": "object",
+              "required": [
+                "stack"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "bandVertical": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/$defs/bandCommon"
+        }
+      ],
+      "properties": {
+        "sort": {
+          "description": "The band order, required (a library's default order is never relied on). y / -y = by the category's value (its stack or group total), ascending / descending.",
+          "oneOf": [
+            {
+              "$ref": "skeleton.schema.json#/$defs/orderSort"
+            },
+            {
+              "enum": [
+                "y",
+                "-y"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "bandHorizontal": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "#/$defs/bandCommon"
+        }
+      ],
+      "properties": {
+        "sort": {
+          "description": "As bandVertical, by the x channel. The first category in the order is drawn at the TOP.",
+          "oneOf": [
+            {
+              "$ref": "skeleton.schema.json#/$defs/orderSort"
+            },
+            {
+              "enum": [
+                "x",
+                "-x"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "bandCommon": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field",
+        "type",
+        "sort"
+      ],
+      "properties": {
+        "title": {
+          "$ref": "skeleton.schema.json#/$defs/channelTitle"
+        },
+        "type": {
+          "$ref": "skeleton.schema.json#/$defs/bandType"
+        },
+        "field": {
+          "$ref": "skeleton.schema.json#/$defs/fieldName"
+        },
+        "sort": true,
+        "format": {
+          "$ref": "skeleton.schema.json#/$defs/temporalFormat"
+        },
+        "axis": {
+          "$ref": "skeleton.schema.json#/$defs/axis"
+        }
+      },
+      "if": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "const": "temporal"
+          }
+        }
+      },
+      "else": {
+        "not": {
+          "type": "object",
+          "required": [
+            "format"
+          ]
+        }
+      }
+    },
+    "value": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "aggregate"
+      ],
+      "properties": {
+        "title": {
+          "$ref": "skeleton.schema.json#/$defs/channelTitle"
+        },
+        "type": {
+          "const": "quantitative"
+        },
+        "field": {
+          "$ref": "skeleton.schema.json#/$defs/fieldName"
+        },
+        "aggregate": {
+          "$ref": "skeleton.schema.json#/$defs/aggregate"
+        },
+        "stack": {
+          "description": "Required when color is set, forbidden otherwise: zero = stacked, normalize = stacked to 100 % of each category, null = grouped side by side.",
+          "enum": [
+            "zero",
+            "normalize",
+            null
+          ]
+        },
+        "format": {
+          "$ref": "skeleton.schema.json#/$defs/numberFormat"
+        },
+        "scale": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "domain"
+          ],
+          "properties": {
+            "domain": {
+              "$ref": "skeleton.schema.json#/$defs/domain"
+            }
+          }
+        },
+        "axis": {
+          "$ref": "skeleton.schema.json#/$defs/axis"
+        }
+      },
+      "if": {
+        "type": "object",
+        "properties": {
+          "aggregate": {
+            "const": "count"
+          }
+        }
+      },
+      "then": {
+        "not": {
+          "type": "object",
+          "required": [
+            "field"
+          ]
+        }
+      },
+      "else": {
+        "type": "object",
+        "required": [
+          "field"
+        ]
+      }
+    },
+    "series": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field",
+        "type",
+        "sort"
+      ],
+      "properties": {
+        "title": {
+          "$ref": "skeleton.schema.json#/$defs/channelTitle"
+        },
+        "type": {
+          "$ref": "skeleton.schema.json#/$defs/seriesType"
+        },
+        "field": {
+          "$ref": "skeleton.schema.json#/$defs/fieldName"
+        },
+        "sort": {
+          "$ref": "skeleton.schema.json#/$defs/orderSort"
+        },
+        "legend": {
+          "$ref": "skeleton.schema.json#/$defs/legend"
+        }
+      }
+    }
+  }
+}

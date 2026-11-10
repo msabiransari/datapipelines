@@ -1,6 +1,6 @@
 # Auth & Security Specification
 
-**Status:** v3.71 (revised — see Change Log)
+**Status:** v3.72 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
 **Last updated:** 2026-11-08
@@ -1294,6 +1294,7 @@ Two things are deliberately **not** rows in this table:
 | `/css/**` | The application stylesheets, which the unauthenticated login and error pages already render. | P3d |
 | `/js/**` | The application scripts, which the unauthenticated login and error pages already render. | P3d |
 | `/favicon.ico` | The site icon, requested by the browser on the login page before any credential exists. | P3d |
+| `/schemas/**` | The chart contract agents and hosts validate against, like /skill.md: the packaged v1 JSON Schemas, no principal, no datastore. | 860 |
 | `/error` | Boot's default error page with no stack trace or message; an anonymous error must not loop through login. | P8 |
 | `/visualizations/*/preview` | The visualization test preview: its ONLY credential is the ?session= preview token, checked by VisualizationTestCapabilities.preview; no session cookie, no other route. | 353 |
 | `/api/v1/visualizations/*/tests/sessions/*/screenshot` | The test screenshot upload: its ONLY credential is the single-use DP-Upload-Token, checked by VisualizationTestCapabilities.authorizeUpload; no cookie is read. | 353 |
@@ -1377,7 +1378,7 @@ Handler methods are not listed here: §7.6 is their reviewed table (B3 — one t
 | security-chain | `chain 1 #20` | `ExceptionTranslationFilter` | `any request` | Turns an access refusal into the entry point's 401/302 or the 403 handler (§8.2). | yes | Constant per request; key and session checks read the §11.4 cache. |
 | security-chain | `chain 1 #21` | `AuthorizationFilter` | `any request` | The §8.3 allowlist, then `authenticated()` for everything else. | yes | Constant per request; key and session checks read the §11.4 cache. |
 | handler-mapping | `requestMappingHandlerMapping` | `RequestMappingHandlerMapping` | `handler methods — auth.md §7.6 and §8.6.2` | Every `@RequestMapping` handler. Its routes are placed on §7.6's rows (governed) or in the public contract below. | yes | The handlers'. |
-| handler-mapping | `resourceHandlerMapping` | `SimpleUrlHandlerMapping` | `/**, /site/**, /webjars/**` | Static resources from the packaged classpath locations. Only the §8.3 globs (`/site/**`, `/vendor/**`, `/css/**`, `/js/**`, `/favicon.ico`, `/robots.txt`) are anonymous; every other static path needs a credential. | yes | A file read; the container bounds the response. |
+| handler-mapping | `resourceHandlerMapping` | `SimpleUrlHandlerMapping` | `/**, /site/**, /webjars/**` | Static resources from the packaged classpath locations. Only the §8.3 globs (`/site/**`, `/vendor/**`, `/css/**`, `/js/**`, `/favicon.ico`, `/schemas/**`, `/robots.txt`) are anonymous; every other static path needs a credential. | yes | A file read; the container bounds the response. |
 | handler-mapping | `welcomePageHandlerMapping` | `WelcomePageHandlerMapping` | `no URL` | Spring Boot's welcome page: no `index.html` is packaged, so it maps nothing. | no | Maps nothing. |
 | handler-mapping | `welcomePageNotAcceptableHandlerMapping` | `WelcomePageNotAcceptableHandlerMapping` | `no URL` | The welcome page's 406 companion; maps nothing for the same reason. | no | Maps nothing. |
 | handler-mapping | `beanNameHandlerMapping` | `BeanNameUrlHandlerMapping` | `no URL` | Maps a bean named like a URL; no bean is. | no | Maps nothing. |
@@ -1452,6 +1453,7 @@ Handler methods are not listed here: §7.6 is their reviewed table (B3 — one t
 | `/css/**` | The application stylesheets, which the unauthenticated login and error pages already render. | `resources` | `/css/app.css` | 200 | no principal · no write · static asset | refused |
 | `/js/**` | The application scripts, which the unauthenticated login and error pages already render. | `resources` | `/js/csrf.js` | 200 | no principal · no write · static asset | refused |
 | `/favicon.ico` | The site icon, requested by the browser on the login page before any credential exists. | `resources` | `/favicon.ico` | 200 | no principal · no write · static asset | refused |
+| `/schemas/**` | The chart contract agents and hosts validate against, like /skill.md: the packaged v1 JSON Schemas, no principal, no datastore. | `GET /schemas/chart/1/{name}.schema.json ChartSchemaController#schema` | `/schemas/chart/1/bar.schema.json` | 200 | no principal · no write · the packaged chart schemas | refused |
 | `/error` | Boot's default error page with no stack trace or message; an anonymous error must not loop through login. | `GET /error BasicErrorController#errorHtml` `GET /error BasicErrorController#error` | `/error` | 500 | no principal · no write · Boot's error page, no stack or message | same answer: 500 |
 | `/visualizations/*/preview` | The visualization test preview: its ONLY credential is the ?session= preview token, checked by VisualizationTestCapabilities.preview; no session cookie, no other route. | `GET /visualizations/{id}/preview VisualizationPreviewController#preview` | `/visualizations/00000000-0000-4000-8000-000000000000/preview` | 404 | no principal · no write · one run's saved fixtures, served only for its live preview capability — every refusal is the one 404 page | refused |
 | `/api/v1/visualizations/*/tests/sessions/*/screenshot` | The test screenshot upload: its ONLY credential is the single-use DP-Upload-Token, checked by VisualizationTestCapabilities.authorizeUpload; no cookie is read. | `POST /api/v1/visualizations/{id}/tests/sessions/{sessionId}/screenshot VisualizationTestsController#screenshot` | `/api/v1/visualizations/00000000-0000-4000-8000-000000000000/tests/sessions/00000000-0000-4000-8000-000000000000/screenshot` | 405 | POST: no principal · one screenshot row and the capability's consumption, in one transaction, for a valid capability only | own E2E: VisualizationTestSurfacesE2eTest |
@@ -1932,6 +1934,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-08 | v3.72 | 860 (#860) — renumbered at merge after #823's v3.71 | **§8.3 + §8.6.2: `/schemas/**`**, the last static pattern — `GET /schemas/chart/1/{name}.schema.json` (`ChartSchemaController#schema`) serves the chart document v1 JSON Schemas, the save path's own classpath bytes, by an allowlist of file names (any other name is the 404 envelope); anonymous for the reason the skill pair is. The static-resource row's anonymous list names the glob. No action, permission or role changes. |
 | 2026-11-08 | v3.71 | #823 managed grant at creation | §7.6: the `workspace.create` row notes the creation-time grant of the managed lake and the `datasource.grant` row notes that revoking that grant is refused (`datasource.managed`). No new route, tool, permission or role cell. |
 | 2026-11-07 | v3.70 | 838 (#838) | **§8.6.1: the conditional entry inventory** — one row per registration a configuration condition admits, first row `LakeSettlementScheduler#sweep` (`datapipelines.lake.enabled=true`): the default profile must not hold it, the lake-enabled profile must, both directions tested (`EntryInventoryE2eTest`, `LakeEnabledEntryInventoryE2eTest`). No new route, tool, permission or role. |
 | 2026-11-07 | v3.69 | #561 + #559 refused-body bounds | §8.2 includes the pre-auth filter; §8.6 bounds both refused-body drains by bytes, 10 s plus connector timeout, and eight shared permits (70 s per drain / 560 thread-seconds with the default 60 s timeout). The fixed context-wide swallowAbortedUploads=false customizer makes every 413 close without reading the remainder, throwing or dispatching /error. No action or role changes. |

@@ -10,16 +10,22 @@ import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import java.util.UUID
 
-/** Complete mechanical reports pin renderer typing and the transform output's presence/nullability contract. */
+/**
+ * Complete mechanical reports pin renderer typing and the transform output's presence/nullability contract — a table's
+ * and KPI's path bindings, and a chart's field-keyed measure (judged by its model, record §5.1).
+ */
 class VisualizationBindingContractTest {
     private val workspace = UUID.randomUUID()
 
     @Test
-    fun `table STRING values pass while Plotly STRING values remain refused`() {
+    fun `table STRING values pass while a chart's STRING measure is refused by its model`() {
         val table = run(RendererKind.TABLE, "columns[0].values", LogicalType.STRING, row = mapOf("amount" to "Jan"))
         assertPassing(table)
-        val plotly = run(RendererKind.PLOTLY, "data[0].values", LogicalType.STRING, row = mapOf("amount" to "Jan"))
-        assertFailure(plotly, "bindings", VisualizationErrorCodes.BINDING_UNBOUND, "bindings.data[0].values")
+        // The save rules refuse a STRING measure (chart.measure.not_numeric); a run over rows that reached the check
+        // anyway is refused by the model itself, naming the field and never the value.
+        val chart = run(RendererKind.CHART, "amount", LogicalType.STRING, row = mapOf("amount" to "Jan"))
+        assertFailure(chart, "fixtures", VisualizationErrorCodes.TEST_CASE_INVALID, "tests.cases[0]")
+        chart.failures.single().message shouldBe "A value of 'amount' is not a number in its column's wire form."
     }
 
     @Test
@@ -39,19 +45,15 @@ class VisualizationBindingContractTest {
     }
 
     @Test
-    fun `Plotly numeric leaves accept only INTEGER and DECIMAL while KPI keeps BIG wire strings`() {
-        listOf("data[0].y", "data[0].z[0]", "data[0].values").forEach { path ->
-            LogicalType.entries.forEach { type ->
-                withClue("$path $type") {
-                    val report = run(RendererKind.PLOTLY, path, type, row = mapOf("amount" to 1))
-                    if (type in setOf(LogicalType.INTEGER, LogicalType.DECIMAL)) {
-                        assertPassing(report)
-                    } else {
-                        assertFailure(report, "bindings", VisualizationErrorCodes.BINDING_UNBOUND, "bindings.$path")
-                    }
-                }
-            }
+    fun `a chart measure draws INTEGER and DECIMAL as numbers and BIG types as exact strings - KPI keeps BIG wire strings`() {
+        listOf(LogicalType.INTEGER, LogicalType.DECIMAL).forEach { type ->
+            withClue(type) { assertPassing(run(RendererKind.CHART, "amount", type, row = mapOf("amount" to 1), marks = 1)) }
         }
+        listOf(LogicalType.BIGINTEGER, LogicalType.BIGDECIMAL).forEach { type ->
+            withClue(type) { assertPassing(run(RendererKind.CHART, "amount", type, row = mapOf("amount" to "10"), marks = 1)) }
+        }
+        // A boolean is no measure in any wire form.
+        run(RendererKind.CHART, "amount", LogicalType.BOOLEAN, row = mapOf("amount" to true)).failures.single().step shouldBe "fixtures"
         listOf("value", "comparison.value").forEach { path ->
             listOf(LogicalType.BIGINTEGER, LogicalType.BIGDECIMAL).forEach { type ->
                 assertPassing(run(RendererKind.KPI, path, type, row = mapOf("amount" to "10.50")))
@@ -60,19 +62,17 @@ class VisualizationBindingContractTest {
     }
 
     @Test
-    fun `nullable transform output null passes at Plotly y and z while absent keys fail precisely`() {
-        listOf("data[0].y", "data[0].z[0]").forEach { path ->
-            assertPassing(run(RendererKind.PLOTLY, path, LogicalType.DECIMAL, nullable = true, row = mapOf("amount" to null)))
-            val missing = run(RendererKind.PLOTLY, path, LogicalType.DECIMAL, nullable = true, row = emptyMap())
-            assertFailure(missing, "fixtures", VisualizationErrorCodes.BINDING_UNBOUND, "tests.cases[0].rows[0].amount")
-            missing.failures.single().message shouldBe "The bound column is missing from the row that $path consumes."
-            missing.cases.getValue("rows").ok shouldBe false
-        }
+    fun `nullable transform output null passes at a chart measure while absent keys fail precisely`() {
+        assertPassing(run(RendererKind.CHART, "amount", LogicalType.DECIMAL, nullable = true, row = mapOf("amount" to null), marks = 0))
+        val missing = run(RendererKind.CHART, "amount", LogicalType.DECIMAL, nullable = true, row = emptyMap())
+        assertFailure(missing, "fixtures", VisualizationErrorCodes.BINDING_UNBOUND, "tests.cases[0].rows[0].amount")
+        missing.failures.single().message shouldBe "The bound column is missing from the row that amount consumes."
+        missing.cases.getValue("rows").ok shouldBe false
     }
 
     @Test
     fun `nonnullable transform output null is an invalid fixture rather than a missing binding`() {
-        val report = run(RendererKind.PLOTLY, "data[0].y", LogicalType.DECIMAL, row = mapOf("amount" to null))
+        val report = run(RendererKind.CHART, "amount", LogicalType.DECIMAL, row = mapOf("amount" to null))
         assertFailure(report, "fixtures", VisualizationErrorCodes.TEST_CASE_INVALID, "tests.cases[0].rows[0].amount")
         report.failures.single().message shouldBe "The column is not nullable."
         report.cases.getValue("rows").ok shouldBe false
@@ -80,15 +80,19 @@ class VisualizationBindingContractTest {
 
     @Test
     fun `nullable null never supplies the literal null for text assertions`() {
-        val report =
-            run(RendererKind.PLOTLY, "data[0].y", LogicalType.DECIMAL, nullable = true, row = mapOf("amount" to null), text = "null")
-        assertFailure(report, "assertions", VisualizationErrorCodes.TEST_CASE_INVALID, "tests.cases[0].assertions[1]")
-        report.cases.getValue("rows").ok shouldBe true
+        val table =
+            run(RendererKind.TABLE, "columns[0].values", LogicalType.DECIMAL, nullable = true, row = mapOf("amount" to null), text = "null")
+        assertFailure(table, "assertions", VisualizationErrorCodes.TEST_CASE_INVALID, "tests.cases[0].assertions[1]")
+        table.cases.getValue("rows").ok shouldBe true
+        // On a chart the text is not proven by the gap either: it stays for the browser to judge.
+        val chart = run(RendererKind.CHART, "amount", LogicalType.DECIMAL, nullable = true, row = mapOf("amount" to null), text = "null")
+        assertPassing(chart)
+        chart.unjudged.map { it.path } shouldBe listOf("tests.cases[0].assertions[1]")
     }
 
     @Test
     fun `nonnullable null failures remain bounded and counted`() {
-        val report = run(RendererKind.PLOTLY, "data[0].y", LogicalType.DECIMAL, row = mapOf("amount" to null), count = 150)
+        val report = run(RendererKind.CHART, "amount", LogicalType.DECIMAL, row = mapOf("amount" to null), count = 150)
         report.ok shouldBe false
         report.failures.size shouldBe VisualizationMechanicalCheck.MAX_FAILURES
         report.dropped shouldBe 50
@@ -104,6 +108,7 @@ class VisualizationBindingContractTest {
         row: Map<String, Any?>,
         text: String? = null,
         count: Int = 1,
+        marks: Int? = null,
     ): VisualizationMechanicalCheck.Report {
         val config =
             when (renderer) {
@@ -115,19 +120,21 @@ class VisualizationBindingContractTest {
                     """{"value":null,"comparison":{"label":"Previous","value":null}}"""
                 }
 
-                RendererKind.PLOTLY -> {
-                    when (path) {
-                        "data[0].values" -> """{"data":[{"type":"pie","values":[]}]}"""
-                        "data[0].z[0]" -> """{"data":[{"type":"heatmap","z":[[]]}]}"""
-                        else -> """{"data":[{"type":"bar","y":[]}]}"""
-                    }
+                RendererKind.CHART -> {
+                    """{"mark":{"type":"bar"},"encoding":{"x":{"field":"label","type":"nominal","sort":null},""" +
+                        """"y":{"field":"$path","type":"quantitative","aggregate":"sum"}}}"""
                 }
 
                 RendererKind.HTML, RendererKind.SVG -> {
                     error("Reserved renderer is not a test specimen.")
                 }
             }
-        val assertion = text?.let { """,{"kind":"text_visible","text":"$it"}""" }.orEmpty()
+        val chart = renderer == RendererKind.CHART
+        val assertion =
+            text?.let { """,{"kind":"text_visible","text":"$it"}""" }.orEmpty() +
+                marks?.let { """,{"kind":"mark_count","equals":$it}""" }.orEmpty()
+        // A chart's bindings are its derived field map; its contract carries the band column too.
+        val bindings = if (chart) """{"$path":"amount","label":"label"}""" else """{"$path":"amount"}"""
         val body =
             ValidatorFakes
                 .visualizationDocument(
@@ -137,7 +144,7 @@ class VisualizationBindingContractTest {
                          "renderer":{"kind":"${renderer.wire}","version":"1"},
                          "inputs":{"revenue":{"columns":[{"name":"amount","type":"DECIMAL","nullable":false}]}},
                          "transform":{"template":{"name":"finance/scripts/revenue_bars","version":2},"inputs":{"rows":"revenue"}},
-                         "config":$config,"bindings":{"$path":"amount"},
+                         "config":$config,"bindings":$bindings,
                          "tests":{"cases":[{"name":"rows","fixtures":{"revenue":[{"amount":1}]},
                          "assertions":[{"kind":"rendered"}$assertion]}]}}
                         """.trimIndent(),
@@ -145,11 +152,18 @@ class VisualizationBindingContractTest {
                 ).body
         val contract =
             ValidatorFakes.CONTRACT.copy(
-                output = ScriptContractView.Output.Table(listOf(ScriptContractView.Column("amount", type, nullable))),
+                output =
+                    ScriptContractView.Output.Table(
+                        listOfNotNull(
+                            ScriptContractView.Column("label", LogicalType.STRING, false).takeIf { chart },
+                            ScriptContractView.Column("amount", type, nullable),
+                        ),
+                    ),
             )
+        val rows = List(count) { if (chart) mapOf("label" to "Jan") + row else row }
         return VisualizationMechanicalCheck(
-            renderers = RendererConfigValidators.deep(),
-            fixtures = TestFixtureEvaluator { _, _, _ -> FixtureEvaluation.Rows(List(count) { row }) },
+            renderers = RendererConfigValidators.default(),
+            fixtures = TestFixtureEvaluator { _, _, _ -> FixtureEvaluation.Rows(rows) },
             templates = TemplateContractFacts { _, _ -> TemplatePin.Transform(PipelineVersionStatus.RELEASED, contract) },
         ).run(workspace, body)
     }

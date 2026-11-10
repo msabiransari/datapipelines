@@ -114,6 +114,7 @@ class ScriptVocabularyGuardTest {
             "datapipelines.transform.pool-size",
             "checkRemovedTransformKeys",
             "TRANSFORM_BINDING_INVALID",
+            "| `chart.transform.output_unknown` | several inputs",
             "TRANSFORM_STAGE",
             "TRANSFORMATION = \"AES/GCM/NoPadding\"",
             "visualizations whose `transform.template` pins the version",
@@ -221,6 +222,7 @@ class ScriptVocabularyGuardTest {
                 Regex("datapipelines\\.transform"), // the removed-key refusal names the old tree
                 Regex("checkRemovedTransformKeys|REMOVED_TRANSFORM_KEY_SUFFIXES|transformLegacyKeysSet"),
                 Regex("TRANSFORM_BINDING_INVALID|transform_binding_invalid"), // the visualization code
+                Regex("chart\\.transform\\.output_unknown"), // the chart save rule's `details.reason` (#860)
                 Regex("`transform\\.(?:template|inputs)`"), // the visualization block's pin and inputs keys (#640)
                 Regex("TRANSFORM_STAGE|stage:\\s*\"transform\"|\"transform\\.failed\"|\"transform\\.status\""), // the refresh stage
                 Regex("^\\s*\\| 2026-"), // a docs ledger row records the vocabulary of its day (append-only history)

@@ -1405,10 +1405,11 @@ class PromoterLensSweepTest {
 
         /** A stored visualization body (no `name`, V42): #563's revenue chart. */
         private const val VISUALIZATION_BODY =
-            """{"display_name":"Lens","description":"","renderer":{"kind":"plotly","version":"4"},""" +
+            """{"display_name":"Lens","description":"","renderer":{"kind":"chart","version":"1"},""" +
                 """"inputs":{"revenue":{"columns":[{"name":"month","type":"DATE","nullable":false},""" +
                 """{"name":"amount","type":"DECIMAL","nullable":false}]}},""" +
-                """"config":{"data":[{"type":"bar","x":[],"y":[]}]},"bindings":{"data[0].x":"month","data[0].y":"amount"},""" +
+                """"config":{"mark":{"type":"bar"},"encoding":{"x":{"field":"month","type":"temporal","sort":"ascending"},""" +
+                """"y":{"field":"amount","type":"quantitative","aggregate":"sum"}}},"bindings":{"amount":"amount","month":"month"},""" +
                 """"tests":{"cases":[{"name":"one month","fixtures":{"revenue":[{"month":"2026-01-01","amount":10.5}]},""" +
                 """"assertions":[{"kind":"rendered"}]}]}}"""
 

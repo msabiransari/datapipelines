@@ -12,11 +12,13 @@ import java.nio.file.Paths
 class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
     @Test
     @Suppress("LongMethod") // a single chart/history/zero-width journey keeps identity witnesses live
-    fun `2d and 3d workspaces versions and cached history share one bundle and retain the shell`() {
+    fun `two chart workspaces, versions and cached history share one bundle and retain the shell`() {
         val root = ready("persistcharts")
         page.setViewportSize(1440, 1000)
         val (flat, _) = createVisualization("$root/charts/flat")
-        val (surface, _) = createVisualization("$root/charts/surface", trace3d = true)
+        // #860: the second workspace is a second bar chart (the 3d surface left with the plotly kind); the shell's one
+        // bundle is still the 3d superset it loads for every chart page.
+        val (second, _) = createVisualization("$root/charts/second")
         openVisualizations(root)
         page.evaluate(
             "() => " +
@@ -46,8 +48,8 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         page.waitForURL("**/visualizations/$flat?version=1&tab=preview")
         preview()
         sameShell()
-        page.click("#nav-tree-visualizations a[href='/visualizations/$surface']")
-        page.waitForURL("**/visualizations/$surface")
+        page.click("#nav-tree-visualizations a[href='/visualizations/$second']")
+        page.waitForURL("**/visualizations/$second")
         preview()
         sameShell()
         page.evaluate("() => window.Plotly===window.__plotly && window.DatapipelinesDashboard===window.__runtime") shouldBe true
@@ -58,7 +60,7 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         // #581: the Visualizations item lands on the family overview (a boosted leave either way).
         page.waitForSelector(".app-overview[data-overview='visualizations']")
         page.goBack()
-        page.waitForURL("**/visualizations/$surface")
+        page.waitForURL("**/visualizations/$second")
         preview()
         sameShell()
         page.goBack()
@@ -66,7 +68,7 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         preview()
         sameShell()
         page.goForward()
-        page.waitForURL("**/visualizations/$surface")
+        page.waitForURL("**/visualizations/$second")
         preview()
         sameShell()
         treeRequests.size shouldBe 0
