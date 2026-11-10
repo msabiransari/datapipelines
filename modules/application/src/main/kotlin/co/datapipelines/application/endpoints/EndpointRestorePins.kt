@@ -36,6 +36,7 @@ class EndpointRestorePins(
     private val maxBlockers: Int,
 ) {
     /** Refuses the restore of [restored] at [pathPattern] when its pin dangles (400) or reaches a draft (409). */
+    @Suppress("ThrowsCount") // each refusal is its own catalogued code and field path, in record §25.4's order
     fun recheck(
         workspaceId: UUID,
         pathPattern: String,
@@ -59,6 +60,7 @@ class EndpointRestorePins(
         transitive(root, pathPattern, pinned, body, actor)
     }
 
+    @Suppress("ThrowsCount") // the walk's dangling node (400) and its drafts (409) are two catalogued refusals
     private fun transitive(
         root: ReleaseNodeIdentity,
         pathPattern: String,

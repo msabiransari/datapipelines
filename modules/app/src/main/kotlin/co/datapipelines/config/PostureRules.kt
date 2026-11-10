@@ -1,6 +1,7 @@
 package co.datapipelines.config
 
 import co.datapipelines.web.config.DeploymentEnv
+import org.springframework.core.env.Environment
 
 /**
  * The §3.23 posture rules (075), lifted out of [ConfigValidator]'s companion so neither
@@ -222,6 +223,13 @@ internal object PostureRules {
 
     /** §3.19 — the authoring capability's key; `AuthoringGuard.CONFIG_KEY` in pipeline-contract, which `app` does not see. */
     const val AUTHORING_KEY = "datapipelines.deployment.authoring-enabled"
+
+    /**
+     * §3.19 (#786 §E.4) — the RESOLVED capability [checkHardenedAuthoring] judges: the posture profile's default or an
+     * override. A value Spring cannot read as a boolean is the binding's own refusal, so it is carried as unknown (null).
+     */
+    fun authoringEnabledOf(environment: Environment): Boolean? =
+        runCatching { environment.getProperty(AUTHORING_KEY, Boolean::class.java) }.getOrNull()
 
     /**
      * §7 / §3.23 (#189) — a passwordless Redis off loopback is a REFUSAL under `hardened`,

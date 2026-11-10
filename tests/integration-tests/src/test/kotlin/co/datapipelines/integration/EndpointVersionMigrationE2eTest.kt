@@ -280,7 +280,14 @@ class EndpointVersionMigrationE2eTest {
                 .extract()
                 .jsonPath()
                 .getString("data.id")
-        val hash = session().get("/api/v1/endpoints/$id/versions/1").then().statusCode(200).extract().jsonPath().getString("data.body_hash")
+        val hash =
+            session()
+                .get("/api/v1/endpoints/$id/versions/1")
+                .then()
+                .statusCode(200)
+                .extract()
+                .jsonPath()
+                .getString("data.body_hash")
         return id to hash
     }
 

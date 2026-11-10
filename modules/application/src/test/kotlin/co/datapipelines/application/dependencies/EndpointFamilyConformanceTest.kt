@@ -42,7 +42,14 @@ class EndpointFamilyConformanceTest {
     private val versions = mockk<PublishedEndpointVersionRepository>()
     private val descriptor = ReleaseDependencyFamilies.descriptor(ReleaseFamily.ENDPOINT, EndpointDependencySource(versions))
     private val context =
-        ResolveContext(workspaceId, MetadataSnapshot.READ_COMMITTED, Purpose.RELEASE_PLANNING, Authority.System, Deadline.none(), ReadIsolation.NONE)
+        ResolveContext(
+            workspaceId,
+            MetadataSnapshot.READ_COMMITTED,
+            Purpose.RELEASE_PLANNING,
+            Authority.System,
+            Deadline.none(),
+            ReadIsolation.NONE,
+        )
 
     private fun identity(version: Int) = ReleaseNodeIdentity(workspaceId, ReleaseFamily.ENDPOINT, path, version)
 
@@ -89,7 +96,14 @@ class EndpointFamilyConformanceTest {
         resolved.identity.stableEntityId shouldBe endpointId.toString()
         resolved.body.currentVersion shouldBe 2
         descriptor.provider.outgoing(resolved).map { Triple(it.relationship, it.sourcePath, it.request.selector) } shouldContainExactly
-            listOf(Triple(Relationship.PIPELINE_PIN, "pipeline_version", co.datapipelines.dependencies.Selector.ExactVersion(4)))
+            listOf(
+                Triple(
+                    Relationship.PIPELINE_PIN,
+                    "pipeline_version",
+                    co.datapipelines.dependencies.Selector
+                        .ExactVersion(4),
+                ),
+            )
     }
 
     @Test

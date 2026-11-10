@@ -87,7 +87,13 @@ class EndpointPromotionImportIntegrationTest {
 
     @Test
     fun `on an authoring-disabled target the native create refuses while the import writes the API and its v1`() {
-        pipeline("acme/rides/daily", current = 3, PipelineVersionStatus.RELEASED, PipelineVersionStatus.RELEASED, PipelineVersionStatus.RELEASED)
+        pipeline(
+            "acme/rides/daily",
+            current = 3,
+            PipelineVersionStatus.RELEASED,
+            PipelineVersionStatus.RELEASED,
+            PipelineVersionStatus.RELEASED,
+        )
         withClue("the native creation path (REST and MCP share it) is an authoring operation: refused here") {
             shouldThrow<DatapipelinesException> {
                 publishing().create(principal(), "/acme/v1/rides", "acme/rides/daily", 3, 45, "Daily rides")
@@ -96,9 +102,10 @@ class EndpointPromotionImportIntegrationTest {
         }
 
         val imported =
-            receiverTransaction.execute {
-                importer().importPromoted(workspaceId, userId, "/acme/v1/rides", "acme/rides/daily", 45, "Daily rides")
-            }.shouldNotBeNull()
+            receiverTransaction
+                .execute {
+                    importer().importPromoted(workspaceId, userId, "/acme/v1/rides", "acme/rides/daily", 45, "Daily rides")
+                }.shouldNotBeNull()
 
         val v1 = versions.find(imported.id, 1).shouldNotBeNull()
         withClue("the pin is the TARGET pipeline's CURRENT at receive time; nothing on the wire chose it") {
@@ -114,9 +121,10 @@ class EndpointPromotionImportIntegrationTest {
     fun `a DRAFT current imports as v1 DRAFT - the API serves at the target iff it would have before`() {
         pipeline("acme/rides/drafty", current = 2, PipelineVersionStatus.RELEASED, PipelineVersionStatus.DRAFT)
         val imported =
-            receiverTransaction.execute {
-                importer().importPromoted(workspaceId, userId, "/acme/v1/drafty", "acme/rides/drafty", null, "")
-            }.shouldNotBeNull()
+            receiverTransaction
+                .execute {
+                    importer().importPromoted(workspaceId, userId, "/acme/v1/drafty", "acme/rides/drafty", null, "")
+                }.shouldNotBeNull()
         val v1 = versions.find(imported.id, 1).shouldNotBeNull()
         v1.status shouldBe PipelineVersionStatus.DRAFT
         v1.body.pipelineVersion shouldBe 2
@@ -258,7 +266,8 @@ class EndpointPromotionImportIntegrationTest {
 
     private fun versionCount() =
         count(
-            "SELECT COUNT(*) FROM published_endpoint_versions v JOIN published_endpoints e ON e.id = v.endpoint_id WHERE e.workspace_id = :ws",
+            "SELECT COUNT(*) FROM published_endpoint_versions v JOIN published_endpoints e ON e.id = v.endpoint_id " +
+                "WHERE e.workspace_id = :ws",
         )
 
     private fun versionLess() =

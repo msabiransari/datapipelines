@@ -596,11 +596,9 @@ object ApiErrorCatalog {
      * NOT here — a node over the page budget is a server-side defect and keeps its stack.
      */
     val EXPECTED_UNAVAILABLE: Set<String> =
-        setOf(
-            PipelineErrorCodes.Navigation.VIEW_UNAVAILABLE,
-            // #786 E.3 — the release-planning deadline's refusal, one per family (record §25.4: WARN without stack).
-            *RELEASE_METADATA_UNAVAILABLE.toTypedArray(),
-        )
+        // #786 E.3 — beside the view, the release-planning deadline's refusal, one per family (record §25.4: WARN
+        // without stack).
+        setOf(PipelineErrorCodes.Navigation.VIEW_UNAVAILABLE) + RELEASE_METADATA_UNAVAILABLE
 
     /** #786 E.3 — every family's `<family>.release.metadata_unavailable` (record §25.4, erratum (6)). */
     private val RELEASE_METADATA_UNAVAILABLE: Set<String>
@@ -720,10 +718,8 @@ object ApiErrorCatalog {
             "lake." to "The lake is busy with another change to this table. Try again shortly.",
         )
 
-    private val USER_MESSAGE_OVERRIDES: Map<String, String> =
+    private val AUTHORED_USER_MESSAGES: Map<String, String> =
         mapOf(
-            // #786 E.3 — the planning deadline is an outage to wait out, not a dependency to release first.
-            *RELEASE_METADATA_UNAVAILABLE.map { it to RELEASE_METADATA_USER_MESSAGE }.toTypedArray(),
             PipelineErrorCodes.Lake.CAPACITY_BUSY to "Delivery capacity is busy. Retry when an ingestion slot and scratch are available.",
             PipelineErrorCodes.Lake.APPEND_GRANT_MISSING to "The execution has no checked authority to append to the lake.",
             PipelineErrorCodes.Lake.APPEND_OUTCOME_UNKNOWN to
@@ -875,4 +871,11 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Versioning.AUTHORING_DISABLED to RECEIVER_USER_MESSAGE,
             PipelineErrorCodes.Template.AUTHORING_DISABLED to RECEIVER_USER_MESSAGE,
         )
+
+    /**
+     * #786 E.3 — the planning deadline is an outage to wait out, not a dependency to release first. The family codes
+     * come first, so an authored entry still wins a clash exactly as it did when they were spread at the literal's head.
+     */
+    private val USER_MESSAGE_OVERRIDES: Map<String, String> =
+        RELEASE_METADATA_UNAVAILABLE.associateWith { RELEASE_METADATA_USER_MESSAGE } + AUTHORED_USER_MESSAGES
 }

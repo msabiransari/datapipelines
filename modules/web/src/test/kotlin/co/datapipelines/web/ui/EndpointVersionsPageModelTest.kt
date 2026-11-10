@@ -60,7 +60,11 @@ class EndpointVersionsPageModelTest {
     private val bindings = mockk<EndpointKeyBindingRepository> { every { findByWorkspace(any()) } returns emptyList() }
     private val apiKeys = mockk<ApiKeyRepository> { every { findByWorkspaceAndKind(any(), any()) } returns emptyList() }
     private val pipelines = mockk<PipelineRepository>()
-    private val pins = mockk<EndpointPinValidator> { every { eligible(any()) } answers { firstArg<PipelineVersionStatus>() == PipelineVersionStatus.RELEASED } }
+    private val pins =
+        mockk<EndpointPinValidator> {
+            every { eligible(any()) } answers
+                { firstArg<PipelineVersionStatus>() == PipelineVersionStatus.RELEASED }
+        }
     private val coordinator = mockk<ReleaseCoordinator>()
     private val model =
         EndpointVersionsPageModel(publishing, versions, bindings, apiKeys, pipelines, pins, AuthoringGuard(false), coordinator)
@@ -125,7 +129,11 @@ class EndpointVersionsPageModelTest {
         )
         every { pipelines.findCurrentVersions(workspaceId) } returns
             listOf(CurrentPipelineVersion(pipelineId, "finance/revenue", "Revenue", 4, "x", PipelineVersionStatus.RELEASED))
-        val record = mockk<PipelineRecord> { every { id } returns pipelineId; every { currentVersion } returns 4 }
+        val record =
+            mockk<PipelineRecord> {
+                every { id } returns pipelineId
+                every { currentVersion } returns 4
+            }
         every { pipelines.findByName(workspaceId, "finance/revenue") } returns record
         every { pipelines.listVersions(workspaceId, pipelineId) } returns
             listOf(

@@ -35,6 +35,7 @@ import java.util.UUID
  * The POST still re-runs the guard — a pin can land between the dialog opening and the button
  * being pressed, and the screen is never the authority. These models only decide what to SAY.
  */
+@Suppress("LongParameterList") // constructor injection (§8.4): each blocker family is its own read port (#786 B.4)
 class PipelineLifecycleDialogModel(
     private val repository: PipelineRepository,
     private val templates: TemplateVersionStatuses,

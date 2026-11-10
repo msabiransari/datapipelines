@@ -15,18 +15,18 @@ import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.api.TestMethodOrder
+import org.springframework.beans.factory.config.BeanPostProcessor
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.beans.factory.config.BeanPostProcessor
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
 import org.springframework.test.annotation.DirtiesContext
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
-import java.security.MessageDigest
 import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Proxy
+import java.security.MessageDigest
 import java.sql.Connection
 import java.sql.DriverManager
 import java.util.UUID
@@ -112,8 +112,10 @@ class EndpointReleaseCascadeE2eTest {
                 ),
         )
 
-    private fun statuses(state: Map<String, List<String>>, key: String): List<String> =
-        state.getValue(key).map { it.split(" | ")[STATUS_COLUMN] }
+    private fun statuses(
+        state: Map<String, List<String>>,
+        key: String,
+    ): List<String> = state.getValue(key).map { it.split(" | ")[STATUS_COLUMN] }
 
     // ---- the witness --------------------------------------------------------------------------------------------
 
@@ -416,13 +418,16 @@ class EndpointReleaseCascadeE2eTest {
         fun seed() {
             DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
                 connection.createStatement().use { statement ->
-                    statement.execute("INSERT INTO workspaces (id, name, display_name) VALUES ('$WORKSPACE_ID', '$WORKSPACE', 'Cascade 786')")
+                    statement.execute(
+                        "INSERT INTO workspaces (id, name, display_name) VALUES ('$WORKSPACE_ID', '$WORKSPACE', 'Cascade 786')",
+                    )
                     statement.execute(
                         "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES" +
                             " ('$ADMIN_ID', 'e2e-786-cascade@datapipelines.test', 'E2E 786', 'test', 'e2e-786-cascade-sub', TRUE, FALSE)",
                     )
                     statement.execute(
-                        "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ('$WORKSPACE_ID', '$ADMIN_ID', 'workspace_admin')",
+                        "INSERT INTO workspace_members (workspace_id, user_id, role) " +
+                            "VALUES ('$WORKSPACE_ID', '$ADMIN_ID', 'workspace_admin')",
                     )
                 }
             }

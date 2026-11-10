@@ -157,7 +157,8 @@ class EndpointVersionBodyHashIntegrationTest {
             mapOf("id" to workspaceId, "name" to "w_${workspaceId.toString().replace("-", "")}", "owner" to userId),
         )
         jdbc.update(
-            "INSERT INTO pipelines (id, name, display_name, owner_id, current_version, workspace_id) VALUES (:id, :name, 'P', :owner, 1, :ws)",
+            "INSERT INTO pipelines (id, name, display_name, owner_id, current_version, workspace_id) " +
+                "VALUES (:id, :name, 'P', :owner, 1, :ws)",
             mapOf("id" to pipelineId, "name" to body.pipelineName, "owner" to userId, "ws" to workspaceId),
         )
         val endpoint =
@@ -190,7 +191,11 @@ class EndpointVersionBodyHashIntegrationTest {
     }
 
     private fun bindingCount(workspaceId: UUID): Int =
-        jdbc.queryForObject("SELECT COUNT(*) FROM endpoint_key_bindings WHERE workspace_id = :ws", mapOf("ws" to workspaceId), Int::class.java)
+        jdbc.queryForObject(
+            "SELECT COUNT(*) FROM endpoint_key_bindings WHERE workspace_id = :ws",
+            mapOf("ws" to workspaceId),
+            Int::class.java,
+        )
             ?: 0
 
     private fun storedHash(

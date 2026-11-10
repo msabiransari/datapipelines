@@ -382,6 +382,7 @@ class PublishedEndpointServeService(
      * an ineligible API version, a missing or DISCARDED pinned version — is the §5.6 `pipeline_not_released` refusal.
      * `findCurrentVersion` is never called here: moving the pipeline's current never moves what an API serves (A06).
      */
+    @Suppress("ReturnCount") // one early null per link of the resolution chain above, in its order
     private fun pointedVersion(endpoint: PublishedEndpoint): Pointed? {
         val api = versions.findCurrent(endpoint.id) ?: return null
         if (!servable(api.status)) return null

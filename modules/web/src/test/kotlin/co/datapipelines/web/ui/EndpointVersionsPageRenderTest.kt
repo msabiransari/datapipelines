@@ -106,7 +106,16 @@ class EndpointVersionsPageRenderTest {
     @Test
     fun `the release dialog posts the tree hash and its draft dependencies under consent - a blocker leaves no form`() {
         val dependency = EndpointVersionsPageModel.Dependency("n1", "finance/revenue@4", "pipeline", "DRAFT")
-        val dialog = EndpointVersionsPageModel.ReleaseDialog(id, 3, "finance/revenue@4", "h3", "t".repeat(64), listOf(dependency), emptyList())
+        val dialog =
+            EndpointVersionsPageModel.ReleaseDialog(
+                id,
+                3,
+                "finance/revenue@4",
+                "h3",
+                "t".repeat(64),
+                listOf(dependency),
+                emptyList(),
+            )
         val doc = partial("partials/endpoint-lifecycle-release", dialog)
         doc.select("form").attr("hx-post") shouldBe "/partials/endpoints/$id/lifecycle/release"
         doc.select("input[name=treeHash]").attr("value") shouldBe "t".repeat(64)
@@ -126,7 +135,18 @@ class EndpointVersionsPageRenderTest {
 
     @Test
     fun `each single-version dialog posts its own verb for its own version`() {
-        val dialog = EndpointVersionsPageModel.VersionDialog(id, "/api/finance/v1/revenue", 2, "RELEASED", "finance/revenue@2", "h2", false, true, false)
+        val dialog =
+            EndpointVersionsPageModel.VersionDialog(
+                id,
+                "/api/finance/v1/revenue",
+                2,
+                "RELEASED",
+                "finance/revenue@2",
+                "h2",
+                false,
+                true,
+                false,
+            )
         listOf("discard", "restore", "purge", "switch").forEach { verb ->
             val doc = partial("partials/endpoint-lifecycle-$verb", dialog)
             doc.select("form").attr("hx-post") shouldBe "/partials/endpoints/$id/lifecycle/$verb?version=2"

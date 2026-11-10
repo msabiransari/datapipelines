@@ -100,7 +100,8 @@ class ApiAndScheduleConsumersIntegrationTest {
         )
         // v1 and v2 RELEASED, v2 current — a noncurrent release (v1) is the case the API's own pin keeps alive.
         jdbc.update(
-            "INSERT INTO pipelines (id, name, display_name, owner_id, current_version, workspace_id) VALUES (:id, :name, 'P', :owner, 2, :ws)",
+            "INSERT INTO pipelines (id, name, display_name, owner_id, current_version, workspace_id) " +
+                "VALUES (:id, :name, 'P', :owner, 2, :ws)",
             mapOf("id" to pipelineId, "name" to pipelineName, "owner" to userId, "ws" to workspaceId),
         )
         pipelineVersion(1, RELEASED)

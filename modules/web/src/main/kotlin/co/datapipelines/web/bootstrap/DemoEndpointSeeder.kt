@@ -280,7 +280,7 @@ class DemoEndpointSeeder(
      * the next target proceeds — a demo seed is never worth a refused boot, and the count this
      * returns is what actually landed, not what was wanted.
      */
-    @Suppress("TooGenericExceptionCaught") // the point IS any failure: one ERROR line, boot proceeds
+    @Suppress("TooGenericExceptionCaught", "NestedBlockDepth") // any failure is one ERROR line; #786 A.5 nests in it
     private fun publishWanted(
         system: co.datapipelines.auth.User,
         demoId: UUID,

@@ -35,8 +35,9 @@ import org.springframework.transaction.support.TransactionTemplate
  * manager so it never joins a weaker caller (#868 G1, record §7.2 step 2).
  *
  * The neutral dependency registry (#868 G1, record §3.2) is assembled here by DI from the descriptor beans: in G1 the
- * pipeline and template release sources, plus the API family (#786, its descriptor in `EndpointsConfiguration`). [FamilyRegistry.production] refuses a duplicate key and a key outside
- * `FamilyKey.PRODUCTION`, so either fails the context at startup.
+ * pipeline and template release sources, plus the API family (#786, its descriptor in `EndpointsConfiguration`).
+ * [FamilyRegistry.production] refuses a duplicate key and a key outside `FamilyKey.PRODUCTION`, so either fails the
+ * context at startup.
  */
 @Configuration
 @EnableConfigurationProperties(ReleaseDependencyProperties::class)

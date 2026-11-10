@@ -108,6 +108,7 @@ class ReleaseCoordinator(
      * re-walk compared again, dependencies first and the root last, then the strict audit rows. Without a plan only the
      * root flips: a DRAFT anywhere below it is `dependency_not_released`, read again under the guard.
      */
+    @Suppress("CyclomaticComplexMethod", "ThrowsCount") // record §7.2's release steps in order, one refusal per step
     fun releaseRoot(request: RootReleaseRequest): RootReleased {
         val rootFamily = request.family
         val root = rootOf(rootFamily)

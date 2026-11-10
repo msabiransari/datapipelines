@@ -28,10 +28,20 @@ class EndpointPromotionImportReachabilityTest {
         if (files.size < SCAN_FLOOR) fail("the scan saw only ${files.size} production Kotlin files (floor $SCAN_FLOOR)")
         val texts = files.associate { it.relativeTo(root).invariantSeparatorsPath to it.readText() }
 
-        val naming = texts.filterValues { TYPE_TOKEN.containsMatchIn(it) }.keys.map { it.substringAfterLast('/') }.toSet()
+        val naming =
+            texts
+                .filterValues { TYPE_TOKEN.containsMatchIn(it) }
+                .keys
+                .map { it.substringAfterLast('/') }
+                .toSet()
         withClue("files that name EndpointPromotionImport") { naming shouldBe setOf(OWN_FILE, COLLABORATOR, ASSEMBLY) }
 
-        val callers = texts.filterValues { CALL_TOKEN.containsMatchIn(it) }.keys.map { it.substringAfterLast('/') }.toSet()
+        val callers =
+            texts
+                .filterValues { CALL_TOKEN.containsMatchIn(it) }
+                .keys
+                .map { it.substringAfterLast('/') }
+                .toSet()
         withClue("files that call importPromoted(") { callers shouldBe setOf(COLLABORATOR) }
 
         val exposing = texts.filterValues { RETURNS_TYPE.containsMatchIn(it) }.keys

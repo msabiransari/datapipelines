@@ -84,7 +84,12 @@ class EndpointLifecycleDialogController(
     ): ResponseEntity<String> {
         val principal = LifecycleVerbs.requireSession()
         val saved =
-            versions.saveDraft(principal, id, EndpointVersionService.DraftInput(pipeline, pipelineVersion, timeoutSeconds, description), ifMatch)
+            versions.saveDraft(
+                principal,
+                id,
+                EndpointVersionService.DraftInput(pipeline, pipelineVersion, timeoutSeconds, description),
+                ifMatch,
+            )
         return redirect(id, saved.version, "api_draft_saved")
     }
 

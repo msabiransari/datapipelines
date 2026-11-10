@@ -89,6 +89,7 @@ import org.springframework.transaction.support.TransactionTemplate
  * same trade the pool publisher documents.
  */
 @Configuration
+@Suppress("TooManyFunctions") // one @Bean per collaborator of the API family; #786 added the version and lifecycle beans
 class EndpointsConfiguration {
     /**
      * The registry's persistence. Declared here rather than in `DomainConfiguration` for

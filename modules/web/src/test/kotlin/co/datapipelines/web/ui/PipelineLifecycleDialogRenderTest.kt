@@ -24,6 +24,7 @@ import java.util.UUID
  * renders exactly one, and the two irreversible dialogs carry the typed confirm (§5.1:
  * the field, the expectation, and a button that starts DISABLED).
  */
+@Suppress("LargeClass") // one dialog family: every verb's render, its blockers (#786 B.4 adds APIs and schedules)
 class PipelineLifecycleDialogRenderTest {
     @Test
     fun `release - a clean draft offers the button and states the lock`() {

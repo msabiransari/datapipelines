@@ -978,10 +978,7 @@ class ConfigValidator(
                 deploymentName = environment.getProperty(DeploymentEnv.LEGACY_ENV_KEY),
                 authAllowLocalOnly =
                     environment.getProperty("datapipelines.auth.allow-local-only", Boolean::class.java) ?: false,
-                // §3.19 (#786 §E.4) — the RESOLVED capability (the posture's profile default or an override); a value
-                // Spring cannot read as a boolean is the binding's own refusal, so it is carried as unknown here.
-                authoringEnabled =
-                    runCatching { environment.getProperty(PostureRules.AUTHORING_KEY, Boolean::class.java) }.getOrNull(),
+                authoringEnabled = PostureRules.authoringEnabledOf(environment), // §3.19 (#786 §E.4)
                 mail = MailRules.snapshot(environment),
             )
 

@@ -192,7 +192,9 @@ class EndpointVersionsPageModel(
                 .orEmpty()
                 .filter { it.status != PipelineVersionStatus.DISCARDED }
                 .map { PinOption(it.version, it.status.name, pins.eligible(it.status), it.version == record?.currentVersion) }
-        val keep = base.version.body.pipelineVersion.takeIf { chosen == base.version.body.pipelineName }
+        val keep =
+            base.version.body.pipelineVersion
+                .takeIf { chosen == base.version.body.pipelineName }
         return DraftDialog(
             id = id,
             isNew = draft == null,
@@ -298,7 +300,9 @@ class EndpointVersionsPageModel(
         Dependency(
             nodeId = node.nodeId,
             label = node.name + "@" + node.identity.version,
-            family = node.identity.family.name.lowercase(),
+            family =
+                node.identity.family.name
+                    .lowercase(),
             status = node.status.name,
         )
 

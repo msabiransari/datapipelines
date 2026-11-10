@@ -51,6 +51,7 @@ class EndpointReleaseSteps(
     }
 
     /** Step 4: the native checks of the API draft at [identity], against [expectedHash] (the root's `If-Match`). */
+    @Suppress("ThrowsCount") // plan conflict, not-a-draft and the If-Match conflict are distinct catalogued refusals
     fun prepare(
         identity: ReleaseNodeIdentity,
         entityUuid: UUID?,

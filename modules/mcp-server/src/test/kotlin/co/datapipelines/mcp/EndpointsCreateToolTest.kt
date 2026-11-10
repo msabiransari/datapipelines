@@ -16,10 +16,10 @@ import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
-import io.modelcontextprotocol.spec.McpError
 import io.mockk.confirmVerified
 import io.mockk.mockk
 import io.mockk.verify
+import io.modelcontextprotocol.spec.McpError
 import org.junit.jupiter.api.Test
 
 /**
@@ -36,7 +36,14 @@ class EndpointsCreateToolTest {
         val publishing = mockk<EndpointPublishService>(relaxed = true)
         runCatching {
             EndpointsTools.CreateTool(publishing).call(
-                McpArguments(mapOf("path" to "/finance/v1/revenue", "pipeline" to "finance/revenue", "pipeline_version" to 4, "timeout_seconds" to 60)),
+                McpArguments(
+                    mapOf(
+                        "path" to "/finance/v1/revenue",
+                        "pipeline" to "finance/revenue",
+                        "pipeline_version" to 4,
+                        "timeout_seconds" to 60,
+                    ),
+                ),
                 ctx,
             )
         }
