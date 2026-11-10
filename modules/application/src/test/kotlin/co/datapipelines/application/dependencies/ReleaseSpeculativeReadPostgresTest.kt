@@ -103,7 +103,7 @@ class ReleaseSpeculativeReadPostgresTest {
     }
 
     @Test
-    fun `control - a SQL failure the old walk reaches propagates unchanged, directly and after a forgiven speculation`() {
+    fun `control - a SQL failure the old walk reaches propagates unchanged and aborts the caller's transaction as it did`() {
         val direct =
             differential { g ->
                 g.node(g.id("root", 1, ReleaseFamily.PIPELINE), ReleaseNodeStatus.DRAFT, BROKEN to "nodes[0].template")
@@ -117,7 +117,10 @@ class ReleaseSpeculativeReadPostgresTest {
         }
         // The old walk's own failure aborts the caller's transaction; the new walk's does exactly the same.
         direct.getValue(GUARDED).old.callerAfter shouldBe IN_FAILED_TRANSACTION
+    }
 
+    @Test
+    fun `a SQL failure the old walk reaches after a forgiven speculation propagates unchanged`() {
         val later =
             differential { g ->
                 val a = g.node(g.id("a", 1), ReleaseNodeStatus.RELEASED)
