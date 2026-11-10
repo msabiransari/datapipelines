@@ -11,6 +11,8 @@ import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.guard.MetadataWriterGuard
 import org.springframework.transaction.support.TransactionOperations
+import org.springframework.transaction.support.TransactionSynchronization
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.time.Instant
 import java.util.UUID
 
@@ -77,6 +79,27 @@ class EndpointPublishService(
         return requireNotNull(result) { "the transaction callback did not run" }.getOrThrow()
     }
 
+    /**
+     * Invalidates the serve registry — locally and on every peer (a Redis publish) — once the transaction that OWNS this
+     * write commits, and never when it rolls back (#841 G0, R2 of the landing review). Returning from [inTransaction] is
+     * not that moment: the REST routes and a promotion receive supply an OUTER transaction which the callback joins, so
+     * the row and the workspace/registry guards are still uncommitted and held when it returns. Invalidating there would
+     * make an outbound call under those locks and let a peer reload — and cache — the pre-commit registry. Registered
+     * inside the transaction, the synchronization belongs to whichever transaction is actual: the outer one when joined,
+     * this service's own otherwise. With no transaction at all (the directly constructed test shape) it runs at once.
+     */
+    private fun invalidateAfterCommit() {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            registry.invalidate()
+            return
+        }
+        TransactionSynchronizationManager.registerSynchronization(
+            object : TransactionSynchronization {
+                override fun afterCommit() = registry.invalidate()
+            },
+        )
+    }
+
     /** The §5.5 clamp, passed in so `modules/application` reads no configuration itself. */
     data class TimeoutBounds(
         val defaultSeconds: Int,
@@ -134,24 +157,27 @@ class EndpointPublishService(
                 requireDeclaredVariables(parsed, version, pipelineName, pathPattern)
 
                 writeGuard.endpointRegistry(PipelineErrorCodes.Endpoint.WRITE_BUSY)
-                endpoints.insert(
-                    PublishedEndpoint.of(
-                        id = UUID.randomUUID(),
-                        workspaceId = workspaceId,
-                        pathPattern = parsed.pattern,
-                        pipelineId = record.id,
-                        timeoutSeconds = timeouts.clamp(timeoutSeconds),
-                        description = description,
-                        isEnabled = true,
-                        createdBy = principal.userId,
-                        createdAt = Instant.now(),
-                        updatedAt = Instant.now(),
-                    ),
-                )
+                val inserted =
+                    endpoints.insert(
+                        PublishedEndpoint.of(
+                            id = UUID.randomUUID(),
+                            workspaceId = workspaceId,
+                            pathPattern = parsed.pattern,
+                            pipelineId = record.id,
+                            timeoutSeconds = timeouts.clamp(timeoutSeconds),
+                            description = description,
+                            isEnabled = true,
+                            createdBy = principal.userId,
+                            createdAt = Instant.now(),
+                            updatedAt = Instant.now(),
+                        ),
+                    )
+                // After the OWNING transaction commits, so a peer that reloads on the message cannot read the pre-write
+                // state, and no outbound call runs under the guards (#841 R2).
+                invalidateAfterCommit()
+                inserted
             }
 
-        // AFTER the write, so a peer that reloads on the message cannot read the pre-write state.
-        registry.invalidate()
         audit.log(
             event = AUDIT_PUBLISHED,
             userId = principal.userId,
@@ -194,10 +220,12 @@ class EndpointPublishService(
             inTransaction {
                 writeGuard.workspaces(listOf(existing.workspaceId), PipelineErrorCodes.Endpoint.WRITE_BUSY)
                 writeGuard.endpointRegistry(PipelineErrorCodes.Endpoint.WRITE_BUSY)
-                endpoints.findRowByPath(stored)?.takeIf { it.id == existing.id }?.let { endpoints.deleteByPath(stored) } ?: false
+                val deleted =
+                    endpoints.findRowByPath(stored)?.takeIf { it.id == existing.id }?.let { endpoints.deleteByPath(stored) } ?: false
+                if (deleted) invalidateAfterCommit()
+                deleted
             }
         if (removed) {
-            registry.invalidate()
             audit.log(
                 event = AUDIT_UNPUBLISHED,
                 userId = principal.userId,
