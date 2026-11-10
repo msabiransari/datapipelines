@@ -53,7 +53,10 @@ import kotlin.io.path.writeText
  *   the operator's fix (delete the API) lets the next boot convert the rest;
  * - conversion racing a discard of the version it would pin, both orders, under the real G0 guard: a raw connection
  *   holds the workspace row (as a writer in flight would), both writers queue on it — observed with
- *   `pg_blocking_pids`, never timed — and the holder's commit releases them in queue order.
+ *   `pg_blocking_pids`, never timed — and the holder's commit releases them in queue order;
+ * - the same two-connection race for an API draft REPIN against the discard of the version it moves to (A39): the
+ *   repin first protects the version (the discard is refused as pinned), the discard first leaves nothing to repin
+ *   onto (the repin is the native 400).
  */
 @Testcontainers
 @ExtendWith(OutputCaptureExtension::class)
@@ -211,6 +214,88 @@ class EndpointVersionMigrationE2eTest {
         scalar<Int>("SELECT current_version FROM pipelines WHERE id = '$racing'") shouldBe 2
         version("/e2emig/v1/race-b") shouldBe listOf("RELEASED", "test/e2emig_race_b", 2, 30, "", 1, true)
     }
+
+    @Test
+    @Order(7)
+    fun `an API draft repin racing a discard - the repin first pins the version, and the discard is refused as pinned (A39)`() {
+        val name = "test/e2emig_repin_a"
+        val racing = pipelineCopy(name, current = 2, "RELEASED", "RELEASED")
+        val (apiId, hash) = nativeApi("/e2emig/v1/repin-a", name, pipelineVersion = 1)
+
+        val (repin, discard) =
+            holdingWorkspace { holder ->
+                val repin = CompletableFuture.supplyAsync { saveDraft(apiId, hash, name, pipelineVersion = 2) }
+                awaitWaiters(holder, 1)
+                val discard = CompletableFuture.supplyAsync { session().post("/api/v1/pipelines/$racing/versions/2/discard") }
+                awaitWaiters(holder, 2)
+                repin to discard
+            }
+
+        repin.get(2, TimeUnit.MINUTES).statusCode shouldBe 200
+        val refused = discard.get(2, TimeUnit.MINUTES)
+        refused.statusCode shouldBe 409
+        refused.jsonPath().getString("error.code") shouldBe "pipeline.version.pinned"
+        refused.jsonPath().getList<String>("error.details.referencing_api_versions.path") shouldContain "/e2emig/v1/repin-a"
+        scalar<Int>("SELECT current_version FROM pipelines WHERE id = '$racing'") shouldBe 2
+        version("/e2emig/v1/repin-a") shouldBe listOf("DRAFT", name, 2, 30, "", 1, true)
+    }
+
+    @Test
+    @Order(8)
+    fun `an API draft repin racing a discard - the discard first wins, and the repin onto the discarded version is refused (A39)`() {
+        val name = "test/e2emig_repin_b"
+        val racing = pipelineCopy(name, current = 2, "RELEASED", "RELEASED")
+        val (apiId, hash) = nativeApi("/e2emig/v1/repin-b", name, pipelineVersion = 1)
+
+        val (discard, repin) =
+            holdingWorkspace { holder ->
+                val discard = CompletableFuture.supplyAsync { session().post("/api/v1/pipelines/$racing/versions/2/discard") }
+                awaitWaiters(holder, 1)
+                val repin = CompletableFuture.supplyAsync { saveDraft(apiId, hash, name, pipelineVersion = 2) }
+                awaitWaiters(holder, 2)
+                discard to repin
+            }
+
+        discard.get(2, TimeUnit.MINUTES).statusCode shouldBe 200
+        val refused = repin.get(2, TimeUnit.MINUTES)
+        refused.statusCode shouldBe 400
+        refused.jsonPath().getString("error.code") shouldBe "endpoint.pipeline_version.not_found"
+        scalar<Int>("SELECT current_version FROM pipelines WHERE id = '$racing'") shouldBe 1
+        version("/e2emig/v1/repin-b") shouldBe listOf("DRAFT", name, 1, 30, "", 1, true)
+    }
+
+    /** A native API (REST create: v1 DRAFT, current) pinned to [pipelineVersion] of [pipeline]; its id and v1's hash. */
+    private fun nativeApi(
+        path: String,
+        pipeline: String,
+        pipelineVersion: Int,
+    ): Pair<String, String> {
+        val id =
+            session()
+                .contentType(ContentType.JSON)
+                .body("""{"path": "$path", "pipeline": "$pipeline", "pipeline_version": $pipelineVersion, "timeout_seconds": 30}""")
+                .post("/api/v1/endpoints")
+                .then()
+                .statusCode(201)
+                .extract()
+                .jsonPath()
+                .getString("data.id")
+        val hash = session().get("/api/v1/endpoints/$id/versions/1").then().statusCode(200).extract().jsonPath().getString("data.body_hash")
+        return id to hash
+    }
+
+    /** Saves the API's working draft onto [pipelineVersion] under `If-Match` [hash] — a repin. */
+    private fun saveDraft(
+        apiId: String,
+        hash: String,
+        pipeline: String,
+        pipelineVersion: Int,
+    ): Response =
+        session()
+            .contentType(ContentType.JSON)
+            .header("If-Match", hash)
+            .body("""{"pipeline": "$pipeline", "pipeline_version": $pipelineVersion}""")
+            .put("/api/v1/endpoints/$apiId/draft")
 
     // ------------------------------------------------------------------ boot + fixtures
 
