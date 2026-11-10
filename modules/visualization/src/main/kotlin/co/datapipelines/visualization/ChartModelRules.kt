@@ -3,7 +3,6 @@ package co.datapipelines.visualization
 import co.datapipelines.typesystem.LogicalType
 import com.fasterxml.jackson.databind.JsonNode
 import java.math.BigDecimal
-import java.math.MathContext
 import java.math.RoundingMode
 
 /** A wire value's identity and text, as the browser's core reads them (`typeof v + ':' + String(v)`). */
@@ -40,58 +39,20 @@ internal object ChartValues {
      * ECMAScript `Number::toString` of [d] (ECMA-262 §6.1.6.1.20): the shortest round-tripping digits, laid out
      * plainly from 1e-6 to below 1e21, exponentially outside (`1e+21`, `5e-324`). A category of `1.0` is the text
      * `1`, as the browser draws it.
-     *
-     * The digits are ECMA's OWN search, not the JDK's: `Double.toString` is shortest since JDK 19 but DISAGREES
-     * with ECMA on subnormals — the JDK prints `MIN_VALUE` as `4.9E-324` where every browser prints `5e-324`
-     * (measured on Temurin 21 vs node 24, 860b R4). The search rounds the binary value's exact decimal expansion
-     * to k significant digits (HALF_EVEN — ECMA's tie rule) for k = 1..17 and takes the first k whose double
-     * round-trips; at that k the HALF_EVEN rounding is the closest k-digit decimal, ties to the even digit, which
-     * is ECMA's s.
      */
-    @Suppress("MagicNumber") // the ECMA-262 layout bounds (21 and -6) and the digit search's 17
-    fun number(d: Double): String {
-        if (d.isNaN()) return "NaN"
-        if (d.isInfinite()) return if (d > 0) "Infinity" else "-Infinity"
-        if (d == 0.0) return "0"
-        val sign = if (d < 0) "-" else ""
-        val (digits, scale) = shortestDigits(Math.abs(d))
-        return sign + ecmaLayout(digits, scale)
-    }
+    fun number(d: Double): String = EcmaNumberText.of(d)
+}
 
-    /** The first k (1..17) HALF_EVEN-rounded significant digits of [a] whose double round-trips: ECMA's s and k. */
-    @Suppress("MagicNumber") // the digit search's 17 (ECMA's s bound: any double round-trips by 17 digits)
-    private fun shortestDigits(a: Double): Pair<String, Int> {
-        for (k in 1..17) {
-            val rounded = BigDecimal(a).round(MathContext(k, RoundingMode.HALF_EVEN))
-            if (rounded.toDouble() == a) return rounded.unscaledValue().toString() to rounded.scale()
-        }
-        return BigDecimal(a).toPlainString() to 0
-    }
+/** Scale before summing absolute magnitudes so a finite category's normalized shares cannot overflow. */
+internal class ChartNormalization(
+    values: List<Double>,
+) {
+    private val maximum = values.maxOfOrNull { Math.abs(it) } ?: 0.0
+    private val total = if (maximum == 0.0) 0.0 else values.sumOf { Math.abs(it) / maximum }
 
-    /** ECMA-262 §6.1.6.1.20's step 8-10 layout: [digits] of length k with point position n = k - [scale]. */
-    @Suppress("MagicNumber") // the ECMA-262 layout bounds (21 and -6)
-    private fun ecmaLayout(digits: String, scale: Int): String {
-        val k = digits.length
-        val n = k - scale
-        return when {
-            n in k..21 -> {
-                digits + "0".repeat(n - k)
-            }
-
-            n in 1..21 -> {
-                digits.substring(0, n) + "." + digits.substring(n)
-            }
-
-            n in -5..0 -> {
-                "0." + "0".repeat(-n) + digits
-            }
-
-            else -> {
-                val e = n - 1
-                val mantissa = if (k == 1) digits else digits[0] + "." + digits.substring(1)
-                mantissa + "e" + (if (e >= 0) "+" else "-") + Math.abs(e)
-            }
-        }
+    fun share(value: Double): Double {
+        val share = if (total == 0.0) 0.0 else (value / maximum) / total
+        return if (share == 0.0) 0.0 else share
     }
 }
 

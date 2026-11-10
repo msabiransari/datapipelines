@@ -57,10 +57,12 @@ class ChartModelParityTest {
     }
 
     @Test
-    fun `the numeric cases meet the record's values on both sides`() {
+    fun `independent corpus expectations judge both sides even when their implementations share a regression`() {
         val numeric = CASES.filterKeys { it.startsWith("numeric/") }
         numeric.size shouldBe NUMERIC_CASES
-        numeric.forEach { (name, case) ->
+        val expected = CASES.filterValues { case -> EXPECTED_FIELDS.any { case.expect.has(it) } }
+        expected.size shouldBe EXPECTED_CASES
+        expected.forEach { (name, case) ->
             val expect = case.expect
             val js = JS.getValue(name)
             withClue(name) {
@@ -70,9 +72,21 @@ class ChartModelParityTest {
                     js.path("categories").map { it.path("full").asText() } shouldBe wanted
                 }
                 expect.get("exact")?.let { want ->
-                    val wanted = want.map { row -> row.map(JsonNode::asText) }
+                    val wanted = want.map { row -> row.map { if (it.isNull) null else it.asText() } }
                     case.model().cells.map { row -> row.map { it.exact } } shouldBe wanted
-                    js.path("cells").map { row -> row.map { it.path("exact").asText() } } shouldBe wanted
+                    val actual = js.path("cells").map { row -> row.map { it.path("exact").takeUnless(JsonNode::isNull)?.asText() } }
+                    actual shouldBe wanted
+                }
+                expect.get("num")?.let { want ->
+                    val wanted = want.map { row -> row.map { if (it.isNull) null else it.asDouble() } }
+                    case.model().cells.map { row -> row.map { it.num } } shouldBe wanted
+                    val actual = js.path("cells").map { row -> row.map { it.path("num").takeUnless(JsonNode::isNull)?.asDouble() } }
+                    actual shouldBe wanted
+                }
+                expect.get("series_full")?.let { want ->
+                    val wanted = want.map(JsonNode::asText)
+                    case.model().series.map { it.full } shouldBe wanted
+                    js.path("series").map { it.path("full").asText() } shouldBe wanted
                 }
             }
         }
@@ -119,8 +133,8 @@ class ChartModelParityTest {
 
         const val MIN_VALIDATION_CASES = 20
 
-        /** 25 at the first delivery; 860b's two fixtures and one numeric case raise it to 28 — dropping any corpus entry goes red. */
-        const val MIN_MODELLED = 28
+        /** Every corpus case is pinned: removing a case must fail even when both sides read the reduced list. */
+        const val MIN_MODELLED = 30
         const val MIN_NON_EMPTY = 15
 
         /**
@@ -129,7 +143,9 @@ class ChartModelParityTest {
          * shortest-digits case (a float category's text is the browser's: the smallest subnormal is `5e-324`, not the
          * JDK's `4.9E-324`).
          */
-        const val NUMERIC_CASES = 6
+        const val NUMERIC_CASES = 8
+        const val EXPECTED_CASES = 24
+        private val EXPECTED_FIELDS = listOf("categories_full", "series_full", "exact", "num")
 
         private val mapper = ArtifactJson.mapper
 

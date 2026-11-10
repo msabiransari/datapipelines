@@ -1430,6 +1430,7 @@
     if (!this._owns(name, refreshId)) return; // a newer run owns it
     var state = payload.state;
     if (state === "no-data") {
+      if (this._occurrences[name].emptyRenderFailed === refreshId) return;
       this._renderOccurrenceStatus(name, { state: "no-data", stale: false, reason: null, refreshId: refreshId });
       this._renderEmpty(name, refreshId);
       return;
@@ -1539,7 +1540,7 @@
    * Record 2026-11-06 §5.2 — a zero-row refresh sends no data frame, only `no-data`. For a renderer with an empty
    * state of its own (the chart kind's `renderEmpty`: the no-marks option, the previous refresh's marks gone), an
    * OWNED no-data draws it once per refresh; the callers check ownership before calling. A no-data the renderer
-   * already acknowledged for this refresh (`emptied`) is not drawn twice.
+   * already attempted for this refresh (`emptied`) is not drawn twice, and a failed attempt stays an error.
    */
   DashboardInstance.prototype._renderEmpty = function (name, refreshId) {
     var self = this;
@@ -1568,6 +1569,7 @@
       },
       function (error) {
         if (self._disposed || !self._owns(name, refreshId)) return;
+        occurrence.emptyRenderFailed = refreshId;
         var code = isDashboardError(error) ? error.code : "render.failed";
         self._renderOccurrenceStatus(name, {
           state: "error",
@@ -1634,6 +1636,7 @@
     for (var i = 0; i < refresh.targets.length; i++) {
       var name = refresh.targets[i];
       if (!this._owns(name, refresh.id)) continue; // a newer run owns it — completion cannot clear it
+      var occurrence = this._occurrences[name];
       var outcome = targets[name] || {};
       // The REAL wire's target outcomes (RefreshJob's TargetOutcome): "ok" | "no-data" | "error" |
       // "abort". "ok" — the server delivered the data — behaves like a data frame already applied:
@@ -1644,7 +1647,6 @@
         // "abort"): an abort chip still standing at completion is this client's own optimistic render
         // from an abort whose confirmation never decided it (#356) — the terminal frame's truth
         // restores the delivered state.
-        var occurrence = this._occurrences[name];
         if (occurrence && occurrence.status === "abort") {
           this._renderOccurrenceStatus(name, { state: "success", stale: false, reason: null, refreshId: refresh.id });
           this._scheduleSuccessSettle(name, refresh.id);
@@ -1652,6 +1654,7 @@
         continue;
       }
       if (outcome.outcome === "no-data") {
+        if (occurrence.emptyRenderFailed === refresh.id) continue;
         this._renderOccurrenceStatus(name, { state: "no-data", stale: false, reason: null, refreshId: refresh.id });
         this._renderEmpty(name, refresh.id);
       } else if (outcome.outcome === "abort") {

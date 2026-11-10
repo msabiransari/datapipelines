@@ -2547,3 +2547,73 @@ test("an empty draw whose deadline fires after its refresh was superseded publis
     instance.dispose();
   }
 });
+
+test("a failed empty draw stays failed through later no-data frames of the same refresh, and a new refresh can recover", async () => {
+  let releaseCompletion;
+  const completionGate = new Promise((resolve) => { releaseCompletion = resolve; });
+  let emptyStarted;
+  const clearStarted = new Promise((resolve) => { emptyStarted = resolve; });
+  let refreshId;
+  let clears = 0;
+  const adapter = scriptedAdapter({
+    mountVisualization: () => Promise.resolve({
+      renderData: () => Promise.resolve("rendered"),
+      renderEmpty: () => {
+        clears++;
+        emptyStarted();
+        return new Promise(() => {});
+      },
+    }),
+  });
+  adapter.renderStatus = (occurrence, status) =>
+    adapter.log.push("status:" + occurrence.name + ":" + status.state + (status.reason ? ":" + status.reason.code : ""));
+  const fetchImpl = fakeFetch();
+  fetchImpl.on("/runtime/visualizations", (url, init) => {
+    refreshId = JSON.parse(init.body).refresh_id;
+    const response = fetchImpl.stream([
+      fetchImpl.frame("visualization_status", { refresh_id: refreshId, name: "chart", state: "no-data" }),
+      fetchImpl.frame("refresh_completed", { refresh_id: refreshId, status: "COMPLETED", targets: { chart: { outcome: "no-data" } } }),
+    ]);
+    const originalReader = response.body.getReader;
+    response.body.getReader = () => {
+      const reader = originalReader();
+      let reads = 0;
+      return {
+        read: async () => {
+          if (reads++ === 1) await completionGate;
+          return reader.read();
+        },
+        cancel: reader.cancel,
+      };
+    };
+    return response;
+  });
+  const { instance } = await boot({ fetch: fetchImpl, adapter, initOptions: { renderTimeoutMs: 30 } });
+  const lastStatus = () => adapter.log.filter((line) => line.startsWith("status:chart:")).at(-1);
+  try {
+    await instance.refresh({ scope: "targets", targets: ["chart"] });
+    await clearStarted;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.equal(lastStatus(), "status:chart:error:render.timeout", "positive control: the clear actually timed out");
+    instance._onFrame("visualization_status", { refresh_id: refreshId, name: "chart", state: "no-data" });
+    assert.equal(lastStatus(), "status:chart:error:render.timeout", "a repeated no-data status cannot hide the failed clear");
+    releaseCompletion();
+    await settle();
+    assert.equal(lastStatus(), "status:chart:error:render.timeout", "the later terminal frame cannot hide the failed clear");
+    assert.equal(clears, 1);
+    assert.equal(adapter.log.filter((line) => line === "notify:render.failed").length, 1);
+    fetchImpl.on("/runtime/visualizations", (url, init) => {
+      const newerId = JSON.parse(init.body).refresh_id;
+      return fetchImpl.stream([
+        fetchImpl.frame("visualization_data", { refresh_id: newerId, name: "chart", bindings: { x: [2] }, rows: 1, bytes: 4 }),
+        fetchImpl.frame("refresh_completed", { refresh_id: newerId, status: "COMPLETED", targets: { chart: { outcome: "ok" } } }),
+      ]);
+    });
+    await instance.refresh({ scope: "targets", targets: ["chart"] });
+    await settle();
+    assert.equal(lastStatus(), "status:chart:success", "the failure belongs only to the old refresh");
+  } finally {
+    releaseCompletion();
+    instance.dispose();
+  }
+});

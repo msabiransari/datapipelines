@@ -162,10 +162,16 @@ class ChartModel private constructor(
                         ?.takeUnless { it.isNull }
                         ?.asText()
                 }
+            val normalizers =
+                if (stack == NORMALIZE) {
+                    categories.map { c -> ChartNormalization(series.mapNotNull { cell(c, it).num?.takeIf(Double::isFinite) }) }
+                } else {
+                    emptyList()
+                }
             val cells =
                 series.map { s ->
-                    categories.map { c ->
-                        drawn(cell(c, s), stack) { series.sumOf { t -> cell(c, t).num?.takeIf(Double::isFinite)?.let(Math::abs) ?: 0.0 } }
+                    categories.mapIndexed { index, c ->
+                        drawn(cell(c, s), stack) { normalizers[index].share(it) }
                     }
                 }
             return ChartModel(ch.vertical, stack, categories, series, cells, seen.nullCategories, seen.nullSeries, colorField != null)
@@ -206,12 +212,12 @@ class ChartModel private constructor(
         /**
          * A cell as drawn: a gap stays a gap; a value float64 cannot carry (860b R1 — an aggregate past ±1.7e308, exact
          * or float) draws nothing, the same gap the browser's core draws; a normalized stack draws its share of the
-         * category's [absoluteTotal].
+         * category's absolute total, computed through [normalizedShare] without overflowing that total.
          */
         private fun drawn(
             r: ChartAggregates.Result,
             stack: String?,
-            absoluteTotal: () -> Double,
+            normalizedShare: (Double) -> Double,
         ): Cell =
             when {
                 r.num == null || !r.num.isFinite() -> {
@@ -219,8 +225,7 @@ class ChartModel private constructor(
                 }
 
                 stack == NORMALIZE -> {
-                    val abs = absoluteTotal()
-                    Cell(if (abs != 0.0) r.num / abs else 0.0, null, r.text)
+                    Cell(normalizedShare(r.num), null, r.text)
                 }
 
                 else -> {

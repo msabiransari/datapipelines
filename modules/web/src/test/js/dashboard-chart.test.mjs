@@ -441,6 +441,7 @@ test("niceTicks terminates on the ranges float64 can barely carry and keeps ordi
   for (const t of max.ticks) assert.ok(Number.isFinite(t), "every tick is finite: " + t);
   const span = chart.core.niceTicks(-1.7e308, 1.7e308, 5);
   assert.ok(Number.isFinite(span.lo) && Number.isFinite(span.hi), "a finite range in, a finite range out");
+  assert.ok(Number.isFinite(span.step) && span.step > 0, "the fallback step must remain finite and positive");
   assert.ok(span.ticks.length > 0 && span.ticks.every((t) => Number.isFinite(t)), JSON.stringify(span.ticks));
   const tiny = chart.core.niceTicks(0, 5e-324, 5);
   assert.ok(tiny.ticks.length > 0 && tiny.ticks.every((t) => Number.isFinite(t)), JSON.stringify(tiny.ticks));
@@ -527,4 +528,29 @@ test("an authored domain at float64's edge converts: the range is the authored e
   ).option;
   assert.deepEqual(option.layout.yaxis.range, [0, 1.7e308]);
   assert.ok(option.layout.yaxis.tickvals.every((t) => Number.isFinite(t)), JSON.stringify(option.layout.yaxis.tickvals));
+});
+
+test("normalization preserves finite shares when their unscaled absolute total overflows", () => {
+  const normalized = spec({
+    mark: { type: "bar", labels: "values" },
+    encoding: {
+      x: { field: "region", type: "nominal", sort: null },
+      y: { field: "amount", type: "quantitative", aggregate: "sum", stack: "normalize", format: "percent" },
+      color: { field: "channel", type: "nominal", sort: null },
+    },
+  });
+  for (const [values, expected] of [
+    [[1e308, 1e308], [0.5, 0.5]],
+    [[Number.MAX_VALUE, Number.MAX_VALUE], [0.5, 0.5]],
+    [[-1e308, 1e308], [-0.5, 0.5]],
+    [[0, 0], [0, 0]],
+    [[-Number.MIN_VALUE, Number.MAX_VALUE], [0, 1]],
+  ]) {
+    const bindings = { region: ["A", "A"], channel: ["one", "two"], amount: values };
+    const model = chart.core.model(normalized, bindings, TOKENS);
+    assert.deepEqual(model.cells.map((row) => row[0].num), expected, String(values));
+    assert.equal(model.warnings.length, 0);
+    const option = convert(normalized, bindings, TOKENS).option;
+    assert.deepEqual(option.data.map((trace) => trace.y[0]), expected, "the converter uses the independent expected shares");
+  }
 });

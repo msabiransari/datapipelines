@@ -68,9 +68,20 @@ for (const name of corpus.numeric) {
   cases["numeric/" + name] = modelOf(f.spec, f.bindings);
 }
 
+// The oracle is Node's built-in String(Number), independent of either chart
+// implementation. IEEE bits preserve subnormals, signed zero and all digits.
+const text = {};
+for (const bits of corpus.text) {
+  if (!/^[0-9a-f]{16}$/.test(bits) || Object.hasOwn(text, bits)) {
+    throw new Error("invalid or duplicate text-oracle bit pattern: " + bits);
+  }
+  text[bits] = String(Buffer.from(bits, "hex").readDoubleBE(0));
+}
+
 mkdirSync(dirname(resolve(out)), { recursive: true });
 rmSync(out, { force: true });
 const tmp = out + ".tmp";
-writeFileSync(tmp, JSON.stringify({ chart: resolve(chartPath), cases }, null, 1) + "\n");
+writeFileSync(tmp, JSON.stringify({ chart: resolve(chartPath), cases, text }, null, 1) + "\n");
 renameSync(tmp, out);
 console.log("CHART_PARITY_CASES=" + Object.keys(cases).length);
+console.log("CHART_TEXT_CASES=" + Object.keys(text).length + " seed=" + corpus.text_seed);

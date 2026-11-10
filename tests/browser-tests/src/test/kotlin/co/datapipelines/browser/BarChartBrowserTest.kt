@@ -333,6 +333,36 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
         }
     }
 
+    @Test
+    fun `two finite bars whose absolute total overflows draw equal nonzero shares`() {
+        startTrace()
+        val root = ready("vbarnormalizedoverflow")
+        val source = ChartBrowserFixtures.fixture("bar-normalized")
+        val rows =
+            JsonParser
+                .parseString("""[{"region":"A","channel":"one","amount":1e308},{"region":"A","channel":"two","amount":1e308}]""")
+                .asJsonArray
+                .map { it.asJsonObject }
+        val expected =
+            JsonParser
+                .parseString(
+                    """{"bars":2,"categories":["A"],"vertical":true,"hover":[],
+                       "label_texts":[{"si":0,"ci":0,"text":"50%"},{"si":1,"ci":0,"text":"50%"}]}""",
+                ).asJsonObject
+        val fixture = ChartBrowserFixtures.Fixture("normalized-overflow", source.spec, rows, expected)
+        val agent = newYorkContext()
+        try {
+            val preview = open(agent, "$root/charts/normalized_overflow", fixture)
+            try {
+                assertDrawn(preview, fixture)
+            } finally {
+                preview.close()
+            }
+        } finally {
+            agent.close()
+        }
+    }
+
     private fun overflowFixture(): ChartBrowserFixtures.Fixture {
         val rawSpec =
             """

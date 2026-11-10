@@ -91,6 +91,9 @@ class ChartModelTest {
             9007199254740992.0 to "9007199254740992",
             Double.MAX_VALUE to "1.7976931348623157e+308",
             2.2250738585072014e-308 to "2.2250738585072014e-308",
+            // The nearest 16-digit decimal is outside the narrower lower rounding interval here;
+            // the adjacent upper candidate round-trips and is shorter than the exact 17 digits.
+            Math.scalb(1.0, -24) to "5.960464477539063e-8",
         ).forEach { (d, text) -> withClue(d) { ChartValues.number(d) shouldBe text } }
     }
 

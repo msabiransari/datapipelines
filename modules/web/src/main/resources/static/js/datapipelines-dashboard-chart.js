@@ -135,12 +135,16 @@
   // overflow to Infinity mid-loop and never terminate, which hangs the whole render).
   var FLOAT64_MAX = Number.MAX_VALUE;
 
-  /** The bounded fallback: the range clamped to float64's finite extremes, its two endpoints the only ticks. */
+  /** The bounded fallback: finite endpoints, with a midpoint when their full span would overflow. */
   function boundedTicks(lo, hi) {
     var a = Math.max(Math.min(lo, FLOAT64_MAX), -FLOAT64_MAX);
     var b = Math.max(Math.min(hi, FLOAT64_MAX), -FLOAT64_MAX);
     if (!(b > a)) b = a < FLOAT64_MAX ? Math.min(a + 1, FLOAT64_MAX) : a;
-    return { lo: a, hi: b, step: b - a, ticks: [a, b] };
+    if (!(b > a)) return { lo: a, hi: b, step: 1, ticks: [a] };
+    var span = b - a;
+    return isFinite(span)
+      ? { lo: a, hi: b, step: span, ticks: [a, b] }
+      : { lo: a, hi: b, step: b / 2 - a / 2, ticks: [a, a / 2 + b / 2, b] };
   }
 
   /** 1-2-2.5-5 ticks covering lo..hi — at most [count] + [TICK_SLACK] intervals before the bounded fallback. */
@@ -461,11 +465,27 @@
     var locale = tokens.locale;
     var normalize = stack === "normalize";
     var fmt = numberFormatter(normalize ? value.enc.format || "percent" : value.enc.format, locale);
+    // Scale finite values before summing: two drawable 1e308 bars still have equal, nonzero shares.
+    var normalizers = normalize ? categories.map(function (c) {
+      var maximum = 0;
+      var total = 0;
+      for (var i = 0; i < series.length; i++) {
+        var v = cell(c, series[i]).num;
+        if (v !== null && isFinite(v)) maximum = Math.max(maximum, Math.abs(v));
+      }
+      if (maximum) {
+        for (var j = 0; j < series.length; j++) {
+          var n = cell(c, series[j]).num;
+          if (n !== null && isFinite(n)) total += Math.abs(n) / maximum;
+        }
+      }
+      return { maximum: maximum, total: total };
+    }) : [];
     // #860 R1 — a value float64 cannot carry (an aggregate past ±1.7e308, exact or float) draws as a gap,
     // never a zero and never Infinity: the bar is not drawn and one data warning names the rule.
     var undrawn = 0;
     var cells = series.map(function (s2) {
-      return categories.map(function (c) {
+      return categories.map(function (c, index) {
         var r = cell(c, s2);
         if (r.num === null || !isFinite(r.num)) {
           if (r.num !== null) undrawn++;
@@ -473,12 +493,9 @@
         }
         var text = r.exact !== null ? r.exact : String(r.num);
         if (normalize) {
-          var abs = 0;
-          for (var t = 0; t < series.length; t++) {
-            var v = cell(c, series[t]).num;
-            if (v !== null && isFinite(v)) abs += Math.abs(v);
-          }
-          var share = abs ? r.num / abs : 0;
+          var norm = normalizers[index];
+          var share = norm.total ? (r.num / norm.maximum) / norm.total : 0;
+          if (share === 0) share = 0; // canonical positive zero, including an underflowed negative share
           return { num: share, exact: null, text: fmt(share), aggregate: text };
         }
         return { num: r.num, exact: r.exact, text: fmt(r.exact !== null ? r.exact : r.num), aggregate: text };
