@@ -14,6 +14,7 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.transaction.support.TransactionSynchronization
 import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.sql.SQLException
+import java.time.Duration
 import java.util.SortedSet
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -40,7 +41,9 @@ import java.util.concurrent.TimeUnit
  * replanning retries) fixes `D = t0 + lockWaitSeconds` on the injected monotonic [nanoTime]. Every later statement reads
  * the clock and is granted `D − now` as its statement-local `lock_timeout` (bound as a parameter through `set_config`,
  * then restored, so the transaction's other waits keep the server's setting); at `now ≥ D` it refuses without issuing
- * the statement. The invariant is elapsed time against `D`, never a sum of the limits granted.
+ * the statement. The invariant is elapsed time against `D`, never a sum of the limits granted. A scope opened with a
+ * ceiling caps `D` at the scope's opening plus that ceiling (#841 R4: the freshness repair's one 5 s budget on the
+ * jobs' shared thread, whatever `lock-wait-seconds` is set to).
  *
  * **Refusal.** A statement that timed out is recognised by SQLSTATE `55P03` on the cause chain — never by Spring's
  * exception type, which the shipped translator answers as `UncategorizedSQLException` — and refuses with that cause
@@ -105,9 +108,27 @@ class JdbcReleaseMutationGuard(
         state.registry = true
     }
 
-    override fun <T> withinOneDeadline(block: () -> T): T {
-        if (scope.get() != null) return block()
-        scope.set(DeadlineScope())
+    override fun <T> withinOneDeadline(block: () -> T): T = scoped(cap = null, block)
+
+    override fun <T> withinOneDeadline(
+        ceiling: Duration,
+        block: () -> T,
+    ): T {
+        require(!ceiling.isNegative && !ceiling.isZero) { "a deadline ceiling must be positive, was $ceiling" }
+        return scoped(cap = nanoTime() + ceiling.toNanos(), block)
+    }
+
+    /** Opens this thread's scope (or, nested, tightens the open one's [cap]: a ceiling never loosens a deadline). */
+    private fun <T> scoped(
+        cap: Long?,
+        block: () -> T,
+    ): T {
+        val open = scope.get()
+        if (open != null) {
+            open.cap = earliest(open.cap, cap)
+            return block()
+        }
+        scope.set(DeadlineScope(cap))
         try {
             return block()
         } finally {
@@ -163,14 +184,30 @@ class JdbcReleaseMutationGuard(
         refusal: (Throwable?) -> DatapipelinesException,
     ): DatapipelinesException? = if (sqlStates(e).any { it == LOCK_NOT_AVAILABLE }) refusal(e) else null
 
-    /** `D`, fixed once: by the open scope when there is one, else by this transaction's first acquisition. */
+    /**
+     * `D`, fixed once: by the open scope when there is one, else by this transaction's first acquisition — and never
+     * later than the open scope's ceiling ([withinOneDeadline] with a ceiling, #841 R4).
+     */
     private fun deadlineFor(state: TxState): Long {
         val open = scope.get()
-        val deadline = state.deadline ?: open?.deadline ?: (nanoTime() + boundNanos)
+        val fixed = state.deadline ?: open?.deadline ?: (nanoTime() + boundNanos)
+        val deadline = earliest(fixed, open?.cap) ?: fixed
         state.deadline = deadline
         open?.deadline = deadline
         return deadline
     }
+
+    /** The earlier of two monotonic instants, either absent; compared by difference, as `System.nanoTime` requires. */
+    private fun earliest(
+        a: Long?,
+        b: Long?,
+    ): Long? =
+        when {
+            a == null -> b
+            b == null -> a
+            b - a < 0 -> b
+            else -> a
+        }
 
     private fun state(): TxState {
         check(TransactionSynchronizationManager.isActualTransactionActive()) {
@@ -191,8 +228,10 @@ class JdbcReleaseMutationGuard(
     private fun sqlStates(e: Throwable): Sequence<String> =
         generateSequence(e) { it.cause.takeUnless { cause -> cause === it } }.filterIsInstance<SQLException>().mapNotNull { it.sqlState }
 
-    /** A replanning scope's deadline: unset until the scope's first acquisition. */
-    private class DeadlineScope {
+    /** A replanning scope's deadline: unset until the scope's first acquisition, and never past [cap] when one is set. */
+    private class DeadlineScope(
+        var cap: Long?,
+    ) {
         var deadline: Long? = null
     }
 

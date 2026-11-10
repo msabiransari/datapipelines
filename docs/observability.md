@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.68 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.69 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-08
@@ -288,7 +288,7 @@ Every `@Scheduled` job but the pool reaper — the stale-execution sweep (every 
 |---|---|---|---|---|
 | Stale-execution sweep (`execution.sweep_failed`) | 10 s | 15 s | 20 s | 30 s |
 | Dashboard refresh sweep (`dashboard.refresh_sweep_failed`) | 10 s | 15 s | 20 s | 30 s |
-| Managed lake freshness tick (two statements) | 5 s | 10 s | 15 s | 25 s |
+| Managed lake freshness tick (two steps; the grant repair's statements, its lock's included, share ONE 5 s budget, #841 R4) | 5 s | 10 s | 15 s | 25 s |
 | Retention sweep (`retention.step_failed`, six isolated steps) | 25 s | 30 s | 35 s | 45 s |
 | Lake settlement tick (`lake.settle.sweep_deferred`) | 5 s per statement | 10 s | 15 s | 25 s |
 
@@ -775,6 +775,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-10 | v1.69 | 841 (#841 R4) | **§3.4H**: the freshness tick's row names two steps: the grant repair's statements, the writer lock's included, share one 5 s budget and each carries the 10 s socket bound, so a step queued behind a held lock still ends at 5 s. No new event or metric. |
 | 2026-11-08 | v1.68 | 858 (#858) | **§3.4H**: the lake settlement tick's statements carry the socket bound too, through the lake runtime's own template: its row reads a 5 s statement bound, a 10 s socket bound, a 15 s end against a hung server and 25 s with the 10 s acquire, named as a separate wait; the shutdown row lists its 15 s end. No new event or metric. |
 | 2026-11-08 | v1.67 | 833 (#833, #824, #840) managed generation bounds | **§3.4A**: `datasource.pool_close_stuck` is reported at each pool's own deadline, from its `connectionTimeout` plus, for a managed lake generation, its reader-pin release bound (was a constant 65 s), and gains `deadline_seconds`. `datasource.pool_hard_closed` reports a managed generation at the managed retire ceiling (`datasources.managed-retire-ceiling-seconds`, #824). **§4.1**: `datapipelines.datasource.pool.close_stuck` counts against that per-pool deadline. |
 | 2026-11-08 | v1.66 | 851 (#851) | §3.4S `lake.settle.metadata_read_stuck`: the abandoned read stops itself at its next chunk; `lake.settle.metadata_read_ended` gains `cause=abandoned` for that end. No event added or renamed. |

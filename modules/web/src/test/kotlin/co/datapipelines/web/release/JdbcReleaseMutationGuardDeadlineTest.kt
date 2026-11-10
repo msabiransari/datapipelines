@@ -152,6 +152,54 @@ class JdbcReleaseMutationGuardDeadlineTest {
     }
 
     @Test
+    fun `a ceiling caps D at the scope's opening plus the ceiling - whatever the configured bound - #841 R4`() {
+        val capped = JdbcReleaseMutationGuard(jdbc, LONG_BOUND_SECONDS) { now }
+        capped.withinOneDeadline(java.time.Duration.ofMillis(CEILING_MILLIS)) {
+            now += millis(200)
+            inTransaction {
+                capped.prerequisites(listOf(KEY_A), CODE)
+                now += millis(1_000)
+                capped.workspaces(listOf(WS_1), CODE)
+            }
+        }
+        // Opened at T0, so D = T0 + 3000 ms (never T0 + 200 ms + 60 s): 2800 ms at the first acquisition, 1800 ms after.
+        jdbc.grantedTimeouts() shouldContainExactly listOf("2800ms", "1800ms")
+    }
+
+    @Test
+    fun `past a ceiling the guard refuses with no cause and no statement - the configured bound is not consulted - #841 R4`() {
+        val capped = JdbcReleaseMutationGuard(jdbc, LONG_BOUND_SECONDS) { now }
+        val refusal =
+            shouldThrow<DatapipelinesException> {
+                capped.withinOneDeadline(java.time.Duration.ofMillis(CEILING_MILLIS)) {
+                    now += millis(CEILING_MILLIS)
+                    inTransaction { capped.prerequisites(listOf(KEY_A), CODE) }
+                }
+            }
+        refusal.code shouldBe CODE
+        refusal.cause.shouldBeNull()
+        jdbc.statements.size shouldBe 0
+    }
+
+    @Test
+    fun `a ceiling longer than the bound leaves D at t0 plus the bound`() {
+        guard.withinOneDeadline(java.time.Duration.ofSeconds(LONG_BOUND_SECONDS.toLong())) {
+            inTransaction { guard.prerequisites(listOf(KEY_A), CODE) }
+        }
+        jdbc.grantedTimeouts() shouldContainExactly listOf("5000ms")
+    }
+
+    @Test
+    fun `a nested ceiling only tightens the open scope's deadline - never loosens it`() {
+        guard.withinOneDeadline(java.time.Duration.ofMillis(CEILING_MILLIS)) {
+            guard.withinOneDeadline(java.time.Duration.ofSeconds(LONG_BOUND_SECONDS.toLong())) {
+                inTransaction { guard.prerequisites(listOf(KEY_A), CODE) }
+            }
+        }
+        jdbc.grantedTimeouts() shouldContainExactly listOf("3000ms")
+    }
+
+    @Test
     fun `a new transaction outside any replanning scope starts its own deadline`() {
         inTransaction { guard.prerequisites(listOf(KEY_A), CODE) }
         now += millis(4_000)
@@ -359,6 +407,10 @@ class JdbcReleaseMutationGuardDeadlineTest {
 
     private companion object {
         const val BOUND_SECONDS = 5
+
+        /** #841 R4: a configured lock wait far above the ceiling (`lock-wait-seconds` admits up to 60), and the ceiling. */
+        const val LONG_BOUND_SECONDS = 60
+        const val CEILING_MILLIS = 3_000L
         const val T0 = 1_000_000_000L
         const val CODE = "datasource.write.busy"
         const val SERVER_LOCK_TIMEOUT = "0"
