@@ -201,8 +201,8 @@ class ScheduledJobsStatementBoundsTest {
     fun `the freshness tick's catalog read and regrant INSERT carry the freshness bound - the boot grant does not`() {
         val registrar = registrar()
         registrar.register()
-        recording.timeoutOf("INSERT INTO datasource_workspaces") shouldBe UNBOUNDED
-        recording.socketTimeoutOf("INSERT INTO datasource_workspaces") shouldBe NO_SOCKET
+        recording.timeoutOf(GRANT_INSERT) shouldBe UNBOUNDED
+        recording.socketTimeoutOf(GRANT_INSERT) shouldBe NO_SOCKET
         recording.clear()
         // A registry that reads the catalog it is handed, as DefaultDatasourceRegistry does (its own test pins that).
         val datasources =
@@ -225,7 +225,7 @@ class ScheduledJobsStatementBoundsTest {
             ).tick()
 
         recording.timeoutOf("SELECT t.namespace, t.name") shouldBe FRESHNESS_BOUND
-        recording.timeoutOf("INSERT INTO datasource_workspaces") shouldBe FRESHNESS_BOUND
+        recording.timeoutOf(GRANT_INSERT) shouldBe FRESHNESS_BOUND
         recording.everyTimeout() shouldBe setOf(FRESHNESS_BOUND)
         recording.everySocketTimeout() shouldBe setOf(FRESHNESS_SOCKET)
         recording.statementCount() shouldBe 2
@@ -268,7 +268,7 @@ class ScheduledJobsStatementBoundsTest {
                     ) || it.contains("FOR NO KEY UPDATE")
                 }.size shouldBe
                 2
-            trace.count { it.first.startsWith("INSERT INTO datasource_workspaces") } shouldBe 1
+            trace.count { it.first.startsWith(GRANT_INSERT) } shouldBe 1
             val waits =
                 trace
                     .filter {
@@ -299,8 +299,8 @@ class ScheduledJobsStatementBoundsTest {
 
         recording.timeoutOf("SELECT t.namespace, t.name") shouldBe BUILD_READ_BOUND
         recording.socketTimeoutOf("SELECT t.namespace, t.name") shouldBe BUILD_READ_SOCKET
-        recording.timeoutOf("INSERT INTO datasource_workspaces") shouldBe UNBOUNDED
-        recording.socketTimeoutOf("INSERT INTO datasource_workspaces") shouldBe NO_SOCKET
+        recording.timeoutOf(GRANT_INSERT) shouldBe UNBOUNDED
+        recording.socketTimeoutOf(GRANT_INSERT) shouldBe NO_SOCKET
         recording.everyTimeout() shouldBe setOf(BUILD_READ_BOUND, UNBOUNDED)
         recording.everySocketTimeout() shouldBe setOf(BUILD_READ_SOCKET, NO_SOCKET)
     }
@@ -346,6 +346,13 @@ class ScheduledJobsStatementBoundsTest {
     private inline fun <reified T : Any> providerOf(bean: T): ObjectProvider<T> = beanProviderOf(bean)
 
     private companion object {
+        /**
+         * #874 G3: a grant INSERT is sent inside the CTE that advances the datasource's generation when it inserted a
+         * row (`DatasourceGrantRepository.advancingGeneration`), so its first line is the CTE's. These ticks send no
+         * other CTE: the boot grant, the freshness regrant and the build's grant are all INSERTs.
+         */
+        const val GRANT_INSERT = "WITH changed AS ("
+
         /** #326: the sweep's bound — two-thirds of its 15 s cadence. */
         const val SWEEP_BOUND = 10
 

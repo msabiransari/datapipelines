@@ -2,6 +2,7 @@ package co.datapipelines.web.schedules
 
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
+import co.datapipelines.application.dependencies.schedule.ExecutorTarget
 import co.datapipelines.auth.PermissionResolver
 import co.datapipelines.auth.PermissionResolverInstallation
 import co.datapipelines.auth.RolePermissionsResolver
@@ -10,6 +11,7 @@ import co.datapipelines.auth.UserKind
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.Workspace
 import co.datapipelines.auth.WorkspaceRepository
+import co.datapipelines.dependencies.Selector
 import co.datapipelines.executor.ExecuteRequest
 import co.datapipelines.executor.ExecutionEventRecord
 import co.datapipelines.executor.ExecutionEventRepository
@@ -85,6 +87,7 @@ import java.util.UUID
  *
  * The launch path and the binder run end to end in `SchedulerE2eTest`.
  */
+@Suppress("LargeClass") // one executor contract: payload validation, preparation and its graph target (#874), one fixture
 class PipelineJobExecutorTest {
     private val mapper = ObjectMapper()
     private val pipelines = mockk<PipelineRepository>()
@@ -227,6 +230,38 @@ class PipelineJobExecutorTest {
         reasonOf("""{"version":1}""") shouldBe "pipeline_missing"
         reasonOf("""{"pipeline":"../etc","version":1}""") shouldBe "pipeline_name_invalid"
         verify(exactly = 0) { pipelines.findByNameAnyStatus(any(), any()) }
+    }
+
+    // ------------------------------------------------------------------------------ the graph's executor target (#874 G3)
+
+    @Test
+    fun `the extractor reads a schema-2 payload as the pipeline at its exact pin - with no read`() {
+        adapter.executorId shouldBe PipelineJobExecutor.EXECUTOR_ID
+        targetOf(SCHEMA, """{"pipeline":"a/p","version":7}""") shouldBe
+            ExecutorTarget.Pipeline("a/p", Selector.ExactVersion(7), "/pipeline")
+        targetOf(SCHEMA, """{"pipeline":"a/p","version":2,"parameter_bindings":{}}""") shouldBe
+            ExecutorTarget.Pipeline("a/p", Selector.ExactVersion(2), "/pipeline")
+        verify(exactly = 0) { pipelines.findByNameAnyStatus(any(), any()) }
+    }
+
+    @Test
+    fun `the extractor reads a schema-1 payload as the pipeline at the current pointer`() {
+        targetOf(1, """{"pipeline":"a/p","version":"current"}""") shouldBe ExecutorTarget.Pipeline("a/p", Selector.Current, "/pipeline")
+        targetOf(1, """{"pipeline":"a/p","version":3}""") shouldBe ExecutorTarget.Unreadable("a/p", 3, "/pipeline")
+        targetOf(1, """{"pipeline":"../etc","version":"current"}""") shouldBe ExecutorTarget.Unreadable("../etc", null, "/pipeline")
+    }
+
+    @Test
+    fun `every payload the executor refuses is an unreadable target keeping what it spelled - never an exception`() {
+        targetOf(SCHEMA, """{"pipeline":"a/p","version":"current"}""") shouldBe ExecutorTarget.Unreadable("a/p", null, "/pipeline")
+        targetOf(SCHEMA, """{"pipeline":"a/p"}""") shouldBe ExecutorTarget.Unreadable("a/p", null, "/pipeline")
+        targetOf(SCHEMA, """{"pipeline":"a/p","version":0}""") shouldBe ExecutorTarget.Unreadable("a/p", null, "/pipeline")
+        targetOf(SCHEMA, """{"pipeline":"a/p","version":99999999999}""") shouldBe ExecutorTarget.Unreadable("a/p", null, "/pipeline")
+        targetOf(SCHEMA, """{"pipeline":"../etc","version":4}""") shouldBe ExecutorTarget.Unreadable("../etc", 4, "/pipeline")
+        targetOf(SCHEMA, """{"version":4}""") shouldBe ExecutorTarget.Unreadable(null, 4, "/pipeline")
+        targetOf(SCHEMA, """{"pipeline":"a/p","version":1,"sql":"x"}""") shouldBe ExecutorTarget.Unreadable("a/p", 1, "/pipeline")
+        targetOf(SCHEMA, """["a/p"]""") shouldBe ExecutorTarget.Unreadable(null, null, "/pipeline")
+        targetOf(3, """{"pipeline":"a/p","version":1}""") shouldBe ExecutorTarget.Unreadable("a/p", 1, "/pipeline")
     }
 
     @Test
@@ -700,6 +735,11 @@ class PipelineJobExecutorTest {
             it.shouldBeInstanceOf<ExecutionOutcome>()
         }
     }
+
+    private fun targetOf(
+        schema: Int,
+        payload: String,
+    ): ExecutorTarget = adapter.targetOf(schema, mapper.readTree(payload))
 
     private fun reasonOf(payload: String): Any? =
         shouldThrow<ScheduleException> { adapter.validate(workspace.id, mapper.readTree(payload), mapper.createObjectNode(), SCHEMA) }

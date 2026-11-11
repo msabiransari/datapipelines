@@ -204,6 +204,69 @@ class DatasourceGrantRepositoryIntegrationTest {
         grantees("shared") shouldBe emptySet()
     }
 
+    // ------------------------------------------ #874 G3: a grant change advances the datasource's generation
+
+    /** Visibility is an identity fact (record §15.1): a grant that changed a row advances it once; a no-op never. */
+    @Test
+    fun `a grant that adds a row advances the generation once - an idempotent re-grant advances nothing`() {
+        register("shared", owner = null)
+        val start = generationOf("shared")
+
+        repository.grant("shared", alpha, actor) shouldBe true
+        generationOf("shared") shouldBe start + 1
+
+        repository.grant("shared", alpha, actor) shouldBe false
+        repository.grantOnRegistration("shared", alpha, actor)
+        generationOf("shared") shouldBe start + 1
+
+        repository.grantOnRegistration("shared", beta, actor)
+        generationOf("shared") shouldBe start + 2
+    }
+
+    @Test
+    fun `a revoke that removes a row advances the generation once - a revoke of nothing advances nothing`() {
+        register("shared", owner = null)
+        repository.grant("shared", alpha, actor) shouldBe true
+        val granted = generationOf("shared")
+
+        repository.revoke("shared", alpha) shouldBe true
+        generationOf("shared") shouldBe granted + 1
+
+        repository.revoke("shared", alpha) shouldBe false
+        generationOf("shared") shouldBe granted + 1
+    }
+
+    /** One repair statement is one change of the datasource's visibility, however many workspaces it reaches. */
+    @Test
+    fun `a repair advances the generation once for every workspace it grants - a repair with nothing to grant advances nothing`() {
+        register("shared", owner = null)
+        val start = generationOf("shared")
+
+        repository.grantToEveryWorkspace("shared", actor) shouldBe 2
+        generationOf("shared") shouldBe start + 1
+
+        repository.grantToEveryWorkspace("shared", actor) shouldBe 0
+        budgeted(Duration.ofSeconds(REPAIR_BUDGET_SECONDS)).grantToEveryWorkspace("shared", actor) shouldBe 0
+        generationOf("shared") shouldBe start + 1
+    }
+
+    @Test
+    fun `granting every instance datasource advances exactly the datasources that gained a grant`() {
+        register("fresh", owner = null)
+        register("already", owner = null)
+        register("owned", owner = beta)
+        repository.grant("already", alpha, actor) shouldBe true
+        val before = listOf("fresh", "already", "owned").associateWith(::generationOf)
+
+        repository.grantAllInstanceDatasourcesTo(alpha, actor) shouldBe 1
+
+        generationOf("fresh") shouldBe checkNotNull(before["fresh"]) + 1
+        generationOf("already") shouldBe before["already"]
+        generationOf("owned") shouldBe before["owned"]
+    }
+
+    private fun generationOf(name: String): Long = checkNotNull(datasources.findIncarnation(name)) { name }.generation
+
     /**
      * The freshness tick's shape (#841 R4): guarded writes in a real metadata transaction on the SAME DataSource as the
      * repository's template (so its statements join it), the no-op guard (the lock protocol is the web module's proof),

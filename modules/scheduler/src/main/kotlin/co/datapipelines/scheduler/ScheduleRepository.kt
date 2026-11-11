@@ -71,6 +71,25 @@ class ScheduleRepository(
                 rowMapper,
             ).singleOrNull()
 
+    /**
+     * The LIVE schedules of [workspaceId] among [ids], in ONE statement (#874 G3, dependency-graph record §7.1): the
+     * schedule family's graph batch read. An id that is deleted, of another workspace or absent is simply not returned;
+     * the order is unspecified. An empty [ids] sends no statement.
+     */
+    fun findLiveByIds(
+        workspaceId: UUID,
+        ids: Collection<UUID>,
+    ): List<Schedule> =
+        if (ids.isEmpty()) {
+            emptyList()
+        } else {
+            jdbc.query(
+                "SELECT * FROM schedules WHERE id = ANY(:ids) AND workspace_id = :ws AND deleted_at IS NULL",
+                mapOf("ids" to uuidArray(ids), "ws" to workspaceId),
+                rowMapper,
+            )
+        }
+
     /** [findLive] holding the row's lock — every run-inserting path takes it (the overlap guard, record §3). */
     fun lockLive(
         workspaceId: UUID,
@@ -493,6 +512,10 @@ class ScheduleRepository(
     /** Spring's SQL array binding requires varargs; lists are bounded to at most 100 recipients. */
     @Suppress("SpreadOperator")
     private fun textArray(values: List<String>): SqlArrayValue = SqlArrayValue("text", *values.toTypedArray())
+
+    /** [findLiveByIds]'s key list, bound as ONE `uuid[]` parameter (the graph walk caps a batch at 256 ids). */
+    @Suppress("SpreadOperator")
+    private fun uuidArray(values: Collection<UUID>): SqlArrayValue = SqlArrayValue("uuid", *values.distinct().toTypedArray())
 
     private fun strings(
         rs: ResultSet,

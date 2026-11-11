@@ -105,12 +105,14 @@ class DatasourceGrantRepository(
         grantedBy: UUID,
     ): Boolean =
         writes.grant(datasourceName, { listOf(workspaceId) }) {
-            jdbc.update(
-                """
-                INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by)
-                VALUES (:name, :ws, :by)
-                ON CONFLICT (datasource_name, workspace_id) DO NOTHING
-                """.trimIndent(),
+            changedRows(
+                advancingGeneration(
+                    """
+                    INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by)
+                    VALUES (:name, :ws, :by)
+                    ON CONFLICT (datasource_name, workspace_id) DO NOTHING
+                    """,
+                ),
                 MapSqlParameterSource().addValue("name", datasourceName).addValue("ws", workspaceId).addValue("by", grantedBy),
             ) > 0
         }
@@ -159,14 +161,16 @@ class DatasourceGrantRepository(
                 writes.guard.prerequisites(planned.map(PrerequisiteKey::datasource), DatasourceErrorCodes.WRITE_BUSY)
                 if (writes.isGuarded && instanceDatasourceNames() != planned) throw KeySetChanged()
                 writes.guard.workspaces(listOf(workspaceId), DatasourceErrorCodes.WRITE_BUSY)
-                jdbc.update(
-                    """
-                    INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by)
-                    SELECT d.name, :ws, :by
-                      FROM datasources d
-                     WHERE d.owner_workspace_id IS NULL AND d.is_deleted = FALSE AND d.name IN (:names)
-                    ON CONFLICT (datasource_name, workspace_id) DO NOTHING
-                    """.trimIndent(),
+                changedRows(
+                    advancingGeneration(
+                        """
+                        INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by)
+                        SELECT d.name, :ws, :by
+                          FROM datasources d
+                         WHERE d.owner_workspace_id IS NULL AND d.is_deleted = FALSE AND d.name IN (:names)
+                        ON CONFLICT (datasource_name, workspace_id) DO NOTHING
+                        """,
+                    ),
                     MapSqlParameterSource().addValue("ws", workspaceId).addValue("by", grantedBy).addValue("names", planned),
                 )
             }
@@ -239,15 +243,17 @@ class DatasourceGrantRepository(
         return writes.grant(datasourceName, discover) {
             val params = MapSqlParameterSource().addValue("name", datasourceName).addValue("by", grantedBy)
             within(deadline) {
-                jdbc.update(
-                    """
-                    INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by)
-                    SELECT :name, w.id, :by
-                      FROM workspaces w
-                     WHERE w.is_deleted = FALSE
-                    ${if (writes.isGuarded) "AND w.id IN (:locked)" else ""}
-                    ON CONFLICT (datasource_name, workspace_id) DO NOTHING
-                    """.trimIndent(),
+                changedRows(
+                    advancingGeneration(
+                        """
+                        INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by)
+                        SELECT :name, w.id, :by
+                          FROM workspaces w
+                         WHERE w.is_deleted = FALSE
+                        ${if (writes.isGuarded) "AND w.id IN (:locked)" else ""}
+                        ON CONFLICT (datasource_name, workspace_id) DO NOTHING
+                        """,
+                    ),
                     if (writes.isGuarded) params.addValue("locked", locked.ifEmpty { listOf(NO_WORKSPACE) }) else params,
                 )
             }
@@ -317,13 +323,40 @@ class DatasourceGrantRepository(
         workspaceId: UUID,
     ): Boolean =
         writes.grant(datasourceName, { listOf(workspaceId) }) {
-            jdbc.update(
-                "DELETE FROM datasource_workspaces WHERE datasource_name = :name AND workspace_id = :ws",
+            changedRows(
+                advancingGeneration("DELETE FROM datasource_workspaces WHERE datasource_name = :name AND workspace_id = :ws"),
                 MapSqlParameterSource().addValue("name", datasourceName).addValue("ws", workspaceId),
             ) > 0
         }
 
+    /** Runs one [advancingGeneration] statement and answers how many grant rows it changed. */
+    private fun changedRows(
+        sql: String,
+        params: MapSqlParameterSource,
+    ): Int = checkNotNull(jdbc.queryForObject(sql, params, Int::class.java)) { "count(*) answered null" }
+
     private companion object {
+        /**
+         * #874 G3 (dependency-graph record §15.1: visibility is an identity fact) — wraps one grant-table write
+         * ([change], an INSERT … ON CONFLICT DO NOTHING or a DELETE, without RETURNING) so the SAME statement advances
+         * the V59 `generation` of every datasource whose grant rows it actually changed, once per datasource: an
+         * idempotent re-grant or a revoke of nothing changes no row and advances nothing. Postgres executes a
+         * data-modifying CTE to completion whether or not the outer query reads it, and the outer query answers the
+         * changed-row count the callers return. It runs inside the caller's G0-guarded section, like the write.
+         */
+        fun advancingGeneration(change: String): String =
+            """
+            WITH changed AS (
+            ${change.trimIndent()}
+            RETURNING datasource_name
+            ),
+            advanced AS (
+                UPDATE datasources SET generation = generation + 1
+                 WHERE name IN (SELECT datasource_name FROM changed)
+            )
+            SELECT count(*)::int FROM changed
+            """.trimIndent()
+
         /** A uuid no workspace holds: `IN ()` is not SQL, and an empty locked set must grant nothing. */
         val NO_WORKSPACE: UUID = UUID(0L, 0L)
 
