@@ -3,6 +3,8 @@ package co.datapipelines.web.bootstrap
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointKeyService
 import co.datapipelines.application.endpoints.EndpointPublishService
+import co.datapipelines.application.endpoints.EndpointVersionService
+import co.datapipelines.application.endpoints.PublishedEndpoint
 import co.datapipelines.application.endpoints.PublishedEndpointRepository
 import co.datapipelines.application.endpoints.PublishedEndpointVersionRepository
 import co.datapipelines.auth.ApiKey
@@ -72,6 +74,15 @@ private const val MAX_LOG_MESSAGE_CHARS = 300
  * family publishes by default; an operator who turns the budget off gets the lake endpoints
  * retired on the next boot, not unbounded public S3 reads.
  *
+ * ## Retirement and revival (#889)
+ * An API this step no longer wants is retired through the API lifecycle's own verbs, never around the guarded deletion
+ * (#786 R1): a draft-only API is deleted; one holding release history keeps its row with its working draft purged and
+ * every RELEASED version discarded, so its pointer recomputes to nothing and nothing serves — the end state a person
+ * reaches with the same verbs. An API whose versions are all DISCARDED is already retired and is left alone without a
+ * line. When a later boot wants that path again, the retired API is revived the way a person would: a new draft pinned
+ * to the pipeline's RELEASED current, released through the coordinator. Both triggers — a manifest that drops a path
+ * and the blank-key kill switch — share this one producer.
+ *
  * ## The principal
  * The SYSTEM service account (auth.md §4.5) — the same actor the example content and every
  * automated write are attributed to, so `created_by` on a seeded endpoint names a row a reader
@@ -104,6 +115,8 @@ class DemoEndpointSeeder(
     private val endpointVersions: PublishedEndpointVersionRepository,
     /** #786 A.5 — v1 is released through the native coordinator as the system actor: no shortcut. */
     private val releases: ReleaseCoordinator,
+    /** #889 — retirement and revival through the API version verbs (discard, draft purge, draft save), never a bypass. */
+    private val versionService: EndpointVersionService,
 ) : SmartInitializingSingleton {
     private val log = LoggerFactory.getLogger(DemoEndpointSeeder::class.java)
 
@@ -303,6 +316,11 @@ class DemoEndpointSeeder(
                         }
                     }
 
+                    retired(existing, demoId, system.id) -> {
+                        // #889 — ours, retired by an earlier boot (no current version): revived, not re-created.
+                        if (revive(system, demoId, target, existing)) published++
+                    }
+
                     else -> {
                         log.warn(
                             "event=demo.path_taken path={} pipeline={} message=\"an existing endpoint holds this " +
@@ -378,15 +396,12 @@ class DemoEndpointSeeder(
     }
 
     /**
-     * Unpublishes the step's own prior rows that the wanted set no longer names: endpoints of
-     * the demo workspace at a `/demo/...` path whose `created_by` is [systemActorId] and whose
-     * path is not wanted. Returns how many rows went.
+     * Retires the step's own prior rows that the wanted set no longer names: endpoints of the demo workspace at a
+     * `/demo/...` path whose `created_by` is [systemActorId] and whose path is not wanted. Returns how many APIs this
+     * boot retired (an already-retired one is not counted).
      *
-     * The same per-target failure domain as [publishWanted] (#274): a retirement that throws is
-     * ONE ERROR line — a stale demo path that refuses to go must not refuse the boot.
-     *
-     * #786 R1: the unpublish is the guarded entity deletion, so a stale demo API that was RELEASED is refused
-     * `endpoint.version.last_release` and stays (that ERROR line, every boot) until #889 gives retirement a native path.
+     * The same per-target failure domain as [publishWanted] (#274): a retirement that throws is ONE ERROR line — a stale
+     * demo path that refuses to go must not refuse the boot.
      */
     @Suppress("TooGenericExceptionCaught") // the point IS any failure: one ERROR line, boot proceeds
     private fun retireStaleEndpoints(
@@ -401,15 +416,9 @@ class DemoEndpointSeeder(
                 .filter { it.pathPattern.startsWith(DEMO_CATEGORY_PREFIX) }
                 .filter { it.createdBy == systemActorId }
                 .filter { it.pathPattern !in wantedPaths }
-        stale.forEach { endpoint ->
+        return stale.count { endpoint ->
             try {
-                val removed = publishService.unpublish(actorForRetirement(system, demoId), endpoint.pathPattern)
-                log.info(
-                    "event=demo.endpoint_retired path={} removed={} pipeline={}",
-                    endpoint.pathPattern,
-                    removed,
-                    endpoint.current?.body?.pipelineName,
-                )
+                retire(actorForRetirement(system, demoId), endpoint)
             } catch (e: Exception) {
                 log.error(
                     "event=demo.endpoint_retire_failed path={} reason={} message=\"the stale demo path stays; " +
@@ -417,9 +426,98 @@ class DemoEndpointSeeder(
                     endpoint.pathPattern,
                     (e.message ?: e.javaClass.simpleName).take(MAX_LOG_MESSAGE_CHARS),
                 )
+                false
             }
         }
-        return stale.size
+    }
+
+    /**
+     * #889 — one stale API retired through the lifecycle's verbs; true when this boot changed it.
+     * - Every version a DRAFT: the guarded entity deletion admits it, so the API is deleted (the pre-#786 path).
+     * - Every version DISCARDED: already retired — no write and no line, so a retired API costs a boot nothing.
+     * - Release history on an authoring-disabled deployment: the version verbs refuse there by design (record §12), so
+     *   the API keeps serving and ONE INFO line says why; nothing is attempted, so nothing fails.
+     * - Otherwise the working draft is purged, then every RELEASED version discarded, oldest first: the pointer only
+     *   ever recomputes to a version that is itself discarded later, and ends at none — nothing serves.
+     */
+    private fun retire(
+        principal: AuthenticatedPrincipal,
+        endpoint: PublishedEndpoint,
+    ): Boolean {
+        val held = endpointVersions.list(endpoint.id)
+        val pipeline = endpoint.current?.body?.pipelineName
+        return when {
+            held.all { it.status == PipelineVersionStatus.DRAFT } -> {
+                val removed = publishService.unpublish(principal, endpoint.pathPattern)
+                log.info("event=demo.endpoint_retired path={} removed={} discarded=[] pipeline={}", endpoint.pathPattern, removed, pipeline)
+                removed
+            }
+
+            held.all { it.status == PipelineVersionStatus.DISCARDED } -> {
+                false
+            }
+
+            !authoring.developmentPosture -> {
+                log.info(
+                    "event=demo.endpoint_retire_deferred path={} pipeline={} message=\"authoring is disabled on this " +
+                        "deployment, so the stale demo API's released versions cannot be discarded here; it keeps serving\"",
+                    endpoint.pathPattern,
+                    pipeline,
+                )
+                false
+            }
+
+            else -> {
+                held.firstOrNull { it.status == PipelineVersionStatus.DRAFT }?.let { draft ->
+                    versionService.discardDraft(principal, endpoint.id, draft.bodyHash)
+                }
+                val discarded =
+                    held
+                        .filter { it.status == PipelineVersionStatus.RELEASED }
+                        .sortedBy { it.version }
+                        .map { versionService.discardVersion(principal, endpoint.id, it.version).version }
+                log.info(
+                    "event=demo.endpoint_retired path={} removed=false discarded={} pipeline={}",
+                    endpoint.pathPattern,
+                    discarded,
+                    pipeline,
+                )
+                true
+            }
+        }
+    }
+
+    /** #889 — the step's own API with no current version: what [retire] leaves behind (every version DISCARDED). */
+    private fun retired(
+        existing: PublishedEndpoint,
+        demoId: UUID,
+        systemActorId: UUID,
+    ): Boolean = existing.workspaceId == demoId && existing.createdBy == systemActorId && existing.current == null
+
+    /**
+     * #889 — a retired API at a path the wanted set names again, revived through the same verbs a person uses: a new
+     * draft pinned to the seeded pipeline's RELEASED current, saved on top of the newest version's body hash, then
+     * released through the coordinator as the system actor. True when revived.
+     */
+    private fun revive(
+        system: co.datapipelines.auth.User,
+        demoId: UUID,
+        target: Wanted,
+        existing: PublishedEndpoint,
+    ): Boolean {
+        val pinned = releasedCurrent(demoId, target) ?: return false
+        val base = endpointVersions.findDraft(existing.id) ?: endpointVersions.list(existing.id).firstOrNull() ?: return false
+        val principal = bootstrapPrincipal(system, demoId, DemoWorkspaceSeeder.DEMO_WORKSPACE)
+        val draft =
+            versionService.saveDraft(
+                principal,
+                existing.id,
+                EndpointVersionService.DraftInput(target.name, pinned, timeoutSeconds = null, description = DESCRIPTION),
+                ifMatch = base.bodyHash,
+            )
+        release(principal, existing.id)
+        log.info("event=demo.endpoint_revived path={} version={} pipeline={}", target.path, draft.version, target.name)
+        return true
     }
 
     /**
@@ -432,9 +530,27 @@ class DemoEndpointSeeder(
         demoId: UUID,
         target: Wanted,
     ): Boolean {
+        val current = releasedCurrent(demoId, target) ?: return false
         val principal = bootstrapPrincipal(system, demoId, DemoWorkspaceSeeder.DEMO_WORKSPACE)
-        val pipeline = pipelineRepository.findById(demoId, target.pipelineId)
-        val current = pipeline?.currentVersion
+        val created =
+            publishService.create(
+                principal,
+                target.path,
+                target.name,
+                pipelineVersion = current,
+                timeoutSeconds = null,
+                description = DESCRIPTION,
+            )
+        release(principal, created.id)
+        return true
+    }
+
+    /** The seeded pipeline's current version when it is RELEASED — the only version a demo API pins — else null (one WARN). */
+    private fun releasedCurrent(
+        demoId: UUID,
+        target: Wanted,
+    ): Int? {
+        val current = pipelineRepository.findById(demoId, target.pipelineId)?.currentVersion
         val released =
             current != null && pipelineRepository.findVersionDetail(demoId, target.pipelineId, current)?.status ==
                 PipelineVersionStatus.RELEASED
@@ -444,19 +560,9 @@ class DemoEndpointSeeder(
                     "version to pin; no endpoint created\"",
                 target.name,
             )
-            return false
+            return null
         }
-        val created =
-            publishService.create(
-                principal,
-                target.path,
-                target.name,
-                pipelineVersion = requireNotNull(current),
-                timeoutSeconds = null,
-                description = DESCRIPTION,
-            )
-        release(principal, created.id)
-        return true
+        return current
     }
 
     /** Releases the API's working draft at its own body hash, as [principal], through the native coordinator. */

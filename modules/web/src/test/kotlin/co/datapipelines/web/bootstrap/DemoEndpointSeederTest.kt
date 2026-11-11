@@ -7,6 +7,7 @@ import co.datapipelines.application.endpoints.EndpointKeyBinding
 import co.datapipelines.application.endpoints.EndpointKeyService
 import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.application.endpoints.EndpointVersionBody
+import co.datapipelines.application.endpoints.EndpointVersionService
 import co.datapipelines.application.endpoints.PublishedEndpoint
 import co.datapipelines.application.endpoints.PublishedEndpointRepository
 import co.datapipelines.application.endpoints.PublishedEndpointVersion
@@ -34,6 +35,7 @@ import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import io.mockk.verifyOrder
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
 import org.slf4j.LoggerFactory
@@ -67,6 +69,9 @@ class DemoEndpointSeederTest {
     private val endpointVersions = mockk<PublishedEndpointVersionRepository>()
     private val releases = mockk<ReleaseCoordinator>()
 
+    /** #889 — the API version verbs retirement and revival go through. */
+    private val versionService = mockk<EndpointVersionService>()
+
     private val examples = mockk<ExampleContentSeeder>()
     private val demoWorkspaceSeeder = mockk<co.datapipelines.auth.DemoWorkspaceSeeder>()
 
@@ -97,6 +102,7 @@ class DemoEndpointSeederTest {
             AuthoringGuard(authoringEnabled),
             endpointVersions,
             releases,
+            versionService,
         )
 
     private fun workspace(): Workspace =
@@ -167,11 +173,29 @@ class DemoEndpointSeederTest {
             releasedBy = null,
         )
 
+    /** Version [number] of the API at [path] at [status], with a hash naming both. */
+    private fun versionOf(
+        path: String,
+        number: Int,
+        status: PipelineVersionStatus,
+    ): PublishedEndpointVersion = draftOf(path).copy(version = number, status = status, bodyHash = "hash-$path-v$number")
+
+    /** #889 — what the API at [path] holds, newest first (the repository's order). */
+    private fun holds(
+        path: String,
+        vararg statuses: PipelineVersionStatus,
+    ): List<PublishedEndpointVersion> {
+        val held = statuses.mapIndexed { i, status -> versionOf(path, i + 1, status) }.reversed()
+        every { endpointVersions.list(UUID.nameUUIDFromBytes(path.toByteArray())) } returns held
+        return held
+    }
+
     private fun endpoint(
         path: String,
         pipelineName: String,
         createdBy: UUID = systemActorId,
-        status: PipelineVersionStatus = PipelineVersionStatus.RELEASED,
+        status: PipelineVersionStatus? = PipelineVersionStatus.RELEASED,
+        currentVersion: Int = 1,
     ): PublishedEndpoint =
         PublishedEndpoint.of(
             id = UUID.nameUUIDFromBytes(path.toByteArray()),
@@ -181,7 +205,7 @@ class DemoEndpointSeederTest {
             createdBy = createdBy,
             createdAt = Instant.now(),
             updatedAt = Instant.now(),
-            current = CurrentVersion(1, status, EndpointVersionBody(pipelineName, 1, 30, "d")),
+            current = status?.let { CurrentVersion(currentVersion, it, EndpointVersionBody(pipelineName, 1, 30, "d")) },
         )
 
     private fun issued(plaintext: String): co.datapipelines.auth.IssuedApiKey =
@@ -314,7 +338,7 @@ class DemoEndpointSeederTest {
     }
 
     @Test
-    fun `the kill switch retracts the seeder's own rows and revokes the managed key`() {
+    fun `the kill switch retires the seeder's own released API through the version verbs and revokes the managed key`() {
         happyStubs()
         val stalePath = "/demo/nyc/mobility/revenue-by-borough"
         val foreignPath = "/demo/custom/v1/thing"
@@ -323,16 +347,23 @@ class DemoEndpointSeederTest {
                 endpoint(stalePath, "nyc/mobility/revenue_by_borough"),
                 endpoint(foreignPath, "custom/thing", createdBy = UUID.randomUUID()),
             )
-        every { publishService.unpublish(any(), stalePath) } returns true
+        holds(stalePath, PipelineVersionStatus.RELEASED)
+        holds(foreignPath, PipelineVersionStatus.RELEASED)
+        val staleId = UUID.nameUUIDFromBytes(stalePath.toByteArray())
+        val foreignId = UUID.nameUUIDFromBytes(foreignPath.toByteArray())
+        every { versionService.discardVersion(any(), staleId, 1) } returns EndpointVersionService.Moved(1, 1, null)
         val managed = issued(key).record
         every { keyRepository.findByWorkspaceAndName(demoId, "demo-public-key") } returns listOf(managed)
         every { apiKeyService.revokeWorkspaceEndpointKey(managed.id, demoId, systemActorId) } returns true
 
         seeder(demoApiKey = "").afterSingletonsInstantiated()
 
-        // The seeder's own row goes; a super admin's hand-published /demo row does not.
-        verify(exactly = 1) { publishService.unpublish(any(), stalePath) }
-        verify(exactly = 0) { publishService.unpublish(any(), foreignPath) }
+        // #889 — the seeder's own released API is discarded, never deleted around the guard; a super admin's
+        // hand-published /demo row is not touched at all.
+        verify(exactly = 1) { versionService.discardVersion(any(), staleId, 1) }
+        verify(exactly = 0) { publishService.unpublish(any(), any()) }
+        verify(exactly = 0) { versionService.discardVersion(any(), foreignId, any()) }
+        verify(exactly = 0) { versionService.discardDraft(any(), foreignId, any()) }
         verify(exactly = 1) { apiKeyService.revokeWorkspaceEndpointKey(managed.id, demoId, systemActorId) }
         verify(exactly = 0) { keyService.issue(any(), any(), any(), any(), any(), any(), any()) }
         verify(exactly = 0) { publishService.create(any(), any(), any(), any(), any(), any()) }
@@ -360,10 +391,11 @@ class DemoEndpointSeederTest {
     }
 
     @Test
-    fun `a changed pipeline set retires the seeder's own stale endpoint and the binding goes with it`() {
+    fun `a changed pipeline set deletes the seeder's own draft-only stale endpoint and the binding goes with it`() {
         happyStubs()
-        val stale = endpoint("/demo/nyc/mobility/gone_away", "nyc/mobility/gone_away")
+        val stale = endpoint("/demo/nyc/mobility/gone_away", "nyc/mobility/gone_away", status = PipelineVersionStatus.DRAFT)
         every { endpointRepository.findByWorkspace(demoId) } returns listOf(stale)
+        holds("/demo/nyc/mobility/gone_away", PipelineVersionStatus.DRAFT)
         every { publishService.unpublish(any(), "/demo/nyc/mobility/gone_away") } returns true
         val managed = issued(key).record
         every { keyRepository.findByWorkspaceAndName(demoId, "demo-public-key") } returns listOf(managed)
@@ -451,8 +483,9 @@ class DemoEndpointSeederTest {
     fun `an authoring-disabled deployment creates and releases nothing, and still retires and reconciles the key`() {
         // The wanted set is NOT the decision: it is non-empty here, and the capability still says no.
         happyStubs()
-        val stale = endpoint("/demo/nyc/mobility/gone_away", "nyc/mobility/gone_away")
+        val stale = endpoint("/demo/nyc/mobility/gone_away", "nyc/mobility/gone_away", status = PipelineVersionStatus.DRAFT)
         every { endpointRepository.findByWorkspace(demoId) } returns listOf(stale)
+        holds("/demo/nyc/mobility/gone_away", PipelineVersionStatus.DRAFT)
 
         val lines = logLines { seeder(authoringEnabled = false).afterSingletonsInstantiated() }
 
@@ -473,8 +506,9 @@ class DemoEndpointSeederTest {
     fun `an authoring-disabled deployment with nothing wanted retracts the key and retires exactly as before`() {
         happyStubs()
         every { examples.seedablePipelines(demoId) } returns emptyList()
-        val stale = endpoint("/demo/nyc/mobility/gone_away", "nyc/mobility/gone_away")
+        val stale = endpoint("/demo/nyc/mobility/gone_away", "nyc/mobility/gone_away", status = PipelineVersionStatus.DRAFT)
         every { endpointRepository.findByWorkspace(demoId) } returns listOf(stale)
+        holds("/demo/nyc/mobility/gone_away", PipelineVersionStatus.DRAFT)
         val managed = issued(key).record
         every { keyRepository.findByWorkspaceAndName(demoId, "demo-public-key") } returns listOf(managed)
         every { apiKeyService.revokeWorkspaceEndpointKey(managed.id, demoId, systemActorId) } returns true
@@ -532,6 +566,160 @@ class DemoEndpointSeederTest {
         DemoEndpointPaths.pathFor("nyc/mobility/revenue_by_borough") shouldBe "/demo/nyc/mobility/revenue-by-borough"
         DemoEndpointPaths.pathFor("trade/balance_by_partner") shouldBe "/demo/trade/balance-by-partner"
         DemoEndpointPaths.pathFor("trade/fx/imports_in_partner_currency") shouldBe "/demo/trade/fx/imports-in-partner-currency"
+    }
+
+    // ------------------------------------------------------------------ #889, retirement through the version verbs
+
+    @Test
+    fun `a stale API with release history keeps its row - the draft is purged, then every RELEASED version discarded oldest first`() {
+        happyStubs()
+        val path = "/demo/nyc/mobility/gone_away"
+        val id = UUID.nameUUIDFromBytes(path.toByteArray())
+        every { endpointRepository.findByWorkspace(demoId) } returns
+            listOf(endpoint(path, "nyc/mobility/gone_away", status = PipelineVersionStatus.DRAFT, currentVersion = 4))
+        holds(
+            path,
+            PipelineVersionStatus.RELEASED,
+            PipelineVersionStatus.DISCARDED,
+            PipelineVersionStatus.RELEASED,
+            PipelineVersionStatus.DRAFT,
+        )
+        every { versionService.discardDraft(any(), id, "hash-$path-v4") } returns EndpointVersionService.Purged(4, entityDeleted = false)
+        every { versionService.discardVersion(any(), id, 1) } returns EndpointVersionService.Moved(1, 3, 3)
+        every { versionService.discardVersion(any(), id, 3) } returns EndpointVersionService.Moved(3, 3, null)
+
+        val lines = logLines { seeder().afterSingletonsInstantiated() }
+
+        assertAll(
+            {
+                verifyOrder {
+                    versionService.discardDraft(any(), id, "hash-$path-v4")
+                    versionService.discardVersion(any(), id, 1)
+                    versionService.discardVersion(any(), id, 3)
+                }
+            },
+            { verify(exactly = 0) { versionService.discardVersion(any(), id, 2) } },
+            { verify(exactly = 0) { publishService.unpublish(any(), any()) } },
+            {
+                lines.filter { it.second.startsWith("event=demo.endpoint_retired") } shouldBe
+                    listOf(
+                        Level.INFO to
+                            "event=demo.endpoint_retired path=$path removed=false discarded=[1, 3] pipeline=nyc/mobility/gone_away",
+                    )
+            },
+            { lines.filter { it.first.isGreaterOrEqual(Level.WARN) } shouldBe emptyList() },
+            { lines.single { it.second.startsWith("event=demo.api_key_seeded") }.second.contains("retired=1") shouldBe true },
+        )
+    }
+
+    @Test
+    fun `an API whose versions are all DISCARDED is already retired - no write, no line, not counted`() {
+        happyStubs()
+        val path = "/demo/nyc/mobility/gone_away"
+        every { endpointRepository.findByWorkspace(demoId) } returns listOf(endpoint(path, "nyc/mobility/gone_away", status = null))
+        holds(path, PipelineVersionStatus.DISCARDED, PipelineVersionStatus.DISCARDED)
+
+        val lines = logLines { seeder(demoApiKey = "").afterSingletonsInstantiated() }
+
+        assertAll(
+            { verify(exactly = 0) { publishService.unpublish(any(), any()) } },
+            { verify(exactly = 0) { versionService.discardVersion(any(), any(), any()) } },
+            { verify(exactly = 0) { versionService.discardDraft(any(), any(), any()) } },
+            { lines.filter { it.second.contains(path) } shouldBe emptyList() },
+            { lines.filter { it.first.isGreaterOrEqual(Level.WARN) } shouldBe emptyList() },
+            { lines.single { it.second.startsWith("event=demo.api_key_unset") }.second.contains("retired=0") shouldBe true },
+        )
+    }
+
+    @Test
+    fun `on an authoring-disabled deployment a stale released API is deferred with one INFO line and nothing attempted`() {
+        happyStubs()
+        val path = "/demo/nyc/mobility/gone_away"
+        every { endpointRepository.findByWorkspace(demoId) } returns listOf(endpoint(path, "nyc/mobility/gone_away"))
+        holds(path, PipelineVersionStatus.RELEASED)
+
+        val lines = logLines { seeder(authoringEnabled = false).afterSingletonsInstantiated() }
+
+        assertAll(
+            { verify(exactly = 0) { publishService.unpublish(any(), any()) } },
+            { verify(exactly = 0) { versionService.discardVersion(any(), any(), any()) } },
+            { lines.count { it.second.startsWith("event=demo.endpoint_retire_deferred path=$path") } shouldBe 1 },
+            { lines.filter { it.first.isGreaterOrEqual(Level.WARN) } shouldBe emptyList() },
+        )
+    }
+
+    @Test
+    fun `a failing retirement is one ERROR line and the next stale API is still retired`() {
+        happyStubs()
+        val first = "/demo/nyc/mobility/gone_away"
+        val second = "/demo/nyc/mobility/also_gone"
+        every { endpointRepository.findByWorkspace(demoId) } returns
+            listOf(endpoint(first, "nyc/mobility/gone_away"), endpoint(second, "nyc/mobility/also_gone"))
+        holds(first, PipelineVersionStatus.RELEASED)
+        holds(second, PipelineVersionStatus.RELEASED)
+        every { versionService.discardVersion(any(), UUID.nameUUIDFromBytes(first.toByteArray()), 1) } throws
+            RuntimeException("the version lock was busy")
+        every { versionService.discardVersion(any(), UUID.nameUUIDFromBytes(second.toByteArray()), 1) } returns
+            EndpointVersionService.Moved(1, 1, null)
+
+        val lines = logLines { seeder(demoApiKey = "").afterSingletonsInstantiated() }
+
+        assertAll(
+            { verify(exactly = 1) { versionService.discardVersion(any(), UUID.nameUUIDFromBytes(second.toByteArray()), 1) } },
+            {
+                lines.filter { it.first == Level.ERROR }.map { it.second.substringBefore(" reason") } shouldBe
+                    listOf("event=demo.endpoint_retire_failed path=$first")
+            },
+            { lines.single { it.second.startsWith("event=demo.api_key_unset") }.second.contains("retired=1") shouldBe true },
+        )
+    }
+
+    @Test
+    fun `a retired API at a path wanted again is revived - a new draft on the newest version's hash, released, never re-created`() {
+        happyStubs()
+        val path = "/demo/nyc/mobility/revenue-by-borough"
+        val id = UUID.nameUUIDFromBytes(path.toByteArray())
+        every { endpointRepository.findByPath(path) } returns endpoint(path, "nyc/mobility/revenue_by_borough", status = null)
+        every { endpointVersions.findDraft(id) } returns null andThen versionOf(path, 3, PipelineVersionStatus.DRAFT)
+        holds(path, PipelineVersionStatus.DISCARDED, PipelineVersionStatus.DISCARDED)
+        val inputs = mutableListOf<EndpointVersionService.DraftInput>()
+        every { versionService.saveDraft(any(), id, capture(inputs), "hash-$path-v2") } returns
+            versionOf(path, 3, PipelineVersionStatus.DRAFT)
+        val requests = mutableListOf<RootReleaseRequest>()
+        every { releases.releaseRoot(capture(requests)) } returns mockk()
+
+        val lines = logLines { seeder().afterSingletonsInstantiated() }
+
+        assertAll(
+            { verify(exactly = 0) { publishService.create(any(), path, any(), any(), any(), any()) } },
+            {
+                inputs shouldBe
+                    listOf(EndpointVersionService.DraftInput("nyc/mobility/revenue_by_borough", 1, null, DemoEndpointSeeder.DESCRIPTION))
+            },
+            { requests.filter { it.entityId == id }.map { it.expectedHash } shouldBe listOf("hash-$path-v3") },
+            {
+                lines.count {
+                    it.second == "event=demo.endpoint_revived path=$path version=3 pipeline=nyc/mobility/revenue_by_borough"
+                } shouldBe
+                    1
+            },
+            { lines.filter { it.first.isGreaterOrEqual(Level.WARN) } shouldBe emptyList() },
+        )
+    }
+
+    @Test
+    fun `a hand-published demo API with no current version is not revived - it is someone else's path`() {
+        happyStubs()
+        val path = "/demo/nyc/mobility/revenue-by-borough"
+        every { endpointRepository.findByPath(path) } returns
+            endpoint(path, "nyc/mobility/revenue_by_borough", createdBy = UUID.randomUUID(), status = null)
+
+        val lines = logLines { seeder().afterSingletonsInstantiated() }
+
+        assertAll(
+            { verify(exactly = 0) { versionService.saveDraft(any(), any(), any(), any()) } },
+            { lines.count { it.second.startsWith("event=demo.path_taken path=$path") } shouldBe 1 },
+        )
     }
 
     /** The seeder's own log lines during [block], as level and formatted message. */
