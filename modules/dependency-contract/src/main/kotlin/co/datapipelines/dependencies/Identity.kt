@@ -81,7 +81,11 @@ sealed interface OwnerScope {
 
 /**
  * A resolved object's identity inside one deployment (§5.1): family, owner scope, the stable local entity id and, for an
- * artifact, the exact version. Aliases deduplicate on it; distinct versions stay distinct nodes. Never on the wire.
+ * artifact, the exact version. Aliases deduplicate on it; distinct versions stay distinct nodes.
+ *
+ * Not served as a whole: only [stableEntityId] reaches the wire, as the §11.1 node's `entity_id` (record erratum (9),
+ * #890), and only on a node whose resolution is `resolved` — every other node carries `null`, so a hidden object's id
+ * never crosses the view. The UI addresses an object's page by it, which name and version cannot do.
  */
 data class ResolvedIdentity(
     val family: FamilyKey,

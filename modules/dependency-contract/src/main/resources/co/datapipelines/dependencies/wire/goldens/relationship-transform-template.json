@@ -6,6 +6,7 @@
   "nodes": [
     {
       "node_id": "n0",
+      "entity_id": "4f188eb7-6cbe-532d-b3be-857502141391",
       "family": "visualization",
       "name": "test_widget/chart",
       "display_name": "Chart",
@@ -28,6 +29,7 @@
     },
     {
       "node_id": "n1",
+      "entity_id": "55a33d00-5023-5a09-b3e5-0f13df698e98",
       "family": "template",
       "name": "test_widget/query",
       "display_name": "Query",
