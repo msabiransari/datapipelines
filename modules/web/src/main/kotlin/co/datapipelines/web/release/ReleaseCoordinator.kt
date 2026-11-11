@@ -531,10 +531,12 @@ class ReleaseCoordinator(
      * `cascade_root` naming the root's family, id and version. Answers the details every row of this release shares.
      *
      * Each row keeps the details its family's cascade wrote before the planner (#873 §C.7): a template under a pipeline
-     * (or API) root `cascade_from_pipeline_id` (#142); under any other root the root family's provenance
-     * (`cascade_from_parameter_set_id`, `cascade_from_visualization_id`, `cascade_from_dashboard_id`,
-     * `cascade_from_template_id` — #332's [LifecycleVerbs.FamilyCascade]); a dashboard-cascaded visualization its `name`
-     * and no id, as #332 wrote it; a parameter set its id and name.
+     * root `cascade_from_pipeline_id` (#142); under any other root the root family's provenance
+     * (`cascade_from_api_endpoint_id`, `cascade_from_parameter_set_id`, `cascade_from_visualization_id`,
+     * `cascade_from_dashboard_id`, `cascade_from_template_id` — #332's [LifecycleVerbs.FamilyCascade]), with the ROOT's
+     * version in `cascade_from_version`; a dashboard-cascaded visualization its `name` and no id, as #332 wrote it; a
+     * parameter set its id and name. An API root takes the family key since #894 (record §11, the owner's 2026-11-11
+     * exception): before it, its template rows carried `cascade_from_pipeline_id` holding the API's id.
      */
     private fun writeDependencyAudit(
         principal: AuthenticatedPrincipal,
@@ -548,7 +550,7 @@ class ReleaseCoordinator(
         val common = linkedMapOf<String, Any?>("scope" to "version", "release_id" to releaseId.toString())
         val cascadeRoot = linkedMapOf("family" to closure.root.family.wire, "id" to rootEntityId.toString(), "version" to rootVersion)
         val source = LifecycleVerbs.CascadeSource(rootEntityId, rootVersion)
-        val pipelineRooted = closure.root.family == ReleaseFamily.PIPELINE || closure.root.family == ReleaseFamily.ENDPOINT
+        val pipelineRooted = closure.root.family == ReleaseFamily.PIPELINE
         val cascade = LifecycleVerbs.FamilyCascade("${closure.root.family.wire}_id", rootEntityId, rootVersion)
 
         fun provenance(details: Map<String, Any?>): Map<String, Any?> =
