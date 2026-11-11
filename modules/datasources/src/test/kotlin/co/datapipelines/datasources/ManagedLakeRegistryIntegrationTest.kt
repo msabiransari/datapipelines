@@ -108,6 +108,8 @@ class ManagedLakeRegistryIntegrationTest {
             val stored = registry.get(LAKE).shouldNotBeNull()
             assertAll(
                 { updatedAt() shouldBe firstVersion },
+                // #874: CREATED minted generation 1; an UNCHANGED sync writes nothing, so it stays there.
+                { generation() shouldBe 1L },
                 { stored.isManagedLake() shouldBe true },
                 { stored.isReadonly shouldBe true },
                 // The credential took the encrypted path: never in properties, never returned.
@@ -134,16 +136,20 @@ class ManagedLakeRegistryIntegrationTest {
             val firstVersion = updatedAt()
 
             // Credential rotation: the reader pair changed in configuration, then a restart.
+            val firstGeneration = generation()
             registry.syncManagedLake(managed(secret = "$READER_SECRET-rotated"), owner) shouldBe ManagedLakeSync.RESYNCED
 
             assertAll(
                 { (updatedAt().after(firstVersion)) shouldBe true },
+                // #874: a RESYNC is a definition update — exactly one advance.
+                { generation() shouldBe firstGeneration + 1 },
                 { audit.countOf(DatasourceAuditEvents.POOL_REBUILD) shouldBe 1 },
                 { published shouldContainExactly listOf(LAKE) },
                 { registry.poolFor(registry.get(LAKE).shouldNotBeNull()) shouldNotBe firstPool },
             )
             // And the rotated secret is what the row now decrypts to: the next sync is UNCHANGED.
             registry.syncManagedLake(managed(secret = "$READER_SECRET-rotated"), owner) shouldBe ManagedLakeSync.UNCHANGED
+            generation() shouldBe firstGeneration + 1
         } finally {
             registry.shutdown()
         }
@@ -583,6 +589,12 @@ class ManagedLakeRegistryIntegrationTest {
     ) = LakeRegisteredTable(listOf(LAKE, "sales"), name, "iceberg", location, managed = true)
 
     private fun external() = LakeRegisteredTable(listOf(LAKE, "ref"), "zones", "parquet", "s3://dp-ref/zones.parquet")
+
+    /** #874 — the managed row's V59 generation. */
+    private fun generation(): Long =
+        checkNotNull(
+            jdbc.queryForObject("SELECT generation FROM datasources WHERE name = :name", mapOf("name" to LAKE), Long::class.java),
+        )
 
     private fun updatedAt(): Timestamp =
         checkNotNull(
