@@ -115,6 +115,23 @@ open class ArtifactRepository<B : Any>(
                 versionMapper,
             ).singleOrNull()
 
+    /**
+     * #873 (dependency-graph record §7.1, brief R1-8) — the exact versions [keys] name, `(artifact name, version)` pairs,
+     * any status, in ONE `IN`-list statement: the visualization and dashboard dependency providers' batch read. A key with
+     * no stored row is absent from the answer. Empty [keys] issues nothing (`IN ()` would not prepare).
+     */
+    fun findVersionsByName(
+        workspaceId: UUID,
+        keys: Collection<Pair<String, Int>>,
+    ): List<ArtifactVersion<B>> {
+        if (keys.isEmpty()) return emptyList()
+        return jdbc.query(
+            "${sql.selectVersion} WHERE s.workspace_id = :workspaceId AND (s.name, v.version) IN (:keys)",
+            mapOf("workspaceId" to workspaceId, "keys" to keys.map { (name, version) -> arrayOf<Any>(name, version) }),
+            versionMapper,
+        )
+    }
+
     /** The version the pointer names, or null (never released, or every release discarded). */
     fun findCurrent(
         workspaceId: UUID,

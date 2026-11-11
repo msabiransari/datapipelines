@@ -193,6 +193,29 @@ class TemplateRepository(
             ?.let { findVersion(workspaceId, id, it.version) }
             ?: findLatest(workspaceId, id)
 
+    /**
+     * #873 (dependency-graph record §7.1, brief R1-8) — the exact versions [keys] name, `(template id, version)` pairs, any
+     * status, in ONE `IN`-list statement: the template dependency provider's batch read. Each row carries the entity's
+     * surrogate id and its current pointer as [findCurrentVersions] reports it (live entities only, NULL never
+     * released). A key with no stored row is absent. Empty [keys] issues nothing (`IN ()` would not prepare).
+     */
+    fun findReleaseVersions(
+        workspaceId: UUID,
+        keys: Collection<Pair<String, Int>>,
+    ): List<TemplateReleaseRow> {
+        if (keys.isEmpty()) return emptyList()
+        return jdbc.query(
+            "$SELECT_RELEASE_ROW WHERE t.workspace_id = :workspaceId AND (t.name, v.version) IN (:keys)",
+            mapOf("workspaceId" to workspaceId, "keys" to keys.map { (id, version) -> arrayOf<Any>(id, version) }),
+        ) { rs, rowNum ->
+            TemplateReleaseRow(
+                entityUuid = rs.getObject("entity_uuid", UUID::class.java),
+                currentVersion = rs.getObject("live_current_version") as Int?,
+                template = checkNotNull(MAPPER.mapRow(rs, rowNum)),
+            )
+        }
+    }
+
     /** A specific stored version's full record, including of a soft-deleted template (§5.1). */
     fun findVersion(
         workspaceId: UUID,
@@ -1226,6 +1249,13 @@ class TemplateRepository(
               JOIN template_versions v ON v.template_id = t.id
             """.trimIndent()
 
+        /** [SELECT_JOINED] plus the entity's surrogate id and its live current pointer — [findReleaseVersions]' row. */
+        private val SELECT_RELEASE_ROW =
+            SELECT_JOINED.replaceFirst(
+                "SELECT ",
+                "SELECT t.id AS entity_uuid, CASE WHEN $TEMPLATE_LIVE_T THEN t.current_version END AS live_current_version, ",
+            )
+
         /**
          * The working-version page predicate of [list], shared with [count] (034 E3)
          *
@@ -1908,3 +1938,13 @@ class TemplateRepository(
             }
     }
 }
+
+/**
+ * One stored template version as the dependency provider reads it (#873, [TemplateRepository.findReleaseVersions]): the
+ * full version, the entity's surrogate id, and its current pointer — null when never released or no longer live.
+ */
+data class TemplateReleaseRow(
+    val entityUuid: UUID,
+    val currentVersion: Int?,
+    val template: Template,
+)
