@@ -146,6 +146,26 @@ class ReleasePrerequisitesPostgresTest {
         }
     }
 
+    @Test
+    fun `planning and the check never connect - an unreachable datasource is available, read from the catalog alone`() {
+        // Record §8: a graph read does not test connectivity. The host is RFC 6761 `.invalid`: any connect fails.
+        NamedParameterJdbcTemplate(SharedPostgres.dataSource())
+            .update("UPDATE datasources SET jdbc_url = :url WHERE name = 'rw_ds'", mapOf("url" to UNREACHABLE_URL))
+        statements.observed.clear()
+
+        val planned = checkNotNull(walk(production).planned(root(), seed.userId))
+        val checked = inTransaction { check(production).check(planned.closure, seed.userId) }
+
+        planned.prerequisites.single { it.name == "rw_ds" } shouldBe ReleasePrerequisite("rw_ds", available = true, readonly = false)
+        checked shouldBe planned.prerequisites
+        withClue("non-vacuity: the walk and the check read the datasource catalog") {
+            statements.observed.any { it.first.contains("FROM datasources", ignoreCase = true) } shouldBe true
+        }
+        withClue(statements.observed.map { it.first }) {
+            statements.observed.none { it.first.contains("jdbc_url", ignoreCase = true) } shouldBe true
+        }
+    }
+
     private fun root() = seed.identity(ReleaseFamily.PIPELINE, "root", 1)
 
     private fun walk(registry: FamilyRegistry) =
@@ -169,5 +189,6 @@ class ReleasePrerequisitesPostgresTest {
     private companion object {
         val NAMES = listOf("ro_ds", "rw_ds", "theirs", "gone", "absent")
         const val BUDGET_SECONDS = 30L
+        const val UNREACHABLE_URL = "jdbc:postgresql://dp873-unreachable.invalid:5432/none"
     }
 }
