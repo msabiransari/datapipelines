@@ -8,6 +8,7 @@
   "nodes": [
     {
       "node_id": "n0",
+      "entity_id": "5dfd7595-d2f5-59cb-bbda-6cd5e19e2b47",
       "family": "dashboard",
       "name": "test_widget/sales",
       "display_name": "Sales",
@@ -28,6 +29,7 @@
     },
     {
       "node_id": "n1",
+      "entity_id": "a3264f9f-02a6-59e2-87d0-e03a289638b9",
       "family": "parameter_set",
       "name": "test_widget/filters",
       "display_name": "Filters",
@@ -48,6 +50,7 @@
     },
     {
       "node_id": "n2",
+      "entity_id": "5cc549b7-f370-5c29-bdb0-af88dbebb3c1",
       "family": "template",
       "name": "test_widget/selector",
       "display_name": "Selector",
@@ -68,6 +71,7 @@
     },
     {
       "node_id": "n3",
+      "entity_id": "83c82b87-f663-5d23-bb21-3393f2781d73",
       "family": "template",
       "name": "test_widget/common",
       "display_name": "Common",
@@ -88,6 +92,7 @@
     },
     {
       "node_id": "n4",
+      "entity_id": "test_widget_warehouse",
       "family": "datasource",
       "name": "test_widget_warehouse",
       "display_name": "Test Widget Warehouse",
@@ -110,6 +115,7 @@
     },
     {
       "node_id": "n5",
+      "entity_id": "d86b260d-d1e2-5438-a934-b7f83ba82b0d",
       "family": "pipeline",
       "name": "test_widget/report",
       "display_name": "Report",
@@ -130,6 +136,7 @@
     },
     {
       "node_id": "n6",
+      "entity_id": "5a7f1e64-fc5b-5997-8316-31d47dbaf083",
       "family": "pipeline",
       "name": "test_widget/totals",
       "display_name": "Totals",
@@ -150,6 +157,7 @@
     },
     {
       "node_id": "n7",
+      "entity_id": "55a33d00-5023-5a09-b3e5-0f13df698e98",
       "family": "template",
       "name": "test_widget/query",
       "display_name": "Query",
@@ -170,6 +178,7 @@
     },
     {
       "node_id": "n8",
+      "entity_id": "4f188eb7-6cbe-532d-b3be-857502141391",
       "family": "visualization",
       "name": "test_widget/chart",
       "display_name": "Chart",
@@ -192,6 +201,7 @@
     },
     {
       "node_id": "n9",
+      "entity_id": "30ec39d4-63c9-5a0c-9c0f-597a62245fc5",
       "family": "template",
       "name": "test_widget/formatter",
       "display_name": "Formatter",
@@ -212,6 +222,7 @@
     },
     {
       "node_id": "n10",
+      "entity_id": "61c86361-bde4-5e0b-bdd5-991a6bccfaf4",
       "family": "api_endpoint",
       "name": "/test-widget/sales/report",
       "display_name": "Report",
@@ -234,6 +245,7 @@
     },
     {
       "node_id": "n11",
+      "entity_id": "d86b260d-d1e2-5438-a934-b7f83ba82b0d",
       "family": "pipeline",
       "name": "test_widget/report",
       "display_name": "Report",
@@ -254,6 +266,7 @@
     },
     {
       "node_id": "n12",
+      "entity_id": "b650fb67-566b-5d09-ab2b-99fd147d566a",
       "family": "schedule",
       "name": "nightly test widget",
       "display_name": "Nightly Test Widget",
