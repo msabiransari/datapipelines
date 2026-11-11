@@ -1,6 +1,6 @@
 # Datasources Specification
 
-**Status:** v2.69 (frozen contract — additive-only changes after this point)
+**Status:** v2.70 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
 **Last updated:** 2026-11-11
@@ -53,10 +53,11 @@ This spec defines:
     "secret": "..."                        // write-only; never returned in GET
   },
   "query_timeout_seconds": 60,
-  "global": false,                         // OPTIONAL (workspaces D8) — admin-only; true = shared
-                                           // infrastructure (workspace_id NULL)
-  "workspace": "team-etl",                 // OPTIONAL (workspaces D8) — a workspace the caller can
-                                           // access; default = the ACTIVE workspace
+  "global": false,                         // OPTIONAL (workspaces D8) — super-admin-only; true = an
+                                           // INSTANCE datasource (owner_workspace_id NULL),
+                                           // visible only where a super admin grants it
+  "workspace": "team-etl",                 // OPTIONAL (workspaces D8) — the OWNING workspace, one the
+                                           // caller can access; default = the ACTIVE workspace
   "readonly": true,                        // OPTIONAL (§5.7) — forbids the three write-shaped uses
   "introspection_include_schemas": ["apex_reporting"],   // OPTIONAL — §7A escape hatch for the
                                                           // system-schema exclusion floors
@@ -88,7 +89,7 @@ Identical to request, except:
 - The credential **secret** is **never** returned — neither as `password` nor as `credential.secret`. The response carries `credential: {kind, username?}` and `password_set: true | false`, which is DERIVED from the kind: V13's `chk_datasource_credential_present` makes `credential_kind = 'none'` and "no stored ciphertext" the same fact, so `password_set` is `false` exactly for `kind: "none"`.
 - Top-level `username` is still returned (frozen shape) and is `null` for the kinds that have none.
 - `jdbc_url` is included (operators need it for debugging).
-- `workspace` (string, additive — workspaces design §9): the bound workspace's NAME, `null` = global.
+- `workspace` (string, additive — workspaces design §9): the OWNING workspace's NAME, `null` = an instance datasource (owned by no workspace). It says who owns the row, not who can see it — visibility is the grant (§3.3).
 - `readonly` (boolean, additive): the §5.7 flag, machine-readable.
 - `last_test` (object or `null`, additive — §8.1B): the outcome of the LAST connection test —
   `{"tested_at": "2026-08-30T09:15:00Z", "ok": false, "message": "FATAL: password authentication failed …"}`.
@@ -134,19 +135,27 @@ Identical to request, except:
 | `query_timeout_seconds` | integer | optional | `Statement.setQueryTimeout` for every node executing against this datasource. When set, it **overrides** `datapipelines.executor.node-query-timeout-seconds` — see §5.5. |
 | `introspection_include_schemas` | array of strings | optional | §7A escape hatch for the dialect's system-schema exclusion: a schema named here is exempt from the exclusion in **all three** introspection operations. Exact names over the **legal-identifier alphabet of the supported dialects** — letters, digits, `_`, `$`, `#` (`_` is an ordinary name character, not SQL-LIKE's wildcard here; an entry outside the alphabet is rejected at save with `datasource.validation.properties_invalid`, because wildcards, quoted identifiers, and qualified `db.schema` names can never match a real schema as exact entries) — and normalized by the ONE rule — trim, lowercase, drop blank-after-trim entries, deduplicate (first-seen order) — at the **registry's save boundary** (the single place every write path crosses) and again on read, so a row whose allowlist landed by restore or a manual JSONB edit cannot sit silently inert AND what a GET projects always survives an unmodified PUT round-trip; absent/empty = the exclusion floors apply unchanged. See §7A. |
 | `properties` | object | optional | Three namespaced maps: `properties.hikari.*` and `properties.jdbc.*` are passthrough (§5); `properties.dialect.*` is TYPED and adapter-validated (§4.2A). On reads, `properties.dialect` carries the non-secret keys only (§3.2's shown/hidden table). |
-| `global` | boolean | optional (write) | Workspaces D8: `true` binds the datasource to NO workspace (global, visible to everyone) — **admin-only** to set, either direction. Mutually exclusive with `workspace`. |
-| `workspace` | string | optional (write) | Workspaces D8: the workspace to bind to — must be one the caller can access (member or admin); `datasource.validation.workspace_forbidden` otherwise. Default: the caller's ACTIVE workspace. |
-| `readonly` | boolean | optional | The §5.7 flag. Editable by whoever may edit the datasource, except on a GLOBAL datasource where only admin may flip it. On update, absent keeps the stored value. |
+| `global` | boolean | optional (write) | Workspaces D8; the wire spelling kept since V23, whose meaning changed: `true` makes an **instance** datasource — owned by NO workspace (`owner_workspace_id` NULL). It makes the datasource visible to nobody by itself: an instance datasource is granted to no workspace at registration, and a super admin grants it (§3.3). **Super-admin-only**: `true` on create, and the flag in either value on update (an absent flag keeps the stored owner). `true` together with `workspace` is refused. |
+| `workspace` | string | optional (write) | Workspaces D8: the OWNING workspace — must be one the caller can access (a member of it, or a super admin); `datasource.validation.workspace_forbidden` otherwise. Default: the caller's ACTIVE workspace. A registration owned by a workspace is granted to that workspace in the same transaction. |
+| `readonly` | boolean | optional | The §5.7 flag. Editable by whoever may edit the datasource, except on an INSTANCE datasource, where only a super admin may flip it (every mutation of an instance datasource is a super admin's). On update, absent keeps the stored value. |
 | `incarnation_id` | UUID | — (server) | **Internal, never on the wire.** Which incarnation of the name this row is: assigned once when the row is inserted (V59's `DEFAULT gen_random_uuid()`), kept by every update and by a soft delete, new only when a row is recreated under the same name. Never in a DTO, a log line, an evidence file, promotion or release consent. See §11.2. |
 | `generation` | integer | — (server) | **Internal, never on the wire.** A local counter of the row's identity-bearing facts, starting at 1 and advanced by exactly one by the writers listed in §11.2 inside their guarded section; a connection test never advances it. Same exclusions as `incarnation_id`. |
 
-**Visibility (workspaces design §5.3, normative):** every listing and by-name read sees the ACTIVE
-workspace's bound datasources plus all global ones — enforced in the repository's SQL
-(`findAllVisible`/`findVisibleByName`), never post-filtered, so paging totals are exact. A
-workspace-bound datasource of another workspace behaves as **not-found** on every surface (REST,
-MCP, introspection). Datasource NAMES remain a flat GLOBAL namespace (§11.1, workspaces design §3):
+**Visibility (RBAC design §4, D-R7, normative):** every listing and by-name read sees exactly the
+datasources GRANTED to the ACTIVE workspace — a `datasource_workspaces` row for the datasource and
+that workspace ([Metadata DB §4.16](metadata-db.md#416-datasource_workspaces)). Nothing is visible
+by default, and owning a datasource is not seeing it: a workspace-owned registration is granted to
+its owner in the same transaction, an instance datasource (no owner) is granted to no workspace
+until a super admin grants it (the server's own grants — the managed lake's, §8C.10, and the `demo`
+workspace's, §8A.1 — are the exceptions). The predicate is in the repository's SQL (`GRANTED_PREDICATE`, inside
+`findAllVisible`/`findVisibleByName`), never post-filtered, so paging totals are exact. A datasource
+not granted to the active workspace behaves as **not-found** on every surface (REST, MCP,
+introspection) — for a super admin too: a super admin's listings read the active workspace's grants
+like anyone's (a super admin may make any workspace active), and the grants surface — the super
+admin's inventory access — reads any live datasource by name, granted here or not
+(`/api/v1/datasources/{name}/grants`, the `datasource.grant` row of [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)). Datasource NAMES remain a flat GLOBAL namespace (§11.1, workspaces design §3):
 `name` is the primary key and the GCM AAD anchor, so a create colliding with another workspace's
-datasource name is `datasource.validation.duplicate_name` — by design. Member CUD is gated by
+datasource name is `datasource.validation.duplicate_name` — by design. CUD below super admin is gated by
 `datapipelines.workspaces.member-datasources-enabled` (configuration §3.17); refusals are
 `datasource.validation.workspace_forbidden` (400).
 
@@ -592,7 +601,7 @@ A datasource flagged `is_readonly` (metadata-db §4.10, V4; workspaces design 20
 
 **Normative deployment guidance (layer 3): the flag is contract, not containment.** A datasource whose data must not change gets a **SELECT-only database user** regardless of the flag — the flag gives agents fast machine-readable feedback and the executor a deterministic refusal, but only the credential gives the guarantee (the datapipelines.co demo's seeded datasources are `global` + `readonly` AND run under SELECT-only users).
 
-The flag is a first-class writable field since the workspaces surfaces slice. Whoever may edit a datasource may flip `readonly` on it — EXCEPT on a GLOBAL datasource, where only a global admin may (workspaces design §6 last paragraph, D8). Every flag write crosses the registry's save boundary, so the pool is drained on update and rebuilds under the new `readOnly` setting at the next lease; there is no column-level UPDATE path, by construction. The §5.2 pool lifecycle is the mechanism — this paragraph is the pointer, not a second statement of it.
+The flag is a first-class writable field since the workspaces surfaces slice. Whoever may edit a datasource may flip `readonly` on it — EXCEPT on an INSTANCE datasource (owned by no workspace; `global: true` on the wire), where only a super admin may, because every mutation of an instance datasource is a super admin's (workspaces design §6 last paragraph, D8; `DatasourceWorkspaceRules`). Every flag write crosses the registry's save boundary, so the pool is drained on update and rebuilds under the new `readOnly` setting at the next lease; there is no column-level UPDATE path, by construction. The §5.2 pool lifecycle is the mechanism — this paragraph is the pointer, not a second statement of it.
 
 ### 5.8 The author-SQL guard on DUCKDB and LAKE leases (TEMPORARY, #816)
 
@@ -752,9 +761,9 @@ only outside the caller's scope takes the in-use branch with no rows. On the in-
 refusal cannot be clicked past; only an unused datasource gets a confirm, and that confirm names
 it. The dialog and the `409` cannot disagree because they are the same scan — but the POST
 **re-runs** the guard anyway: a pipeline can start referencing the datasource between the dialog
-opening and the button being pressed, and the screen is never the authority. The `readonly` /
-`global` D8 rules apply exactly as they do for update (a member deleting a global datasource is
-told so before the scan even runs).
+opening and the button being pressed, and the screen is never the authority. The D8
+instance-datasource rule applies exactly as it does for update (anyone below super admin deleting
+an instance datasource is told so before the scan even runs).
 
 Deleting a datasource **retires** its pool on every instance rather than closing it (§5.2), so a
 query already running against it finishes on the connection it holds. That is what the dialog's
@@ -1155,7 +1164,9 @@ datasources:
 
 `readonly: true` writes `datasources.is_readonly`, so every §5.7 enforcement layer applies to a
 bootstrapped datasource exactly as to one created over the API. `global: true` means
-`workspace_id NULL`.
+`owner_workspace_id` NULL: an instance datasource, which the registration grants to no workspace. The
+`demo` workspace's seeder grants every instance datasource to `demo` (`InstanceDatasourceGrants`);
+every other workspace gets each grant from a super admin.
 
 **`global` is required and must be `true`.** The flag is written explicitly rather than defaulted
 because registration runs before any workspace exists, so there is no answer to "which workspace
@@ -1326,7 +1337,8 @@ The surface:
   `POST …/tables/import` (an inline `tables[]` block, or a `manifest_url` fetched server-side
   and restricted to the datasource's OWN bucket/endpoint — the SSRF boundary), and
   `GET …/lake-tables` (the registry's own rows, `read` scope). The writes are `author`;
-  mutating a GLOBAL datasource's registry is admin-only as a workspaces D8 rule.
+  mutating an INSTANCE datasource's registry is super-admin-only, the same workspaces D8 rule as
+  an update (`LakeTableMutationGate`).
 - **MCP**: `lake_tables_register`, `lake_tables_import`, `lake_tables_unregister`
   ([mcp-server §6.2.29–31](mcp-server.md#6229-lake_tables_register)) over the same
   application service, so validation, the duplicate refusal and the pool invalidation are
@@ -1593,7 +1605,7 @@ On boot, a backfill scans each released version that has no row, or a row from a
 
 Managed lake tables (tables DP defines and writes, [Lake §9](lake.md#9-reads)) are read through ONE datasource that DP creates itself: the **managed lake datasource** (#818, design record §6, §10). It is an ordinary `LAKE` datasource in every respect §8C.1–§8C.9 describe. The differences are listed here.
 
-- **Configuration is its only source.** When `datapipelines.lake.enabled=true`, boot creates the row (named `datapipelines.lake.name`, default `lake`; dialect `LAKE`; URL `jdbc:duckdb::memory:`; read-only; global, no owner workspace). On each later boot it rewrites the row if configuration has changed. An unchanged boot writes nothing. The row carries `properties.dialect.managed = "true"`, the store's addressing (region, endpoint, URL style) and the reader memory limit. A REST `PUT` or `DELETE` of it is refused with `datasource.managed` (409), and the UI's edit form refuses it too. A name already held by another datasource, live or soft-deleted, refuses the boot with `lake.boot.datasource_name_taken`; rename that datasource or choose another `datapipelines.lake.name`. The managed row is written before bootstrap registration runs (§8A), so a bootstrap entry with the same name is skipped as already present, and its credential is never probed or written (`datasource.bootstrap_managed_name`).
+- **Configuration is its only source.** When `datapipelines.lake.enabled=true`, boot creates the row (named `datapipelines.lake.name`, default `lake`; dialect `LAKE`; URL `jdbc:duckdb::memory:`; read-only; an instance datasource, no owner workspace). On each later boot it rewrites the row if configuration has changed. An unchanged boot writes nothing. The row carries `properties.dialect.managed = "true"`, the store's addressing (region, endpoint, URL style) and the reader memory limit. A REST `PUT` or `DELETE` of it is refused with `datasource.managed` (409), and the UI's edit form refuses it too. A name already held by another datasource, live or soft-deleted, refuses the boot with `lake.boot.datasource_name_taken`; rename that datasource or choose another `datapipelines.lake.name`. The managed row is written before bootstrap registration runs (§8A), so a bootstrap entry with the same name is skipped as already present, and its credential is never probed or written (`datasource.bootstrap_managed_name`).
 - **Its credential.** The reader pair (`storage.reader-access-key` / `reader-secret-key`), when both are set, is the row's stored credential. Otherwise the writer pair is, and with neither the instance's credential chain is used. The credential is encrypted like every other datasource credential (§7). It never enters `properties.dialect`, a log line or an event. The reader pair is read-only by **operator contract** ([Configuration §3.36](configuration.md#336-managed-lake-dp-lake-785)): DP cannot verify what the pair is allowed to do.
 - **Every workspace sees it, and the server holds the grant (#823).** Boot grants it to every workspace. A workspace created later is granted in the same transaction that creates it, as the server's system actor, so it can use the lake from its first request: if the grant cannot be written the workspace is not created, and the creation is audited only after the grant. The freshness tick remains the repair path: it grants any workspace that lacks the grant (one that predates the lake, one created while the lake was disabled, or one whose grant row was deleted from the database) within one tick. A repair writes no `datasource.granted` audit row, because the server, not a person, made it; neither does the creation-time grant. A revoke of this grant is refused, because the tick would undo it and the workspace would be without its lake until then: the REST `DELETE /api/v1/datasources/{name}/grants/{workspace}` and the UI's revoke answer `datasource.managed` (409) whether or not the workspace holds the grant, nothing is deleted and no `datasource.revoked` row is written, and the grants dialog shows "granted by the server" instead of a Revoke button. Granting it by hand stays idempotent. No new permission: the refusal is a property of the datasource, so every role gets the same answer. Its tables are the managed tables. Registry rows for tables defined before the datasource existed are written at boot.
 - **Its views read the catalog.** A generation's view for a managed table reads the metadata location in the Iceberg catalog row (`iceberg_tables`) at build time, never the registry's copy. A table that is archived or purged, has no catalog row, has no lifecycle row, or belongs to a disabled lake (`datapipelines.lake.enabled=false`) gets no view. Each omission logs `lake.table_unavailable_omitted` ([Observability §3.4C](observability.md#34c-the-lake-instance-events-152)). A node that reads such a table is refused before a connection is leased, with `lake.table.unavailable` (409) naming the table and the reason. The refusal is judged against the generation the lease comes from: the executor resolves the pool, asks that generation's snapshot, then leases from the same pool, and no catalog is read at CONNECT. So a table archived after the generation was built keeps being served until the generation is replaced, a table restored after it was built stays refused until then, and a catalog outage refuses nothing a live generation serves. A deprecated table keeps its view, and its notice appears in the table listing's remarks (`iceberg; deprecated: …`).
@@ -1844,6 +1856,7 @@ fixture) get their Testcontainers twin.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-11 | v2.70 | #896 docs: ownership and grants as they are since V23 | **Text only, no wire change.** §3.3's Visibility paragraph says what the repository's `GRANTED_PREDICATE` reads: exactly the datasources GRANTED to the active workspace, nothing by default — not "bound datasources plus all global ones"; owning is not seeing (a workspace-owned registration is granted to its owner, an instance datasource to nobody until a super admin grants it), and a super admin's inventory access is the grants surface. The §3.1 example comments, the §3.2 `workspace` field and the §3.3 `global`/`workspace`/`readonly` rows say what the surviving `global` wire flag means since V23 (an INSTANCE datasource, owned by no workspace) and that its write and every mutation of an instance datasource are super-admin-only; the same correction in §5.7 (`readonly`), §6.2 (the delete dialog), §8A.1 (`global: true` = `owner_workspace_id` NULL, granted to no workspace; `demo` gets its grants from the seeder), §8C (lake-table registry writes) and §8C.10 (the managed row is an instance datasource). |
 | 2026-11-11 | v2.69 | #874 G3 datasource identity | **§3.3 gains the two internal fields `incarnation_id` and `generation`** (V59), never on the wire. **New §11.2 identity across delete and recreation**: the name stays the key everywhere; the incarnation is kept by updates and soft delete and new on a same-name recreation; the generation advances by one inside the guarded section for a definition update, a changed managed re-sync, a credential change, a soft delete and a grant or revoke that changed a row, and never for a connection test; neither enters a wire, a log, promotion or release consent (record erratum (7)); the dependency graph folds both into its internal node fingerprint. The owner's ruling (b) — no restore and no hard delete action — is recorded there. |
 | 2026-11-10 | v2.68 | #841 R4 freshness repair budget | §8C.10: the freshness tick's grant repair takes the datasource's writer lock (#841 G0) and its key wait, workspace-row waits and `INSERT` share ONE 5 s budget (busy `55P03` or cancelled `57014`, rolled back, repaired next tick) instead of a full bound each; every statement of the repair carries the 10 s socket bound. No new key; the 5 s bound is unchanged. |
 | 2026-11-08 | v2.67 | #867 listing enrichment bounds | §8C.10: the listings' managed enrichment is bounded outside a metadata transaction (5 s statement, 10 s socket, about 15 s against a server that never answers) and keeps the transaction's own connection and policy inside one (release, import, promotion). The generation build's bound, the retire ceiling and the close deadline are unchanged; no new key. |

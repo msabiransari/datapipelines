@@ -1,9 +1,9 @@
 # Auth & Security Specification
 
-**Status:** v3.74 (revised — see Change Log)
+**Status:** v3.75 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
-**Last updated:** 2026-11-10
+**Last updated:** 2026-11-11
 
 ---
 
@@ -1786,7 +1786,7 @@ The five roles, as the record's §2 ratifies them (the row-by-row table is §7.6
 | **author** (D4, D8, D9) | the viewer's rows + create/edit/discard/restore/purge pipelines and templates, **release**, switch the served version, publish endpoints, register lake tables, record/retire learned facts, read the promotion page | promote, members, workspace datasources |
 | **promoter** (D5) | reads datasources; reads pipelines, templates and endpoints through the **lens** (§11A.1: released, and newer than the promotion target's — what is promotable, and nothing else); introspects schemas; reads the promotion page; **promotes** | execute, cancel, execution and result reads, connection test, authoring, release, switch, members. Promoters are ops people. |
 | **workspace admin** (D6) | everything in the workspace: every row above plus members, roles and invitations, workspace-bound datasources, the workspaces page, the audit trail (D12 — no surface yet), and promotion | the instance verbs |
-| **super admin** (D7) | everything everywhere: every workspace's rows without a membership (audited `acting_via=super_admin`), global datasources and grants, workspaces, users | — |
+| **super admin** (D7) | everything everywhere: every workspace's rows without a membership (audited `acting_via=super_admin`), instance datasources (owned by no workspace — the `global` wire flag) and every datasource's grants (the inventory access: the grants surface reads any datasource by name; listings still show the active workspace's granted set — RBAC design §4, D-R7; §7.6 `datasource.grant`), workspaces, users | — |
 
 Reads are cumulative — viewer ⊂ author ⊂ workspace admin ⊂ super admin — and the promoter is NOT on that chain: it reads datasources as a viewer does, reads pipelines, templates and endpoints through the lens (§11A.1), reads no executions, and adds the promote verb.
 
@@ -1936,6 +1936,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-11 | v3.75 | #896 docs: datasource ownership and grants | **§11A, no §7.6 change, no role cell change:** the super admin's row says "instance datasources (owned by no workspace) and every datasource's grants" instead of "global datasources and grants" — since V23 nothing is visible by default; the grants surface is the super admin's inventory access, and listings read the active workspace's grants for every role. |
 | 2026-11-10 | v3.74 | #786 U1 API versions | **§7.6: API versions.** Two new rows, `endpoint.release` (cells copied from `pipeline.release`) and `endpoint.version.manage` (cells copied from `template.version.manage`), both session-only; `endpoint.read` lists the versions resources and the API versions page `GET /api-console/endpoints/{id}`; `endpoint.publish` now creates a DRAFT v1 pinned to an exact pipeline version and saves the working draft (`PUT /api/v1/endpoints/{id}/draft`), refused on an authoring-disabled deployment whatever the role. The page's lifecycle dialogs (`/partials/endpoints/{id}/lifecycle/{draft,release,discard,restore,purge,switch}`, GET and POST) sit on the row their REST twin declares. The permission count moves 101 → 103. No role gains an action it did not hold on the equivalent pipeline or template row. |
 | 2026-11-10 | v3.73 | #841 R4 | §8.6.1: the `ManagedLakeFreshnessScheduler#tick` row's bounds — the grant repair takes the datasource's writer lock and its waits and `INSERT` share one 5 s budget. No route, action, permission or role changes. |
 | 2026-11-08 | v3.72 | 860 (#860) — renumbered at merge after #823's v3.71 | **§8.3 + §8.6.2: `/schemas/**`**, the last static pattern — `GET /schemas/chart/1/{name}.schema.json` (`ChartSchemaController#schema`) serves the chart document v1 JSON Schemas, the save path's own classpath bytes, by an allowlist of file names (any other name is the 404 envelope); anonymous for the reason the skill pair is. The static-resource row's anonymous list names the glob. No action, permission or role changes. |
