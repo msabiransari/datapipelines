@@ -254,9 +254,11 @@ class ConversionRollbackBoundaryE2eTest {
 
             version(fixture.apiA) shouldBe listOf(1, "RELEASED", API_A_PIPELINE, 2, 45, "A one")
             version(fixture.apiB) shouldBe listOf(1, "DRAFT", API_B_PIPELINE, 1, 30, "")
+            // The repository's setCurrent stamps updated_at with the pointer; every other column is the start's.
+            val moved = listOf("current_version", "updated_at")
             withClue("the entity rows: only the pointer moved; enabled state, legacy columns and the key binding untouched") {
-                endpoint(fixture.apiA).minus("current_version") shouldBe before.endpoint(fixture.apiA).minus("current_version")
-                endpoint(fixture.apiB).minus("current_version") shouldBe before.endpoint(fixture.apiB).minus("current_version")
+                endpoint(fixture.apiA).minus(moved) shouldBe before.endpoint(fixture.apiA).minus(moved)
+                endpoint(fixture.apiB).minus(moved) shouldBe before.endpoint(fixture.apiB).minus(moved)
                 rows(BINDINGS) shouldBe before.getValue("bindings")
             }
             payloadOf("schedules", fixture.scheduleA) shouldBe mapper.readTree("""{"pipeline": "$SCHED_PIPELINE", "version": 1}""")
@@ -521,8 +523,9 @@ class ConversionRollbackBoundaryE2eTest {
         sql("DELETE FROM schedule_runs WHERE $scope")
         sql("DELETE FROM schedules WHERE $scope")
         sql("DELETE FROM endpoint_key_bindings WHERE $scope")
-        sql("DELETE FROM published_endpoint_versions WHERE endpoint_id IN (SELECT id FROM published_endpoints WHERE $scope)")
+        // The pointer first: fk_published_endpoints_current_version references the version rows.
         sql("UPDATE published_endpoints SET current_version = NULL WHERE $scope")
+        sql("DELETE FROM published_endpoint_versions WHERE endpoint_id IN (SELECT id FROM published_endpoints WHERE $scope)")
         sql("DELETE FROM published_endpoints WHERE $scope")
     }
 
