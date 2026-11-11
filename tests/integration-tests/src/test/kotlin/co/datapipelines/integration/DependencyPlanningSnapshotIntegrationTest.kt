@@ -117,7 +117,21 @@ class DependencyPlanningSnapshotIntegrationTest {
         val sources = mapOf(family("PIPELINE") to hooked(pipelineSource, hook), family("TEMPLATE") to hooked(templateSource, hook))
 
         val families = Class.forName(FAMILIES)
-        val registry = families.getMethod("registry", Map::class.java).invoke(families.getField("INSTANCE").get(null), sources)
+        // #786 R3 added the ceiling parameter and #786 the planning limits; a reflective call names every parameter, so
+        // each is passed as the Kotlin default a compiled caller omitting it gets: these sources read over the recording
+        // template above, never over the production ceiling's own template.
+        val ceilingType = Class.forName(STATEMENT_CEILING)
+        val noCeiling = ceilingType.getField("Companion").get(null).let { it.javaClass.getMethod("getNONE").invoke(it) }
+        val defaultLimits =
+            Class
+                .forName(PLANNING_LIMITS)
+                .getField("Companion")
+                .get(null)
+                .let { it.javaClass.getMethod("getDEFAULT").invoke(it) }
+        val registry =
+            families
+                .getMethod("registry", Map::class.java, ceilingType)
+                .invoke(families.getField("INSTANCE").get(null), sources, noCeiling)
         val walkType = Class.forName(PLANNING_WALK)
         val companion = walkType.getField("Companion").get(null)
         val manager = context.getBean("metadataTransactionManager", PlatformTransactionManager::class.java)
@@ -141,6 +155,7 @@ class DependencyPlanningSnapshotIntegrationTest {
                 speculativeReads,
                 context.getBean("releasePlanningDeadline"),
                 Clock.systemUTC(),
+                defaultLimits,
             )
         return PlanningWalk(walk, planning as TransactionTemplate)
     }
@@ -451,13 +466,23 @@ class DependencyPlanningSnapshotIntegrationTest {
         private const val FAMILIES = "co.datapipelines.application.dependencies.ReleaseDependencyFamilies"
         private const val PLANNING_WALK = "co.datapipelines.application.dependencies.ReleasePlanningWalk"
 
-        /** registry, bounds, planning transactions, speculative-read fence, deadline, clock. */
-        private const val WALK_CONSTRUCTOR_PARAMETERS = 6
+        private const val STATEMENT_CEILING = "co.datapipelines.application.dependencies.StatementCeiling"
+        private const val PLANNING_LIMITS = "co.datapipelines.application.dependencies.ReleasePlanningLimits"
 
-        /** Three versions, three repository reads each (record §7.2: statement-count tests enforce batching). */
-        private const val EXPECTED_STATEMENTS = 9
+        /** registry, bounds, planning transactions, speculative-read fence, deadline, clock, planning limits. */
+        private const val WALK_CONSTRUCTOR_PARAMETERS = 7
 
-        private val METADATA_TABLES = setOf("pipelines", "pipeline_versions", "templates", "template_versions")
+        /**
+         * Three versions (record §7.2: statement-count tests enforce batching): each pipeline three repository reads, the
+         * template four — #873 gave `TemplateDependencySource` its import read (`findVersion`) on top of entity, version
+         * detail and current pointer.
+         */
+        private const val EXPECTED_STATEMENTS = 10
+
+        /** The import read's projection (#873) also reads the template's implements rows and their learned facts. */
+        private val METADATA_TABLES =
+            setOf("pipelines", "pipeline_versions", "templates", "template_versions", "template_implements", "learned_facts")
+
         private val TABLE_REFERENCE = Regex("""(?i)\b(?:from|join)\s+([a-z_][a-z0-9_]*)""")
         private const val CONTROL_STATEMENT = "SELECT 868 AS control"
 
