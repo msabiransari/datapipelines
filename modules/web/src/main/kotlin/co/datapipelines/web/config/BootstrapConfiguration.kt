@@ -96,6 +96,7 @@ class BootstrapConfiguration {
         authoring: co.datapipelines.pipeline.AuthoringGuard,
         endpointVersions: co.datapipelines.application.endpoints.PublishedEndpointVersionRepository,
         releases: co.datapipelines.web.release.ReleaseCoordinator,
+        versionService: co.datapipelines.application.endpoints.EndpointVersionService,
     ): DemoEndpointSeeder =
         DemoEndpointSeeder(
             properties,
@@ -114,5 +115,6 @@ class BootstrapConfiguration {
             authoring,
             endpointVersions,
             releases,
+            versionService,
         )
 }
