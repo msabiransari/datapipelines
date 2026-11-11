@@ -15,7 +15,7 @@ import co.datapipelines.templates.TemplateRepository
  * path `imports[i]` (a DISCARDED version answers none: its pins are never walked, as a pipeline's).
  *
  * Since #873 production resolves templates through the native `TemplateReleaseProvider` (one batch read per frontier);
- * this source is kept as the PARITY ORACLE only (brief §A.2): `ArtifactReleaseProvidersPostgresTest` walks the same
+ * this source is kept as the PARITY ORACLE only (brief §A.2): `TemplateProviderParityPostgresTest` walks the same
  * fixtures through both and asserts identical closures. Its reads (entity, version detail, current pointer, body) and its
  * pin mapping are its own, written independently of the provider's, so a defect in either is a parity difference.
  */

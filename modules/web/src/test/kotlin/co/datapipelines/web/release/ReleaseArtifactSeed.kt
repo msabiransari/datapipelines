@@ -34,6 +34,8 @@ import java.util.UUID
  * reference-bearing minimum: the providers read references only, never validity.
  *
  * A pin is `name to version`; a template's name is its id.
+ *
+ * A copy of the application module's test helper of the same name (test sources are not shared across modules).
  */
 class ReleaseArtifactSeed(
     private val jdbc: NamedParameterJdbcTemplate,

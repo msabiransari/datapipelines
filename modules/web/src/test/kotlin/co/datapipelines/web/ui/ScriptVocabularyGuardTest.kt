@@ -312,9 +312,18 @@ class ScriptVocabularyGuardTest {
                 ),
                 Triple(
                     Regex(
+                        "^modules/application/src/test/kotlin/co/datapipelines/application/dependencies/" +
+                            "(?:ArtifactReleaseProvidersPostgresTest|ReleaseArtifactSeed)\\.kt$",
+                    ),
+                    Regex("transform(?: pin|s? template|-template|\\.template|-free| = |: Pair)|TransformBinding"),
+                    "the native release providers' database suite and its seed (#873 G2, moved beside the providers): the " +
+                        "block's pin, phrase by phrase — a node noun stays red here",
+                ),
+                Triple(
+                    Regex(
                         "^modules/web/src/(?:main|test)/kotlin/co/datapipelines/web/release/" +
                             "(?:VisualizationReleaseParticipant|ReleaseConfiguration|ReleaseArtifactSeed|" +
-                            "ArtifactReleaseProvidersPostgresTest|ArtifactRootGraph|ReleaseAliasParityTest|" +
+                            "TemplateProviderParityPostgresTest|ArtifactRootGraph|ReleaseAliasParityTest|" +
                             "ReleaseCoordinatorArtifactRootsTest)\\.kt$",
                     ),
                     Regex("transform(?: pin|s? template|-template|\\.template|-free| = |: Pair)|TransformBinding|_transform\\.sql"),

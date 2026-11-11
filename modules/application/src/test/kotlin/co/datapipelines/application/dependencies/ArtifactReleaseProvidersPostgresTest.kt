@@ -1,9 +1,10 @@
-package co.datapipelines.web.release
+package co.datapipelines.application.dependencies
 
-import co.datapipelines.application.dependencies.PostgresStatementCeiling
-import co.datapipelines.application.dependencies.ReleaseDependencyFamilies
-import co.datapipelines.application.dependencies.ReleasePlanningDeadline
-import co.datapipelines.application.dependencies.ReleasePlanningWalk
+import co.datapipelines.application.SharedPostgres
+import co.datapipelines.application.dependencies.dashboard.DashboardReleaseProvider
+import co.datapipelines.application.dependencies.parameterset.ParameterSetReleaseProvider
+import co.datapipelines.application.dependencies.template.TemplateReleaseProvider
+import co.datapipelines.application.dependencies.visualization.VisualizationReleaseProvider
 import co.datapipelines.dependencies.Authority
 import co.datapipelines.dependencies.Constraint
 import co.datapipelines.dependencies.Deadline
@@ -18,14 +19,17 @@ import co.datapipelines.dependencies.ResolveContext
 import co.datapipelines.dependencies.conformance.ProviderConformance
 import co.datapipelines.pipeline.PipelineVersionStatus.DISCARDED
 import co.datapipelines.pipeline.PipelineVersionStatus.DRAFT
+import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineVersionStatus.RELEASED
+import co.datapipelines.pipeline.release.PipelineDependencySource
 import co.datapipelines.pipeline.release.ReleaseBounds
 import co.datapipelines.pipeline.release.ReleaseClosure
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseNodeIdentity
-import co.datapipelines.pipeline.release.TreeHash
+import co.datapipelines.parameters.ParameterSetRepository
 import co.datapipelines.templates.TemplateRepository
-import co.datapipelines.web.SharedPostgres
+import co.datapipelines.visualization.DashboardRepository
+import co.datapipelines.visualization.VisualizationRepository
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
@@ -44,31 +48,32 @@ import java.time.Duration
 import java.util.UUID
 
 /**
- * #873 §A on a real PostgreSQL, through the PRODUCTION descriptor bean methods of `ReleaseConfiguration`: the four native
- * artifact providers (template, parameter set, visualization, dashboard) pass G1's [ProviderConformance] harness over
- * seeded rows; `resolveMany` is ONE statement per call whatever the request count (review R1-8) and the walk batches a
- * frontier into ⌈n / 256⌉ calls; the record §5.4 worked graph resolves through the registry with exactly 9 nodes and
- * 9 edges and no datasource reference (U1); the import diamond loads `common@2` once with two edge occurrences (A02); and
- * the native template provider and the adapted real [TemplateDependencySource] walk identical closures (§A.2 parity).
+ * #873 §A on a real PostgreSQL, over descriptors built exactly as `ReleaseConfiguration`'s beans build them: the four
+ * native artifact providers (template, parameter set, visualization, dashboard) pass G1's [ProviderConformance] harness
+ * over seeded rows; `resolveMany` is ONE statement per call whatever the request count (review R1-8) and the walk batches
+ * a frontier into ⌈n / 256⌉ calls; the record §5.4 worked graph resolves through the registry with exactly 9 nodes and
+ * 9 edges and no datasource reference (U1); the import diamond loads `common@2` once with two edge occurrences (A02).
+ *
+ * The providers live in this module, so their database suite does too (the module's coverage is its own code's). The
+ * §A.2 parity with the adapted `TemplateDependencySource` (a web class) is web's `TemplateProviderParityPostgresTest`,
+ * over the production beans; one descriptor per family is web's `ReleaseStatementCeilingWiringTest`.
  */
 class ArtifactReleaseProvidersPostgresTest {
     private val statements = ObservedStatements(SharedPostgres.dataSource())
     private val seed = ReleaseArtifactSeed(NamedParameterJdbcTemplate(SharedPostgres.dataSource()))
     private val manager = DataSourceTransactionManager(statements.dataSource)
     private val ceiling = PostgresStatementCeiling(statements.dataSource)
-    private val release = ReleaseConfiguration()
+
+    /** The descriptors exactly as `ReleaseConfiguration`'s beans build them (web's parity and wiring tests read the beans). */
     private val descriptors =
         mapOf(
-            ReleaseFamily.PIPELINE to release.pipelineDependencyFamily(ceiling),
-            ReleaseFamily.TEMPLATE to release.templateDependencyFamily(ceiling),
-            ReleaseFamily.PARAMETER_SET to release.parameterSetDependencyFamily(ceiling),
-            ReleaseFamily.VISUALIZATION to release.visualizationDependencyFamily(ceiling),
-            ReleaseFamily.DASHBOARD to release.dashboardDependencyFamily(ceiling),
+            ReleaseFamily.PIPELINE to
+                ReleaseDependencyFamilies.descriptor(ReleaseFamily.PIPELINE, PipelineDependencySource(PipelineRepository(ceiling.jdbc)), ceiling),
+            ReleaseFamily.TEMPLATE to TemplateReleaseProvider(TemplateRepository(ceiling.jdbc), ceiling).descriptor(),
+            ReleaseFamily.PARAMETER_SET to ParameterSetReleaseProvider(ParameterSetRepository(ceiling.jdbc), ceiling).descriptor(),
+            ReleaseFamily.VISUALIZATION to VisualizationReleaseProvider(VisualizationRepository(ceiling.jdbc), ceiling).descriptor(),
+            ReleaseFamily.DASHBOARD to DashboardReleaseProvider(DashboardRepository(ceiling.jdbc), ceiling).descriptor(),
         )
-
-    /** G1's adapted template source over the same ceiling — the parity oracle, never registered in production. */
-    private val adaptedTemplate =
-        ReleaseDependencyFamilies.descriptor(ReleaseFamily.TEMPLATE, TemplateDependencySource(TemplateRepository(ceiling.jdbc)), ceiling)
 
     @BeforeEach
     fun reset() {
@@ -269,31 +274,6 @@ class ArtifactReleaseProvidersPostgresTest {
         closure.dependencyFirst.map { it.identity.entityId } shouldContainExactly listOf("common", "dates", "report")
     }
 
-    // ------------------------------------------------------------------------------------------- §A.2 parity
-
-    @Test
-    fun `the native template provider and the adapted TemplateDependencySource walk identical closures`() {
-        workedGraph()
-        val worked = seed.identity(ReleaseFamily.DASHBOARD, "sales", 3)
-        importDiamond()
-        val diamond = seed.identity(ReleaseFamily.TEMPLATE, "report", 7)
-        seed.template("library", 1, DISCARDED, imports = listOf("common" to 2))
-        seed.template("importer", 1, DRAFT, imports = listOf("library" to 1, "dates" to 3))
-        val discarded = seed.identity(ReleaseFamily.TEMPLATE, "importer", 1)
-
-        listOf(worked, diamond, discarded).forEach { root ->
-            val native = plan(root)
-            val adapted = plan(root, template = adaptedTemplate)
-            withClue("$root: ids, edges, paths, depth and the canonical string") {
-                native shouldBe adapted
-                TreeHash.canonical(native) shouldBe TreeHash.canonical(adapted)
-            }
-        }
-        withClue("non-vacuous: the import edges exist in both") {
-            plan(diamond).edges shouldHaveSize 3
-        }
-    }
-
     // ------------------------------------------------------------------------------------------------ fixtures
 
     /** Record §5.4, artifact-only (U1): the datasource `warehouse` is named by the selector but emits no edge yet. */
@@ -372,11 +352,8 @@ class ArtifactReleaseProvidersPostgresTest {
             provider.outgoing(resolved.shouldBeInstanceOf<Outcome.Resolved<Any>>())
         }
 
-    private fun plan(
-        root: ReleaseNodeIdentity,
-        template: FamilyDescriptor<*> = descriptors.getValue(ReleaseFamily.TEMPLATE),
-    ): ReleaseClosure {
-        val registry = FamilyRegistry.production(descriptors.values.filter { it.key.wire != "template" } + template)
+    private fun plan(root: ReleaseNodeIdentity): ReleaseClosure {
+        val registry = FamilyRegistry.production(descriptors.values.toList())
         val walk =
             ReleasePlanningWalk(
                 registry,
