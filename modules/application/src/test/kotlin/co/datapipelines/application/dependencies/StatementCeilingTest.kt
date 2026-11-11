@@ -31,9 +31,10 @@ import java.time.ZoneOffset
 import java.util.UUID
 
 /**
- * #786 R3 (record §25.4): the release provider reads each source under its [StatementCeiling] with the context's bound
- * read when that read starts; a zero bound refuses before the read; a statement cancelled at its bound is the walk's
- * [DeadlineExceeded]. The PostgreSQL behaviour itself is `ReleaseStatementCeilingPostgresTest`'s.
+ * #786 R3 (record §25.4): the release provider reads each source under its [StatementCeiling] with the context's LIVE
+ * bound (a supplier the ceiling reads before every statement); a zero bound refuses before the read; a statement cancelled
+ * at its bound, or not issued because its bound was spent, is the walk's [DeadlineExceeded]. The PostgreSQL behaviour
+ * itself is `ReleaseStatementCeilingPostgresTest`'s and `ReleaseStatementBudgetPostgresTest`'s.
  */
 class StatementCeilingTest {
     private val workspaceId = UUID.randomUUID()
@@ -78,7 +79,7 @@ class StatementCeilingTest {
         val ceiling =
             object : StatementCeiling {
                 override fun <T> within(
-                    bound: Duration,
+                    bound: () -> Duration?,
                     read: () -> T,
                 ): T = throw cancelled
             }
@@ -105,14 +106,57 @@ class StatementCeilingTest {
     }
 
     @Test
+    fun `the ceiling receives the LIVE bound - a statement starting later in the same read reads the budget left then`() {
+        val seen = mutableListOf<Duration?>()
+        val ceiling =
+            object : StatementCeiling {
+                override fun <T> within(
+                    bound: () -> Duration?,
+                    read: () -> T,
+                ): T {
+                    seen += bound()
+                    clock.now = clock.now.plusSeconds(3)
+                    seen += bound()
+                    return read()
+                }
+            }
+        val provider = ReleaseDependencyFamilies.descriptor(ReleaseFamily.PIPELINE, source, ceiling).provider
+
+        provider.resolveMany(listOf(request("a")), context(Deadline.after(Duration.ofSeconds(4), clock), Duration.ofSeconds(30)))
+
+        seen shouldContainExactly listOf(Duration.ofSeconds(4), Duration.ofSeconds(1))
+    }
+
+    @Test
+    fun `a statement not issued because its bound was spent is the walk's DeadlineExceeded, the exhaustion the cause`() {
+        val spent = StatementBudgetExhausted()
+        val ceiling =
+            object : StatementCeiling {
+                override fun <T> within(
+                    bound: () -> Duration?,
+                    read: () -> T,
+                ): T = throw spent
+            }
+        val provider = ReleaseDependencyFamilies.descriptor(ReleaseFamily.TEMPLATE, source, ceiling).provider
+
+        val refused =
+            shouldThrow<DeadlineExceeded> {
+                provider.resolveMany(listOf(request("t", ReleaseFamily.TEMPLATE)), context(Deadline.none(), Duration.ofSeconds(5)))
+            }
+        refused.family shouldBe FamilyKey.TEMPLATE
+        refused.cause shouldBe spent
+    }
+
+    @Test
     fun `the PostgreSQL ceiling rounds up to whole milliseconds, recognises 57014 anywhere in the chain, and needs a transaction`() {
         PostgresStatementCeiling.millis(Duration.ofMillis(1500)) shouldBe 1500L
         PostgresStatementCeiling.millis(Duration.ofSeconds(1).plusNanos(1)) shouldBe 1001L
         PostgresStatementCeiling.millis(Duration.ofNanos(1)) shouldBe 1L
         PostgresStatementCeiling.cancelled(RuntimeException(QueryTimeoutException("x", SQLException("c", "57014")))) shouldBe true
         PostgresStatementCeiling.cancelled(RuntimeException(SQLException("division by zero", "22012"))) shouldBe false
-        shouldThrow<IllegalStateException> { PostgresStatementCeiling(mockk()).within(Duration.ofSeconds(1)) { 1 } }
-        shouldThrow<IllegalArgumentException> { PostgresStatementCeiling(mockk()).within(Duration.ZERO) { 1 } }
+        shouldThrow<IllegalStateException> { PostgresStatementCeiling(mockk(relaxed = true)).within({ Duration.ofSeconds(1) }) { 1 } }
+        shouldThrow<IllegalArgumentException> { PostgresStatementCeiling(mockk(relaxed = true)).within({ Duration.ZERO }) { 1 } }
+        PostgresStatementCeiling(mockk(relaxed = true)).within({ null }) { 7 } shouldBe 7
     }
 
     private fun request(
@@ -136,10 +180,10 @@ class StatementCeilingTest {
         val bounds = mutableListOf<Duration>()
 
         override fun <T> within(
-            bound: Duration,
+            bound: () -> Duration?,
             read: () -> T,
         ): T {
-            bounds += bound
+            bounds += checkNotNull(bound()) { "the provider hands the ceiling a bounded supplier" }
             return read()
         }
     }

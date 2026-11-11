@@ -4,7 +4,6 @@ import co.datapipelines.application.dependencies.PostgresStatementCeiling
 import co.datapipelines.application.dependencies.ReleaseDependencyFamilies
 import co.datapipelines.application.dependencies.ReleasePlanningDeadline
 import co.datapipelines.application.dependencies.ReleasePlanningWalk
-import co.datapipelines.application.dependencies.StatementCeiling
 import co.datapipelines.application.endpoints.EndpointReleaseSteps
 import co.datapipelines.dependencies.FamilyDescriptor
 import co.datapipelines.dependencies.FamilyRegistry
@@ -70,27 +69,28 @@ class ReleaseConfiguration {
 
     /**
      * #786 R3 (record §25.4) — the ONE statement bound every release source read runs under: `SET LOCAL statement_timeout`
-     * = `min(statement-timeout-seconds, remaining deadline)` on the metadata connection the walk's transaction holds.
-     * Every release family descriptor takes it; `ReleaseStatementCeilingWiringTest` asserts each one does.
+     * = `min(statement-timeout-seconds, remaining deadline)`, set on the metadata connection the walk's transaction holds
+     * immediately before EACH statement a source issues through the ceiling's own template (`PostgresStatementCeiling.jdbc`,
+     * over the same metadata `DataSource` the repository beans use). Every release family descriptor takes it and builds
+     * its source's repositories over that template; `ReleaseStatementCeilingWiringTest` asserts both for each one.
      */
     @Bean
-    fun releaseStatementCeiling(jdbc: NamedParameterJdbcTemplate): StatementCeiling = PostgresStatementCeiling(jdbc.jdbcTemplate)
+    fun releaseStatementCeiling(jdbc: NamedParameterJdbcTemplate): PostgresStatementCeiling =
+        PostgresStatementCeiling(checkNotNull(jdbc.jdbcTemplate.dataSource) { "the metadata JdbcTemplate has a DataSource" })
 
-    /** The pipeline family over its release source (record §4; G2 adds the other artifact families). */
+    /**
+     * The pipeline family over its release source (record §4; G2 adds the other artifact families). The source reads
+     * through a repository over the ceiling's template, never the shared repository bean: only that template bounds each
+     * statement (#786 R3).
+     */
     @Bean
-    fun pipelineDependencyFamily(
-        pipelines: PipelineRepository,
-        ceiling: StatementCeiling,
-    ): FamilyDescriptor<ResolvedNode> =
-        ReleaseDependencyFamilies.descriptor(ReleaseFamily.PIPELINE, PipelineDependencySource(pipelines), ceiling)
+    fun pipelineDependencyFamily(ceiling: PostgresStatementCeiling): FamilyDescriptor<ResolvedNode> =
+        ReleaseDependencyFamilies.descriptor(ReleaseFamily.PIPELINE, PipelineDependencySource(PipelineRepository(ceiling.jdbc)), ceiling)
 
-    /** The template family over its release source (no pins today: #518 adds the import arm). */
+    /** The template family over its release source (no pins today: #518 adds the import arm), over the ceiling's template. */
     @Bean
-    fun templateDependencyFamily(
-        templates: TemplateRepository,
-        ceiling: StatementCeiling,
-    ): FamilyDescriptor<ResolvedNode> =
-        ReleaseDependencyFamilies.descriptor(ReleaseFamily.TEMPLATE, TemplateDependencySource(templates), ceiling)
+    fun templateDependencyFamily(ceiling: PostgresStatementCeiling): FamilyDescriptor<ResolvedNode> =
+        ReleaseDependencyFamilies.descriptor(ReleaseFamily.TEMPLATE, TemplateDependencySource(TemplateRepository(ceiling.jdbc)), ceiling)
 
     /** Every descriptor bean, one registry; a duplicate or non-production key fails the context here. */
     @Bean

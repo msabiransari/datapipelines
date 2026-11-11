@@ -37,7 +37,8 @@ import java.time.Duration
  * unproduced while the template source returns no pins).
  *
  * Every source read runs under the family's [StatementCeiling] (#786 R3, record §25.4): production wires
- * [PostgresStatementCeiling], so each metadata statement is bounded by the context's `statementBound()`.
+ * [PostgresStatementCeiling] and builds each source's repositories over its template, so each metadata statement is
+ * bounded by the context's `statementBound()` read immediately before that statement.
  */
 object ReleaseDependencyFamilies {
     /** The release capability pair every adapted release family declares (record §4). */
@@ -98,10 +99,12 @@ object ReleaseDependencyFamilies {
  * batch read; G2's providers batch), an absent or invisible version answered [Outcome.Missing], and a source exception
  * propagated, never turned into a missing node.
  *
- * #786 R3 (record §25.4): each source read runs under [ceiling] with the context's `statementBound()` read when that
- * read starts — `min(statement limit, remaining deadline)` — so a batch of requests never outlives the deadline by more
- * than one bounded read. A bound that is already zero refuses before the read ([DeadlineExceeded]: a zero timeout would
- * mean "none"), and a statement cancelled at its bound is the same refusal, its cancellation the cause.
+ * #786 R3 (record §25.4): each source read runs under [ceiling] with the context's LIVE `statementBound()` — the
+ * supplier, not a value — so the ceiling bounds every statement the read issues by `min(statement limit, remaining
+ * deadline)` measured when THAT statement starts (landing review r4: a value read once kept the first statement's budget
+ * for the later ones). A bound that is already zero refuses before the read ([DeadlineExceeded]: a zero timeout would
+ * mean "none"); a statement cancelled at its bound, or not issued because its bound was spent, is the same refusal, the
+ * ceiling's exception the cause.
  */
 internal class ReleaseSourceProvider(
     private val family: ReleaseFamily,
@@ -148,9 +151,9 @@ internal class ReleaseSourceProvider(
         val bound = context.statementBound() ?: return read()
         if (bound <= Duration.ZERO) throw DeadlineExceeded(ReleaseDependencyFamilies.keyOf(family))
         return try {
-            ceiling.within(bound, read)
-        } catch (cancelled: StatementCancelled) {
-            throw DeadlineExceeded(ReleaseDependencyFamilies.keyOf(family)).apply { initCause(cancelled) }
+            ceiling.within(context::statementBound, read)
+        } catch (reached: StatementBoundReached) {
+            throw DeadlineExceeded(ReleaseDependencyFamilies.keyOf(family)).apply { initCause(reached) }
         }
     }
 

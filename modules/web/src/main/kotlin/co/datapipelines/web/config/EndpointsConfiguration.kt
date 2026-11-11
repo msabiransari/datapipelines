@@ -2,9 +2,9 @@ package co.datapipelines.web.config
 
 import co.datapipelines.application.dependencies.EndpointDependencySource
 import co.datapipelines.application.dependencies.EndpointVersionPipelineConsumers
+import co.datapipelines.application.dependencies.PostgresStatementCeiling
 import co.datapipelines.application.dependencies.ReleaseDependencyFamilies
 import co.datapipelines.application.dependencies.ReleasePlanningWalk
-import co.datapipelines.application.dependencies.StatementCeiling
 import co.datapipelines.application.endpoints.EndpointAuthorizer
 import co.datapipelines.application.endpoints.EndpointInvalidationPublisher
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
@@ -243,14 +243,18 @@ class EndpointsConfiguration {
         registry: EndpointRegistry,
     ): EndpointReleaseSteps = EndpointReleaseSteps(endpoints, versions, pins, authoring, registry)
 
-    /** #786 C.1 — the API family over its release source; `FamilyRegistry.production` admits `api_endpoint`. */
+    /**
+     * #786 C.1 — the API family over its release source; `FamilyRegistry.production` admits `api_endpoint`. #786 R3: the
+     * source reads through a versions repository over the release statement ceiling's own template (`ReleaseConfiguration`),
+     * never the shared repository bean — only that template bounds each statement it issues.
+     */
     @Bean
-    fun endpointDependencyFamily(
-        versions: PublishedEndpointVersionRepository,
-        /** #786 R3 — the release statement bound every metadata read of the walk runs under (`ReleaseConfiguration`). */
-        ceiling: StatementCeiling,
-    ): FamilyDescriptor<ResolvedNode> =
-        ReleaseDependencyFamilies.descriptor(ReleaseFamily.ENDPOINT, EndpointDependencySource(versions), ceiling)
+    fun endpointDependencyFamily(ceiling: PostgresStatementCeiling): FamilyDescriptor<ResolvedNode> =
+        ReleaseDependencyFamilies.descriptor(
+            ReleaseFamily.ENDPOINT,
+            EndpointDependencySource(PublishedEndpointVersionRepository(ceiling.jdbc)),
+            ceiling,
+        )
 
     /** §7.2/§7.7 — the one execution-visibility rule both execution reads share. */
     @Bean

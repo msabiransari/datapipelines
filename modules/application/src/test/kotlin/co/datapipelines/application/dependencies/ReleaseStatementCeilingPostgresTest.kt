@@ -41,7 +41,7 @@ class ReleaseStatementCeilingPostgresTest {
     private val dataSource = SharedPostgres.dataSource()
     private val jdbc = NamedParameterJdbcTemplate(dataSource)
     private val manager = DataSourceTransactionManager(dataSource)
-    private val ceiling = PostgresStatementCeiling(jdbc.jdbcTemplate)
+    private val ceiling = PostgresStatementCeiling(dataSource)
     private var userId: UUID = UUID.randomUUID()
     private var workspaceId: UUID = UUID.randomUUID()
 
@@ -115,7 +115,7 @@ class ReleaseStatementCeilingPostgresTest {
 
     @Test
     fun `the pipeline provider's statements are bounded the same way - pipeline metadata_unavailable`() {
-        val pipelines = PipelineRepository(jdbc)
+        val pipelines = PipelineRepository(ceiling.jdbc)
         val sources = mapOf<ReleaseFamily, DependencySource>(ReleaseFamily.PIPELINE to PipelineDependencySource(pipelines))
         val root = ReleaseNodeIdentity(workspaceId, ReleaseFamily.PIPELINE, PIPELINE, 1)
         val (refusal, took) =
@@ -167,7 +167,7 @@ class ReleaseStatementCeilingPostgresTest {
         budget: Duration = Duration.ofSeconds(30),
         sources: Map<ReleaseFamily, DependencySource> =
             mapOf(
-                ReleaseFamily.ENDPOINT to EndpointDependencySource(PublishedEndpointVersionRepository(jdbc)),
+                ReleaseFamily.ENDPOINT to EndpointDependencySource(PublishedEndpointVersionRepository(ceiling.jdbc)),
                 // The pinned pipeline as a released leaf: this suite is about the API provider's statement.
                 ReleaseFamily.PIPELINE to DependencySource { identity -> leaf(identity) },
             ),
