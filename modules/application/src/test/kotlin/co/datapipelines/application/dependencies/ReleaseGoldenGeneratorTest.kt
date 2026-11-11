@@ -64,6 +64,6 @@ class ReleaseGoldenGeneratorTest {
     }
 
     private companion object {
-        const val EXPECTED_CASES = 18
+        const val EXPECTED_CASES = 19
     }
 }

@@ -245,6 +245,34 @@ class VisualizationReleaseEvidenceIntegrationTest {
     }
 
     @Test
+    fun `the release planner's commit judges the evidence too - no run refuses tests_missing and flips nothing, a GREEN run releases`() {
+        // #873 A12 / §C.8: the participant's commit seam is the gate's second caller; the verdict runs there, not only
+        // on the native path above.
+        val created = h.createVisualization()
+        val id = created.detail.artifactId
+        val candidate =
+            checkNotNull(
+                h.visualizations.prepareRelease(TestEvidenceHarness.WORKSPACE, id, created.detail.version, created.detail.bodyHash),
+            )
+        val commit = {
+            h.visualizations.commitRelease(
+                TestEvidenceHarness.WORKSPACE,
+                candidate,
+                candidate.bodyHash,
+                TestEvidenceHarness.AUTHOR,
+            )
+        }
+        val status = { checkNotNull(h.visualizationRepository.findVersion(TestEvidenceHarness.WORKSPACE, id, 1)).detail.status }
+
+        shouldThrow<DatapipelinesException> { commit() }.code shouldBe VisualizationErrorCodes.RELEASE_TESTS_MISSING
+        status() shouldBe PipelineVersionStatus.DRAFT
+
+        greenRun(candidate)
+        checkNotNull(commit()).detail.status shouldBe PipelineVersionStatus.RELEASED
+        status() shouldBe PipelineVersionStatus.RELEASED
+    }
+
+    @Test
     fun `the draft-update race is FORCED - a candidate formed before the transaction cannot release on moved evidence`() {
         val created = h.createVisualization()
         val candidate = candidateOf(created.detail)

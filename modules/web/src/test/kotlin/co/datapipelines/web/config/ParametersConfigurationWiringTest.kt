@@ -110,6 +110,11 @@ class ParametersConfigurationWiringTest {
         fun releaseMutationGuard(): co.datapipelines.pipeline.release.ReleaseMutationGuard =
             co.datapipelines.pipeline.release.ReleaseMutationGuard.NONE
 
+        /** #873 §D — the transitive restore recheck the restores now take; the graph, not the walk, is under test here. */
+        @Bean
+        fun restoreDependencyGuard(): co.datapipelines.pipeline.release.RestoreDependencyGuard =
+            co.datapipelines.pipeline.release.RestoreDependencyGuard.DIRECT_ONLY
+
         /** #517 round three — the bound a restore refusal's blockers list truncates at; the shipped default. */
         @Bean
         fun releaseBounds(): co.datapipelines.pipeline.release.ReleaseBounds =

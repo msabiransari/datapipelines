@@ -81,15 +81,9 @@ class TemplateLifecycleDialogController(
                 message = "This template has no draft to release.",
                 details = mapOf("template_id" to name),
             )
-        val released = releases.release(workspaceId, name, bodyHash, principal.userId)
-        // T187 — the release is the D4 human step; it is audited on every surface that offers it.
-        LifecycleVerbs.audit(
-            audit,
-            LifecycleVerbs.TEMPLATE_AUDIT_VERSION_RELEASED,
-            principal,
-            workspaceId,
-            LifecycleVerbs.templateReleaseDetails(principal, released.detail.templateId, released.detail.version),
-        )
+        releases.release(workspaceId, name, bodyHash, principal.userId)
+        // T187 — the release is audited on every surface that offers it: by the coordinator, inside the one
+        // transaction (#873 §C.7); this handler writes none.
         return redirect(versionsTab(name, "released"))
     }
 

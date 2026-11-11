@@ -28,6 +28,7 @@ import io.kotest.matchers.string.shouldHaveMaxLength
 import io.kotest.matchers.string.shouldNotContain
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -326,7 +327,7 @@ class TemplatesControllerTest {
         val discardMissing = shouldThrow<ApiException> { controller.discard(null, """{"name":"test/fetch_orders.sql"}""") }
         discardMissing.details["reason"] shouldBe "precondition_missing"
 
-        every { releases.release(any(), "test/fetch_orders.sql", "hash-v3", userId) } returns
+        every { releases.release(any(), "test/fetch_orders.sql", "hash-v3", userId, null) } returns
             TemplateReleaseService.Released(
                 TemplateVersionDetail(
                     templateId = "test/fetch_orders.sql",
@@ -340,13 +341,39 @@ class TemplatesControllerTest {
             )
         val released = controller.release("hash-v3", """{"name":"test/fetch_orders.sql"}""").data
         released.get("status").asText() shouldBe "RELEASED"
-        // T187 — the release is audited on the REST surface too, with the version and the `via`.
-        audited.map { it.first } shouldBe listOf("template.version.released")
-        audited.single().second["version"] shouldBe 3
-        audited.single().second["via"] shouldBe "session"
+        // T187's row is the coordinator's now, written inside its transaction (#873 §C.7): the handler writes none.
+        audited shouldBe emptyList()
 
         every { releases.purge(any(), "test/fetch_orders.sql", "hash-v3") } returns Unit
         controller.discard("hash-v3", """{"name":"test/fetch_orders.sql"}""")
+    }
+
+    @Test
+    fun `release reads the body's other fields as the plan - the name is the address, never a plan field`() {
+        authenticate()
+        val plan = slot<co.datapipelines.pipeline.release.ReleasePlanRequest>()
+        every { releases.release(any(), "test/fetch_orders.sql", "hash-v3", userId, capture(plan)) } returns
+            TemplateReleaseService.Released(
+                TemplateVersionDetail(
+                    templateId = "test/fetch_orders.sql",
+                    version = 3,
+                    status = PipelineVersionStatus.RELEASED,
+                    bodyHash = "hash-v3",
+                    createdAt = Instant.parse("2026-08-02T00:00:00Z"),
+                    createdBy = userId,
+                ),
+                template(3),
+            )
+
+        controller.release("hash-v3", """{"name":"test/fetch_orders.sql","tree_hash":"sha256:abc","include_dependencies":["n1"]}""")
+
+        plan.captured.treeHash shouldBe "sha256:abc"
+        plan.captured.includeDependencies shouldBe listOf("n1")
+        val refused =
+            shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
+                controller.release("hash-v3", """{"name":"test/fetch_orders.sql","status":"RELEASED"}""")
+            }
+        refused.code shouldBe "template.release.plan_invalid"
     }
 
     @Test

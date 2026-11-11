@@ -49,9 +49,11 @@ class ReleasePlanningDeadlineWiringTest {
     }
 
     @Test
-    fun `the context assembles the registry from the pipeline and template descriptors and builds the coordinator`() {
+    fun `the context assembles the registry from the release configuration's five descriptors and builds the coordinator`() {
         context.run { context ->
-            context.getBean(FamilyRegistry::class.java).keys shouldBe setOf(FamilyKey.PIPELINE, FamilyKey.TEMPLATE)
+            // #873: the four native artifact providers join pipeline's; the API family is EndpointsConfiguration's.
+            context.getBean(FamilyRegistry::class.java).keys shouldBe
+                setOf(FamilyKey.PIPELINE, FamilyKey.TEMPLATE, FamilyKey.PARAMETER_SET, FamilyKey.VISUALIZATION, FamilyKey.DASHBOARD)
             context.getBean(PipelineReleaseCoordination::class.java).shouldBeInstanceOf<ReleaseCoordinator>()
         }
     }

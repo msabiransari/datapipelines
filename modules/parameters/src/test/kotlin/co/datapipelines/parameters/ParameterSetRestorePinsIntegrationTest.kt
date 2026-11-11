@@ -7,6 +7,10 @@ import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateType
+import co.datapipelines.pipeline.release.ReleaseFamily
+import co.datapipelines.pipeline.release.ReleaseNodeIdentity
+import co.datapipelines.pipeline.release.ReleaseNodeStatus
+import co.datapipelines.pipeline.release.RestoreReach
 import co.datapipelines.templates.TemplateDraft
 import co.datapipelines.templates.TemplateJson
 import co.datapipelines.typesystem.DatapipelinesException
@@ -332,6 +336,58 @@ class ParameterSetRestorePinsIntegrationTest {
                         ),
                     ),
                 "blockers_truncated" to false,
+            )
+    }
+
+    // ---- #873 §D.3: the import closure BELOW the selector template, through the shared walk
+
+    private fun belowSelector(
+        pin: TemplateRef,
+        status: ReleaseNodeStatus,
+    ) = RestoreReach(
+        ReleaseNodeIdentity(WORKSPACE, ReleaseFamily.TEMPLATE, "acme/sales/lib.sql", 1),
+        "acme/sales/lib.sql",
+        status,
+        "parameters[1].source.template",
+        "parameters[1].source.template.imports[0]",
+        listOf(ReleaseNodeIdentity(WORKSPACE, ReleaseFamily.TEMPLATE, pin.id, pin.version)),
+    )
+
+    @Test
+    fun `a DRAFT library beneath the RELEASED selector template refuses 409 with path and via - the set's own root walked`() {
+        val (id, pin) = discardedSet()
+        h.restoreReaches += belowSelector(pin, ReleaseNodeStatus.DRAFT)
+        val name = checkNotNull(h.repository.findRecord(WORKSPACE, id)).name
+
+        val error = refusedWithoutWrite(id)
+
+        error.code shouldBe ParameterErrorCodes.RELEASE_DEPENDENCY_NOT_RELEASED
+        val blocker = (error.details["blockers"] as List<*>).single() as Map<*, *>
+        blocker["name"] shouldBe "acme/sales/lib.sql"
+        blocker["paths"] shouldBe listOf("parameters[1].source.template.imports[0]")
+        blocker["via"] shouldBe listOf(mapOf("family" to "template", "name" to pin.id, "version" to pin.version))
+        h.restoreRechecked shouldContainExactly listOf(ReleaseNodeIdentity(WORKSPACE, ReleaseFamily.PARAMETER_SET, name, 1))
+    }
+
+    @Test
+    fun `a DISCARDED library beneath the RELEASED selector template is the native 400 at the pin, with path and via`() {
+        val (id, pin) = discardedSet()
+        h.restoreReaches += belowSelector(pin, ReleaseNodeStatus.DISCARDED)
+
+        val error = refusedWithoutWrite(id)
+
+        error.code shouldBe ParameterErrorCodes.TEMPLATE_VERSION_NOT_FOUND
+        (error as ParameterSetValidationException).result.failures.map { it.path } shouldContainExactly
+            listOf("parameters[1].source.template")
+        failureDetails(error) shouldContainExactly
+            listOf(
+                mapOf(
+                    "template_id" to "acme/sales/lib.sql",
+                    "template_version" to 1,
+                    "reason" to "discarded",
+                    "path" to "parameters[1].source.template.imports[0]",
+                    "via" to listOf(mapOf("family" to "template", "name" to pin.id, "version" to pin.version)),
+                ),
             )
     }
 

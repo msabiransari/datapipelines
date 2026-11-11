@@ -64,6 +64,24 @@ class GraphFingerprintTest {
     }
 
     @Test
+    fun `a declared import alias rides the edge verbatim and never moves the fingerprint - provenance only (#873 R2)`() {
+        val plain = WorkedGraph().walk()
+        val aliased = WorkedGraph(importAlias = "lib_common").walk()
+
+        val importEdges = aliased.edges.filter { it.relationship == Relationship.IMPORT }
+        withClue("both IMPORT occurrences carry the alias their reference declared") {
+            importEdges.map { it.alias } shouldBe listOf("lib_common", "lib_common")
+        }
+        plain.edges.map { it.alias }.toSet() shouldBe setOf(null)
+        withClue("tree_hash v1 inputs exclude the alias: two graphs differing only in alias fingerprint equal") {
+            aliased.internalFingerprint shouldBe plain.internalFingerprint
+            aliased.internalFingerprint shouldBe GOLDEN_DIGEST
+        }
+        GraphFingerprint.canonical(aliased.roots, aliased.nodes, aliased.edges) { 1 } shouldBe
+            GraphFingerprint.canonical(plain.roots, plain.nodes, plain.edges) { 1 }
+    }
+
+    @Test
     fun `identity, version, lifecycle, body hash, generation, pointer resolution, paths and extractor versions move it`() {
         val golden = WorkedGraph().walk().internalFingerprint
         val variants =
@@ -107,6 +125,7 @@ class GraphFingerprintTest {
         val templateExtractor: Int = 1,
         val warehouseIncarnation: String = "6f1c1b7e-0000-4000-8000-000000000001",
         val parameterName: String = "region",
+        val importAlias: String? = null,
     ) {
         private val families = FamilyKey.PRODUCTION.keys.associateWith { FakeFamily(it) }
 
@@ -125,8 +144,9 @@ class GraphFingerprintTest {
                 identity = ResolvedIdentity(DATASOURCE, OwnerScope.Deployment, warehouseIncarnation, null),
             )
             val common = artifact(exact(TEMPLATE, "common", 4), Lifecycle.RELEASED, hash = commonHash)
-            val selector = artifact(exact(TEMPLATE, "selector", 5), Lifecycle.RELEASED, pin(TEMPLATE, common, "imports[0]"))
-            val query = artifact(exact(TEMPLATE, "query", 6), Lifecycle.RELEASED, pin(TEMPLATE, common, "imports[0]"))
+            val import = pin(TEMPLATE, common, "imports[0]").copy(alias = importAlias)
+            val selector = artifact(exact(TEMPLATE, "selector", 5), Lifecycle.RELEASED, import)
+            val query = artifact(exact(TEMPLATE, "query", 6), Lifecycle.RELEASED, import)
             val formatter = artifact(exact(TEMPLATE, "formatter", 3), Lifecycle.RELEASED)
             val filters =
                 artifact(

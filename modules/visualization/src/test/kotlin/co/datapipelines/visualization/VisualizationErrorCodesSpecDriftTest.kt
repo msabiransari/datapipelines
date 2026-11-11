@@ -47,10 +47,11 @@ class VisualizationErrorCodesSpecDriftTest {
             .filterValues { it != "409" }
             .keys
             .shouldBeEmpty()
-        // The release-dependency plan's three non-409 codes (release-dependencies record §14, #517).
+        // The release-dependency plan's non-409 codes (release-dependencies record §14, #517; the 503 is #786's).
         documented[VisualizationErrorCodes.RELEASE_PLAN_REQUIRED] shouldBe "428"
         documented[VisualizationErrorCodes.RELEASE_PLAN_INVALID] shouldBe "400"
         documented[VisualizationErrorCodes.RELEASE_DEPENDENCY_LIMIT] shouldBe "422"
+        documented[VisualizationErrorCodes.RELEASE_METADATA_UNAVAILABLE] shouldBe "503"
         documented[VisualizationErrorCodes.NAME_TAKEN] shouldBe "409"
         documented[VisualizationErrorCodes.NOT_FOUND] shouldBe "404"
         documented[VisualizationErrorCodes.IMPORT_ID_TAKEN] shouldBe "409"
@@ -69,6 +70,7 @@ class VisualizationErrorCodesSpecDriftTest {
                 VisualizationErrorCodes.RELEASE_PLAN_REQUIRED,
                 VisualizationErrorCodes.RELEASE_PLAN_INVALID,
                 VisualizationErrorCodes.RELEASE_DEPENDENCY_LIMIT,
+                VisualizationErrorCodes.RELEASE_METADATA_UNAVAILABLE,
             )
     }
 }

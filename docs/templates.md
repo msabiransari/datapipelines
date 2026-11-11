@@ -425,6 +425,14 @@ Because the loader only ever resolves `"{id}@{version}"` keys against the regist
 - Aliases must be unique within a template's `imports` array (`template.validation.duplicate_alias`). Two libraries may share macro names as long as their aliases differ — that is what namespacing is for.
 - Imports are transitive: library A can import library B. Transitive depth is capped at **10** (`template.validation.import_depth_exceeded`). The cap is a fixed constant, not a config key.
 - Cycles forbidden: A imports B, B imports A → `template.validation.import_cycle`.
+- **Lifecycle (#873).** Saving is permissive: a DRAFT may import a DRAFT library. RELEASING is not: a template is
+  released only when its whole declared import closure (transitively, beneath RELEASED libraries too) is RELEASED or
+  selected in the same release plan — the plan releases the selected libraries first and the importer last, in one
+  transaction; an unselected DRAFT, a DISCARDED or a missing library is a `template.release.dependency_not_released`
+  blocker, and nothing is restored for you ([Versioning §6](versioning.md#6-templates-same-lifecycle-plus-the-pin-rule)).
+  A RESTORE rechecks the same closure: a missing or DISCARDED import is `template.validation.import_not_found`
+  (`reason: discarded`), a DRAFT one `template.release.dependency_not_released`. In the dependency tree the import edges
+  are labelled **Imports** (the Dependencies tab, G6).
 
 ### 6.5 Library promotion across environments
 

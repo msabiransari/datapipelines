@@ -33,8 +33,8 @@ import java.time.Duration
  * The release sources behind the neutral contract (#868 G1, record §8: "a release adapter maps the generic graph to the
  * existing `ReleasePlan` wire"): each [ReleaseFamily]'s [DependencySource] becomes a [FamilyDescriptor] with
  * `EXACT_VERSION` as its only root selector and the `ARTIFACT_RELEASE` / `VERSIONED_ARTIFACT` pair, and each
- * [ResolvedNode] pin an outgoing [Reference] carrying its §6 [Relationship] (`TEMPLATE`, `CHILD_PIPELINE`; `IMPORT` stays
- * unproduced while the template source returns no pins).
+ * [ResolvedNode] pin an outgoing [Reference] carrying its §6 [Relationship] (`TEMPLATE`, `CHILD_PIPELINE`; `IMPORT` when
+ * an adapted template source is walked — production registers the native template provider instead, #873 §A.2).
  *
  * Every source read runs under the family's [StatementCeiling] (#786 R3, record §25.4): production wires
  * [PostgresStatementCeiling] and builds each source's repositories over its template, so each metadata statement is
@@ -69,7 +69,27 @@ object ReleaseDependencyFamilies {
     ): FamilyRegistry = FamilyRegistry.production(sources.map { (family, source) -> descriptor(family, source, ceiling) })
 
     /** The ceiling a release descriptor's reads run under; null for a descriptor this object did not build (the wiring guard's read). */
-    fun ceilingOf(descriptor: FamilyDescriptor<*>): StatementCeiling? = (descriptor.provider as? ReleaseSourceProvider)?.ceiling
+    fun ceilingOf(descriptor: FamilyDescriptor<*>): StatementCeiling? = (descriptor.provider as? CeilingBound)?.ceiling
+
+    /**
+     * [read] under [ceiling] with [context]'s LIVE `statementBound()` (#786 R3): a bound that is already spent refuses
+     * before the read; a statement cancelled at its bound, or never issued because its bound was spent, is the walk's
+     * [DeadlineExceeded] with the ceiling's exception as its cause. Every release provider's reads go through here.
+     */
+    fun <T> bounded(
+        family: ReleaseFamily,
+        ceiling: StatementCeiling,
+        context: ResolveContext,
+        read: () -> T,
+    ): T {
+        val bound = context.statementBound() ?: return read()
+        if (bound <= Duration.ZERO) throw DeadlineExceeded(keyOf(family))
+        return try {
+            ceiling.within(context::statementBound, read)
+        } catch (reached: StatementBoundReached) {
+            throw DeadlineExceeded(keyOf(family)).apply { initCause(reached) }
+        }
+    }
 
     fun keyOf(family: ReleaseFamily): FamilyKey = FamilyKey(family.wire)
 
@@ -109,8 +129,9 @@ object ReleaseDependencyFamilies {
 internal class ReleaseSourceProvider(
     private val family: ReleaseFamily,
     private val source: DependencySource,
-    internal val ceiling: StatementCeiling,
-) : DependencyProvider<ResolvedNode> {
+    override val ceiling: StatementCeiling,
+) : DependencyProvider<ResolvedNode>,
+    CeilingBound {
     override fun resolveMany(
         requests: List<ObjectRequest>,
         context: ResolveContext,
@@ -122,7 +143,7 @@ internal class ReleaseSourceProvider(
     ): Outcome<ResolvedNode> {
         val identity = ReleaseDependencyFamilies.identityOf(request)
         if (identity == null || identity.family != family) return Outcome.Unsupported
-        val node = bounded(context) { source.resolve(identity) } ?: return Outcome.Missing
+        val node = ReleaseDependencyFamilies.bounded(family, ceiling, context) { source.resolve(identity) } ?: return Outcome.Missing
         check(node.identity == identity) { "the ${family.wire} source answered ${node.identity} for $identity" }
         return Outcome.Resolved(
             identity =
@@ -142,19 +163,6 @@ internal class ReleaseSourceProvider(
                 ),
             body = node,
         )
-    }
-
-    private fun <T> bounded(
-        context: ResolveContext,
-        read: () -> T,
-    ): T {
-        val bound = context.statementBound() ?: return read()
-        if (bound <= Duration.ZERO) throw DeadlineExceeded(ReleaseDependencyFamilies.keyOf(family))
-        return try {
-            ceiling.within(context::statementBound, read)
-        } catch (reached: StatementBoundReached) {
-            throw DeadlineExceeded(ReleaseDependencyFamilies.keyOf(family)).apply { initCause(reached) }
-        }
     }
 
     override fun outgoing(resolved: Outcome.Resolved<ResolvedNode>): List<Reference> =

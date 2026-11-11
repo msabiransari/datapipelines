@@ -55,6 +55,11 @@ data class Edge(
     /** The exact version the selector resolved to in this snapshot (a CURRENT selector's pointer resolution). */
     val resolvedVersion: Int?,
     val constraints: List<Constraint>,
+    /**
+     * The [Reference.alias] of this occurrence, copied verbatim — provenance only (#873 R2): [GraphFingerprint] does not
+     * read it, so `tree_hash` v1 is unchanged; the §11.1 projection does not carry it either (no wire token).
+     */
+    val alias: String? = null,
 )
 
 /**

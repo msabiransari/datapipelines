@@ -17,9 +17,11 @@ import co.datapipelines.pipeline.release.ReleaseBounds
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import co.datapipelines.pipeline.release.ReleaseNodeIdentity
-import co.datapipelines.pipeline.release.ReleaseRefusals
+import co.datapipelines.pipeline.release.ReleasePlanRequest
 import co.datapipelines.pipeline.release.ReleasedVersion
 import co.datapipelines.pipeline.release.ReleasedVersionObserver
+import co.datapipelines.pipeline.release.RestoreDependencyGuard
+import co.datapipelines.pipeline.release.RestoreRechecks
 import co.datapipelines.pipeline.through
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.transaction.support.SimpleTransactionStatus
@@ -76,6 +78,26 @@ data class ParameterSetReleased(
 )
 
 /**
+ * The port [ParameterSetService.release] delegates to when the assembling layer wires one (#873 §C.1; the
+ * `PipelineReleaseCoordination` mold): every set release — the REST route's and the dialog's — then runs through the
+ * shared release planner and its ONE metadata transaction. A directly constructed service leaves it unset and releases
+ * natively.
+ */
+fun interface ParameterSetReleaseCoordination {
+    fun release(request: ParameterSetReleaseRequest): ParameterSetReleased
+}
+
+/** A set release as the surfaces ask for it: the legacy alias `release_pinned_templates`, or a plan (record §6). */
+data class ParameterSetReleaseRequest(
+    val workspaceId: UUID,
+    val id: UUID,
+    val expectedHash: String,
+    val actor: UUID,
+    val releasePinnedTemplates: Boolean = false,
+    val plan: ReleasePlanRequest? = null,
+)
+
+/**
  * The parameter-set aggregate's use cases (record §8.2, §8.3; versioning §3.5's verb table) — the one
  * place every write and every read passes, so the surfaces (lane D) add transport only.
  *
@@ -106,7 +128,7 @@ data class ParameterSetReleased(
  * One façade over the aggregate's verb table (its ports are the constructor); each verb maps each
  * distinct refusal to its own catalogued code, so a verb throws as many as it has preconditions.
  */
-@Suppress("TooManyFunctions", "LongParameterList", "ThrowsCount")
+@Suppress("TooManyFunctions", "LongParameterList", "ThrowsCount", "LargeClass") // every verb of the family, as its repository
 class ParameterSetService(
     private val repository: ParameterSetRepository,
     private val validator: ParameterSetValidator,
@@ -128,6 +150,13 @@ class ParameterSetService(
      * (the owner's 2026-11-02 seam ruling). [ReleasedVersionObserver.NONE] in a directly constructed test.
      */
     private val observer: ReleasedVersionObserver = ReleasedVersionObserver.NONE,
+    /**
+     * #873 §C.1 — the shared release planner; when set, [release] delegates every request to it and the planner's
+     * participant calls [releaseTarget], [prepareRelease] and [commitRelease]. Null in a directly constructed test.
+     */
+    private val coordination: ParameterSetReleaseCoordination? = null,
+    /** #873 §D.3 — the transitive restore recheck; [RestoreDependencyGuard.DIRECT_ONLY] in a directly constructed test. */
+    private val restoreGuard: RestoreDependencyGuard = RestoreDependencyGuard.DIRECT_ONLY,
 ) {
     /** [block] in one metadata transaction with the workspace writer guard acquired first (#517). */
     private fun <T> guarded(
@@ -203,16 +232,25 @@ class ParameterSetService(
      * with the set in ONE metadata transaction, templates first (142); record §4 steps 4–6 re-run against
      * the pins as they are now, BEFORE that transaction (a draft template edited after the set's save is
      * caught here, with the step's own code).
+     *
+     * Since #873 a wired [coordination] owns the release after the authoring check (record §4.1): the alias consents to
+     * exactly the direct DRAFT selector templates above, a [plan] to its own selection; the native body below is the
+     * directly constructed service's, and a plan reaching it is a wiring defect.
      */
-    @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal
+    @Suppress("ThrowsCount", "LongParameterList") // each throw is a distinct catalogued refusal; the request's fields
     fun release(
         workspaceId: UUID,
         id: UUID,
         expectedHash: String,
         actor: UUID,
         releasePinnedTemplates: Boolean = false,
+        plan: ReleasePlanRequest? = null,
     ): ParameterSetReleased {
         requireAuthoring()
+        coordination?.let {
+            return it.release(ParameterSetReleaseRequest(workspaceId, id, expectedHash, actor, releasePinnedTemplates, plan))
+        }
+        check(plan?.present != true) { "a release plan needs the release coordinator, and none is wired" }
         repository.findRecord(workspaceId, id) ?: throw notFound(id)
         val draft = repository.findDraft(workspaceId, id) ?: throw notDraft(id)
         val body = checkNotNull(repository.findVersion(workspaceId, id, draft.version)).body
@@ -230,6 +268,56 @@ class ParameterSetService(
             )
         return ParameterSetReleased(checkNotNull(repository.findVersion(workspaceId, id, released.first.version)), released.second)
     }
+
+    // ---- the release planner's seams (#873 §B.1) -------------------------------------------------------
+
+    /** The set's working DRAFT as a release names it — the record and the draft — or the native refusal. */
+    fun releaseTarget(
+        workspaceId: UUID,
+        id: UUID,
+    ): Pair<ParameterSetRecord, ParameterSetVersionDetail> {
+        val record = repository.findRecord(workspaceId, id) ?: throw notFound(id)
+        val draft = repository.findDraft(workspaceId, id) ?: throw notDraft(id)
+        return record to draft
+    }
+
+    /**
+     * The planner's PREPARE, outside every transaction (record §4.1 step 4): the DRAFT that is [version] at [expectedHash]
+     * re-judged against its selector sources as they are now — the probe opens customer-datasource connections, which a
+     * metadata transaction refuses. Null when that DRAFT is no longer the planned one (the participant's `plan_conflict`).
+     */
+    fun prepareRelease(
+        workspaceId: UUID,
+        id: UUID,
+        version: Int,
+        expectedHash: String,
+    ): ParameterSetVersion? {
+        val draft = repository.findDraft(workspaceId, id)?.takeIf { it.version == version && it.bodyHash == expectedHash } ?: return null
+        val stored = repository.findVersion(workspaceId, id, draft.version) ?: return null
+        validator.revalidateSources(workspaceId, stored.body).throwIfInvalid()
+        return stored
+    }
+
+    /**
+     * The planner's COMMIT, inside its guarded transaction (record §4.1 step 6): the one exact-hash flip and the #778
+     * observer; null when no DRAFT matched [expectedHash] (the caller's refusal — never a silent pickup).
+     */
+    fun commitRelease(
+        workspaceId: UUID,
+        id: UUID,
+        expectedHash: String,
+        actor: UUID,
+    ): ParameterSetVersion? {
+        val flipped = repository.releaseDraft(workspaceId, id, expectedHash, actor) ?: return null
+        observeReleased(workspaceId, id, flipped.version)
+        return checkNotNull(repository.findVersion(workspaceId, id, flipped.version))
+    }
+
+    /** The native stale-hash refusal for set [id] — the planner's answer when the root's `If-Match` no longer matches. */
+    fun staleRelease(
+        workspaceId: UUID,
+        id: UUID,
+    ): DatapipelinesException = staleBase(workspaceId, id)
 
     /** Purge the DRAFT (versioning §5.4) at [expectedHash]; the sole version takes the set with it. */
     fun purgeDraft(
@@ -302,7 +390,7 @@ class ParameterSetService(
      * Restore DISCARDED version [version]; the pointer moves only above-current-or-NULL (D60). A restore lands RELEASED
      * without a human's consent, so under the guard the stored body's selector-template pins are rechecked first (#517
      * round three, record §12.1): a missing or DISCARDED pin refuses with the save rules' validation code (400), a DRAFT
-     * one `parameter_set.release.dependency_not_released` (409). A refusal writes nothing.
+     * one `parameter.release.dependency_not_released` (409). A refusal writes nothing.
      */
     fun restoreVersion(
         workspaceId: UUID,
@@ -324,13 +412,13 @@ class ParameterSetService(
         workspaceId: UUID,
         stored: ParameterSetVersion,
     ) {
-        val pins = validator.validateRestorePins(workspaceId, stored.body)
+        val name = stored.record.name
+        val root = ReleaseNodeIdentity(workspaceId, ReleaseFamily.PARAMETER_SET, name, stored.detail.version)
+        // §D.3: the direct pins keep their native judgement; the shared walk adds what lies BELOW a live pin.
+        val below = restoreGuard.recheck(root).filter { it.transitive }
+        val pins = validator.validateRestorePins(workspaceId, stored.body, below)
         if (pins.result.failures.isNotEmpty()) throw ParameterSetValidationException(pins.result)
-        if (pins.drafts.isNotEmpty()) {
-            val name = stored.record.name
-            val root = ReleaseNodeIdentity(workspaceId, ReleaseFamily.PARAMETER_SET, name, stored.detail.version)
-            throw ReleaseRefusals.restoreDependencyNotReleased(root, name, pins.drafts, maxBlockers)
-        }
+        RestoreRechecks.notReleased(root, name, below, maxBlockers, extra = pins.drafts)?.let { throw it }
     }
 
     /** Point the set at [version] (D60) — the receiver's verb, never an authoring write. Answers the move and the name. */
