@@ -2,6 +2,10 @@ package co.datapipelines.application.endpoints
 
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.inverse.InverseRequest
+import co.datapipelines.pipeline.inverse.InverseRow
+import co.datapipelines.pipeline.inverse.InverseScope
+import co.datapipelines.pipeline.inverse.InverseSql
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.RowMapper
@@ -338,6 +342,32 @@ class PublishedEndpointVersionRepository(
             PIN_MAPPER,
         )
 
+    /**
+     * #877 §B — the bounded inverse arm pipeline ← API: one page of the API versions of [InverseRequest.workspaceId] whose
+     * stored `pipeline_name` is [InverseRequest.targetKey] (and `pipeline_version` the target version when given), ONE
+     * occurrence per version at [PIN_PATH], in the inverse total order (the entity id, the version), `limit + 1`
+     * rows. The dependent is named by its `path_pattern`. The API family's history rule makes ANY the LIVE set: a
+     * DISCARDED API version protects nothing, because its restore revalidates its pin (record §14, A39) — so the
+     * entity purge's [livePinsAnyVersion] and this arm's ANY read the same rows. WORKING is the draft, else the pointer.
+     */
+    fun findPipelinePinOccurrences(request: InverseRequest): List<InverseRow> {
+        val scope = if (request.scope == InverseScope.ANY) InverseScope.LIVE else request.scope
+        val exact = if (request.targetVersion == null) "" else "AND v.pipeline_version = :targetVersion"
+        val occurrences =
+            """
+            SELECT e.id::text AS dependent_id, e.path_pattern AS dependent_name, v.version AS dependent_version,
+                   v.status AS dependent_status, '$PIN_PATH' AS source_path,
+                   v.pipeline_version AS stored_version, NULL::text AS element_id
+              FROM published_endpoint_versions v
+              JOIN published_endpoints e ON e.id = v.endpoint_id
+             WHERE e.workspace_id = :workspaceId AND v.pipeline_name = :targetKey
+               AND ${InverseSql.scope(scope, "published_endpoint_versions", "endpoint_id", entity = "e")}
+               $exact
+            """.trimIndent()
+        val binds = mapOf("workspaceId" to request.workspaceId, "targetKey" to request.targetKey, "targetVersion" to request.targetVersion)
+        return InverseSql.page(jdbc, occurrences, binds, request)
+    }
+
     /** One API version pinning a pipeline version: what a refusal names (path, version, status) within visibility. */
     data class Pin(
         val endpointId: UUID,
@@ -372,6 +402,9 @@ class PublishedEndpointVersionRepository(
     )
 
     companion object {
+        /** The field path of an API version's one pin, `pipeline_version` — the outgoing and the inverse spell it alike. */
+        const val PIN_PATH = "pipeline_version"
+
         /**
          * THE body hash (record §5.3, A44) — byte-equal to the expression quoted in V58's header (a drift test reads
          * both). The four casts are what lets PostgreSQL type the `jsonb_build_object` arguments from JDBC parameters.

@@ -1,8 +1,10 @@
 package co.datapipelines.visualization
 
 import co.datapipelines.pipeline.PipelineVersionStatus
-import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.node.ObjectNode
+import co.datapipelines.pipeline.inverse.InverseRequest
+import co.datapipelines.pipeline.inverse.InverseRow
+import co.datapipelines.pipeline.inverse.InverseScope
+import co.datapipelines.pipeline.inverse.InverseSql
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import java.util.UUID
 
@@ -51,10 +53,10 @@ enum class PinScope {
  * module's SQL names another module's tables — graph rule 1's composition is `application`'s).
  *
  * **Every statement is workspace-scoped** — the pinned name is per workspace, so a same-named artifact in another
- * workspace never matches, and every probe is a BOUND JSON value (no JSON path is built from input). **The pins
- * path is indexed (V46)**: the GIN index on `body_json -> 'visualizations'` serves the containment probes
- * (#331); the reverse arrows' remaining scans — `body_json -> 'sources'`, the set pin, the transform pin — stay
- * one scan per arrow per verb over a workspace's stored versions, measured in the #320 evidence.
+ * workspace never matches, and every value is a bind (no JSON path is built from input). #877: each arrow pages its
+ * dependent repository's bounded inverse query ([VisualizationRepository.findTemplatePinOccurrences],
+ * [DashboardRepository.findPipelinePinOccurrences], [DashboardRepository.findParameterSetPinOccurrences]) to exhaustion
+ * — the same statement the provider arm reads, so the two directions share one definition of "pins".
  *
  * **Public and UNLENSED, by design (#340):** every row comes back, drafts and hidden names included, because the guards
  * that ask it are author-or-above verbs. A consumer that answers a caller whose lens narrows (a promoter) applies BOTH
@@ -62,23 +64,18 @@ enum class PinScope {
  * promoter; see `TemplateUsage.visible` and the Usage tab's dashboards half) — or it leaks what the lens hides.
  */
 class ArtifactDependents(
-    private val jdbc: NamedParameterJdbcTemplate,
+    jdbc: NamedParameterJdbcTemplate,
 ) {
+    private val visualizations = VisualizationRepository(jdbc)
+    private val dashboards = DashboardRepository(jdbc)
+
     /** The visualization versions that pin script template [templateId] — at [version], or at any version when null. */
     fun visualizationsPinningTemplate(
         workspaceId: UUID,
         templateId: String,
         version: Int?,
         scope: PinScope,
-    ): List<ArtifactPin> =
-        scan(
-            workspaceId,
-            ArtifactKind.VISUALIZATION,
-            scope,
-            objectProbe("transform", "template", ref(templateId, version)),
-            "(v.body_json -> 'transform' -> 'template' ->> 'version')::int",
-            "v.body_json @> CAST(:probe AS jsonb)",
-        )
+    ): List<ArtifactPin> = pins(workspaceId, templateId, version, scope, visualizations::findTemplatePinOccurrences)
 
     /** The dashboard versions with a source that pins pipeline [pipelineName] — at [version], or at any version when null. */
     fun dashboardsPinningPipeline(
@@ -86,16 +83,7 @@ class ArtifactDependents(
         pipelineName: String,
         version: Int?,
         scope: PinScope,
-    ): List<ArtifactPin> =
-        scan(
-            workspaceId,
-            ArtifactKind.DASHBOARD,
-            scope,
-            objectProbe("pipeline", null, ref(pipelineName, version)),
-            "(src -> 'pipeline' ->> 'version')::int",
-            "src @> CAST(:probe AS jsonb)",
-            "CROSS JOIN LATERAL jsonb_array_elements(v.body_json -> 'sources') AS src",
-        )
+    ): List<ArtifactPin> = pins(workspaceId, pipelineName, version, scope, dashboards::findPipelinePinOccurrences)
 
     /** The dashboard versions that pin parameter set [setName] — at [version], or at any version when null. */
     fun dashboardsPinningParameterSet(
@@ -103,96 +91,46 @@ class ArtifactDependents(
         setName: String,
         version: Int?,
         scope: PinScope,
-    ): List<ArtifactPin> =
-        scan(
-            workspaceId,
-            ArtifactKind.DASHBOARD,
-            scope,
-            objectProbe("parameter_set", null, ref(setName, version)),
-            "(v.body_json -> 'parameter_set' ->> 'version')::int",
-            "v.body_json @> CAST(:probe AS jsonb)",
-        )
+    ): List<ArtifactPin> = pins(workspaceId, setName, version, scope, dashboards::findParameterSetPinOccurrences)
 
     /**
-     * The one statement shape: the [kind]'s versions joined to their index row (the workspace filter), narrowed by
-     * [scope], matched by [match] against the bound `:probe`. Only closed constants — the kind's table names and the
-     * callers' fixed expressions — are interpolated; every value travels as a bind.
+     * #877 §B — every page of the dependent repository's bounded inverse query [arm] (the ONE definition the provider
+     * arm shares), collapsed to one [ArtifactPin] per dependent version and pinned version (two placements of one pin
+     * count once, as the former `SELECT DISTINCT` did; a pin storing no integral version reads as 0, as its `::int`
+     * cast's NULL did), in the former order: name, then version newest first.
      */
-    @Suppress("LongParameterList") // one statement shape; the three arrows differ only in these fragments
-    private fun scan(
+    private fun pins(
         workspaceId: UUID,
-        kind: ArtifactKind,
-        scope: PinScope,
-        probe: JsonNode,
-        pinnedVersion: String,
-        match: String,
-        lateral: String = "",
-    ): List<ArtifactPin> =
-        jdbc.query(
-            """
-            SELECT DISTINCT s.id AS artifact_id, s.name AS name, v.version AS version, v.status AS status,
-                   $pinnedVersion AS pinned_version
-              FROM ${kind.versions} v
-              JOIN ${kind.index} s ON s.id = v.${kind.fk}
-              $lateral
-             WHERE s.workspace_id = :workspaceId AND $match AND ${scopePredicate(kind, scope)}
-             ORDER BY s.name, v.version DESC
-            """.trimIndent(),
-            mapOf("workspaceId" to workspaceId, "probe" to ArtifactJson.mapper.writeValueAsString(probe)),
-        ) { rs, _ ->
-            ArtifactPin(
-                artifactId = UUID.fromString(rs.getString("artifact_id")),
-                name = rs.getString("name"),
-                version = rs.getInt("version"),
-                status = PipelineVersionStatus.fromWire(rs.getString("status")),
-                pinnedVersion = rs.getInt("pinned_version"),
-            )
-        }
-
-    /** The [scope]'s predicate over the versions alias `v` and the index alias `s`. */
-    private fun scopePredicate(
-        kind: ArtifactKind,
-        scope: PinScope,
-    ): String {
-        val entityIsLive =
-            "EXISTS (SELECT 1 FROM ${kind.versions} lv WHERE lv.${kind.fk} = s.id AND lv.status IN ('DRAFT', 'RELEASED'))"
-        return when (scope) {
-            PinScope.LIVE -> {
-                "v.status IN ('DRAFT', 'RELEASED')"
-            }
-
-            PinScope.ANY -> {
-                entityIsLive
-            }
-
-            PinScope.WORKING -> {
-                "$entityIsLive AND v.version = COALESCE(" +
-                    "(SELECT d.version FROM ${kind.versions} d WHERE d.${kind.fk} = s.id AND d.status = 'DRAFT' LIMIT 1), " +
-                    "s.current_version)"
-            }
-        }
-    }
-
-    private fun ref(
-        name: String,
+        key: String,
         version: Int?,
-    ): ObjectNode =
-        ArtifactJson.mapper
-            .createObjectNode()
-            .put("name", name)
-            .also { node -> version?.let { node.put("version", it) } }
+        scope: PinScope,
+        arm: (InverseRequest) -> List<InverseRow>,
+    ): List<ArtifactPin> =
+        InverseSql
+            .exhaust(InverseSql.EXHAUST_PAGE) { after ->
+                arm(InverseRequest(workspaceId, key, version, scope.inverse, after, InverseSql.EXHAUST_PAGE))
+            }.map { row ->
+                ArtifactPin(
+                    artifactId = row.dependentUuid,
+                    name = row.dependentName,
+                    version = row.dependentVersion,
+                    status = requireNotNull(row.status) { "a versioned dependent row carries its status" },
+                    pinnedVersion = row.storedVersion ?: 0,
+                )
+            }.distinct()
+            .sortedWith(BY_NAME_NEWEST_FIRST)
 
-    /**
-     * The containment probe for a pin at `outer[.inner]`: `{outer: {inner: ref}}`, `{outer: ref}` when [inner] is null.
-     * For an array-element match (`src @> probe`) the probe is the element's shape, so the outer key IS the field.
-     */
-    private fun objectProbe(
-        outer: String,
-        inner: String?,
-        pin: ObjectNode,
-    ): JsonNode {
-        val mapper = ArtifactJson.mapper
-        val body = if (inner == null) pin else mapper.createObjectNode().set<JsonNode>(inner, pin)
-        return mapper.createObjectNode().set<JsonNode>(outer, body)
+    private companion object {
+        val BY_NAME_NEWEST_FIRST: Comparator<ArtifactPin> =
+            compareBy<ArtifactPin> { it.name }.thenByDescending { it.version }.thenBy { it.pinnedVersion }
     }
 }
+
+/** The inverse query's scope for a [PinScope] — the same three questions under one definition. */
+internal val PinScope.inverse: InverseScope
+    get() =
+        when (this) {
+            PinScope.WORKING -> InverseScope.WORKING
+            PinScope.LIVE -> InverseScope.LIVE
+            PinScope.ANY -> InverseScope.ANY
+        }

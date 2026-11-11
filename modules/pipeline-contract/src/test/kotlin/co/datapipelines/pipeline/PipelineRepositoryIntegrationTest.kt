@@ -515,9 +515,10 @@ class PipelineRepositoryIntegrationTest {
 
         repository.findAnyVersionDatasourceRefs(WORKSPACE_ID, "pg-prod").map { it.pipelineName } shouldContainExactly
             listOf("reader", "writer")
-        // `tempdb` is the reserved literal, not a datasource — it can never match one by name.
-        repository.findAnyVersionDatasourceRefs(WORKSPACE_ID, "tempdb").map { it.pipelineName } shouldContainExactly
-            listOf("writer")
+        // `tempdb` is the reserved literal, not a datasource — it can never match one by name. #877: the scan is the
+        // inverse arm, which follows the outgoing extraction's rule (`DatasourceEdges.ofPipeline` never emits `tempdb`),
+        // so the reserved literal is no reference in either direction (it was a textual match before).
+        repository.findAnyVersionDatasourceRefs(WORKSPACE_ID, "tempdb") shouldContainExactly emptyList()
         repository.findAnyVersionDatasourceRefs(WORKSPACE_ID, "never-used") shouldContainExactly emptyList()
     }
 
