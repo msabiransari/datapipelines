@@ -238,7 +238,7 @@ class DatasourceGrantRepositoryIntegrationTest {
 
     /** One repair statement is one change of the datasource's visibility, however many workspaces it reaches. */
     @Test
-    fun `a repair advances the generation once for every workspace it grants - a repair with nothing to grant advances nothing`() {
+    fun `a repair advances the datasource generation once when it adds grants - a repair with nothing to grant advances nothing`() {
         register("shared", owner = null)
         val start = generationOf("shared")
 

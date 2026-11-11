@@ -313,7 +313,8 @@ class DatasourceGrantRepository(
         )
 
     /**
-     * Revokes the grant; false when there was none. Nothing about the datasource itself changes.
+     * Revokes the grant; false when there was none. A removed grant advances the datasource's generation once;
+     * a no-op advances nothing. The datasource's definition and incarnation stay unchanged.
      * It refuses nothing: the managed lake's grant is protected by the REST and UI revoke handlers
      * ([DatasourceErrorCodes.MANAGED], #823), so a new caller that can reach a managed grant needs
      * the same check.
