@@ -124,6 +124,11 @@ class DatasourceEdgesE2eTest {
         val (compatible, _) = pipeline(fx, "test/ds873/recreate/compatible")
         val treeHash = fx.treeHash(planned, plannedEdges)
         val before = incarnation(DS_RECREATE)
+        // The preview the consent is given on: the production planner, before the datasource disappears.
+        val preview = planWire(planned)
+        preview["prerequisites"] shouldBe
+            listOf(linkedMapOf("kind" to "datasource", "name" to DS_RECREATE, "available" to true, "readonly" to false))
+        preview["tree_hash"] shouldBe treeHash
 
         recreate(DS_RECREATE)
 
