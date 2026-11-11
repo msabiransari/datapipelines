@@ -175,7 +175,8 @@ class FamilyRootsAuditE2eTest {
         withClue("no witness or plant is left from an earlier run") { leftovers() shouldBe "0" }
     }
 
-    @ParameterizedTest(name = "{0} through the {1} entry")
+    // The multiline source sits ABOVE @ParameterizedTest: OrderedTestAnnotationGuardTest reads only the contiguous
+    // annotation lines around @Order, so @Order must share its block with the test annotation and the fun.
     @CsvSource(
         "template, planned",
         "template, compatible",
@@ -186,6 +187,7 @@ class FamilyRootsAuditE2eTest {
         "dashboard, planned",
         "dashboard, compatible",
     )
+    @ParameterizedTest(name = "{0} through the {1} entry")
     @Order(2)
     fun `the root's audit row fails after every flip - all rolls back, then the same request writes one row per flip`(
         family: String,
