@@ -370,8 +370,10 @@ class ApiErrorCatalogSpecDriftTest {
          * [STATUS_ROW_REGEX], landed in the SAME commit as the constants and catalog rows.
          * 505 → 506 with #786: §13.14 gains `endpoint.version.confirm_mismatch` (400), the API purge dialog's typed
          * confirm, landed in the SAME commit as its constant and catalog row.
+         * 506 → 507 with #786 R1: §13.14 gains `endpoint.version.last_release` (409, the `endpoint.version.` family
+         * default), the guarded entity deletion's refusal, landed in the SAME commit as its constant.
          */
-        const val SECTION_13_ROW_COUNT = 506
+        const val SECTION_13_ROW_COUNT = 507
 
         /**
          * §12's distinct validation codes.

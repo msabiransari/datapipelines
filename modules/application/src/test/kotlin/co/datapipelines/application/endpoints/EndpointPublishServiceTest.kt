@@ -404,15 +404,60 @@ class EndpointPublishServiceTest {
     }
 
     @Test
-    fun `unpublishing an endpoint of the caller's workspace removes it and invalidates`() {
-        every { endpoints.findRowByPath("/mine/v1/x") } returns EndpointRow.Valid(endpoint())
+    fun `unpublishing a draft-only endpoint of the caller's workspace removes it and invalidates`() {
+        // #786 R1: corrected — this case deleted the RELEASED fixture; the guarded deletion admits a draft-only API only.
+        val endpoint = endpoint(status = PipelineVersionStatus.DRAFT)
+        every { endpoints.findRowByPath("/mine/v1/x") } returns EndpointRow.Valid(endpoint)
+        every { versions.list(endpoint.id) } returns listOf(version(endpoint, 1, PipelineVersionStatus.DRAFT))
         every { endpoints.deleteByPath("/mine/v1/x") } returns true
 
         assertAll(
             { service().unpublish(principal(), "/mine/v1/x") shouldBe true },
+            { verify(exactly = 1) { versions.lockEntity(endpoint.id) } },
             { verify(exactly = 1) { registry.invalidate() } },
             { verify(exactly = 1) { audit.log("endpoint.unpublished", any(), any(), any(), any(), any()) } },
         )
+    }
+
+    @Test
+    fun `an endpoint whose current version is RELEASED is refused last_release and nothing is deleted (#786 R1)`() {
+        val endpoint = endpoint()
+        every { endpoints.findRowByPath("/mine/v1/x") } returns EndpointRow.Valid(endpoint)
+        every { versions.list(endpoint.id) } returns listOf(version(endpoint, 1, PipelineVersionStatus.RELEASED))
+
+        val refused = shouldThrow<DatapipelinesException> { service().unpublish(principal(), "/mine/v1/x") }
+        assertAll(
+            { refused.code shouldBe PipelineErrorCodes.Endpoint.VERSION_LAST_RELEASE },
+            { refused.details shouldBe mapOf("endpoint_id" to endpoint.id.toString(), "version" to 1, "status" to "RELEASED") },
+            { verify(exactly = 0) { endpoints.deleteByPath(any()) } },
+            { verify(exactly = 0) { registry.invalidate() } },
+            { verify(exactly = 0) { audit.log("endpoint.unpublished", any(), any(), any(), any(), any()) } },
+        )
+    }
+
+    @Test
+    fun `a NON-current RELEASED version refuses too - every version is checked, not the pointer (#786 R1)`() {
+        // v2 DRAFT is current; v1 RELEASED sits behind it. Reading only the current version would delete v1 with the entity.
+        val endpoint = endpoint(status = PipelineVersionStatus.DRAFT, current = 2)
+        every { endpoints.findRowByPath("/mine/v1/x") } returns EndpointRow.Valid(endpoint)
+        every { versions.list(endpoint.id) } returns
+            listOf(version(endpoint, 2, PipelineVersionStatus.DRAFT), version(endpoint, 1, PipelineVersionStatus.RELEASED))
+
+        val refused = shouldThrow<DatapipelinesException> { service().unpublish(principal(), "/mine/v1/x") }
+        refused.code shouldBe PipelineErrorCodes.Endpoint.VERSION_LAST_RELEASE
+        refused.details["version"] shouldBe 1
+        verify(exactly = 0) { endpoints.deleteByPath(any()) }
+    }
+
+    @Test
+    fun `a DISCARDED version refuses as well - the native entity rule keeps history (#786 R1)`() {
+        val endpoint = endpoint(status = PipelineVersionStatus.DRAFT, current = 2)
+        every { endpoints.findRowByPath("/mine/v1/x") } returns EndpointRow.Valid(endpoint)
+        every { versions.list(endpoint.id) } returns
+            listOf(version(endpoint, 2, PipelineVersionStatus.DRAFT), version(endpoint, 1, PipelineVersionStatus.DISCARDED))
+
+        shouldThrow<DatapipelinesException> { service().unpublish(principal(), "/mine/v1/x") }.details["status"] shouldBe "DISCARDED"
+        verify(exactly = 0) { endpoints.deleteByPath(any()) }
     }
 
     @Test
@@ -430,9 +475,12 @@ class EndpointPublishServiceTest {
                 enabled = false,
             )
         every { endpoints.deleteByPath("/nyc/revenue-by-borough") } returns true
+        // #786 R1: a legacy row is never served, so its converted version's status does not hold the cleanup back.
+        every { versions.list(any()) } returns listOf(version(endpoint(), 1, PipelineVersionStatus.RELEASED))
 
         assertAll(
             { service().unpublish(principal(), "/nyc/revenue-by-borough") shouldBe true },
+            { verify(exactly = 0) { versions.list(any()) } },
             { verify(exactly = 1) { registry.invalidate() } },
             { verify(exactly = 1) { audit.log("endpoint.unpublished", any(), any(), any(), any(), any()) } },
         )
@@ -504,17 +552,36 @@ class EndpointPublishServiceTest {
         dependsOn = emptyList(),
     )
 
-    private fun endpoint(workspaceId: UUID = WORKSPACE) =
-        PublishedEndpoint.of(
-            id = UUID.randomUUID(),
-            workspaceId = workspaceId,
-            pathPattern = "/mine/v1/x",
-            isEnabled = true,
-            createdBy = ACTOR,
-            createdAt = Instant.EPOCH,
-            updatedAt = Instant.EPOCH,
-            current = CurrentVersion(1, PipelineVersionStatus.RELEASED, EndpointVersionBody(PIPELINE_NAME, 1, 30, "")),
-        )
+    private fun endpoint(
+        workspaceId: UUID = WORKSPACE,
+        status: PipelineVersionStatus = PipelineVersionStatus.RELEASED,
+        current: Int = 1,
+    ) = PublishedEndpoint.of(
+        id = UUID.randomUUID(),
+        workspaceId = workspaceId,
+        pathPattern = "/mine/v1/x",
+        isEnabled = true,
+        createdBy = ACTOR,
+        createdAt = Instant.EPOCH,
+        updatedAt = Instant.EPOCH,
+        current = CurrentVersion(current, status, EndpointVersionBody(PIPELINE_NAME, 1, 30, "")),
+    )
+
+    private fun version(
+        endpoint: PublishedEndpoint,
+        number: Int,
+        status: PipelineVersionStatus,
+    ) = PublishedEndpointVersion(
+        endpointId = endpoint.id,
+        version = number,
+        status = status,
+        body = EndpointVersionBody(PIPELINE_NAME, 1, 30, ""),
+        bodyHash = "h$number",
+        createdAt = Instant.EPOCH,
+        createdBy = ACTOR,
+        releasedAt = null,
+        releasedBy = null,
+    )
 
     private fun principal() =
         AuthenticatedPrincipal(

@@ -694,6 +694,78 @@ class PublishedEndpointE2eTest {
     }
 
     @Test
+    fun `deleting a released API is refused last_release over REST and MCP, and a draft-only API is deleted (#786 R1)`() {
+        val name = "test/r1_guarded_delete"
+        pipeline(pinnedPipelineBody("v1", name))
+        val apiId = createApi("/nyc/v1/r1-released", name)
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .header("If-Match", apiVersion(apiId, 1).getString("data.body_hash"))
+            .`when`()
+            .post("/api/v1/endpoints/$apiId/release")
+            .then()
+            .statusCode(200)
+
+        deleteApi("/nyc/v1/r1-released")
+            .statusCode(409)
+            .body("error.code", equalTo("endpoint.version.last_release"))
+            .body("error.details.endpoint_id", equalTo(apiId))
+            .body("error.details.version", equalTo(1))
+            .body("error.details.status", equalTo("RELEASED"))
+        val overMcp = mcpTool("endpoints_delete", mapOf("path" to "/nyc/v1/r1-released"))
+        overMcp.getBoolean("result.isError") shouldBe true
+        overMcp.getString("result.content[0].text").contains("endpoint.version.last_release") shouldBe true
+        // Nothing went: the entity still resolves by path, its released version and its current pointer are intact.
+        apiVersion(apiId, 1).getString("data.status") shouldBe "RELEASED"
+        apiVersion(apiId, 1).getBoolean("data.is_current") shouldBe true
+
+        // Controls: a draft-only API is deleted by either transport.
+        createApi("/nyc/v1/r1-draft-rest", name)
+        deleteApi("/nyc/v1/r1-draft-rest").statusCode(204)
+        createApi("/nyc/v1/r1-draft-mcp", name)
+        val deleted = mcpTool("endpoints_delete", mapOf("path" to "/nyc/v1/r1-draft-mcp"))
+        deleted.getBoolean("result.isError") shouldBe false
+        deleted.getString("result.content[0].text").contains("\"deleted\":true") shouldBe true
+        listOf("/nyc/v1/r1-draft-rest", "/nyc/v1/r1-draft-mcp").forEach { gone ->
+            given()
+                .port(port)
+                .asSession(ADMIN_SESSION)
+                .queryParam("path", gone)
+                .`when`()
+                .get("/api/v1/endpoints")
+                .then()
+                .statusCode(404)
+        }
+    }
+
+    private fun createApi(
+        path: String,
+        pipeline: String,
+    ): String =
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .asSession(ADMIN_SESSION)
+            .body("""{"path": "$path", "pipeline": "$pipeline", "pipeline_version": 1, "timeout_seconds": 60}""")
+            .`when`()
+            .post("/api/v1/endpoints")
+            .then()
+            .statusCode(201)
+            .extract()
+            .jsonPath()
+            .getString("data.id")
+
+    private fun deleteApi(path: String) =
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .queryParam("path", path)
+            .`when`()
+            .delete("/api/v1/endpoints")
+            .then()
+
+    @Test
     fun `an unreadable API release plan body is the house malformed_json 400 and releases nothing`() {
         val name = "test/c2_release_body"
         pipeline(pinnedPipelineBody("v1", name))

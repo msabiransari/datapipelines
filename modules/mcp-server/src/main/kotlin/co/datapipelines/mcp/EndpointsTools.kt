@@ -228,7 +228,8 @@ object EndpointsTools {
                         "Key bindings on that path are NOT removed: they describe a node of the tree, which may still " +
                         "carry other endpoints beneath it. This is also the fix for a LEGACY row (#274) — a retired " +
                         "path listed with \"legacy\": true never serves under the current grammar, and deleting it " +
-                        "removes the row.",
+                        "removes the row. An API that holds a RELEASED or DISCARDED version is never deleted: the call is " +
+                        "refused endpoint.version.last_release and nothing is removed — discard is per version, the API stays.",
                 schema = PATH_SCHEMA,
             )
 

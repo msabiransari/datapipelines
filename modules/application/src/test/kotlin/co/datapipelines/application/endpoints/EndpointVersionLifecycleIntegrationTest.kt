@@ -236,6 +236,46 @@ class EndpointVersionLifecycleIntegrationTest {
     }
 
     @Test
+    fun `deleting a released API is refused last_release in the deleting transaction, and nothing it holds goes (#786 R1)`() {
+        pipeline("acme/rides/kept", current = 1, PipelineVersionStatus.RELEASED)
+        val api = publishing(transactions).create(principal(), "/acme/v1/kept", "acme/rides/kept", 1, null, "")
+        val released = release(api.id, versions.find(api.id, 1).shouldNotBeNull().bodyHash)
+        bind("/acme")
+        val before = snapshot(api.id)
+
+        val refused = shouldThrow<DatapipelinesException> { publishing(transactions).unpublish(principal(), "/acme/v1/kept") }
+        refused.code shouldBe PipelineErrorCodes.Endpoint.VERSION_LAST_RELEASE
+        refused.details shouldBe mapOf("endpoint_id" to api.id.toString(), "version" to released.version, "status" to "RELEASED")
+        withClue("the entity, its pointer, its versions and the node's binding all stay; no unpublish is audited") {
+            snapshot(api.id) shouldBe before
+            audit.events.contains(EndpointPublishService.AUDIT_UNPUBLISHED) shouldBe false
+        }
+
+        // A NON-current RELEASED version: v2 DRAFT becomes current, v1 RELEASED stays behind it — still refused.
+        val draft = service().saveDraft(principal(), api.id, input(pipelineVersion = 1, description = "v2"), released.bodyHash)
+        service().switchCurrent(principal(), api.id, draft.version)
+        pointer(api.id) shouldBe draft.version
+        shouldThrow<DatapipelinesException> {
+            publishing(transactions).unpublish(principal(), "/acme/v1/kept")
+        }.details["version"] shouldBe released.version
+        endpoints.findById(api.id).shouldNotBeNull()
+        versions.list(api.id).map { it.status } shouldContainExactly listOf(PipelineVersionStatus.DRAFT, PipelineVersionStatus.RELEASED)
+    }
+
+    @Test
+    fun `a draft-only API is deleted with its versions, and its node's binding is left to the tree (#786 R1)`() {
+        pipeline("acme/rides/drafty", current = 1, PipelineVersionStatus.RELEASED)
+        val api = publishing(transactions).create(principal(), "/acme/v1/drafty", "acme/rides/drafty", 1, null, "")
+        bind("/acme")
+
+        publishing(transactions).unpublish(principal(), "/acme/v1/drafty") shouldBe true
+        endpoints.findById(api.id).shouldBeNull()
+        versions.list(api.id) shouldBe emptyList()
+        bindings() shouldBe 1
+        audit.events.contains(EndpointPublishService.AUDIT_UNPUBLISHED) shouldBe true
+    }
+
+    @Test
     fun `with authoring disabled every lifecycle verb and the release prepare refuse, whatever the role`() {
         pipeline("acme/rides/hardened", current = 1, PipelineVersionStatus.RELEASED)
         val api = publishing().create(principal(), "/acme/v1/hardened", "acme/rides/hardened", 1, null, "")
@@ -320,7 +360,7 @@ class EndpointVersionLifecycleIntegrationTest {
     private fun steps(authoring: AuthoringGuard = AuthoringGuard(true)) =
         EndpointReleaseSteps(endpoints, versions, pins(authoring), authoring, EndpointRegistry(endpoints))
 
-    private fun publishing() =
+    private fun publishing(transactions: TransactionTemplate? = null) =
         EndpointPublishService(
             endpoints = endpoints,
             versions = versions,
@@ -329,7 +369,33 @@ class EndpointVersionLifecycleIntegrationTest {
             audit = audit,
             timeouts = TIMEOUTS,
             authoring = AuthoringGuard(true),
+            transactions = transactions,
         )
+
+    /** One endpoint key bound at [prefix] — a tree node's binding, which an API deletion never touches. */
+    private fun bind(prefix: String) {
+        val keyId = "k_${UUID.randomUUID().toString().take(8)}"
+        jdbc.update(
+            "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
+                " VALUES (:id, :owner, :owner, 'endpoint key', 'x', :ws, 'endpoint', 'api_caller')",
+            mapOf("id" to keyId, "owner" to userId, "ws" to workspaceId),
+        )
+        jdbc.update(
+            "INSERT INTO endpoint_key_bindings (path_prefix, api_key_id, workspace_id, created_by) VALUES (:p, :key, :ws, :owner)",
+            mapOf("p" to prefix, "key" to keyId, "ws" to workspaceId, "owner" to userId),
+        )
+    }
+
+    private fun bindings(): Int =
+        jdbc.queryForObject(
+            "SELECT COUNT(*) FROM endpoint_key_bindings WHERE workspace_id = :ws",
+            mapOf("ws" to workspaceId),
+            Int::class.java,
+        ) ?: 0
+
+    /** What an entity deletion would remove: the entity row, its pointer, its versions (status + hash), the bindings. */
+    private fun snapshot(id: UUID) =
+        listOf(endpoints.findById(id)?.id, pointer(id), versions.list(id).map { it.version to it.status to it.bodyHash }, bindings())
 
     private fun user(id: UUID) {
         jdbc.update(

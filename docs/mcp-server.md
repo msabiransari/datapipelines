@@ -1066,12 +1066,12 @@ Returns the §6.2.23 shape, or `endpoint.not_found`.
 
 #### 6.2.26 `endpoints_delete`
 
-Unpublish an endpoint. The pipeline is untouched; key bindings on that node are not removed, since a node may still carry other endpoints beneath it.
+Unpublish an endpoint — the guarded entity deletion (#786). The pipeline is untouched; key bindings on that node are not removed, since a node may still carry other endpoints beneath it. An API is deleted only while every version it holds is a DRAFT: a RELEASED version (current or not) or a DISCARDED one refuses `endpoint.version.last_release` (409) with nothing removed — the API, its pointer, its versions and its bindings stay. A legacy row (#274) is never served and stays deletable.
 
 ```json
 {
   "name": "endpoints_delete",
-  "description": "Unpublish an endpoint by its path. The pipeline is untouched — only the URL stops answering. Key bindings on that path are NOT removed: they describe a node of the tree, which may still carry other endpoints beneath it. This is also the fix for a LEGACY row (#274) — a retired path listed with \"legacy\": true never serves under the current grammar, and deleting it removes the row.",
+  "description": "Unpublish an endpoint by its path. The pipeline is untouched — only the URL stops answering. Key bindings on that path are NOT removed: they describe a node of the tree, which may still carry other endpoints beneath it. This is also the fix for a LEGACY row (#274) — a retired path listed with \"legacy\": true never serves under the current grammar, and deleting it removes the row. An API that holds a RELEASED or DISCARDED version is never deleted: the call is refused endpoint.version.last_release and nothing is removed — discard is per version, the API stays.",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -1088,7 +1088,7 @@ Unpublish an endpoint. The pipeline is untouched; key bindings on that node are 
 }
 ```
 
-Returns `{path, deleted: true}`, or `endpoint.not_found`.
+Returns `{path, deleted: true}`, `endpoint.not_found`, or `endpoint.version.last_release` (`details`: this API's blocking `version` and `status`).
 
 **Permission:** `endpoint.unpublish`. **Mutating** — declared `mutating` in the tool catalog, so every call writes `mcp.tool.called` **and** `mcp.tool.write` at the dispatcher's single audit choke point (§6.3).
 
@@ -3124,7 +3124,7 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-10 | v1.78 | #786 U1 (API versions, exact pins) | **§6.2.23 `endpoints_create`: `pipeline_version` is a REQUIRED input** (owner ruling 2026-11-08: the pin is authored input on every surface, MCP included — a named exception to the additive-only rule). The tool creates the API's version 1 as a DRAFT pinned to that exact version; the pin must be eligible under the posture (`endpoint.pipeline_version.not_eligible`) and creation is refused on an authoring-disabled deployment (`endpoint.authoring_disabled`). No tool releases an API. The response shape, `endpoints_list`, `endpoints_get` and `endpoints_delete` are unchanged; `pipeline` in every response is the CURRENT version's pinned name. No tool added, removed or renamed; no permission change. |
+| 2026-11-10 | v1.78 | #786 U1 (API versions, exact pins) | **§6.2.23 `endpoints_create`: `pipeline_version` is a REQUIRED input** (owner ruling 2026-11-08: the pin is authored input on every surface, MCP included — a named exception to the additive-only rule). The tool creates the API's version 1 as a DRAFT pinned to that exact version; the pin must be eligible under the posture (`endpoint.pipeline_version.not_eligible`) and creation is refused on an authoring-disabled deployment (`endpoint.authoring_disabled`). No tool releases an API. The response shape, `endpoints_list` and `endpoints_get` are unchanged; **§6.2.26 `endpoints_delete` is the guarded entity deletion** (#786 R1): an API holding a RELEASED or DISCARDED version is refused `endpoint.version.last_release` and nothing is removed, a draft-only API or a legacy row is deleted as before — its description says so, its input is unchanged; `pipeline` in every response is the CURRENT version's pinned name. No tool added, removed or renamed; no permission change. |
 | 2026-10-25 | v1.77 | 706 (#706) | **§4.1/§6 preamble/§9.3: the live prose still taught the retired PK4 cap, the membership-freshness rule (C2) and `auth.key_issuer_role_lost` as the MCP refusal, contradicting §4.1's own keys-v2 bullets and §4.2 — rewritten to the key's chosen role and `auth.role_required`; recovery = a new key under the subset rule. §13's checklist includes workspace-admin keys and preserves MCP creator liveness (A20), and §9.3 names identity or creator deactivation; the §4.1 TTL sentence says the same (revocation and deactivation reach the key; a member role change does not). History rows v1.47/v1.50 unchanged. No tool, route, permission or code change.** |
 | 2026-10-22 | v1.76 | 8b (#8) | The type description and §6.2.43 describe JavaScript availability, statement bodies and console results. |
 | 2026-10-21 | v1.75 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The template-type and node prose say script**: the script contract / invariants / tests descriptions, the `scripts` docs area and `skill/scripts-contracts`, the `templates_*` refusal reason `type_not_script`, the key `datapipelines.script.evaluate-timeout-seconds`; the visualization write tools' block property stays `transform` (restored in this lane's third round; `ArtifactWriteSchemaReaderParityTest` pins schema = reader keys). A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |

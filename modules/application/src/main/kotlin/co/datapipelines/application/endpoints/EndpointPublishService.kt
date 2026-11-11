@@ -7,6 +7,7 @@ import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.guard.MetadataWriterGuard
 import org.springframework.transaction.support.TransactionOperations
 
@@ -36,7 +37,7 @@ import org.springframework.transaction.support.TransactionOperations
 @Suppress("LongParameterList") // one collaborator per concern of the one creation path
 class EndpointPublishService(
     private val endpoints: PublishedEndpointRepository,
-    versions: PublishedEndpointVersionRepository,
+    private val versions: PublishedEndpointVersionRepository,
     private val pins: EndpointPinValidator,
     registry: EndpointRegistry,
     private val audit: AuditEventSink,
@@ -110,8 +111,14 @@ class EndpointPublishService(
     }
 
     /**
-     * Deletes the API at a path, every version with it (entity deletion, unchanged). Returns false when nothing exists
-     * there. Reads the ROW (valid or legacy): deleting a legacy row IS the fix for it (#274).
+     * Deletes the API at a path, every version with it — the guarded entity deletion (#786 R1, versioning §3.2): an API
+     * is deleted only while every version it holds is a DRAFT; any other version (a RELEASED one, current or not, or a
+     * DISCARDED one) refuses `endpoint.version.last_release` (409) and nothing is deleted — the parameter-set entity
+     * purge's rule. The check reads the versions under the entity row lock, inside the transaction that deletes, after
+     * the workspace guard and the registry key, so no release can land between the check and the delete.
+     *
+     * Returns false when nothing exists there. Reads the ROW (valid or legacy): a legacy row is never served, and
+     * deleting it IS the fix for it (#274), so a legacy row stays deletable whatever its converted version's status.
      */
     fun unpublish(
         principal: AuthenticatedPrincipal,
@@ -130,8 +137,9 @@ class EndpointPublishService(
             writes.inTransaction {
                 writes.writeGuard.workspaces(listOf(existing.workspaceId), PipelineErrorCodes.Endpoint.WRITE_BUSY)
                 writes.writeGuard.endpointRegistry(PipelineErrorCodes.Endpoint.WRITE_BUSY)
-                val deleted =
-                    endpoints.findRowByPath(stored)?.takeIf { it.id == existing.id }?.let { endpoints.deleteByPath(stored) } ?: false
+                val row = endpoints.findRowByPath(stored)?.takeIf { it.id == existing.id }
+                if (row is EndpointRow.Valid) refuseUnlessDraftOnly(row.endpoint)
+                val deleted = row?.let { endpoints.deleteByPath(stored) } ?: false
                 if (deleted) writes.invalidateAfterCommit()
                 deleted
             }
@@ -144,6 +152,28 @@ class EndpointPublishService(
             )
         }
         return removed
+    }
+
+    /**
+     * #786 R1 — the native entity purge rule under the entity row lock (G0's third step; every version writer, release
+     * included, takes it): every stored version, current or not, must be a DRAFT. The refusal names this API's own
+     * blocking version — the caller already addressed this API in its own workspace — and nothing else.
+     */
+    private fun refuseUnlessDraftOnly(endpoint: PublishedEndpoint) {
+        versions.lockEntity(endpoint.id) ?: return
+        val blocking = versions.list(endpoint.id).firstOrNull { it.status != PipelineVersionStatus.DRAFT } ?: return
+        throw DatapipelinesException(
+            code = PipelineErrorCodes.Endpoint.VERSION_LAST_RELEASE,
+            message =
+                "Version ${blocking.version} of this API is ${blocking.status.name}: an API that holds a non-draft version " +
+                    "is never deleted. Discard is per version, the API stays.",
+            details =
+                mapOf(
+                    "endpoint_id" to endpoint.id.toString(),
+                    "version" to blocking.version,
+                    "status" to blocking.status.name,
+                ),
+        )
     }
 
     /** The APIs of the caller's workspace (§6's listing), through the promoter lens. */

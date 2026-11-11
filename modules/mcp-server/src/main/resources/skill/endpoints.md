@@ -82,7 +82,9 @@ endpoint key reaches published endpoints and the status and cursor of executions
 and nothing else: not `/mcp`, and no other `/api/v1` route.
 
 `endpoints_list`, `endpoints_get` and `endpoints_delete` complete the surface. Deleting an
-endpoint stops the URL answering and leaves the pipeline untouched. A row listed with
+endpoint stops the URL answering and leaves the pipeline untouched. Only a draft-only API is
+deleted: one that holds a RELEASED or DISCARDED version is refused
+`endpoint.version.last_release` and stays whole — say so, never retry. A row listed with
 `"legacy": true` is a stored path saved before the current three-segment grammar: it is retired
 — it never serves and never blocks a publish — and unpublishing it (`endpoints_delete`) is the
 fix.

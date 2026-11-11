@@ -384,6 +384,9 @@ class DemoEndpointSeeder(
      *
      * The same per-target failure domain as [publishWanted] (#274): a retirement that throws is
      * ONE ERROR line — a stale demo path that refuses to go must not refuse the boot.
+     *
+     * #786 R1: the unpublish is the guarded entity deletion, so a stale demo API that was RELEASED is refused
+     * `endpoint.version.last_release` and stays (that ERROR line, every boot) until #889 gives retirement a native path.
      */
     @Suppress("TooGenericExceptionCaught") // the point IS any failure: one ERROR line, boot proceeds
     private fun retireStaleEndpoints(

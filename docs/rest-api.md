@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.110 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.111 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-11-10
@@ -2320,6 +2320,15 @@ pipeline version is eligible). Creation is an authoring operation: a deployment 
 with `409 endpoint.authoring_disabled`, and there is no release to perform there. A promotion receiver creates an
 absent API through its own receiver-only import (§18), never through this route.
 
+**Delete (#786).** `DELETE /api/v1/endpoints?path=` is the **guarded entity deletion** (versioning §3.2, the
+parameter-set entity rule): an API is deleted — with its versions — only while every version it holds is a DRAFT.
+A RELEASED version, current or not, or a DISCARDED one refuses `409 endpoint.version.last_release` (`details`: this
+API's blocking `version` and its `status`) and nothing is removed: the entity, its current pointer, its versions and
+its key bindings all stay. Discard is per version (below); an API that was ever released keeps its history. The
+check reads the versions under the entity row lock in the transaction that deletes, after the writer guard and the
+registry key, so no release lands between the check and the delete. A legacy row (below) never serves and stays
+deletable whatever its converted version's status.
+
 **Versions (#786).** An API is versioned like a pipeline (record §24): each version is an immutable body — `pipeline`,
 `pipeline_version`, `timeout_seconds`, `description` — with a `status` (DRAFT, RELEASED, DISCARDED) and a
 `body_hash`; at most one DRAFT exists, and the entity's current pointer names the version that serves. The
@@ -2359,7 +2368,7 @@ listing answers it after the valid rows with the keys `path`, `pipeline`, `enabl
 carries none of the valid shape's parse-derived fields (`path_variables`, `bindings`,
 timestamps), because there is no parse. Once V41 has run its `enabled` is `false`; a single read
 (`?path=`) resolves valid rows only and answers the legacy path `404`, like the serve path. The
-one verb the legacy row supports is **`DELETE`** — the same unpublish route, unchanged — which
+one verb the legacy row supports is **`DELETE`** — the same unpublish route, exempt from its version rule — which
 removes it; republishing at a current-grammar path is the replacement. The API console page lists
 the row flagged with the same reason and offers only that verb. The flag is the parse verdict taken on every read, not the `retired_reason` column (an audit marker); a legacy `path` (and its `url`) is echoed as stored up to the grammar's 200 characters and cut there (#286 — `path_pattern` is `TEXT` with no CHECK, so only a database write can store a longer one; every API write has been held to 200 since the registry was born, so every row the product wrote is echoed exactly and stays addressable by `DELETE ?path=`, and a longer one is unpublished by its full stored path; the cut falls on a code-point boundary, and such a row's `reason` is the length sentence — it never quotes more of the stored path than the echo shows (#298) — and the console offers no Unpublish on it (#293)), and a row malformed in a way V41's two-segment predicate does not name is listed `legacy: true` with `enabled: true` and is never served either. A **promotion** batch (§10.5) never carries a legacy row — the target's grammar would refuse it — and the sender logs the omission (`event=endpoint.promotion_legacy_omitted`, the count over the promoted pipelines, never a path); the promotion result does not list it.
 
@@ -2940,6 +2949,7 @@ browser persistence. Clients must reject foreign/stale responses even after abor
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-11 | v2.111 | #786 U1 R1 (API versions — guarded entity deletion) | **§19.5:** `DELETE /api/v1/endpoints` is the guarded entity deletion — an API holding a RELEASED (current or not) or DISCARDED version is refused `409 endpoint.version.last_release` with nothing removed (entity, pointer, versions, bindings); a draft-only API and a legacy row are deleted as before. MCP `endpoints_delete` answers the same ([MCP §6.2.26](mcp-server.md#6226-endpoints_delete)). A new refusal on an existing route; no route, field or permission change. |
 | 2026-11-10 | v2.110 | #841 metadata writer protocol (G0) — renumbered at merge after #860's v2.109 | **§9, §19, §20.2, §20.5:** datasource writes (register, update, credential, delete, grant, revoke), endpoint publish/unpublish, a schedule create and a target-changing schedule edit run under the metadata writer guard (release-dependencies design §4.4); an exhausted wait is `409 datasource.write.busy` / `endpoint.write.busy` / `schedule.write.busy` (`details.lock_wait_seconds`, nothing written). A schedule create validates its target under the guard. Additive: new refusals on existing routes, no route or field change. |
 | 2026-11-08 | v2.109 | 860 (#860) | Additive. **§22.2:** a visualization's `POST` and `PUT` answer `warnings` beside the full JSON, always present (`[]` on a clean save, else `{code, path, library}` per partly drawn chart field). **§23.3:** each `chart` occurrence of `GET /{id}/runtime/config` carries `columns`, `{field: LogicalType}` of its encoded fields; `renderer.bundle` is `"2d"` for every v1 kind. |
 | 2026-11-03 | v2.108 | #782 logout CSRF | **§16.4:** the root-level browser logout has a narrow same-origin Fetch Metadata exemption; other callers retain double-submit validation. A refused browser navigation gets the 403 page and preserves its session; machine callers keep JSON. |

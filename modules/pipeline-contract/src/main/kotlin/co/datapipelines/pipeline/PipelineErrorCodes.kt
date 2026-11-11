@@ -1455,6 +1455,13 @@ object PipelineErrorCodes {
         const val VERSION_NOT_DISCARDED = "endpoint.version.not_discarded"
 
         /**
+         * #786 (R1, versioning §3.2 — the `parameter.version.last_release` rule) — 409: an API entity deletion
+         * (`DELETE /api/v1/endpoints`, MCP `endpoints_delete`) found a version that is not a DRAFT. An API that was ever
+         * released keeps its history: discard is per version, the entity stays. Nothing is deleted.
+         */
+        const val VERSION_LAST_RELEASE = "endpoint.version.last_release"
+
+        /**
          * #786 — 400: the purge dialog's typed confirm (ui-screens §5.1) did not name the version it asked for (`v2`);
          * checked before the lifecycle service runs. The pipeline and template purge twins are `*.version.confirm_mismatch`.
          */
