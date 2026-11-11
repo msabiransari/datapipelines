@@ -1,6 +1,10 @@
 package co.datapipelines.visualization
 
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.release.ReleaseFamily
+import co.datapipelines.pipeline.release.ReleaseNodeIdentity
+import co.datapipelines.pipeline.release.ReleaseNodeStatus
+import co.datapipelines.pipeline.release.RestoreReach
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.visualization.VisualizationTestDb.AUTHOR
 import co.datapipelines.visualization.VisualizationTestDb.WORKSPACE
@@ -22,6 +26,12 @@ import java.util.UUID
  *
  * Each case first shows the SAME restore succeeds while the dependency is alive (the control), so a refusal is the
  * dependency's doing and nothing else's.
+ *
+ * #873 §D.1 — the restore then walks the stored body's whole closure through the shared port (record §25.2 row G2): the
+ * harness answers the walk's reaches per root family, so these cases pin each family's MAPPING of them — a dangling
+ * node anywhere below a pin keeps the native 400 at that pin (plus `path` and `via`), a DRAFT one is the 409
+ * `<family>.release.dependency_not_released` in the shared shape; the native direct check answers first. The walk
+ * itself is `WalkingRestoreDependencyGuardTest`'s and `RestoreOutboundPinsE2eTest`'s.
  */
 class RestoreDependenciesIntegrationTest {
     private lateinit var h: LifecycleHarness
@@ -167,5 +177,141 @@ class RestoreDependenciesIntegrationTest {
         error.code shouldBe VisualizationErrorCodes.TRANSFORM_BINDING_INVALID
         ((error.details["failures"] as List<*>).map { ((it as Map<*, *>)["details"] as Map<*, *>)["reason"] }) shouldContainExactly
             listOf("template_not_found")
+    }
+
+    // ---- #873 §D.1: the transitive recheck, mapped per family
+
+    private fun reach(
+        family: ReleaseFamily,
+        name: String,
+        status: ReleaseNodeStatus,
+        directPath: String,
+        path: String,
+        vararg via: ReleaseNodeIdentity,
+    ) = RestoreReach(ReleaseNodeIdentity(WORKSPACE, family, name, 1), name, status, directPath, path, via.toList())
+
+    private val chart = ReleaseNodeIdentity(WORKSPACE, ReleaseFamily.VISUALIZATION, DocumentFixtures.VISUALIZATION_NAME, 1)
+    private val shapePath = "visualizations[0].visualization.transform.template"
+
+    @Suppress("UNCHECKED_CAST")
+    private fun blockers(error: DatapipelinesException) = error.details["blockers"] as List<Map<String, Any?>>
+
+    private fun failureDetails(error: DatapipelinesException): List<Map<*, *>> =
+        (error.details["failures"] as List<*>).map { (it as Map<*, *>)["details"] as Map<*, *> }
+
+    @Test
+    fun `the restore walks the DISCARDED dashboard's own identity once, and a released closure restores`() {
+        val id = discardedDashboard()
+
+        h.dashboards
+            .restoreVersion(WORKSPACE, id, 1)
+            .detail.status shouldBe PipelineVersionStatus.RELEASED
+        h.restoreRechecked shouldContainExactly
+            listOf(ReleaseNodeIdentity(WORKSPACE, ReleaseFamily.DASHBOARD, DocumentFixtures.DASHBOARD_NAME, 1))
+    }
+
+    @Test
+    fun `a DRAFT beneath the dashboard's RELEASED visualization refuses 409 dependency_not_released with path and via`() {
+        val id = discardedDashboard()
+        h.restoreReaches[ReleaseFamily.DASHBOARD] =
+            listOf(reach(ReleaseFamily.TEMPLATE, "test/shape.jsonata", ReleaseNodeStatus.DRAFT, VIZ_PIN, shapePath, chart))
+
+        val error = refusal { h.dashboards.restoreVersion(WORKSPACE, id, 1) }
+
+        error.code shouldBe "dashboard.release.dependency_not_released"
+        (error.details["root"] as Map<*, *>)["name"] shouldBe DocumentFixtures.DASHBOARD_NAME
+        val blocker = blockers(error).single()
+        blocker["family"] shouldBe "template"
+        blocker["status"] shouldBe "DRAFT"
+        blocker["reason"] shouldBe "not_released"
+        blocker["paths"] shouldBe listOf(shapePath)
+        blocker["via"] shouldBe listOf(mapOf("family" to "visualization", "name" to DocumentFixtures.VISUALIZATION_NAME, "version" to 1))
+        status(id) shouldBe PipelineVersionStatus.DISCARDED
+    }
+
+    @Test
+    fun `a DISCARDED node beneath a RELEASED pin keeps the dashboard's native 400 at that pin, with path and via`() {
+        val id = discardedDashboard()
+        h.restoreReaches[ReleaseFamily.DASHBOARD] =
+            listOf(
+                reach(ReleaseFamily.TEMPLATE, "test/shape.jsonata", ReleaseNodeStatus.DISCARDED, VIZ_PIN, shapePath, chart),
+                reach(ReleaseFamily.PIPELINE, "test/draft", ReleaseNodeStatus.DRAFT, "sources[0].pipeline", "sources[0].pipeline"),
+            )
+
+        val error = refusal { h.dashboards.restoreVersion(WORKSPACE, id, 1) }
+
+        error.code shouldBe DashboardErrorCodes.DEPENDENCY_NOT_FOUND
+        (error.details["failures"] as List<*>).map { (it as Map<*, *>)["path"] } shouldContainExactly listOf(VIZ_PIN)
+        val details = failureDetails(error).single()
+        details["kind"] shouldBe "template"
+        details["status"] shouldBe "DISCARDED"
+        details["path"] shouldBe shapePath
+        (details["via"] as List<*>).size shouldBe 1
+        status(id) shouldBe PipelineVersionStatus.DISCARDED
+    }
+
+    @Test
+    fun `the native direct check answers before the walk - a dead pipeline pin is the 400 even over a DRAFT reach`() {
+        val id = discardedDashboard()
+        h.fakes.pipelines[ValidatorFakes.PIPELINE_REF] =
+            h.fakes.pipelines
+                .getValue(ValidatorFakes.PIPELINE_REF)
+                .copy(status = PipelineVersionStatus.DISCARDED)
+        h.restoreReaches[ReleaseFamily.DASHBOARD] =
+            listOf(reach(ReleaseFamily.TEMPLATE, "test/shape.jsonata", ReleaseNodeStatus.DRAFT, VIZ_PIN, shapePath, chart))
+
+        val error = refusal { h.dashboards.restoreVersion(WORKSPACE, id, 1) }
+
+        error.code shouldBe DashboardErrorCodes.DEPENDENCY_NOT_FOUND
+        danglingKinds(error) shouldContainExactly listOf("pipeline")
+        h.restoreRechecked shouldBe emptyList()
+    }
+
+    @Test
+    fun `a visualization whose transform template is DRAFT refuses 409 visualization dependency_not_released, no via`() {
+        val id = discardedVisualization()
+        h.restoreReaches[ReleaseFamily.VISUALIZATION] =
+            listOf(reach(ReleaseFamily.TEMPLATE, "test/shape.jsonata", ReleaseNodeStatus.DRAFT, TRANSFORM_PIN, TRANSFORM_PIN))
+
+        val error = refusal { h.visualizations.restoreVersion(WORKSPACE, id, 1) }
+
+        error.code shouldBe "visualization.release.dependency_not_released"
+        val blocker = blockers(error).single()
+        blocker["paths"] shouldBe listOf(TRANSFORM_PIN)
+        blocker.containsKey("via") shouldBe false
+        h.restoreRechecked.single().family shouldBe ReleaseFamily.VISUALIZATION
+        checkNotNull(h.visualizationRepository.findVersionDetail(WORKSPACE, id, 1)).status shouldBe PipelineVersionStatus.DISCARDED
+    }
+
+    @Test
+    fun `a missing node beneath the RELEASED transform template is the visualization's native 400 with path and via`() {
+        val id = discardedVisualization()
+        val transform = ReleaseNodeIdentity(WORKSPACE, ReleaseFamily.TEMPLATE, "test/shape.jsonata", 1)
+        h.restoreReaches[ReleaseFamily.VISUALIZATION] =
+            listOf(
+                reach(
+                    ReleaseFamily.TEMPLATE,
+                    "test/lib.sql",
+                    ReleaseNodeStatus.MISSING,
+                    TRANSFORM_PIN,
+                    "$TRANSFORM_PIN.imports[0]",
+                    transform,
+                ),
+            )
+
+        val error = refusal { h.visualizations.restoreVersion(WORKSPACE, id, 1) }
+
+        error.code shouldBe VisualizationErrorCodes.TRANSFORM_BINDING_INVALID
+        val details = failureDetails(error).single()
+        details["reason"] shouldBe "template_version_not_found"
+        details["template"] shouldBe "test/lib.sql"
+        details["status"] shouldBe "MISSING"
+        details["path"] shouldBe "$TRANSFORM_PIN.imports[0]"
+        checkNotNull(h.visualizationRepository.findVersionDetail(WORKSPACE, id, 1)).status shouldBe PipelineVersionStatus.DISCARDED
+    }
+
+    private companion object {
+        const val VIZ_PIN = "visualizations[0].visualization"
+        const val TRANSFORM_PIN = "transform.template"
     }
 }

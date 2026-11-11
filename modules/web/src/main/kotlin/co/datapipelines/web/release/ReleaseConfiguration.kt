@@ -4,9 +4,16 @@ import co.datapipelines.application.dependencies.PostgresStatementCeiling
 import co.datapipelines.application.dependencies.ReleaseDependencyFamilies
 import co.datapipelines.application.dependencies.ReleasePlanningDeadline
 import co.datapipelines.application.dependencies.ReleasePlanningWalk
+import co.datapipelines.application.dependencies.dashboard.DashboardReleaseProvider
+import co.datapipelines.application.dependencies.parameterset.ParameterSetReleaseProvider
+import co.datapipelines.application.dependencies.restore.WalkingRestoreDependencyGuard
+import co.datapipelines.application.dependencies.template.TemplateReleaseProvider
+import co.datapipelines.application.dependencies.visualization.VisualizationReleaseProvider
 import co.datapipelines.application.endpoints.EndpointReleaseSteps
 import co.datapipelines.dependencies.FamilyDescriptor
 import co.datapipelines.dependencies.FamilyRegistry
+import co.datapipelines.parameters.ParameterSetRepository
+import co.datapipelines.parameters.ParameterSetService
 import co.datapipelines.pipeline.PipelineReleaseService
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.release.PipelineDependencySource
@@ -16,7 +23,12 @@ import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import co.datapipelines.pipeline.release.ReleasedVersionObserver
 import co.datapipelines.pipeline.release.ResolvedNode
+import co.datapipelines.pipeline.release.RestoreDependencyGuard
 import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.visualization.DashboardRepository
+import co.datapipelines.visualization.DashboardService
+import co.datapipelines.visualization.VisualizationRepository
+import co.datapipelines.visualization.VisualizationService
 import co.datapipelines.web.config.ReleaseDependencyProperties
 import co.datapipelines.web.templates.TemplateReleaseService
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -35,8 +47,9 @@ import org.springframework.transaction.support.TransactionTemplate
  * REQUIRES_NEW; the plan's first closure read is its own read-only REPEATABLE READ transaction, REQUIRES_NEW on the same
  * manager so it never joins a weaker caller (#868 G1, record §7.2 step 2).
  *
- * The neutral dependency registry (#868 G1, record §3.2) is assembled here by DI from the descriptor beans: in G1 the
- * pipeline and template release sources, plus the API family (#786, its descriptor in `EndpointsConfiguration`).
+ * The neutral dependency registry (#868 G1, record §3.2) is assembled here by DI from the descriptor beans: the pipeline
+ * release source (G1's adapter), the native template, parameter-set, visualization and dashboard providers (#873 G2),
+ * plus the API family (#786, its descriptor in `EndpointsConfiguration`).
  * [FamilyRegistry.production] refuses a duplicate key and a key outside `FamilyKey.PRODUCTION`, so either fails the
  * context at startup.
  */
@@ -87,10 +100,29 @@ class ReleaseConfiguration {
     fun pipelineDependencyFamily(ceiling: PostgresStatementCeiling): FamilyDescriptor<ResolvedNode> =
         ReleaseDependencyFamilies.descriptor(ReleaseFamily.PIPELINE, PipelineDependencySource(PipelineRepository(ceiling.jdbc)), ceiling)
 
-    /** The template family over its release source (no pins today: #518 adds the import arm), over the ceiling's template. */
+    /**
+     * The template family's NATIVE provider (#873 §A.2: exactly one descriptor per family — it replaces G1's adapted
+     * template source, which stays as the parity oracle only): one batch read per frontier, the `IMPORT` edges, over the
+     * ceiling's template.
+     */
     @Bean
-    fun templateDependencyFamily(ceiling: PostgresStatementCeiling): FamilyDescriptor<ResolvedNode> =
-        ReleaseDependencyFamilies.descriptor(ReleaseFamily.TEMPLATE, TemplateDependencySource(TemplateRepository(ceiling.jdbc)), ceiling)
+    fun templateDependencyFamily(ceiling: PostgresStatementCeiling): FamilyDescriptor<*> =
+        TemplateReleaseProvider(TemplateRepository(ceiling.jdbc), ceiling).descriptor()
+
+    /** The parameter-set family's native provider (#873 G2): selector-template edges, one batch read per frontier. */
+    @Bean
+    fun parameterSetDependencyFamily(ceiling: PostgresStatementCeiling): FamilyDescriptor<*> =
+        ParameterSetReleaseProvider(ParameterSetRepository(ceiling.jdbc), ceiling).descriptor()
+
+    /** The visualization family's native provider (#873 G2): the transform-template edge, one batch read per frontier. */
+    @Bean
+    fun visualizationDependencyFamily(ceiling: PostgresStatementCeiling): FamilyDescriptor<*> =
+        VisualizationReleaseProvider(VisualizationRepository(ceiling.jdbc), ceiling).descriptor()
+
+    /** The dashboard family's native provider (#873 G2): set, source-pipeline and visualization edges, one batch read per frontier. */
+    @Bean
+    fun dashboardDependencyFamily(ceiling: PostgresStatementCeiling): FamilyDescriptor<*> =
+        DashboardReleaseProvider(DashboardRepository(ceiling.jdbc), ceiling).descriptor()
 
     /** Every descriptor bean, one registry; a duplicate or non-production key fails the context here. */
     @Bean
@@ -127,6 +159,27 @@ class ReleaseConfiguration {
             planning = properties.toPlanningLimits(),
         )
 
+    /**
+     * #873 §D.0 — the restore recheck port the five families' restore verbs call: the DISCARDED version's stored body
+     * read through its family's provider, its references walked as the roots of ONE lifecycle-guard walk in the
+     * restore's own guarded transaction — the registry, bounds and deadline the planner uses.
+     */
+    @Bean
+    fun restoreDependencyGuard(
+        registry: FamilyRegistry,
+        deadline: ReleasePlanningDeadline,
+        metadataTransactionManager: PlatformTransactionManager,
+        bounds: ReleaseBounds,
+        properties: ReleaseDependencyProperties,
+    ): RestoreDependencyGuard =
+        WalkingRestoreDependencyGuard(
+            registry = registry,
+            bounds = bounds,
+            speculativeReads = ReleasePlanningWalk.speculativeReads(metadataTransactionManager),
+            deadline = deadline,
+            planning = properties.toPlanningLimits(),
+        )
+
     @Bean
     @Suppress("LongParameterList") // the coordinator's collaborators, one per step of the record's algorithm
     fun pipelineReleaseCoordinator(
@@ -143,6 +196,10 @@ class ReleaseConfiguration {
         observer: ReleasedVersionObserver,
         /** #786 — the API family's release steps: the coordinator's second root. */
         endpointSteps: EndpointReleaseSteps,
+        /** #873 §B — the parameter-set, visualization and dashboard roots, through their services' planner seams. */
+        parameterSets: ParameterSetService,
+        visualizations: VisualizationService,
+        dashboards: DashboardService,
     ): ReleaseCoordinator =
         ReleaseCoordinator(
             releases = releases,
@@ -153,6 +210,9 @@ class ReleaseConfiguration {
                     PipelineReleaseParticipant(releases, pipelines),
                     TemplateReleaseParticipant(templateReleases),
                     EndpointReleaseParticipant(endpointSteps),
+                    ParameterSetReleaseParticipant(parameterSets),
+                    VisualizationReleaseParticipant(visualizations),
+                    DashboardReleaseParticipant(dashboards),
                 ),
             authorization = authorization,
             guard = guard,

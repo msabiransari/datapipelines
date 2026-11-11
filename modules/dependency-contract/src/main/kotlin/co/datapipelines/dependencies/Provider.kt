@@ -62,6 +62,12 @@ data class Reference(
     val sourcePath: String?,
     val constraints: List<Constraint> = emptyList(),
     val spelledName: String? = null,
+    /**
+     * Provenance (#873 R2, record §6 template → template "Preserve alias/path as provenance", §23.3 item 1): the alias
+     * the dependent's author declared for this occurrence (a template import's `alias`), null where the family declares
+     * none. Carried verbatim onto the [Edge]; never hashed, never rendered, never interpolated into SQL, HTML or a message.
+     */
+    val alias: String? = null,
 )
 
 /**

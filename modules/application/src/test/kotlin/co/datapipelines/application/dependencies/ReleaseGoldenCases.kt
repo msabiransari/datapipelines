@@ -145,6 +145,15 @@ internal object ReleaseGoldenCases {
                 val root = g.node(pipeline(g, "orders"), ReleaseNodeStatus.DRAFT, left to "nodes[0].template", right to "nodes[1].template")
                 GoldenCase("diamond-shared-template", g, root)
             },
+            // #873 §A.2 (A02): the template IMPORT diamond report@7 → dates@3 → common@2 plus the direct report@7 →
+            // common@2 — one common@2 node, two edge occurrences, released once (dependency-first: common, dates, report).
+            {
+                val g = GoldenGraph()
+                val common = g.node(g.id("common", 2), ReleaseNodeStatus.DRAFT)
+                val dates = g.node(g.id("dates", 3), ReleaseNodeStatus.DRAFT, common to "imports[0]")
+                val root = g.node(g.id("report", 7), ReleaseNodeStatus.DRAFT, dates to "imports[0]", common to "imports[1]")
+                GoldenCase("import-diamond", g, root)
+            },
             {
                 val g = GoldenGraph()
                 val v1 = g.node(g.id("region", 1), ReleaseNodeStatus.RELEASED, currentVersion = 2)

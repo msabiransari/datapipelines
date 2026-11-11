@@ -229,6 +229,8 @@ class PipelineLifecycleConfiguration {
         // #733 — the entity row, to tell a missing template from a missing version.
         templateIds: TemplateIds,
         bounds: ReleaseBounds,
+        // #873 §D.3 — the restore recheck walks below every live pin (the shared port, bound in ReleaseConfiguration).
+        restoreGuard: co.datapipelines.pipeline.release.RestoreDependencyGuard,
     ): PipelineService =
         PipelineService(
             pipelines,
@@ -245,5 +247,6 @@ class PipelineLifecycleConfiguration {
             templateStatuses = templateStatuses,
             templateIds = templateIds,
             maxBlockers = bounds.maxBlockers,
+            restoreGuard = restoreGuard,
         )
 }

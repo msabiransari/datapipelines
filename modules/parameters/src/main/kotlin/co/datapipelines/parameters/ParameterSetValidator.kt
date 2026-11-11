@@ -18,6 +18,7 @@ import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseNodeIdentity
 import co.datapipelines.pipeline.release.ReleaseNodeStatus
 import co.datapipelines.pipeline.release.RestoreBlocker
+import co.datapipelines.pipeline.release.RestoreReach
 import co.datapipelines.typesystem.DeclarationRule
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.typesystem.ParameterCardinality
@@ -149,12 +150,29 @@ class ParameterSetValidator(
      * A RESTORE's recheck of the stored body's selector pins under the writer guard (#517 round three, record §12.1):
      * the missing or DISCARDED pins as failures, the present-but-DRAFT ones as blockers. Metadata only; no render,
      * no dry run, no customer connection.
+     *
+     * #873 §D.3: [below] are the not-RELEASED nodes the shared restore walk found beneath a live pin (an import of a
+     * selector template); a missing or DISCARDED one is the same `template_version_not_found` at its pin's field, with the
+     * full `path` and the intermediate nodes as `via`. The DRAFT ones stay the caller's 409.
      */
     fun validateRestorePins(
         workspaceId: UUID,
         body: ParameterSetBody,
+        below: List<RestoreReach> = emptyList(),
     ): RestorePins {
         val failures = ParameterSetFailures()
+        below.filter { it.dangling }.forEach { reach ->
+            val name = reach.identity.entityId.safeEcho()
+            failures.add(
+                ParameterErrorCodes.TEMPLATE_VERSION_NOT_FOUND,
+                reach.directPath,
+                "Template '$name' version ${reach.identity.version}, reached through '${reach.path}', is " +
+                    "${reach.status.name}; a restore lands RELEASED and everything below its pins must be live.",
+                mapOf("template_id" to name, "template_version" to reach.identity.version) +
+                    (if (reach.status == ReleaseNodeStatus.DISCARDED) mapOf("reason" to "discarded") else emptyMap()) +
+                    mapOf("path" to reach.path, "via" to reach.viaDetails()),
+            )
+        }
         val drafts =
             body.parameters.mapIndexedNotNull { index, parameter ->
                 val ref = parameter.source?.template

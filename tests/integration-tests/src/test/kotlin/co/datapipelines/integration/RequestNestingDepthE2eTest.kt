@@ -91,6 +91,8 @@ class RequestNestingDepthE2eTest {
             StringRoute("POST", "/api/v1/visualizations", VISUALIZATION_MALFORMED),
             StringRoute("PUT", "/api/v1/visualizations/${UUID.randomUUID()}", VISUALIZATION_MALFORMED),
             StringRoute("POST", "/api/v1/visualizations/${UUID.randomUUID()}/current", VISUALIZATION_MALFORMED),
+            // #873: the artifact release plan body is read through the same request mapper, BEFORE any lookup.
+            StringRoute("POST", "/api/v1/visualizations/${UUID.randomUUID()}/release", VISUALIZATION_MALFORMED),
             // #10 L1c: the transfer routes read their envelope bodies themselves.
             StringRoute("POST", "/api/v1/visualizations/import", VISUALIZATION_MALFORMED),
             // #353: the test-session results route reads its body through the same family reader, BEFORE any lookup.
@@ -102,6 +104,8 @@ class RequestNestingDepthE2eTest {
             StringRoute("POST", "/api/v1/dashboards", DASHBOARD_MALFORMED),
             StringRoute("PUT", "/api/v1/dashboards/${UUID.randomUUID()}", DASHBOARD_MALFORMED),
             StringRoute("POST", "/api/v1/dashboards/${UUID.randomUUID()}/current", DASHBOARD_MALFORMED),
+            // #873: the artifact release plan body, read the same way.
+            StringRoute("POST", "/api/v1/dashboards/${UUID.randomUUID()}/release", DASHBOARD_MALFORMED),
             // #10 L2: the three runtime POSTs parse their own body too — read whole BEFORE any lookup, so a random id is enough.
             StringRoute("POST", "/api/v1/dashboards/${UUID.randomUUID()}/runtime/parameters", DASHBOARD_MALFORMED),
             StringRoute("POST", "/api/v1/dashboards/${UUID.randomUUID()}/runtime/visualizations", DASHBOARD_MALFORMED),
@@ -115,6 +119,8 @@ class RequestNestingDepthE2eTest {
             StringRoute("POST", "/api/v1/parameter-sets", PARAMETER_MALFORMED),
             StringRoute("PUT", "/api/v1/parameter-sets/${UUID.randomUUID()}", PARAMETER_MALFORMED),
             StringRoute("POST", "/api/v1/parameter-sets/${UUID.randomUUID()}/evaluate", PARAMETER_MALFORMED),
+            // #873: the artifact release plan body, read the same way.
+            StringRoute("POST", "/api/v1/parameter-sets/${UUID.randomUUID()}/release", PARAMETER_MALFORMED),
             StringRoute("POST", "/api/v1/parameter-sets/import", PARAMETER_MALFORMED),
             // #375: the observed evaluation reads its body through the same request mapper.
             StringRoute("POST", "/api/v1/parameter-sets/${UUID.randomUUID()}/evaluations", PARAMETER_MALFORMED),
@@ -192,10 +198,11 @@ class RequestNestingDepthE2eTest {
                 "PipelineTransferController.kt" to 1,
                 "PipelineExecuteController.kt" to 1,
                 "SchedulesController.kt" to 2,
-                "VisualizationsController.kt" to 3,
-                "DashboardsController.kt" to 3,
+                // #873: the artifact release plan joins create, update and switch-current (and evaluate).
+                "VisualizationsController.kt" to 4,
+                "DashboardsController.kt" to 4,
                 "DashboardRuntimeController.kt" to 3,
-                "ParameterSetsController.kt" to 4,
+                "ParameterSetsController.kt" to 5,
                 // #10 L1c: the transfer routes read their envelope bodies themselves.
                 "VisualizationTransferController.kt" to 1,
                 "DashboardTransferController.kt" to 1,
@@ -210,7 +217,8 @@ class RequestNestingDepthE2eTest {
             found.entries.map { it.key to it.value } shouldContainExactlyInAnyOrder
                 (swept + ALLOWLISTED).entries.map { it.key to it.value }
         }
-        stringRoutes.size shouldBe swept.values.sum() // 32 routes sweep themselves: no allowlist (#323, #10 L1c, #353, #375, #517, #786)
+        // 35 routes sweep themselves, no allowlist (#323, #10 L1c, #353, #375, #517, #786, #873)
+        stringRoutes.size shouldBe swept.values.sum()
     }
 
     @Test

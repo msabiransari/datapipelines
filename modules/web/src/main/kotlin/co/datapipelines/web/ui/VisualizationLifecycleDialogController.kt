@@ -39,8 +39,8 @@ import java.util.UUID
  * redirects to the catalog. Refusals ride the UiExceptionHandler Shape C path with their real 4xx — including the
  * typed-confirm mismatch, checked BEFORE the service so a mismatched dialog can never purge anything.
  *
- * Every audit row is the REST route's twin (#332): the release's cascaded template events first, then the
- * visualization's own naming them — after the service returned, never on a refusal.
+ * Every audit row is the REST route's twin (#332). The release's rows — the cascaded template events first, then the
+ * visualization's own naming them — are the release coordinator's, written inside the one transaction (#873 §C.7).
  */
 @Controller
 @RequestMapping("/partials/visualizations/{id}/lifecycle")
@@ -84,34 +84,7 @@ class VisualizationLifecycleDialogController(
         // D61 — the ONE consent: without it a DRAFT transform pin refuses release.dependency_not_released as it
         // always has; the server, never the checkbox, is the guard.
         val released = visualizations.release(workspaceId, id, bodyHash, principal.userId, releasePinnedTemplates)
-        val cascade = LifecycleVerbs.FamilyCascade("visualization_id", id, released.version.detail.version)
-        released.templatesReleased.forEach { template ->
-            LifecycleVerbs.audit(
-                audit,
-                LifecycleVerbs.TEMPLATE_AUDIT_VERSION_RELEASED,
-                principal,
-                workspaceId,
-                LifecycleVerbs.cascadedReleaseDetails(principal, "template_id", template.id, template.version, cascade),
-            )
-        }
-        LifecycleVerbs.audit(
-            audit,
-            LifecycleVerbs.VISUALIZATION_EVENTS.versionReleased,
-            principal,
-            workspaceId,
-            LifecycleVerbs.familyReleaseDetails(
-                principal,
-                LifecycleVerbs.FamilyIdentity(
-                    "visualization_id",
-                    "visualization_name",
-                    id,
-                    released.version.record.name,
-                    released.version.detail.version,
-                ),
-                "templates_released",
-                released.templatesReleased.map { mapOf("template_id" to it.id, "version" to it.version) },
-            ),
-        )
+        // #873 §C.7 — the coordinator wrote every release event inside the one transaction; this handler writes none.
         return redirect(workspaceTab(id, from, if (released.templatesReleased.isEmpty()) OK_RELEASED else OK_RELEASED_WITH_TEMPLATES))
     }
 

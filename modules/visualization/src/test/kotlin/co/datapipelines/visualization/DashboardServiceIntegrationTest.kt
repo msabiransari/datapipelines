@@ -9,6 +9,7 @@ import co.datapipelines.visualization.VisualizationTestDb.OTHER_WORKSPACE
 import co.datapipelines.visualization.VisualizationTestDb.WORKSPACE
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.BeforeEach
@@ -186,6 +187,26 @@ class DashboardServiceIntegrationTest {
         (refused.details["dependencies_not_released"] as List<*>).map { (it as Map<*, *>)["kind"] to it["status"] } shouldBe
             listOf("parameter_set" to "DRAFT", "visualization" to "DRAFT")
         vizStatus() shouldBe PipelineVersionStatus.DRAFT
+    }
+
+    @Test
+    fun `the release planner's commit never flips a dashboard over a non-RELEASED source - prepare admits it, commit refuses (R5)`() {
+        // #873 §C.4: prepare judges every rule but the source status (the plan may select the DRAFT source); the commit,
+        // after the dependencies flipped, judges it strictly — a source still DRAFT there is source_not_released.
+        h.createVisualization()
+        h.fakes.pipelines[ValidatorFakes.PIPELINE_REF] =
+            h.fakes.pipelines
+                .getValue(ValidatorFakes.PIPELINE_REF)
+                .copy(status = PipelineVersionStatus.DRAFT)
+        val dashboard = h.dashboards.create(WORKSPACE, h.dashboardDocument(1), AUTHOR, WriteSurface.MCP)
+        val id = dashboard.record.id
+        val prepared = checkNotNull(h.dashboards.prepareRelease(WORKSPACE, id, dashboard.detail.version, dashboard.detail.bodyHash))
+
+        val refused =
+            shouldThrow<ArtifactValidationException> { h.dashboards.commitRelease(WORKSPACE, prepared, dashboard.detail.bodyHash, AUTHOR) }
+
+        refused.result.codes shouldContain DashboardErrorCodes.SOURCE_NOT_RELEASED
+        checkNotNull(h.dashboardRepository.findDraft(WORKSPACE, id)).status shouldBe PipelineVersionStatus.DRAFT
     }
 
     @Test

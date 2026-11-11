@@ -28,6 +28,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -191,18 +192,43 @@ class ParameterSetsControllerTest {
         val released = mockk<co.datapipelines.parameters.ParameterSetReleased>()
         every { released.version } returns loaded
         every { released.templatesReleased } returns listOf(TemplateRef("acme/templates/t", 2))
-        every { sets.release(workspaceId, setId, "hash-v1", userId, true) } returns released
+        every { sets.release(workspaceId, setId, "hash-v1", userId, true, null) } returns released
 
         controller.release(setId, "hash-v1", releasePinnedTemplates = true)
 
-        verify(exactly = 1) { sets.release(workspaceId, setId, "hash-v1", userId, true) }
-        // #332 — the release audit, the auditRelease twin: the cascaded template's event first,
-        // then the set's own naming it.
-        audit.events shouldBe
-            listOf("template.version.released", "parameter_set.version.released")
-        audit.details.first()["cascade_from_parameter_set_id"] shouldBe setId.toString()
-        audit.details.last()["templates_released"] shouldBe listOf(mapOf("template_id" to "acme/templates/t", "version" to 2))
-        audit.details.last()["parameter_set_name"] shouldBe record.name
+        verify(exactly = 1) { sets.release(workspaceId, setId, "hash-v1", userId, true, null) }
+        // #873 §C.7 — the release coordinator is the ONE writer of release events, inside its transaction; the handler
+        // writes none after the service returns (the #332 rows are the coordinator's now).
+        audit.events shouldBe emptyList()
+    }
+
+    @Test
+    fun `release reads an optional plan body and hands it to the service`() {
+        authenticate()
+        val released = mockk<co.datapipelines.parameters.ParameterSetReleased>()
+        every { released.version } returns loaded
+        every { released.templatesReleased } returns emptyList()
+        val plan = slot<co.datapipelines.pipeline.release.ReleasePlanRequest>()
+        every { sets.release(workspaceId, setId, "hash-v1", userId, false, capture(plan)) } returns released
+
+        controller.release(setId, "hash-v1", body = """{"tree_hash": "sha256:abc", "include_dependencies": ["n1"]}""")
+
+        plan.captured.treeHash shouldBe "sha256:abc"
+        plan.captured.includeDependencies shouldBe listOf("n1")
+        audit.events shouldBe emptyList()
+    }
+
+    @Test
+    fun `release refuses a plan body field the plan does not have as the set family's plan_invalid`() {
+        authenticate()
+
+        val refused =
+            shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
+                controller.release(setId, "hash-v1", body = """{"status": "RELEASED"}""")
+            }
+
+        refused.code shouldBe "parameter.release.plan_invalid"
+        verify(exactly = 0) { sets.release(any(), any(), any(), any(), any(), any()) }
     }
 
     @Test

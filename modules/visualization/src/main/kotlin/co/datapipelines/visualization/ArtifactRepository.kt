@@ -115,6 +115,43 @@ open class ArtifactRepository<B : Any>(
                 versionMapper,
             ).singleOrNull()
 
+    /**
+     * #873 (dependency-graph record §7.1, brief R1-8) — the exact versions [keys] name, `(artifact name, version)` pairs,
+     * any status, in ONE `IN`-list statement: the visualization and dashboard dependency providers' batch read. A key with
+     * no stored row is absent from the answer. Empty [keys] issues nothing (`IN ()` would not prepare).
+     */
+    fun findVersionsByName(
+        workspaceId: UUID,
+        keys: Collection<Pair<String, Int>>,
+    ): List<ArtifactVersion<B>> {
+        if (keys.isEmpty()) return emptyList()
+        return jdbc.query(
+            "${sql.selectVersion} WHERE s.workspace_id = :workspaceId AND (s.name, v.version) IN (:keys)",
+            mapOf("workspaceId" to workspaceId, "keys" to keys.map { (name, version) -> arrayOf<Any>(name, version) }),
+            versionMapper,
+        )
+    }
+
+    /**
+     * [findVersionsByName]'s ONE statement with a per-row LATERAL join (#873 R1): the version rows are the subquery `x`,
+     * [lateral] joins one family fact to each (it may read `x.id` and `x.version`), [columns] selects it and [extra]
+     * maps it beside the version. Still one `IN`-list statement, never one per key.
+     */
+    protected fun <E> findVersionsByNameJoined(
+        workspaceId: UUID,
+        keys: Collection<Pair<String, Int>>,
+        columns: String,
+        lateral: String,
+        extra: (ResultSet) -> E,
+    ): List<Pair<ArtifactVersion<B>, E>> {
+        if (keys.isEmpty()) return emptyList()
+        return jdbc.query(
+            "SELECT x.*, $columns FROM (${sql.selectVersion} WHERE s.workspace_id = :workspaceId AND (s.name, v.version) IN (:keys)) x" +
+                " $lateral",
+            mapOf("workspaceId" to workspaceId, "keys" to keys.map { (name, version) -> arrayOf<Any>(name, version) }),
+        ) { rs, row -> checkNotNull(versionMapper.mapRow(rs, row)) to extra(rs) }
+    }
+
     /** The version the pointer names, or null (never released, or every release discarded). */
     fun findCurrent(
         workspaceId: UUID,
@@ -679,6 +716,32 @@ class VisualizationRepository(
     ): List<co.datapipelines.pipeline.RecentRow> =
         co.datapipelines.pipeline.RecentSource
             .recent(jdbc, co.datapipelines.pipeline.NavigationFamily.VISUALIZATIONS, workspaceId, lens)
+
+    /**
+     * #873 R1 — the provider's batch read: the exact versions [keys] name (any status) each with its LATEST test run's
+     * stored facts ([LatestRunFacts], null when it has none; the order of `TestRunRepository.latestRun`), in ONE
+     * statement — the graph's `evidence_ready` is classified from stored evidence, never by running anything.
+     */
+    fun findVersionsWithLatestRun(
+        workspaceId: UUID,
+        keys: Collection<Pair<String, Int>>,
+    ): List<Pair<ArtifactVersion<VisualizationBody>, LatestRunFacts?>> =
+        findVersionsByNameJoined(
+            workspaceId,
+            keys,
+            columns = "lr.status AS latest_run_status, lr.body_hash AS latest_run_body_hash, lr.expires_at AS latest_run_expires_at",
+            lateral =
+                "LEFT JOIN LATERAL (SELECT r.status, r.body_hash, r.expires_at FROM visualization_test_runs r" +
+                    " WHERE r.visualization_id = x.id AND r.version = x.version ORDER BY r.started_at DESC, r.id DESC LIMIT 1) lr ON TRUE",
+        ) { rs ->
+            rs.getString("latest_run_status")?.let { status ->
+                LatestRunFacts(
+                    TestRunStatus.valueOf(status),
+                    rs.getString("latest_run_body_hash"),
+                    rs.getObject("latest_run_expires_at", OffsetDateTime::class.java).toInstant(),
+                )
+            }
+        }
 
     /** The pinned visualization version a dashboard names, by name within the workspace; null when absent. */
     val pins: VisualizationPins =

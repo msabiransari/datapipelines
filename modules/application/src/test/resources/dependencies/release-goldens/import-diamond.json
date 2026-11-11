@@ -1,0 +1,72 @@
+{
+  "case" : "import-diamond",
+  "bounds" : {
+    "max_depth" : 32,
+    "max_versions" : 1024,
+    "max_edges" : 4096,
+    "max_blockers" : 100,
+    "max_wire_bytes" : 1048576
+  },
+  "outcome" : "closure",
+  "nodes" : [
+    {
+      "node_id" : "n0",
+      "family" : "template",
+      "entity_id" : "report",
+      "version" : 7,
+      "name" : "acme/report",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-report-7",
+      "current_version" : null,
+      "entity_uuid" : "cd73d10e-e054-332b-8f67-bf613a55978e"
+    },
+    {
+      "node_id" : "n1",
+      "family" : "template",
+      "entity_id" : "dates",
+      "version" : 3,
+      "name" : "acme/dates",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-dates-3",
+      "current_version" : null,
+      "entity_uuid" : "3b87d383-1c1b-3e3d-a39d-64cc95829f1e"
+    },
+    {
+      "node_id" : "n2",
+      "family" : "template",
+      "entity_id" : "common",
+      "version" : 2,
+      "name" : "acme/common",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-common-2",
+      "current_version" : null,
+      "entity_uuid" : "b8437a7c-4fd9-3b6a-bb70-0e8772c04c78"
+    }
+  ],
+  "edges" : [
+    {
+      "from" : "n0",
+      "to" : "n1",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n1",
+      "to" : "n2",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n0",
+      "to" : "n2",
+      "path" : "imports[1]"
+    }
+  ],
+  "depth" : 2,
+  "dependency_first" : [
+    "n2",
+    "n1",
+    "n0"
+  ],
+  "canonical" : "{\"format\":\"v1\",\"workspace\":\"00000000-0000-0000-0000-000000000868\",\"root\":[\"template\",\"report\",7],\"nodes\":[{\"id\":[\"template\",\"common\",2],\"entity_uuid\":\"b8437a7c-4fd9-3b6a-bb70-0e8772c04c78\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-common-2\",\"current\":null},{\"id\":[\"template\",\"dates\",3],\"entity_uuid\":\"3b87d383-1c1b-3e3d-a39d-64cc95829f1e\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-dates-3\",\"current\":null},{\"id\":[\"template\",\"report\",7],\"entity_uuid\":\"cd73d10e-e054-332b-8f67-bf613a55978e\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-report-7\",\"current\":null}],\"edges\":[{\"from\":[\"template\",\"dates\",3],\"to\":[\"template\",\"common\",2],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"report\",7],\"to\":[\"template\",\"common\",2],\"path\":\"imports[1]\"},{\"from\":[\"template\",\"report\",7],\"to\":[\"template\",\"dates\",3],\"path\":\"imports[0]\"}]}",
+  "wire_bound" : 1048576,
+  "digest" : "v1:4f45add298b0522a62e11fe3afdce548f7d11f7072112b25d2e6fcdd81476d34"
+}

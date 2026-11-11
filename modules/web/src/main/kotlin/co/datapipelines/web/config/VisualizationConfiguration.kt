@@ -134,6 +134,11 @@ class VisualizationConfiguration {
         transactionManager: PlatformTransactionManager,
         // #517 — every pin-affecting write under the workspace writer guard (release-dependencies §4.3).
         guard: ReleaseMutationGuard,
+        // #873 §C.1 — the shared release planner, read per release (it holds this service's participant: no cycle).
+        coordinator: org.springframework.beans.factory.ObjectProvider<co.datapipelines.web.release.ReleaseCoordinator>,
+        // #873 §D.1 — the restore recheck walks the stored body's whole closure (the shared port) and its blocker bound.
+        restoreGuard: co.datapipelines.pipeline.release.RestoreDependencyGuard,
+        bounds: co.datapipelines.pipeline.release.ReleaseBounds,
     ): VisualizationService =
         VisualizationService(
             repository,
@@ -145,6 +150,11 @@ class VisualizationConfiguration {
             evidence = evidence,
             transactions = TransactionTemplate(transactionManager) as TransactionOperations,
             guard = guard,
+            coordination =
+                co.datapipelines.web.release.VisualizationReleaseParticipant
+                    .coordination { coordinator.getObject() },
+            restoreGuard = restoreGuard,
+            maxBlockers = bounds.maxBlockers,
         )
 
     @Bean
@@ -157,6 +167,11 @@ class VisualizationConfiguration {
         authoring: AuthoringGuard,
         transactionManager: PlatformTransactionManager,
         guard: ReleaseMutationGuard,
+        // #873 §C.1 — the shared release planner, read per release (it holds this service's participant: no cycle).
+        coordinator: org.springframework.beans.factory.ObjectProvider<co.datapipelines.web.release.ReleaseCoordinator>,
+        // #873 §D.1 — the restore recheck walks the stored body's whole closure (the shared port) and its blocker bound.
+        restoreGuard: co.datapipelines.pipeline.release.RestoreDependencyGuard,
+        bounds: co.datapipelines.pipeline.release.ReleaseBounds,
     ): DashboardService =
         DashboardService(
             repository,
@@ -166,6 +181,11 @@ class VisualizationConfiguration {
             authoring,
             transactions = TransactionTemplate(transactionManager) as TransactionOperations,
             guard = guard,
+            coordination =
+                co.datapipelines.web.release.DashboardReleaseParticipant
+                    .coordination { coordinator.getObject() },
+            restoreGuard = restoreGuard,
+            maxBlockers = bounds.maxBlockers,
         )
 
     /**

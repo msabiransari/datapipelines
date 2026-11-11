@@ -23,7 +23,6 @@ import io.kotest.matchers.string.shouldContain
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
-import io.mockk.verifySequence
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -42,8 +41,8 @@ import java.util.UUID
  * controller test established: every POST calls the SAME service the REST routes wire (the
  * hash and the guard re-run there — the dialog only decides what to SAY), every golden path
  * answers `HX-Redirect` onto the workspace's Versions tab with the flash code (or the catalog
- * when the row is gone), the release is audited exactly as the REST route audits it (#332:
- * each cascaded visualization's own event first, then the dashboard's own), and the typed
+ * when the row is gone), the release's audit rows are the release coordinator's alone (#873 §C.7:
+ * the dialog writes none after the service returns), and the typed
  * confirm is checked BEFORE the service — a mismatched dialog can never purge anything.
  * Session-only: an API key is refused `auth.session.required` before anything is read.
  */
@@ -116,11 +115,8 @@ class DashboardLifecycleDialogControllerTest {
         val answer = controller.release(dashboardId, bodyHash = "hash-2", releasePinnedVisualizations = true)
 
         answer.headers["HX-Redirect"] shouldBe listOf("/dashboards/$dashboardId?tab=versions&ok=released_with_visualizations")
-        // #332 — one cascaded visualization event FIRST, then the dashboard's own.
-        verifySequence {
-            audit.log("visualization.version.released", any(), any(), any(), any(), any())
-            audit.log("dashboard.version.released", any(), any(), any(), any(), any())
-        }
+        // #873 §C.7 — the #332 rows are the coordinator's, written inside its transaction; the dialog writes none.
+        verify(exactly = 0) { audit.log(any(), any(), any(), any(), any(), any()) }
     }
 
     @Test

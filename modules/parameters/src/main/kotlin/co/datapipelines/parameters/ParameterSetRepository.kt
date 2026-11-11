@@ -129,6 +129,23 @@ class ParameterSetRepository(
                 VERSION,
             ).singleOrNull()
 
+    /**
+     * #873 (dependency-graph record §7.1, brief R1-8) — the exact versions [keys] name, `(set name, version)` pairs, any
+     * status, in ONE `IN`-list statement: the parameter-set dependency provider's batch read. A key with no stored row is
+     * absent from the answer. Empty [keys] issues nothing (`IN ()` would not prepare).
+     */
+    fun findVersionsByName(
+        workspaceId: UUID,
+        keys: Collection<Pair<String, Int>>,
+    ): List<ParameterSetVersion> {
+        if (keys.isEmpty()) return emptyList()
+        return jdbc.query(
+            "$SELECT_VERSION WHERE s.workspace_id = :workspaceId AND (s.name, v.version) IN (:keys)",
+            mapOf("workspaceId" to workspaceId, "keys" to keys.map { (name, version) -> arrayOf<Any>(name, version) }),
+            VERSION,
+        )
+    }
+
     /** The version the pointer names, or null (never released, or every release discarded). */
     fun findCurrent(
         workspaceId: UUID,

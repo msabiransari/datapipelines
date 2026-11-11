@@ -5,11 +5,14 @@ import co.datapipelines.application.dependencies.ReleaseDependencyFamilies
 import co.datapipelines.application.dependencies.ReleasePlanningLimits
 import co.datapipelines.application.dependencies.ReleasePlanningWalk
 import co.datapipelines.application.dependencies.StatementCeiling
+import co.datapipelines.application.dependencies.template.TemplateReleaseProvider
 import co.datapipelines.dependencies.FamilyDescriptor
 import co.datapipelines.dependencies.FamilyKey
+import co.datapipelines.dependencies.FamilyRegistry
 import co.datapipelines.web.config.EndpointsConfiguration
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
@@ -29,8 +32,9 @@ import java.util.IdentityHashMap
 
 /**
  * The production wiring of the release statement bound (#786 R3, record §25.4): ONE [StatementCeiling] bean, the
- * PostgreSQL one, and every release family descriptor — pipeline, template and the API family `EndpointsConfiguration`
- * declares — reads its source under that bean, never under [StatementCeiling.NONE], and through repositories over THAT
+ * PostgreSQL one, and every release family descriptor — pipeline, the four native artifact providers (#873) and the API
+ * family `EndpointsConfiguration` declares — reads its source under that bean, never under [StatementCeiling.NONE], and
+ * through repositories over THAT
  * bean's template (landing review r4: only that template's per-statement hook bounds each statement); the planning walk
  * carries `statement-timeout-seconds` as the statement limit it puts in every provider context.
  */
@@ -48,9 +52,27 @@ class ReleaseStatementCeilingWiringTest {
             context.getBeansOfType(StatementCeiling::class.java).size shouldBe 1
             val ceiling = context.getBean(StatementCeiling::class.java).shouldBeInstanceOf<PostgresStatementCeiling>()
             val descriptors = context.getBeansOfType(FamilyDescriptor::class.java).values
-            descriptors.map { it.key }.toSet() shouldBe setOf(FamilyKey.PIPELINE, FamilyKey.TEMPLATE, FamilyKey.API_ENDPOINT)
+            descriptors.map { it.key }.toSet() shouldBe PRODUCTION_KEYS
             descriptors.forEach { descriptor ->
                 withClue(descriptor.key) { ReleaseDependencyFamilies.ceilingOf(descriptor) shouldBeSameInstanceAs ceiling }
+            }
+        }
+    }
+
+    /**
+     * #873 §A.2–3 (review R1-5): exactly ONE descriptor per frozen graph family key — the native template provider
+     * replaced G1's adapted template source, it did not join it — and the registry bean the planner walks holds those
+     * six. Startup would refuse a duplicate key (`DependencyFamilyRegistryWiringTest`); this proves the hand-over.
+     */
+    @Test
+    fun `the production registry holds exactly one descriptor per frozen family key`() {
+        context.run { context ->
+            val keys = context.getBeansOfType(FamilyDescriptor::class.java).values.map { it.key.wire }
+            keys.sorted() shouldContainExactly PRODUCTION_KEYS.map { it.wire }.sorted()
+            context.getBean(FamilyRegistry::class.java).keys shouldBe PRODUCTION_KEYS
+            val template = context.getBean(FamilyRegistry::class.java)[FamilyKey.TEMPLATE]
+            withClue("the template family is the native provider, not G1's adapted DependencySource") {
+                template?.provider.shouldBeInstanceOf<TemplateReleaseProvider>()
             }
         }
     }
@@ -143,6 +165,17 @@ class ReleaseStatementCeilingWiringTest {
     }
 
     private companion object {
+        /** Record §4's six releasable graph families (`FamilyKey`, never `ReleaseFamily.code()`'s `endpoint` prefix). */
+        val PRODUCTION_KEYS =
+            setOf(
+                FamilyKey.PIPELINE,
+                FamilyKey.TEMPLATE,
+                FamilyKey.PARAMETER_SET,
+                FamilyKey.VISUALIZATION,
+                FamilyKey.DASHBOARD,
+                FamilyKey.API_ENDPOINT,
+            )
+
         /** The two source roots hold hundreds of files; a scan that reads fewer read the wrong directory. */
         const val NON_VACUOUS_FLOOR = 100
 
