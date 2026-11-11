@@ -780,6 +780,31 @@ Preconditions, evaluated server-side before the statement runs:
      which stays `true` until the release dialog sends `tree_hash` (#522): until then a bare alias is the legacy
      cascade above, unchanged.
 
+   **The other roots (#873).** A template, a parameter set, a visualization and a dashboard release through the same
+   planner, on their existing routes and dialogs, with the same plan fields (`tree_hash`, `include_dependencies`; a
+   template's body carries them beside `name`) and the same refusals spelled in the root's family
+   (`parameter.release.*`, `visualization.release.*`, `dashboard.release.*`, `template.release.*`,
+   [pipeline-contract §13](pipeline-contract.md)). The closure is the planner's for every family: a template's
+   declared imports, a set's selector templates, a visualization's transform template, a dashboard's set, source
+   pipelines and visualizations, each transitively. Without a plan field each family keeps its legacy consent, scoped
+   to exactly the direct drafts it released before and never broadened: `release_pinned_templates` on a set or a
+   visualization = its DRAFT templates; `release_pinned_visualizations` on a dashboard = its DRAFT visualizations only
+   (not their templates, not its set, not its source pipelines); a template has no alias. On that path the refusal
+   keeps the family's own `details` keys (`pins_not_released`, `dependencies_not_released`), now naming deeper blockers
+   too. Every native preparation that may open a customer connection (a set's selector probe, a visualization's evidence
+   gate, a dashboard's §3.2 rules) runs before the transaction on a plan; the commit (a visualization's evidence
+   verdict, a dashboard's strict source re-validation, the exact-hash flip) runs inside it. A stale root `If-Match`
+   keeps the family's native `*.version.conflict`; any other drift is the root family's `plan_conflict`. The services
+   write no audit row of their own any more: the coordinator writes one row per flip, in the transaction, for every
+   entry (REST and dialog alike).
+
+   **A dashboard's DRAFT source pipeline (#873 §C.4).** A source pipeline that is still a DRAFT is a dependency like any
+   other: a plan may select it, and it then flips first with its own checks (and `check_overrides` per node). Without
+   a plan, or under `release_pinned_visualizations`, it refuses `409 dashboard.release.dependency_not_released` with
+   kind `pipeline` — where the validator's `400 dashboard.validation.source_not_released` answered before. That 400
+   remains the dashboard's import rule and the commit's strict re-validation: a dashboard never commits over a source
+   that is not RELEASED.
+
    **One transaction, strictly audited.** Every release — consent or none — runs in ONE metadata transaction:
    the workspace writer guard first (below), then the dependencies flip dependency-first, each at the hash the
    closure read, the pipeline last; one `*.version.released` audit row per actual flip is written in that same
@@ -1517,6 +1542,11 @@ and the test goes red (a guard that cannot fail is not a guard).
 - **One-draft index:** second draft insert violates the partial unique index.
 - **Release pin rule:** pipeline release with a DRAFT template pin ⇒
   `pipeline.release.dependency_not_released`; with all pins released ⇒ succeeds.
+- **The other roots (#873):** per root family, a plan flips dependencies first and the root last in one transaction,
+  one audit row per flip sharing one `release_id`; preparation outside the transaction and commit inside it; the
+  legacy alias selects exactly its old direct drafts and its refusal `details` equal the pre-#873 keys; a dashboard's
+  DRAFT source pipeline refuses `dashboard.release.dependency_not_released` kind `pipeline` without a plan and flips
+  with one (`ReleaseCoordinatorArtifactRootsTest`, `ReleaseAliasParityTest`, `FamilyRootsReleaseCascadeE2eTest`).
 - **Import table (§9.2):** each row of the conflict table as a case; hash recompute guard
   catches a doctored payload; the D60 pointer rule (subsequent import never moves the
   pointer; first import onto a current-less entity sets it).
