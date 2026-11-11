@@ -100,6 +100,8 @@ internal class CoordinatorFixture(
                             )
                         },
                     dashboards = mockk(relaxed = true),
+                    endpointVersions = co.datapipelines.web.NO_API_VERSION_PINS,
+                    schedules = co.datapipelines.web.NO_SCHEDULE_PINS,
                 ),
             )
         } else {
@@ -308,6 +310,7 @@ internal class CoordinatorFixture(
         authorization: ReleaseAuthorization = RecordingAuthorization(log, principal()),
         legacyAliasAdmitted: Boolean = true,
         planningTransactions: TransactionOperations = TransactionOperations.withoutTransaction(),
+        deadline: ReleasePlanningDeadline = ReleasePlanningDeadline.NONE,
     ) = ReleaseCoordinator(
         releases = releases,
         pipelines = pipelines,
@@ -319,7 +322,7 @@ internal class CoordinatorFixture(
                 bounds,
                 planningTransactions,
                 ReadIsolation.NONE,
-                ReleasePlanningDeadline.NONE,
+                deadline,
             ),
         participants = listOf(PipelineReleaseParticipant(releases, pipelines), TemplateReleaseParticipant(templateReleases)),
         authorization = authorization,
@@ -345,7 +348,13 @@ internal class RecordingAuthorization(
 ) : ReleaseAuthorization {
     override fun principal(): AuthenticatedPrincipal = principal
 
-    override fun requireRelease(family: ReleaseFamily) {
+    override fun requireRelease(family: ReleaseFamily) = requireRelease(principal, family)
+
+    /** #786 — the explicit-principal recheck (a boot-time root release); logged under the same name. */
+    override fun requireRelease(
+        principal: AuthenticatedPrincipal,
+        family: ReleaseFamily,
+    ) {
         log += "auth:${family.wire}"
         if (family in refused) throw DatapipelinesException(code = "auth.role_required", message = "refused ${family.wire}")
     }

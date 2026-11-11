@@ -342,6 +342,9 @@ class UiConfig {
         schedules: co.datapipelines.scheduler.ScheduleService,
         // #320 — the dashboards that pin a release, the port the service's discard guard asks.
         dashboards: co.datapipelines.pipeline.PipelineVersionConsumers,
+        // #786 B.4 — the live API versions and schedules that pin a version: the guard's two new ports.
+        endpointVersions: co.datapipelines.pipeline.EndpointVersionConsumers,
+        scheduleConsumers: co.datapipelines.pipeline.ScheduleConsumers,
     ): PipelineLifecycleDialogModel =
         PipelineLifecycleDialogModel(
             repository,
@@ -355,7 +358,24 @@ class UiConfig {
             co.datapipelines.pipeline.PipelineDeserializer(),
             schedules,
             dashboards,
+            endpointVersions,
+            scheduleConsumers,
         )
+
+    /** #786 B.3: the API versions page and its dialogs, over the services the REST routes call. */
+    @Bean
+    @Suppress("LongParameterList") // the page model's collaborators, one per concern
+    fun endpointVersionsPageModel(
+        publishing: co.datapipelines.application.endpoints.EndpointPublishService,
+        versions: co.datapipelines.application.endpoints.EndpointVersionService,
+        bindings: co.datapipelines.application.endpoints.EndpointKeyBindingRepository,
+        apiKeys: co.datapipelines.auth.ApiKeyRepository,
+        pipelines: co.datapipelines.pipeline.PipelineRepository,
+        pins: co.datapipelines.application.endpoints.EndpointPinValidator,
+        authoring: co.datapipelines.pipeline.AuthoringGuard,
+        coordinator: co.datapipelines.web.release.ReleaseCoordinator,
+    ): EndpointVersionsPageModel =
+        EndpointVersionsPageModel(publishing, versions, bindings, apiKeys, pipelines, pins, authoring, coordinator)
 
     /** 102: the template twin of [pipelineLifecycleDialogModel]. */
     @Bean

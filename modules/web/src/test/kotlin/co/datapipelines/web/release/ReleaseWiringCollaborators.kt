@@ -1,5 +1,6 @@
 package co.datapipelines.web.release
 
+import co.datapipelines.application.endpoints.EndpointReleaseSteps
 import co.datapipelines.pipeline.PipelineReleaseService
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.release.ReleasedVersionObserver
@@ -42,4 +43,8 @@ class ReleaseWiringCollaborators {
 
     @Bean
     fun releasedVersionObserver(): ReleasedVersionObserver = ReleasedVersionObserver.NONE
+
+    /** #786 — the API family's release steps, the coordinator's second root. */
+    @Bean
+    fun endpointReleaseSteps(): EndpointReleaseSteps = mockk(relaxed = true)
 }

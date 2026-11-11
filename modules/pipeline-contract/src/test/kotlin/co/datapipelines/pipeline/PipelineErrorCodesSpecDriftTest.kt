@@ -270,6 +270,8 @@ class PipelineErrorCodesSpecDriftTest {
                 PipelineErrorCodes.Endpoint.NOT_ACCEPTABLE,
                 PipelineErrorCodes.Endpoint.KEY_NOT_BOUND,
                 PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED,
+                // #786 A.4 — the deployment's authoring posture is the refused thing, not an entity under the API.
+                PipelineErrorCodes.Endpoint.AUTHORING_DISABLED,
                 // 118 §13.15 — the `semantics` domain has no entity dimension either: every
                 // code is about one fact.
                 PipelineErrorCodes.Semantics.KIND_INVALID,

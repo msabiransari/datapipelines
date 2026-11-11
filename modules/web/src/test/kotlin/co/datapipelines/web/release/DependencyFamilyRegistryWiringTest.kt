@@ -1,6 +1,7 @@
 package co.datapipelines.web.release
 
 import co.datapipelines.application.dependencies.ReleaseDependencyFamilies
+import co.datapipelines.application.dependencies.StatementCeiling
 import co.datapipelines.dependencies.FamilyDescriptor
 import co.datapipelines.dependencies.FamilyKey
 import co.datapipelines.pipeline.release.DependencySource
@@ -46,7 +47,7 @@ class DependencyFamilyRegistryWiringTest {
     class DuplicatePipeline {
         @Bean
         fun secondPipelineFamily(): FamilyDescriptor<*> =
-            ReleaseDependencyFamilies.descriptor(ReleaseFamily.PIPELINE, DependencySource { null })
+            ReleaseDependencyFamilies.descriptor(ReleaseFamily.PIPELINE, DependencySource { null }, StatementCeiling.NONE)
     }
 
     @Configuration
@@ -54,7 +55,7 @@ class DependencyFamilyRegistryWiringTest {
     class SyntheticFamily {
         @Bean
         fun widgetFamily(): FamilyDescriptor<*> {
-            val pipeline = ReleaseDependencyFamilies.descriptor(ReleaseFamily.PIPELINE, DependencySource { null })
+            val pipeline = ReleaseDependencyFamilies.descriptor(ReleaseFamily.PIPELINE, DependencySource { null }, StatementCeiling.NONE)
             return FamilyDescriptor(
                 key = FamilyKey("test_widget"),
                 rootSelectors = pipeline.rootSelectors,

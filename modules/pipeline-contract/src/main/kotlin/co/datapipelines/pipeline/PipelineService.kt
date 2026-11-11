@@ -112,6 +112,10 @@ open class PipelineService(
     private val draftTemplates: ExclusiveDraftTemplates,
     /** #320 — the dashboards that pin a release: a source pins `pipeline {name, version}` exactly (graph rule 1). */
     private val dashboards: PipelineVersionConsumers,
+    /** #786 B.4 — the live API versions that pin a pipeline version exactly (record §14, A39). */
+    private val endpointVersions: EndpointVersionConsumers,
+    /** #786 B.4 — the live schedules that run a pipeline version, paused and blocked included (record §14, A39). */
+    private val schedules: ScheduleConsumers,
     private val deserializer: PipelineDeserializer = PipelineDeserializer(),
     private val serializer: PipelineSerializer = PipelineSerializer(),
     /**
@@ -136,7 +140,7 @@ open class PipelineService(
     /** Blockers one restore refusal lists (`datapipelines.release.dependencies.max-blockers`, record §14). */
     private val maxBlockers: Int = ReleaseBounds.DEFAULT_MAX_BLOCKERS,
 ) {
-    private val pinGuard = PipelinePurgePinGuard(pipelines, dashboards)
+    private val pinGuard = PipelinePurgePinGuard(pipelines, dashboards, endpointVersions, schedules)
     private val restorePins = PipelineRestorePins(pipelines, templateStatuses, templateIds, maxBlockers, deserializer)
 
     /** The writer guard, acquired first inside every pin-affecting write's transaction. */
@@ -961,13 +965,6 @@ open class PipelineService(
         entityPurge: Boolean = false,
     ) = pinGuard.refuseIfPinned(workspaceId, record, version, entityPurge)
 
-    private fun pinned(
-        record: PipelineRecord,
-        version: Int,
-        pinners: List<TemplatePin>,
-        dashboardPins: List<DashboardPin> = emptyList(),
-    ): DatapipelinesException = pinGuard.pinned(record, version, pinners, dashboardPins)
-
     /**
      * The discard statement returned zero rows after the service-side guard passed: a pin
      * landed in between, or a concurrent discard won.
@@ -977,9 +974,8 @@ open class PipelineService(
         record: PipelineRecord,
         version: Int,
     ): DatapipelinesException {
-        val pinners = pipelines.findLiveParentsPinningVersion(workspaceId, record.name, version)
-        val dashboardPins = dashboards.liveVersionPins(workspaceId, record.name, version)
-        if (pinners.isNotEmpty() || dashboardPins.isNotEmpty()) return pinned(record, version, pinners, dashboardPins)
+        val pinners = pinGuard.pinnersOf(workspaceId, record, version)
+        if (!pinners.isEmpty) return pinGuard.pinned(record, version, pinners)
         val current = pipelines.findVersionDetail(workspaceId, record.id, version) ?: throw versionNotFound(record.id, version)
         return when (current.status) {
             PipelineVersionStatus.RELEASED -> {

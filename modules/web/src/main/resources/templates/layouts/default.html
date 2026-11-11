@@ -774,6 +774,15 @@
              visualization's — so the family carries its own switch, draft-purge and purge words. -->
         <th:block th:if="${code == 'visualization_switched'}"><div th:replace="~{partials/toast :: toast('success', 'Current version switched', 'Dashboards that pin this visualization keep their pinned versions; the Versions tab shows which version is current.')}"></div></th:block>
         <th:block th:if="${code == 'visualization_draft_purged'}"><div th:replace="~{partials/toast :: toast('success', 'Draft purged', 'The draft is gone. This cannot be undone.')}"></div></th:block>
+        <!-- #786 — the API versions page's verbs (ui-screens §4.18b): an API version is not a pipeline's, so the
+             family carries its own words; `switched` names what the API serves, never the pipeline's pointer. -->
+        <th:block th:if="${code == 'api_draft_saved'}"><div th:replace="~{partials/toast :: toast('success', 'Draft saved', 'The API draft pins the pipeline version you chose. Release it to lock it.')}"></div></th:block>
+        <th:block th:if="${code == 'api_released'}"><div th:replace="~{partials/toast :: toast('success', 'Released', 'The draft is now the API current version and is locked.')}"></div></th:block>
+        <th:block th:if="${code == 'api_discarded'}"><div th:replace="~{partials/toast :: toast('success', 'Version discarded', 'It no longer serves. The list shows which version is current now.')}"></div></th:block>
+        <th:block th:if="${code == 'api_restored'}"><div th:replace="~{partials/toast :: toast('success', 'Version restored', 'It is released again. The list shows which version is current.')}"></div></th:block>
+        <th:block th:if="${code == 'api_switched'}"><div th:replace="~{partials/toast :: toast('success', 'Current version switched', 'The API now serves the version you chose, at its own pinned pipeline version.')}"></div></th:block>
+        <th:block th:if="${code == 'api_draft_purged'}"><div th:replace="~{partials/toast :: toast('success', 'Draft purged', 'The draft is gone. This cannot be undone.')}"></div></th:block>
+        <th:block th:if="${code == 'api_purged'}"><div th:replace="~{partials/toast :: toast('success', 'API removed', 'Its only version was a draft, so the API is gone with it.')}"></div></th:block>
         <th:block th:if="${code == 'visualization_purged'}"><div th:replace="~{partials/toast :: toast('success', 'Visualization purged', 'The visualization and its draft are gone.')}"></div></th:block></th:block>
     </div>
     <th:block th:replace="${content}"/>

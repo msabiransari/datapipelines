@@ -1,6 +1,6 @@
 # MCP Server Specification
 
-**Status:** v1.77 (frozen contract — additive-only changes after this point)
+**Status:** v1.78 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
 **Last updated:** 2026-10-25
@@ -978,17 +978,18 @@ An agent that needs a datasource it cannot find should **ask the person** to add
 
 #### 6.2.23 `endpoints_create`
 
-Publish a released pipeline as a `GET` endpoint at `/api/<category>/<version>/<path…>` (R-EP5; [REST API §19](rest-api.md#19-published-endpoints)). Calls the same service `POST /api/v1/endpoints` calls — the same read-only rule, the same reserved-category refusal, the same ambiguity refusal, the same audit (049's rule: two entry points, one validated path).
+Create a `GET` API at `/api/<category>/<version>/<path…>` (R-EP5; [REST API §19](rest-api.md#19-published-endpoints)) — its version 1 a DRAFT pinned to the EXACT `pipeline_version` given (#786; dependency-graph record §24): the pin never moves when the pipeline's current version moves, and no tool releases it — releasing is a person's act in the UI or over REST (`POST /api/v1/endpoints/{id}/release`, session only). Calls the same service `POST /api/v1/endpoints` calls — the same read-only rule, the same reserved-category refusal, the same ambiguity refusal, the same audit (049's rule: two entry points, one validated path).
 
 ```json
 {
   "name": "endpoints_create",
-  "description": "Publish a released pipeline as a GET endpoint at /api/<category>/<version>/<path>. The category is your namespace (a business domain, a team); categories matching v<number> and the literal 'api' are reserved to the product and refused with endpoint.path_reserved. The version is one free-form segment (v1 by convention); path variables come after it. The pipeline must have a RELEASED version and must be side-effect-free: every node DQL into tempdb or the caller, a DML/DDL node whose source is tempdb, transitively through PIPELINE nodes. A DML/DDL node against a registered datasource, or a DQL node writing back to a datasource, is refused with endpoint.pipeline_not_readonly naming the node and the datasource — that rule is what makes serving over GET safe, since GET is retried, preloaded and crawled. path is 3-10 segments, each a literal [a-z0-9][a-z0-9_.-]{0,63} or a {variable} naming a declared parameter; remaining parameters come from the query string. A leading /api prefix is stripped, not refused. A path that could match the same URL as an existing one is refused (endpoint.path_conflict) rather than resolved by precedence. Calling the endpoint needs an API key bound to it — create one with the api_caller role and bind it over REST or in the UI (auth.md §7.7); an endpoint bound to no key is served to no one, and an MCP key never reaches REST at all (it acts over /mcp only).",
+  "description": "Create a GET endpoint at /api/<category>/<version>/<path>: this creates the API's first DRAFT version pinned to the exact pipeline_version given. Creation is an authoring operation: a deployment with authoring disabled refuses it (endpoint.authoring_disabled); there is no release to perform there. In an authoring-enabled deployment the draft is the entity's current version and serves under the normal runtime checks — the entity is enabled, the caller's key is bound, and the pinned pipeline version is eligible. The pin never moves when the pipeline's current version moves. The category is your namespace (a business domain, a team); categories matching v<number> and the literal 'api' are reserved to the product and refused with endpoint.path_reserved. The version is one free-form segment (v1 by convention); path variables come after it. The pinned pipeline version must be eligible here (RELEASED; a DRAFT only where authoring is enabled — else endpoint.pipeline_version.not_eligible) and must be side-effect-free: every node DQL into tempdb or the caller, a DML/DDL node whose source is tempdb, transitively through PIPELINE nodes. A DML/DDL node against a registered datasource, or a DQL node writing back to a datasource, is refused with endpoint.pipeline_not_readonly naming the node and the datasource — that rule is what makes serving over GET safe, since GET is retried, preloaded and crawled. path is 3-10 segments, each a literal [a-z0-9][a-z0-9_.-]{0,63} or a {variable} naming a declared parameter; remaining parameters come from the query string. A leading /api prefix is stripped, not refused. A path that could match the same URL as an existing one is refused (endpoint.path_conflict) rather than resolved by precedence. Calling the endpoint needs an API key bound to it — create one with the api_caller role and bind it over REST or in the UI (auth.md §7.7); an endpoint bound to no key is served to no one, and an MCP key never reaches REST at all (it acts over /mcp only).",
   "inputSchema": {
     "type": "object",
     "required": [
       "path",
-      "pipeline"
+      "pipeline",
+      "pipeline_version"
     ],
     "additionalProperties": false,
     "properties": {
@@ -998,7 +999,12 @@ Publish a released pipeline as a `GET` endpoint at `/api/<category>/<version>/<p
       },
       "pipeline": {
         "type": "string",
-        "description": "The pipeline NAME. It must have a released version."
+        "description": "The pipeline NAME."
+      },
+      "pipeline_version": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "The EXACT pipeline version the API's first draft pins. It never moves when the pipeline's current version moves."
       },
       "timeout_seconds": {
         "type": "integer",
@@ -1060,12 +1066,12 @@ Returns the §6.2.23 shape, or `endpoint.not_found`.
 
 #### 6.2.26 `endpoints_delete`
 
-Unpublish an endpoint. The pipeline is untouched; key bindings on that node are not removed, since a node may still carry other endpoints beneath it.
+Unpublish an endpoint — the guarded entity deletion (#786). The pipeline is untouched; key bindings on that node are not removed, since a node may still carry other endpoints beneath it. An API is deleted only while every version it holds is a DRAFT: a RELEASED version (current or not) or a DISCARDED one refuses `endpoint.version.last_release` (409) with nothing removed — the API, its pointer, its versions and its bindings stay. A legacy row (#274) is never served and stays deletable.
 
 ```json
 {
   "name": "endpoints_delete",
-  "description": "Unpublish an endpoint by its path. The pipeline is untouched — only the URL stops answering. Key bindings on that path are NOT removed: they describe a node of the tree, which may still carry other endpoints beneath it. This is also the fix for a LEGACY row (#274) — a retired path listed with \"legacy\": true never serves under the current grammar, and deleting it removes the row.",
+  "description": "Unpublish an endpoint by its path. The pipeline is untouched — only the URL stops answering. Key bindings on that path are NOT removed: they describe a node of the tree, which may still carry other endpoints beneath it. This is also the fix for a LEGACY row (#274) — a retired path listed with \"legacy\": true never serves under the current grammar, and deleting it removes the row. An API that holds a RELEASED or DISCARDED version is never deleted: the call is refused endpoint.version.last_release and nothing is removed — discard is per version, the API stays.",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -1082,7 +1088,7 @@ Unpublish an endpoint. The pipeline is untouched; key bindings on that node are 
 }
 ```
 
-Returns `{path, deleted: true}`, or `endpoint.not_found`.
+Returns `{path, deleted: true}`, `endpoint.not_found`, or `endpoint.version.last_release` (`details`: this API's blocking `version` and `status`).
 
 **Permission:** `endpoint.unpublish`. **Mutating** — declared `mutating` in the tool catalog, so every call writes `mcp.tool.called` **and** `mcp.tool.write` at the dispatcher's single audit choke point (§6.3).
 
@@ -3118,6 +3124,7 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-10 | v1.78 | #786 U1 (API versions, exact pins) | **§6.2.23 `endpoints_create`: `pipeline_version` is a REQUIRED input** (owner ruling 2026-11-08: the pin is authored input on every surface, MCP included — a named exception to the additive-only rule). The tool creates the API's version 1 as a DRAFT pinned to that exact version; the pin must be eligible under the posture (`endpoint.pipeline_version.not_eligible`) and creation is refused on an authoring-disabled deployment (`endpoint.authoring_disabled`). No tool releases an API. The response shape, `endpoints_list` and `endpoints_get` are unchanged; **§6.2.26 `endpoints_delete` is the guarded entity deletion** (#786 R1): an API holding a RELEASED or DISCARDED version is refused `endpoint.version.last_release` and nothing is removed, a draft-only API or a legacy row is deleted as before — its description says so, its input is unchanged; `pipeline` in every response is the CURRENT version's pinned name. No tool added, removed or renamed; no permission change. |
 | 2026-10-25 | v1.77 | 706 (#706) | **§4.1/§6 preamble/§9.3: the live prose still taught the retired PK4 cap, the membership-freshness rule (C2) and `auth.key_issuer_role_lost` as the MCP refusal, contradicting §4.1's own keys-v2 bullets and §4.2 — rewritten to the key's chosen role and `auth.role_required`; recovery = a new key under the subset rule. §13's checklist includes workspace-admin keys and preserves MCP creator liveness (A20), and §9.3 names identity or creator deactivation; the §4.1 TTL sentence says the same (revocation and deactivation reach the key; a member role change does not). History rows v1.47/v1.50 unchanged. No tool, route, permission or code change.** |
 | 2026-10-22 | v1.76 | 8b (#8) | The type description and §6.2.43 describe JavaScript availability, statement bodies and console results. |
 | 2026-10-21 | v1.75 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The template-type and node prose say script**: the script contract / invariants / tests descriptions, the `scripts` docs area and `skill/scripts-contracts`, the `templates_*` refusal reason `type_not_script`, the key `datapipelines.script.evaluate-timeout-seconds`; the visualization write tools' block property stays `transform` (restored in this lane's third round; `ArtifactWriteSchemaReaderParityTest` pins schema = reader keys). A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |

@@ -73,8 +73,9 @@ class ConfigValidator(
          * 44 since #785 added `LakeRules.checkLakeStorage`, `checkLakeRetention`, `checkLakeAdmission` and
          * `checkLakeBounds` (§3.36 — the managed lake, judged only when it is enabled).
          * 45 since #818 added `LakeRules.checkLakeReads` (§3.36 — the managed reads' bounds, record §10 RULING 4).
+         * 46 since #786 added `PostureRules.checkHardenedAuthoring` (§3.23 — a hardened deployment does not author).
          */
-        internal const val CHECK_COUNT = 45
+        internal const val CHECK_COUNT = 46
 
         /**
          * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
@@ -137,6 +138,7 @@ class ConfigValidator(
             PostureRules.checkPostureProfileAlignment(snapshot, violations)
             PostureRules.checkHardenedPosture(snapshot, violations, warnings)
             PostureRules.checkHardenedRedisPassword(snapshot, violations)
+            PostureRules.checkHardenedAuthoring(snapshot, violations)
             checkRemovedWorkspaceKeys(snapshot, violations)
             ScriptRules.checkRemovedTransformKeys(snapshot, violations)
             checkBootstrapActorConfigured(snapshot, violations)
@@ -976,6 +978,7 @@ class ConfigValidator(
                 deploymentName = environment.getProperty(DeploymentEnv.LEGACY_ENV_KEY),
                 authAllowLocalOnly =
                     environment.getProperty("datapipelines.auth.allow-local-only", Boolean::class.java) ?: false,
+                authoringEnabled = PostureRules.authoringEnabledOf(environment), // §3.19 (#786 §E.4)
                 mail = MailRules.snapshot(environment),
             )
 
@@ -1213,6 +1216,8 @@ internal data class ConfigSnapshot(
     val deploymentName: String? = null,
     /** §3.4 (075) — the explicit acknowledgement that a hardened deployment has no OIDC. */
     val authAllowLocalOnly: Boolean = false,
+    /** §3.19 (#786 §E.4) — `datapipelines.deployment.authoring-enabled` as resolved; null = unset or unreadable. */
+    val authoringEnabled: Boolean? = null,
     /** §3.27 (137) — the mail block, its own value so the snapshot builder stays readable. */
     val mail: MailSnapshot = MailSnapshot(),
 ) {
@@ -1281,6 +1286,7 @@ internal data class ConfigSnapshot(
             "demo=$demo, " +
             "deploymentName=$deploymentName, " +
             "authAllowLocalOnly=$authAllowLocalOnly, " +
+            "authoringEnabled=$authoringEnabled, " +
             "mail=$mail)"
 }
 

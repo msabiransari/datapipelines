@@ -278,7 +278,11 @@ class G0WriterContentionE2eTest {
     }
 
     private fun publish(path: String): Response =
-        rest().contentType(ContentType.JSON).body("""{"path": "$path", "pipeline": "$PIPELINE"}""").post("/api/v1/endpoints")
+        rest()
+            .contentType(
+                ContentType.JSON,
+            ).body("""{"path": "$path", "pipeline": "$PIPELINE", "pipeline_version": 1}""")
+            .post("/api/v1/endpoints")
 
     private fun createSchedule(
         name: String,
@@ -344,7 +348,7 @@ class G0WriterContentionE2eTest {
     fun `endpoint publish over MCP - endpoint write busy, nothing published`() {
         assertMcpBusy(
             exhausts(holdWorkspace()) {
-                callTool("endpoints_create", mapOf("path" to "/g0/v1/mcp", "pipeline" to PIPELINE))
+                callTool("endpoints_create", mapOf("path" to "/g0/v1/mcp", "pipeline" to PIPELINE, "pipeline_version" to 1))
             },
             "endpoint.write.busy",
         )

@@ -12,7 +12,32 @@ import java.time.Instant
 class Deadline private constructor(
     private val clock: Clock,
     private val at: Instant?,
+    /** #786 R3: one statement's own ceiling (§25.4 `statement-timeout-seconds`); null = none beyond the deadline. */
+    val statementLimit: Duration? = null,
 ) {
+    /**
+     * This deadline with [limit] as the per-statement ceiling (#786 R3, additive): the same clock and the same expiry, so
+     * the cumulative budget is unchanged; only [statementBound] reads the limit.
+     */
+    fun withStatementLimit(limit: Duration): Deadline {
+        require(limit > Duration.ZERO) { "a statement limit is positive, got $limit" }
+        return Deadline(clock, at, limit)
+    }
+
+    /**
+     * The bound of a statement starting NOW (§25.4): `min(statementLimit, remaining())`, whichever of the two is set;
+     * null when neither is. [Duration.ZERO] once the deadline has passed — a provider never starts a statement on a zero
+     * bound (to PostgreSQL `0` means no timeout); it refuses with [DeadlineExceeded] instead.
+     */
+    fun statementBound(): Duration? {
+        val remaining = remaining()
+        return when {
+            statementLimit == null -> remaining
+            remaining == null -> statementLimit
+            else -> minOf(statementLimit, remaining)
+        }
+    }
+
     /** The time left, never negative; null when unbounded. */
     fun remaining(): Duration? = at?.let { Duration.between(clock.instant(), it).coerceAtLeast(Duration.ZERO) }
 
@@ -22,7 +47,8 @@ class Deadline private constructor(
     /** True for [none]. */
     val unbounded: Boolean get() = at == null
 
-    override fun toString(): String = if (at == null) "Deadline.none" else "Deadline(at=$at)"
+    override fun toString(): String =
+        (if (at == null) "Deadline.none" else "Deadline(at=$at)") + (statementLimit?.let { "[statement=$it]" } ?: "")
 
     companion object {
         private val NONE = Deadline(Clock.systemUTC(), null)

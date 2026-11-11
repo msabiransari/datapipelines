@@ -117,10 +117,14 @@ open class PipelineReleaseService(
     private val reviewMarks: TemplateReviewMarks = TemplateReviewMarks.NONE,
     /** Required dashboard pin evidence for purge; production supplies the workspace-scoped consumer. */
     private val dashboards: PipelineVersionConsumers,
+    /** #786 B.4 — the live API versions pinning a draft: a purge refuses them like a dashboard (record §14, A39). */
+    private val endpointVersions: EndpointVersionConsumers,
+    /** #786 B.4 — the live schedules running a draft (development posture's CURRENT draft) refuse its purge too. */
+    private val schedules: ScheduleConsumers,
     /** The release-dependencies bounds (#517, configuration §3.35) the native closure walk enforces. */
     private val bounds: ReleaseBounds = ReleaseBounds(),
 ) {
-    private val pinGuard = PipelinePurgePinGuard(pipelines, dashboards)
+    private val pinGuard = PipelinePurgePinGuard(pipelines, dashboards, endpointVersions, schedules)
 
     /** What a release produced: the bumped record, the released version, the released body. */
     data class Released(

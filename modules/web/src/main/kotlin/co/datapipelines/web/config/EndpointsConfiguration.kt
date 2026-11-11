@@ -1,25 +1,42 @@
 package co.datapipelines.web.config
 
+import co.datapipelines.application.dependencies.EndpointDependencySource
+import co.datapipelines.application.dependencies.EndpointVersionPipelineConsumers
+import co.datapipelines.application.dependencies.PostgresStatementCeiling
+import co.datapipelines.application.dependencies.ReleaseDependencyFamilies
+import co.datapipelines.application.dependencies.ReleasePlanningWalk
 import co.datapipelines.application.endpoints.EndpointAuthorizer
 import co.datapipelines.application.endpoints.EndpointInvalidationPublisher
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointKeyService
+import co.datapipelines.application.endpoints.EndpointPinValidator
 import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.application.endpoints.EndpointRegistry
+import co.datapipelines.application.endpoints.EndpointReleaseSteps
+import co.datapipelines.application.endpoints.EndpointRestorePins
 import co.datapipelines.application.endpoints.EndpointServeAudit
+import co.datapipelines.application.endpoints.EndpointVersionService
 import co.datapipelines.application.endpoints.PublishedEndpointRepository
+import co.datapipelines.application.endpoints.PublishedEndpointVersionRepository
 import co.datapipelines.application.endpoints.ReadOnlyPipelineRule
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.ApiKeyService
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.WorkspaceLiveness
+import co.datapipelines.dependencies.FamilyDescriptor
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ResultConfig
 import co.datapipelines.executor.ResultStore
 import co.datapipelines.executor.ResultUrlFactory
 import co.datapipelines.pipeline.AuthoringGuard
+import co.datapipelines.pipeline.EndpointVersionConsumers
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineResolver
 import co.datapipelines.pipeline.PipelineService
+import co.datapipelines.pipeline.release.ReleaseBounds
+import co.datapipelines.pipeline.release.ReleaseFamily
+import co.datapipelines.pipeline.release.ResolvedNode
+import co.datapipelines.typesystem.guard.MetadataWriterGuard
 import co.datapipelines.web.endpoints.PublishedEndpointServeService
 import co.datapipelines.web.endpoints.PublishedExecutionPagingService
 import co.datapipelines.web.executions.ExecutionMetadataProjection
@@ -28,6 +45,7 @@ import co.datapipelines.web.executions.ResultCursor
 import co.datapipelines.web.pipelines.RecordingExecutionRunner
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.dao.DataAccessException
@@ -38,6 +56,8 @@ import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.data.redis.listener.ChannelTopic
 import org.springframework.data.redis.listener.RedisMessageListenerContainer
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.support.TransactionTemplate
 
 /**
  * Every bean of the published-endpoint feature that `web` owns (074) — the registry, its
@@ -70,6 +90,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
  * same trade the pool publisher documents.
  */
 @Configuration
+@Suppress("TooManyFunctions") // one @Bean per collaborator of the API family; #786 added the version and lifecycle beans
 class EndpointsConfiguration {
     /**
      * The registry's persistence. Declared here rather than in `DomainConfiguration` for
@@ -113,10 +134,35 @@ class EndpointsConfiguration {
     @Bean
     fun endpointServeAudit(jdbc: NamedParameterJdbcTemplate): EndpointServeAudit = EndpointServeAudit(jdbc)
 
+    /** #786 — the API versions table (V58): one row per exact version, the entity's `current_version` its pointer. */
+    @Bean
+    fun publishedEndpointVersionRepository(jdbc: NamedParameterJdbcTemplate): PublishedEndpointVersionRepository =
+        PublishedEndpointVersionRepository(jdbc)
+
     /**
-     * Publishing and unpublishing (§4.2/§6) — the ONE validated path REST, MCP and promotion all
-     * go through, so a publish cannot skip the read-only rule by arriving over a different
-     * surface.
+     * #786 B.4 — the pipeline aggregate's answer to "which API versions pin this release?" (record §14, A39): a pipeline
+     * version discard or purge refuses while a DRAFT or RELEASED API version pins it.
+     */
+    @Bean
+    fun endpointVersionConsumers(versions: PublishedEndpointVersionRepository): EndpointVersionConsumers =
+        EndpointVersionPipelineConsumers(versions)
+
+    /**
+     * #786 — the native checks of an API version's exact pipeline pin, shared by creation, a draft save, the current
+     * switch, the release participant and the receiver import, so no surface stores a pin another would refuse.
+     */
+    @Bean
+    fun endpointPinValidator(
+        pipelineRepository: PipelineRepository,
+        // Deferred: pipelineService → release coordinator → API participant → this validator is a construction cycle.
+        pipelines: ObjectProvider<PipelineService>,
+        readOnlyRule: ReadOnlyPipelineRule,
+        authoring: AuthoringGuard,
+    ): EndpointPinValidator = EndpointPinValidator(pipelineRepository, lazy { pipelines.getObject() }, readOnlyRule, authoring)
+
+    /**
+     * Creation and entity deletion (§4.2/§6; #786: a create is the entity + its v1 DRAFT) — the ONE validated path REST
+     * and MCP go through, so a create cannot skip the pin's checks by arriving over a different surface.
      */
     @Bean
     // A DI factory's arity is the container's business: every parameter is a bean the service
@@ -124,36 +170,90 @@ class EndpointsConfiguration {
     @Suppress("LongParameterList")
     fun endpointPublishService(
         endpoints: PublishedEndpointRepository,
-        pipelines: PipelineService,
-        pipelineRepository: PipelineRepository,
-        readOnlyRule: ReadOnlyPipelineRule,
+        versions: PublishedEndpointVersionRepository,
+        pins: EndpointPinValidator,
         registry: EndpointRegistry,
         audit: AuditEventSink,
         properties: EndpointsProperties,
+        authoring: AuthoringGuard,
         // 178 — the promoter lens on the endpoint reads (visible iff the pipeline is).
-        lens: co.datapipelines.application.lens.PromoterLens,
-        // #841 (G0) — publish/unpublish under the writer guard, in the metadata transaction.
-        transactionManager: org.springframework.transaction.PlatformTransactionManager,
-        writeGuard: co.datapipelines.typesystem.guard.MetadataWriterGuard,
+        lens: PromoterLens,
+        // #841 (G0) — every write under the writer guard, in the metadata transaction.
+        transactionManager: PlatformTransactionManager,
+        writeGuard: MetadataWriterGuard,
     ): EndpointPublishService =
         EndpointPublishService(
-            transactions =
-                org.springframework.transaction.support
-                    .TransactionTemplate(transactionManager),
-            writeGuard = writeGuard,
             endpoints = endpoints,
-            pipelines = pipelines,
-            pipelineRepository = pipelineRepository,
-            readOnlyRule = readOnlyRule,
+            versions = versions,
+            pins = pins,
             registry = registry,
             audit = audit,
+            timeouts = timeoutBounds(properties),
+            authoring = authoring,
             lens = lens,
-            timeouts =
-                EndpointPublishService.TimeoutBounds(
-                    defaultSeconds = properties.timeoutDefaultSeconds,
-                    minSeconds = properties.timeoutMinSeconds,
-                    maxSeconds = properties.timeoutMaxSeconds,
-                ),
+            transactions = TransactionTemplate(transactionManager),
+            writeGuard = writeGuard,
+        )
+
+    /** #786 C.4 — an API restore's transitive recheck of its pin, through G1's planner walk. */
+    @Bean
+    fun endpointRestorePins(
+        pipelineRepository: PipelineRepository,
+        planning: ReleasePlanningWalk,
+        bounds: ReleaseBounds,
+    ): EndpointRestorePins = EndpointRestorePins(pipelineRepository, planning, bounds.maxBlockers)
+
+    /** #786 B.2 — the API version lifecycle: draft save, discards, restore, purge and the current switch. */
+    @Bean
+    @Suppress("LongParameterList") // see endpointPublishService
+    fun endpointVersionService(
+        endpoints: PublishedEndpointRepository,
+        versions: PublishedEndpointVersionRepository,
+        pins: EndpointPinValidator,
+        restorePins: EndpointRestorePins,
+        registry: EndpointRegistry,
+        audit: AuditEventSink,
+        properties: EndpointsProperties,
+        authoring: AuthoringGuard,
+        lens: PromoterLens,
+        transactionManager: PlatformTransactionManager,
+        writeGuard: MetadataWriterGuard,
+    ): EndpointVersionService =
+        EndpointVersionService(
+            endpoints = endpoints,
+            versions = versions,
+            pins = pins,
+            restorePins = restorePins,
+            registry = registry,
+            audit = audit,
+            timeouts = timeoutBounds(properties),
+            authoring = authoring,
+            lens = lens,
+            transactions = TransactionTemplate(transactionManager),
+            writeGuard = writeGuard,
+        )
+
+    /** #786 C.2 — the API family's two release steps, consumed by the coordinator's participant. */
+    @Bean
+    fun endpointReleaseSteps(
+        endpoints: PublishedEndpointRepository,
+        versions: PublishedEndpointVersionRepository,
+        pins: EndpointPinValidator,
+        authoring: AuthoringGuard,
+        registry: EndpointRegistry,
+    ): EndpointReleaseSteps = EndpointReleaseSteps(endpoints, versions, pins, authoring, registry)
+
+    /**
+     * #786 C.1 — the API family over its release source; `FamilyRegistry.production` admits `api_endpoint`. #786 R3: the
+     * source reads through a versions repository over the release statement ceiling's own template (`ReleaseConfiguration`),
+     * never the shared repository bean — only that template bounds each statement it issues.
+     */
+    @Bean
+    fun endpointDependencyFamily(ceiling: PostgresStatementCeiling): FamilyDescriptor<ResolvedNode> =
+        ReleaseDependencyFamilies.descriptor(
+            ReleaseFamily.ENDPOINT,
+            EndpointDependencySource(PublishedEndpointVersionRepository(ceiling.jdbc)),
+            ceiling,
         )
 
     /** §7.2/§7.7 — the one execution-visibility rule both execution reads share. */
@@ -207,6 +307,8 @@ class EndpointsConfiguration {
     @Suppress("LongParameterList") // one composition root for one request path
     fun publishedEndpointServeService(
         registry: EndpointRegistry,
+        versions: PublishedEndpointVersionRepository,
+        pipelineRepository: PipelineRepository,
         bindings: EndpointKeyBindingRepository,
         authorizer: EndpointAuthorizer,
         readOnlyRule: ReadOnlyPipelineRule,
@@ -225,6 +327,8 @@ class EndpointsConfiguration {
     ): PublishedEndpointServeService =
         PublishedEndpointServeService(
             registry = registry,
+            versions = versions,
+            pipelineRepository = pipelineRepository,
             bindings = bindings,
             authorizer = authorizer,
             readOnlyRule = readOnlyRule,
@@ -238,6 +342,13 @@ class EndpointsConfiguration {
             authoring = authoringGuard,
             scope = executionScope,
             workspaceLiveness = workspaceLiveness,
+        )
+
+    private fun timeoutBounds(properties: EndpointsProperties) =
+        EndpointPublishService.TimeoutBounds(
+            defaultSeconds = properties.timeoutDefaultSeconds,
+            minSeconds = properties.timeoutMinSeconds,
+            maxSeconds = properties.timeoutMaxSeconds,
         )
 
     @Bean

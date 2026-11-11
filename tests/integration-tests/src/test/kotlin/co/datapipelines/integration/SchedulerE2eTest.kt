@@ -52,9 +52,11 @@ import java.util.UUID
  *   JSON read (§10.3A), while the admin's own interactive run stays invisible to them.
  * - **A demoted creator keeps the schedule running** — the author who created it becomes a
  *   viewer and the dispatcher still fires it, because it never ran as them (R2).
- * - **A refused run has a trail and no execution, and blocks** — the pipeline's release is
- *   discarded, Run now records a `not_started` / `pointer_null` run, the schedule blocks, a second
- *   Run now is `409 schedule.blocked`, and unblock re-validates and refuses.
+ * - **A refused run has a trail and no execution, and blocks** — the discard of the release the
+ *   schedule runs is refused `pipeline.version.pinned` naming it (#786 B.4), so the NULL pointer is
+ *   planted as the legacy data it now only can be; Run now records a `not_started` /
+ *   `pointer_null` run, the schedule blocks, a second Run now is `409 schedule.blocked`, and
+ *   unblock re-validates and refuses.
  * - **Isolation** — another workspace's member cannot see the schedule (R9).
  * - **The system identity cannot authenticate** — it holds no key, and a validly signed session
  *   naming it is refused.
@@ -262,8 +264,15 @@ class SchedulerE2eTest {
         created.statusCode shouldBe 201
         val refusedSchedule = created.jsonPath().getString("data.id")
 
-        // The only release is discarded: the pointer is NULL (versioning §3.4).
-        session(ADMIN_SESSION).post("/api/v1/pipelines/$refusedPipelineId/versions/1/discard").then().statusCode(200)
+        withClue("#786 B.4: the release a live schedule runs is protected, so the discard is refused and names the schedule") {
+            val discard = session(ADMIN_SESSION).post("/api/v1/pipelines/$refusedPipelineId/versions/1/discard")
+            discard.statusCode shouldBe 409
+            discard.jsonPath().getString("error.code") shouldBe "pipeline.version.pinned"
+            discard.jsonPath().getList<String>("error.details.referencing_schedules.schedule") shouldContainExactly
+                listOf("test/sched_refused")
+        }
+        // A NULL pointer under a live schedule is now legacy data only (written before #786): plant it as such.
+        sql("UPDATE pipelines SET current_version = NULL WHERE id = '$refusedPipelineId'")
 
         val accepted = session(ADMIN_SESSION).post("/api/v1/schedules/$refusedSchedule/run")
         accepted.statusCode shouldBe 202

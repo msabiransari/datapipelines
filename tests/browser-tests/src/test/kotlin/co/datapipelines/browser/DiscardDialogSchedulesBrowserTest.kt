@@ -10,10 +10,14 @@ import java.nio.file.Paths
 
 /**
  * #273 — the pipelines DISCARD dialog's schedules evidence (ui-screens §4.3d): the dialog
- * lists the live schedules whose target names the pipeline — name, condition, next run —
- * because a discard SUCCEEDS and each of them then blocks at its next run. The read is the
- * Usage tab's by-target read (lensed for the caller); the verb and the refusal branch are
- * unchanged.
+ * lists the live schedules whose target names the pipeline — name, condition, next run. The
+ * read is the Usage tab's by-target read (lensed for the caller).
+ *
+ * #786 B.4 changed what the evidence means: a live schedule PROTECTS the version it runs (its
+ * schema-1 payload resolves to CURRENT), so discarding that version is refused and the dialog
+ * lists the schedules as blockers with no confirm; once a later release is current, the old
+ * version's discard succeeds and the same schedules are evidence that they follow the current
+ * version, which the discard leaves in place.
  *
  * The roles half of the guard: an author (the dialog's audience) sees the evidence and the
  * confirm; a promoter — `pipeline.version.manage` is not theirs — renders no Discard verb at
@@ -21,7 +25,7 @@ import java.nio.file.Paths
  */
 class DiscardDialogSchedulesBrowserTest : BrowserSuite() {
     @Test
-    fun `the discard dialog lists the two schedules that run the pipeline - name, state, next run`() {
+    fun `the discard dialog lists the two schedules that run the pipeline - blockers on current, evidence once it is not`() {
         startTrace()
         val wsName = "dd273-" + generatedPassword("w").take(8).lowercase()
         val email = uniqueEmail("dd273-" + generatedPassword("u").take(8))
@@ -30,7 +34,7 @@ class DiscardDialogSchedulesBrowserTest : BrowserSuite() {
         page.waitForURL("**/dashboard")
         createWorkspace(wsName)
         val pipelineName = "test/dd273_probe"
-        seedReleasedPipeline(pipelineName)
+        val (pipelineId, v1Hash) = seedReleasedPipeline(pipelineName)
         // Two schedules, two states: the enabled one with a stored next run, a paused one
         // with none (its row says so — a next run it will never reach would lie).
         seedSchedule(wsName, email, "dd273/nightly", pipelineName, enabled = true, dueInHours = 24)
@@ -43,6 +47,26 @@ class DiscardDialogSchedulesBrowserTest : BrowserSuite() {
         // each shot re-opens the same dialog from the same row verb.
         ensureTheme("light")
         page.waitForResponse("**/lifecycle/discard*") { discardV1(page) }
+        val blocked = page.locator("#pe-dialog [data-lifecycle-dialog='pipeline-discard']")
+        blocked.waitFor()
+        withClue("#786 B.4: v1 is CURRENT, both schedules run it (paused included), so they block and there is no confirm") {
+            blocked
+                .locator("[data-discard-pinner-schedule]")
+                .allInnerTexts()
+                .map { it.substringBefore(' ').trim() }
+                .sorted() shouldBe
+                listOf("dd273/backfill", "dd273/nightly")
+            blocked.innerText() shouldContain "cannot be discarded"
+            blocked.locator("button[data-verb='pipeline-discard-confirm']").count() shouldBe 0
+        }
+        shot("discard-schedules-blocked-1440-light")
+        closeDialog()
+
+        // A later release becomes current: the schedules follow v2, so v1 is no longer theirs.
+        val v2Hash = hashOf(send("PUT", "/api/v1/pipelines/$pipelineId", calculatorBody(pipelineName, "fq_v2"), ifMatch = v1Hash))
+        send("POST", "/api/v1/pipelines/$pipelineId/release", ifMatch = v2Hash).first shouldBe 200
+        openVersionsTab(page, pipelineName)
+        page.waitForResponse("**/lifecycle/discard*") { discardV1(page) }
         val dialog = page.locator("#pe-dialog [data-lifecycle-dialog='pipeline-discard']")
         dialog.waitFor()
 
@@ -54,17 +78,13 @@ class DiscardDialogSchedulesBrowserTest : BrowserSuite() {
         text shouldContain "dd273/backfill"
         text shouldContain "paused"
         // The consequence the evidence exists to surface, stated once, above the confirm.
-        text.lowercase() shouldContain "blocks (the pointer is gone) until repointed or deleted"
+        text.lowercase() shouldContain "they follow its current version, which this discard leaves in place"
+        dialog.locator("[data-discard-pinner-schedule]").count() shouldBe 0
         // The verb is unchanged: one confirm, the version in its words.
         dialog.locator("button[data-verb='pipeline-discard-confirm']").count() shouldBe 1
 
         shot("discard-schedules-1440-light")
-        page.keyboard().press("Escape")
-        page.locator("#pe-dialog [data-lifecycle-dialog]").waitFor(
-            com.microsoft.playwright.Locator
-                .WaitForOptions()
-                .setState(com.microsoft.playwright.options.WaitForSelectorState.DETACHED),
-        )
+        closeDialog()
         ensureTheme("dark")
         page.waitForSelector("#pe-pane-versions tr[data-version-row]")
         page.waitForResponse("**/lifecycle/discard*") { discardV1(page) }
@@ -122,23 +142,39 @@ class DiscardDialogSchedulesBrowserTest : BrowserSuite() {
 
     // ------------------------------------------------------------------ fixtures
 
-    /** A released calculator pipeline through the browser session's REST (the 102 shape). */
-    private fun seedReleasedPipeline(name: String) {
-        val (status, body) =
-            send(
-                "POST",
-                "/api/v1/pipelines",
-                """{"name":"$name","display_name":"${name.substringAfterLast('/')}",""" +
-                    """"description":"273 fixture","nodes":[{"id":"fq","type":"CALCULATOR",""" +
-                    """"kind":"fiscal_quarter","context_key":"run_fiscal_quarter",""" +
-                    """"inputs":{"date":"${'$'}current_date","fiscal_start":"${'$'}org_fiscal_start_date"}}]}""",
-            )
+    /** A released calculator pipeline through the browser session's REST (the 102 shape): its id and v1 body hash. */
+    private fun seedReleasedPipeline(name: String): Pair<String, String> {
+        val (status, body) = send("POST", "/api/v1/pipelines", calculatorBody(name, "fq"))
         status shouldBe 201
         val id = Regex(""""id"\s*:\s*"([0-9a-f-]+)"""").find(body!!)!!.groupValues[1]
         val (gs, gbody) = send("GET", "/api/v1/pipelines/$id")
         gs shouldBe 200
-        val hash = Regex(""""body_hash"\s*:\s*"([0-9a-f]+)"""").find(gbody!!)!!.groupValues[1]
+        val hash = hashOf(gs to gbody)
         send("POST", "/api/v1/pipelines/$id/release", ifMatch = hash).first shouldBe 200
+        return id to hash
+    }
+
+    private fun calculatorBody(
+        name: String,
+        nodeId: String,
+    ): String =
+        """{"name":"$name","display_name":"${name.substringAfterLast('/')}",""" +
+            """"description":"273 fixture","nodes":[{"id":"$nodeId","type":"CALCULATOR",""" +
+            """"kind":"fiscal_quarter","context_key":"run_fiscal_quarter",""" +
+            """"inputs":{"date":"${'$'}current_date","fiscal_start":"${'$'}org_fiscal_start_date"}}]}"""
+
+    private fun hashOf(response: Pair<Int, String?>): String {
+        response.first shouldBe 200
+        return Regex(""""body_hash"\s*:\s*"([0-9a-f]+)"""").find(response.second!!)!!.groupValues[1]
+    }
+
+    private fun closeDialog() {
+        page.keyboard().press("Escape")
+        page.locator("#pe-dialog [data-lifecycle-dialog]").waitFor(
+            com.microsoft.playwright.Locator
+                .WaitForOptions()
+                .setState(com.microsoft.playwright.options.WaitForSelectorState.DETACHED),
+        )
     }
 
     /** The in-page REST seeding of LifecycleDialogBrowserTest (session cookie + CSRF header). */

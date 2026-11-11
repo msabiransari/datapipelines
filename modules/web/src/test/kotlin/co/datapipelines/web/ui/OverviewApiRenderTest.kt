@@ -329,13 +329,13 @@ class OverviewApiRenderTest {
             legacyCount = 1,
             served =
                 mapOf(
-                    released.pipelineId to ServedVersion(3, draft = false),
-                    drafted.pipelineId to ServedVersion(2, draft = true),
+                    released.id to ServedVersion(3, draft = false),
+                    drafted.id to ServedVersion(2, draft = true),
                 ),
             names =
                 mapOf(
-                    released.pipelineId to PipelineName("nyc/mobility", "Mobility"),
-                    drafted.pipelineId to PipelineName("nyc/revenue", "Revenue"),
+                    released.id to PipelineName("nyc/mobility", "Mobility"),
+                    drafted.id to PipelineName("nyc/revenue", "Revenue"),
                 ),
         )
     }
@@ -348,9 +348,6 @@ class OverviewApiRenderTest {
             id = UUID.randomUUID(),
             workspaceId = UUID.randomUUID(),
             pathPattern = path,
-            pipelineId = UUID.randomUUID(),
-            timeoutSeconds = 30,
-            description = "",
             isEnabled = true,
             createdBy = UUID.randomUUID(),
             createdAt = createdAt,

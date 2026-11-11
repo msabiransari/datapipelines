@@ -40,6 +40,8 @@ class PublishedEndpointSessionRefusalTest {
     private val service =
         PublishedEndpointServeService(
             registry = registry,
+            versions = mockk(),
+            pipelineRepository = mockk(),
             bindings = mockk<EndpointKeyBindingRepository>(),
             authorizer = EndpointAuthorizer(),
             readOnlyRule = mockk<ReadOnlyPipelineRule>(),

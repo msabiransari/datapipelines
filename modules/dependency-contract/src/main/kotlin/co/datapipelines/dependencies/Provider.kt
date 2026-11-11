@@ -1,5 +1,6 @@
 package co.datapipelines.dependencies
 
+import java.time.Duration
 import java.util.UUID
 
 /**
@@ -69,6 +70,9 @@ data class Reference(
  * with, chosen by whoever opened the [snapshot]'s transaction (never defaulted: an unfenced read over a transaction is
  * the #868 R1 defect). Deliberately no client flag (never `ignorePermissions`): the core receives authorized outcomes,
  * not a backdoor repository.
+ *
+ * #786 R3 (§25.4): a provider that issues statements bounds each one by [statementBound], read when the statement starts.
+ * The per-statement limit travels on the [deadline] (`Deadline.withStatementLimit`), so the context's fields are unchanged.
  */
 data class ResolveContext(
     val workspaceId: UUID,
@@ -77,7 +81,10 @@ data class ResolveContext(
     val authority: Authority,
     val deadline: Deadline,
     val readIsolation: ReadIsolation,
-)
+) {
+    /** The bound of a statement starting now: the [deadline]'s `statementBound()` (§25.4), null when unbounded. */
+    fun statementBound(): Duration? = deadline.statementBound()
+}
 
 /**
  * How the walk fences a read whose failure it may forgive (#868 R1): a SPECULATIVE read — requests the walk does not

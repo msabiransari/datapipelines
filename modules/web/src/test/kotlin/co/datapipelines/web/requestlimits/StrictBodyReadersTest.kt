@@ -11,7 +11,6 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.PipelineErrorCodes
-import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.web.api.ApiExceptionHandler
 import co.datapipelines.web.authapi.AuthController
 import co.datapipelines.web.dashboards.DashboardKeyBindingsController
@@ -63,7 +62,6 @@ class StrictBodyReadersTest {
     private val endpointKeyService = mockk<EndpointKeyService>()
     private val publishing = mockk<EndpointPublishService>()
     private val bindings = mockk<EndpointKeyBindingRepository>()
-    private val pipelines = mockk<PipelineRepository>()
     private val inventoryService = mockk<PromotionInventoryService>()
     private val receiveService = mockk<PromotionReceiveService>()
     private val dashboardKeys = mockk<DashboardKeyService>()
@@ -72,7 +70,7 @@ class StrictBodyReadersTest {
         MockMvcBuilders
             .standaloneSetup(
                 AuthController(apiKeyService, apiKeyRepository, userService, endpointKeyService),
-                EndpointsController(publishing, endpointKeyService, bindings, apiKeyRepository, pipelines),
+                EndpointsController(publishing, endpointKeyService, bindings, apiKeyRepository),
                 PromotionController(inventoryService, receiveService),
                 DashboardKeyBindingsController(dashboardKeys, apiKeyRepository),
             ).setControllerAdvice(ApiExceptionHandler())
@@ -227,7 +225,6 @@ class StrictBodyReadersTest {
             endpointKeyService,
             publishing,
             bindings,
-            pipelines,
             receiveService,
             dashboardKeys,
         )

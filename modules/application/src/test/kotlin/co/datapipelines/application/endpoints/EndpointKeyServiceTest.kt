@@ -10,6 +10,7 @@ import co.datapipelines.auth.IssuedApiKey
 import co.datapipelines.auth.KeyRole
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
@@ -275,13 +276,11 @@ class EndpointKeyServiceTest {
             id = UUID.randomUUID(),
             workspaceId = WORKSPACE,
             pathPattern = pattern,
-            pipelineId = UUID.randomUUID(),
-            timeoutSeconds = 60,
-            description = "",
             isEnabled = true,
             createdBy = ACTOR,
             createdAt = Instant.EPOCH,
             updatedAt = Instant.EPOCH,
+            current = CurrentVersion(1, PipelineVersionStatus.RELEASED, EndpointVersionBody("test/pipeline", 1, 60, "")),
         )
 
     private fun stubIssue() {

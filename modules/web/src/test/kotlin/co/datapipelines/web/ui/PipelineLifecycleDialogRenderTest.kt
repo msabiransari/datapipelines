@@ -24,6 +24,7 @@ import java.util.UUID
  * renders exactly one, and the two irreversible dialogs carry the typed confirm (§5.1:
  * the field, the expectation, and a button that starts DISABLED).
  */
+@Suppress("LargeClass") // one dialog family: every verb's render, its blockers (#786 B.4 adds APIs and schedules)
 class PipelineLifecycleDialogRenderTest {
     @Test
     fun `release - a clean draft offers the button and states the lock`() {
@@ -296,6 +297,69 @@ class PipelineLifecycleDialogRenderTest {
         html shouldNotContain "<button type=\"submit\""
     }
 
+    /** #786 B.4 — a live API version or schedule that runs the version is a blocker: listed by name, and NO button. */
+    @Test
+    fun `discard - a pinning API version and schedule are listed as blockers and render NO button`() {
+        val html =
+            render("partials/pipeline-lifecycle-discard") {
+                setVariable(
+                    "dlg",
+                    discardDialog().copy(
+                        pinnerApiVersions =
+                            listOf(
+                                co.datapipelines.pipeline.EndpointVersionPin(
+                                    "/nyc/v1/<rides>",
+                                    3,
+                                    co.datapipelines.pipeline.PipelineVersionStatus.DRAFT,
+                                    2,
+                                ),
+                            ),
+                        pinnerSchedules = listOf(co.datapipelines.pipeline.SchedulePin("reports/<nightly>", 2)),
+                    ),
+                )
+                setVariable("from", "editor")
+            }
+
+        html shouldContain "cannot be discarded"
+        html shouldContain "data-discard-pinner-api-version"
+        html shouldContain "/nyc/v1/&lt;rides&gt;"
+        html shouldContain "v3 · API version · DRAFT"
+        html shouldContain "data-discard-pinner-schedule"
+        html shouldContain "reports/&lt;nightly&gt;"
+        html shouldNotContain "<rides>"
+        html shouldNotContain "<button type=\"submit\""
+    }
+
+    /** #786 B.4 — the purge twin: a pinning API version or schedule leaves no destructive form. */
+    @Test
+    fun `purge - a pinning API version and schedule are listed as blockers and render NO form`() {
+        val html =
+            render("partials/pipeline-lifecycle-purge") {
+                setVariable(
+                    "dlg",
+                    purgeDialog(runCount = 2).copy(
+                        pinnerApiVersions =
+                            listOf(
+                                co.datapipelines.pipeline.EndpointVersionPin(
+                                    "/nyc/v1/rides",
+                                    1,
+                                    co.datapipelines.pipeline.PipelineVersionStatus.RELEASED,
+                                    4,
+                                ),
+                            ),
+                        pinnerSchedules = listOf(co.datapipelines.pipeline.SchedulePin("reports/nightly", 4)),
+                    ),
+                )
+                setVariable("from", "editor")
+            }
+
+        html shouldContain "cannot be purged"
+        html shouldContain "data-purge-pinner-api-version"
+        html shouldContain "v1 · API version · RELEASED"
+        html shouldContain "data-purge-pinner-schedule"
+        html shouldNotContain "<form"
+    }
+
     @Test
     fun `discard - a non-current version says the pointer does not move`() {
         val html = renderDiscard(isCurrent = false, fallback = null)
@@ -307,8 +371,9 @@ class PipelineLifecycleDialogRenderTest {
     /**
      * #273 — the schedules that run the pipeline render as evidence above the confirm: one
      * row per schedule, the name through `th:text`, the Usage tab's condition badge and the
-     * stored next occurrence; the note names the consequence (the discard succeeds, the
-     * schedule then blocks at its next run).
+     * stored next occurrence. #786 B.4 changed the note: a schedule that runs THIS version is a blocker now, so the
+     * evidence a confirmable dialog lists is the schedules following a current version the discard leaves in place —
+     * the reachable shape is a NON-current target.
      */
     @Test
     fun `discard - the schedules that run the pipeline render above the confirm with name, state and next run`() {
@@ -317,6 +382,8 @@ class PipelineLifecycleDialogRenderTest {
                 setVariable(
                     "dlg",
                     discardDialog().copy(
+                        isCurrent = false,
+                        fallback = null,
                         schedules =
                             listOf(
                                 PipelineLifecycleDialogModel.ScheduleEvidence(
@@ -339,7 +406,8 @@ class PipelineLifecycleDialogRenderTest {
 
         html shouldContain "data-discard-schedules"
         html shouldContain "Schedules that run this pipeline"
-        html shouldContain "blocks (the pointer is gone) until repointed or deleted"
+        html shouldContain "they follow its current version"
+        html shouldNotContain "blocks (the pointer is gone)"
         html shouldContain ">reports/nightly</span>"
         html shouldContain ">enabled</span>"
         html shouldContain ">2026-10-01 03:00 UTC</span>"
@@ -538,6 +606,18 @@ class PipelineLifecycleDialogRenderTest {
         html shouldNotContain "<b>parent</b>"
     }
 
+    /** #786 B.4 — the entity scope: a schedule that targets the pipeline blocks its purge even with no CURRENT to run. */
+    @Test
+    fun `purge entity - a schedule targeting the pipeline is a blocker and offers NO form`() {
+        val html =
+            renderPurgeEntity(refusal = null, pinnerSchedules = listOf(co.datapipelines.pipeline.SchedulePin("reports/waiting", null)))
+
+        html shouldContain "cannot be purged"
+        html shouldContain "data-purge-pinner-schedule"
+        html shouldContain "reports/waiting"
+        html shouldNotContain "<form"
+    }
+
     /** #471 — the unpinned dialog is exactly today's: empty lists render the form, never the pinned block. */
     @Test
     fun `purge entity - an unpinned dialog renders the form and no pinned block (#471)`() {
@@ -665,6 +745,7 @@ class PipelineLifecycleDialogRenderTest {
         kept: List<PipelineLifecycleDialogModel.KeptTemplate> = emptyList(),
         pinnerPipelines: List<PipelineLifecycleDialogModel.PinnerView> = emptyList(),
         pinnerDashboards: List<co.datapipelines.pipeline.DashboardPin> = emptyList(),
+        pinnerSchedules: List<co.datapipelines.pipeline.SchedulePin> = emptyList(),
     ): String =
         render("partials/pipeline-lifecycle-purge-entity") {
             setVariable(
@@ -680,6 +761,7 @@ class PipelineLifecycleDialogRenderTest {
                     refusal = refusal,
                     pinnerPipelines = pinnerPipelines,
                     pinnerDashboards = pinnerDashboards,
+                    pinnerSchedules = pinnerSchedules,
                 ),
             )
             setVariable("from", "editor")

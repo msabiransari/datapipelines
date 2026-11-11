@@ -198,8 +198,9 @@ class OverviewApiControllerTest {
 
     private fun answer(lensed: Boolean = false) {
         val released = endpoint("/nyc/v1/oldest", AT.minusSeconds(7200))
-        // A second path on the same released pipeline: the release bar is twice the others.
-        val again = endpoint("/nyc/v1/again", AT.minusSeconds(9000), released.pipelineId)
+        // A second path on the same released pipeline: the release bar is twice the others. #786: the pins are per API, so
+        // the second path carries its own entry naming the same pipeline and version.
+        val again = endpoint("/nyc/v1/again", AT.minusSeconds(9000))
         val orphan = endpoint("/nyc/v1/middle", AT.minusSeconds(3600))
         val drafted = endpoint("/nyc/v1/newest", AT)
         every { reads.lensed(any()) } returns lensed
@@ -209,14 +210,16 @@ class OverviewApiControllerTest {
                 legacyCount = 1,
                 served =
                     mapOf(
-                        released.pipelineId to ServedVersion(3, draft = false),
-                        drafted.pipelineId to ServedVersion(2, draft = true),
+                        released.id to ServedVersion(3, draft = false),
+                        again.id to ServedVersion(3, draft = false),
+                        drafted.id to ServedVersion(2, draft = true),
                     ),
                 names =
                     mapOf(
-                        released.pipelineId to PipelineName("nyc/mobility", "Mobility"),
-                        orphan.pipelineId to PipelineName("nyc/orphan", null),
-                        drafted.pipelineId to PipelineName("nyc/revenue", "Revenue"),
+                        released.id to PipelineName("nyc/mobility", "Mobility"),
+                        again.id to PipelineName("nyc/mobility", "Mobility"),
+                        orphan.id to PipelineName("nyc/orphan", null),
+                        drafted.id to PipelineName("nyc/revenue", "Revenue"),
                     ),
             )
         every { reads.keys(any()) } returns KEYS
@@ -231,15 +234,11 @@ class OverviewApiControllerTest {
     private fun endpoint(
         path: String,
         createdAt: Instant,
-        pipelineId: UUID = UUID.randomUUID(),
     ): PublishedEndpoint =
         PublishedEndpoint.of(
             id = UUID.randomUUID(),
             workspaceId = workspaceId,
             pathPattern = path,
-            pipelineId = pipelineId,
-            timeoutSeconds = 30,
-            description = "",
             isEnabled = true,
             createdBy = UUID.randomUUID(),
             createdAt = createdAt,
