@@ -16,6 +16,7 @@ import co.datapipelines.dependencies.SelectorKind
 import co.datapipelines.dependencies.VersionKind
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
+import io.kotest.assertions.assertSoftly
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldNotBeEmpty
@@ -223,16 +224,18 @@ class WireContractTest {
         val data = WireFiles.validator()
         val golden = WireFiles.data.getValue("resolution-missing")
         val resolutions = golden.items("nodes").map { it.path("resolution").asText() }
-        mapOf(
-            Resolution.MISSING to "7d2c0000-0000-4000-8000-000000000001",
-            Resolution.RESOLVED to null,
-        ).forEach { (resolution, value) ->
-            val index = resolutions.indexOf(resolution.wire)
-            val changed = golden.deepCopy<JsonNode>()
-            (changed.path("nodes").get(index) as ObjectNode).put("entity_id", value)
-            withClue("a ${resolution.wire} node given entity_id $value") {
-                val locations = data.validate(changed).map { it.instanceLocation.toString() }
-                withClue(locations) { ("/nodes/$index/entity_id" in locations) shouldBe true }
+        assertSoftly {
+            mapOf(
+                Resolution.MISSING to "7d2c0000-0000-4000-8000-000000000001",
+                Resolution.RESOLVED to null,
+            ).forEach { (resolution, value) ->
+                val index = resolutions.indexOf(resolution.wire)
+                val changed = golden.deepCopy<JsonNode>()
+                (changed.path("nodes").get(index) as ObjectNode).put("entity_id", value)
+                withClue("a ${resolution.wire} node given entity_id $value") {
+                    val locations = data.validate(changed).map { it.instanceLocation.toString() }
+                    withClue(locations) { ("/nodes/$index/entity_id" in locations) shouldBe true }
+                }
             }
         }
     }
