@@ -486,11 +486,11 @@ class DatasourceRegistryIntegrationTest {
     @Test
     fun `the registry's writers advance the generation exactly when the definition changes`() {
         val registry = registry(references = { name -> if (name == "used") listOf(reference("pipeline_a")) else emptyList() })
-        registry.save(Fixtures.h2(name = "gen", secret = "pw"), owner)
-        registry.save(Fixtures.h2(name = "used", secret = "pw"), owner)
+        registry.save(Fixtures.h2(name = "gen"), owner)
+        registry.save(Fixtures.h2(name = "used"), owner)
         generationOf("gen") shouldBe 1L
 
-        registry.save(Fixtures.h2(name = "gen", secret = null).copy(displayName = "Gen v2"), owner)
+        registry.save(Fixtures.h2("gen", "jdbc:h2:mem:gen", KEEP_STORED_CREDENTIAL).copy(displayName = "Gen v2"), owner)
         generationOf("gen") shouldBe 2L
 
         registry.testConnection("gen").shouldNotBeNull().connected shouldBe true
@@ -503,8 +503,7 @@ class DatasourceRegistryIntegrationTest {
         generationOf("gen") shouldBe 3L
     }
 
-    private fun generationOf(name: String): Long =
-        checkNotNull(DatasourceRepository(jdbc).findIncarnation(name)) { name }.generation
+    private fun generationOf(name: String): Long = checkNotNull(DatasourceRepository(jdbc).findIncarnation(name)) { name }.generation
 
     @Test
     fun `save on an existing name updates in place and keeps the password when omitted`() {
@@ -924,3 +923,6 @@ class DatasourceRegistryIntegrationTest {
             ),
         )
 }
+
+/** A save with no credential keeps the stored one (the update shape of [Fixtures.h2]). */
+private val KEEP_STORED_CREDENTIAL: String? = null

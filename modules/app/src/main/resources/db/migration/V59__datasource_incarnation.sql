@@ -8,7 +8,7 @@
 --    LOCAL fact beside that key: a soft delete keeps it (and so would a restore), while a row recreated under the same
 --    name (an operator's SQL delete-and-insert, a restore from backup) gets a new one from the DEFAULT. It is never
 --    compared across deployments.
--- 2. generation — a protected local counter of the row's identity-bearing facts (§5.3: never a password-derived
+-- 2. generation — a protected local counter of the row's identity-bearing facts (§5.3: never a credential-derived
 --    digest): the writers advance it by one inside their guarded section for a definition update, a credential
 --    change, a soft delete and a grant or revoke that changed a row; a connection test (an observation) does not.
 --

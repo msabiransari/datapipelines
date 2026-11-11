@@ -1,6 +1,8 @@
 package co.datapipelines.web.schedules
 
 import co.datapipelines.application.LakeAppendAuthorization
+import co.datapipelines.application.dependencies.schedule.ExecutorTarget
+import co.datapipelines.application.dependencies.schedule.ExecutorTargetExtractor
 import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.application.pipelines.PipelineInputResolver
 import co.datapipelines.auth.AuthenticatedPrincipal
@@ -92,6 +94,11 @@ import kotlin.coroutines.cancellation.CancellationException
  * A `reference*` key inside the payload or a binding is refused here: the run's time is the
  * scheduler's frozen context, never a client field (§5.1).
  *
+ * ## The dependency graph (#874 G3)
+ * It is also the [ExecutorTargetExtractor] of its payloads: the schedule family's `EXECUTOR_TARGET` edge is read with
+ * this grammar ([PipelineGraphTarget]) — schema 2 at the exact pin, schema 1 at the current pointer, anything else an
+ * unreadable target that resolves MISSING.
+ *
  * ## Authority (R2)
  * Every admission and launch acts as the system identity ([SystemActorPrincipals]) in the
  * schedule's workspace and ASKS for what it does — `pipeline.read` to read the version,
@@ -121,9 +128,19 @@ class PipelineJobExecutor(
     private val mapper: ObjectMapper,
     /** How long [start] waits for the RUNNING row before it reports "cannot know" (the run becomes `unknown`). */
     private val startWait: Duration = DEFAULT_START_WAIT,
-) : JobExecutor {
+) : JobExecutor,
+    ExecutorTargetExtractor {
     override val id: String = EXECUTOR_ID
     override val payloadSchemaVersion: Int = PAYLOAD_SCHEMA_VERSION
+
+    /** #874 G3 — the executor-target extractor port: this executor reads its own payloads for the dependency graph. */
+    override val executorId: String get() = EXECUTOR_ID
+
+    /** What a stored payload targets, by this executor's own grammar ([PipelineGraphTarget]); total, no I/O. */
+    override fun targetOf(
+        payloadSchemaVersion: Int,
+        payload: JsonNode,
+    ): ExecutorTarget = PipelineGraphTarget.of(payloadSchemaVersion, payload)
 
     /** Stateless: one shared resolver for save-time structure and run-time resolution (§5.2). */
     private val resolver = PipelineInputResolver()

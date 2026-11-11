@@ -373,7 +373,7 @@ class DatasourceRepository(
      * flag and the workspace binding are the operator's, and a resync does not get to have an
      * opinion about them. `updated_at` DOES move here — unlike [recordTestOutcome], this is a
      * real change to the datasource, so the V59 `generation` advances by one too (record §15.1: a credential change is
-     * a protected local generation, never a password-derived digest).
+     * a protected local generation, never a credential-derived digest).
      */
     fun updateCredential(
         name: String,
@@ -473,6 +473,7 @@ class DatasourceRepository(
             )
         }
 
+    @Suppress("SpreadOperator") // SqlArrayValue takes a vararg; the copy is one bounded batch (ScheduleRepository precedent)
     private fun textArray(values: Collection<String>): SqlArrayValue = SqlArrayValue("text", *values.toTypedArray())
 
     /** The ONE construction site of [DatasourceGraphFacts]: its identity facts come from the stored row only. */
@@ -623,12 +624,12 @@ class DatasourceRepository(
          * Every read joins `workspaces` for the additive `workspace` name — LEFT, because an
          * INSTANCE datasource (no owning workspace, D-R7) has NULL there.
          */
+        const val SELECT_COLUMNS =
+            "SELECT $COLUMNS FROM datasources d LEFT JOIN workspaces w ON w.id = d.owner_workspace_id"
+
         /** #874 — the graph facts' six columns: nothing of the connection, the owner or the grants. */
         const val GRAPH_FACTS_SELECT =
             "SELECT d.name, d.display_name, d.dialect, d.is_readonly, d.incarnation_id, d.generation FROM datasources d"
-
-        const val SELECT_COLUMNS =
-            "SELECT $COLUMNS FROM datasources d LEFT JOIN workspaces w ON w.id = d.owner_workspace_id"
 
         /**
          * The visibility predicate (D-R7): a datasource is visible to a workspace exactly when
