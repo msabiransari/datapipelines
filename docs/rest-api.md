@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.115 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37) and 2026-11-11 (v2.112) rows for the deliberate breaks)
+**Status:** v2.116 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37) and 2026-11-11 (v2.112, v2.116) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-11-11
@@ -392,7 +392,9 @@ in that same transaction, strictly (an audit store that refuses the row refuses 
 a dependency's own preconditions, a stale `If-Match`, a concurrent write, the audit row — rolls the whole
 release back. The audit rows of one release share `release_id`, carry `scope: "version"`, the cascaded rows
 `cascade_root: {family, id, version}`, and the pipeline's row `dependencies_released`; the 142 keys stay —
-each cascaded template row keeps `cascade_from_pipeline_id` / `cascade_from_version`, and the pipeline's row
+each cascaded template row keeps `cascade_from_pipeline_id` / `cascade_from_version` (under an API root — §19's
+`POST /api/v1/endpoints/{id}/release` — since #894 `cascade_from_api_endpoint_id` / the API's `cascade_from_version`
+instead; earlier rows are not rewritten, `cascade_root.family` tells them apart), and the pipeline's row
 `templates_released: [{template_id, version}]` (empty when nothing cascaded). The same role holds both release
 verbs (auth §7.6), so neither the flag nor a plan grants a new capability.
 UI-driven in practice — agents never release (versioning D4); no MCP tool exists. Over REST
@@ -2951,6 +2953,7 @@ browser persistence. Clients must reject foreign/stale responses even after abor
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-11 | v2.116 | #894 endpoint-root audit provenance — a deliberate break | **§5.10** (the audit paragraph): a template row an API release cascades carries `cascade_from_api_endpoint_id` and the API's `cascade_from_version`, and no longer `cascade_from_pipeline_id` holding the API's id (owner ruling 2026-11-11, an explicit exception to the frozen release-dependencies record §11). A pipeline release's rows are unchanged; rows written before #894 are not rewritten. No route, field, permission or role changed. |
 | 2026-11-11 | v2.115 | #896 review F2 | **§9.1:** distinguish `global: true` (super-admin-only) from `global: false` (accepted on create below super admin); the update rule in §9.4 still requires super admin for either value. No wire or authorization change. |
 | 2026-11-11 | v2.114 | #896 review F1 | **§9.3:** a by-name read is not-found when the datasource is not granted to the active workspace, whoever owns it. Ownership by another workspace alone does not make a granted datasource invisible. |
 | 2026-11-11 | v2.113 | #896 docs: datasource ownership and grants as they are since V23 | **Text only, no wire change.** §9.1's binding paragraph says what `global`/`workspace` set since V23 — the OWNER (`global: true` = an instance datasource, owned by no workspace) — and that visibility is the grant (a workspace-owned registration is granted to its owner; an instance datasource to nobody until a super admin grants it); its refusal sentence names super admin and `global: true` with `workspace`. §9.2's listing is the datasources GRANTED to the active workspace, not "bound plus all global ones"; §9.3's `workspace` field is the owning workspace's name; §9.4/§9.5's D8 gates say an INSTANCE datasource's mutation (a `readonly` flip and a delete included) needs super admin. |

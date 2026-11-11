@@ -9,6 +9,7 @@ import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
 import io.mockk.verify
@@ -80,6 +81,44 @@ class ReleaseCoordinatorTest {
         // The #142 keys stay on the template row and on the root's.
         fx.audited.first().details["cascade_from_pipeline_id"] shouldBe fx.recordOf("test/a").id.toString()
         rootRow.details["templates_released"] shouldBe listOf(mapOf("template_id" to "test/t1.sql", "version" to 1))
+    }
+
+    /**
+     * #894: an API root's template rows moved to the family key; a PIPELINE root's did not. The whole detail map of the
+     * cascaded template row, by expected literal — every key and value, `release_id` excluded as generated (its value is
+     * pinned by the test above) — so any key added, dropped or renamed on a pipeline-root row is red here.
+     */
+    @Test
+    fun `a pipeline-root cascaded template row keeps its whole detail map - the 142 keys, unchanged by 894`() {
+        val preview = fx.preview(a)
+
+        fx.coordinator().release(fx.request(a, ReleasePlanRequest(preview.treeHash, preview.ids(t1, c))))
+
+        val rootId = fx.recordOf("test/a").id.toString()
+        val templateRow = fx.audited.single { it.event == "template.version.released" }
+        templateRow.details.keys shouldContainExactlyInAnyOrder
+            setOf(
+                "template_id",
+                "version",
+                "via",
+                "cascade_from_pipeline_id",
+                "cascade_from_version",
+                "scope",
+                "release_id",
+                "cascade_root",
+                "workspace_id",
+            )
+        templateRow.details - "release_id" shouldBe
+            mapOf(
+                "template_id" to "test/t1.sql",
+                "version" to 1,
+                "via" to "session",
+                "cascade_from_pipeline_id" to rootId,
+                "cascade_from_version" to 1,
+                "scope" to "version",
+                "cascade_root" to mapOf("family" to "pipeline", "id" to rootId, "version" to 1),
+                "workspace_id" to fx.workspaceId.toString(),
+            )
     }
 
     @Test
