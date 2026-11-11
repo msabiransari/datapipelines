@@ -17,16 +17,16 @@ import co.datapipelines.dependencies.Purpose
 import co.datapipelines.dependencies.ReadIsolation
 import co.datapipelines.dependencies.ResolveContext
 import co.datapipelines.dependencies.conformance.ProviderConformance
+import co.datapipelines.parameters.ParameterSetRepository
+import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineVersionStatus.DISCARDED
 import co.datapipelines.pipeline.PipelineVersionStatus.DRAFT
-import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineVersionStatus.RELEASED
 import co.datapipelines.pipeline.release.PipelineDependencySource
 import co.datapipelines.pipeline.release.ReleaseBounds
 import co.datapipelines.pipeline.release.ReleaseClosure
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseNodeIdentity
-import co.datapipelines.parameters.ParameterSetRepository
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.visualization.DashboardRepository
 import co.datapipelines.visualization.VisualizationRepository
@@ -68,7 +68,11 @@ class ArtifactReleaseProvidersPostgresTest {
     private val descriptors =
         mapOf(
             ReleaseFamily.PIPELINE to
-                ReleaseDependencyFamilies.descriptor(ReleaseFamily.PIPELINE, PipelineDependencySource(PipelineRepository(ceiling.jdbc)), ceiling),
+                ReleaseDependencyFamilies.descriptor(
+                    ReleaseFamily.PIPELINE,
+                    PipelineDependencySource(PipelineRepository(ceiling.jdbc)),
+                    ceiling,
+                ),
             ReleaseFamily.TEMPLATE to TemplateReleaseProvider(TemplateRepository(ceiling.jdbc), ceiling).descriptor(),
             ReleaseFamily.PARAMETER_SET to ParameterSetReleaseProvider(ParameterSetRepository(ceiling.jdbc), ceiling).descriptor(),
             ReleaseFamily.VISUALIZATION to VisualizationReleaseProvider(VisualizationRepository(ceiling.jdbc), ceiling).descriptor(),
