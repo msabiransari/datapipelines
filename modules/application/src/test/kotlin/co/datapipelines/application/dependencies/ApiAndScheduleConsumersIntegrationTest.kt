@@ -20,8 +20,10 @@ import co.datapipelines.pipeline.PipelineVersionStatus.RELEASED
 import co.datapipelines.pipeline.SchedulePin
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.mockk
@@ -238,6 +240,71 @@ class ApiAndScheduleConsumersIntegrationTest {
         scheduleConsumers.liveVersionPins(workspaceId, pipelineName, 1).shouldBeEmpty()
         scheduleConsumers.liveVersionPins(workspaceId, pipelineName, 2).shouldBeEmpty()
         scheduleConsumers.anyVersionPins(workspaceId, pipelineName).map { it.pipelineVersion } shouldContainExactly listOf(null, null)
+    }
+
+    @Test
+    fun `#786 R3 - every positive Int exact pin is protected - nine digits, ten digits and Int MAX_VALUE refuse the discard`() {
+        for (version in listOf(999_999_999, 1_000_000_000, Int.MAX_VALUE)) {
+            pipelineVersion(version, RELEASED)
+            schedule("pinned_$version", schema = 2, version = version.toString())
+
+            withClue("v$version") {
+                scheduleConsumers.liveVersionPins(workspaceId, pipelineName, version) shouldContainExactly
+                    listOf(SchedulePin("pinned_$version", version))
+                val refused = shouldThrow<DatapipelinesException> { service.discardVersion(workspaceId, pipelineId, version, userId) }
+                refused.code shouldBe PipelineErrorCodes.Versioning.PINNED
+                refused.details["referencing_schedules"] shouldBe
+                    listOf(mapOf("schedule" to "pinned_$version", "pipeline_version" to version))
+                status(version) shouldBe RELEASED
+            }
+        }
+        scheduleConsumers.anyVersionPins(workspaceId, pipelineName).map { it.pipelineVersion } shouldContainExactlyInAnyOrder
+            listOf(999_999_999, 1_000_000_000, Int.MAX_VALUE)
+    }
+
+    @Test
+    fun `#786 R3 - a ten-digit DRAFT pin refuses that draft's purge`() {
+        pipelineVersion(1_000_000_000, DRAFT)
+        schedule("next_draft", schema = 2, version = "1000000000")
+
+        val refused = shouldThrow<DatapipelinesException> { service.purgeVersion(workspaceId, pipelineId, 1_000_000_000) }
+
+        refused.code shouldBe PipelineErrorCodes.Versioning.PINNED
+        status(1_000_000_000) shouldBe DRAFT
+    }
+
+    @Test
+    fun `#786 R3 - an Int MAX_VALUE DRAFT pin refuses that draft's purge`() {
+        pipelineVersion(Int.MAX_VALUE, DRAFT)
+        schedule("max_draft", schema = 2, version = Int.MAX_VALUE.toString())
+
+        val refused = shouldThrow<DatapipelinesException> { service.purgeVersion(workspaceId, pipelineId, Int.MAX_VALUE) }
+
+        refused.code shouldBe PipelineErrorCodes.Versioning.PINNED
+        status(Int.MAX_VALUE) shouldBe DRAFT
+    }
+
+    @Test
+    fun `#786 R3 - an overflowing or malformed stored version pins nothing and never fails the read`() {
+        val planted =
+            linkedMapOf(
+                "past_int" to "2147483648",
+                "past_long" to "99999999999999999999999",
+                "negative" to "-1",
+                "fraction" to "2.5",
+                "text_digits" to "\"2\"",
+                "json_null" to "null",
+                "an_object" to "{\"v\": 2}",
+            )
+        planted.forEach { (name, version) -> schedule(name, schema = 2, version = version) }
+
+        scheduleConsumers.liveVersionPins(workspaceId, pipelineName, 1).shouldBeEmpty()
+        scheduleConsumers.liveVersionPins(workspaceId, pipelineName, 2).shouldBeEmpty()
+        scheduleConsumers.liveVersionPins(workspaceId, pipelineName, Int.MAX_VALUE).shouldBeEmpty()
+        scheduleConsumers.anyVersionPins(workspaceId, pipelineName) shouldContainExactlyInAnyOrder
+            planted.keys.map { SchedulePin(it, null) }
+        // Nothing protects v2, so its discard proceeds: the read answered, it did not throw.
+        service.discardVersion(workspaceId, pipelineId, 2, userId).version.status shouldBe DISCARDED
     }
 
     @Test

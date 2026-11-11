@@ -66,6 +66,12 @@ class SchedulePipelineConsumers(
      * Each live schedule targeting [pipelineName] with the version it runs: the schema-2 exact pin, or for a schema-1
      * row the pipeline's CURRENT (null when NULL). A schema-2 `version` that is not a plain positive integer cannot be
      * saved; were one planted it reads as null rather than failing the discard's read.
+     *
+     * The SQL hands back the stored JSON number's TEXT, never a cast (#786 R3): [exactPin] parses it in Kotlin over
+     * the executor's whole grammar — every positive Int, 1 through 2147483647 — and reads anything else (zero, a
+     * negative, a fraction, a value past Int's range) as no pin, without throwing and without a cast that could
+     * overflow in the database. (PostgreSQL prints a stored jsonb number in plain decimal, so a planted `1e3` reads as
+     * 1000 — a pin the executor's own grammar never saves, and protecting it errs on the safe side.)
      */
     private fun resolved(
         workspaceId: UUID,
@@ -74,16 +80,35 @@ class SchedulePipelineConsumers(
         jdbc.query(
             """
             SELECT s.name,
-                   CASE WHEN s.payload_schema_version >= 2
-                        THEN CASE WHEN jsonb_typeof(s.payload_json -> 'version') = 'number'
-                                   AND (s.payload_json ->> 'version') ~ '^[1-9][0-9]{0,8}$'
-                                  THEN (s.payload_json ->> 'version')::int END
-                        ELSE p.current_version END AS pipeline_version
+                   s.payload_schema_version >= 2 AS exact,
+                   CASE WHEN jsonb_typeof(s.payload_json -> 'version') = 'number'
+                        THEN s.payload_json ->> 'version' END AS pinned_text,
+                   p.current_version
               FROM schedules s
               LEFT JOIN pipelines p ON p.workspace_id = s.workspace_id AND p.name = :name
              WHERE s.workspace_id = :ws AND s.target_ref = :ref AND s.deleted_at IS NULL
              ORDER BY s.name
             """.trimIndent(),
             mapOf("ws" to workspaceId, "name" to pipelineName, "ref" to targetPrefix + pipelineName),
-        ) { rs, _ -> SchedulePin(rs.getString("name"), rs.getInt("pipeline_version").takeUnless { rs.wasNull() }) }
+        ) { rs, _ ->
+            val version =
+                if (rs.getBoolean("exact")) {
+                    exactPin(rs.getString("pinned_text"))
+                } else {
+                    rs.getInt("current_version").takeUnless { rs.wasNull() }
+                }
+            SchedulePin(rs.getString("name"), version)
+        }
+
+    companion object {
+        /** A plain positive decimal integer: no sign, no leading zero, no fraction or exponent. */
+        private val POSITIVE_DECIMAL = Regex("[1-9][0-9]*")
+
+        /**
+         * The stored schema-2 `version` number's text as the exact pin it names, or null when it names none: the
+         * executor's grammar (a positive JSON integer that fits an Int). [String.toIntOrNull] answers null past Int's
+         * range, so an overlong value never throws and never wraps.
+         */
+        fun exactPin(text: String?): Int? = text?.takeIf(POSITIVE_DECIMAL::matches)?.toIntOrNull()
+    }
 }
