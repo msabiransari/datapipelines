@@ -994,13 +994,18 @@ or delete the API, then upgrade again. There is no version floor, no `Recreate` 
 every live pipeline schedule still following its pipeline's current version (payload schema 1,
 `"version": "current"`) is pinned to the exact version CURRENT names at that moment (schema 2). Only the payload's
 `version` and its schema number change — bindings, parameters, cron, timezone, missed-run policy and notification
-settings are untouched — and each of the schedule's queued runs is pinned the same way. One
-`event=scheduler.conversion.converted` line per schedule and an `event=scheduler.conversion.summary` total; a restart
-converts nothing twice. A schedule whose pipeline is missing or has no current version refuses the start exactly as an
-API does: one `event=scheduler.conversion.refused kind=schedule` ERROR line per schedule (id, name, pipeline,
-`reason=missing_pipeline|no_versions|no_current`) and an `event=scheduler.conversion.refused_summary` line — on the
-previous version, release that pipeline or delete the schedule, then upgrade again. Every API and schedule is checked
-before anything is written, so a refusal leaves both unconverted. A current version that is a DRAFT the deployment does
+settings are untouched. Each of the schedule's queued runs is pinned from its OWN payload copy: a run queued before an
+edit of the schedule's target still names the old pipeline, and is pinned to the version THAT pipeline's current
+version names — never the schedule's — in the same transaction as its schedule. One
+`event=scheduler.conversion.converted` line per schedule, one `event=scheduler.conversion.converted_run` line per queued
+run (its own pipeline and version) and an `event=scheduler.conversion.summary` total; a restart converts nothing twice.
+A schedule — or a queued run — whose pipeline is missing or has no current version refuses the start exactly as an API
+does: one `event=scheduler.conversion.refused` ERROR line each (`kind=schedule`, or `kind=run` naming the run and its
+schedule; pipeline, `reason=missing_pipeline|no_versions|no_current`) and an `event=scheduler.conversion.refused_summary`
+line — on the previous version, release that pipeline or delete the schedule, then upgrade again. Every API, schedule
+and queued run is checked before anything is written, so a refusal leaves all of them unconverted; a target that loses
+its current version during the conversion rolls its schedule's whole transaction back and refuses the start the same
+way. A current version that is a DRAFT the deployment does
 not run converts to that draft pin and keeps refusing at run, as before.
 
 ### 8.3 Upgrade procedure (recommended)

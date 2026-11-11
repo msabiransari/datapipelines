@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode
 import io.kotest.assertions.throwables.shouldThrowAny
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.restassured.RestAssured.given
@@ -288,6 +289,140 @@ class ScheduleVersionConversionE2eTest {
         scalar<String>("SELECT status FROM pipeline_versions WHERE pipeline_id = '$racing' AND version = 2") shouldBe "RELEASED"
     }
 
+    // ------------------------------------------------------------------ #786 round 7, R1: a queued run converts from ITS OWN copy
+
+    @Test
+    @Order(7)
+    fun `R1 - a queued run whose copy names the OLD pipeline converts to that pipeline's own CURRENT, and a rerun repins nothing`(
+        output: CapturedOutput,
+    ) {
+        // Two pipelines with their own bodies (created through REST), each with its own CURRENT: old at v2, new at v3.
+        val old = createAndRelease(AB_OLD)
+        copyVersion(old, 2, "RELEASED", from = old)
+        sql("UPDATE pipelines SET current_version = 2 WHERE id = '$old'")
+        val new = createAndRelease(AB_NEW)
+        copyVersion(new, 2, "RELEASED", from = new)
+        copyVersion(new, 3, "RELEASED", from = new)
+        sql("UPDATE pipelines SET current_version = 3 WHERE id = '$new'")
+        close()
+        // What the previous version left: the schedule saved on OLD, a run queued from it, then an ordinary edit of the
+        // schedule to NEW — the edit rewrites the schedule, never the run's frozen copy.
+        val schedule = legacySchedule("test/e2econv_ab_edit", AB_OLD)
+        val run = legacyRun(schedule, "queued", admitBy = "NOW() + INTERVAL '1 day'")
+        sql(
+            "UPDATE schedules SET payload_json = '{\"pipeline\": \"$AB_NEW\", \"version\": \"current\"}'," +
+                " target_ref = 'pipeline:$AB_NEW', revision = revision + 1 WHERE id = '$schedule'",
+        )
+        val runBefore = runRow(run)
+        withClue("the two targets are distinct versions of distinct bodies") {
+            bodyHash(old, 2) shouldNotBe bodyHash(new, 3)
+        }
+
+        context = boot()
+
+        payloadOf(schedule) shouldBe mapper.readTree("""{"pipeline": "$AB_NEW", "version": 3}""")
+        withClue("the run keeps its own pipeline and pins ITS CURRENT (2), never the schedule's (3)") {
+            runPayloadOf(run) shouldBe mapper.readTree("""{"pipeline": "$AB_OLD", "version": 2}""")
+            runSchemaAndVersion(run) shouldBe listOf(2, "2")
+        }
+        withClue("no other column of the run moved: parameters, frozen reference, window, actor, state") {
+            runRow(run).minus(RUN_CONVERTED_COLUMNS) shouldBe runBefore.minus(RUN_CONVERTED_COLUMNS)
+        }
+        output.out shouldContain "name=test/e2econv_ab_edit pipeline=$AB_NEW pipeline_version=3 status=RELEASED queued_runs=1"
+        output.out shouldContain
+            "event=scheduler.conversion.converted_run id=$run schedule=$schedule pipeline=$AB_OLD pipeline_version=2 status=RELEASED"
+
+        // A rerun after the old pipeline's CURRENT moved repins nothing.
+        sql("UPDATE pipelines SET current_version = 1 WHERE id = '$old'")
+        val snapshot = rows(SNAPSHOT)
+        close()
+        context = boot()
+        rows(SNAPSHOT) shouldBe snapshot
+        runSchemaAndVersion(run) shouldBe listOf(2, "2")
+        output.out shouldContain "event=scheduler.conversion.summary converted=0 released=0 draft=0 queued_runs=0"
+    }
+
+    @Test
+    @Order(8)
+    fun `R1 E0 - a queued run whose own pipeline is missing or has no CURRENT refuses the boot, named kind=run, and nothing is written`(
+        output: CapturedOutput,
+    ) {
+        close()
+        val noCurrent = pipelineCopy(RUN_NO_CURRENT, current = null, "DISCARDED")
+        val missingSchedule = legacySchedule("test/e2econv_run_missing", AB_NEW)
+        val missingRun = legacyRun(missingSchedule, "queued", admitBy = "NOW() + INTERVAL '1 day'", payload = legacyPayload(RUN_GONE))
+        val noCurrentSchedule = legacySchedule("test/e2econv_run_no_current", AB_NEW)
+        val noCurrentRun =
+            legacyRun(noCurrentSchedule, "queued", admitBy = "NOW() + INTERVAL '1 day'", payload = legacyPayload(RUN_NO_CURRENT))
+        val before = rows(SNAPSHOT)
+
+        val refused = shouldThrowAny { boot() }
+
+        val messages = generateSequence(refused) { it.cause }.mapNotNull { it.message }.toList()
+        withClue(messages) { messages.any { it.contains("The upgrade's conversion refused to start: 2 ") } shouldBe true }
+        withClue("nothing written: both schedules (whose own pipeline is fine) and both runs are as they were") {
+            rows(SNAPSHOT) shouldBe before
+        }
+        output.out shouldContain
+            "event=scheduler.conversion.refused kind=run id=$missingRun schedule=$missingSchedule name=test/e2econv_run_missing " +
+            "pipeline=$RUN_GONE reason=missing_pipeline"
+        output.out shouldContain
+            "event=scheduler.conversion.refused kind=run id=$noCurrentRun schedule=$noCurrentSchedule name=test/e2econv_run_no_current " +
+            "pipeline=$RUN_NO_CURRENT reason=no_current"
+        output.out shouldNotContain "kind=schedule id=$missingSchedule"
+        output.out shouldNotContain "kind=schedule id=$noCurrentSchedule"
+        output.out shouldContain "event=scheduler.conversion.refused_summary refused=2"
+
+        // The operator's fix on the previous version: release the run's pipeline, or delete the schedule.
+        sql(
+            "UPDATE pipeline_versions SET status = 'RELEASED', discarded_by = NULL, discarded_at = NULL" +
+                " WHERE pipeline_id = '$noCurrent' AND version = 1",
+        )
+        sql("UPDATE pipelines SET current_version = 1 WHERE id = '$noCurrent'")
+        sql("UPDATE schedules SET deleted_at = NOW(), deleted_by = '$adminId' WHERE id = '$missingSchedule'")
+        context = boot()
+        payloadOf(noCurrentSchedule)["version"].asInt() shouldBe 3
+        runPayloadOf(noCurrentRun) shouldBe mapper.readTree("""{"pipeline": "$RUN_NO_CURRENT", "version": 1}""")
+        withClue("the deleted schedule's run is not selected: the worker skips it as schedule_deleted") {
+            runSchemaAndVersion(missingRun) shouldBe listOf(1, "current")
+        }
+    }
+
+    @Test
+    @Order(9)
+    fun `R1 - a run target that loses its CURRENT under the guard rolls back the schedule's own write with it`(output: CapturedOutput) {
+        close()
+        val target = pipelineCopy(RUN_RACE, current = 1, "RELEASED")
+        val schedule = legacySchedule("test/e2econv_run_race", AB_NEW)
+        val run = legacyRun(schedule, "queued", admitBy = "NOW() + INTERVAL '1 day'", payload = legacyPayload(RUN_RACE))
+        val before = rows(SNAPSHOT)
+
+        val booted =
+            holdingWorkspace { holder ->
+                val booted = CompletableFuture.supplyAsync { boot() }
+                // The precondition (unguarded reads) passed; the conversion now waits for the workspace guard.
+                awaitWaiters(holder, 1)
+                // Meanwhile the run's pipeline loses its CURRENT: the guarded re-read, after the schedule's write, refuses.
+                sql("UPDATE pipelines SET current_version = NULL WHERE id = '$target'")
+                booted
+            }
+
+        shouldThrowAny { booted.get(5, TimeUnit.MINUTES) }
+        withClue("the schedule was written first inside the transaction; the run's refusal rolled both back") {
+            rows(SNAPSHOT) shouldBe before
+            scalar<Int>("SELECT payload_schema_version FROM schedules WHERE id = '$schedule'") shouldBe 1
+        }
+        output.out shouldContain
+            "event=scheduler.conversion.refused kind=run id=$run schedule=$schedule name=test/e2econv_run_race " +
+            "pipeline=$RUN_RACE reason=no_current"
+
+        // CURRENT back: the next boot converts the schedule and its run, each to its own pipeline's version.
+        sql("UPDATE pipelines SET current_version = 1 WHERE id = '$target'")
+        context = boot()
+        payloadOf(schedule)["version"].asInt() shouldBe 3
+        runPayloadOf(run) shouldBe mapper.readTree("""{"pipeline": "$RUN_RACE", "version": 1}""")
+    }
+
     // ------------------------------------------------------------------ the binding witnesses
 
     /**
@@ -420,18 +555,19 @@ class ScheduleVersionConversionE2eTest {
         error("expected $count waiter(s) behind backend $holderPid")
     }
 
-    /** Adds version [version] of [pipeline] as a copy of its v1 body with [status]. */
+    /** Adds version [version] of [pipeline] as a copy of [from]'s v1 body (the fixture pipeline's by default) with [status]. */
     private fun copyVersion(
         pipeline: UUID,
         version: Int,
         status: String,
+        from: UUID = bindingsPipeline,
     ) = sql(
         "INSERT INTO pipeline_versions (pipeline_id, version, body_json, body_hash, status, created_by, released_by," +
             " released_at, discarded_by, discarded_at)" +
             " SELECT '$pipeline', $version, body_json, body_hash, '$status', created_by," +
             " CASE WHEN '$status' <> 'DRAFT' THEN created_by END, CASE WHEN '$status' <> 'DRAFT' THEN NOW() END," +
             " CASE WHEN '$status' = 'DISCARDED' THEN created_by END, CASE WHEN '$status' = 'DISCARDED' THEN NOW() END" +
-            " FROM pipeline_versions WHERE pipeline_id = '$bindingsPipeline' AND version = 1",
+            " FROM pipeline_versions WHERE pipeline_id = '$from' AND version = 1",
     )
 
     /** A pipeline whose versions 1..n are copies of the fixture pipeline's v1 body with [statuses]. */
@@ -466,18 +602,23 @@ class ScheduleVersionConversionE2eTest {
         return id
     }
 
-    /** A manual run of [schedule] in [state], admitted until [admitBy] (SQL); its payload copy is the schedule's stored one. */
+    /**
+     * A manual run of [schedule] in [state], admitted until [admitBy] (SQL); its payload copy is the schedule's stored one,
+     * or [payload] — the copy a run queued before an edit of the schedule's target still carries.
+     */
     private fun legacyRun(
         schedule: UUID,
         state: String,
         admitBy: String,
+        payload: String? = null,
     ): UUID {
         val id = UUID.randomUUID()
+        val copy = payload?.let { "CAST('$it' AS jsonb)" } ?: "s.payload_json"
         sql(
             "INSERT INTO schedule_runs (id, schedule_id, workspace_id, origin, reference_at, reference_timezone, admit_by," +
                 " executor_id, payload_schema_version, payload_json, parameters_json, actor_user_id, state)" +
                 " SELECT '$id', s.id, s.workspace_id, 'manual', NOW(), s.timezone, $admitBy, s.executor_id," +
-                " s.payload_schema_version, s.payload_json, s.parameters_json, u.id, '$state'" +
+                " s.payload_schema_version, $copy, s.parameters_json, u.id, '$state'" +
                 " FROM schedules s, users u WHERE s.id = '$schedule' AND u.kind = 'system'",
         )
         return id
@@ -498,6 +639,23 @@ class ScheduleVersionConversionE2eTest {
 
     private fun parametersOf(schedule: UUID): JsonNode =
         mapper.readTree(scalar<String>("SELECT parameters_json::text FROM schedules WHERE id = '$schedule'"))
+
+    /** A schema-1 payload naming [pipeline], as the previous version wrote it. */
+    private fun legacyPayload(pipeline: String) = """{"pipeline": "$pipeline", "version": "current"}"""
+
+    private fun runPayloadOf(run: UUID): JsonNode =
+        mapper.readTree(scalar<String>("SELECT payload_json::text FROM schedule_runs WHERE id = '$run'"))
+
+    /** Every column of the run row, JSON columns as text. */
+    private fun runRow(run: UUID): Map<String, Any?> =
+        rows(
+            "SELECT *, payload_json::text AS payload_text, parameters_json::text AS parameters_text FROM schedule_runs WHERE id = '$run'",
+        ).single().mapValues { (_, v) -> if (v?.javaClass?.simpleName == "PGobject") v.toString() else v }
+
+    private fun bodyHash(
+        pipeline: UUID,
+        version: Int,
+    ): String = scalar("SELECT body_hash FROM pipeline_versions WHERE pipeline_id = '$pipeline' AND version = $version")
 
     private fun runSchemaAndVersion(run: UUID): List<Any?> =
         rows("SELECT payload_schema_version, payload_json ->> 'version' AS v FROM schedule_runs WHERE id = '$run'").single().values.toList()
@@ -570,6 +728,16 @@ class ScheduleVersionConversionE2eTest {
         private const val WORKSPACE = "conv-e2e"
         private val WORKSPACE_ID: UUID = UUID.randomUUID()
         private const val BINDINGS_PIPELINE = "test/e2econv_bindings"
+
+        /** R1: the schedule's old and new targets, and the queued runs' own targets. */
+        private const val AB_OLD = "test/e2econv_ab_old"
+        private const val AB_NEW = "test/e2econv_ab_new"
+        private const val RUN_GONE = "test/e2econv_run_gone"
+        private const val RUN_NO_CURRENT = "test/e2econv_run_no_current"
+        private const val RUN_RACE = "test/e2econv_run_race"
+
+        /** The columns the conversion writes on a run; every other column must be what it was. */
+        private val RUN_CONVERTED_COLUMNS = setOf("payload_json", "payload_text", "payload_schema_version")
         private const val BINDINGS_SCHEDULE = "test/e2econv_bindings"
         private const val DRAFT_PIPELINE = "test/e2econv_draft_current"
         private const val YEARLY = "0 3 1 1 *"
