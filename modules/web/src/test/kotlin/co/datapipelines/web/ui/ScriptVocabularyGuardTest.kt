@@ -333,8 +333,8 @@ class ScriptVocabularyGuardTest {
                 Triple(
                     Regex(
                         "^tests/integration-tests/src/test/kotlin/co/datapipelines/integration/" +
-                            "(?:FamilyRootsFixture|FamilyRootsReleaseCascadeE2eTest|RestoreOutboundPinsE2eTest|" +
-                            "TemplateImportClosureE2eTest)\\.kt$",
+                            "(?:FamilyRootsFixture|FamilyRootsReleaseCascadeE2eTest|FamilyRootsAuditE2eTest|" +
+                            "RestoreOutboundPinsE2eTest|TemplateImportClosureE2eTest)\\.kt$",
                     ),
                     Regex("transform\\.template|transform template|\"transform\":"),
                     "the #873 release and restore closures over a visualization (G2): the block's pin, its wire path and its JSON " +
