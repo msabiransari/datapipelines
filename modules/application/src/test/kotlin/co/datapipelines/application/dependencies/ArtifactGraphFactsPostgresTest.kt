@@ -120,7 +120,7 @@ class ArtifactGraphFactsPostgresTest {
             }
 
             Evidence.ABSENT -> {
-                Unit
+                // no stored run at all
             }
 
             Evidence.GREEN_ON_ANOTHER_VERSION_ONLY -> {

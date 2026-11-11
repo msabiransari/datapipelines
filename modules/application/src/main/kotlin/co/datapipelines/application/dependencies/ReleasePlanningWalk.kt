@@ -8,6 +8,7 @@ import co.datapipelines.dependencies.DeadlineExceeded
 import co.datapipelines.dependencies.DependencyWalker
 import co.datapipelines.dependencies.FamilyRegistry
 import co.datapipelines.dependencies.GraphLimits
+import co.datapipelines.dependencies.GraphSnapshot
 import co.datapipelines.dependencies.MetadataSnapshot
 import co.datapipelines.dependencies.Purpose
 import co.datapipelines.dependencies.ReadIsolation
