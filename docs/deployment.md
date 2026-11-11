@@ -554,7 +554,7 @@ DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_URL=https://uat.example.com
 DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_KEY=<the same shared secret>
 ```
 
-`DATAPIPELINES_ENV` is **your** name for each deployment and nothing branches on it; the receiver records the sender's label as the `source_env` of what it received. `DATAPIPELINES_POSTURE` is what actually changes behaviour — `hardened` defaults `authoring-enabled` to `false`, which is the receiver's whole configuration. Set `DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED` explicitly if this one box must do both ([Environments §1](environments.md#1-why-two-variables)).
+`DATAPIPELINES_ENV` is **your** name for each deployment and nothing branches on it; the receiver records the sender's label as the `source_env` of what it received. `DATAPIPELINES_POSTURE` is what actually changes behaviour — `hardened` defaults `authoring-enabled` to `false`, which is the receiver's whole configuration. A hardened box does not author: setting `DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED=true` there **refuses startup** ([Configuration §3.23](configuration.md#323-environment-and-posture)), so a box that must author runs the `development` posture ([Environments §2](environments.md#a-hardened-deployment-does-not-author-786)).
 
 Generate the secret the way every other one here is generated — `openssl rand -base64 32` — and set the identical value on both sides. It is a **bearer credential**: it belongs in `deploy/secrets.env` with the rest of the secrets, never inline in a compose file or a chart's values.
 
