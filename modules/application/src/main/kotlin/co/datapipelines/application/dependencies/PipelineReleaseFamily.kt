@@ -4,6 +4,9 @@ import co.datapipelines.application.dependencies.prerequisites.DatasourceEdges
 import co.datapipelines.application.dependencies.prerequisites.DatasourceReferenceReader
 import co.datapipelines.dependencies.DependencyProvider
 import co.datapipelines.dependencies.FamilyDescriptor
+import co.datapipelines.dependencies.FamilyKey
+import co.datapipelines.dependencies.IncomingQuery
+import co.datapipelines.dependencies.IncomingResult
 import co.datapipelines.dependencies.ObjectRequest
 import co.datapipelines.dependencies.Outcome
 import co.datapipelines.dependencies.Reference
@@ -50,13 +53,14 @@ object PipelineReleaseFamily {
         pipelines: PipelineRepository,
         ceiling: StatementCeiling,
         deserializer: PipelineDeserializer = PipelineDeserializer(),
+        incoming: IncomingArms? = null,
     ): FamilyDescriptor<PipelineReleaseNode> =
         FamilyDescriptor(
             key = ReleaseDependencyFamilies.keyOf(ReleaseFamily.PIPELINE),
             rootSelectors = setOf(SelectorKind.EXACT_VERSION),
             capabilities = ReleaseDependencyFamilies.CAPABILITIES,
             extractorSchemaVersion = ReleaseDependencyFamilies.EXTRACTOR_SCHEMA_VERSION,
-            provider = PipelineReleaseProvider(pipelines, deserializer, ceiling),
+            provider = PipelineReleaseProvider(pipelines, deserializer, ceiling, incoming),
             safeSummary = FamilyDescriptor.NO_SAFE_SUMMARY,
         )
 }
@@ -65,9 +69,22 @@ internal class PipelineReleaseProvider(
     private val pipelines: PipelineRepository,
     private val deserializer: PipelineDeserializer,
     override val ceiling: StatementCeiling,
+    /** #877 §B — the pipeline target's four inverse arms ([IncomingArmCatalog.pipeline]); none = Unsupported. */
+    private val incoming: IncomingArms? = null,
 ) : DependencyProvider<PipelineReleaseNode>,
     CeilingBound,
     DatasourceReferenceReader {
+    init {
+        require(incoming == null || incoming.target == KEY) { "the pipeline provider's inverse arms target ${incoming?.target}" }
+    }
+
+    override val incomingFrom: Set<FamilyKey> get() = incoming?.incomingFrom.orEmpty()
+
+    override fun findIncoming(
+        query: IncomingQuery,
+        context: ResolveContext,
+    ): IncomingResult = incoming?.find(query, context) ?: IncomingResult.Unsupported
+
     /**
      * #887 (record §7.1, §25.4 D12): one [Outcome] per request from ONE bounded statement per workspace in the call
      * ([PipelineRepository.findVersionNodesByName] through [BoundedGraphRead]: a batch above the contract's ceiling is

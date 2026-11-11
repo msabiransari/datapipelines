@@ -188,6 +188,43 @@ class ReleaseArtifactSeed(
         children: List<Pair<String, Int>> = emptyList(),
         source: String = "pg",
     ) {
+        pipelineNodes(
+            name,
+            version,
+            status,
+            templates.withIndex().map { (index, pin) ->
+                Node(
+                    id = "n$index",
+                    description = "",
+                    type = NodeType.DQL,
+                    source = source,
+                    template = TemplateRef(pin.first, pin.second),
+                    output = NodeOutput.Caller,
+                    dependsOn = emptyList(),
+                )
+            } +
+                children.withIndex().map { (index, pin) ->
+                    Node(
+                        id = "c$index",
+                        description = "",
+                        type = NodeType.PIPELINE,
+                        source = "",
+                        template = TemplateRef(),
+                        output = NodeOutput.Tempdb("stg_c$index"),
+                        dependsOn = emptyList(),
+                        pipeline = PipelineNodeRef(pin.first, pin.second),
+                    )
+                },
+        )
+    }
+
+    /** A pipeline version whose body holds exactly [nodes] (#877: any node shape the inverse tests need). */
+    fun pipelineNodes(
+        name: String,
+        version: Int,
+        status: PipelineVersionStatus,
+        nodes: List<Node>,
+    ) {
         jdbc.update(
             "INSERT INTO pipelines (id, name, display_name, owner_id, current_version, workspace_id)" +
                 " VALUES (:id, :name, 'P', :owner, NULL, :ws) ON CONFLICT (workspace_id, name) DO NOTHING",
@@ -201,30 +238,7 @@ class ReleaseArtifactSeed(
                 description = "",
                 settings = PipelineSettings(),
                 parameters = emptyMap(),
-                nodes =
-                    templates.withIndex().map { (index, pin) ->
-                        Node(
-                            id = "n$index",
-                            description = "",
-                            type = NodeType.DQL,
-                            source = source,
-                            template = TemplateRef(pin.first, pin.second),
-                            output = NodeOutput.Caller,
-                            dependsOn = emptyList(),
-                        )
-                    } +
-                        children.withIndex().map { (index, pin) ->
-                            Node(
-                                id = "c$index",
-                                description = "",
-                                type = NodeType.PIPELINE,
-                                source = "",
-                                template = TemplateRef(),
-                                output = NodeOutput.Tempdb("stg_c$index"),
-                                dependsOn = emptyList(),
-                                pipeline = PipelineNodeRef(pin.first, pin.second),
-                            )
-                        },
+                nodes = nodes,
             )
         jdbc.update(
             "INSERT INTO pipeline_versions (pipeline_id, version, body_json, body_hash, status, created_by, released_by, released_at," +
