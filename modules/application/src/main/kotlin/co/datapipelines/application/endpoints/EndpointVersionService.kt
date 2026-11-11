@@ -264,8 +264,8 @@ class EndpointVersionService(
         return writes.inTransaction {
             writes.writeGuard.workspaces(listOf(workspaceId), PipelineErrorCodes.Endpoint.WRITE_BUSY)
             if (registryKey) writes.writeGuard.endpointRegistry(PipelineErrorCodes.Endpoint.WRITE_BUSY)
-            versions.lockEntity(endpointId) ?: throw notFound(endpointId, version = null)
-            val endpoint = endpoints.findById(endpointId)?.takeIf { it.workspaceId == workspaceId } ?: throw notFound(endpointId, null)
+            versions.lockEntity(workspaceId, endpointId) ?: throw notFound(endpointId, version = null)
+            val endpoint = endpoints.findById(workspaceId, endpointId) ?: throw notFound(endpointId, null)
             block(endpoint)
         }
     }
@@ -275,7 +275,7 @@ class EndpointVersionService(
         principal: AuthenticatedPrincipal,
         endpointId: UUID,
     ): PublishedEndpoint? {
-        val endpoint = endpoints.findById(endpointId)?.takeIf { it.workspaceId == principal.requireWorkspace().id } ?: return null
+        val endpoint = endpoints.findById(principal.requireWorkspace().id, endpointId) ?: return null
         val view = lens?.viewFor(principal)?.takeIf { it.isLensed }?.pipelines ?: return endpoint
         return endpoint.takeIf { e -> e.pipelineName?.let(view::admits) ?: false }
     }

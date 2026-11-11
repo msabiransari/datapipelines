@@ -299,6 +299,41 @@ class EndpointVersionLifecycleIntegrationTest {
         versions.find(api.id, 1).shouldNotBeNull().bodyHash shouldBe hash
     }
 
+    @Test
+    fun `the selected workspace bounds management reads and row locks`() {
+        pipeline("acme/rides/scoped", current = 1, PipelineVersionStatus.RELEASED)
+        val api = publishing().create(principal(), "/acme/v1/scoped", "acme/rides/scoped", 1, null, "")
+        val hash = versions.find(api.id, 1).shouldNotBeNull().bodyHash
+        val elsewhere = UUID.randomUUID().also { workspace(it) }
+        val service = service()
+
+        endpoints.findById(workspaceId, api.id).shouldNotBeNull().id shouldBe api.id
+        endpoints.findById(elsewhere, api.id).shouldBeNull()
+        service.versions(principal(elsewhere), api.id).shouldBeNull()
+        transactions.execute { versions.lockEntity(workspaceId, api.id) }.shouldNotBeNull().endpointId shouldBe api.id
+
+        SharedPostgres.dataSource().connection.use { holder ->
+            holder.autoCommit = false
+            try {
+                holder.prepareStatement("SELECT id FROM published_endpoints WHERE id = ? FOR UPDATE").use { statement ->
+                    statement.setObject(1, api.id)
+                    statement.executeQuery().next() shouldBe true
+                }
+                transactions.execute { status ->
+                    status.setRollbackOnly()
+                    jdbc.jdbcTemplate.execute("SET LOCAL lock_timeout = '100ms'")
+                    versions.lockEntity(elsewhere, api.id).shouldBeNull()
+                    shouldThrow<DatapipelinesException> {
+                        service.discardDraft(principal(elsewhere), api.id, hash)
+                    }.code shouldBe PipelineErrorCodes.Endpoint.VERSION_NOT_FOUND
+                }
+            } finally {
+                holder.rollback()
+            }
+        }
+        versions.find(api.id, 1).shouldNotBeNull().bodyHash shouldBe hash
+    }
+
     // ------------------------------------------------------------------------- helpers
 
     /** What the walk leaves for the readers: v2 RELEASED, v1 RELEASED and current. */

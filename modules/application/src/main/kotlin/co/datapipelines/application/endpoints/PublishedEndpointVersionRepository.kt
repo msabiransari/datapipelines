@@ -104,6 +104,18 @@ class PublishedEndpointVersionRepository(
             ) { rs, _ -> EntityPointer(rs.getObject("id", UUID::class.java), rs.getInt("current_version").takeUnless { rs.wasNull() }) }
             .singleOrNull()
 
+    /** The management lock: only a row in the selected workspace can be locked. */
+    fun lockEntity(
+        workspaceId: UUID,
+        endpointId: UUID,
+    ): EntityPointer? =
+        jdbc
+            .query(
+                "SELECT id, current_version FROM published_endpoints WHERE workspace_id = :ws AND id = :id FOR UPDATE",
+                mapOf("ws" to workspaceId, "id" to endpointId),
+            ) { rs, _ -> EntityPointer(rs.getObject("id", UUID::class.java), rs.getInt("current_version").takeUnless { rs.wasNull() }) }
+            .singleOrNull()
+
     /**
      * A new working DRAFT at `max(existing) + 1` (DISCARDED and purged numbers stay consumed only while their rows
      * exist; a purged draft's number is reused, the pipeline rule). The one-draft index turns a second draft into

@@ -92,6 +92,16 @@ class PublishedEndpointRepository(
     fun findById(id: UUID): PublishedEndpoint? =
         queryRows("$SELECT_COLUMNS WHERE e.id = :id", mapOf("id" to id)).validEndpoints().singleOrNull()
 
+    /** One valid endpoint in the selected workspace; management reads filter before materializing its body. */
+    fun findById(
+        workspaceId: UUID,
+        id: UUID,
+    ): PublishedEndpoint? =
+        queryRows(
+            "$SELECT_COLUMNS WHERE e.workspace_id = :workspaceId AND e.id = :id",
+            mapOf("workspaceId" to workspaceId, "id" to id),
+        ).validEndpoints().singleOrNull()
+
     /**
      * The endpoints with a LIVE (DRAFT or RELEASED) version pinning any version of the pipeline [pipelineId] — the
      * pipeline page's usage evidence (#786: by the exact pins, by name in the entity's workspace, never by the legacy
