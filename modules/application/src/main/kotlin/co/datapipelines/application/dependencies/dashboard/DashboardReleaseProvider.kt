@@ -19,8 +19,9 @@ import java.util.UUID
  * source pipeline at `sources[i].pipeline` and every visualization occurrence at `visualizations[i].visualization` — two
  * occurrences of one version are two edges to one node.
  *
- * The parameter-set edge carries the `parameter_names` constraint [R19; F8]: the distinct set-parameter names the
- * `{parameter}` source bindings use, in first-use order; a literal binding adds nothing, a repeated one adds its name once.
+ * The parameter-set edge carries the `parameter_names` constraint (R19, F8): the distinct set-parameter names the
+ * `{parameter}` source bindings use, sorted (a source's bindings are a JSON object, whose key order JSONB storage does not
+ * keep — so only a sorted list is a function of the body's meaning); a literal binding adds nothing, a repeated one adds its name once.
  * Record §6 constrains ONLY those bindings — `action_controls[].parameter`, `parameter_scopes`, `parameter_state` and the
  * layout's parameter placements name set parameters too and add no constraint (brief §What is verified).
  */
@@ -49,7 +50,8 @@ class DashboardReleaseProvider(
         val body = stored.body
         val names = parameterNames(body)
         return pinsOf(workspaceId, body).map { (target, path) ->
-            val constraints = if (target.family == ReleaseFamily.PARAMETER_SET && names.isNotEmpty()) listOf(Constraint.ParameterNames(names)) else emptyList()
+            val constrained = target.family == ReleaseFamily.PARAMETER_SET && names.isNotEmpty()
+            val constraints = if (constrained) listOf(Constraint.ParameterNames(names)) else emptyList()
             reference(target, path, constraints)
         }
     }
@@ -63,7 +65,9 @@ class DashboardReleaseProvider(
             body: DashboardBody,
         ): List<Pair<ReleaseNodeIdentity, String>> =
             listOfNotNull(
-                body.parameterSet?.let { ReleaseNodeIdentity(workspaceId, ReleaseFamily.PARAMETER_SET, it.name, it.version) to PARAMETER_SET_PATH },
+                body.parameterSet?.let {
+                    ReleaseNodeIdentity(workspaceId, ReleaseFamily.PARAMETER_SET, it.name, it.version) to PARAMETER_SET_PATH
+                },
             ) +
                 body.sources.mapIndexed { index, source ->
                     ReleaseNodeIdentity(workspaceId, ReleaseFamily.PIPELINE, source.pipeline.name, source.pipeline.version) to
@@ -71,12 +75,16 @@ class DashboardReleaseProvider(
                 } +
                 body.visualizations.mapIndexed { index, occurrence ->
                     val ref = occurrence.visualization
-                    ReleaseNodeIdentity(workspaceId, ReleaseFamily.VISUALIZATION, ref.name, ref.version) to "visualizations[$index].visualization"
+                    ReleaseNodeIdentity(workspaceId, ReleaseFamily.VISUALIZATION, ref.name, ref.version) to
+                        "visualizations[$index].visualization"
                 }
 
-        /** The `parameter_names` constraint's names: every `{parameter}` source binding's set parameter, distinct, first-use order. */
+        /** The `parameter_names` constraint's names: every `{parameter}` source binding's set parameter, distinct and sorted. */
         fun parameterNames(body: DashboardBody): List<String> =
-            body.sources.flatMap { source -> source.parameters.values.mapNotNull { it.parameter } }.distinct()
+            body.sources
+                .flatMap { source -> source.parameters.values.mapNotNull { it.parameter } }
+                .distinct()
+                .sorted()
 
         /**
          * A34 — the constraint names [set] does not declare: a dashboard edge whose set lacks a bound name violates its

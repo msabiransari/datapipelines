@@ -1,5 +1,6 @@
 package co.datapipelines.application.dependencies
 
+import co.datapipelines.dependencies.Constraint
 import co.datapipelines.dependencies.DependencyProvider
 import co.datapipelines.dependencies.FamilyDescriptor
 import co.datapipelines.dependencies.Lifecycle
@@ -13,7 +14,6 @@ import co.datapipelines.dependencies.ResolveContext
 import co.datapipelines.dependencies.ResolvedIdentity
 import co.datapipelines.dependencies.SelectorKind
 import co.datapipelines.dependencies.VersionInfo
-import co.datapipelines.dependencies.Constraint
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseNodeIdentity
@@ -124,7 +124,9 @@ abstract class ArtifactReleaseProvider<B : Any>(
         Reference(
             request = ReleaseDependencyFamilies.request(target),
             relationship =
-                checkNotNull(Relationship.between(ReleaseDependencyFamilies.keyOf(family), ReleaseDependencyFamilies.keyOf(target.family))) {
+                checkNotNull(
+                    Relationship.between(ReleaseDependencyFamilies.keyOf(family), ReleaseDependencyFamilies.keyOf(target.family)),
+                ) {
                     "a ${family.wire} reference to a ${target.family.wire} is not a §6 row"
                 },
             sourcePath = path,

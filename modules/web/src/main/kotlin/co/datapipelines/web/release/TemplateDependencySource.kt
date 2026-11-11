@@ -1,8 +1,8 @@
 package co.datapipelines.web.release
 
-import co.datapipelines.application.dependencies.template.TemplateReleaseProvider
 import co.datapipelines.pipeline.release.DependencySource
 import co.datapipelines.pipeline.release.PipelineDependencySource
+import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseNodeIdentity
 import co.datapipelines.pipeline.release.ReleaseNodeStatus
 import co.datapipelines.pipeline.release.ReleasePin
@@ -14,10 +14,10 @@ import co.datapipelines.templates.TemplateRepository
  * hash, the entity's current pointer and — since #873 (record §23.3) — its `IMPORT` pins, one per `imports[i]` at field
  * path `imports[i]` (a DISCARDED version answers none: its pins are never walked, as a pipeline's).
  *
- * Since #873 production resolves templates through the native [TemplateReleaseProvider] (one batch read per frontier);
- * this source is kept as the PARITY ORACLE only (brief §A.2): `TemplateProviderParityTest` walks the same fixtures through
- * both and asserts identical closures. Its pins are computed by the provider's own [TemplateReleaseProvider.importsOf],
- * so the two cannot drift apart by spelling.
+ * Since #873 production resolves templates through the native `TemplateReleaseProvider` (one batch read per frontier);
+ * this source is kept as the PARITY ORACLE only (brief §A.2): `ArtifactReleaseProvidersPostgresTest` walks the same
+ * fixtures through both and asserts identical closures. Its reads (entity, version detail, current pointer, body) and its
+ * pin mapping are its own, written independently of the provider's, so a defect in either is a parity difference.
  */
 class TemplateDependencySource(
     private val templates: TemplateRepository,
@@ -32,8 +32,9 @@ class TemplateDependencySource(
                 emptyList()
             } else {
                 val template = templates.findVersion(identity.workspaceId, identity.entityId, identity.version) ?: return null
-                TemplateReleaseProvider.importsOf(identity.workspaceId, template).map { (target, path) ->
-                    ReleasePin(target, target.entityId, path)
+                template.imports.mapIndexed { index, import ->
+                    val target = ReleaseNodeIdentity(identity.workspaceId, ReleaseFamily.TEMPLATE, import.id, import.version)
+                    ReleasePin(target, import.id, "imports[$index]")
                 }
             }
         return ResolvedNode(identity, identity.entityId, status, detail.bodyHash, current, pins, entityUuid)

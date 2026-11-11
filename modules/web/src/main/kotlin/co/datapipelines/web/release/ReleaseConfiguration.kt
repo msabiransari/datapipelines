@@ -11,6 +11,7 @@ import co.datapipelines.application.dependencies.visualization.VisualizationRele
 import co.datapipelines.application.endpoints.EndpointReleaseSteps
 import co.datapipelines.dependencies.FamilyDescriptor
 import co.datapipelines.dependencies.FamilyRegistry
+import co.datapipelines.parameters.ParameterSetRepository
 import co.datapipelines.pipeline.PipelineReleaseService
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.release.PipelineDependencySource
@@ -20,7 +21,6 @@ import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import co.datapipelines.pipeline.release.ReleasedVersionObserver
 import co.datapipelines.pipeline.release.ResolvedNode
-import co.datapipelines.parameters.ParameterSetRepository
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.visualization.DashboardRepository
 import co.datapipelines.visualization.VisualizationRepository
