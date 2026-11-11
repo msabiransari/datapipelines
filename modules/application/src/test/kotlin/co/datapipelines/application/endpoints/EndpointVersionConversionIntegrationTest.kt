@@ -6,8 +6,8 @@ import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.application.SharedPostgres
 import co.datapipelines.pipeline.PipelineVersionStatus
-import co.datapipelines.typesystem.guard.MetadataWriterGuard
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldNotBeNull
@@ -29,7 +29,9 @@ import java.util.UUID
  * #786 §E.0–E.2 — the in-place conversion's rows, against real PostgreSQL: a pre-V58 API is an entity row with its
  * legacy columns and no version row, inserted here by SQL exactly as the previous version wrote it. The startup
  * ordering, the refused boot and the conversion-versus-discard race under the real G0 guard are
- * `EndpointVersionMigrationE2eTest`'s; this class pins what one run writes, logs and refuses.
+ * `EndpointVersionMigrationE2eTest`'s, and the joint rollback boundary with the schedules is
+ * `ConversionRollbackBoundaryE2eTest`'s (#895); this class pins what one attempt writes, logs and refuses, driven as the
+ * startup runner drives it: E.0, then plan → entity locks → convert in ONE transaction, then the commit-time effects.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class EndpointVersionConversionIntegrationTest {
@@ -37,9 +39,10 @@ class EndpointVersionConversionIntegrationTest {
     private lateinit var versions: PublishedEndpointVersionRepository
     private lateinit var registry: EndpointRegistry
     private lateinit var conversion: EndpointVersionConversion
+    private lateinit var transactions: TransactionTemplate
 
     // Every event this capture reads is logged by the class's own EndpointVersionConversion, inside run() or
-    // logPrecondition() called from a test method; TransactionTemplate runs each per-entity callback on that caller's
+    // logPrecondition() called from a test method; TransactionTemplate runs the attempt's callback on that caller's
     // thread, no other class in this module builds the conversion, and test forks are separate JVMs.
     // raw-list-appender: synchronous — the conversion logs only on the test thread that calls it
     private val logs = ListAppender<ILoggingEvent>()
@@ -55,14 +58,8 @@ class EndpointVersionConversionIntegrationTest {
         jdbc = NamedParameterJdbcTemplate(dataSource)
         versions = PublishedEndpointVersionRepository(jdbc)
         registry = EndpointRegistry(PublishedEndpointRepository(jdbc))
-        conversion =
-            EndpointVersionConversion(
-                jdbc,
-                versions,
-                registry,
-                TransactionTemplate(DataSourceTransactionManager(dataSource)),
-                MetadataWriterGuard.NONE,
-            )
+        conversion = EndpointVersionConversion(jdbc, versions, registry)
+        transactions = TransactionTemplate(DataSourceTransactionManager(dataSource))
     }
 
     @BeforeEach
@@ -92,7 +89,7 @@ class EndpointVersionConversionIntegrationTest {
         val disabled = legacyApi("/acme/v1/rides-off", pipeline, timeout = 30, description = "", enabled = false)
         val warmed = registry.matcher()
 
-        val report = conversion.run()
+        val report = runOnce()
 
         report.converted shouldContainExactly
             listOf(
@@ -123,8 +120,7 @@ class EndpointVersionConversionIntegrationTest {
         val pipeline = pipeline("acme/rides/draft_only", current = 2, PipelineVersionStatus.RELEASED, PipelineVersionStatus.DRAFT)
         val api = legacyApi("/acme/v1/drafty", pipeline)
 
-        conversion
-            .run()
+        runOnce()
             .converted
             .single()
             .status shouldBe PipelineVersionStatus.DRAFT
@@ -149,15 +145,15 @@ class EndpointVersionConversionIntegrationTest {
         val b = legacyApi("/acme/z/two", noVersions)
         val c = legacyApi("/acme/z/three", foreign)
 
-        val refused = shouldThrow<ConversionRefusedException> { conversion.run() }
+        // E.0 is the runner's first phase: it reads every family's list and refuses before any family writes.
+        conversion.logPrecondition() shouldBe 3
 
-        refused.refusals shouldContainExactly
+        conversion.precondition() shouldContainExactly
             listOf(
                 ConversionRefusal(a, "/acme/z/one", "acme/z/no_current", ConversionRefusal.Reason.NO_CURRENT),
                 ConversionRefusal(c, "/acme/z/three", foreign.toString(), ConversionRefusal.Reason.MISSING_PIPELINE),
                 ConversionRefusal(b, "/acme/z/two", "acme/z/no_versions", ConversionRefusal.Reason.NO_VERSIONS),
             )
-        refused.message.shouldNotBeNull() shouldContain ConversionRefusedException.OPERATOR_FIX
         count("SELECT COUNT(*) FROM published_endpoint_versions") shouldBe 0
         count("SELECT COUNT(*) FROM published_endpoints WHERE current_version IS NOT NULL") shouldBe 0
         logs.list.filter { it.level == Level.ERROR }.map { it.formattedMessage } shouldContainExactly
@@ -181,11 +177,11 @@ class EndpointVersionConversionIntegrationTest {
             "UPDATE published_endpoint_versions SET status = 'DISCARDED', discarded_at = NOW(), discarded_by = :u WHERE endpoint_id = :id",
             mapOf("id" to native, "u" to userId),
         )
-        conversion.run().converted.map { it.path } shouldContainExactly listOf("/acme/v1/legacy")
+        runOnce().converted.map { it.path } shouldContainExactly listOf("/acme/v1/legacy")
         val before = snapshot()
         logs.list.clear()
 
-        conversion.run().converted.shouldBeEmpty()
+        runOnce().converted.shouldBeEmpty()
 
         snapshot() shouldBe before
         pointer(native) shouldBe null
@@ -193,7 +189,79 @@ class EndpointVersionConversionIntegrationTest {
         reportLines() shouldContainExactly listOf("event=endpoint.conversion.summary converted=0 released=0 draft=0")
     }
 
+    @Test
+    fun `a CURRENT lost after the plan refuses under the locks, logs the existing line, and the transaction keeps nothing`() {
+        val first = pipeline("acme/a/first", current = 1, PipelineVersionStatus.RELEASED)
+        val later = pipeline("acme/z/later", current = 1, PipelineVersionStatus.RELEASED)
+        legacyApi("/acme/a/first", first)
+        val refusedApi = legacyApi("/acme/z/later", later)
+        conversion.logPrecondition() shouldBe 0
+        logs.list.clear()
+
+        val refused =
+            shouldThrow<ConversionRefusedException> {
+                transactions.executeWithoutResult {
+                    val attempt = conversion.plan()
+                    attempt.lockEntities()
+                    // Between the plan and the locked re-read, the later API's pipeline loses its CURRENT.
+                    jdbc.update("UPDATE pipelines SET current_version = NULL WHERE id = :id", mapOf("id" to later))
+                    attempt.convert(attempt.workspaces)
+                }
+            }
+
+        refused.refusals shouldContainExactly
+            listOf(ConversionRefusal(refusedApi, "/acme/z/later", "acme/z/later", ConversionRefusal.Reason.NO_CURRENT))
+        refused.message.shouldNotBeNull() shouldContain ConversionRefusedException.OPERATOR_FIX
+        withClue("the first API was written inside the transaction, which rolled back with the refusal") {
+            count("SELECT COUNT(*) FROM published_endpoint_versions") shouldBe 0
+        }
+        logs.list.map { it.formattedMessage } shouldContainExactly
+            listOf(
+                "event=endpoint.conversion.refused kind=api id=$refusedApi path=/acme/z/later pipeline=acme/z/later reason=no_current",
+                "event=endpoint.conversion.refused_summary refused=1 fix=\"${ConversionRefusedException.OPERATOR_FIX}\"",
+            )
+    }
+
+    @Test
+    fun `a candidate outside the guarded workspaces or the locked rows is a conflict, and nothing is written or reported`() {
+        val pipeline = pipeline("acme/rides/conflict", current = 1, PipelineVersionStatus.RELEASED)
+        legacyApi("/acme/v1/planned", pipeline)
+
+        shouldThrow<EndpointConversionConflict> {
+            transactions.executeWithoutResult {
+                val attempt = conversion.plan()
+                attempt.lockEntities()
+                // A legacy row appears after the entity locks: the attempt must not write a row it did not lock.
+                legacyApi("/acme/v1/late", pipeline)
+                attempt.convert(attempt.workspaces)
+            }
+        }
+        shouldThrow<EndpointConversionConflict> {
+            transactions.executeWithoutResult {
+                val attempt = conversion.plan()
+                attempt.lockEntities()
+                attempt.convert(emptySet())
+            }
+        }
+
+        count("SELECT COUNT(*) FROM published_endpoint_versions") shouldBe 0
+        reportLines().shouldBeEmpty()
+    }
+
     // ------------------------------------------------------------------ fixtures
+
+    /** One attempt as the runner drives it — plan, entity locks, convert in ONE transaction — then its effects. */
+    private fun runOnce(): ConversionReport {
+        val outcome =
+            transactions
+                .execute {
+                    val attempt = conversion.plan()
+                    attempt.lockEntities()
+                    attempt.convert(attempt.workspaces)
+                }.shouldNotBeNull()
+        outcome.publish()
+        return outcome.report
+    }
 
     private fun workspace(id: UUID) =
         jdbc.update(
