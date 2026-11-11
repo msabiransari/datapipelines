@@ -1,6 +1,6 @@
 # Datasources Specification
 
-**Status:** v2.70 (frozen contract — additive-only changes after this point)
+**Status:** v2.71 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
 **Last updated:** 2026-11-11
@@ -53,9 +53,11 @@ This spec defines:
     "secret": "..."                        // write-only; never returned in GET
   },
   "query_timeout_seconds": 60,
-  "global": false,                         // OPTIONAL (workspaces D8) — super-admin-only; true = an
-                                           // INSTANCE datasource (owner_workspace_id NULL),
-                                           // visible only where a super admin grants it
+  "global": false,                         // OPTIONAL (workspaces D8) — true requires super admin
+                                           // and creates an INSTANCE datasource (owner_workspace_id
+                                           // NULL), visible only where granted; false is accepted
+                                           // on create below super admin (either value on update
+                                           // requires super admin)
   "workspace": "team-etl",                 // OPTIONAL (workspaces D8) — the OWNING workspace, one the
                                            // caller can access; default = the ACTIVE workspace
   "readonly": true,                        // OPTIONAL (§5.7) — forbids the three write-shaped uses
@@ -1856,7 +1858,8 @@ fixture) get their Testcontainers twin.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-11 | v2.70 | #896 docs: ownership and grants as they are since V23 | **Text only, no wire change.** §3.3's Visibility paragraph says what the repository's `GRANTED_PREDICATE` reads: exactly the datasources GRANTED to the active workspace, nothing by default — not "bound datasources plus all global ones"; owning is not seeing (a workspace-owned registration is granted to its owner, an instance datasource to nobody until a super admin grants it), and a super admin's inventory access is the grants surface. The §3.1 example comments, the §3.2 `workspace` field and the §3.3 `global`/`workspace`/`readonly` rows say what the surviving `global` wire flag means since V23 (an INSTANCE datasource, owned by no workspace) and that its write and every mutation of an instance datasource are super-admin-only; the same correction in §5.7 (`readonly`), §6.2 (the delete dialog), §8A.1 (`global: true` = `owner_workspace_id` NULL, granted to no workspace; `demo` gets its grants from the seeder), §8C (lake-table registry writes) and §8C.10 (the managed row is an instance datasource). |
+| 2026-11-11 | v2.71 | #896 review F2 | **§3.1 example and v2.70 summary:** `global: false` is accepted on create below super admin; only `true` on create and either value on update require super admin. The example now agrees with §3.3 and `DatasourceWorkspaceRules`. |
+| 2026-11-11 | v2.70 | #896 docs: ownership and grants as they are since V23 | **Text only, no wire change.** §3.3's Visibility paragraph says what the repository's `GRANTED_PREDICATE` reads: exactly the datasources GRANTED to the active workspace, nothing by default — not "bound datasources plus all global ones"; owning is not seeing (a workspace-owned registration is granted to its owner, an instance datasource to nobody until a super admin grants it), and a super admin's inventory access is the grants surface. The §3.1 example comments, the §3.2 `workspace` field and the §3.3 `global`/`workspace`/`readonly` rows say what the surviving `global` wire flag means since V23 (an INSTANCE datasource, owned by no workspace) and that setting it true on create, either value on update, and every mutation of an instance datasource are super-admin-only; the same correction in §5.7 (`readonly`), §6.2 (the delete dialog), §8A.1 (`global: true` = `owner_workspace_id` NULL, granted to no workspace; `demo` gets its grants from the seeder), §8C (lake-table registry writes) and §8C.10 (the managed row is an instance datasource). |
 | 2026-11-11 | v2.69 | #874 G3 datasource identity | **§3.3 gains the two internal fields `incarnation_id` and `generation`** (V59), never on the wire. **New §11.2 identity across delete and recreation**: the name stays the key everywhere; the incarnation is kept by updates and soft delete and new on a same-name recreation; the generation advances by one inside the guarded section for a definition update, a changed managed re-sync, a credential change, a soft delete and a grant or revoke that changed a row, and never for a connection test; neither enters a wire, a log, promotion or release consent (record erratum (7)); the dependency graph folds both into its internal node fingerprint. The owner's ruling (b) — no restore and no hard delete action — is recorded there. |
 | 2026-11-10 | v2.68 | #841 R4 freshness repair budget | §8C.10: the freshness tick's grant repair takes the datasource's writer lock (#841 G0) and its key wait, workspace-row waits and `INSERT` share ONE 5 s budget (busy `55P03` or cancelled `57014`, rolled back, repaired next tick) instead of a full bound each; every statement of the repair carries the 10 s socket bound. No new key; the 5 s bound is unchanged. |
 | 2026-11-08 | v2.67 | #867 listing enrichment bounds | §8C.10: the listings' managed enrichment is bounded outside a metadata transaction (5 s statement, 10 s socket, about 15 s against a server that never answers) and keeps the transaction's own connection and policy inside one (release, import, promotion). The generation build's bound, the retire ceiling and the close deadline are unchanged; no new key. |
