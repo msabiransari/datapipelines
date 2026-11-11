@@ -3,13 +3,15 @@ package co.datapipelines.web.datasources
 import co.datapipelines.application.datasources.DatasourceCreateService
 import co.datapipelines.application.datasources.DatasourcePayloadBinder
 import co.datapipelines.application.datasources.DatasourceUpdateService
+import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
-import co.datapipelines.datasources.DeleteResult
+import co.datapipelines.datasources.DatasourceUsages
 import co.datapipelines.datasources.DialectAdapters
+import co.datapipelines.datasources.ReferenceVisibility
 import co.datapipelines.datasources.pooling.PoolSettings
 import co.datapipelines.datasources.visibleDialectProperties
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -220,7 +222,7 @@ class DatasourcesController(
             result.deleted -> {}
 
             result.errorCode == PipelineErrorCodes.Datasource.IN_USE -> {
-                throw inUse(name, result)
+                throw inUse(name, result.usagesVisibleTo(referenceVisibilityOf(principal)))
             }
 
             else -> {
@@ -235,23 +237,33 @@ class DatasourcesController(
      * and every `references` entry gains `kind` (`pipeline` or `parameter_set`). A parameter-set entry is
      * `{kind, parameter_set, parameter_set_version, version_status, path}`, the selector's `parameters[i].source.datasource`
      * path; `referencing_parameter_sets` lists the distinct sets. Pipeline entries first, then set entries, each in scan order.
+     *
+     * The delete refusal's details are scoped to the caller's workspaces ([referenceVisibilityOf]): the refusal fires
+     * whichever workspace holds a reference, and [usages] names only the ones the caller may read. When none is
+     * nameable the lists are empty and the message says only that the datasource is in use — the same body however
+     * many references lie outside, and in which workspaces. The message is built from the scoped view alone, so the
+     * handler's log line (it logs the message) is scoped too.
      */
     private fun inUse(
         name: String,
-        result: DeleteResult,
+        usages: DatasourceUsages,
     ): ApiException =
         ApiException(
             PipelineErrorCodes.Datasource.IN_USE,
-            "Datasource '$name' is referenced by ${result.referencingPipelines.size} pipeline(s) across ${result.references.size}" +
-                " node(s) and ${result.referencingParameterSets.size} parameter set(s) across ${result.parameterSetReferences.size}" +
-                " selector(s), including historical versions. Remove or repoint the referencing nodes and selectors before" +
-                " deleting it.",
+            if (usages.named) {
+                "Datasource '$name' is referenced by ${usages.referencingPipelines.size} pipeline(s) across ${usages.references.size}" +
+                    " node(s) and ${usages.referencingParameterSets.size} parameter set(s) across ${usages.parameterSetReferences.size}" +
+                    " selector(s), including historical versions. Remove or repoint the referencing nodes and selectors before" +
+                    " deleting it."
+            } else {
+                "Datasource '$name' is in use and cannot be deleted."
+            },
             mapOf(
                 "datasource_name" to name,
-                "referencing_pipelines" to result.referencingPipelines,
-                "referencing_parameter_sets" to result.referencingParameterSets,
+                "referencing_pipelines" to usages.referencingPipelines,
+                "referencing_parameter_sets" to usages.referencingParameterSets,
                 "references" to
-                    result.references.map {
+                    usages.references.map {
                         linkedMapOf(
                             "kind" to "pipeline",
                             "pipeline" to it.pipelineName,
@@ -260,7 +272,7 @@ class DatasourcesController(
                             "version_status" to it.versionStatus,
                         )
                     } +
-                    result.parameterSetReferences.map {
+                    usages.parameterSetReferences.map {
                         linkedMapOf(
                             "kind" to "parameter_set",
                             "parameter_set" to it.parameterSetName,
@@ -368,3 +380,15 @@ class DatasourcesController(
         const val MAX_ECHOED_VALUE_CHARS = 32
     }
 }
+
+/**
+ * Whose references a datasource-delete refusal may name, for the REST refusal and the UI's delete dialog alike (#873
+ * §F.3 e): a super admin reads every workspace; anyone else the workspace this request is authorized in — the one
+ * [AuthenticatedPrincipal.requireWorkspace] resolves, never a value the client supplied.
+ */
+internal fun referenceVisibilityOf(principal: AuthenticatedPrincipal): ReferenceVisibility =
+    if (principal.isSuperAdmin) {
+        ReferenceVisibility.Everything
+    } else {
+        ReferenceVisibility.Workspace(principal.requireWorkspace().id)
+    }

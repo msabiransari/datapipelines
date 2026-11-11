@@ -2,6 +2,7 @@ package co.datapipelines.datasources
 
 import co.datapipelines.typesystem.DatapipelinesException
 import java.time.Instant
+import java.util.UUID
 
 /**
  * Outcome of save-time validation (datasources.md §5.4, §9). Also the return type of
@@ -189,9 +190,12 @@ data class DatasourceTestOutcome(
  * [references] is the ANY-VERSION scan (061/T79, mirroring 040's template guard): one entry
  * per referencing NODE, carrying the pipeline version whose body holds the reference — a
  * released pipeline whose OLDER version pins the datasource is a real reference, because
- * pipeline versions are immutable and executable by explicit version. [referencingPipelines]
- * is that list's distinct pipeline names, derived rather than stored so the two can never
- * disagree.
+ * pipeline versions are immutable and executable by explicit version.
+ *
+ * The two lists are the LOCK's evidence: every workspace's references, so a datasource granted to another workspace
+ * stays protected. They are never rendered as they stand — a surface names them only through [usagesVisibleTo], which
+ * is why the distinct names live on [DatasourceUsages], not here (#873 §F.3 e: the delete refusal's details are scoped
+ * to the caller's workspaces).
  */
 data class DeleteResult(
     val deleted: Boolean,
@@ -201,9 +205,65 @@ data class DeleteResult(
     /** #873 §F.3 e — the parameter-set selectors that lock the name, one per selector occurrence, in scan order. */
     val parameterSetReferences: List<ParameterSetDatasourceReference> = emptyList(),
 ) {
-    /** The blocking pipelines, distinct, in scan order — what a message counts and names. */
+    /** The refusal's evidence as [visibility] may see it; [DatasourceUsages.inUse] still counts every workspace. */
+    fun usagesVisibleTo(visibility: ReferenceVisibility): DatasourceUsages =
+        DatasourceUsages.of(references, parameterSetReferences, visibility)
+}
+
+/**
+ * Whose stored references a datasource-delete refusal may NAME (#873 §F.3 e; record §12 "missing versus inaccessible
+ * facts remain indistinguishable"). The surface resolves it from the authenticated caller — never from a request value:
+ * a super admin reads every workspace ([Everything]); anyone else reads the workspace the request is authorized in
+ * ([Workspace]).
+ */
+sealed interface ReferenceVisibility {
+    /** True when a reference held in [workspaceId] may be named to this caller. */
+    fun admits(workspaceId: UUID): Boolean
+
+    /** A super admin: every workspace's references are named. */
+    data object Everything : ReferenceVisibility {
+        override fun admits(workspaceId: UUID): Boolean = true
+    }
+
+    /** A workspace-scoped caller: only references held in [id] are named. */
+    data class Workspace(
+        val id: UUID,
+    ) : ReferenceVisibility {
+        override fun admits(workspaceId: UUID): Boolean = workspaceId == id
+    }
+}
+
+/**
+ * The in-use evidence one caller may see (#873 §F.3 e). [inUse] is the LOCK — true when ANY workspace's stored pipeline
+ * or parameter-set version references the name, so the refusal fires either way; [references] and
+ * [parameterSetReferences] keep only what [ReferenceVisibility.admits], in scan order. A reference outside the caller's
+ * scope contributes no name, id, link, count or workspace: two different outside populations yield equal instances.
+ */
+data class DatasourceUsages(
+    val inUse: Boolean,
+    val references: List<DatasourceReference>,
+    val parameterSetReferences: List<ParameterSetDatasourceReference>,
+) {
+    /** The named blocking pipelines, distinct, in scan order — what a message counts and names. */
     val referencingPipelines: List<String> get() = references.map { it.pipelineName }.distinct()
 
-    /** The blocking parameter sets, distinct, in scan order. */
+    /** The named blocking parameter sets, distinct, in scan order. */
     val referencingParameterSets: List<String> get() = parameterSetReferences.map { it.parameterSetName }.distinct()
+
+    /** True when the caller may be told which references block the delete — false when every one lies outside its scope. */
+    val named: Boolean get() = references.isNotEmpty() || parameterSetReferences.isNotEmpty()
+
+    companion object {
+        /** Scopes the any-version scan's two lists to [visibility]; the lock bit is computed BEFORE the filter. */
+        fun of(
+            references: List<DatasourceReference>,
+            parameterSetReferences: List<ParameterSetDatasourceReference>,
+            visibility: ReferenceVisibility,
+        ): DatasourceUsages =
+            DatasourceUsages(
+                inUse = references.isNotEmpty() || parameterSetReferences.isNotEmpty(),
+                references = references.filter { visibility.admits(it.workspaceId) },
+                parameterSetReferences = parameterSetReferences.filter { visibility.admits(it.workspaceId) },
+            )
+    }
 }

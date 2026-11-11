@@ -404,8 +404,8 @@ class DatasourcesControllerTest {
                 errorCode = PipelineErrorCodes.Datasource.IN_USE,
                 references =
                     listOf(
-                        DatasourceReference("monthly_revenue", 1, "RELEASED", "extract"),
-                        DatasourceReference("monthly_revenue", 2, "RELEASED", "load"),
+                        DatasourceReference("monthly_revenue", 1, "RELEASED", "extract", workspaceId),
+                        DatasourceReference("monthly_revenue", 2, "RELEASED", "load", workspaceId),
                     ),
             )
         val inUse = shouldThrow<ApiException> { controller.delete("busy") }
@@ -435,11 +435,11 @@ class DatasourcesControllerTest {
                 deleted = false,
                 name = "busy",
                 errorCode = PipelineErrorCodes.Datasource.IN_USE,
-                references = listOf(DatasourceReference("monthly_revenue", 1, "RELEASED", "extract")),
+                references = listOf(DatasourceReference("monthly_revenue", 1, "RELEASED", "extract", workspaceId)),
                 parameterSetReferences =
                     listOf(
-                        ParameterSetDatasourceReference("acme/filters", 3, "DISCARDED", "parameters[0].source.datasource"),
-                        ParameterSetDatasourceReference("acme/filters", 2, "RELEASED", "parameters[1].source.datasource"),
+                        ParameterSetDatasourceReference("acme/filters", 3, "DISCARDED", "parameters[0].source.datasource", workspaceId),
+                        ParameterSetDatasourceReference("acme/filters", 2, "RELEASED", "parameters[1].source.datasource", workspaceId),
                     ),
             )
 

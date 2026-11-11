@@ -66,6 +66,8 @@ class DatasourceReferencesWiringTest {
         val referencing = references.referencesTo("bound")
 
         referencing.map { it.pipelineName } shouldBe listOf("acme-report", "globex-report")
+        // #873 §F.3 e: each reference carries the workspace it was found in — the evidence a refusal is scoped by.
+        referencing.map { it.workspaceId } shouldBe listOf(wsA.id, wsB.id)
     }
 
     /**
@@ -80,7 +82,7 @@ class DatasourceReferencesWiringTest {
             listOf(DatasourceRef(UUID.randomUUID(), "monthly_revenue", 1, PipelineVersionStatus.RELEASED, "extract"))
 
         references.referencesTo("retired") shouldBe
-            listOf(DatasourceReference("monthly_revenue", 1, "RELEASED", "extract"))
+            listOf(DatasourceReference("monthly_revenue", 1, "RELEASED", "extract", wsA.id))
     }
 
     @Test
@@ -127,8 +129,8 @@ class DatasourceReferencesWiringTest {
 
         references.parameterSetReferencesTo("warehouse") shouldBe
             listOf(
-                ParameterSetDatasourceReference("acme/filters", 2, "DISCARDED", "parameters[1].source.datasource"),
-                ParameterSetDatasourceReference("globex/filters", 1, "RELEASED", "parameters[0].source.datasource"),
+                ParameterSetDatasourceReference("acme/filters", 2, "DISCARDED", "parameters[1].source.datasource", wsA.id),
+                ParameterSetDatasourceReference("globex/filters", 1, "RELEASED", "parameters[0].source.datasource", wsB.id),
             )
         verify(exactly = 1) { sets.findAnyVersionDatasourceRefs(wsA.id, "warehouse") }
         verify(exactly = 1) { sets.findAnyVersionDatasourceRefs(wsB.id, "warehouse") }

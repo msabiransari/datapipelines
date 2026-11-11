@@ -511,14 +511,15 @@ class DatasourcePartialControllerTest {
         references =
             DatasourceReferences {
                 listOf(
-                    DatasourceReference("sales_daily", 3, "RELEASED", "extract"),
-                    DatasourceReference("sales_daily", 4, "DRAFT", "extract"),
-                    DatasourceReference("ops_hourly", 1, "RELEASED", "load"),
+                    DatasourceReference("sales_daily", 3, "RELEASED", "extract", workspaceId),
+                    DatasourceReference("sales_daily", 4, "DRAFT", "extract", workspaceId),
+                    DatasourceReference("ops_hourly", 1, "RELEASED", "load", workspaceId),
                 )
             }
 
         controller.deleteDialog(model, "pg1") shouldBe "partials/datasource-delete"
 
+        model["inUse"] shouldBe true
         (model["usages"] as List<*>).size shouldBe 3
         model["usedByPipelines"] shouldBe listOf("sales_daily", "ops_hourly")
         model["forbidden"] shouldBe null
@@ -534,13 +535,14 @@ class DatasourcePartialControllerTest {
 
                 override fun parameterSetReferencesTo(datasourceName: String) =
                     listOf(
-                        ParameterSetDatasourceReference("acme/filters", 2, "DISCARDED", "parameters[0].source.datasource"),
-                        ParameterSetDatasourceReference("acme/filters", 1, "RELEASED", "parameters[0].source.datasource"),
+                        ParameterSetDatasourceReference("acme/filters", 2, "DISCARDED", "parameters[0].source.datasource", workspaceId),
+                        ParameterSetDatasourceReference("acme/filters", 1, "RELEASED", "parameters[0].source.datasource", workspaceId),
                     )
             }
 
         controller.deleteDialog(model, "pg1")
 
+        model["inUse"] shouldBe true
         (model["usages"] as List<*>).size shouldBe 0
         (model["setUsages"] as List<*>).size shouldBe 2
         model["usedBySets"] shouldBe listOf("acme/filters")
@@ -552,6 +554,7 @@ class DatasourcePartialControllerTest {
 
         controller.deleteDialog(model, "pg1")
 
+        model["inUse"] shouldBe false
         (model["usages"] as List<*>).size shouldBe 0
         (model["setUsages"] as List<*>).size shouldBe 0
         model["forbidden"] shouldBe null
@@ -598,7 +601,7 @@ class DatasourcePartialControllerTest {
                 deleted = false,
                 name = "pg1",
                 errorCode = "datasource.in_use",
-                references = listOf(DatasourceReference("sales_daily", 3, "RELEASED", "extract")),
+                references = listOf(DatasourceReference("sales_daily", 3, "RELEASED", "extract", workspaceId)),
             )
 
         val response = controller.delete(model, "pg1") as ModelAndView
@@ -618,7 +621,7 @@ class DatasourcePartialControllerTest {
                 name = "pg1",
                 errorCode = "datasource.in_use",
                 parameterSetReferences =
-                    listOf(ParameterSetDatasourceReference("acme/filters", 2, "DISCARDED", "parameters[0].source.datasource")),
+                    listOf(ParameterSetDatasourceReference("acme/filters", 2, "DISCARDED", "parameters[0].source.datasource", workspaceId)),
             )
 
         val response = controller.delete(model, "pg1") as ModelAndView

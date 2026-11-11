@@ -50,7 +50,13 @@ import java.util.UUID
  * 6. the production planner's `prerequisites` lists `warehouse` once — two edges reach it — with its `readonly` flag, and
  *    the plan's `tree_hash` is the artifact-only oracle's;
  * 7. the plan wire's absent row and other-workspace row are the identical `{kind, name, available:false, readonly:null}`
- *    and the plan is blocked by it.
+ *    and the plan is blocked by it;
+ * 8. the race window (round 4 ruling 1, the third leg): a datasource that disappears AFTER a flipping holder's native
+ *    validation passed and BEFORE the guarded section — forced open by holding the workspace row the guard locks — is
+ *    refused by the prerequisite check with (c)'s 409, absent and other-workspace alike, both paths, nothing flipped;
+ * 9. the delete refusal's details are scoped to the caller's workspaces (round 4 ruling 2): a workspace admin is told
+ *    only about this workspace's references, the same body whatever lies outside, and a super admin about all of them —
+ *    the refusal holding every time. Moving a set or pipeline to the other workspace is a SQL plant (one column).
  */
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @SpringBootTest(classes = [DatapipelinesApplication::class], webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -219,6 +225,162 @@ class DatasourceEdgesE2eTest {
         (wire["nodes"] as List<Map<String, Any?>>).size shouldBe fx.nodeIds(board, edges).size
         val released = fx.releaseWithPlan(board, edges)
         withClue(released.asString().take(EXCERPT)) { released.statusCode shouldBe OK }
+    }
+
+    @Test
+    @Order(7)
+    fun `8 - a datasource gone between native prepare and the guard refuses with the prerequisite shape, both paths`() {
+        val fx = fx(DS_RACE)
+        // Flipping holders: DRAFT pipelines whose native §12 revalidation passes while the datasource is still there.
+        val (planned, plannedEdges) = pipeline(fx, "test/ds873/race/planned")
+        val (compatible, compatibleEdges) = pipeline(fx, "test/ds873/race/compatible")
+        val drafts = (plannedEdges + compatibleEdges).flatMap { listOf(it.from, it.to) }
+        val hold = WorkspaceRowHold(postgres.jdbcUrl, postgres.username, postgres.password)
+        val sends = listOf({ planRelease(fx, planned, plannedEdges, selectAll = true) }, { releaseLegacy(fx, compatible) })
+
+        fun raced(
+            disappear: () -> Unit,
+            reappear: () -> Unit,
+        ) = sends.map { send ->
+            val audit = lastAuditId()
+            val response = hold.around(WORKSPACE_ID, send, disappear)
+            reappear()
+            withClue(response.asString().take(EXCERPT)) { response.statusCode shouldBe CONFLICT }
+            withClue("no audit row for a refusal") { releasedEventsAfter(audit) shouldBe emptyList() }
+            val error = response.jsonPath().getMap<String, Any?>("error")
+            mapOf("code" to error["code"], "message" to error["message"], "details" to error["details"])
+        }
+
+        val absent = raced({ softDelete(DS_RACE) }, { execute("UPDATE datasources SET is_deleted = FALSE WHERE name = ?", DS_RACE) })
+        val theirs =
+            raced(
+                { moveGrant(DS_RACE, from = WORKSPACE_ID, to = OTHER_WORKSPACE_ID) },
+                { moveGrant(DS_RACE, from = OTHER_WORKSPACE_ID, to = WORKSPACE_ID) },
+            )
+
+        absent.forEach { refusal ->
+            refusal["code"] shouldBe "pipeline.release.dependency_not_released"
+            @Suppress("UNCHECKED_CAST")
+            (refusal["details"] as Map<String, Any?>)["blockers"] shouldBe
+                listOf(mapOf("kind" to "datasource", "name" to DS_RACE, "reason" to "unavailable"))
+        }
+        withClue("other-workspace-only = absent inside the window, deep-compared, both paths") { theirs shouldBe absent }
+        withClue("nothing flipped") { drafts.map { fx.row(it).status }.toSet() shouldBe setOf("DRAFT") }
+        withClue("non-vacuity: with the datasource left alone the same two releases APPLY") {
+            sends.forEach { send -> send().statusCode shouldBe OK }
+            listOf(planned, compatible).map { fx.row(it).status } shouldBe listOf("RELEASED", "RELEASED")
+        }
+    }
+
+    @Test
+    @Order(8)
+    fun `9 - the delete refusal's details are scoped to the caller's workspaces`() {
+        val fx = fx(DS_SCOPE)
+        execute(GRANT, DS_SCOPE, OTHER_WORKSPACE_ID, ADMIN_ID)
+        val selector = fx.sqlTemplate("test/ds873/scope/selector.sql", FamilyRootsFixture.SELECTOR_BODY)
+        val ours = fx.parameterSet("test/ds873/scope/ours", selector)
+
+        val onlyOurs = scopedRefusal()
+        withClue("only this workspace's set") { onlyOurs shouldBe ourRefusal(ours.name) }
+
+        moveToOther("parameter_sets", fx.parameterSet("test/ds873/scope/theirs_one", selector).name)
+        val withOneOutside = scopedRefusal()
+        moveToOther("parameter_sets", ours.name)
+        val onlyOutsideFew = scopedRefusal()
+        moveBack("parameter_sets", ours.name)
+
+        moveToOther("parameter_sets", fx.parameterSet("test/ds873/scope/theirs_two", selector).name)
+        moveToOther("pipelines", pipeline(fx, "test/ds873/scope/theirs_pipeline").first.name)
+        val withThreeOutside = scopedRefusal()
+        moveToOther("parameter_sets", ours.name)
+        val onlyOutsideMany = scopedRefusal()
+
+        withClue("ours and outside references: only ours named, whatever lies outside") {
+            withOneOutside shouldBe onlyOurs
+            withThreeOutside shouldBe onlyOurs
+        }
+        withClue("only outside references: refused, nothing named, the same body for one and for three") {
+            onlyOutsideFew shouldBe
+                mapOf(
+                    "code" to "datasource.in_use",
+                    "message" to "Datasource '$DS_SCOPE' is in use and cannot be deleted.",
+                    "details" to
+                        mapOf(
+                            "datasource_name" to DS_SCOPE,
+                            "referencing_pipelines" to emptyList<String>(),
+                            "referencing_parameter_sets" to emptyList<String>(),
+                            "references" to emptyList<Any>(),
+                        ),
+                )
+            onlyOutsideMany shouldBe onlyOutsideFew
+        }
+        withClue("a super admin is told about every workspace's references") {
+            val all = delete(DS_SCOPE)
+            withClue(all.asString().take(EXCERPT)) { all.statusCode shouldBe CONFLICT }
+            all.jsonPath().getList<String>("error.details.referencing_pipelines") shouldBe listOf("test/ds873/scope/theirs_pipeline")
+            all.jsonPath().getList<String>("error.details.referencing_parameter_sets") shouldBe
+                listOf("test/ds873/scope/ours", "test/ds873/scope/theirs_one", "test/ds873/scope/theirs_two")
+        }
+    }
+
+    /** The workspace admin's (not a super admin) delete of [DS_SCOPE]: refused every time, as `{code, message, details}`. */
+    private fun scopedRefusal(): Map<String, Any?> {
+        val response = given().port(port).asSession(MEMBER_ADMIN_SESSION).delete("/api/v1/datasources/$DS_SCOPE")
+        withClue(response.asString().take(EXCERPT)) { response.statusCode shouldBe CONFLICT }
+        val error = response.jsonPath().getMap<String, Any?>("error")
+        return mapOf("code" to error["code"], "message" to error["message"], "details" to error["details"])
+    }
+
+    private fun ourRefusal(set: String) =
+        mapOf(
+            "code" to "datasource.in_use",
+            "message" to
+                "Datasource '$DS_SCOPE' is referenced by 0 pipeline(s) across 0 node(s) and 1 parameter set(s) across 1 selector(s)," +
+                " including historical versions. Remove or repoint the referencing nodes and selectors before deleting it.",
+            "details" to
+                mapOf(
+                    "datasource_name" to DS_SCOPE,
+                    "referencing_pipelines" to emptyList<String>(),
+                    "referencing_parameter_sets" to listOf(set),
+                    "references" to
+                        listOf(
+                            mapOf(
+                                "kind" to "parameter_set",
+                                "parameter_set" to set,
+                                "parameter_set_version" to 1,
+                                "version_status" to "DRAFT",
+                                "path" to "parameters[0].source.datasource",
+                            ),
+                        ),
+                ),
+        )
+
+    /** The plant: the live entity [name] of [table] (`pipelines` or `parameter_sets`) now belongs to the other workspace. */
+    private fun moveToOther(
+        table: String,
+        name: String,
+    ) = moveEntity(table, name, from = WORKSPACE_ID, to = OTHER_WORKSPACE_ID)
+
+    private fun moveBack(
+        table: String,
+        name: String,
+    ) = moveEntity(table, name, from = OTHER_WORKSPACE_ID, to = WORKSPACE_ID)
+
+    private fun moveEntity(
+        table: String,
+        name: String,
+        from: String,
+        to: String,
+    ) {
+        require(table in setOf("pipelines", "parameter_sets")) { "a plant on a known table only" }
+        connect().use { c ->
+            c.prepareStatement("UPDATE $table SET workspace_id = ?::uuid WHERE workspace_id = ?::uuid AND name = ?").use { s ->
+                s.setString(1, to)
+                s.setString(2, from)
+                s.setString(3, name)
+                check(s.executeUpdate() == 1) { "$table $name moved" }
+            }
+        }
     }
 
     // ---- product calls ----------------------------------------------------------------------------------------
@@ -502,7 +664,9 @@ class DatasourceEdgesE2eTest {
         private const val DS_GONE = "ds873-gone"
         private const val DS_LEGACY = "ds873-legacy"
         private const val DS_REPOINT = "ds873-repoint"
-        private val DATASOURCES = listOf(WAREHOUSE, DS_SET_ONLY, DS_FREE, DS_RECREATE, DS_GONE, DS_LEGACY, DS_REPOINT)
+        private const val DS_RACE = "ds873-race"
+        private const val DS_SCOPE = "ds873-scope"
+        private val DATASOURCES = listOf(WAREHOUSE, DS_SET_ONLY, DS_FREE, DS_RECREATE, DS_GONE, DS_LEGACY, DS_REPOINT, DS_RACE, DS_SCOPE)
         private const val LOCKED_SET = "test/ds873/locked/set"
         private val MAPPER = ObjectMapper()
         private const val GRANT =
@@ -517,6 +681,11 @@ class DatasourceEdgesE2eTest {
         private val JWT_SECRET = E2eSession.newSecret()
         private val ENCRYPTION_KEY = E2eSession.newSecret()
         private val SESSION get() = E2eSession.jwt(JWT_SECRET, ADMIN_ID, "e2e-873-ds@datapipelines.test", WORKSPACE)
+
+        /** A workspace admin of this workspace who is NOT a super admin — the caller the delete refusal is scoped for. */
+        private val MEMBER_ADMIN_ID: String = UUID.randomUUID().toString()
+        private val MEMBER_ADMIN_SESSION get() =
+            E2eSession.jwt(JWT_SECRET, MEMBER_ADMIN_ID, "e2e-873-ds-member@datapipelines.test", WORKSPACE)
 
         private val postgres get() = SharedE2e.postgres
         private val redis get() = SharedE2e.redis
@@ -541,6 +710,8 @@ class DatasourceEdgesE2eTest {
             registry.add("datapipelines.auth.oidc.providers[0].display-name") { "Test google" }
             registry.add("datapipelines.auth.base-url") { "http://localhost:8080" }
             registry.add("datapipelines.scheduler.enabled") { "false" }
+            // Case 9: a workspace admin manages its workspace's datasources (the D8 gate), so its delete reaches the refusal.
+            registry.add("datapipelines.workspaces.member-datasources-enabled") { "true" }
         }
 
         @JvmStatic
@@ -562,6 +733,15 @@ class DatasourceEdgesE2eTest {
                     statement.execute(
                         "INSERT INTO workspace_members (workspace_id, user_id, role)" +
                             " VALUES ('$WORKSPACE_ID', '$ADMIN_ID', 'workspace_admin')",
+                    )
+                    statement.execute(
+                        "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES" +
+                            " ('$MEMBER_ADMIN_ID', 'e2e-873-ds-member@datapipelines.test', 'E2E 873 member', 'test'," +
+                            " 'e2e-873-ds-member-sub', TRUE, FALSE)",
+                    )
+                    statement.execute(
+                        "INSERT INTO workspace_members (workspace_id, user_id, role)" +
+                            " VALUES ('$WORKSPACE_ID', '$MEMBER_ADMIN_ID', 'workspace_admin')",
                     )
                 }
             }

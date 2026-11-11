@@ -304,12 +304,17 @@ interface DatasourceRegistry {
  * `RELEASED` / `DISCARDED`); it is a String rather than the `pipeline-contract` enum because
  * `datasources` may depend on `typesystem` alone (module-structure §5.4) — the same layering
  * that makes [DatasourceReferences] an inverted port in the first place.
+ *
+ * [workspaceId] is the workspace the referencing pipeline lives in. The lock counts every workspace's references, but a
+ * refusal names only those its caller may read ([ReferenceVisibility], #873 §F.3 e): the field is how the scan's
+ * evidence is scoped, and it never reaches a wire.
  */
 data class DatasourceReference(
     val pipelineName: String,
     val pipelineVersion: Int,
     val versionStatus: String,
     val nodeId: String,
+    val workspaceId: UUID,
 )
 
 /**
@@ -318,13 +323,15 @@ data class DatasourceReference(
  * consent over it is its NAME; a set version — DRAFT, RELEASED or DISCARDED alike, because a version is restorable and its
  * selector re-runs against that name — keeps the name locked exactly as a pipeline version does.
  *
- * [versionStatus] is the set version's status as its wire string, for the layering reason [DatasourceReference] gives.
+ * [versionStatus] is the set version's status as its wire string, for the layering reason [DatasourceReference] gives;
+ * [workspaceId] is the set's workspace, for the scoping reason it gives.
  */
 data class ParameterSetDatasourceReference(
     val parameterSetName: String,
     val parameterSetVersion: Int,
     val versionStatus: String,
     val path: String,
+    val workspaceId: UUID,
 )
 
 /**
@@ -348,7 +355,7 @@ fun interface DatasourceReferences {
     /**
      * Every node of every stored version of every non-deleted pipeline that references
      * [datasourceName]; empty when none. One entry per referencing node, not per pipeline —
-     * [DeleteResult.referencingPipelines] distinct-ifies for the message.
+     * [DatasourceUsages.referencingPipelines] distinct-ifies for the message.
      */
     fun referencesTo(datasourceName: String): List<DatasourceReference>
 

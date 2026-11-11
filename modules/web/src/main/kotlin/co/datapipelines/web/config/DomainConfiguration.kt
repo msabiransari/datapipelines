@@ -332,6 +332,10 @@ class DomainConfiguration {
      * references saved while the datasource was global survive the re-bind. Reading the
      * row's binding here serves nothing anymore; the caller's workspace never mattered
      * (022 review F5) and the row's own binding no longer does either.
+     *
+     * Every reference carries the workspace it was found in. The LOCK counts all of them; a refusal NAMES only those its
+     * caller may read (`DatasourceUsages`, #873 §F.3 e — the delete refusal's details are scoped to the caller's
+     * workspaces).
      */
     @Bean
     fun datasourceReferences(
@@ -349,6 +353,7 @@ class DomainConfiguration {
                             pipelineVersion = ref.pipelineVersion,
                             versionStatus = ref.versionStatus.name,
                             nodeId = ref.nodeId,
+                            workspaceId = workspace.id,
                         )
                     }
                 }
@@ -361,6 +366,7 @@ class DomainConfiguration {
                             parameterSetVersion = ref.version,
                             versionStatus = ref.status.name,
                             path = ref.path,
+                            workspaceId = workspace.id,
                         )
                     }
                 }

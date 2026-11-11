@@ -1462,9 +1462,11 @@ Updates connection details. The credential secret is optional — omit `credenti
 DELETE /datasources/{name}
 ```
 
-Fails with `datasource.in_use` if any non-deleted pipeline references it **in any version it has ever stored** — DRAFT, RELEASED and DISCARDED alike ([Datasources §6.2](datasources.md#62-in-use-check-on-delete)). Pipeline versions are immutable and executable by explicit version, so a reference from a released v1 that a later v2 dropped is a real reference; the guard that read each pipeline's current version only let that delete through and failed v1's next execution at connect.
+Fails with `datasource.in_use` if any non-deleted pipeline or parameter set, in any workspace, references it **in any version it has ever stored** — DRAFT, RELEASED and DISCARDED alike ([Datasources §6.2](datasources.md#62-in-use-check-on-delete)); a parameter set references it through a selector's `parameters[i].source.datasource` (#873). Pipeline versions are immutable and executable by explicit version, so a reference from a released v1 that a later v2 dropped is a real reference; the guard that read each pipeline's current version only let that delete through and failed v1's next execution at connect.
 
-`details` carries `datasource_name`, `referencing_pipelines` (the distinct pipeline names) and `references` — one entry per referencing node, `{"pipeline", "node_id", "pipeline_version", "version_status"}` — the same shape `template.in_use` uses (§8.6), because the version is what tells the operator which body to go and edit.
+`details` carries `datasource_name`, `referencing_pipelines` (the distinct pipeline names), `referencing_parameter_sets` (the distinct set names, #873) and `references` — one entry per referencing node, `{"kind": "pipeline", "pipeline", "node_id", "pipeline_version", "version_status"}`, then one per referencing selector, `{"kind": "parameter_set", "parameter_set", "parameter_set_version", "version_status", "path"}` — the same shape `template.in_use` uses (§8.6), because the version is what tells the operator which body to go and edit.
+
+The delete refusal's details are scoped to the caller's workspaces (#873): a super admin's lists name every workspace's references; anyone else's name only those in the workspace the request acts in. The refusal still fires when only another workspace's bodies use the name — then the lists are empty and the message is `Datasource '<name>' is in use and cannot be deleted.`, identical however many references lie outside.
 
 D8-gated like update: deleting a global datasource requires admin; a member needs the `member-datasources-enabled` gate for a bound one.
 

@@ -820,6 +820,36 @@ Preconditions, evaluated server-side before the statement runs:
    remains the dashboard's import rule and the commit's strict re-validation: a dashboard never commits over a source
    that is not RELEASED.
 
+   **Datasources are prerequisites, never released (#873 §F, owner ruling 2026-11-08).** A pipeline node that reads or
+   writes a registered datasource (a DQL/DML/DDL source, a datasource output; never `tempdb`) and a parameter-set
+   selector that names one (`parameters[i].source.datasource`) reach that datasource in the release walk. A datasource
+   has no version and no release status, so consent over it is that the NAMED datasource exists:
+   - (a) *`tree_hash` is unchanged.* No datasource fact enters the canonical form; the closure a plan digests is the
+     artifact closure exactly as before, and the existing digests stay byte-identical.
+   - (b) *The plan lists them, never as nodes.* The plan carries a top-level `prerequisites` array, one row per distinct
+     name: `{kind: "datasource", name, available, readonly}`. It is never a checkbox, a version or a status, and
+     releasing never connects to the datasource. `readonly` is a boolean only when `available` is true; when the name
+     is unavailable it is `null` (unknown, never looked up). An unavailable name blocks the plan with the versionless
+     blocker `{kind: "datasource", name, reason: "unavailable"}`, after the node blockers and inside `max_blockers`.
+   - (c) *Apply re-checks the names.* Inside the guarded transaction, after the re-walk and before any permission
+     recheck or flip, every guarded entry (a pipeline or artifact root, on the plan and on the compatibility path)
+     resolves each name again. An unavailable one refuses `409 <root family>.release.dependency_not_released` with that
+     blocker, before anything flips. A node that FLIPS is refused earlier by its own native validation, outside the
+     transaction and still before any flip, exactly as before #873 — for a pipeline, `400
+     pipeline.validation.unknown_datasource`. The apply check answers for a datasource held by a closure member that
+     does not flip (a RELEASED child below a DRAFT root, a dashboard's RELEASED source) and for a datasource that
+     disappears between native preparation and the guarded section.
+   - (d) *Recreation keeps consent.* A datasource recreated under the same name, a credential or configuration change,
+     or a new generation does not invalidate a plan: the check compares nothing but the name's resolution.
+   - (e) *The name is locked.* A datasource cannot be deleted while any stored version — DRAFT, RELEASED or DISCARDED —
+     of a live pipeline or parameter set in ANY workspace names it (`409 datasource.in_use`), and there is no rename.
+     The refusal's details are scoped to the caller's workspaces: a super admin sees every reference; anyone else sees
+     only the references in the workspace they act in. A datasource in use only elsewhere is refused with no names, no
+     count and no links ([datasources §6.2](datasources.md#62-in-use-check-on-delete)).
+   - (f) *Absent and inaccessible are one outcome.* A name that does not exist and a name granted only to another
+     workspace give byte-identical plan rows and refusals; no owner workspace, count or metadata of a hidden
+     datasource appears. The name itself is echoed only because the caller wrote it into the body.
+
    **One transaction, strictly audited.** Every release — consent or none — runs in ONE metadata transaction:
    the workspace writer guard first (below), then the dependencies flip dependency-first, each at the hash the
    closure read, the pipeline last; one `*.version.released` audit row per actual flip is written in that same
