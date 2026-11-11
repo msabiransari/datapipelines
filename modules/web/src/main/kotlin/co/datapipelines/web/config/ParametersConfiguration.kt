@@ -95,6 +95,8 @@ class ParametersConfiguration {
         bounds: co.datapipelines.pipeline.release.ReleaseBounds,
         // #778 — the lake reference scanner, told of each RELEASED version inside its transaction (seam ruling 2026-11-02).
         observer: co.datapipelines.pipeline.release.ReleasedVersionObserver,
+        // #873 §C.1 — the shared release planner, read per release (it holds this service's participant: no cycle).
+        coordinator: org.springframework.beans.factory.ObjectProvider<co.datapipelines.web.release.ReleaseCoordinator>,
     ): ParameterSetService =
         ParameterSetService(
             repository,
@@ -110,6 +112,7 @@ class ParametersConfiguration {
             guard = guard,
             maxBlockers = bounds.maxBlockers,
             observer = observer,
+            coordination = co.datapipelines.web.release.ParameterSetReleaseParticipant.coordination { coordinator.getObject() },
         )
 
     /** #376 — the durable evaluation history's tables (V48), read by the History tab and the hourly housekeeping. */

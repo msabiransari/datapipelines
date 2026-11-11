@@ -698,6 +698,21 @@ class TemplateRepository(
             ) { rs, _ -> rs.getObject("id", UUID::class.java) }
             .singleOrNull()
 
+    /**
+     * The template name (its authored id) behind surrogate [entityUuid] in [workspaceId] — the inverse of [findEntityUuid],
+     * for a release root named by its entity id (#873 §C.1, `RootReleaseRequest`). Null when no such template is here.
+     */
+    fun findNameByEntityUuid(
+        workspaceId: UUID,
+        entityUuid: UUID,
+    ): String? =
+        jdbc
+            .query(
+                "SELECT name FROM templates WHERE workspace_id = :workspaceId AND id = :id",
+                mapOf("workspaceId" to workspaceId, "id" to entityUuid),
+            ) { rs, _ -> rs.getString("name") }
+            .singleOrNull()
+
     /** One version's lifecycle detail, or null when the template/version does not exist in the workspace. */
     fun findVersionDetail(
         workspaceId: UUID,

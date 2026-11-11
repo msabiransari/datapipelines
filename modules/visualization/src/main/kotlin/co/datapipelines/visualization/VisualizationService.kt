@@ -11,6 +11,7 @@ import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.pipeline.release.GuardedTransaction
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseMutationGuard
+import co.datapipelines.pipeline.release.ReleasePlanRequest
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.transaction.support.TransactionOperations
 import java.util.UUID
@@ -19,6 +20,28 @@ import java.util.UUID
 data class VisualizationReleased(
     val version: ArtifactVersion<VisualizationBody>,
     val templatesReleased: List<TemplateRef>,
+)
+
+/**
+ * The port [VisualizationService.release] delegates to when the assembling layer wires one (#873 §C.1; the
+ * `PipelineReleaseCoordination` mold): every visualization release — the REST route's and the dialog's — then runs
+ * through the shared release planner and its ONE metadata transaction. A directly constructed service leaves it unset.
+ */
+fun interface VisualizationReleaseCoordination {
+    fun release(request: ArtifactReleaseRequest): VisualizationReleased
+}
+
+/**
+ * A visualization or dashboard release as the surfaces ask for it (#873 §C.1): the legacy alias — the family's
+ * `release_pinned_templates` / `release_pinned_visualizations` — or a plan (record §6).
+ */
+data class ArtifactReleaseRequest(
+    val workspaceId: UUID,
+    val id: UUID,
+    val expectedHash: String,
+    val actor: UUID,
+    val releasePinned: Boolean = false,
+    val plan: ReleasePlanRequest? = null,
 )
 
 /**
@@ -65,6 +88,11 @@ class VisualizationService(
     newId: () -> UUID = UUID::randomUUID,
     /** #517 — the workspace writer guard; [ReleaseMutationGuard.NONE] in a directly constructed test. */
     private val guard: ReleaseMutationGuard = ReleaseMutationGuard.NONE,
+    /**
+     * #873 §C.1 — the shared release planner; when set, [release] delegates every request to it and the planner's
+     * participant calls [releaseTarget], [prepareRelease] and [commitRelease]. Null in a directly constructed test.
+     */
+    private val coordination: VisualizationReleaseCoordination? = null,
 ) {
     /** Repository-owned, lens-filtered navigation metadata only. */
     fun navigation(request: co.datapipelines.pipeline.NavigationRequest): List<co.datapipelines.pipeline.NavigationRow> =
@@ -120,15 +148,25 @@ class VisualizationService(
         }
     }
 
-    /** Release the DRAFT at [expectedHash] (see the class KDoc for the order of the checks). */
+    /**
+     * Release the DRAFT at [expectedHash] (see the class KDoc for the order of the checks). Since #873 a wired
+     * [coordination] owns the release after the authoring check: the alias consents to exactly the DRAFT transform
+     * template, a [plan] to its own selection; the native body is the directly constructed service's.
+     */
+    @Suppress("LongParameterList") // the request's fields
     fun release(
         workspaceId: UUID,
         id: UUID,
         expectedHash: String,
         actor: UUID,
         releasePinnedTemplates: Boolean = false,
+        plan: ReleasePlanRequest? = null,
     ): VisualizationReleased {
         lifecycle.requireAuthoring()
+        coordination?.let {
+            return it.release(ArtifactReleaseRequest(workspaceId, id, expectedHash, actor, releasePinnedTemplates, plan))
+        }
+        check(plan == null) { "a release plan needs the release coordinator, and none is wired" }
         val record = repository.findRecord(workspaceId, id) ?: throw lifecycle.notFound(id)
         val draft = repository.findDraft(workspaceId, id) ?: throw lifecycle.notDraft(id)
         val body = checkNotNull(repository.findVersion(workspaceId, id, draft.version)).body
@@ -150,6 +188,63 @@ class VisualizationService(
             )
         return VisualizationReleased(checkNotNull(repository.findVersion(workspaceId, id, released.first.version)), released.second)
     }
+
+    // ---- the release planner's seams (#873 §B.2) -------------------------------------------------------
+
+    /** The visualization's working DRAFT as a release names it — the record and the draft — or the native refusal. */
+    fun releaseTarget(
+        workspaceId: UUID,
+        id: UUID,
+    ): Pair<ArtifactRecord, ArtifactVersionDetail> {
+        val record = repository.findRecord(workspaceId, id) ?: throw lifecycle.notFound(id)
+        val draft = repository.findDraft(workspaceId, id) ?: throw lifecycle.notDraft(id)
+        return record to draft
+    }
+
+    /**
+     * The planner's PREPARE, outside every transaction (record §4.1 step 4): the DRAFT that is [version] at [expectedHash]
+     * must declare a test case (`release.tests_missing` / `no_cases`) and pass the rules against its pin as it is now;
+     * answers the evidence gate's [ReleaseCandidate]. Null when that DRAFT is no longer the planned one.
+     */
+    fun prepareRelease(
+        workspaceId: UUID,
+        id: UUID,
+        version: Int,
+        expectedHash: String,
+    ): ReleaseCandidate? {
+        val record = repository.findRecord(workspaceId, id) ?: return null
+        val draft = repository.findDraft(workspaceId, id)?.takeIf { it.version == version && it.bodyHash == expectedHash } ?: return null
+        val body = repository.findVersion(workspaceId, id, draft.version)?.body ?: return null
+        if (body.tests?.cases.isNullOrEmpty()) throw noCases(record.name)
+        validated(workspaceId, VisualizationDocument(record.name, body))
+        return ReleaseCandidate(id, record.name, draft.version, draft.bodyHash, body)
+    }
+
+    /**
+     * The planner's COMMIT, inside its guarded transaction (record §4.1 step 6; brief A12): the [ReleaseEvidence] verdict
+     * for [candidate] — every `tests_*` / `mechanical_failed` refusal with its reason; the mechanical re-run is the
+     * visualization's own script, never a customer probe, so it runs here as it did in the native transaction — then the
+     * one exact-hash flip. Null when no DRAFT matched [expectedHash] (the caller's refusal).
+     */
+    fun commitRelease(
+        workspaceId: UUID,
+        candidate: ReleaseCandidate,
+        expectedHash: String,
+        actor: UUID,
+    ): ArtifactVersion<VisualizationBody>? {
+        when (val verdict = evidence.verdict(workspaceId, candidate)) {
+            EvidenceVerdict.Pass -> Unit
+            is EvidenceVerdict.Refused -> throw DatapipelinesException(verdict.code, verdict.message, verdict.details)
+        }
+        val flipped = repository.releaseDraft(workspaceId, candidate.visualizationId, expectedHash, actor) ?: return null
+        return checkNotNull(repository.findVersion(workspaceId, candidate.visualizationId, flipped.version))
+    }
+
+    /** The native stale-hash refusal for [id] — the planner's answer when the root's `If-Match` no longer matches. */
+    fun staleRelease(
+        workspaceId: UUID,
+        id: UUID,
+    ): DatapipelinesException = lifecycle.staleBase(workspaceId, id)
 
     /** Purge the DRAFT at [expectedHash] — refused while a live dashboard version pins it. */
     fun purgeDraft(

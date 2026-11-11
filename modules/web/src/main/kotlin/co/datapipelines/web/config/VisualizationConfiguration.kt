@@ -134,6 +134,8 @@ class VisualizationConfiguration {
         transactionManager: PlatformTransactionManager,
         // #517 — every pin-affecting write under the workspace writer guard (release-dependencies §4.3).
         guard: ReleaseMutationGuard,
+        // #873 §C.1 — the shared release planner, read per release (it holds this service's participant: no cycle).
+        coordinator: org.springframework.beans.factory.ObjectProvider<co.datapipelines.web.release.ReleaseCoordinator>,
     ): VisualizationService =
         VisualizationService(
             repository,
@@ -145,6 +147,7 @@ class VisualizationConfiguration {
             evidence = evidence,
             transactions = TransactionTemplate(transactionManager) as TransactionOperations,
             guard = guard,
+            coordination = co.datapipelines.web.release.VisualizationReleaseParticipant.coordination { coordinator.getObject() },
         )
 
     @Bean
@@ -157,6 +160,8 @@ class VisualizationConfiguration {
         authoring: AuthoringGuard,
         transactionManager: PlatformTransactionManager,
         guard: ReleaseMutationGuard,
+        // #873 §C.1 — the shared release planner, read per release (it holds this service's participant: no cycle).
+        coordinator: org.springframework.beans.factory.ObjectProvider<co.datapipelines.web.release.ReleaseCoordinator>,
     ): DashboardService =
         DashboardService(
             repository,
@@ -166,6 +171,7 @@ class VisualizationConfiguration {
             authoring,
             transactions = TransactionTemplate(transactionManager) as TransactionOperations,
             guard = guard,
+            coordination = co.datapipelines.web.release.DashboardReleaseParticipant.coordination { coordinator.getObject() },
         )
 
     /**

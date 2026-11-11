@@ -75,5 +75,15 @@ class TemplateLifecycleConfiguration {
         usage: co.datapipelines.application.templates.TemplateUsage,
         // #517 — the workspace writer guard every lifecycle verb acquires first.
         guard: co.datapipelines.pipeline.release.ReleaseMutationGuard,
-    ): TemplateReleaseService = TemplateReleaseService(templates, validator, authoring, usage, guard)
+        // #873 §C.1 — the shared release planner, read per release (it holds this service's participant: no cycle).
+        coordinator: org.springframework.beans.factory.ObjectProvider<co.datapipelines.web.release.ReleaseCoordinator>,
+    ): TemplateReleaseService =
+        TemplateReleaseService(
+            templates,
+            validator,
+            authoring,
+            usage,
+            guard,
+            coordination = co.datapipelines.web.release.TemplateReleaseParticipant.coordination { coordinator.getObject() },
+        )
 }

@@ -6,6 +6,7 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseMutationGuard
+import co.datapipelines.pipeline.release.ReleasePlanRequest
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDraft
 import co.datapipelines.templates.TemplateRepository
@@ -14,6 +15,25 @@ import co.datapipelines.templates.TemplateVersionDetail
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
+
+/**
+ * The port [TemplateReleaseService.release] delegates to when the assembling layer wires one (#873 §C.1; the
+ * `PipelineReleaseCoordination` mold): every surface template release — the REST route's and the dialog's — then runs
+ * through the shared release planner, its import closure walked and its ONE metadata transaction.
+ */
+fun interface TemplateReleaseCoordination {
+    fun release(request: TemplateReleaseRequest): TemplateReleaseService.Released
+}
+
+/** A template release as the surfaces ask for it: the template's entity, its `If-Match`, and a plan (record §6). */
+data class TemplateReleaseRequest(
+    val workspaceId: UUID,
+    /** The template's surrogate id — the coordinator names every root by its entity. */
+    val entityId: UUID,
+    val expectedHash: String,
+    val actor: UUID,
+    val plan: ReleasePlanRequest? = null,
+)
 
 /**
  * Template release, purge, discard and restore (versioning §5.3/§5.4/§3.1, mirrored by §6;
@@ -53,6 +73,12 @@ open class TemplateReleaseService(
     private val usage: TemplateUsage,
     /** The workspace writer guard (#517); [ReleaseMutationGuard.NONE] in a directly constructed test. */
     private val guard: ReleaseMutationGuard = ReleaseMutationGuard.NONE,
+    /**
+     * #873 §C.1 — the shared release planner; when set, [release] hands every surface release to it (the template's
+     * import closure is the planner's walk), and the planner's participant flips through [releaseExact]. Null in a
+     * directly constructed test, which releases natively.
+     */
+    private val coordination: TemplateReleaseCoordination? = null,
 ) {
     private fun lockWorkspace(workspaceId: UUID) = guard.acquire(workspaceId, ReleaseFamily.TEMPLATE)
 
@@ -71,16 +97,60 @@ open class TemplateReleaseService(
      *
      * Transactional and guarded since #517: until then the flip was a bare statement outside any transaction. Inside
      * the pipeline coordinator's transaction it joins that one (the guard is already held; re-acquiring it is a no-op).
+     *
+     * Since #873 a wired [coordination] owns the surface release after the authoring check (record §4.1, §23.3): the
+     * template's DRAFT, missing or DISCARDED imports, at any depth, are the planner's blockers, and a [plan] may select the
+     * DRAFT ones. Without one the native flip below runs, the import closure unchecked (the directly constructed service).
      */
-    @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal the caller distinguishes
-    @Transactional("metadataTransactionManager")
     open fun release(
         workspaceId: UUID,
         id: String,
         expectedHash: String,
         actor: UUID,
+        plan: ReleasePlanRequest? = null,
     ): Released {
         // §5.5: release is an authoring action — a promotion receiver refuses it.
+        authoring.requireTemplateAuthoring()
+        coordination?.let {
+            val (entity, _) = releaseTarget(workspaceId, id)
+            return it.release(TemplateReleaseRequest(workspaceId, entity, expectedHash, actor, plan))
+        }
+        check(plan == null) { "a release plan needs the release coordinator, and none is wired" }
+        return flip(workspaceId, id, expectedHash, actor)
+    }
+
+    /**
+     * The template's DRAFT as a release root names it (#873 §C.1): its entity id and the draft's detail, or the native
+     * `template.version.not_draft` (a template that does not exist has no draft either, as [release] always answered).
+     */
+    open fun releaseTarget(
+        workspaceId: UUID,
+        id: String,
+    ): Pair<UUID, TemplateVersionDetail> {
+        val draft = templates.findDraftDetail(workspaceId, id) ?: throw notDraft(id)
+        val entity = templates.findEntityUuid(workspaceId, id) ?: throw notDraft(id)
+        return entity to draft
+    }
+
+    /** The template name behind entity [entityUuid], or the native `template.version.not_draft` (#873 §C.1). */
+    open fun releaseTargetName(
+        workspaceId: UUID,
+        entityUuid: UUID,
+    ): String = templates.findNameByEntityUuid(workspaceId, entityUuid) ?: throw notDraft(entityUuid.toString())
+
+    /**
+     * The native release's flip (versioning §5.3): the guard, the DRAFT re-validated exactly as a save would, the
+     * one-statement flip at [expectedHash]. [release]'s unwired body and every cascade leg ([releasePinned],
+     * [releaseExact]) run it; inside the coordinator's transaction it joins that one.
+     */
+    @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal the caller distinguishes
+    @Transactional("metadataTransactionManager")
+    open fun flip(
+        workspaceId: UUID,
+        id: String,
+        expectedHash: String,
+        actor: UUID,
+    ): Released {
         authoring.requireTemplateAuthoring()
         lockWorkspace(workspaceId)
 
@@ -156,7 +226,7 @@ open class TemplateReleaseService(
                     ),
             )
         }
-        return release(workspaceId, id, draft.bodyHash, actor)
+        return flip(workspaceId, id, draft.bodyHash, actor)
     }
 
     /**
@@ -176,7 +246,7 @@ open class TemplateReleaseService(
     ): Released {
         val draft = templates.findDraftDetail(workspaceId, id) ?: throw conflict()
         if (draft.version != version || draft.bodyHash != consentedHash) throw conflict()
-        return release(workspaceId, id, consentedHash, actor)
+        return flip(workspaceId, id, consentedHash, actor)
     }
 
     /**
