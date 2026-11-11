@@ -1,8 +1,6 @@
 package co.datapipelines.web.schedules
 
 import ch.qos.logback.classic.Logger
-import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineVersionDetail
@@ -12,6 +10,7 @@ import co.datapipelines.scheduler.ScheduleRepository
 import co.datapipelines.scheduler.ScheduleRun
 import co.datapipelines.scheduler.ScheduleRunRepository
 import co.datapipelines.typesystem.guard.MetadataWriterGuard
+import co.datapipelines.web.capturingLogEvents
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.throwables.shouldThrow
@@ -279,17 +278,9 @@ class ScheduleVersionConversionTest {
     }
 
     /** The formatted INFO/ERROR lines the conversion logged while [block] ran (its exception, if any, rethrown). */
-    private fun captured(block: () -> Unit): List<String> {
-        val logger = LoggerFactory.getLogger(ScheduleVersionConversion::class.java) as Logger
-        val appender = ListAppender<ILoggingEvent>().apply { start() }
-        logger.addAppender(appender)
-        try {
-            block()
-        } finally {
-            logger.detachAppender(appender)
-        }
-        return appender.list.map { it.formattedMessage }
-    }
+    private fun captured(block: () -> Unit): List<String> =
+        capturingLogEvents(LoggerFactory.getLogger(ScheduleVersionConversion::class.java) as Logger, block = block)
+            .map { it.formattedMessage }
 
     /** A transaction manager that records what each transaction ended with. */
     private class RecordingTransactions : PlatformTransactionManager {
