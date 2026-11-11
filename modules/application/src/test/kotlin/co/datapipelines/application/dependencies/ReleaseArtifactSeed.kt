@@ -64,13 +64,14 @@ class ReleaseArtifactSeed(
         version: Int,
     ) = ReleaseNodeIdentity(workspaceId, family, name, version)
 
-    /** A template version importing [imports] in order (alias `i<index>`). */
+    /** A template version importing [imports] in order (alias [aliases]`[index]`, by default `i<index>`). */
     fun template(
         name: String,
         version: Int,
         status: PipelineVersionStatus = PipelineVersionStatus.RELEASED,
         imports: List<Pair<String, Int>> = emptyList(),
         library: Boolean = false,
+        aliases: List<String> = imports.indices.map { "i$it" },
     ) {
         jdbc.update(
             "INSERT INTO templates (name, display_name, description, current_version, workspace_id, created_by)" +
@@ -79,7 +80,7 @@ class ReleaseArtifactSeed(
         )
         val importsJson =
             imports.withIndex().joinToString(",", "[", "]") { (index, pin) ->
-                """{"id":"${pin.first}","version":${pin.second},"alias":"i$index"}"""
+                """{"id":"${pin.first}","version":${pin.second},"alias":"${aliases[index]}"}"""
             }
         jdbc.update(
             "INSERT INTO template_versions (template_id, version, engine, dialect, is_library, imports_json, body, status, body_hash," +
@@ -139,7 +140,10 @@ class ReleaseArtifactSeed(
         }
     }
 
-    /** A dashboard version: its set, one source per pipeline (binding [bound] set parameters), one occurrence per visualization. */
+    /**
+     * A dashboard version: its set, one source per pipeline (binding [bound] set parameters and [literals] to the literal
+     * `1`), one occurrence per visualization. Written past the save validator: a bound name the set lacks is stored as is.
+     */
     fun dashboard(
         name: String,
         version: Int,
@@ -148,6 +152,7 @@ class ReleaseArtifactSeed(
         pipelines: List<Pair<String, Int>> = emptyList(),
         visualizations: List<Pair<String, Int>> = emptyList(),
         bound: List<String> = emptyList(),
+        literals: List<String> = emptyList(),
     ) {
         val body =
             DashboardBody(
@@ -158,7 +163,8 @@ class ReleaseArtifactSeed(
                         DashboardSource(
                             "s$index",
                             ArtifactRef(pin.first, pin.second),
-                            bound.associateWith { ParameterBinding(parameter = it) },
+                            bound.associateWith { ParameterBinding(parameter = it) } +
+                                literals.associateWith { ParameterBinding(value = JsonNodeFactory.instance.numberNode(1)) },
                         )
                     },
                 visualizations =
@@ -234,6 +240,40 @@ class ReleaseArtifactSeed(
         pointer("pipelines", name, status, version)
     }
 
+    /**
+     * A test run of visualization [name]@[version] as the session service stores it (V42): [bodyHash] is the hash it ran
+     * against, [startedSecondsAgo] orders runs (the latest is the one judged), a RUNNING row has no `completed_at`.
+     */
+    fun testRun(
+        name: String,
+        version: Int,
+        status: String,
+        bodyHash: String = "a-$name-$version",
+        expiresInSeconds: Long = HOUR_SECONDS,
+        startedSecondsAgo: Long = 0,
+    ) {
+        jdbc.update(
+            "INSERT INTO visualization_test_runs (id, visualization_id, version, body_hash, session_id, expires_at, started_by," +
+                " started_at, completed_at, status)" +
+                " SELECT :id, v.id, :version, :hash, :session, NOW() + make_interval(secs => :expires)," +
+                " :owner, NOW() - make_interval(secs => :ago)," +
+                " CASE WHEN :status = 'RUNNING' THEN NULL ELSE NOW() END, :status" +
+                " FROM visualizations v WHERE v.name = :name AND v.workspace_id = :ws",
+            mapOf(
+                "id" to UUID.randomUUID(),
+                "version" to version,
+                "hash" to bodyHash,
+                "session" to UUID.randomUUID(),
+                "expires" to expiresInSeconds.toDouble(),
+                "owner" to userId,
+                "ago" to startedSecondsAgo.toDouble(),
+                "status" to status,
+                "name" to name,
+                "ws" to workspaceId,
+            ),
+        )
+    }
+
     private fun artifact(
         entities: String,
         versions: String,
@@ -282,6 +322,7 @@ class ReleaseArtifactSeed(
     }
 
     private companion object {
+        const val HOUR_SECONDS = 3600L
         const val RELEASED_BY = "CASE WHEN :status <> 'DRAFT' THEN CAST(:owner AS uuid) END"
         const val RELEASED_AT = "CASE WHEN :status <> 'DRAFT' THEN NOW() END"
         const val DISCARDED_BY = "CASE WHEN :status = 'DISCARDED' THEN CAST(:owner AS uuid) END"
