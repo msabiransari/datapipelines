@@ -217,6 +217,7 @@ class DependencyWalker(
                     requestedSelector = reference.request.selector,
                     resolvedVersion = nodes[target].identity?.artifactVersion,
                     constraints = reference.constraints,
+                    alias = reference.alias,
                 )
             edges.add(edge)
             return edge

@@ -38,8 +38,16 @@ class TemplateReleaseProvider(
             )
         }
 
+    /**
+     * One `IMPORT` reference per `imports[i]` occurrence, carrying that occurrence's declared alias verbatim as provenance
+     * (#873 R2, record §6 "Preserve alias/path as provenance", §23.3 item 1): a library imported twice under two aliases
+     * is two edges, each with its own alias. The alias is the author's own, already bounded by the save validator's
+     * `IMPORT_ALIAS` rule; it is never hashed (`tree_hash` v1 unchanged) and never rendered.
+     */
     override fun references(stored: StoredVersion<Template>): List<Reference> =
-        importsOf(stored.identity.workspaceId, stored.body).map { (target, path) -> reference(target, path) }
+        importsOf(stored.identity.workspaceId, stored.body).zip(stored.body.imports) { (target, path), import ->
+            reference(target, path, alias = import.alias)
+        }
 
     companion object {
         /** The field path of the [index]th import — the release form the `tree_hash` covers. */

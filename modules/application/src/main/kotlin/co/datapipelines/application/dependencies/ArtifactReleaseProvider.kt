@@ -6,6 +6,7 @@ import co.datapipelines.dependencies.FamilyDescriptor
 import co.datapipelines.dependencies.Lifecycle
 import co.datapipelines.dependencies.NodeFacts
 import co.datapipelines.dependencies.ObjectRequest
+import co.datapipelines.dependencies.Operational
 import co.datapipelines.dependencies.Outcome
 import co.datapipelines.dependencies.OwnerScope
 import co.datapipelines.dependencies.Reference
@@ -32,6 +33,8 @@ data class StoredVersion<B : Any>(
     val bodyHash: String,
     val currentVersion: Int?,
     val body: B,
+    /** The family's operational fact (record §11.1; #873 R1: a visualization's `evidence_ready`), null for none. */
+    val operational: Operational? = null,
 )
 
 /**
@@ -111,15 +114,20 @@ abstract class ArtifactReleaseProvider<B : Any>(
                     lifecycle = lifecycleOf(stored.status),
                     currentVersion = stored.currentVersion,
                     bodyHash = stored.bodyHash,
+                    operational = stored.operational,
                 ),
             body = stored,
         )
 
-    /** One reference from this family to [target] at [path] — the §6 row between the two families. */
+    /**
+     * One reference from this family to [target] at [path] — the §6 row between the two families; [alias] is the
+     * occurrence's declared alias, provenance only (#873 R2: a template import's), null where the family declares none.
+     */
     protected fun reference(
         target: ReleaseNodeIdentity,
         path: String,
         constraints: List<Constraint> = emptyList(),
+        alias: String? = null,
     ): Reference =
         Reference(
             request = ReleaseDependencyFamilies.request(target),
@@ -132,6 +140,7 @@ abstract class ArtifactReleaseProvider<B : Any>(
             sourcePath = path,
             constraints = constraints,
             spelledName = target.entityId,
+            alias = alias,
         )
 
     /** This family's descriptor: `EXACT_VERSION` roots, the artifact release pair, G1's extractor version. */
