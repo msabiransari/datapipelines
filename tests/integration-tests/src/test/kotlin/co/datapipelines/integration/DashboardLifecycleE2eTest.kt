@@ -312,6 +312,18 @@ class DashboardLifecycleE2eTest {
                  '$admin', '$admin', NOW())
             """.trimIndent(),
         )
+        // The template both pipelines pin, RELEASED as a released pipeline's pins always are: since #873 the dashboard's
+        // release walks the whole closure (record §4.1), so a pin to a template that does not exist is a `missing` blocker.
+        val readTemplate = UUID.randomUUID()
+        sql(
+            "INSERT INTO templates (id, name, display_name, description, current_version, workspace_id, created_by) " +
+                "VALUES ('$readTemplate', '$ROOT/templates/read.sql', 'Read', '', 1, '$WORKSPACE_ID', '$admin')",
+        )
+        sql(
+            "INSERT INTO template_versions (template_id, version, engine, dialect, is_library, imports_json, body, " +
+                "body_hash, status, created_by, released_by, released_at) VALUES ('$readTemplate', 1, 'freemarker', 'H2', " +
+                "FALSE, '[]'::jsonb, 'SELECT 1', 'seed-hash-read', 'RELEASED', '$admin', '$admin', NOW())",
+        )
         // The released visualizations and dashboards — seeded because nothing can release a visualization before L4.
         listOf(SHOWN_VISUALIZATION to "$ROOT/charts/shown", HIDDEN_VISUALIZATION to "$ROOT/charts/hidden").forEach { (id, name) ->
             seedArtifact("visualizations", "visualization_versions", "visualization_id", id, name, visualizationBody())
