@@ -217,7 +217,8 @@ class RequestNestingDepthE2eTest {
             found.entries.map { it.key to it.value } shouldContainExactlyInAnyOrder
                 (swept + ALLOWLISTED).entries.map { it.key to it.value }
         }
-        stringRoutes.size shouldBe swept.values.sum() // 35 routes sweep themselves: no allowlist (#323, #10 L1c, #353, #375, #517, #786, #873)
+        // 35 routes sweep themselves, no allowlist (#323, #10 L1c, #353, #375, #517, #786, #873)
+        stringRoutes.size shouldBe swept.values.sum()
     }
 
     @Test
