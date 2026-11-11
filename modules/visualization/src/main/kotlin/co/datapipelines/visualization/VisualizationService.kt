@@ -6,12 +6,17 @@ import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateReleaser
 import co.datapipelines.pipeline.TemplateVersionStatuses
+import co.datapipelines.pipeline.ValidationFailure
 import co.datapipelines.pipeline.ValidationResult
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.pipeline.release.GuardedTransaction
+import co.datapipelines.pipeline.release.ReleaseBounds
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseMutationGuard
+import co.datapipelines.pipeline.release.ReleaseNodeIdentity
 import co.datapipelines.pipeline.release.ReleasePlanRequest
+import co.datapipelines.pipeline.release.RestoreDependencyGuard
+import co.datapipelines.pipeline.release.RestoreRechecks
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.transaction.support.TransactionOperations
 import java.util.UUID
@@ -93,6 +98,12 @@ class VisualizationService(
      * participant calls [releaseTarget], [prepareRelease] and [commitRelease]. Null in a directly constructed test.
      */
     private val coordination: VisualizationReleaseCoordination? = null,
+    /**
+     * #873 §D.1 — the transitive restore recheck ([RestoreDependencyGuard.DIRECT_ONLY] in a directly constructed test)
+     * and the blockers one restore refusal lists (`datapipelines.release.dependencies.max-blockers`, record §14).
+     */
+    private val restoreGuard: RestoreDependencyGuard = RestoreDependencyGuard.DIRECT_ONLY,
+    private val maxBlockers: Int = ReleaseBounds.DEFAULT_MAX_BLOCKERS,
 ) {
     /** Repository-owned, lens-filtered navigation metadata only. */
     fun navigation(request: co.datapipelines.pipeline.NavigationRequest): List<co.datapipelines.pipeline.NavigationRow> =
@@ -306,9 +317,46 @@ class VisualizationService(
         lifecycle.requireAuthoring()
         return guarded(workspaceId) {
             val stored = repository.findVersion(workspaceId, id, version)
-            if (stored != null && stored.detail.status == PipelineVersionStatus.DISCARDED) refuseDanglingPin(workspaceId, id, stored.body)
+            if (stored != null && stored.detail.status == PipelineVersionStatus.DISCARDED) {
+                refuseDanglingPin(workspaceId, id, stored.body)
+                refuseUnreleasedClosure(workspaceId, id, version)
+            }
             lifecycle.restoreVersion(workspaceId, id, version)
         }
+    }
+
+    /**
+     * #873 §D.1 — the stored body's closure through the shared restore walk (record §25.2 row G2, §25.4 D15): a missing
+     * or DISCARDED node anywhere below the transform pin is the native 400 `transform_binding_invalid` at that pin
+     * (`reason: template_version_not_found`, plus the full `path` and the intermediate nodes as `via`); a present DRAFT —
+     * the pin itself or a node beneath a RELEASED template — is `visualization.release.dependency_not_released` (409,
+     * `reason: not_released`).
+     */
+    private fun refuseUnreleasedClosure(
+        workspaceId: UUID,
+        id: UUID,
+        version: Int,
+    ) {
+        val record = repository.findRecord(workspaceId, id) ?: return
+        val root = ReleaseNodeIdentity(workspaceId, ReleaseFamily.VISUALIZATION, record.name, version)
+        val reaches = restoreGuard.recheck(root)
+        val dangling =
+            reaches.filter { it.dangling }.map { reach ->
+                ValidationFailure(
+                    VisualizationErrorCodes.TRANSFORM_BINDING_INVALID,
+                    reach.directPath,
+                    "Template '${reach.identity.entityId.safeEcho()}' version ${reach.identity.version}, reached through " +
+                        "'${reach.path}', has no live version; a restore lands RELEASED and everything below it must be live.",
+                    mapOf(
+                        "reason" to "template_version_not_found",
+                        "template" to reach.identity.entityId.safeEcho(),
+                        "template_version" to reach.identity.version,
+                        "status" to reach.status.name,
+                    ) + if (reach.transitive) mapOf("path" to reach.path, "via" to reach.viaDetails()) else emptyMap(),
+                )
+            }
+        if (dangling.isNotEmpty()) throw ArtifactValidationException(ValidationResult(dangling), VisualizationErrorCodes.BODY_INVALID)
+        RestoreRechecks.notReleased(root, record.name, reaches, maxBlockers)?.let { throw it }
     }
 
     private fun refuseDanglingPin(

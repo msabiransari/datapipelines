@@ -20,8 +20,8 @@ import co.datapipelines.visualization.VisualizationReleaseCoordination
 import co.datapipelines.visualization.VisualizationReleased
 import co.datapipelines.visualization.VisualizationService
 import co.datapipelines.web.pipelines.LifecycleVerbs
-import java.util.UUID
 import org.springframework.transaction.TransactionStatus
+import java.util.UUID
 
 /**
  * The visualization family in a coordinated release (#873 §B.2; record §4.1) — as the ROOT and as a dashboard's
@@ -103,7 +103,13 @@ class VisualizationReleaseParticipant(
         return LifecycleVerbs.VISUALIZATION_EVENTS.versionReleased to
             LifecycleVerbs.familyReleaseDetails(
                 principal,
-                LifecycleVerbs.FamilyIdentity("visualization_id", "visualization_name", entityId, released.record.name, released.detail.version),
+                LifecycleVerbs.FamilyIdentity(
+                    "visualization_id",
+                    "visualization_name",
+                    entityId,
+                    released.record.name,
+                    released.detail.version,
+                ),
                 "templates_released",
                 ArtifactReleaseRoot.templates(dependencies).map { mapOf("template_id" to it.name, "version" to it.version) },
             )

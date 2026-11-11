@@ -67,6 +67,7 @@ class TemplateLifecycleConfiguration {
         )
 
     @Bean
+    @Suppress("LongParameterList") // a bean factory: one parameter per injected collaborator of the service
     fun templateReleaseService(
         templates: TemplateRepository,
         validator: TemplateValidator,
@@ -77,6 +78,9 @@ class TemplateLifecycleConfiguration {
         guard: co.datapipelines.pipeline.release.ReleaseMutationGuard,
         // #873 §C.1 — the shared release planner, read per release (it holds this service's participant: no cycle).
         coordinator: org.springframework.beans.factory.ObjectProvider<co.datapipelines.web.release.ReleaseCoordinator>,
+        // #873 §D.2 — a restore rechecks the stored body's whole import closure (the shared port) and its blocker bound.
+        restoreGuard: co.datapipelines.pipeline.release.RestoreDependencyGuard,
+        bounds: co.datapipelines.pipeline.release.ReleaseBounds,
     ): TemplateReleaseService =
         TemplateReleaseService(
             templates,
@@ -84,6 +88,10 @@ class TemplateLifecycleConfiguration {
             authoring,
             usage,
             guard,
-            coordination = co.datapipelines.web.release.TemplateReleaseParticipant.coordination { coordinator.getObject() },
+            coordination =
+                co.datapipelines.web.release.TemplateReleaseParticipant
+                    .coordination { coordinator.getObject() },
+            restoreGuard = restoreGuard,
+            maxBlockers = bounds.maxBlockers,
         )
 }

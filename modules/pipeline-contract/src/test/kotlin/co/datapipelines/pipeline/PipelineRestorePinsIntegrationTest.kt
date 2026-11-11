@@ -1,6 +1,12 @@
 package co.datapipelines.pipeline
 
 import co.datapipelines.pipeline.PipelineErrorCodes.Validation
+import co.datapipelines.pipeline.release.ReleaseFamily
+import co.datapipelines.pipeline.release.ReleaseNodeIdentity
+import co.datapipelines.pipeline.release.ReleaseNodeStatus
+import co.datapipelines.pipeline.release.ReleasePin
+import co.datapipelines.pipeline.release.RestoreDependencyGuard
+import co.datapipelines.pipeline.release.RestoreReach
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
@@ -70,6 +76,7 @@ class PipelineRestorePinsIntegrationTest {
     private fun service(
         maxBlockers: Int = 100,
         validator: PipelineValidator = Fixtures.validator(templates = UntouchableTemplates),
+        restoreGuard: RestoreDependencyGuard = RestoreDependencyGuard.DIRECT_ONLY,
     ): PipelineService =
         PipelineService(
             pipelines = repository,
@@ -93,6 +100,7 @@ class PipelineRestorePinsIntegrationTest {
             templateStatuses = statusesPort,
             templateIds = idsPort,
             maxBlockers = maxBlockers,
+            restoreGuard = restoreGuard,
         )
 
     private fun seed(
@@ -338,6 +346,75 @@ class PipelineRestorePinsIntegrationTest {
 
         (error.details["blockers"] as List<*>).map { (it as Map<*, *>)["name"] } shouldContainExactly listOf(DRAFT_TEMPLATE)
         error.details["blockers_truncated"] shouldBe true
+    }
+
+    // ---- #873 §D.3: the closure BELOW a live pin, through the shared walk
+
+    /** The shared walk's answer for this restore, recording every seed it was handed (root and pins). */
+    private class Walk(
+        private val answer: List<RestoreReach>,
+    ) : RestoreDependencyGuard {
+        val seeds = mutableListOf<Pair<ReleaseNodeIdentity, List<ReleasePin>>>()
+
+        override fun recheck(root: ReleaseNodeIdentity): List<RestoreReach> =
+            error("a pipeline restore seeds the walk with its body's pins: its provider emits none for a DISCARDED version")
+
+        override fun recheck(
+            root: ReleaseNodeIdentity,
+            pins: List<ReleasePin>,
+        ): List<RestoreReach> = answer.also { seeds += root to pins }
+    }
+
+    private fun below(
+        status: ReleaseNodeStatus,
+        via: ReleaseNodeIdentity,
+    ) = RestoreReach(
+        ReleaseNodeIdentity(WORKSPACE, ReleaseFamily.TEMPLATE, DRAFT_TEMPLATE, 2),
+        DRAFT_TEMPLATE,
+        status,
+        "nodes[0].pipeline",
+        "nodes[0].pipeline.nodes[0].template",
+        listOf(via),
+    )
+
+    @Test
+    fun `a DRAFT template beneath a RELEASED child refuses 409 with path and via - the walk is seeded with the body's own pins`() {
+        seed(Fixtures.pipeline(name = CHILD))
+        val parent = discardedParent(childNode(CHILD))
+        val child = ReleaseNodeIdentity(WORKSPACE, ReleaseFamily.PIPELINE, CHILD, 1)
+        val walk = Walk(listOf(below(ReleaseNodeStatus.DRAFT, child)))
+
+        val error = refusedWithoutWrite(parent, service(restoreGuard = walk))
+
+        error.code shouldBe "pipeline.release.dependency_not_released"
+        val blocker = (error.details["blockers"] as List<*>).single() as Map<*, *>
+        blocker["name"] shouldBe DRAFT_TEMPLATE
+        blocker["paths"] shouldBe listOf("nodes[0].pipeline.nodes[0].template")
+        blocker["via"] shouldBe listOf(mapOf("family" to "pipeline", "name" to CHILD, "version" to 1))
+        val (root, pins) = walk.seeds.single()
+        root shouldBe ReleaseNodeIdentity(WORKSPACE, ReleaseFamily.PIPELINE, PARENT, 1)
+        pins.map { it.target to it.path } shouldContainExactly listOf(child to "nodes[0].pipeline")
+    }
+
+    @Test
+    fun `a DISCARDED template beneath a RELEASED child is the native 400 at the child pin, reason discarded, with path and via`() {
+        seed(Fixtures.pipeline(name = CHILD))
+        val parent = discardedParent(childNode(CHILD))
+        val child = ReleaseNodeIdentity(WORKSPACE, ReleaseFamily.PIPELINE, CHILD, 1)
+
+        val error = refusedWithoutWrite(parent, service(restoreGuard = Walk(listOf(below(ReleaseNodeStatus.DISCARDED, child)))))
+
+        error.code shouldBe Validation.TEMPLATE_VERSION_NOT_FOUND
+        val failure = error.failures().single()
+        failure.path shouldBe "nodes[0].pipeline"
+        failure.details shouldBe
+            mapOf(
+                "template" to DRAFT_TEMPLATE,
+                "version" to 2,
+                "reason" to "discarded",
+                "path" to "nodes[0].pipeline.nodes[0].template",
+                "via" to listOf(mapOf("family" to "pipeline", "name" to CHILD, "version" to 1)),
+            )
     }
 
     /** The recheck never renders: any port call here is a render or a registry read the restore must not make. */

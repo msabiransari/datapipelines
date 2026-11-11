@@ -2,8 +2,8 @@ package co.datapipelines.pipeline.release
 
 /**
  * The legacy consent `release_pinned_templates=true` / `release_pinned_visualizations=true` (#142, #332; record §6):
- * scoped to its OLD direct edges — the root's own DRAFT pins in the family its flag named — never "release every family". A deeper draft, a draft child pipeline or a MISSING/DISCARDED pin
- * stays a blocker under it.
+ * scoped to its OLD direct edges — the root's own DRAFT pins in the family its flag named — never "release every
+ * family". A deeper draft, a draft child pipeline or a MISSING/DISCARDED pin stays a blocker under it.
  */
 object LegacyReleaseAlias {
     /**

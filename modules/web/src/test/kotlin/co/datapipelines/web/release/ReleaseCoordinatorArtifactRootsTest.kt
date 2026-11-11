@@ -90,14 +90,21 @@ class ReleaseCoordinatorArtifactRootsTest {
         // A dashboard is never a dependency: its own stale draft is the native conflict below.
         val (root, dependency, participant) =
             when (family) {
-                ReleaseFamily.TEMPLATE -> Triple(g.chart, g.chartTemplate, TemplateReleaseParticipant(fx.templateReleases))
-                ReleaseFamily.PARAMETER_SET ->
+                ReleaseFamily.TEMPLATE -> {
+                    Triple(g.chart, g.chartTemplate, TemplateReleaseParticipant(fx.templateReleases))
+                }
+
+                ReleaseFamily.PARAMETER_SET -> {
                     Triple(
                         fx.artifact(ReleaseFamily.DASHBOARD, "test/boards/with_set", listOf(g.set)),
                         g.set,
                         ParameterSetReleaseParticipant(fx.sets),
                     )
-                else -> Triple(g.board, g.boardChart, VisualizationReleaseParticipant(fx.visualizations))
+                }
+
+                else -> {
+                    Triple(g.board, g.boardChart, VisualizationReleaseParticipant(fx.visualizations))
+                }
             }
         val closure = requireNotNull(ReleaseGraph(fx.sources, ReleaseBounds()).walk(root))
         val node = closure.node(dependency)
@@ -123,7 +130,14 @@ class ReleaseCoordinatorArtifactRootsTest {
 
         listOf(planned to false, alias to true).forEach { (request, releasePinned) ->
             withClue(if (releasePinned) "compatibility" else "plan") {
-                val error = refused { fx.coordinator().releaseRoot(request, releasePinned = releasePinned && family != ReleaseFamily.TEMPLATE) }
+                val error =
+                    refused {
+                        fx.coordinator().releaseRoot(
+                            request,
+                            releasePinned =
+                                releasePinned && family != ReleaseFamily.TEMPLATE,
+                        )
+                    }
                 error.code shouldBe "${family.codePrefix}.version.conflict"
             }
         }
@@ -156,7 +170,10 @@ class ReleaseCoordinatorArtifactRootsTest {
                 fx.reads.clear()
                 val error =
                     refused {
-                        fx.coordinator(deadline = ReleasePlanningDeadline.after(Duration.ofSeconds(BUDGET_SECONDS), clock)).releaseRoot(request)
+                        fx
+                            .coordinator(
+                                deadline = ReleasePlanningDeadline.after(Duration.ofSeconds(BUDGET_SECONDS), clock),
+                            ).releaseRoot(request)
                     }
                 error.code shouldBe family.code(ReleaseRefusal.METADATA_UNAVAILABLE)
                 error.details shouldBe emptyMap()

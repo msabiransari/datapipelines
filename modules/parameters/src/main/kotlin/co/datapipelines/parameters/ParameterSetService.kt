@@ -18,9 +18,10 @@ import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import co.datapipelines.pipeline.release.ReleaseNodeIdentity
 import co.datapipelines.pipeline.release.ReleasePlanRequest
-import co.datapipelines.pipeline.release.ReleaseRefusals
 import co.datapipelines.pipeline.release.ReleasedVersion
 import co.datapipelines.pipeline.release.ReleasedVersionObserver
+import co.datapipelines.pipeline.release.RestoreDependencyGuard
+import co.datapipelines.pipeline.release.RestoreRechecks
 import co.datapipelines.pipeline.through
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.transaction.support.SimpleTransactionStatus
@@ -127,7 +128,7 @@ data class ParameterSetReleaseRequest(
  * One façade over the aggregate's verb table (its ports are the constructor); each verb maps each
  * distinct refusal to its own catalogued code, so a verb throws as many as it has preconditions.
  */
-@Suppress("TooManyFunctions", "LongParameterList", "ThrowsCount")
+@Suppress("TooManyFunctions", "LongParameterList", "ThrowsCount", "LargeClass") // every verb of the family, as its repository
 class ParameterSetService(
     private val repository: ParameterSetRepository,
     private val validator: ParameterSetValidator,
@@ -154,6 +155,8 @@ class ParameterSetService(
      * participant calls [releaseTarget], [prepareRelease] and [commitRelease]. Null in a directly constructed test.
      */
     private val coordination: ParameterSetReleaseCoordination? = null,
+    /** #873 §D.3 — the transitive restore recheck; [RestoreDependencyGuard.DIRECT_ONLY] in a directly constructed test. */
+    private val restoreGuard: RestoreDependencyGuard = RestoreDependencyGuard.DIRECT_ONLY,
 ) {
     /** [block] in one metadata transaction with the workspace writer guard acquired first (#517). */
     private fun <T> guarded(
@@ -409,13 +412,13 @@ class ParameterSetService(
         workspaceId: UUID,
         stored: ParameterSetVersion,
     ) {
-        val pins = validator.validateRestorePins(workspaceId, stored.body)
+        val name = stored.record.name
+        val root = ReleaseNodeIdentity(workspaceId, ReleaseFamily.PARAMETER_SET, name, stored.detail.version)
+        // §D.3: the direct pins keep their native judgement; the shared walk adds what lies BELOW a live pin.
+        val below = restoreGuard.recheck(root).filter { it.transitive }
+        val pins = validator.validateRestorePins(workspaceId, stored.body, below)
         if (pins.result.failures.isNotEmpty()) throw ParameterSetValidationException(pins.result)
-        if (pins.drafts.isNotEmpty()) {
-            val name = stored.record.name
-            val root = ReleaseNodeIdentity(workspaceId, ReleaseFamily.PARAMETER_SET, name, stored.detail.version)
-            throw ReleaseRefusals.restoreDependencyNotReleased(root, name, pins.drafts, maxBlockers)
-        }
+        RestoreRechecks.notReleased(root, name, below, maxBlockers, extra = pins.drafts)?.let { throw it }
     }
 
     /** Point the set at [version] (D60) — the receiver's verb, never an authoring write. Answers the move and the name. */

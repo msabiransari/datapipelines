@@ -6,6 +6,7 @@ import co.datapipelines.application.dependencies.ReleasePlanningDeadline
 import co.datapipelines.application.dependencies.ReleasePlanningWalk
 import co.datapipelines.application.dependencies.dashboard.DashboardReleaseProvider
 import co.datapipelines.application.dependencies.parameterset.ParameterSetReleaseProvider
+import co.datapipelines.application.dependencies.restore.WalkingRestoreDependencyGuard
 import co.datapipelines.application.dependencies.template.TemplateReleaseProvider
 import co.datapipelines.application.dependencies.visualization.VisualizationReleaseProvider
 import co.datapipelines.application.endpoints.EndpointReleaseSteps
@@ -22,6 +23,7 @@ import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import co.datapipelines.pipeline.release.ReleasedVersionObserver
 import co.datapipelines.pipeline.release.ResolvedNode
+import co.datapipelines.pipeline.release.RestoreDependencyGuard
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.visualization.DashboardRepository
 import co.datapipelines.visualization.DashboardService
@@ -152,6 +154,27 @@ class ReleaseConfiguration {
             bounds = bounds,
             planningTransactions = ReleasePlanningWalk.planningTransaction(metadataTransactionManager),
             // #868 R1: a failed speculative read rolls back to its savepoint and never aborts the walk's transaction.
+            speculativeReads = ReleasePlanningWalk.speculativeReads(metadataTransactionManager),
+            deadline = deadline,
+            planning = properties.toPlanningLimits(),
+        )
+
+    /**
+     * #873 §D.0 — the restore recheck port the five families' restore verbs call: the DISCARDED version's stored body
+     * read through its family's provider, its references walked as the roots of ONE lifecycle-guard walk in the
+     * restore's own guarded transaction — the registry, bounds and deadline the planner uses.
+     */
+    @Bean
+    fun restoreDependencyGuard(
+        registry: FamilyRegistry,
+        deadline: ReleasePlanningDeadline,
+        metadataTransactionManager: PlatformTransactionManager,
+        bounds: ReleaseBounds,
+        properties: ReleaseDependencyProperties,
+    ): RestoreDependencyGuard =
+        WalkingRestoreDependencyGuard(
+            registry = registry,
+            bounds = bounds,
             speculativeReads = ReleasePlanningWalk.speculativeReads(metadataTransactionManager),
             deadline = deadline,
             planning = properties.toPlanningLimits(),

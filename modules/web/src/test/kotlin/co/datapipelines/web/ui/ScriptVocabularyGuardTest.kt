@@ -313,11 +313,23 @@ class ScriptVocabularyGuardTest {
                 Triple(
                     Regex(
                         "^modules/web/src/(?:main|test)/kotlin/co/datapipelines/web/release/" +
-                            "(?:VisualizationReleaseParticipant|ReleaseConfiguration|ReleaseArtifactSeed|ArtifactReleaseProvidersPostgresTest)\\.kt$",
+                            "(?:VisualizationReleaseParticipant|ReleaseConfiguration|ReleaseArtifactSeed|" +
+                            "ArtifactReleaseProvidersPostgresTest|ArtifactRootGraph|ReleaseAliasParityTest|" +
+                            "ReleaseCoordinatorArtifactRootsTest)\\.kt$",
                     ),
-                    Regex("transform(?: pin|s? template|-template|\\.template|-free| = |: Pair)|TransformBinding"),
+                    Regex("transform(?: pin|s? template|-template|\\.template|-free| = |: Pair)|TransformBinding|_transform\\.sql"),
                     "the visualization release participant, its provider's wiring and their fixtures (#873 G2): the block's pin, " +
                         "phrase by phrase — a node noun stays red here",
+                ),
+                Triple(
+                    Regex(
+                        "^tests/integration-tests/src/test/kotlin/co/datapipelines/integration/" +
+                            "(?:FamilyRootsFixture|FamilyRootsReleaseCascadeE2eTest|RestoreOutboundPinsE2eTest|" +
+                            "TemplateImportClosureE2eTest)\\.kt$",
+                    ),
+                    Regex("transform\\.template|transform template|\"transform\":"),
+                    "the #873 release and restore closures over a visualization (G2): the block's pin, its wire path and its JSON " +
+                        "key — a node noun stays red here",
                 ),
                 Triple(
                     Regex("^docs/rest-api\\.md$"),
@@ -465,8 +477,8 @@ class ScriptVocabularyGuardTest {
                 ),
                 Triple(
                     Regex("^docs/versioning\\.md$"),
-                    Regex("its transform pin RELEASED|the transform pins of any pushed visualization"),
-                    "the visualization release gate and the transfer closure (the block's pin)",
+                    Regex("its transform pin RELEASED|the transform pins of any pushed visualization|visualization's transform template"),
+                    "the visualization release gate, the transfer closure and the #873 release/restore closures (the block's pin)",
                 ),
                 Triple(
                     Regex("^docs/ui-screens\\.md$"),

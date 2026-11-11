@@ -87,8 +87,7 @@ class FamilyRootsReleaseCascadeE2eTest {
 
     // ---- the four closures ------------------------------------------------------------------------------------
 
-    private fun selector(prefix: String) =
-        fx.sqlTemplate("$prefix/selector.sql", "SELECT 'a' AS \"value\", 'A' AS \"display_value\", FALSE AS \"is_default\" ORDER BY 1")
+    private fun selector(prefix: String) = fx.sqlTemplate("$prefix/selector.sql", FamilyRootsFixture.SELECTOR_BODY)
 
     /** [root] and its edges in pin order, for the closure of [family] under [prefix]; every node a DRAFT. */
     private fun closure(
@@ -109,28 +108,11 @@ class FamilyRootsReleaseCascadeE2eTest {
             }
 
             "visualization" -> {
-                val template = fx.jsonataTemplate("$prefix/shape.jsonata")
-                val chart = fx.visualization("$prefix/chart", template)
-                chart to listOf(Edge(chart, template, "transform.template"))
+                fx.visualizationClosure(prefix)
             }
 
             else -> {
-                val selectorTemplate = selector(prefix)
-                val set = fx.parameterSet("$prefix/set", selectorTemplate)
-                val query = fx.sqlTemplate("$prefix/query.sql")
-                val source = fx.pipeline("$prefix/source", query)
-                val shape = fx.jsonataTemplate("$prefix/shape.jsonata")
-                val chart = fx.visualization("$prefix/chart", shape)
-                val board = fx.dashboard("$prefix/board", set, source, chart)
-                board to
-                    listOf(
-                        Edge(board, set, "parameter_set"),
-                        Edge(set, selectorTemplate, "parameters[0].source.template"),
-                        Edge(board, source, "sources[0].pipeline"),
-                        Edge(source, query, "nodes[0].template"),
-                        Edge(board, chart, "visualizations[0].visualization"),
-                        Edge(chart, shape, "transform.template"),
-                    )
+                fx.dashboardClosure(prefix)
             }
         }
 

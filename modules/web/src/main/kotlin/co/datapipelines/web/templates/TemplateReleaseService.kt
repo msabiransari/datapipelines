@@ -4,12 +4,20 @@ import co.datapipelines.application.templates.TemplateUsage
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.release.ReleaseBounds
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseMutationGuard
+import co.datapipelines.pipeline.release.ReleaseNodeIdentity
+import co.datapipelines.pipeline.release.ReleaseNodeStatus
 import co.datapipelines.pipeline.release.ReleasePlanRequest
+import co.datapipelines.pipeline.release.RestoreDependencyGuard
+import co.datapipelines.pipeline.release.RestoreRechecks
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDraft
 import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.templates.TemplateValidationException
+import co.datapipelines.templates.TemplateValidationFailure
+import co.datapipelines.templates.TemplateValidationResult
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.TemplateVersionDetail
 import co.datapipelines.typesystem.DatapipelinesException
@@ -79,6 +87,12 @@ open class TemplateReleaseService(
      * directly constructed test, which releases natively.
      */
     private val coordination: TemplateReleaseCoordination? = null,
+    /**
+     * #873 §D.2 — the transitive restore recheck over the import closure ([RestoreDependencyGuard.DIRECT_ONLY] in a
+     * directly constructed test) and the blockers one restore refusal lists (record §14).
+     */
+    private val restoreGuard: RestoreDependencyGuard = RestoreDependencyGuard.DIRECT_ONLY,
+    private val maxBlockers: Int = ReleaseBounds.DEFAULT_MAX_BLOCKERS,
 ) {
     private fun lockWorkspace(workspaceId: UUID) = guard.acquire(workspaceId, ReleaseFamily.TEMPLATE)
 
@@ -299,7 +313,14 @@ open class TemplateReleaseService(
             ?: throw pinnedOrConcurrent(workspaceId, id, version)
     }
 
-    /** §3.1 (101) — restore DISCARDED version [version]; the pointer moves only above-current-or-NULL. */
+    /**
+     * §3.1 (101) — restore DISCARDED version [version]; the pointer moves only above-current-or-NULL. A restore lands
+     * RELEASED without a release's consent, so under the guard the stored body's import closure is rechecked first
+     * through the shared restore walk (#873 §D.2, record §25.2 row G2): a missing or DISCARDED import anywhere in it is
+     * the save rules' 400 `template.validation.import_not_found` (`reason: discarded` for a DISCARDED version; the full
+     * `path` and the intermediate libraries as `via` below the first level); a DRAFT one — imported directly or beneath a
+     * RELEASED library — is `template.release.dependency_not_released` (409). Metadata only; a refusal writes nothing.
+     */
     @Transactional("metadataTransactionManager")
     open fun restoreVersion(
         workspaceId: UUID,
@@ -311,8 +332,27 @@ open class TemplateReleaseService(
         requireTemplate(workspaceId, id)
         val detail = findVersionOr404(workspaceId, id, version)
         if (detail.status != PipelineVersionStatus.DISCARDED) throw notDiscarded(id, version, detail.status)
+        refuseUnreleasedImports(ReleaseNodeIdentity(workspaceId, ReleaseFamily.TEMPLATE, id, version))
         return templates.restoreVersion(workspaceId, id, version)
             ?: throw templateNotFound(id, version)
+    }
+
+    private fun refuseUnreleasedImports(root: ReleaseNodeIdentity) {
+        val reaches = restoreGuard.recheck(root)
+        val dangling =
+            reaches.filter { it.dangling }.map { reach ->
+                val key = "${reach.identity.entityId}@${reach.identity.version}"
+                TemplateValidationFailure(
+                    PipelineErrorCodes.Template.IMPORT_NOT_FOUND,
+                    "Imported template '$key' is ${reach.status.name.lowercase()}; a restore lands RELEASED and its whole " +
+                        "import closure must be live.",
+                    mapOf("import" to key) +
+                        (if (reach.status == ReleaseNodeStatus.DISCARDED) mapOf("reason" to "discarded") else emptyMap()) +
+                        if (reach.transitive) mapOf("path" to reach.path, "via" to reach.viaDetails()) else emptyMap(),
+                )
+            }
+        if (dangling.isNotEmpty()) throw TemplateValidationException(TemplateValidationResult(dangling))
+        RestoreRechecks.notReleased(root, root.entityId, reaches, maxBlockers)?.let { throw it }
     }
 
     /**

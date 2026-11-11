@@ -4,12 +4,17 @@ import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.LifecycleBucket
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.pipeline.ValidationFailure
 import co.datapipelines.pipeline.ValidationResult
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.pipeline.release.GuardedTransaction
+import co.datapipelines.pipeline.release.ReleaseBounds
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseMutationGuard
+import co.datapipelines.pipeline.release.ReleaseNodeIdentity
 import co.datapipelines.pipeline.release.ReleasePlanRequest
+import co.datapipelines.pipeline.release.RestoreDependencyGuard
+import co.datapipelines.pipeline.release.RestoreRechecks
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.transaction.support.TransactionOperations
 import java.util.UUID
@@ -63,6 +68,12 @@ class DashboardService(
      * participant calls [releaseTarget], [prepareRelease] and [commitRelease]. Null in a directly constructed test.
      */
     private val coordination: DashboardReleaseCoordination? = null,
+    /**
+     * #873 §D.1 — the transitive restore recheck ([RestoreDependencyGuard.DIRECT_ONLY] in a directly constructed test)
+     * and the blockers one restore refusal lists (`datapipelines.release.dependencies.max-blockers`, record §14).
+     */
+    private val restoreGuard: RestoreDependencyGuard = RestoreDependencyGuard.DIRECT_ONLY,
+    private val maxBlockers: Int = ReleaseBounds.DEFAULT_MAX_BLOCKERS,
 ) {
     /** Repository-owned, lens-filtered navigation metadata only. */
     fun navigation(request: co.datapipelines.pipeline.NavigationRequest): List<co.datapipelines.pipeline.NavigationRow> =
@@ -249,9 +260,46 @@ class DashboardService(
         lifecycle.requireAuthoring()
         return guarded(workspaceId) {
             val stored = repository.findVersion(workspaceId, id, version)
-            if (stored != null && stored.detail.status == PipelineVersionStatus.DISCARDED) refuseDanglingPins(workspaceId, id, stored.body)
+            if (stored != null && stored.detail.status == PipelineVersionStatus.DISCARDED) {
+                refuseDanglingPins(workspaceId, id, stored.body)
+                refuseUnreleasedClosure(workspaceId, id, version)
+            }
             lifecycle.restoreVersion(workspaceId, id, version)
         }
+    }
+
+    /**
+     * #873 §D.1 — the stored body's closure through the shared restore walk (record §25.2 row G2, §25.4 D15): a missing
+     * or DISCARDED node anywhere below a pin is the native 400 `dependency_not_found` at that pin (its `kind`, `name` and
+     * `version`, plus the full `path` and the intermediate nodes as `via`); a present DRAFT — a pin itself (a DRAFT source
+     * pipeline, set or visualization) or a node beneath a RELEASED one — is `dashboard.release.dependency_not_released`
+     * (409, `reason: not_released`).
+     */
+    private fun refuseUnreleasedClosure(
+        workspaceId: UUID,
+        id: UUID,
+        version: Int,
+    ) {
+        val record = repository.findRecord(workspaceId, id) ?: return
+        val root = ReleaseNodeIdentity(workspaceId, ReleaseFamily.DASHBOARD, record.name, version)
+        val reaches = restoreGuard.recheck(root)
+        val dangling =
+            reaches.filter { it.dangling }.map { reach ->
+                ValidationFailure(
+                    DashboardErrorCodes.DEPENDENCY_NOT_FOUND,
+                    reach.directPath,
+                    "The ${reach.identity.family.wire} ${reach.identity.entityId.safeEcho()} version ${reach.identity.version}, " +
+                        "reached through '${reach.path}', is not live here; a restore lands RELEASED.",
+                    mapOf(
+                        "kind" to reach.identity.family.wire,
+                        "name" to reach.identity.entityId.safeEcho(),
+                        "version" to reach.identity.version,
+                        "status" to reach.status.name,
+                    ) + if (reach.transitive) mapOf("path" to reach.path, "via" to reach.viaDetails()) else emptyMap(),
+                )
+            }
+        if (dangling.isNotEmpty()) throw ArtifactValidationException(ValidationResult(dangling), DashboardErrorCodes.BODY_INVALID)
+        RestoreRechecks.notReleased(root, record.name, reaches, maxBlockers)?.let { throw it }
     }
 
     private fun refuseDanglingPins(

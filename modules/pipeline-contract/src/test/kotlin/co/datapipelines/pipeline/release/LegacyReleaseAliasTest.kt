@@ -27,7 +27,7 @@ class LegacyReleaseAliasTest {
                 fx.node(fx.id("${family.wire}-${child.wire}", family = child), ReleaseNodeStatus.DRAFT, deep to "inner")
             }
         val released = fx.node(fx.id("${family.wire}-released"), ReleaseNodeStatus.RELEASED, currentVersion = 1)
-        fx.node(root, ReleaseNodeStatus.DRAFT, *(direct + released).mapIndexed { i, it -> it to "pins[$i]" }.toTypedArray())
+        fx.node(root, ReleaseNodeStatus.DRAFT, *(direct + released).mapIndexed { i, pin -> pin to "pins[$i]" }.toTypedArray())
         return LegacyReleaseAlias.selection(requireNotNull(fx.graph().walk(root)))
     }
 

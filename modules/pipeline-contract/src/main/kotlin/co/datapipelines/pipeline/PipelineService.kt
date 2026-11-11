@@ -6,6 +6,7 @@ import co.datapipelines.pipeline.release.ReleaseBounds
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import co.datapipelines.pipeline.release.ReleasePlanRequest
+import co.datapipelines.pipeline.release.RestoreDependencyGuard
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
@@ -139,9 +140,11 @@ open class PipelineService(
     private val templateIds: TemplateIds = TemplateIds { _, _ -> false },
     /** Blockers one restore refusal lists (`datapipelines.release.dependencies.max-blockers`, record §14). */
     private val maxBlockers: Int = ReleaseBounds.DEFAULT_MAX_BLOCKERS,
+    /** #873 §D.3 — the transitive restore recheck; [RestoreDependencyGuard.DIRECT_ONLY] in a directly constructed test. */
+    private val restoreGuard: RestoreDependencyGuard = RestoreDependencyGuard.DIRECT_ONLY,
 ) {
     private val pinGuard = PipelinePurgePinGuard(pipelines, dashboards, endpointVersions, schedules)
-    private val restorePins = PipelineRestorePins(pipelines, templateStatuses, templateIds, maxBlockers, deserializer)
+    private val restorePins = PipelineRestorePins(pipelines, templateStatuses, templateIds, maxBlockers, deserializer, restoreGuard)
 
     /** The writer guard, acquired first inside every pin-affecting write's transaction. */
     private fun lockWorkspace(workspaceId: UUID) = guard.acquire(workspaceId, ReleaseFamily.PIPELINE)

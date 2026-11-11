@@ -19,8 +19,8 @@ import co.datapipelines.pipeline.release.ReleaseNodeStatus
 import co.datapipelines.pipeline.release.ReleasedDependency
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.pipelines.LifecycleVerbs
-import java.util.UUID
 import org.springframework.transaction.TransactionStatus
+import java.util.UUID
 
 /**
  * The parameter-set family in a coordinated release (#873 §B.1; record §4.1) — as the ROOT of its own release and as a
@@ -99,7 +99,13 @@ class ParameterSetReleaseParticipant(
         return LifecycleVerbs.PARAMETER_SET_EVENTS.versionReleased to
             LifecycleVerbs.familyReleaseDetails(
                 principal,
-                LifecycleVerbs.FamilyIdentity("parameter_set_id", "parameter_set_name", entityId, released.record.name, released.detail.version),
+                LifecycleVerbs.FamilyIdentity(
+                    "parameter_set_id",
+                    "parameter_set_name",
+                    entityId,
+                    released.record.name,
+                    released.detail.version,
+                ),
                 "templates_released",
                 ArtifactReleaseRoot.templates(dependencies).map { mapOf("template_id" to it.name, "version" to it.version) },
             )

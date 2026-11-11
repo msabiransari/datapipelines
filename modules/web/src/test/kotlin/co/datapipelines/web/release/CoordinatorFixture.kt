@@ -5,11 +5,11 @@ import co.datapipelines.application.dependencies.ReleasePlanningDeadline
 import co.datapipelines.application.dependencies.ReleasePlanningWalk
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.dependencies.ReadIsolation
 import co.datapipelines.parameters.ParameterSetRecord
 import co.datapipelines.parameters.ParameterSetService
 import co.datapipelines.parameters.ParameterSetVersion
 import co.datapipelines.parameters.ParameterSetVersionDetail
-import co.datapipelines.dependencies.ReadIsolation
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineReleaseService
@@ -283,7 +283,8 @@ internal class CoordinatorFixture(
         every { templateReleases.releaseTargetName(workspaceId, entity) } returns id
         if (status == ReleaseNodeStatus.DRAFT) {
             every { templateReleases.releaseTarget(workspaceId, id) } answers {
-                entity to TemplateVersionDetail(id, version, PipelineVersionStatus.DRAFT, graph.getValue(identity).bodyHash, Instant.EPOCH, actor)
+                entity to
+                    TemplateVersionDetail(id, version, PipelineVersionStatus.DRAFT, graph.getValue(identity).bodyHash, Instant.EPOCH, actor)
             }
             every { templateReleases.flip(workspaceId, id, any(), actor) } answers {
                 val consented = thirdArg<String>()
@@ -371,6 +372,7 @@ internal class CoordinatorFixture(
     ) {
         val name = identity.entityId
         val record = ParameterSetRecord(id, workspaceId, name, name, "d", null, Instant.EPOCH, Instant.EPOCH, actor)
+
         fun detail(status: PipelineVersionStatus) =
             ParameterSetVersionDetail(id, identity.version, status, graph.getValue(identity).bodyHash, Instant.EPOCH, actor)
         every { sets.releaseTarget(workspaceId, id) } answers { record to detail(PipelineVersionStatus.DRAFT) }
@@ -390,7 +392,8 @@ internal class CoordinatorFixture(
                 ParameterSetVersion(record.copy(currentVersion = identity.version), detail(PipelineVersionStatus.RELEASED), mockk())
             }
         }
-        every { sets.staleRelease(workspaceId, id) } answers { DatapipelinesException(code = "parameter.version.conflict", message = "stale $name") }
+        every { sets.staleRelease(workspaceId, id) } answers
+            { DatapipelinesException(code = "parameter.version.conflict", message = "stale $name") }
     }
 
     private fun stubVisualization(
@@ -399,6 +402,7 @@ internal class CoordinatorFixture(
     ) {
         val name = identity.entityId
         val record = ArtifactRecord(id, workspaceId, name, name, "d", null, Instant.EPOCH, Instant.EPOCH, actor)
+
         fun detail(status: PipelineVersionStatus) =
             ArtifactVersionDetail(id, identity.version, status, graph.getValue(identity).bodyHash, Instant.EPOCH, actor)
         every { visualizations.releaseTarget(workspaceId, id) } answers { record to detail(PipelineVersionStatus.DRAFT) }
@@ -429,6 +433,7 @@ internal class CoordinatorFixture(
     ) {
         val name = identity.entityId
         val record = ArtifactRecord(id, workspaceId, name, name, "d", null, Instant.EPOCH, Instant.EPOCH, actor)
+
         fun detail(status: PipelineVersionStatus) =
             ArtifactVersionDetail(id, identity.version, status, graph.getValue(identity).bodyHash, Instant.EPOCH, actor)
         every { dashboards.releaseTarget(workspaceId, id) } answers { record to detail(PipelineVersionStatus.DRAFT) }

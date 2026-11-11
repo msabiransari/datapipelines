@@ -238,7 +238,16 @@ class ReleaseCoordinator(
         flipped: ReleaseFlip,
         released: List<ReleasedDependency>,
     ): Pair<String, Map<String, Any?>> =
-        if (root is ArtifactReleaseRoot) root.auditRow(principal, entityId, flipped, released) else root.auditRow(principal, entityId, flipped)
+        if (root is ArtifactReleaseRoot) {
+            root.auditRow(
+                principal,
+                entityId,
+                flipped,
+                released,
+            )
+        } else {
+            root.auditRow(principal, entityId, flipped)
+        }
 
     /**
      * The plan a release dialog shows for a non-pipeline root (#786 C.3): the closure read in its own planning snapshot and
@@ -558,34 +567,41 @@ class ReleaseCoordinator(
                     }
 
                     else -> {
-                        when (node.identity.family) {
-                            ReleaseFamily.VISUALIZATION ->
-                                LifecycleVerbs.VISUALIZATION_EVENTS.versionReleased to
-                                    provenance(
-                                        LifecycleVerbs.cascadedReleaseDetails(principal, null, null, node.identity.version, cascade) +
-                                            ("name" to node.name),
-                                    )
-
-                            ReleaseFamily.PARAMETER_SET ->
-                                LifecycleVerbs.PARAMETER_SET_EVENTS.versionReleased to
-                                    provenance(
-                                        LifecycleVerbs.cascadedReleaseDetails(
-                                            principal,
-                                            "parameter_set_id",
-                                            checkNotNull(node.entityUuid) { "a flipped parameter set ${node.name} has no id" }.toString(),
-                                            node.identity.version,
-                                            cascade,
-                                        ) + ("name" to node.name),
-                                    )
-
-                            else -> error("no audit row shape for a ${node.identity.family} flip")
-                        }
+                        artifactAuditRow(principal, node, cascade).let { (event, details) -> event to provenance(details) }
                     }
                 }
             record(principal, workspaceId, event, details + common + ("cascade_root" to cascadeRoot))
         }
         return common
     }
+
+    /** The audit event and details of a flipped visualization or parameter set under [cascade], before provenance. */
+    private fun artifactAuditRow(
+        principal: AuthenticatedPrincipal,
+        node: ClosureNode,
+        cascade: LifecycleVerbs.FamilyCascade,
+    ): Pair<String, Map<String, Any?>> =
+        when (node.identity.family) {
+            ReleaseFamily.VISUALIZATION -> {
+                LifecycleVerbs.VISUALIZATION_EVENTS.versionReleased to
+                    LifecycleVerbs.cascadedReleaseDetails(principal, null, null, node.identity.version, cascade) + ("name" to node.name)
+            }
+
+            ReleaseFamily.PARAMETER_SET -> {
+                LifecycleVerbs.PARAMETER_SET_EVENTS.versionReleased to
+                    LifecycleVerbs.cascadedReleaseDetails(
+                        principal,
+                        "parameter_set_id",
+                        checkNotNull(node.entityUuid) { "a flipped parameter set ${node.name} has no id" }.toString(),
+                        node.identity.version,
+                        cascade,
+                    ) + ("name" to node.name)
+            }
+
+            else -> {
+                error("no audit row shape for a ${node.identity.family} flip")
+            }
+        }
 
     private fun record(
         principal: AuthenticatedPrincipal,
@@ -648,7 +664,11 @@ interface ArtifactReleaseRoot : ReleaseRoot {
 
         /** The root's direct pins, distinct, in the root's pin order — the order every native refusal listed them in. */
         fun directPins(closure: ReleaseClosure): List<ClosureNode> =
-            closure.edges.filter { it.from == closure.root }.map { it.to }.distinct().map(closure::node)
+            closure.edges
+                .filter { it.from == closure.root }
+                .map { it.to }
+                .distinct()
+                .map(closure::node)
 
         /** [blockers] with the root's direct pins first (pin order), then the deeper ones (discovery order). */
         fun directFirst(

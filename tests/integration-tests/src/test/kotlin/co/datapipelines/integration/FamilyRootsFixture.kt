@@ -147,6 +147,33 @@ internal class FamilyRootsFixture(
         return Node("dashboard", name)
     }
 
+    /** The visualization closure under [prefix]: a jsonata shape and the chart over it, every node a DRAFT. */
+    fun visualizationClosure(prefix: String): Pair<Node, List<Edge>> {
+        val template = jsonataTemplate("$prefix/shape.jsonata")
+        val chart = visualization("$prefix/chart", template)
+        return chart to listOf(Edge(chart, template, "transform.template"))
+    }
+
+    /** The dashboard closure under [prefix] — its set, source pipeline and chart with their templates — every node a DRAFT. */
+    fun dashboardClosure(prefix: String): Pair<Node, List<Edge>> {
+        val selectorTemplate = sqlTemplate("$prefix/selector.sql", SELECTOR_BODY)
+        val set = parameterSet("$prefix/set", selectorTemplate)
+        val query = sqlTemplate("$prefix/query.sql")
+        val source = pipeline("$prefix/source", query)
+        val shape = jsonataTemplate("$prefix/shape.jsonata")
+        val chart = visualization("$prefix/chart", shape)
+        val board = dashboard("$prefix/board", set, source, chart)
+        return board to
+            listOf(
+                Edge(board, set, "parameter_set"),
+                Edge(set, selectorTemplate, "parameters[0].source.template"),
+                Edge(board, source, "sources[0].pipeline"),
+                Edge(source, query, "nodes[0].template"),
+                Edge(board, chart, "visualizations[0].visualization"),
+                Edge(chart, shape, "transform.template"),
+            )
+    }
+
     /** Releases [root] with a plan over [edges] selecting every node but the root, at the root's stored hash. */
     fun releaseWithPlan(
         root: Node,
@@ -268,6 +295,9 @@ internal class FamilyRootsFixture(
     companion object {
         private const val CREATED = 201
         private const val EXCERPT = 600
+
+        /** A selector template's body: the value, label and default columns a SELECT parameter reads. */
+        const val SELECTOR_BODY = "SELECT 'a' AS \"value\", 'A' AS \"display_value\", FALSE AS \"is_default\" ORDER BY 1"
         private const val RESULTS = """{"cases":[{"name":"one month","verdict":"green"}],"environment":{"browser":"e2e","theme":"dark"}}"""
 
         /** Family wire word → (entity table, version table, version FK). Constants only; no request value reaches SQL text. */
