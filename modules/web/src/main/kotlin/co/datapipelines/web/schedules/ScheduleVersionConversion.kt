@@ -34,14 +34,18 @@ import java.util.UUID
  *   naming the operator's fix; the startup runner refuses the server after every step's precondition was read, so
  *   nothing is written. A CURRENT the posture makes ineligible (a DRAFT pointer in a hardened deployment) is NOT a
  *   failure: it converts to that exact pin and keeps refusing at run exactly as before (`version_not_eligible`).
- * - **Per schedule, one transaction, under the workspace guard** (G0 class 2 — the guard every pin writer and the
- *   version discard take), over the schedule's workspace and its queued runs' workspaces: the schedule, its queued runs
- *   and every target's CURRENT are re-read under the guard; ONLY the payload's `version` selector is replaced
- *   (`"current"` → the integer) and `payload_schema_version` set to 2 — the schedule's under its revision CAS, each
- *   run's while it is still queued at schema 1. Parameters, bindings, the frozen reference, every other payload key and
- *   every other column are untouched. A CAS conflict (a concurrent pin-unchanged edit) retries from the fresh rows; it
- *   never overwrites. A target that lost its CURRENT between the precondition and the guarded re-read refuses: the
- *   transaction rolls back the schedule AND its runs together, and the startup fails.
+ * - **The whole step, ONE transaction, under the workspace guard** (#786 round 8: all conversion writes of one startup
+ *   are one transaction; a failure rolls everything back). The guard is G0 class 2 — the one every pin writer and the
+ *   version discard take — acquired ONCE, in sorted id order, over every workspace the step writes in: each candidate
+ *   schedule's and each of its queued runs'. Under it the candidates, their queued runs and every target's CURRENT are
+ *   re-read, then each schedule converts in workspace/name order: ONLY the payload's `version` selector is replaced
+ *   (`"current"` → the integer) and `payload_schema_version` set to 2 — the schedule's under its revision CAS, each run's
+ *   while it is still queued at schema 1. Parameters, bindings, the frozen reference, every other payload key and every
+ *   other column are untouched. A CAS conflict (a concurrent pin-unchanged edit), or a candidate or run that appeared in
+ *   a workspace the guard does not cover, rolls the WHOLE transaction back and the step retries from fresh rows; it never
+ *   overwrites. A target that lost its CURRENT between the precondition and the guarded re-read refuses, and so does any
+ *   write that fails: the one transaction rolls back every schedule and every queued run it had converted, earlier
+ *   candidates included, and the startup fails with the store exactly as it found it.
  * - **Idempotent**: the selector is schema 1, so a rerun selects nothing, repins nothing and logs the zero summary.
  *
  * A deleted schedule is not selected, nor are its runs: the worker skips them (`schedule_deleted`) before preparing,
@@ -76,13 +80,15 @@ class ScheduleVersionConversion(
 
     /**
      * E.0 then the conversion. Throws [ScheduleConversionRefusedException] (after logging) when E.0 fails — before any
-     * write — or when a target lost its CURRENT between the precondition and the guarded re-read (that schedule's
-     * transaction, its runs included, rolls back; earlier schedules stay converted, each exactly as a rerun would
-     * convert it).
+     * write — or when a target lost its CURRENT between the precondition and the guarded re-read; any other failure of
+     * the step's one transaction propagates as thrown. Either way the transaction rolls back every schedule and queued
+     * run it had converted, so a refused startup leaves the store as it found it. The converted lines are logged only
+     * after the commit.
      */
     fun run(): ScheduleConversionReport {
         precondition().takeIf { it.isNotEmpty() }?.let { refuse(it) }
-        val converted = candidates().mapNotNull { convertOne(it.id) }
+        val converted = convertAll()
+        converted.forEach(::logConverted)
         val report = ScheduleConversionReport(converted)
         log.info(
             "event=scheduler.conversion.summary converted={} released={} draft={} queued_runs={}",
@@ -94,48 +100,60 @@ class ScheduleVersionConversion(
         return report
     }
 
-    private fun convertOne(scheduleId: UUID): ConvertedSchedule? {
+    private fun convertAll(): List<ConvertedSchedule> {
         repeat(MAX_ATTEMPTS) {
-            when (val attempt = attempt(scheduleId)) {
-                Attempt.Conflict -> Unit
-                Attempt.Skipped -> return null
-                is Attempt.Done -> return attempt.converted.also(::logConverted)
+            try {
+                return attempt()
+            } catch (_: ConversionConflict) {
+                // The whole transaction rolled back; the next attempt starts over from fresh rows.
             }
         }
-        // Every attempt lost its CAS to a concurrent edit. At startup nothing else writes schedules; refuse loudly.
-        error("schedule $scheduleId: the conversion lost its revision CAS $MAX_ATTEMPTS times; nothing was overwritten")
+        // Every attempt lost a CAS to a concurrent edit. At startup nothing else writes schedules; refuse loudly.
+        error("the schedule conversion lost its revision CAS $MAX_ATTEMPTS times; every attempt rolled back, nothing was overwritten")
     }
 
-    @Suppress("ReturnCount") // one early outcome per re-read, in the order the guarded checks must run
-    private fun attempt(scheduleId: UUID): Attempt =
+    /**
+     * One attempt of the whole step in ONE transaction. Throws [ConversionConflict] (rolling the transaction back) when
+     * a CAS lost or a row appeared in a workspace the guard does not cover; a refusal or a failed write rolls back the
+     * same way and propagates.
+     */
+    private fun attempt(): List<ConvertedSchedule> =
         requireNotNull(
             transactions.execute {
-                val first = schedules.findAny(scheduleId)?.takeIf(::isCandidate) ?: return@execute Attempt.Skipped
-                // The guard covers every workspace this transaction writes in: the schedule's and its runs' (a run's
-                // workspace is copied from its schedule at materialisation, so in practice this is one workspace).
-                val guarded = (listOf(first.workspaceId) + queuedOf(first).map { it.workspaceId }).toSortedSet()
+                // The guard covers every workspace this transaction writes in: the candidates' and their runs' (a run's
+                // workspace is copied from its schedule at materialisation, so in practice these coincide). ONE
+                // acquisition, sorted by the guard: a deterministic order, never an inversion with the live writers.
+                val guarded = workspacesOf(candidates())
+                if (guarded.isEmpty()) return@execute emptyList()
                 writeGuard.workspaces(guarded, ScheduleErrorCodes.WRITE_BUSY)
                 // Re-read UNDER the guard: what a concurrent writer committed while this transaction waited counts.
-                val locked = schedules.findAny(scheduleId)?.takeIf(::isCandidate) ?: return@execute Attempt.Skipped
-                val queued = queuedOf(locked)
-                // A run that appeared in an unguarded workspace while we waited: start over, nothing written yet.
-                if (locked.workspaceId !in guarded || queued.any { it.workspaceId !in guarded }) return@execute Attempt.Conflict
-                val target = pinOf(locked.workspaceId, scheduleTarget(locked)) { scheduleRefusalOf(locked, it) }
-                if (!schedules.convertPayload(locked.id, locked.revision, FROM_SCHEMA, pinned(locked.payload, target.version), TO_SCHEMA)) {
-                    return@execute Attempt.Conflict
-                }
-                // Each run from ITS OWN payload copy and ITS OWN pipeline's CURRENT — never the schedule's version.
-                // A refusal here throws after the schedule's write: the whole transaction rolls back.
-                val converted =
-                    queued.mapNotNull { run ->
-                        val pin = pinOf(run.workspaceId, runTarget(run)) { runRefusalOf(locked, run, it) }
-                        ConvertedRun(run.id, pin.pipeline, pin.version, pin.status).takeIf {
-                            runs.convertQueuedPayload(run.id, FROM_SCHEMA, pinned(run.payload, pin.version), TO_SCHEMA)
-                        }
-                    }
-                Attempt.Done(ConvertedSchedule(locked.id, locked.name, target.pipeline, target.version, target.status, converted))
+                val locked = candidates()
+                // A row that appeared in an unguarded workspace while we waited: start over, everything rolled back.
+                if (!guarded.containsAll(workspacesOf(locked))) throw ConversionConflict()
+                locked.map(::convertLocked)
             },
         ) { "the conversion transaction returned no outcome" }
+
+    /** Converts [schedule] and its queued runs inside the step's transaction, under the guard [attempt] holds. */
+    private fun convertLocked(schedule: Schedule): ConvertedSchedule {
+        val target = pinOf(schedule.workspaceId, scheduleTarget(schedule)) { scheduleRefusalOf(schedule, it) }
+        if (!schedules.convertPayload(schedule.id, schedule.revision, FROM_SCHEMA, pinned(schedule.payload, target.version), TO_SCHEMA)) {
+            throw ConversionConflict()
+        }
+        // Each run from ITS OWN payload copy and ITS OWN pipeline's CURRENT — never the schedule's version. A refusal
+        // here throws after this and every earlier schedule's write: the whole transaction rolls back.
+        val converted =
+            queuedOf(schedule).mapNotNull { run ->
+                val pin = pinOf(run.workspaceId, runTarget(run)) { runRefusalOf(schedule, run, it) }
+                ConvertedRun(run.id, pin.pipeline, pin.version, pin.status).takeIf {
+                    runs.convertQueuedPayload(run.id, FROM_SCHEMA, pinned(run.payload, pin.version), TO_SCHEMA)
+                }
+            }
+        return ConvertedSchedule(schedule.id, schedule.name, target.pipeline, target.version, target.status, converted)
+    }
+
+    private fun workspacesOf(candidates: List<Schedule>): Set<UUID> =
+        candidates.flatMapTo(sortedSetOf()) { schedule -> listOf(schedule.workspaceId) + queuedOf(schedule).map { it.workspaceId } }
 
     /** The exact pin for [pipeline] in [workspaceId] right now, or a refusal (built by [refusalOf]) thrown. */
     private fun pinOf(
@@ -149,11 +167,6 @@ class ScheduleVersionConversion(
         val status = requireNotNull(state.currentStatus) { "refusal answered null, so CURRENT's row exists" }
         return Pin(pipeline, version, status)
     }
-
-    private fun isCandidate(schedule: Schedule) =
-        schedule.deletedAt == null &&
-            schedule.executorId == PipelineJobExecutor.EXECUTOR_ID &&
-            schedule.payloadSchemaVersion == FROM_SCHEMA
 
     private fun candidates(): List<Schedule> = schedules.listLiveAtSchema(PipelineJobExecutor.EXECUTOR_ID, FROM_SCHEMA)
 
@@ -269,15 +282,8 @@ class ScheduleVersionConversion(
         }
     }
 
-    private sealed interface Attempt {
-        data object Skipped : Attempt
-
-        data object Conflict : Attempt
-
-        data class Done(
-            val converted: ConvertedSchedule,
-        ) : Attempt
-    }
+    /** A lost CAS or an unguarded row: thrown inside the transaction so it rolls back, caught by [convertAll]. */
+    private class ConversionConflict : RuntimeException("the schedule conversion lost a race; retrying from fresh rows")
 
     private data class PipelineState(
         val pipeline: String,

@@ -15,6 +15,7 @@ import co.datapipelines.typesystem.guard.MetadataWriterGuard
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldHaveSize
@@ -36,9 +37,11 @@ import java.util.UUID
  * #786 round 7, R1 — the startup conversion of a schedule's QUEUED runs, with the production [ScheduleVersionConversion]
  * over recording repositories and a transaction manager that records commit and rollback. The contract under test: a
  * queued run converts from ITS OWN frozen payload — its own pipeline's CURRENT, never the live schedule's resolved
- * version; the precondition covers every run target (named `kind=run`, separately from schedules) before any write; a
- * run target that fails under the guard rolls the whole schedule's transaction back. The real-database legs (the A-to-B
- * edit at a real upgrade boot, the refused boot, the rollback race, the rerun) are `ScheduleVersionConversionE2eTest`.
+ * version; the precondition covers every run target (named `kind=run`, separately from schedules) before any write; the
+ * whole step is ONE transaction (round 8), so a run target that fails under the guard on a LATER schedule rolls back
+ * every earlier schedule and run with it, and a lost CAS retries the whole step. The real-database legs (the A-to-B
+ * edit at a real upgrade boot, the refused boot, the rollback race, the multi-schedule rollback, the rerun) are
+ * `ScheduleVersionConversionE2eTest`.
  */
 class ScheduleVersionConversionTest {
     private val mapper = ObjectMapper()
@@ -168,6 +171,64 @@ class ScheduleVersionConversionTest {
     }
 
     @Test
+    fun `a refusal on the SECOND schedule rolls back the first schedule and its run in the same one transaction`() {
+        pipeline("first/pipeline", current = 3)
+        val second = pipeline("second/pipeline", current = 7)
+        val seven =
+            mockk<PipelineVersionDetail> {
+                every { version } returns 7
+                every { status } returns PipelineVersionStatus.RELEASED
+            }
+        val secondId = UUID.randomUUID()
+        val firstSchedule = schedule("first/pipeline", name = "a_first")
+        val secondSchedule = schedule("second/pipeline", id = secondId, name = "z_second")
+        val firstRun = run("first/pipeline")
+        val secondRun = run("second/pipeline", id = UUID.randomUUID())
+        every { schedules.listLiveAtSchema(PipelineJobExecutor.EXECUTOR_ID, 1) } returns listOf(firstSchedule, secondSchedule)
+        every { schedules.convertPayload(any(), REVISION, 1, capture(schedulePayloads), 2) } returns true
+        every { runs.listQueuedAtSchema(scheduleId, 1) } returns listOf(firstRun)
+        every { runs.listQueuedAtSchema(secondId, 1) } returns listOf(secondRun)
+        every { runs.convertQueuedPayload(any(), 1, capture(runPayloads), 2) } returns true
+        // The precondition reads the second pipeline's CURRENT 7 twice (the schedule, then its run); the guarded re-read,
+        // after the first pair's writes, finds it gone.
+        every { pipelines.findCurrentVersionDetail(workspace, second) } returnsMany listOf(seven, seven, null)
+
+        val lines = captured { shouldThrow<ScheduleConversionRefusedException> { conversion.run() } }
+
+        verify(exactly = 1) { schedules.convertPayload(scheduleId, REVISION, 1, any(), 2) }
+        verify(exactly = 1) { runs.convertQueuedPayload(runId, 1, any(), 2) }
+        verify(exactly = 0) { schedules.convertPayload(secondId, any(), any(), any(), any()) }
+        withClue("the first pair was written inside the ONE transaction, which rolled back; nothing committed") {
+            transactions.rollbacks shouldBe 1
+            transactions.commits shouldBe 0
+        }
+        withClue("no converted line is logged for a conversion that rolled back") {
+            lines.none { it.startsWith("event=scheduler.conversion.converted") } shouldBe true
+        }
+    }
+
+    @Test
+    fun `a lost CAS rolls the WHOLE step back and the retry converts every schedule from fresh rows`() {
+        pipeline("first/pipeline", current = 3)
+        pipeline("second/pipeline", current = 7)
+        val secondId = UUID.randomUUID()
+        val firstSchedule = schedule("first/pipeline", name = "a_first")
+        val secondSchedule = schedule("second/pipeline", id = secondId, name = "z_second")
+        every { schedules.listLiveAtSchema(PipelineJobExecutor.EXECUTOR_ID, 1) } returns listOf(firstSchedule, secondSchedule)
+        every { schedules.convertPayload(scheduleId, REVISION, 1, any(), 2) } returns true
+        // The second schedule's first CAS loses to a concurrent edit; the retry wins.
+        every { schedules.convertPayload(secondId, REVISION, 1, any(), 2) } returnsMany listOf(false, true)
+        every { runs.listQueuedAtSchema(any(), 1) } returns emptyList()
+
+        val report = conversion.run()
+
+        report.converted.map { it.scheduleId } shouldContainExactly listOf(scheduleId, secondId)
+        verify(exactly = 2) { schedules.convertPayload(scheduleId, REVISION, 1, any(), 2) }
+        transactions.rollbacks shouldBe 1
+        transactions.commits shouldBe 1
+    }
+
+    @Test
     fun `each converted queued run is logged with its own pipeline and version`() {
         pipeline("old/pipeline", current = 2)
         pipeline("new/pipeline", current = 5)
@@ -186,18 +247,21 @@ class ScheduleVersionConversionTest {
 
     // ------------------------------------------------------------------ fixtures
 
-    private fun schedule(pipeline: String) =
-        mockk<Schedule> {
-            every { id } returns scheduleId
-            every { workspaceId } returns workspace
-            every { name } returns NAME
-            every { revision } returns REVISION
-            every { executorId } returns PipelineJobExecutor.EXECUTOR_ID
-            every { payloadSchemaVersion } returns 1
-            every { deletedAt } returns null
-            every { targetRef } returns PipelineJobExecutor.TARGET_PREFIX + pipeline
-            every { payload } returns mapper.readTree("""{"pipeline":"$pipeline","version":"current"}""")
-        }
+    private fun schedule(
+        pipeline: String,
+        id: UUID = scheduleId,
+        name: String = NAME,
+    ) = mockk<Schedule> {
+        every { this@mockk.id } returns id
+        every { workspaceId } returns workspace
+        every { this@mockk.name } returns name
+        every { revision } returns REVISION
+        every { executorId } returns PipelineJobExecutor.EXECUTOR_ID
+        every { payloadSchemaVersion } returns 1
+        every { deletedAt } returns null
+        every { targetRef } returns PipelineJobExecutor.TARGET_PREFIX + pipeline
+        every { payload } returns mapper.readTree("""{"pipeline":"$pipeline","version":"current"}""")
+    }
 
     private fun run(
         pipeline: String,

@@ -1003,9 +1003,10 @@ A schedule — or a queued run — whose pipeline is missing or has no current v
 does: one `event=scheduler.conversion.refused` ERROR line each (`kind=schedule`, or `kind=run` naming the run and its
 schedule; pipeline, `reason=missing_pipeline|no_versions|no_current`) and an `event=scheduler.conversion.refused_summary`
 line — on the previous version, release that pipeline or delete the schedule, then upgrade again. Every API, schedule
-and queued run is checked before anything is written, so a refusal leaves all of them unconverted; a target that loses
-its current version during the conversion rolls its schedule's whole transaction back and refuses the start the same
-way. A current version that is a DRAFT the deployment does
+and queued run is checked before anything is written, so a refusal leaves all of them unconverted. Every schedule and
+queued run converts in ONE transaction: a target that loses its current version during the conversion, or any write
+that fails, rolls back every schedule and run already converted in that start and refuses the start the same way —
+nothing is left half converted. A current version that is a DRAFT the deployment does
 not run converts to that draft pin and keeps refusing at run, as before.
 
 ### 8.3 Upgrade procedure (recommended)

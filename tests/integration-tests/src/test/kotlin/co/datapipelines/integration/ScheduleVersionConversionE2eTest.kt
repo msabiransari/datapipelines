@@ -62,7 +62,9 @@ import java.util.concurrent.TimeUnit
  *   written by EITHER step (a convertible legacy API beside them stays version-less: every step's precondition is read
  *   before any step writes); the operator's fix lets the next boot convert the rest;
  * - the conversion racing a discard of the version it pins, both orders, under the real G0 guard (a raw connection
- *   holds the workspace row; both writers queue on it, observed with `pg_blocking_pids`, never timed).
+ *   holds the workspace row; both writers queue on it, observed with `pg_blocking_pids`, never timed);
+ * - the whole step is ONE transaction (#786 round 8): a storage failure injected by a fixture trigger on the SECOND
+ *   schedule's write leaves the first schedule and both queued runs at schema 1 — the store exactly as before the start.
  */
 @Testcontainers
 @ExtendWith(OutputCaptureExtension::class)
@@ -423,6 +425,49 @@ class ScheduleVersionConversionE2eTest {
         runPayloadOf(run) shouldBe mapper.readTree("""{"pipeline": "$RUN_RACE", "version": 1}""")
     }
 
+    @Test
+    @Order(10)
+    fun `R1 - a storage failure on the SECOND schedule rolls back the first schedule and both queued runs with it`() {
+        close()
+        // Two schema-1 schedules, each with its own queued run; "a" sorts before "z", so the first pair converts first.
+        // Both targets have an eligible CURRENT: the precondition passes and the step reaches its writes.
+        val first = legacySchedule("test/e2econv_atomic_a", AB_NEW)
+        val firstRun = legacyRun(first, "queued", admitBy = "NOW() + INTERVAL '1 day'")
+        val second = legacySchedule("test/e2econv_atomic_z", AB_NEW)
+        val secondRun = legacyRun(second, "queued", admitBy = "NOW() + INTERVAL '1 day'")
+        val before = rows(SNAPSHOT)
+        // Deterministic failure injection in the fixture database: the second schedule's conversion write raises.
+        sql(
+            "CREATE FUNCTION e2econv_fail_second() RETURNS trigger LANGUAGE plpgsql AS " +
+                "'BEGIN IF NEW.id = ''$second''::uuid AND NEW.payload_schema_version = 2 THEN " +
+                "RAISE EXCEPTION ''$INJECTED_FAILURE''; END IF; RETURN NEW; END'",
+        )
+        sql("CREATE TRIGGER e2econv_fail_second BEFORE UPDATE ON schedules FOR EACH ROW EXECUTE FUNCTION e2econv_fail_second()")
+        try {
+            val refused = shouldThrowAny { boot() }
+            generateSequence(refused) { it.cause }.mapNotNull { it.message }.joinToString("\n") shouldContain INJECTED_FAILURE
+            // Read on new connections, in order: first schedule, first run, second schedule, second run.
+            val observed =
+                listOf(
+                    scalar<Int>("SELECT payload_schema_version FROM schedules WHERE id = '$first'"),
+                    runSchemaAndVersion(firstRun).first(),
+                    scalar<Int>("SELECT payload_schema_version FROM schedules WHERE id = '$second'"),
+                    runSchemaAndVersion(secondRun).first(),
+                )
+            withClue("all conversion writes of one startup are one transaction: the refused start converted nothing") {
+                observed shouldBe listOf(1, 1, 1, 1)
+                rows(SNAPSHOT) shouldBe before
+            }
+        } finally {
+            sql("DROP TRIGGER e2econv_fail_second ON schedules")
+            sql("DROP FUNCTION e2econv_fail_second()")
+        }
+        // The failure gone, the next boot converts both pairs.
+        context = boot()
+        listOf(first, second).map { scalar<Int>("SELECT payload_schema_version FROM schedules WHERE id = '$it'") } shouldBe listOf(2, 2)
+        listOf(firstRun, secondRun).map { runSchemaAndVersion(it).first() } shouldBe listOf(2, 2)
+    }
+
     // ------------------------------------------------------------------ the binding witnesses
 
     /**
@@ -735,6 +780,9 @@ class ScheduleVersionConversionE2eTest {
         private const val RUN_GONE = "test/e2econv_run_gone"
         private const val RUN_NO_CURRENT = "test/e2econv_run_no_current"
         private const val RUN_RACE = "test/e2econv_run_race"
+
+        /** R1 round 8: the message the fixture trigger raises on the second schedule's conversion write. */
+        private const val INJECTED_FAILURE = "e2econv injected second conversion failure"
 
         /** The columns the conversion writes on a run; every other column must be what it was. */
         private val RUN_CONVERTED_COLUMNS = setOf("payload_json", "payload_text", "payload_schema_version")
