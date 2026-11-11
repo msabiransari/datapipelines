@@ -5,6 +5,8 @@ import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
+import co.datapipelines.pipeline.release.ReleaseBounds
+import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.visualization.ArtifactValidation
 import co.datapipelines.visualization.DashboardDocument
 import co.datapipelines.visualization.DashboardReader
@@ -16,6 +18,7 @@ import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.api.writeSurface
 import co.datapipelines.web.pipelines.IfMatchHeader
 import co.datapipelines.web.pipelines.LifecycleVerbs
+import co.datapipelines.web.release.ReleasePlanBody
 import co.datapipelines.web.visualizations.ArtifactFamily
 import co.datapipelines.web.visualizations.ArtifactHttp
 import co.datapipelines.web.visualizations.ArtifactResponses
@@ -61,8 +64,10 @@ class DashboardsController(
     private val reader: DashboardReader,
     /** The promoter lens: every read below passes the caller's view, never `Everything`. */
     private val lens: PromoterLens,
-    /** #332 — every lifecycle verb and the release audit, the pipelines mould (enums.md §15). */
+    /** #332 — every lifecycle verb, the pipelines mould (enums.md §15); the release audit is the coordinator's (#873 §C.7). */
     private val audit: AuditEventSink,
+    /** #873 §C.1 — the configured release bounds (configuration §3.35); the plan body is read within `max-wire-bytes`. */
+    private val releaseBounds: ReleaseBounds = ReleaseBounds(),
 ) {
     /** §23 — create; the server assigns the id (P24) and lands version 1 DRAFT (D55). */
     @PostMapping
@@ -145,6 +150,11 @@ class DashboardsController(
      * release RELEASED; every pinned visualization RELEASED or — with `release_pinned_visualizations=true` — released
      * through its OWN gate in the same transaction (its template drafts are not consented by this flag); every
      * source release RELEASED and read-only. Anything else is `dashboard.release.dependency_not_released`.
+     *
+     * #873 §C.1/§C.4: an optional JSON body carries a release plan, read as the pipeline route reads it; a DRAFT source
+     * pipeline is then a dependency the plan may select. Without a plan, `release_pinned_visualizations` is the
+     * compatibility alias and a DRAFT source refuses `dashboard.release.dependency_not_released` (kind `pipeline`). The
+     * coordinator writes every audit row inside the one transaction (§C.7) — this handler writes none.
      */
     @PostMapping("/{id}/release")
     @RequiredScope(Permission.DASHBOARD_RELEASE)
@@ -153,48 +163,21 @@ class DashboardsController(
         @RequestHeader(value = IfMatchHeader.NAME, required = false) ifMatch: String?,
         @RequestParam(value = "release_pinned_visualizations", required = false, defaultValue = "false")
         releasePinnedVisualizations: Boolean = false,
+        @RequestBody(required = false) body: String? = null,
     ): ApiResponse<JsonNode> {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
+        val expectedHash = IfMatchHeader.required(ifMatch)
+        val plan = ReleasePlanBody.parse(body, ReleaseFamily.DASHBOARD, releaseBounds, FAMILY::malformed)
         val released =
             dashboards.release(
                 workspaceId,
                 id,
-                IfMatchHeader.required(ifMatch),
+                expectedHash,
                 principal.userId,
                 releasePinnedVisualizations = releasePinnedVisualizations,
+                plan = plan,
             )
-        // #332 — the release audit, the auditRelease twin: each cascaded VISUALIZATION's own event
-        // first (the 142 "who released X v2 and why" provenance, cascade_from_dashboard_id), then the
-        // dashboard's own event naming them — after the one transaction committed, never on a refusal.
-        val cascade = LifecycleVerbs.FamilyCascade("dashboard_id", id, released.version.detail.version)
-        released.visualizationsReleased.forEach { pin ->
-            LifecycleVerbs.audit(
-                audit,
-                LifecycleVerbs.VISUALIZATION_EVENTS.versionReleased,
-                principal,
-                workspaceId,
-                LifecycleVerbs.cascadedReleaseDetails(principal, null, null, pin.version, cascade) + mapOf("name" to pin.name),
-            )
-        }
-        LifecycleVerbs.audit(
-            audit,
-            LifecycleVerbs.DASHBOARD_EVENTS.versionReleased,
-            principal,
-            workspaceId,
-            LifecycleVerbs.familyReleaseDetails(
-                principal,
-                LifecycleVerbs.FamilyIdentity(
-                    "dashboard_id",
-                    "dashboard_name",
-                    id,
-                    released.version.record.name,
-                    released.version.detail.version,
-                ),
-                "visualizations_released",
-                released.visualizationsReleased.map { mapOf("name" to it.name, "version" to it.version) },
-            ),
-        )
         val data = ArtifactResponses.full(released.version) as com.fasterxml.jackson.databind.node.ObjectNode
         data.putArray("visualizations_released").also { array ->
             released.visualizationsReleased.forEach { array.addObject().put("name", it.name).put("version", it.version) }

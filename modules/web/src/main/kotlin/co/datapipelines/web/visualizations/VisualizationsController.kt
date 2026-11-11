@@ -5,6 +5,8 @@ import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
+import co.datapipelines.pipeline.release.ReleaseBounds
+import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.visualization.VisualizationReader
 import co.datapipelines.visualization.VisualizationService
 import co.datapipelines.web.api.ApiResponse
@@ -14,6 +16,7 @@ import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.api.writeSurface
 import co.datapipelines.web.pipelines.IfMatchHeader
 import co.datapipelines.web.pipelines.LifecycleVerbs
+import co.datapipelines.web.release.ReleasePlanBody
 import com.fasterxml.jackson.databind.JsonNode
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.DeleteMapping
@@ -60,8 +63,10 @@ class VisualizationsController(
     private val reader: VisualizationReader,
     /** The promoter lens: every read below passes the caller's view, never `Everything`. */
     private val lens: PromoterLens,
-    /** #332 — every lifecycle verb and the release audit, the pipelines mould (enums.md §15). */
+    /** #332 — every lifecycle verb, the pipelines mould (enums.md §15); the release audit is the coordinator's (#873 §C.7). */
     private val audit: AuditEventSink,
+    /** #873 §C.1 — the configured release bounds (configuration §3.35); the plan body is read within `max-wire-bytes`. */
+    private val releaseBounds: ReleaseBounds = ReleaseBounds(),
 ) {
     /** §22 — create; the server assigns the id (P24) and lands version 1 DRAFT (D55). */
     @PostMapping
@@ -144,6 +149,10 @@ class VisualizationsController(
      * or — with `release_pinned_templates=true` — released WITH it, then the evidence gate (the spec's §11.4 —
      * `VisualizationReleaseEvidence` judges the latest run for THIS draft: `tests_missing`, `tests_stale`,
      * `tests_red` or `mechanical_failed`, else PASS), all in one transaction.
+     *
+     * #873 §C.1: an optional JSON body carries a release plan, read as the pipeline route reads it; without one,
+     * `release_pinned_templates` is the compatibility alias. The coordinator writes every audit row inside the one
+     * transaction (§C.7) — this handler writes none.
      */
     @PostMapping("/{id}/release")
     @RequiredScope(Permission.VISUALIZATION_RELEASE)
@@ -151,47 +160,21 @@ class VisualizationsController(
         @PathVariable id: UUID,
         @RequestHeader(value = IfMatchHeader.NAME, required = false) ifMatch: String?,
         @RequestParam(value = "release_pinned_templates", required = false, defaultValue = "false") releasePinnedTemplates: Boolean = false,
+        @RequestBody(required = false) body: String? = null,
     ): ApiResponse<JsonNode> {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
+        val expectedHash = IfMatchHeader.required(ifMatch)
+        val plan = ReleasePlanBody.parse(body, ReleaseFamily.VISUALIZATION, releaseBounds, FAMILY::malformed)
         val released =
             visualizations.release(
                 workspaceId,
                 id,
-                IfMatchHeader.required(ifMatch),
+                expectedHash,
                 principal.userId,
                 releasePinnedTemplates = releasePinnedTemplates,
+                plan = plan,
             )
-        // #332 — the release audit, the auditRelease twin: each cascaded template's event first, then
-        // the visualization's own naming them — after the one transaction committed, never on a refusal.
-        val cascade = LifecycleVerbs.FamilyCascade("visualization_id", id, released.version.detail.version)
-        released.templatesReleased.forEach { template ->
-            LifecycleVerbs.audit(
-                audit,
-                LifecycleVerbs.TEMPLATE_AUDIT_VERSION_RELEASED,
-                principal,
-                workspaceId,
-                LifecycleVerbs.cascadedReleaseDetails(principal, "template_id", template.id, template.version, cascade),
-            )
-        }
-        LifecycleVerbs.audit(
-            audit,
-            LifecycleVerbs.VISUALIZATION_EVENTS.versionReleased,
-            principal,
-            workspaceId,
-            LifecycleVerbs.familyReleaseDetails(
-                principal,
-                LifecycleVerbs.FamilyIdentity(
-                    "visualization_id",
-                    "visualization_name",
-                    id,
-                    released.version.record.name,
-                    released.version.detail.version,
-                ),
-                "templates_released",
-                released.templatesReleased.map { mapOf("template_id" to it.id, "version" to it.version) },
-            ),
-        )
         val data = ArtifactResponses.full(released.version) as com.fasterxml.jackson.databind.node.ObjectNode
         data.putArray("templates_released").also { array ->
             released.templatesReleased.forEach { array.addObject().put("template_id", it.id).put("version", it.version) }

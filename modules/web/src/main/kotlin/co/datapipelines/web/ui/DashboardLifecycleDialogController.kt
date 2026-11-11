@@ -88,36 +88,7 @@ class DashboardLifecycleDialogController(
         // checkbox, is the guard. The set and the source pins have no cascade: RELEASED or refused.
         val released =
             dashboards.release(workspaceId, id, bodyHash, principal.userId, releasePinnedVisualizations)
-        // #332 — the release audit, the REST route's twin: each cascaded visualization's own event
-        // first, then the dashboard's own event naming them.
-        val cascade = LifecycleVerbs.FamilyCascade("dashboard_id", id, released.version.detail.version)
-        released.visualizationsReleased.forEach { pin ->
-            LifecycleVerbs.audit(
-                audit,
-                LifecycleVerbs.VISUALIZATION_EVENTS.versionReleased,
-                principal,
-                workspaceId,
-                LifecycleVerbs.cascadedReleaseDetails(principal, null, null, pin.version, cascade) + mapOf("name" to pin.name),
-            )
-        }
-        LifecycleVerbs.audit(
-            audit,
-            LifecycleVerbs.DASHBOARD_EVENTS.versionReleased,
-            principal,
-            workspaceId,
-            LifecycleVerbs.familyReleaseDetails(
-                principal,
-                LifecycleVerbs.FamilyIdentity(
-                    "dashboard_id",
-                    "dashboard_name",
-                    id,
-                    released.version.record.name,
-                    released.version.detail.version,
-                ),
-                "visualizations_released",
-                released.visualizationsReleased.map { mapOf("name" to it.name, "version" to it.version) },
-            ),
-        )
+        // #873 §C.7 — the coordinator wrote every release event inside the one transaction; this handler writes none.
         return redirect(
             versionsTab(id, if (released.visualizationsReleased.isEmpty()) OK_RELEASED else OK_RELEASED_WITH_VISUALIZATIONS),
         )

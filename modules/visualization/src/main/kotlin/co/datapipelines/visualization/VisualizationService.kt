@@ -166,7 +166,7 @@ class VisualizationService(
         coordination?.let {
             return it.release(ArtifactReleaseRequest(workspaceId, id, expectedHash, actor, releasePinnedTemplates, plan))
         }
-        check(plan == null) { "a release plan needs the release coordinator, and none is wired" }
+        check(plan?.present != true) { "a release plan needs the release coordinator, and none is wired" }
         val record = repository.findRecord(workspaceId, id) ?: throw lifecycle.notFound(id)
         val draft = repository.findDraft(workspaceId, id) ?: throw lifecycle.notDraft(id)
         val body = checkNotNull(repository.findVersion(workspaceId, id, draft.version)).body

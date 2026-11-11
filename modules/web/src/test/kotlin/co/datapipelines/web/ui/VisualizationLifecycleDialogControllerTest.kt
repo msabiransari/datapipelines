@@ -43,7 +43,8 @@ import java.util.UUID
  * CLOSED tab enum and a constant flash code, so a hostile `from` lands on Versions and is never echoed. A purge that
  * took the entity lands on the catalog. The typed confirm is checked BEFORE the service (a mismatch purges nothing);
  * an API key is refused `auth.session.required` before anything is read; every audit row is written AFTER the verb
- * returned, the release's cascaded template rows first (#332) — read off a RECORDING sink, so a missing row is red.
+ * returned — read off a RECORDING sink, so a missing row is red — except the release's, which are the coordinator's
+ * (#873 §C.7), so a release row here is red.
  */
 class VisualizationLifecycleDialogControllerTest {
     private val workspaceId = UUID.randomUUID()
@@ -78,7 +79,7 @@ class VisualizationLifecycleDialogControllerTest {
     // ------------------------------------------------------------------ release
 
     @Test
-    fun `release passes the DIALOG's hash and the consent, audits the cascaded template first, and returns to the tab`() {
+    fun `release passes the DIALOG's hash and the consent, writes no audit row of its own, and returns to the tab`() {
         authenticate()
         // #416: the draft is at v3 / hash-3 NOW; the form posted hash-2, the one the dialog read.
         draftWorking(version = 3)
@@ -89,8 +90,8 @@ class VisualizationLifecycleDialogControllerTest {
         val answer = controller.release(vizId, bodyHash = "hash-2", releasePinnedTemplates = true, from = "preview")
 
         location(answer) shouldBe "/visualizations/$vizId?tab=preview&ok=released_with_templates"
-        audit.events.map { it.first } shouldBe listOf("template.version.released", "visualization.version.released")
-        audit.events.last().second["visualization_name"] shouldBe VisualizationUiFixtures.NAME
+        // #873 §C.7 — the #332 rows are the coordinator's, written inside its transaction; the dialog writes none.
+        audit.events.shouldBeEmpty()
     }
 
     @Test
@@ -102,7 +103,7 @@ class VisualizationLifecycleDialogControllerTest {
 
         location(controller.release(vizId, bodyHash = "hash-2", releasePinnedTemplates = false, from = null)) shouldBe
             "/visualizations/$vizId?tab=versions&ok=released"
-        audit.events.map { it.first } shouldBe listOf("visualization.version.released")
+        audit.events.shouldBeEmpty()
     }
 
     @Test

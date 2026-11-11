@@ -17,6 +17,8 @@ import co.datapipelines.parameters.ParameterSetService
 import co.datapipelines.parameters.ParametersConfig
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.RequestLimits
+import co.datapipelines.pipeline.release.ReleaseBounds
+import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.api.ApiResponse
@@ -27,6 +29,7 @@ import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.api.writeSurface
 import co.datapipelines.web.pipelines.IfMatchHeader
 import co.datapipelines.web.pipelines.LifecycleVerbs
+import co.datapipelines.web.release.ReleasePlanBody
 import com.fasterxml.jackson.databind.JsonNode
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.DeleteMapping
@@ -77,8 +80,10 @@ class ParameterSetsController(
     private val config: ParametersConfig,
     /** 178 — the promoter lens: every read below passes the caller's view, never `Everything`. */
     private val lens: PromoterLens,
-    /** #332 — every lifecycle verb and the release audit, the pipelines mould (enums.md §15). */
+    /** #332 — every lifecycle verb, the pipelines mould (enums.md §15); the release audit is the coordinator's (#873 §C.7). */
     private val audit: AuditEventSink,
+    /** #873 §C.1 — the configured release bounds (configuration §3.35); the plan body is read within `max-wire-bytes`. */
+    private val releaseBounds: ReleaseBounds = ReleaseBounds(),
 ) {
     /** §21 — create; the server assigns the id (P24) and lands version 1 DRAFT (D55). */
     @PostMapping
@@ -168,6 +173,11 @@ class ParameterSetsController(
      * `release_pinned_templates=true`, released WITH the set in one transaction, templates
      * first (142); §4 steps 4–6 re-run against the pins as they are now (record §8.2).
      * Session-style in practice; no MCP twin exists (§9.1).
+     *
+     * #873 §C.1: an optional JSON body carries a release plan (`tree_hash`, `include_dependencies`, `check_overrides`,
+     * read as the pipeline route reads it); without one, `release_pinned_templates` is the compatibility alias. Either
+     * way the release is one coordinator transaction, and the coordinator writes every audit row inside it (§C.7) —
+     * this handler writes none.
      */
     @PostMapping("/{id}/release")
     @RequiredScope(Permission.PARAMETER_SET_RELEASE)
@@ -175,49 +185,13 @@ class ParameterSetsController(
         @PathVariable id: UUID,
         @RequestHeader(value = IfMatchHeader.NAME, required = false) ifMatch: String?,
         @RequestParam(value = "release_pinned_templates", required = false, defaultValue = "false") releasePinnedTemplates: Boolean = false,
+        @RequestBody(required = false) body: String? = null,
     ): ApiResponse<JsonNode> {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
-        val released =
-            sets.release(
-                workspaceId,
-                id,
-                IfMatchHeader.required(ifMatch),
-                principal.userId,
-                releasePinnedTemplates,
-            )
-        // #332 — the release audit, the auditRelease twin (the T187 gap would otherwise be recreated
-        // here): each cascaded template's own event FIRST — the order the writes happened in — then
-        // the set's own event naming them. Called only after the service returned, i.e. after the one
-        // transaction committed; a refusal anywhere threw before this and logs nothing.
-        val cascade = LifecycleVerbs.FamilyCascade("parameter_set_id", id, released.version.detail.version)
-        released.templatesReleased.forEach { template ->
-            LifecycleVerbs.audit(
-                audit,
-                LifecycleVerbs.TEMPLATE_AUDIT_VERSION_RELEASED,
-                principal,
-                workspaceId,
-                LifecycleVerbs.cascadedReleaseDetails(principal, "template_id", template.id, template.version, cascade),
-            )
-        }
-        LifecycleVerbs.audit(
-            audit,
-            LifecycleVerbs.PARAMETER_SET_EVENTS.versionReleased,
-            principal,
-            workspaceId,
-            LifecycleVerbs.familyReleaseDetails(
-                principal,
-                LifecycleVerbs.FamilyIdentity(
-                    "parameter_set_id",
-                    "parameter_set_name",
-                    id,
-                    released.version.record.name,
-                    released.version.detail.version,
-                ),
-                "templates_released",
-                released.templatesReleased.map { mapOf("template_id" to it.id, "version" to it.version) },
-            ),
-        )
+        val expectedHash = IfMatchHeader.required(ifMatch)
+        val plan = ReleasePlanBody.parse(body, ReleaseFamily.PARAMETER_SET, releaseBounds, ApiErrors::malformedParameterSetBody)
+        val released = sets.release(workspaceId, id, expectedHash, principal.userId, releasePinnedTemplates, plan)
         return ApiResponse.of(ParameterSetResponses.full(released.version.record, released.version.body, released.version.detail))
     }
 

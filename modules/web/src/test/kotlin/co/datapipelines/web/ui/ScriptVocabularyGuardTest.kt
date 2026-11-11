@@ -306,6 +306,20 @@ class ScriptVocabularyGuardTest {
                         "token, the `transform.template` path and its JSON pointer — a node noun stays red here",
                 ),
                 Triple(
+                    Regex("^modules/application/src/main/kotlin/co/datapipelines/application/dependencies/visualization/"),
+                    Regex("transform", setOf(IGNORE_CASE)),
+                    "the visualization family's native release provider (#873 G2) reads the block's `transform` pin as its one edge",
+                ),
+                Triple(
+                    Regex(
+                        "^modules/web/src/(?:main|test)/kotlin/co/datapipelines/web/release/" +
+                            "(?:VisualizationReleaseParticipant|ReleaseConfiguration|ReleaseArtifactSeed|ArtifactReleaseProvidersPostgresTest)\\.kt$",
+                    ),
+                    Regex("transform(?: pin|s? template|-template|\\.template|-free| = |: Pair)|TransformBinding"),
+                    "the visualization release participant, its provider's wiring and their fixtures (#873 G2): the block's pin, " +
+                        "phrase by phrase — a node noun stays red here",
+                ),
+                Triple(
                     Regex("^docs/rest-api\\.md$"),
                     Regex("transform pin|transform template|the transform|transform,|transform`", setOf(IGNORE_CASE)),
                     "the visualization/dashboard rows and the runtime stage list (the block)",

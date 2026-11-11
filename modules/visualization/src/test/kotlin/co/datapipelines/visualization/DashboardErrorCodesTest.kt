@@ -18,8 +18,8 @@ class DashboardErrorCodesTest {
          * §13.23's rows — the spec's 24, the ten L1a added (pipeline-contract v1.44), L2's
          * `too_many_invocations` (v1.45), L5's `binding.path_invalid` (v1.49) and the seven release-plan codes #517
          * added (`plan_conflict`, `plan_required`, `plan_invalid`, `dependency_cycle`, `dependency_limit`, `busy`,
-         * `bundle_unsupported`).
+         * `bundle_unsupported`), and #786's `metadata_unavailable` (503, record §25.4 erratum (6)).
          */
-        const val EXPECTED_DASHBOARD_CODES = 43
+        const val EXPECTED_DASHBOARD_CODES = 44
     }
 }

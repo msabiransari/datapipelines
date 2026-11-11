@@ -253,18 +253,8 @@ class VisualizationsControllerTest {
             .single()
             .get("template_id")
             .asText() shouldBe "finance/scripts/revenue_bars"
-        // #332 — the release audit, the auditRelease twin: the cascaded template's event first,
-        // naming the visualization release it rode on, then the visualization's own naming it.
-        audit.events shouldBe listOf("template.version.released", "visualization.version.released")
-        audit.details.first()["template_id"] shouldBe "finance/scripts/revenue_bars"
-        audit.details.first()["version"] shouldBe 2
-        audit.details.first()["cascade_from_visualization_id"] shouldBe id.toString()
-        audit.details.first()["cascade_from_version"] shouldBe 1
-        audit.details.last()["visualization_id"] shouldBe id.toString()
-        audit.details.last()["visualization_name"] shouldBe NAME
-        audit.details.last()["version"] shouldBe 1
-        audit.details.last()["templates_released"] shouldBe
-            listOf(mapOf("template_id" to "finance/scripts/revenue_bars", "version" to 2))
+        // #873 §C.7 — the coordinator is the ONE writer of release events, inside its transaction; none here.
+        audit.events shouldBe emptyList()
     }
 
     @Test

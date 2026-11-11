@@ -115,7 +115,7 @@ open class TemplateReleaseService(
             val (entity, _) = releaseTarget(workspaceId, id)
             return it.release(TemplateReleaseRequest(workspaceId, entity, expectedHash, actor, plan))
         }
-        check(plan == null) { "a release plan needs the release coordinator, and none is wired" }
+        check(plan?.present != true) { "a release plan needs the release coordinator, and none is wired" }
         return flip(workspaceId, id, expectedHash, actor)
     }
 

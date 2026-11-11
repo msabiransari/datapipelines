@@ -38,6 +38,16 @@ class ReleaseWiringCollaborators {
     @Bean
     fun templateReleaseService(): TemplateReleaseService = mockk(relaxed = true)
 
+    /** #873 §B — the three family services the coordinator's new participants release through. */
+    @Bean
+    fun parameterSetService(): co.datapipelines.parameters.ParameterSetService = mockk(relaxed = true)
+
+    @Bean
+    fun visualizationService(): co.datapipelines.visualization.VisualizationService = mockk(relaxed = true)
+
+    @Bean
+    fun dashboardService(): co.datapipelines.visualization.DashboardService = mockk(relaxed = true)
+
     @Bean
     fun metadataTransactionManager(): PlatformTransactionManager = mockk(relaxed = true)
 
