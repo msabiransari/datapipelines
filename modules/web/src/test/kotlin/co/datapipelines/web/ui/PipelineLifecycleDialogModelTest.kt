@@ -482,7 +482,7 @@ class PipelineLifecycleDialogModelTest {
             revision = 1,
             executorId = "pipeline",
             payloadSchemaVersion = 1,
-            payload = json.readTree("""{"pipeline":"test/probe","version":"current"}"""),
+            payload = json.readTree("""{"pipeline":"test/probe","version":1}"""),
             parameters = json.readTree("{}"),
             targetRef = "pipeline:test/probe",
             cron = "0 3 1 1 *",

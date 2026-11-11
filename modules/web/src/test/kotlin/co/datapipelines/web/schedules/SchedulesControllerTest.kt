@@ -244,7 +244,7 @@ class SchedulesControllerTest {
         every { service.create(any(), any(), capture(request), null) } returns Written(schedule(), replayed = false)
 
         controller.create(
-            """{"name":"a/b","payload":{"pipeline":"a/p","version":"current"},"cron":"0 6 * * *","timezone":"UTC"}""",
+            """{"name":"a/b","payload":{"pipeline":"a/p","version":1},"cron":"0 6 * * *","timezone":"UTC"}""",
             null,
         )
 
@@ -476,7 +476,7 @@ class SchedulesControllerTest {
         revision = revision,
         executorId = "pipeline",
         payloadSchemaVersion = 1,
-        payload = mapper.readTree("""{"pipeline":"finance/revenue","version":"current"}"""),
+        payload = mapper.readTree("""{"pipeline":"finance/revenue","version":1}"""),
         parameters = mapper.createObjectNode(),
         targetRef = "pipeline:finance/revenue",
         cron = "0 6 * * *",
@@ -507,7 +507,7 @@ class SchedulesControllerTest {
             scheduleRevision = 3,
             executorId = "pipeline",
             payloadSchemaVersion = 1,
-            payload = mapper.readTree("""{"pipeline":"finance/revenue","version":"current"}"""),
+            payload = mapper.readTree("""{"pipeline":"finance/revenue","version":1}"""),
             parameters = mapper.createObjectNode(),
             prepared = null,
             actorUserId = UUID.randomUUID(),
@@ -567,7 +567,7 @@ class SchedulesControllerTest {
         val RUN_ID: UUID = UUID.fromString("00000000-0000-0000-0000-00000000f00d")
         val EXECUTION_ID: UUID = UUID.fromString("00000000-0000-0000-0000-00000000e0ec")
         const val BODY =
-            """{"name":"finance/daily/revenue","payload":{"pipeline":"finance/revenue","version":"current"},""" +
+            """{"name":"finance/daily/revenue","payload":{"pipeline":"finance/revenue","version":1},""" +
                 """"cron":"0 6 * * *","timezone":"UTC"}"""
     }
 }

@@ -20,8 +20,10 @@ import co.datapipelines.pipeline.PipelineVersionStatus.RELEASED
 import co.datapipelines.pipeline.SchedulePin
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.mockk
@@ -215,6 +217,97 @@ class ApiAndScheduleConsumersIntegrationTest {
     }
 
     @Test
+    fun `#786 D1 - a schema-2 schedule protects exactly its pinned version, never what CURRENT resolves to`() {
+        schedule("pinned_v1", schema = 2, version = "1")
+
+        scheduleConsumers.liveVersionPins(workspaceId, pipelineName, 1) shouldContainExactly listOf(SchedulePin("pinned_v1", 1))
+        scheduleConsumers.liveVersionPins(workspaceId, pipelineName, 2).shouldBeEmpty()
+        scheduleConsumers.anyVersionPins(workspaceId, pipelineName) shouldContainExactly listOf(SchedulePin("pinned_v1", 1))
+
+        val refused = shouldThrow<DatapipelinesException> { service.discardVersion(workspaceId, pipelineId, 1, userId) }
+        refused.code shouldBe PipelineErrorCodes.Versioning.PINNED
+        refused.details["referencing_schedules"] shouldBe listOf(mapOf("schedule" to "pinned_v1", "pipeline_version" to 1))
+        // CURRENT is not what this schedule runs: moving or clearing the pointer never reaches it.
+        jdbc.update("UPDATE pipelines SET current_version = NULL WHERE id = :id", mapOf("id" to pipelineId))
+        scheduleConsumers.liveVersionPins(workspaceId, pipelineName, 1) shouldContainExactly listOf(SchedulePin("pinned_v1", 1))
+    }
+
+    @Test
+    fun `#786 D1 - a schema-2 payload whose version is not a positive integer pins nothing, and the entity scope still counts it`() {
+        schedule("planted_text", schema = 2, version = "\"current\"")
+        schedule("planted_zero", schema = 2, version = "0")
+
+        scheduleConsumers.liveVersionPins(workspaceId, pipelineName, 1).shouldBeEmpty()
+        scheduleConsumers.liveVersionPins(workspaceId, pipelineName, 2).shouldBeEmpty()
+        scheduleConsumers.anyVersionPins(workspaceId, pipelineName).map { it.pipelineVersion } shouldContainExactly listOf(null, null)
+    }
+
+    @Test
+    fun `#786 R3 - every positive Int exact pin is protected - nine digits, ten digits and Int MAX_VALUE refuse the discard`() {
+        for (version in listOf(999_999_999, 1_000_000_000, Int.MAX_VALUE)) {
+            pipelineVersion(version, RELEASED)
+            schedule("pinned_$version", schema = 2, version = version.toString())
+
+            withClue("v$version") {
+                scheduleConsumers.liveVersionPins(workspaceId, pipelineName, version) shouldContainExactly
+                    listOf(SchedulePin("pinned_$version", version))
+                val refused = shouldThrow<DatapipelinesException> { service.discardVersion(workspaceId, pipelineId, version, userId) }
+                refused.code shouldBe PipelineErrorCodes.Versioning.PINNED
+                refused.details["referencing_schedules"] shouldBe
+                    listOf(mapOf("schedule" to "pinned_$version", "pipeline_version" to version))
+                status(version) shouldBe RELEASED
+            }
+        }
+        scheduleConsumers.anyVersionPins(workspaceId, pipelineName).map { it.pipelineVersion } shouldContainExactlyInAnyOrder
+            listOf(999_999_999, 1_000_000_000, Int.MAX_VALUE)
+    }
+
+    @Test
+    fun `#786 R3 - a ten-digit DRAFT pin refuses that draft's purge`() {
+        pipelineVersion(1_000_000_000, DRAFT)
+        schedule("next_draft", schema = 2, version = "1000000000")
+
+        val refused = shouldThrow<DatapipelinesException> { service.purgeVersion(workspaceId, pipelineId, 1_000_000_000) }
+
+        refused.code shouldBe PipelineErrorCodes.Versioning.PINNED
+        status(1_000_000_000) shouldBe DRAFT
+    }
+
+    @Test
+    fun `#786 R3 - an Int MAX_VALUE DRAFT pin refuses that draft's purge`() {
+        pipelineVersion(Int.MAX_VALUE, DRAFT)
+        schedule("max_draft", schema = 2, version = Int.MAX_VALUE.toString())
+
+        val refused = shouldThrow<DatapipelinesException> { service.purgeVersion(workspaceId, pipelineId, Int.MAX_VALUE) }
+
+        refused.code shouldBe PipelineErrorCodes.Versioning.PINNED
+        status(Int.MAX_VALUE) shouldBe DRAFT
+    }
+
+    @Test
+    fun `#786 R3 - an overflowing or malformed stored version pins nothing and never fails the read`() {
+        val planted =
+            linkedMapOf(
+                "past_int" to "2147483648",
+                "past_long" to "99999999999999999999999",
+                "negative" to "-1",
+                "fraction" to "2.5",
+                "text_digits" to "\"2\"",
+                "json_null" to "null",
+                "an_object" to "{\"v\": 2}",
+            )
+        planted.forEach { (name, version) -> schedule(name, schema = 2, version = version) }
+
+        scheduleConsumers.liveVersionPins(workspaceId, pipelineName, 1).shouldBeEmpty()
+        scheduleConsumers.liveVersionPins(workspaceId, pipelineName, 2).shouldBeEmpty()
+        scheduleConsumers.liveVersionPins(workspaceId, pipelineName, Int.MAX_VALUE).shouldBeEmpty()
+        scheduleConsumers.anyVersionPins(workspaceId, pipelineName) shouldContainExactlyInAnyOrder
+            planted.keys.map { SchedulePin(it, null) }
+        // Nothing protects v2, so its discard proceeds: the read answered, it did not throw.
+        service.discardVersion(workspaceId, pipelineId, 2, userId).version.status shouldBe DISCARDED
+    }
+
+    @Test
     fun `a schedule targeting another pipeline protects nothing here`() {
         schedule("other", target = TARGET_PREFIX + "a39/someone_else")
 
@@ -266,11 +359,13 @@ class ApiAndScheduleConsumersIntegrationTest {
         blocked: Boolean = false,
         deleted: Boolean = false,
         target: String = TARGET_PREFIX + pipelineName,
+        schema: Int = 1,
+        version: String? = null,
     ) = jdbc.update(
         """
         INSERT INTO schedules (id, workspace_id, name, executor_id, payload_schema_version, payload_json, target_ref, cron, timezone,
                                enabled, blocked_reason, blocked_at, created_by, updated_by, deleted_at, deleted_by)
-        VALUES (:id, :ws, :name, 'pipeline', 1, CAST(:payload AS jsonb), :target, '0 3 * * *', 'UTC', :enabled,
+        VALUES (:id, :ws, :name, 'pipeline', :schema, CAST(:payload AS jsonb), :target, '0 3 * * *', 'UTC', :enabled,
                 CASE WHEN :blocked THEN 'pipeline_not_released' END, CASE WHEN :blocked THEN NOW() END, :owner, :owner,
                 CASE WHEN :deleted THEN NOW() END, CASE WHEN :deleted THEN CAST(:owner AS UUID) END)
         """.trimIndent(),
@@ -278,7 +373,13 @@ class ApiAndScheduleConsumersIntegrationTest {
             "id" to UUID.randomUUID(),
             "ws" to workspaceId,
             "name" to name,
-            "payload" to """{"pipeline":"${target.removePrefix(TARGET_PREFIX)}"}""",
+            "schema" to schema,
+            "payload" to
+                if (version == null) {
+                    """{"pipeline":"${target.removePrefix(TARGET_PREFIX)}"}"""
+                } else {
+                    """{"pipeline":"${target.removePrefix(TARGET_PREFIX)}","version":$version}"""
+                },
             "target" to target,
             "enabled" to enabled,
             "blocked" to blocked,

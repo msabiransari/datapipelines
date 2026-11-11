@@ -25,18 +25,24 @@ interface JobExecutor {
     /** The registered id — `schedules.executor_id`. Allowlisted: nothing else can be named (record §5). */
     val id: String
 
-    /** The payload schema version this executor writes and accepts. */
+    /**
+     * The payload schema version this executor writes — every create and every edit that sets the payload stores it.
+     * A stored payload of any other version is READ-checked (#786 D.2): [validate] and [prepare] receive the stored
+     * number and the executor refuses one it no longer accepts, never upgrading it silently at read time.
+     */
     val payloadSchemaVersion: Int
 
     /**
-     * At save (and at unblock): is this payload + parameters runnable in [workspaceId]? Returns the
-     * generic target reference to store (B15), or throws a catalogued `DatapipelinesException` the
-     * surface renders as the refusal.
+     * At save (and at unblock, and at Run now on a payload stored under an older schema): is this payload + parameters
+     * runnable in [workspaceId]? [payloadSchemaVersion] is the schema the payload is stored in (a new request's payload
+     * is in this executor's own [JobExecutor.payloadSchemaVersion]). Returns the generic target reference to store
+     * (B15), or throws a catalogued `DatapipelinesException` the surface renders as the refusal.
      */
     fun validate(
         workspaceId: UUID,
         payload: JsonNode,
         parameters: JsonNode,
+        payloadSchemaVersion: Int,
     ): String
 
     /**
@@ -99,6 +105,8 @@ data class Admission(
     val referenceTimezone: String,
     val payload: JsonNode,
     val parameters: JsonNode,
+    /** The schema [payload] was stored in — the run row's own copy (V38), never a live schedule read (#786 D.2). */
+    val payloadSchemaVersion: Int,
 )
 
 /** The outcome of [JobExecutor.prepare]. */

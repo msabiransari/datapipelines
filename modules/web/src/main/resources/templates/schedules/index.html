@@ -34,7 +34,8 @@
   <div class="tplx-page sch-page app-canvas" data-schedules-root
        th:attr="data-can-author=${canAuthor == true},
                 data-can-read-executions=${canReadExecutions == true},
-                data-can-execute=${canExecute == true}"
+                data-can-execute=${canExecute == true},
+                data-drafts-eligible=${draftsEligible == true}"
        th:data-schedule-condition="${#strings.isEmpty(condition) ? null : condition}"
        th:data-schedule-outcome="${#strings.isEmpty(outcome) ? null : outcome}">
 
@@ -44,7 +45,7 @@
         <h1 class="ds-headline">Schedules</h1>
         <p class="app-page-sub">
           Run a pipeline on a timetable. A schedule fires as the system identity, never as the
-          person who created it, and follows the pipeline's current version.
+          person who created it, and runs the exact pipeline version it names.
         </p>
       </div>
       <div class="app-page-actions">

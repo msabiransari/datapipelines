@@ -33,6 +33,9 @@ class SchedulesDetailBrowserTest : SchedulesBrowserSuite() {
         val id = createSchedule(page, "$root/nightly/rows", pipeline)
         openSchedules("?id=$id")
         detail().waitFor()
+        // #786 D.4: the detail names the exact pin the schedule runs.
+        page.locator("#schedule-detail [data-slot='version']").textContent() shouldBe "pinned to v1"
+        page.locator("#schedule-detail [data-slot='version']").getAttribute("data-pinned-version") shouldBe "1"
 
         page.locator("[data-verb='schedule-pause']").click()
         page.waitForFunction("() => (document.querySelector('#schedule-detail [data-slot=condition]') || {}).textContent === 'paused'")
@@ -43,18 +46,18 @@ class SchedulesDetailBrowserTest : SchedulesBrowserSuite() {
 
         // #786 B.4: the release a live schedule runs is protected, so the discard verb is refused.
         send(page, "POST", "/api/v1/pipelines/$pipelineId/versions/1/discard").status shouldBe 409
-        // The pipeline loses its current version the only way left — legacy data (its only release
+        // The pinned version stops running the only way left — legacy data (its only release
         // discarded before #786): a Run now is refused before anything starts, and the schedule
-        // BLOCKS with that cause (§5.2).
+        // BLOCKS with that cause (§5.2) — the exact pin is read, never the pointer.
         plantLegacyDiscardedRelease(pipelineId)
         page.locator("[data-verb='schedule-run']").click()
         val blocked = page.locator("#schedule-detail [data-slot='blocked']:not([hidden])")
         blocked.waitFor()
-        page.locator("#schedule-detail [data-slot='blocked-code']").textContent() shouldBe "pointer_null"
+        page.locator("#schedule-detail [data-slot='blocked-code']").textContent() shouldBe "version_not_eligible"
         page.locator("[data-verb='schedule-run']").isVisible() shouldBe false
         page.locator("#schedule-detail .sch-runrow").first().getAttribute("data-state") shouldBe "not_started"
 
-        // Unblock re-validates first: still no current version, so it is refused and the block stays.
+        // Unblock re-validates first: the pin is still DISCARDED, so it is refused and the block stays.
         page.waitForResponse({ it.url().endsWith("/unblock") }) { page.locator("#schedule-detail [data-verb='schedule-unblock']").click() }
         page.locator(".ds-toast-danger").first().waitFor()
         blocked.isVisible() shouldBe true

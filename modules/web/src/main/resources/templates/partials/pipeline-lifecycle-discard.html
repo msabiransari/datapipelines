@@ -50,11 +50,11 @@
 
       <!-- #273: the schedules that run this pipeline, from the SAME read the Usage tab makes
            (lensed for the caller). Since #786 B.4 a schedule that runs THIS version is a blocker
-           (listed above, no button); the ones listed here follow a current version the discard
-           leaves in place. -->
+           (listed above, no button); the ones listed here each pin another exact version (#786
+           D.1), which the discard leaves in place. -->
       <th:block th:if="${!#lists.isEmpty(dlg.schedules)}">
         <p class="u-secondary u-text-sm" data-discard-schedules-note>
-          <strong>Schedules that run this pipeline</strong> — they follow its current version,
+          <strong>Schedules that run this pipeline</strong> — each runs another version of it,
           which this discard leaves in place.
         </p>
         <ul class="u-text-sm u-mb-md" data-discard-schedules>

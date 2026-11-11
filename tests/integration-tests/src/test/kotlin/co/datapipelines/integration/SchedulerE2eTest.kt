@@ -53,10 +53,10 @@ import java.util.UUID
  * - **A demoted creator keeps the schedule running** — the author who created it becomes a
  *   viewer and the dispatcher still fires it, because it never ran as them (R2).
  * - **A refused run has a trail and no execution, and blocks** — the discard of the release the
- *   schedule runs is refused `pipeline.version.pinned` naming it (#786 B.4), so the NULL pointer is
+ *   schedule runs is refused `pipeline.version.pinned` naming it (#786 B.4), so a DISCARDED pin is
  *   planted as the legacy data it now only can be; Run now records a `not_started` /
- *   `pointer_null` run, the schedule blocks, a second Run now is `409 schedule.blocked`, and
- *   unblock re-validates and refuses.
+ *   `version_not_eligible` run (the exact pin is read, never the pointer — #786 D.1), the schedule
+ *   blocks, a second Run now is `409 schedule.blocked`, and unblock re-validates and refuses.
  * - **Isolation** — another workspace's member cannot see the schedule (R9).
  * - **The system identity cannot authenticate** — it holds no key, and a validly signed session
  *   naming it is refused.
@@ -271,31 +271,127 @@ class SchedulerE2eTest {
             discard.jsonPath().getList<String>("error.details.referencing_schedules.schedule") shouldContainExactly
                 listOf("test/sched_refused")
         }
-        // A NULL pointer under a live schedule is now legacy data only (written before #786): plant it as such.
-        sql("UPDATE pipelines SET current_version = NULL WHERE id = '$refusedPipelineId'")
+        // A DISCARDED pin under a live schedule is now legacy data only (written before #786): plant it as such.
+        sql(
+            "UPDATE pipeline_versions SET status = 'DISCARDED', discarded_at = NOW() " +
+                "WHERE pipeline_id = '$refusedPipelineId' AND version = 1; " +
+                "UPDATE pipelines SET current_version = NULL WHERE id = '$refusedPipelineId'",
+        )
 
         val accepted = session(ADMIN_SESSION).post("/api/v1/schedules/$refusedSchedule/run")
         accepted.statusCode shouldBe 202
         val run = awaitRun(refusedSchedule, accepted.jsonPath().getString("data.id"))
 
         run["state"].asText() shouldBe "not_started"
-        run["reason"].asText() shouldBe "pointer_null"
+        run["reason"].asText() shouldBe "version_not_eligible"
         run["execution_id"].isNull shouldBe true
         run["trail"].map { it["kind"].asText() } shouldContainExactly listOf("recorded", "not_started")
 
         val schedule = session(ADMIN_SESSION).get("/api/v1/schedules/$refusedSchedule").jsonPath()
         schedule.getString("data.condition") shouldBe "blocked"
-        schedule.getString("data.blocked.reason") shouldBe "pointer_null"
+        schedule.getString("data.blocked.reason") shouldBe "version_not_eligible"
         schedule.getString("data.blocked.run_id") shouldBe run["id"].asText()
 
         session(ADMIN_SESSION).post("/api/v1/schedules/$refusedSchedule/run").jsonPath().getString("error.code") shouldBe "schedule.blocked"
         withClue(
-            "unblock re-validates first: the pointer is still NULL, so the save path refuses with the new code (#280) and the block stays",
+            "unblock re-validates first: the pin is still DISCARDED, so the save path refuses target_not_released and the block stays",
         ) {
             session(ADMIN_SESSION).post("/api/v1/schedules/$refusedSchedule/unblock").jsonPath().getString("error.code") shouldBe
                 "schedule.validation.target_not_released"
             session(ADMIN_SESSION).get("/api/v1/schedules/$refusedSchedule").jsonPath().getString("data.condition") shouldBe "blocked"
         }
+    }
+
+    /**
+     * #786 D.2 (A33): a schedule row still stored in schema 1 — the shape before exact pins, which the startup
+     * conversion rewrites — is READ as schema 1 and never runs. Two plants: (a) the realistic legacy row, whose
+     * `"current"` the schema-2 grammar would also refuse (so only the CODE proves the stored number was read);
+     * (b) a schema-1 row whose JSON is a valid schema-2 pin, which runs if the stored number is ever skipped.
+     */
+    @Test
+    @Order(6)
+    fun `A33 - a stored schema-1 payload never runs - Run now, the cron run and unblock refuse it, and re-saving converts it`() {
+        val pipeline = "test/sched_rows_schema1"
+        createAndReleasePipeline(pipeline)
+        val created = createSchedule(ADMIN_SESSION, "test/sched_schema1", pipeline, EVERY_FIVE_MINUTES)
+        created.statusCode shouldBe 201
+        val id = created.jsonPath().getString("data.id")
+
+        sql(
+            "UPDATE schedules SET payload_schema_version = 1, " +
+                "payload_json = '{\"pipeline\":\"$pipeline\",\"version\":\"current\"}' WHERE id = '$id'",
+        )
+        withClue("(a) a legacy schema-1 row: Run now refuses the stored schema, not the payload's shape, and records no run") {
+            assertSchemaRefused(session(ADMIN_SESSION).post("/api/v1/schedules/$id/run"))
+            runsOf(id) shouldBe emptyList()
+        }
+
+        sql("UPDATE schedules SET payload_json = '{\"pipeline\":\"$pipeline\",\"version\":1}' WHERE id = '$id'")
+        withClue("(b) a schema-1 row whose JSON is a valid exact pin is still refused: the stored number is read") {
+            assertSchemaRefused(session(ADMIN_SESSION).post("/api/v1/schedules/$id/run"))
+            runsOf(id) shouldBe emptyList()
+        }
+
+        sql("UPDATE schedules SET next_due_at = $PREVIOUS_FIVE_MINUTE_BOUNDARY WHERE id = '$id'")
+        val cronRun =
+            poll("the due cron run of the schema-1 row to end") {
+                runsOf(id).firstOrNull { it["origin"].asText() == "cron" && it["state"].asText() !in ACTIVE_STATES }
+            }
+        cronRun["state"].asText() shouldBe "not_started"
+        cronRun["reason"].asText() shouldBe "payload_schema_unsupported"
+        cronRun["execution_id"].isNull shouldBe true
+        val blocked = session(ADMIN_SESSION).get("/api/v1/schedules/$id").jsonPath()
+        blocked.getString("data.condition") shouldBe "blocked"
+        blocked.getString("data.blocked.reason") shouldBe "payload_schema_unsupported"
+        withClue("unblock revalidates in the stored schema: refused, the block stays") {
+            assertSchemaRefused(session(ADMIN_SESSION).post("/api/v1/schedules/$id/unblock"))
+            session(ADMIN_SESSION).get("/api/v1/schedules/$id").jsonPath().getString("data.condition") shouldBe "blocked"
+        }
+
+        // Re-saving the same exact pin is a save in schema 2: the row converts, and the block can then be cleared.
+        resaveExactPin(id, "test/sched_schema1", pipeline).statusCode shouldBe 200
+        scalar("SELECT payload_schema_version::text FROM schedules WHERE id = '$id'") shouldBe "2"
+        session(ADMIN_SESSION).post("/api/v1/schedules/$id/unblock").statusCode shouldBe 200
+
+        // It would fire every five minutes for as long as a dispatching instance exists: delete it.
+        val revision = session(ADMIN_SESSION).get("/api/v1/schedules/$id").header("ETag")
+        session(ADMIN_SESSION)
+            .header(IF_MATCH, revision)
+            .delete("/api/v1/schedules/$id")
+            .then()
+            .statusCode(204)
+    }
+
+    /** PUT the schedule's own exact-pin body back (v1, the fixture's parameters and cron) under its current ETag. */
+    private fun resaveExactPin(
+        id: String,
+        name: String,
+        pipeline: String,
+    ): Response {
+        val etag = session(ADMIN_SESSION).get("/api/v1/schedules/$id").header("ETag")
+        val body =
+            mapper.writeValueAsString(
+                mapOf(
+                    "name" to name,
+                    "payload" to mapOf("pipeline" to pipeline, "version" to 1),
+                    "parameters" to mapOf("min_id" to MIN_ID),
+                    "cron" to EVERY_FIVE_MINUTES,
+                    "timezone" to "UTC",
+                ),
+            )
+        return session(ADMIN_SESSION)
+            .contentType(ContentType.JSON)
+            .header(IF_MATCH, etag)
+            .body(body)
+            .put("/api/v1/schedules/$id")
+    }
+
+    private fun assertSchemaRefused(response: Response) {
+        response.statusCode shouldBe 400
+        val error = response.jsonPath()
+        error.getString("error.code") shouldBe "schedule.validation.payload_schema_unsupported"
+        error.getInt("error.details.stored") shouldBe 1
+        error.getInt("error.details.supported") shouldBe 2
     }
 
     @Test
@@ -338,7 +434,7 @@ class SchedulerE2eTest {
             mapper.writeValueAsString(
                 mapOf(
                     "name" to name,
-                    "payload" to mapOf("pipeline" to pipeline, "version" to "current"),
+                    "payload" to mapOf("pipeline" to pipeline, "version" to 1),
                     "parameters" to mapOf("min_id" to MIN_ID),
                     "cron" to cron,
                     "timezone" to "UTC",

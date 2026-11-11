@@ -1,16 +1,16 @@
 # Scheduler Specification
 
-**Status:** v1.11 (slices 1–4 of #9 — optional notification delivery implemented; the application credential remains pending)
+**Status:** v1.12 (slices 1–4 of #9 — optional notification delivery implemented; the application credential remains pending)
 **Owner:** datapipelines.co core
 **Depends on:** [REST API §20](rest-api.md#20-schedules), [Auth](auth.md), [DAG Executor](dag-executor.md), [Metadata DB §4.22–§4.25](metadata-db.md#422-schedules), [Configuration §3.29](configuration.md#329-scheduler-9)
 **Design record:** [scheduler design revision](superpowers/specs/2026-09-22-scheduler-design-revision.md) (ratified 2026-09-25) — the why; this page is the what
-**Last updated:** 2026-11-05
+**Last updated:** 2026-11-11
 
 ---
 
 ## 1. Purpose
 
-A **schedule** runs a job at the occurrences of a cron pattern in a timezone. In v1 the one job is a **pipeline run**: the schedule names a pipeline, follows its current version and passes literal parameter values, plus — since slice 3 — optional per-parameter bindings that resolve on the run's frozen reference time (§2.2). This spec defines:
+A **schedule** runs a job at the occurrences of a cron pattern in a timezone. In v1 the one job is a **pipeline run**: the schedule names a pipeline and one exact version of it (#786) — never whichever version is current when a run comes due — and passes literal parameter values, plus — since slice 3 — optional per-parameter bindings that resolve on the run's frozen reference time (§2.2). This spec defines:
 
 - when a schedule fires, including across daylight-saving changes (§3);
 - what happens to occurrences missed while no instance was dispatching, while a run was still going, or while the schedule was paused (§4);
@@ -38,10 +38,16 @@ A schedule is **not** a versioned artifact. It has no draft or release, is never
 ### 2.1 The pipeline payload
 
 ```json
-{ "pipeline": "finance/daily/revenue", "version": "current" }
+{ "pipeline": "finance/daily/revenue", "version": 3 }
 ```
 
-Since slice 3 the payload may also carry the optional, additive `parameter_bindings` object (§2.2) — `current` and the pipeline name are still the only required keys, and `latest` is refused by name. `current` follows the pipeline's **current-version pointer** at each run ([Versioning §3.4](versioning.md#34-current_version-is-sticky-and-event-driven-d60)) — wherever a person points it, including at a draft under the development posture. `latest` is refused by name (it is not a selector), and so is a version number. At SAVE, a payload naming a pipeline with no current version to follow is refused `400 schedule.validation.target_not_released` (#280) — release it, or switch its current version, then save again (§13.19; it was a `payload_invalid` / `pointer_null` refusal before, one code shared with the shape refusals) — while the RUN side's refusal of the same absence stays a `not_started` / `pointer_null` run that blocks (§5). Each run freezes what it actually ran — `{pipeline_id, version, body_sha256}` and, since slice 3, `resolved_parameters` — before it launches, so a later release, switch or draft edit never changes a run that was already admitted. If the draft is edited between that freeze and the launch, the run is refused `not_started` / `version_changed` rather than run on a body nobody reviewed.
+This is payload **schema 2** (`payload_schema_version: 2`, #786; dependency-graph record §24): the schedule pins ONE exact pipeline version, and every run executes exactly that version — never what the pipeline's current-version pointer names when the run comes due. A release, a switch of the pointer or a new draft does not move a schedule; a person edits the schedule to pick another version. The payload may also carry the optional, additive `parameter_bindings` object (§2.2); the pipeline name and the version are the only required keys.
+
+At SAVE (create, and an update that changes the pin) the version must be a positive JSON integer — `"current"` and `"latest"` are refused by name (`400 schedule.validation.payload_invalid`, `details.reason` `version_current_refused` / `version_latest_refused`; a missing version is `version_missing`, anything else `version_invalid`). The pinned version must exist (`400 schedule.validation.target_not_found`, `details.version`) and be one this deployment runs (`400 schedule.validation.target_not_released`): RELEASED everywhere, a DRAFT only where authoring is enabled ([Versioning §7](versioning.md)). The save validates the pin under the pinned pipeline's workspace writer guard and writes under the schedule's revision, so a save racing the discard of the version it pins is ordered: the discard either sees the new pin and refuses (`pipeline.version.pinned`), or commits first and the save then refuses the discarded version (#786 D.3).
+
+At RUN the executor loads exactly the pinned version, and checks its status again — at preparation and once more at launch, with the same policy as the save — refusing a version this deployment no longer runs `not_started` / `version_not_eligible`, blocking (§5). A live schedule's pin protects only its present target: a run's payload is its own frozen copy, so a run queued or prepared on v1 can outlive an edit that repins the schedule to v2, and the now-unpinned v1 can then be discarded through the ordinary lifecycle before that run launches. At launch the status, the body hash and the body that runs come from one read of the version, and a refusal reaches no runner and records no execution. Each run freezes what it actually ran — `{pipeline_id, version, body_sha256}` and, since slice 3, `resolved_parameters` — before it launches. A pinned DRAFT is mutable under its number: if it is edited between that freeze and the launch, the run is refused `not_started` / `version_changed` rather than run on a body nobody reviewed.
+
+**Schema 1 is refused, never upgraded at read time.** Before #786 the payload was `{"pipeline": …, "version": "current"}` (schema 1), which followed the pointer at each run. The upgrade converts every live schema-1 schedule in place at startup, before the scheduler dispatches: the version selector becomes the exact version CURRENT names at that moment, and nothing else changes — bindings, parameters, cron, timezone, missed-run policy and notification settings are untouched ([Deployment §8.2](deployment.md)). A schedule whose pipeline has no CURRENT version refuses the startup instead. Afterwards a schema-1 row can only be one written behind the application's back: update, unblock and Run now refuse it `400 schedule.validation.payload_schema_unsupported` (`details.stored`, `details.supported`), and its runs refuse `not_started` / `payload_schema_unsupported` and block.
 
 A schedule's **parameters** are literal values for the pipeline's declared parameters, checked by the same binder an interactive run uses — at save, again at unblock, and again when each run is prepared. A value that no longer binds (the pipeline's parameters changed) refuses the run and blocks the schedule; it is never silently dropped.
 
@@ -59,7 +65,7 @@ The rules an operator can rely on:
 
 - **Keywords are an exact allowlist** — `TODAY` and `YESTERDAY`, uppercase — matched only inside an explicit `{"source": "keyword"}` binding. A literal STRING `"TODAY"` in `parameters` reaches the pipeline as the string; nothing is ever scanned for magic words.
 - **One source per parameter.** The same name in `parameters` and `parameter_bindings` is refused (`400 schedule.validation.binding_conflict`); there is no precedence rule to wonder about.
-- **A binding must fit the version.** A bound name the pipeline's current version does not declare, or declares as anything but `DATE`, is refused at save (`400 schedule.validation.binding_invalid` with a `reason`) and — if it stopped fitting after the save — refuses the run `not_started` / `parameters_invalid` and blocks, exactly like a literal that no longer binds.
+- **A binding must fit the version.** A bound name the pinned version does not declare, or declares as anything but `DATE`, is refused at save (`400 schedule.validation.binding_invalid` with a `reason`) and — if it stopped fitting after the save — refuses the run `not_started` / `parameters_invalid` and blocks, exactly like a literal that no longer binds.
 - **The run's time is not a client field.** A `reference`, `reference_at` or `reference_timezone` key inside the payload or a binding is refused `400 schedule.validation.payload_invalid`; the reference time is minted by the scheduler and frozen on the run.
 - **A bound run executes as the system identity exactly as a literal one** — resolution changes VALUES, never the principal (§6).
 
@@ -140,7 +146,7 @@ Editing a schedule's pattern or timezone also recomputes from now — the old pa
 
 ## 5. Runs: states and reasons
 
-A run is admitted by a worker: capacity first (§7), then the executor prepares it (resolves `current`, checks the parameters, freezes the snapshot), then the start is **claimed** — a conditional write that only one worker can win — and only then launched. That order is what makes the states below honest: nothing is ever launched without a committed claim, and a claim is never made without capacity.
+A run is admitted by a worker: capacity first (§7), then the executor prepares it (loads the pinned version, checks the parameters, freezes the snapshot), then the start is **claimed** — a conditional write that only one worker can win — and only then launched. That order is what makes the states below honest: nothing is ever launched without a committed claim, and a claim is never made without capacity.
 
 | State | Reasons | Meaning |
 |---|---|---|
@@ -152,7 +158,7 @@ A run is admitted by a worker: capacity first (§7), then the executor prepares 
 | `cancelled` | `cancelled` | Someone cancelled the execution |
 | `aborted` | `shutdown` | An instance shut down under it (§8.2). An execution record that reads ABORTED with an UNREADABLE abort payload (#336) records `aborted` with NO reason: the record proves the run ended by abort, only the reason is lost — the executor logs `scheduler.outcome_evidence_unreadable`, and `unknown` (which blocks) would overstate what is uncertain |
 | `unknown` | `instance_lost`, `start_unconfirmed`, `start_failed`, `execution_missing`, `outcome_unreadable` (#336) | Nobody can say whether its work happened: its instance died mid-run; a claim whose execution never appeared; a launch that threw; a running execution whose record vanished; an ABORTED execution whose `error_json` — the place the sweeper's `instance_lost` marker lives — cannot be read, so "not instance_lost" cannot be concluded. **Blocks the schedule** |
-| `not_started` | `capacity`, `executor_unavailable`, `pointer_null`, `target_not_found`, `payload_invalid`, `parameters_invalid`, `version_changed`, `workspace_inactive`, `authority_refused`, `start_refused`, `snapshot_unresolved`, `record_unwritable` | Definitively never started — nothing ran. `snapshot_unresolved` is the bindings fail-closed refusal (#269): a schedule with `parameter_bindings` whose frozen snapshot carries no resolved map — a rolling deploy between prepare and start — is never launched on its raw parameters, and does not block |
+| `not_started` | `capacity`, `executor_unavailable`, `pointer_null` (schema 1 only — history), `version_not_eligible`, `payload_schema_unsupported`, `target_not_found`, `payload_invalid`, `parameters_invalid`, `version_changed`, `workspace_inactive`, `authority_refused`, `start_refused`, `snapshot_unresolved`, `record_unwritable` | Definitively never started — nothing ran. `snapshot_unresolved` is the bindings fail-closed refusal (#269): a schedule with `parameter_bindings` whose frozen snapshot carries no resolved map — a rolling deploy between prepare and start — is never launched on its raw parameters, and does not block |
 | `skipped` | `missed`, `overlap`, `schedule_paused`, `schedule_blocked`, `schedule_deleted` | By policy; never attempted |
 
 ### 5.1 Not started means nothing ran
@@ -161,7 +167,7 @@ A scheduled launch **fails closed**: the execution may begin only after its `RUN
 
 ### 5.2 What blocks
 
-`unknown` always blocks: a scheduler that fired again after an unknown outcome could run a non-idempotent load twice. Most executor refusals block too, because a person has to fix something — the pipeline has no current version (`pointer_null`), it is gone (`target_not_found`), the saved payload or parameters no longer validate, the system identity was refused (`authority_refused`), the launch path refused before recording (`start_refused`), or no executor is registered under the run's id (`executor_unavailable`).
+`unknown` always blocks: a scheduler that fired again after an unknown outcome could run a non-idempotent load twice. Most executor refusals block too, because a person has to fix something — the pinned version is no longer one this deployment runs (`version_not_eligible`; before #786, a pointer with nothing to follow was `pointer_null`), it is gone (`target_not_found`), the saved payload or parameters no longer validate, its payload is in a schema the executor no longer runs (`payload_schema_unsupported`), the system identity was refused (`authority_refused`), the launch path refused before recording (`start_refused`), or no executor is registered under the run's id (`executor_unavailable`).
 
 Four do **not** block, because nothing about the schedule is wrong: `capacity` (the instance was busy), `record_unwritable` (the metadata database refused one write), `workspace_inactive` (a reactivated workspace is handled as an outage) and `version_changed` (a draft edited between preparation and launch; the next occurrence prepares afresh).
 
@@ -233,6 +239,7 @@ People manage schedules on the **Schedules** page (`/schedules`, in the rail's O
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-11 | v1.12 | #786 U2 schedules pin exact versions | §1, §2.1: payload schema 2 — `{"pipeline", "version": <int>}` pins one exact version; `current`/`latest` refused by name; the pin is validated at save under the pinned pipeline's workspace guard (eligible: RELEASED, or DRAFT where authoring is enabled); a stored schema-1 payload is refused `payload_schema_unsupported`, never upgraded at read time; the upgrade converts live schema-1 schedules in place (only the version selector changes). §5: `not_started` gains `version_not_eligible` and `payload_schema_unsupported` (both block); `pointer_null` is schema-1 history. Round 7: the launch re-checks the pinned version's eligibility on the same read as the body (a prepared copy can outlive a repin and the old version's discard); the conversion pins each queued run to ITS OWN pipeline's CURRENT. |
 | 2026-11-05 | v1.11 | 799 (#799), ruling (c) | §6 adds lake append to the system actor’s fixed permission set; lake-writing schedule saves also require the caller’s lake append permission. |
 | 2026-10-25 | v1.10 | 442c (#442) | §2.3: notices use the run’s frozen target and reference timezone with known due/start/end and execution reference. §8.2: activation and rollback pointers. |
 | 2026-10-24 | v1.9 | 442b (#442) | §2.3: scheduler notification mail is delivered — off unless enabled (computed `on`/`off` + reason), one notice per selected transition written with it, one message per recipient with a fixed Message-ID, the four delivery states with bounded retries for provably-unsent sends only, `uncertain` never retried, re-checks at send, the resend (REST §20.13). §8.1: API mode sends no mail. §8.3: the three notification counters. §9: notifications struck through. |

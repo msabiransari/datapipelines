@@ -13,11 +13,11 @@ import java.nio.file.Paths
  * lists the live schedules whose target names the pipeline — name, condition, next run. The
  * read is the Usage tab's by-target read (lensed for the caller).
  *
- * #786 B.4 changed what the evidence means: a live schedule PROTECTS the version it runs (its
- * schema-1 payload resolves to CURRENT), so discarding that version is refused and the dialog
- * lists the schedules as blockers with no confirm; once a later release is current, the old
- * version's discard succeeds and the same schedules are evidence that they follow the current
- * version, which the discard leaves in place.
+ * #786 B.4 changed what the evidence means: a live schedule PROTECTS the version it runs (since
+ * #786 D.1 its exact pin), so discarding that version is refused and the dialog lists the
+ * schedules as blockers with no confirm — even after a later release becomes current, since the
+ * pin does not follow releases; the later version's discard succeeds and the same schedules are
+ * evidence that they run another version, which the discard leaves in place.
  *
  * The roles half of the guard: an author (the dialog's audience) sees the evidence and the
  * confirm; a promoter — `pipeline.version.manage` is not theirs — renders no Discard verb at
@@ -25,7 +25,7 @@ import java.nio.file.Paths
  */
 class DiscardDialogSchedulesBrowserTest : BrowserSuite() {
     @Test
-    fun `the discard dialog lists the two schedules that run the pipeline - blockers on current, evidence once it is not`() {
+    fun `the discard dialog lists the two schedules that run the pipeline - blockers on their pin, evidence on another version`() {
         startTrace()
         val wsName = "dd273-" + generatedPassword("w").take(8).lowercase()
         val email = uniqueEmail("dd273-" + generatedPassword("u").take(8))
@@ -46,10 +46,10 @@ class DiscardDialogSchedulesBrowserTest : BrowserSuite() {
         // the open dialog's backdrop. Light first (the deployment default is dark), then dark;
         // each shot re-opens the same dialog from the same row verb.
         ensureTheme("light")
-        page.waitForResponse("**/lifecycle/discard*") { discardV1(page) }
+        page.waitForResponse("**/lifecycle/discard*") { discardVersion(page, 1) }
         val blocked = page.locator("#pe-dialog [data-lifecycle-dialog='pipeline-discard']")
         blocked.waitFor()
-        withClue("#786 B.4: v1 is CURRENT, both schedules run it (paused included), so they block and there is no confirm") {
+        withClue("#786 B.4: both schedules pin v1 (paused included), so they block and there is no confirm") {
             blocked
                 .locator("[data-discard-pinner-schedule]")
                 .allInnerTexts()
@@ -62,11 +62,14 @@ class DiscardDialogSchedulesBrowserTest : BrowserSuite() {
         shot("discard-schedules-blocked-1440-light")
         closeDialog()
 
-        // A later release becomes current: the schedules follow v2, so v1 is no longer theirs.
+        // A later release becomes current: the schedules' exact pin does NOT follow it (#786 D.1),
+        // so v1 is still theirs and still blocked; v2 is not theirs.
         val v2Hash = hashOf(send("PUT", "/api/v1/pipelines/$pipelineId", calculatorBody(pipelineName, "fq_v2"), ifMatch = v1Hash))
         send("POST", "/api/v1/pipelines/$pipelineId/release", ifMatch = v2Hash).first shouldBe 200
         openVersionsTab(page, pipelineName)
-        page.waitForResponse("**/lifecycle/discard*") { discardV1(page) }
+        expectV1StillBlockedByBothSchedules()
+        page.waitForSelector("#pe-pane-versions tr[data-version-row='2']")
+        page.waitForResponse("**/lifecycle/discard*") { discardVersion(page, 2) }
         val dialog = page.locator("#pe-dialog [data-lifecycle-dialog='pipeline-discard']")
         dialog.waitFor()
 
@@ -78,7 +81,7 @@ class DiscardDialogSchedulesBrowserTest : BrowserSuite() {
         text shouldContain "dd273/backfill"
         text shouldContain "paused"
         // The consequence the evidence exists to surface, stated once, above the confirm.
-        text.lowercase() shouldContain "they follow its current version, which this discard leaves in place"
+        text.lowercase() shouldContain "each runs another version of it, which this discard leaves in place"
         dialog.locator("[data-discard-pinner-schedule]").count() shouldBe 0
         // The verb is unchanged: one confirm, the version in its words.
         dialog.locator("button[data-verb='pipeline-discard-confirm']").count() shouldBe 1
@@ -87,7 +90,7 @@ class DiscardDialogSchedulesBrowserTest : BrowserSuite() {
         closeDialog()
         ensureTheme("dark")
         page.waitForSelector("#pe-pane-versions tr[data-version-row]")
-        page.waitForResponse("**/lifecycle/discard*") { discardV1(page) }
+        page.waitForResponse("**/lifecycle/discard*") { discardVersion(page, 2) }
         page.locator("#pe-dialog [data-lifecycle-dialog='pipeline-discard']").waitFor()
         shot("discard-schedules-1440-dark")
     }
@@ -141,6 +144,18 @@ class DiscardDialogSchedulesBrowserTest : BrowserSuite() {
     }
 
     // ------------------------------------------------------------------ fixtures
+
+    /** The pin does not follow a release: re-opening v1's discard still lists both schedules as blockers, no confirm. */
+    private fun expectV1StillBlockedByBothSchedules() {
+        page.waitForResponse("**/lifecycle/discard*") { discardVersion(page, 1) }
+        val stillBlocked = page.locator("#pe-dialog [data-lifecycle-dialog='pipeline-discard']")
+        stillBlocked.waitFor()
+        withClue("the pin does not follow the release: v1 stays blocked by both schedules") {
+            stillBlocked.locator("[data-discard-pinner-schedule]").count() shouldBe 2
+            stillBlocked.locator("button[data-verb='pipeline-discard-confirm']").count() shouldBe 0
+        }
+        closeDialog()
+    }
 
     /** A released calculator pipeline through the browser session's REST (the 102 shape): its id and v1 body hash. */
     private fun seedReleasedPipeline(name: String): Pair<String, String> {
@@ -226,8 +241,8 @@ class DiscardDialogSchedulesBrowserTest : BrowserSuite() {
                         """
                         INSERT INTO schedules (id, workspace_id, name, executor_id, payload_schema_version, payload_json,
                                                target_ref, cron, timezone, enabled, next_due_at, created_by, updated_by)
-                        SELECT gen_random_uuid(), w.id, '$scheduleName', 'pipeline', 1,
-                               jsonb_build_object('pipeline', '$pipelineName', 'version', 'current'),
+                        SELECT gen_random_uuid(), w.id, '$scheduleName', 'pipeline', 2,
+                               jsonb_build_object('pipeline', '$pipelineName', 'version', 1),
                                'pipeline:$pipelineName', '0 30 2 * * *', 'UTC', $enabled, $due, u.id, u.id
                           FROM workspaces w
                           CROSS JOIN users u
@@ -288,23 +303,19 @@ class DiscardDialogSchedulesBrowserTest : BrowserSuite() {
         on.waitForSelector("#pe-pane-versions tr[data-version-row]")
     }
 
-    /** The v1 row's ⋯ menu → Discard v1 (the row verb, `from=editor`). */
-    private fun discardV1(on: Page) {
-        val row =
-            on
-                .locator("#pe-pane-versions tr[data-version-row]")
-                .filter(
-                    com.microsoft.playwright.Locator
-                        .FilterOptions()
-                        .setHasText("v1"),
-                ).first()
+    /** The [version] row's ⋯ menu → Discard v[version] (the row verb, `from=editor`). */
+    private fun discardVersion(
+        on: Page,
+        version: Int,
+    ) {
+        val row = on.locator("#pe-pane-versions tr[data-version-row='$version']")
         row.locator("details.tplx-vmenu summary").click()
         row
             .locator(
                 ".tplx-vmenu-list button",
                 com.microsoft.playwright.Locator
                     .LocatorOptions()
-                    .setHasText("Discard v1"),
+                    .setHasText("Discard v$version"),
             ).click()
     }
 

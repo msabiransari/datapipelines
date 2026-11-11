@@ -157,7 +157,8 @@ class EndpointVersionMigrationE2eTest {
         val refused = shouldThrowAny { boot() }
 
         val messages = generateSequence(refused) { it.cause }.mapNotNull { it.message }.toList()
-        messages.any { it.contains("The API version conversion refused to start: 2 API(s)") } shouldBe true
+        // #786 U2: the startup runs every step's E.0 before any write, so the refusal is the combined runner's.
+        messages.any { it.contains("The upgrade's conversion refused to start: 2 API(s) or schedule(s)") } shouldBe true
         scalar<Long>("SELECT COUNT(*) FROM published_endpoint_versions") shouldBe versionsBefore
         scalar<Long>(VERSIONLESS) shouldBe 3L
         output.out shouldContain "path=/e2emig/z/no-current pipeline=test/e2emig_no_current reason=no_current"

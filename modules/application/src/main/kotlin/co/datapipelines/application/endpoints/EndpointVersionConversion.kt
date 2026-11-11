@@ -42,6 +42,13 @@ class EndpointVersionConversion(
     /** E.0 — every version-less entity whose legacy pipeline cannot be pinned, in path order; empty = convertible. */
     fun precondition(): List<ConversionRefusal> = candidates(null).mapNotNull { it.refusal() }
 
+    /** [precondition], each refusal logged as its structured ERROR line plus the summary; writes nothing (#786 D.5). */
+    fun logPrecondition(): Int {
+        val refusals = precondition()
+        logRefusals(refusals)
+        return refusals.size
+    }
+
     /**
      * E.0 then E.1. Throws [ConversionRefusedException] (after logging the list) when E.0 fails — before any write — or
      * when a candidate's pipeline lost its CURRENT between the precondition and its locked re-read (that entity's
@@ -90,6 +97,12 @@ class EndpointVersionConversion(
 
     private fun refuseIfAny(refusals: List<ConversionRefusal>) {
         if (refusals.isEmpty()) return
+        logRefusals(refusals)
+        throw ConversionRefusedException(refusals)
+    }
+
+    private fun logRefusals(refusals: List<ConversionRefusal>) {
+        if (refusals.isEmpty()) return
         refusals.forEach {
             log.error(
                 "event=endpoint.conversion.refused kind=api id={} path={} pipeline={} reason={}",
@@ -104,7 +117,6 @@ class EndpointVersionConversion(
             refusals.size,
             ConversionRefusedException.OPERATOR_FIX,
         )
-        throw ConversionRefusedException(refusals)
     }
 
     private fun candidates(only: UUID?): List<Candidate> =

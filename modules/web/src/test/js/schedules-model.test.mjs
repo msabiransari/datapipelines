@@ -16,7 +16,7 @@ const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const M = require(path.join(here, "../../main/resources/static/js/schedules/model.js"));
 
-const s = (name, extra = {}) => ({ id: name, name, condition: "enabled", cron: "0 6 * * *", timezone: "UTC", payload: { pipeline: "p/x", version: "current" }, ...extra });
+const s = (name, extra = {}) => ({ id: name, name, condition: "enabled", cron: "0 6 * * *", timezone: "UTC", payload: { pipeline: "p/x", version: 1 }, ...extra });
 
 test("a level lists its direct folders with subtree counts, and its direct leaves", () => {
   const all = [s("finance/daily/revenue"), s("finance/daily/costs"), s("finance/weekly/summary"), s("ops/nightly"), s("finance/top")];
@@ -188,7 +188,14 @@ test("a §20 refusal lands beside the field it names, or is a toast", () => {
   assert.deepEqual(M.fieldForError({ code: "schedule.validation.interval_too_short" }), { field: "cron" });
   assert.deepEqual(M.fieldForError({ code: "schedule.validation.timezone_invalid" }), { field: "timezone" });
   assert.deepEqual(M.fieldForError({ code: "schedule.validation.target_not_found" }), { field: "pipeline" });
-  assert.deepEqual(M.fieldForError({ code: "schedule.validation.target_not_released" }), { field: "pipeline" });
+  // #786 D.4: the pin is the version field's — an ineligible pin, a stored schema-1 payload, a
+  // version the payload lacks or misspells, a version the pipeline does not have.
+  assert.deepEqual(M.fieldForError({ code: "schedule.validation.target_not_released" }), { field: "version" });
+  assert.deepEqual(M.fieldForError({ code: "schedule.validation.payload_schema_unsupported" }), { field: "version" });
+  assert.deepEqual(M.fieldForError({ code: "schedule.validation.payload_invalid", details: { reason: "version_missing" } }), { field: "version" });
+  assert.deepEqual(M.fieldForError({ code: "schedule.validation.payload_invalid", details: { reason: "version_current_refused" } }), { field: "version" });
+  assert.deepEqual(M.fieldForError({ code: "schedule.validation.target_not_found", details: { pipeline: "a/p", version: 7 } }), { field: "version" });
+  assert.deepEqual(M.fieldForError({ code: "schedule.validation.target_not_found", details: { pipeline: "a/p" } }), { field: "pipeline" });
   assert.deepEqual(M.fieldForError({ code: "schedule.validation.request_invalid", details: { field: "payload" } }), { field: "pipeline" });
   assert.equal(M.fieldForError({ code: "schedule.validation.request_invalid", details: { field: "If-Match" } }), null);
   assert.equal(M.fieldForError({ code: "schedule.limit.per_workspace" }), null);
@@ -384,4 +391,55 @@ test("the filtered empty state names the last run, beside the condition when bot
   assert.equal(M.filteredEmptyTitle("", "nightly", "succeeded"), "No schedules whose last run succeeded match “nightly”.");
   // A word that is not a filter names nothing — never echoed into the title.
   assert.equal(M.filteredEmptyTitle("", "nightly", "<b>x</b>"), "No schedules match “nightly”");
+});
+
+// ------------------------------------------------------------------ #786 D.4 the version picker
+
+test("pinnedVersionOf reads only a positive integer pin - schema 1's current and junk are no version", () => {
+  assert.equal(M.pinnedVersionOf({ payload: { pipeline: "a/p", version: 3 } }), 3);
+  assert.equal(M.pinnedVersionOf({ payload: { pipeline: "a/p", version: "current" } }), null);
+  assert.equal(M.pinnedVersionOf({ payload: { pipeline: "a/p", version: "3" } }), null);
+  assert.equal(M.pinnedVersionOf({ payload: { pipeline: "a/p", version: 0 } }), null);
+  assert.equal(M.pinnedVersionOf({ payload: { pipeline: "a/p", version: 1.5 } }), null);
+  assert.equal(M.pinnedVersionOf({ payload: { pipeline: "a/p" } }), null);
+  assert.equal(M.pinnedVersionOf(null), null);
+});
+
+const versions = (...rows) => rows.map(([version, status]) => ({ version, status }));
+
+test("versionChoices: every version with its status, the newest RELEASED preselected, a draft never the default over a release", () => {
+  const list = versions([3, "DRAFT"], [2, "RELEASED"], [1, "DISCARDED"]);
+  const dev = M.versionChoices(list, true, null);
+  assert.deepEqual(dev.options.map((o) => [o.value, o.label, o.eligible, o.disabled]), [
+    [3, "v3 · draft", true, false],
+    [2, "v2 · released", true, false],
+    [1, "v1 · discarded — not run here", false, true],
+  ]);
+  assert.equal(dev.selected, 2);
+  const hardened = M.versionChoices(list, false, null);
+  assert.deepEqual(hardened.options.map((o) => [o.value, o.label, o.disabled]), [
+    [3, "v3 · draft — drafts do not run here", true],
+    [2, "v2 · released", false],
+    [1, "v1 · discarded — not run here", true],
+  ]);
+  assert.equal(hardened.selected, 2);
+});
+
+test("versionChoices: a draft-only pipeline is pickable only where drafts run; nothing runnable selects nothing", () => {
+  assert.equal(M.versionChoices(versions([1, "DRAFT"]), true, null).selected, 1);
+  const hardened = M.versionChoices(versions([1, "DRAFT"]), false, null);
+  assert.equal(hardened.selected, null);
+  assert.equal(hardened.options[0].disabled, true);
+  assert.equal(M.versionChoices(versions([1, "DISCARDED"]), true, null).selected, null);
+  assert.equal(M.versionChoices([], true, null).selected, null);
+});
+
+test("versionChoices: an edit keeps the stored pin selected even when it no longer runs - never a silent repin", () => {
+  const list = versions([2, "RELEASED"], [1, "DISCARDED"]);
+  const edit = M.versionChoices(list, false, 1);
+  assert.equal(edit.selected, 1);
+  // The stored pin stays selectable so the form shows it; the save refuses it with its own words.
+  assert.deepEqual(edit.options.map((o) => [o.value, o.disabled]), [[2, false], [1, false]]);
+  // A stored pin the pipeline no longer lists falls back to the newest release.
+  assert.equal(M.versionChoices(list, false, 9).selected, 2);
 });
