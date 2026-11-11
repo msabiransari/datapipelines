@@ -1,12 +1,49 @@
 /* docs.css — the in-product spec set (033). Token-only (no hard-coded colors, fonts,
    or spacing): the rendered markdown arrives as bare tags inside .doc-body, so these
-   rules map doc structure onto the design system. */
+   rules map doc structure onto the design system.
+   #713 — the long documents (up to ~9,500 elements, /docs/ui-screens) spend seconds of
+   main-thread time laying out table and pre blocks the reader never has on screen.
+   `content-visibility: auto` lets the browser skip that work for blocks off-screen and
+   render them on approach (scroll, find-in-page, fragment navigation all force render
+   per spec). `contain-intrinsic-size` is the off-screen placeholder so the scrollbar
+   does not thrash; the `auto` prefix lets the element remember its real size after its
+   first render, so the token below is only the first-paint estimate. */
 
 .doc-body {
+  /* #713: the off-screen placeholder estimate for skipped table/pre blocks — the one
+     custom-property length literal in this sheet, named and sanctioned by
+     DocsCssTokenTest (the pre-existing 1px hairline borders are style values, not tokens). */
+  --doc-intrinsic-block: 480px;
   font-size: var(--text-sm);
   line-height: var(--leading-relaxed);
   color: var(--text-primary);
   max-width: var(--container-md);
+}
+
+/* #713: one h2-run of a rendered doc (DocsCatalog wraps each h2-to-next-h2 run).
+   Off-screen parts skip style/layout/paint; scrolling, find-in-page and fragment
+   navigation force the part's render per the CSS containment spec, so anchors and
+   in-page search behave exactly as before. */
+/* 713: the three content-visibility rules below are the performance ladder. They are
+   mirrored in scripts/site-lighthouse.sh (CV_SUSPEND_SELECTORS), which suspends them for
+   the guard's accessibility pass — axe mis-measures contrast/target-size on cv-skipped
+   subtrees (owner ruling 2026-10-25). A new cv SKIP rule here must be added there;
+   DocsContentVisibilitySuspensionDriftTest fails when the two lists drift. */
+.doc-part {
+  content-visibility: auto;
+  contain-intrinsic-size: auto var(--doc-intrinsic-block);
+}
+
+/* The docs-anchors block in site.js marks every part ABOVE a fragment's target while
+   it corrects the browser's landing (the block carries the measured why: the browser
+   computes its jump from the placeholder layout and never re-runs it, programmatic
+   scrolls suppress scroll anchoring, and CSS alone cannot express "the siblings before
+   the one containing :target" — :has() may not nest inside :has()). A marked part
+   renders in full, so the one scrollIntoView that follows lands on true heights; the
+   class is site.js state, reapplied per hashchange. It cannot hide anything from the
+   audit, so it has no mirror in CV_SUSPEND_SELECTORS. */
+.doc-part.is-rendered {
+  content-visibility: visible;
 }
 
 .doc-body h1,
@@ -72,6 +109,8 @@
 }
 
 .doc-body pre {
+  content-visibility: auto;
+  contain-intrinsic-size: auto var(--doc-intrinsic-block);
   background: var(--surface-inset);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
@@ -86,6 +125,8 @@
 }
 
 .doc-body table {
+  content-visibility: auto;
+  contain-intrinsic-size: auto var(--doc-intrinsic-block);
   border-collapse: collapse;
   width: 100%;
   margin-bottom: var(--gap-md);
