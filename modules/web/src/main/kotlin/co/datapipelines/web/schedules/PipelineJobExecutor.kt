@@ -24,6 +24,7 @@ import co.datapipelines.pipeline.ParameterBinder
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineNameGrammar
+import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionStatus
@@ -73,7 +74,11 @@ import kotlin.coroutines.cancellation.CancellationException
  * refused at save (`payload_invalid`, `details.reason` naming which). At save the pinned version
  * must exist and be eligible under this deployment's posture
  * ([PipelineVersionStatus.eligibleForPointer] over [AuthoringGuard.developmentPosture] — released
- * everywhere, a draft only where authoring is enabled); otherwise `target_not_released`.
+ * everywhere, a draft only where authoring is enabled); otherwise `target_not_released`. The same
+ * policy is applied again at prepare and at launch, each time over the pinned version's status as
+ * read then (`version_not_eligible`, blocking): a queued or prepared copy can outlive an explicit
+ * repin of its schedule, and the now-unpinned old version can be discarded before that copy runs.
+ * At launch the status, the body hash and the body that runs come from ONE read of the version.
  *
  * Schema version 1 (`"version": "current"`, the pointer-following payload before #786) is READ-
  * checked, never upgraded at read time: [validate] refuses a stored schema-1 payload with
@@ -312,14 +317,11 @@ class PipelineJobExecutor(
         val version = launch.snapshot.path("version").asInt()
         val record =
             pipelines.findById(workspace.id, pipelineId) ?: return notStarted(TARGET_NOT_FOUND, block = true, "The pipeline is gone.")
-        val detail = pipelines.findVersionDetail(workspace.id, pipelineId, version)
-        if (detail?.bodyHash != launch.snapshot.path("body_sha256").asText()) {
-            // D.1: the PINNED version's body changed between preparation and launch (a draft edited under its number).
-            return notStarted(VERSION_CHANGED, block = false, "Pipeline '${record.name}' v$version changed after it was prepared.")
-        }
         val executable =
-            pipelineService.findExecutable(workspace.id, ReadLens.Everything, record, version)
-                ?: return notStarted(TARGET_NOT_FOUND, block = true, "Pipeline '${record.name}' v$version has no stored body.")
+            when (val pinned = pinnedVersion(workspace.id, record, version, launch.snapshot)) {
+                is PinnedVersion.Ready -> pinned.executable
+                is PinnedVersion.Refused -> return pinned.outcome
+            }
         val reference =
             referenceOf(admission)
                 ?: return notStarted(
@@ -368,6 +370,51 @@ class PipelineJobExecutor(
                 reference = reference,
             )
         return launchAndAwaitRecord(request, workspace.id)
+    }
+
+    /**
+     * The pinned version as it stands at launch, read ONCE (#786 R2): the body that would run, its hash and its status come
+     * from the same row read, so a status read earlier can never authorize a body read later. Both checks run before the
+     * runner is called.
+     */
+    private fun pinnedVersion(
+        workspaceId: UUID,
+        record: PipelineRecord,
+        version: Int,
+        snapshot: JsonNode,
+    ): PinnedVersion {
+        val executable = pipelineService.findExecutable(workspaceId, ReadLens.Everything, record, version)
+        if (executable == null || executable.bodyHash != snapshot.path("body_sha256").asText()) {
+            // D.1: the PINNED version's body changed (a draft edited under its number) or its row is gone since preparation.
+            return PinnedVersion.Refused(
+                notStarted(VERSION_CHANGED, block = false, "Pipeline '${record.name}' v$version changed after it was prepared."),
+            )
+        }
+        val status = executable.status
+        if (status == null || !PipelineVersionStatus.eligibleForPointer(status, authoring.developmentPosture)) {
+            // R2: the pin left eligibility after preparation — e.g. prepared on v1, the live schedule repinned to v2,
+            // then the now-unpinned v1 discarded. Prepare's policy, prepare's reason, and it blocks as there.
+            val shown = status?.name?.lowercase() ?: "unknown"
+            return PinnedVersion.Refused(
+                notStarted(
+                    VERSION_NOT_ELIGIBLE,
+                    block = true,
+                    "Pipeline '${record.name}' v$version is $shown, which this deployment does not run.",
+                ),
+            )
+        }
+        return PinnedVersion.Ready(executable)
+    }
+
+    /** What [pinnedVersion] found: the version to run, or the launch's refusal. */
+    private sealed interface PinnedVersion {
+        data class Ready(
+            val executable: PipelineService.ExecutablePipeline,
+        ) : PinnedVersion
+
+        data class Refused(
+            val outcome: StartOutcome.NotStarted,
+        ) : PinnedVersion
     }
 
     /** Launches asynchronously and waits only for the RUNNING row (A14) — never for the run. */

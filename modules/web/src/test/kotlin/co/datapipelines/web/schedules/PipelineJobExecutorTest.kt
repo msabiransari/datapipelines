@@ -53,6 +53,7 @@ import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.confirmVerified
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -579,6 +580,118 @@ class PipelineJobExecutorTest {
         coVerify(exactly = 0) { runner.run(any(), any(), any(), any(), any()) }
     }
 
+    // ------------------------------------------------------------------------------ #786 R2 — launch eligibility
+
+    @Test
+    fun `#786 R2 - prepared on v1, schedule repinned to v2, v1 discarded - start refuses version_not_eligible, blocking, no runner`() {
+        // The live pipeline is at CURRENT 2 (the schedule's new pin); the already prepared run still pins v1, whose
+        // row is now DISCARDED with its original body hash. A stale metadata read still saying RELEASED must not
+        // authorize it: the status that decides is the one read with the body.
+        val discarded = launchable(status = PipelineVersionStatus.DISCARDED, currentVersion = 2)
+        every { pipelines.findVersionDetail(workspace.id, discarded.record.id, 1) } returns detail(PipelineVersionStatus.RELEASED)
+        recordingRunner() // a launch that got past the checks would start: the refusal is the executor's, not the runner's
+
+        val refused = adapter.start(launchOf(discarded)).shouldBeInstanceOf<StartOutcome.NotStarted>()
+
+        refused.reason shouldBe PipelineJobExecutor.VERSION_NOT_ELIGIBLE
+        refused.block shouldBe true
+        refused.message shouldContain "v1 is discarded"
+        coVerify(exactly = 0) { runner.run(any(), any(), any(), any(), any()) }
+        // No execution side effect: nothing reached the runner, the execution store or its events.
+        confirmVerified(runner, executions, events)
+    }
+
+    @Test
+    fun `#786 R2 - the released control launches`() {
+        val released = launchable(status = PipelineVersionStatus.RELEASED, currentVersion = 2)
+        recordingRunner()
+
+        adapter.start(launchOf(released)).shouldBeInstanceOf<StartOutcome.Started>()
+
+        coVerify(exactly = 1) { runner.run(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `#786 R2 - a pinned DRAFT launches where authoring is enabled and is refused in a hardened posture`() {
+        val draft = launchable(status = PipelineVersionStatus.DRAFT, currentVersion = 1)
+        recordingRunner()
+
+        executor(draftsEligible = true).start(launchOf(draft)).shouldBeInstanceOf<StartOutcome.Started>()
+
+        val refused = executor(draftsEligible = false).start(launchOf(draft)).shouldBeInstanceOf<StartOutcome.NotStarted>()
+        refused.reason shouldBe PipelineJobExecutor.VERSION_NOT_ELIGIBLE
+        refused.block shouldBe true
+        coVerify(exactly = 1) { runner.run(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `#786 R2 - a body changed after preparation is still version_changed, not blocking, and never launches`() {
+        // A draft edited under its number after preparation: the row read at launch carries the new hash.
+        val prepared = launchable(status = PipelineVersionStatus.DRAFT, currentVersion = 1)
+        val edited = prepared.copy(bodyHash = "edited")
+        every { pipelineService.findExecutable(workspace.id, ReadLens.Everything, prepared.record, 1) } returns edited
+
+        val refused = executor(draftsEligible = true).start(launchOf(edited)).shouldBeInstanceOf<StartOutcome.NotStarted>()
+
+        refused.reason shouldBe PipelineJobExecutor.VERSION_CHANGED
+        refused.block shouldBe false
+        coVerify(exactly = 0) { runner.run(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `#786 R2 - a pinned version whose row is gone since preparation is version_changed and never launches`() {
+        val gone = launchable(status = PipelineVersionStatus.RELEASED, currentVersion = 1)
+        every { pipelineService.findExecutable(workspace.id, ReadLens.Everything, gone.record, 1) } returns null
+
+        val refused = adapter.start(launchOf(gone)).shouldBeInstanceOf<StartOutcome.NotStarted>()
+
+        refused.reason shouldBe PipelineJobExecutor.VERSION_CHANGED
+        coVerify(exactly = 0) { runner.run(any(), any(), any(), any(), any()) }
+    }
+
+    /** A v1 executable of `a/p` in [status], its record at [currentVersion], stubbed for `start`'s reads. */
+    private fun launchable(
+        status: PipelineVersionStatus,
+        currentVersion: Int,
+    ): PipelineService.ExecutablePipeline {
+        val base = executable()
+        val bound = base.copy(record = base.record.copy(currentVersion = currentVersion), status = status)
+        every { pipelines.findById(workspace.id, bound.record.id) } returns bound.record
+        every { pipelines.findVersionDetail(workspace.id, bound.record.id, 1) } returns detail(status)
+        every { pipelineService.findExecutable(workspace.id, ReadLens.Everything, bound.record, 1) } returns bound
+        every { executorConfig.result } returns mockk { every { ttlMaxSeconds } returns 3600 }
+        return bound
+    }
+
+    /** The launch of a run prepared on v1 with body hash `h` (what `prepare` froze). */
+    private fun launchOf(executable: PipelineService.ExecutablePipeline) =
+        Launch(
+            admission(payload = payload("a/p")),
+            executionId = executionId,
+            snapshot =
+                mapper.readTree(
+                    """{"pipeline_id":"${executable.record.id}","version":1,"body_sha256":"h","resolved_parameters":{}}""",
+                ),
+            capacity = mockk(),
+        )
+
+    /** A runner that writes its RUNNING row at once (A14) and records the request. */
+    private fun recordingRunner() {
+        coEvery { runner.run(any(), any(), any(), any(), any()) } coAnswers {
+            val request = firstArg<ExecuteRequest>()
+            arg<(UUID) -> Unit>(4).invoke(requireNotNull(request.executionId))
+            ExecutionResult(
+                executionId = request.executionId!!,
+                status = ExecutionStatus.RUNNING,
+                nodeStats = emptyList(),
+                resultRef = null,
+                startedAt = Instant.now(),
+                completedAt = Instant.now(),
+                durationMs = 1,
+            )
+        }
+    }
+
     // ------------------------------------------------------------------------------ fixtures
 
     private fun outcomeFor(record: ExecutionRecord?): ExecutionOutcome {
@@ -658,7 +771,8 @@ class PipelineJobExecutorTest {
                 parameters = params.toMap().mapValues { Parameter(type = it.value) },
                 nodes = emptyList(),
             )
-        return PipelineService.ExecutablePipeline(record, 1, "{}", body)
+        // The executable carries ITS OWN row's hash and status (one read, `findExecutionSnapshot`): what `start` checks.
+        return PipelineService.ExecutablePipeline(record, 1, "{}", body, bodyHash = "h", status = PipelineVersionStatus.RELEASED)
     }
 
     private fun detail(versionStatus: PipelineVersionStatus = PipelineVersionStatus.RELEASED) =
