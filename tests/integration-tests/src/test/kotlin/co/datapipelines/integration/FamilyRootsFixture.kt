@@ -223,18 +223,27 @@ internal class FamilyRootsFixture(
     fun releaseCompatible(root: Node): Response {
         val row = row(root)
         return when (root.family) {
-            "template" -> form("/partials/templates/lifecycle/release", mapOf("name" to root.name, "bodyHash" to row.hash))
-            "parameter_set" -> send("POST", "/api/v1/parameter-sets/${row.uuid}/release?release_pinned_templates=true", "", row.hash)
-            "visualization" ->
+            "template" -> {
+                form("/partials/templates/lifecycle/release", mapOf("name" to root.name, "bodyHash" to row.hash))
+            }
+
+            "parameter_set" -> {
+                send("POST", "/api/v1/parameter-sets/${row.uuid}/release?release_pinned_templates=true", "", row.hash)
+            }
+
+            "visualization" -> {
                 form(
                     "/partials/visualizations/${row.uuid}/lifecycle/release",
                     mapOf("body_hash" to row.hash, "release_pinned_templates" to "true"),
                 )
-            else ->
+            }
+
+            else -> {
                 form(
                     "/partials/dashboards/${row.uuid}/lifecycle/release",
                     mapOf("bodyHash" to row.hash, "releasePinnedVisualizations" to "true"),
                 )
+            }
         }
     }
 

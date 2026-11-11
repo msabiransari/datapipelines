@@ -70,7 +70,11 @@ class ArtifactGraphFactsPostgresTest {
 
     private val descriptors =
         listOf(
-            ReleaseDependencyFamilies.descriptor(ReleaseFamily.PIPELINE, PipelineDependencySource(PipelineRepository(ceiling.jdbc)), ceiling),
+            ReleaseDependencyFamilies.descriptor(
+                ReleaseFamily.PIPELINE,
+                PipelineDependencySource(PipelineRepository(ceiling.jdbc)),
+                ceiling,
+            ),
             TemplateReleaseProvider(TemplateRepository(ceiling.jdbc), ceiling).descriptor(),
             ParameterSetReleaseProvider(ParameterSetRepository(ceiling.jdbc), ceiling).descriptor(),
             VisualizationReleaseProvider(visualizations, ceiling).descriptor(),
@@ -106,23 +110,51 @@ class ArtifactGraphFactsPostgresTest {
         seed.visualization("chart", 1)
         seed.visualization("chart", 2, DRAFT)
         when (evidence) {
-            Evidence.GREEN_EXACT_HASH -> seed.testRun("chart", 2, "GREEN")
+            Evidence.GREEN_EXACT_HASH -> {
+                seed.testRun("chart", 2, "GREEN")
+            }
+
             Evidence.GREEN_LATEST_OVER_OLDER_RED -> {
                 seed.testRun("chart", 2, "RED", startedSecondsAgo = 60)
                 seed.testRun("chart", 2, "GREEN")
             }
-            Evidence.ABSENT -> Unit
-            Evidence.GREEN_ON_ANOTHER_VERSION_ONLY -> seed.testRun("chart", 1, "GREEN")
-            Evidence.GREEN_FOR_OTHER_CONTENT -> seed.testRun("chart", 2, "GREEN", bodyHash = "a-chart-2-edited-since")
+
+            Evidence.ABSENT -> {
+                Unit
+            }
+
+            Evidence.GREEN_ON_ANOTHER_VERSION_ONLY -> {
+                seed.testRun("chart", 1, "GREEN")
+            }
+
+            Evidence.GREEN_FOR_OTHER_CONTENT -> {
+                seed.testRun("chart", 2, "GREEN", bodyHash = "a-chart-2-edited-since")
+            }
+
             Evidence.STALE_GREEN_UNDER_LATER_RED -> {
                 seed.testRun("chart", 2, "GREEN", startedSecondsAgo = 60)
                 seed.testRun("chart", 2, "RED")
             }
-            Evidence.OPEN_SESSION -> seed.testRun("chart", 2, "RUNNING")
-            Evidence.RUNNING_PAST_ITS_DEADLINE -> seed.testRun("chart", 2, "RUNNING", expiresInSeconds = -1)
-            Evidence.SWEPT_EXPIRED -> seed.testRun("chart", 2, "EXPIRED")
-            Evidence.RED -> seed.testRun("chart", 2, "RED")
-            Evidence.INCOMPLETE -> seed.testRun("chart", 2, "INCOMPLETE")
+
+            Evidence.OPEN_SESSION -> {
+                seed.testRun("chart", 2, "RUNNING")
+            }
+
+            Evidence.RUNNING_PAST_ITS_DEADLINE -> {
+                seed.testRun("chart", 2, "RUNNING", expiresInSeconds = -1)
+            }
+
+            Evidence.SWEPT_EXPIRED -> {
+                seed.testRun("chart", 2, "EXPIRED")
+            }
+
+            Evidence.RED -> {
+                seed.testRun("chart", 2, "RED")
+            }
+
+            Evidence.INCOMPLETE -> {
+                seed.testRun("chart", 2, "INCOMPLETE")
+            }
         }
     }
 
@@ -193,7 +225,8 @@ class ArtifactGraphFactsPostgresTest {
 
         val graph = walk(seed.identity(ReleaseFamily.TEMPLATE, "report", 7))
 
-        aliases(graph) shouldContainExactlyInAnyOrder listOf("report imports[0] dates cal", "report imports[1] common shared", "dates imports[0] common base")
+        aliases(graph) shouldContainExactlyInAnyOrder
+            listOf("report imports[0] dates cal", "report imports[1] common shared", "dates imports[0] common base")
     }
 
     @Test
@@ -279,7 +312,10 @@ class ArtifactGraphFactsPostgresTest {
         boardOver(declared = listOf("country"), bound = listOf("year"))
         val root = seed.identity(ReleaseFamily.DASHBOARD, "board", 1)
 
-        val refusal = shouldThrow<ArtifactValidationException> { inTransaction { planningWalk().walkInCurrentTransaction(root, seed.userId) } }
+        val refusal =
+            shouldThrow<ArtifactValidationException> {
+                inTransaction { planningWalk().walkInCurrentTransaction(root, seed.userId) }
+            }
 
         refusal.result.failures.map { it.path to it.details["parameter"] } shouldBe listOf("parameter_set" to "year")
     }
@@ -303,7 +339,8 @@ class ArtifactGraphFactsPostgresTest {
 
         val closure = plan(seed.identity(ReleaseFamily.DASHBOARD, "board", 1))
 
-        closure.nodes.map { it.identity.entityId } shouldContainExactlyInAnyOrder listOf("board", "filters", "selector", "report1", "report2", "report3")
+        closure.nodes.map { it.identity.entityId } shouldContainExactlyInAnyOrder
+            listOf("board", "filters", "selector", "report1", "report2", "report3")
     }
 
     @Test
@@ -324,7 +361,8 @@ class ArtifactGraphFactsPostgresTest {
 
     private fun walk(root: ReleaseNodeIdentity): GraphSnapshot =
         inTransaction {
-            DependencyWalker(registry, ReleaseGraphLimits.of(ReleaseBounds())).walk(listOf(ReleaseDependencyFamilies.request(root)), context())
+            DependencyWalker(registry, ReleaseGraphLimits.of(ReleaseBounds()))
+                .walk(listOf(ReleaseDependencyFamilies.request(root)), context())
         }
 
     private fun planningWalk() =
@@ -339,7 +377,8 @@ class ArtifactGraphFactsPostgresTest {
     private fun plan(root: ReleaseNodeIdentity): ReleaseClosure = checkNotNull(planningWalk().plan(root, seed.userId)) { "$root resolves" }
 
     @Suppress("UNCHECKED_CAST")
-    private fun provider(family: ReleaseFamily) = checkNotNull(registry[ReleaseDependencyFamilies.keyOf(family)]).provider as DependencyProvider<Any>
+    private fun provider(family: ReleaseFamily) =
+        checkNotNull(registry[ReleaseDependencyFamilies.keyOf(family)]).provider as DependencyProvider<Any>
 
     private fun context() =
         ResolveContext(

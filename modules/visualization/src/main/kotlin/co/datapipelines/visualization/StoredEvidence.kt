@@ -12,7 +12,10 @@ data class LatestRunFacts(
     val expiresAt: Instant,
 ) {
     /** A RUNNING row past its deadline that no read swept is EXPIRED ([TestRunRow.statusAt]'s rule). */
-    fun statusAt(now: Instant): TestRunStatus = if (status == TestRunStatus.RUNNING && !expiresAt.isAfter(now)) TestRunStatus.EXPIRED else status
+    fun statusAt(now: Instant): TestRunStatus {
+        val expired = status == TestRunStatus.RUNNING && !expiresAt.isAfter(now)
+        return if (expired) TestRunStatus.EXPIRED else status
+    }
 }
 
 /**

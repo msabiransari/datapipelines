@@ -30,6 +30,7 @@ import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import java.sql.Connection
 import java.sql.DriverManager
+import java.sql.ResultSet
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
@@ -78,9 +79,11 @@ class FamilyRootsAuditE2eTest {
         connect().use { c ->
             c.prepareStatement(sql).use { s ->
                 args.forEachIndexed { index, arg -> s.setString(index + 1, arg) }
-                s.executeQuery().use { r -> if (r.next()) r.getString(1) else null }
+                s.executeQuery().use(::firstColumn)
             }
         }
+
+    private fun firstColumn(rows: ResultSet): String? = if (rows.next()) rows.getString(1) else null
 
     /** Every `*.version.released` row this class's admin caused after audit id [after] — `event | release_id`, in order. */
     private fun auditAfter(after: Long): List<Pair<String, String?>> =
@@ -129,14 +132,20 @@ class FamilyRootsAuditE2eTest {
         // visualization only — its set, source pipeline and the chart's template are released beforehand.
         val prior =
             when (family) {
-                "template" -> listOf(nodes[1] to emptyList())
+                "template" -> {
+                    listOf(nodes[1] to emptyList())
+                }
+
                 "dashboard" -> {
                     val set = edges.single { it.path == "parameter_set" }.to
                     val source = edges.single { it.path == "sources[0].pipeline" }.to
                     val shape = edges.single { it.path == "transform.template" }.to
                     listOf(set to edges.filter { it.from == set }, source to edges.filter { it.from == source }, shape to emptyList())
                 }
-                else -> emptyList()
+
+                else -> {
+                    emptyList()
+                }
             }
         prior.forEach { (node, below) ->
             val released = fx.releaseWithPlan(node, below)
@@ -203,18 +212,45 @@ class FamilyRootsAuditE2eTest {
             "event=family_roots.c7 root=$family entry=$entry refused_row=$refusedRow root_flips=$rootFlips child_first=$childFirst" +
                 " status=${failed.statusCode} redirect=${failed.header(HX_REDIRECT)}",
         )
-        withClue("the plant refused the ROOT's row, the release's last") { refusedRow shouldBe EVENTS.getValue(family) }
-        withClue("the root flipped before its audit row failed, every selected dependency already RELEASED") {
-            rootFlips shouldBe 1
-            childFirst shouldBe 1
-        }
-        withClue("independent-connection read: every flip and pointer rolled back") { afterFailure shouldBe before }
-        withClue("no audit row survives the rollback") { auditAfter(audit) shouldBe emptyList() }
-        withClue(failed.asString().take(EXCERPT)) {
-            failed.header(HX_REDIRECT) shouldBe null
-            failed.statusCode shouldBe INTERNAL_ERROR
-        }
+        rolledBack(Observed(refusedRow, rootFlips, childFirst, afterFailure, failed), family, before, audit)
 
+        released(case, before, audit)
+    }
+
+    /** What one armed attempt left: the refused row, the witness counts, the committed state and the response. */
+    private data class Observed(
+        val refusedRow: String?,
+        val rootFlips: Int,
+        val childFirst: Int,
+        val state: Map<Node, FamilyRootsFixture.Row>,
+        val response: Response,
+    )
+
+    private fun rolledBack(
+        observed: Observed,
+        family: String,
+        before: Map<Node, FamilyRootsFixture.Row>,
+        audit: Long,
+    ) {
+        withClue("the plant refused the ROOT's row, the release's last") { observed.refusedRow shouldBe EVENTS.getValue(family) }
+        withClue("the root flipped before its audit row failed, every selected dependency already RELEASED") {
+            observed.rootFlips shouldBe 1
+            observed.childFirst shouldBe 1
+        }
+        withClue("independent-connection read: every flip and pointer rolled back") { observed.state shouldBe before }
+        withClue("no audit row survives the rollback") { auditAfter(audit) shouldBe emptyList() }
+        withClue(observed.response.asString().take(EXCERPT)) {
+            observed.response.header(HX_REDIRECT) shouldBe null
+            observed.response.statusCode shouldBe INTERNAL_ERROR
+        }
+    }
+
+    /** The same request unarmed: one persisted row per actual flip, one `release_id`, every node RELEASED unchanged. */
+    private fun released(
+        case: Case,
+        before: Map<Node, FamilyRootsFixture.Row>,
+        audit: Long,
+    ) {
         plantWitness(case)
         val released =
             try {
@@ -238,7 +274,7 @@ class FamilyRootsAuditE2eTest {
             }
         }
         val rows = auditAfter(audit)
-        println("event=family_roots.c7.control root=$family entry=$entry rows=$rows")
+        println("event=family_roots.c7.control root=${case.root} rows=$rows")
         withClue("exactly one persisted event per actual flip, dependencies first, the root last") {
             rows.map { it.first } shouldContainExactly case.events
         }
