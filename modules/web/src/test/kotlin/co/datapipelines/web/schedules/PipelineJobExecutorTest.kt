@@ -20,6 +20,7 @@ import co.datapipelines.executor.ExecutionResult
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.executor.ExecutorConfig
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.Parameter
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineRecord
@@ -72,12 +73,16 @@ import java.util.UUID
  *   never a conclusive abort), a vanished record → absent;
  * - **the reconciler asks with authority**: a system identity refused `execution.read` decides
  *   nothing (every run stays "running") rather than reading "absent" and blocking;
- * - **the payload contract** (schema version 1): `current` only, `latest` refused by name, no
- *   extra field, a real pipeline name;
+ * - **the payload contract** (schema version 2, #786 D.1): an exact positive integer version,
+ *   `current` and `latest` refused by name, no extra field, a real pipeline name; the pin must
+ *   exist and be eligible under the posture (released; a draft only where authoring is enabled);
+ * - **the stored schema is read** (D.2, A33): a schema-1 payload is refused at validate and at
+ *   prepare (blocking), never re-read as a pin;
  * - **preparation refusals** that need no pipeline body: an inactive workspace does not block, an
- *   absent pipeline or a NULL pointer blocks.
+ *   absent pipeline, a missing pinned version and an ineligible pin block — and preparation never
+ *   reads the pipeline's CURRENT pointer.
  *
- * The launch path and the binder run end to end in `SchedulerE2eTest` (parity, pointer_null).
+ * The launch path and the binder run end to end in `SchedulerE2eTest`.
  */
 class PipelineJobExecutorTest {
     private val mapper = ObjectMapper()
@@ -89,10 +94,13 @@ class PipelineJobExecutorTest {
     private val pipelineService = mockk<PipelineService>()
     private val runner = mockk<RecordingExecutionRunner>()
     private val executorConfig = mockk<ExecutorConfig>()
-    private val adapter =
+    private val adapter = executor(draftsEligible = false)
+
+    private fun executor(draftsEligible: Boolean) =
         PipelineJobExecutor(
             pipelines = pipelines,
             pipelineService = pipelineService,
+            authoring = AuthoringGuard(draftsEligible),
             workspaces = workspaces,
             users = users,
             runner = runner,
@@ -197,18 +205,26 @@ class PipelineJobExecutorTest {
     // ------------------------------------------------------------------------------ the payload
 
     @Test
-    fun `the payload is current only - latest is refused by name, a number and a missing selector too`() {
+    fun `the payload pins an exact version - current and latest by name, a missing, textual or non-positive one refused`() {
+        reasonOf("""{"pipeline":"a/p","version":"current"}""") shouldBe PipelineJobExecutor.VERSION_CURRENT_REFUSED
         reasonOf("""{"pipeline":"a/p","version":"latest"}""") shouldBe PipelineJobExecutor.VERSION_LATEST_REFUSED
-        reasonOf("""{"pipeline":"a/p","version":"3"}""") shouldBe "version_unsupported"
-        reasonOf("""{"pipeline":"a/p"}""") shouldBe "version_missing"
+        reasonOf("""{"pipeline":"a/p"}""") shouldBe PipelineJobExecutor.VERSION_MISSING
+        reasonOf("""{"pipeline":"a/p","version":null}""") shouldBe PipelineJobExecutor.VERSION_MISSING
+        reasonOf("""{"pipeline":"a/p","version":"3"}""") shouldBe PipelineJobExecutor.VERSION_INVALID
+        reasonOf("""{"pipeline":"a/p","version":0}""") shouldBe PipelineJobExecutor.VERSION_INVALID
+        reasonOf("""{"pipeline":"a/p","version":-2}""") shouldBe PipelineJobExecutor.VERSION_INVALID
+        reasonOf("""{"pipeline":"a/p","version":2.5}""") shouldBe PipelineJobExecutor.VERSION_INVALID
+        reasonOf("""{"pipeline":"a/p","version":99999999999}""") shouldBe PipelineJobExecutor.VERSION_INVALID
+        reasonOf("""{"pipeline":"a/p","version":[1]}""") shouldBe PipelineJobExecutor.VERSION_INVALID
+        verify(exactly = 0) { pipelines.findByNameAnyStatus(any(), any()) }
     }
 
     @Test
     fun `the payload names a real pipeline and nothing else`() {
         reasonOf("""["a/p"]""") shouldBe "not_an_object"
-        reasonOf("""{"pipeline":"a/p","version":"current","sql":"DROP TABLE x"}""") shouldBe "unknown_field"
-        reasonOf("""{"version":"current"}""") shouldBe "pipeline_missing"
-        reasonOf("""{"pipeline":"../etc","version":"current"}""") shouldBe "pipeline_name_invalid"
+        reasonOf("""{"pipeline":"a/p","version":1,"sql":"DROP TABLE x"}""") shouldBe "unknown_field"
+        reasonOf("""{"version":1}""") shouldBe "pipeline_missing"
+        reasonOf("""{"pipeline":"../etc","version":1}""") shouldBe "pipeline_name_invalid"
         verify(exactly = 0) { pipelines.findByNameAnyStatus(any(), any()) }
     }
 
@@ -216,24 +232,62 @@ class PipelineJobExecutorTest {
     fun `a payload naming a pipeline the workspace does not hold is target_not_found`() {
         every { pipelines.findByNameAnyStatus(workspace.id, "a/p") } returns null
 
-        shouldThrow<ScheduleException> { adapter.validate(workspace.id, payload("a/p"), mapper.createObjectNode()) }
+        shouldThrow<ScheduleException> { adapter.validate(workspace.id, payload("a/p"), mapper.createObjectNode(), SCHEMA) }
             .code shouldBe ScheduleErrorCodes.TARGET_NOT_FOUND
     }
 
     @Test
-    fun `a pipeline with no current version cannot be scheduled - target_not_released at save`() {
-        every { pipelines.findByNameAnyStatus(workspace.id, "a/p") } returns pipeline(currentVersion = null)
+    fun `a pinned version the pipeline does not have is target_not_found, naming the version`() {
+        val record = pipeline(currentVersion = 1)
+        every { pipelines.findByNameAnyStatus(workspace.id, "a/p") } returns record
+        every { pipelines.findVersionDetail(workspace.id, record.id, 7) } returns null
 
-        val refused = shouldThrow<ScheduleException> { adapter.validate(workspace.id, payload("a/p"), mapper.createObjectNode()) }
+        val refused =
+            shouldThrow<ScheduleException> {
+                adapter.validate(workspace.id, payload("a/p", version = 7), mapper.createObjectNode(), SCHEMA)
+            }
 
-        refused.code shouldBe ScheduleErrorCodes.TARGET_NOT_RELEASED
-        refused.details shouldBe mapOf("pipeline" to "a/p")
+        refused.code shouldBe ScheduleErrorCodes.TARGET_NOT_FOUND
+        refused.details shouldBe mapOf("pipeline" to "a/p", "version" to 7)
+    }
+
+    @Test
+    fun `R3 - a discarded pin is target_not_released everywhere, a draft pin only where authoring is off`() {
+        val bound = executable()
+        every { pipelines.findByNameAnyStatus(workspace.id, "a/p") } returns bound.record
+        every { pipelineService.findExecutable(workspace.id, ReadLens.Everything, bound.record, 1) } returns bound
+
+        every { pipelines.findVersionDetail(workspace.id, bound.record.id, 1) } returns detail(PipelineVersionStatus.DISCARDED)
+        listOf(adapter, executor(draftsEligible = true)).forEach { executor ->
+            shouldThrow<ScheduleException> { executor.validate(workspace.id, payload("a/p"), mapper.createObjectNode(), SCHEMA) }
+                .let {
+                    it.code shouldBe ScheduleErrorCodes.TARGET_NOT_RELEASED
+                    it.details shouldBe mapOf("pipeline" to "a/p", "version" to 1, "status" to "DISCARDED")
+                }
+        }
+
+        every { pipelines.findVersionDetail(workspace.id, bound.record.id, 1) } returns detail(PipelineVersionStatus.DRAFT)
+        shouldThrow<ScheduleException> { adapter.validate(workspace.id, payload("a/p"), mapper.createObjectNode(), SCHEMA) }
+            .code shouldBe ScheduleErrorCodes.TARGET_NOT_RELEASED
+        executor(draftsEligible = true).validate(workspace.id, payload("a/p"), mapper.createObjectNode(), SCHEMA) shouldBe "pipeline:a/p"
+    }
+
+    @Test
+    fun `D2 - a stored schema-1 payload is refused payload_schema_unsupported at save, never read as a pin`() {
+        val refused =
+            shouldThrow<ScheduleException> {
+                adapter.validate(workspace.id, payload("a/p", version = null), mapper.createObjectNode(), 1)
+            }
+
+        refused.code shouldBe ScheduleErrorCodes.PAYLOAD_SCHEMA_UNSUPPORTED
+        refused.details shouldBe mapOf("stored" to 1, "supported" to PipelineJobExecutor.PAYLOAD_SCHEMA_VERSION)
+        verify(exactly = 0) { pipelines.findByNameAnyStatus(any(), any()) }
     }
 
     // ------------------------------------------------------------------------------ preparation
 
     @Test
-    fun `preparation - an inactive workspace does not block, an absent pipeline and a NULL pointer do`() {
+    fun `preparation - an inactive workspace does not block, an absent pipeline, a missing pin and an ineligible pin do`() {
         every { workspaces.findById(workspace.id) } returns workspace.copy(deactivatedAt = Instant.EPOCH)
         (adapter.prepare(admission()) as Preparation.Refused).let {
             it.reason shouldBe PipelineJobExecutor.WORKSPACE_INACTIVE
@@ -247,11 +301,51 @@ class PipelineJobExecutorTest {
             it.block shouldBe true
         }
 
-        every { pipelines.findByNameAnyStatus(workspace.id, "a/p") } returns pipeline(currentVersion = null)
+        val record = pipeline(currentVersion = null)
+        every { pipelines.findByNameAnyStatus(workspace.id, "a/p") } returns record
+        every { pipelines.findVersionDetail(workspace.id, record.id, 1) } returns null
         (adapter.prepare(admission()) as Preparation.Refused).let {
-            it.reason shouldBe PipelineJobExecutor.POINTER_NULL
+            it.reason shouldBe PipelineJobExecutor.TARGET_NOT_FOUND
             it.block shouldBe true
         }
+
+        every { pipelines.findVersionDetail(workspace.id, record.id, 1) } returns detail(PipelineVersionStatus.DRAFT)
+        (adapter.prepare(admission()) as Preparation.Refused).let {
+            it.reason shouldBe PipelineJobExecutor.VERSION_NOT_ELIGIBLE
+            it.block shouldBe true
+        }
+    }
+
+    @Test
+    fun `D1 - preparation loads exactly the pinned version and never reads the CURRENT pointer`() {
+        // A strict record whose CURRENT getter is NOT stubbed: reading it throws, so a prepare that
+        // consulted the pointer would fail here instead of preparing v2.
+        val record =
+            mockk<PipelineRecord> {
+                every { name } returns "a/p"
+                every { id } returns recordId
+            }
+        val body = executable()
+        every { pipelines.findByNameAnyStatus(workspace.id, "a/p") } returns record
+        every { pipelines.findVersionDetail(workspace.id, recordId, 2) } returns detail()
+        every { pipelineService.findExecutable(workspace.id, ReadLens.Everything, record, 2) } returns body.copy(version = 2)
+
+        val snapshot = (adapter.prepare(admission(payload = payload("a/p", version = 2))) as Preparation.Prepared).snapshot
+
+        snapshot["version"].asInt() shouldBe 2
+        snapshot["body_sha256"].asText() shouldBe "h"
+        verify(exactly = 0) { pipelines.findCurrentVersionDetail(any(), any()) }
+    }
+
+    @Test
+    fun `A33 - a run whose payload is stored in schema 1 is refused payload_schema_unsupported and blocks`() {
+        val refused = adapter.prepare(admission(payload = payload("a/p", version = null), payloadSchemaVersion = 1))
+
+        (refused as Preparation.Refused).let {
+            it.reason shouldBe PipelineJobExecutor.PAYLOAD_SCHEMA_UNSUPPORTED
+            it.block shouldBe true
+        }
+        verify(exactly = 0) { pipelines.findByNameAnyStatus(any(), any()) }
     }
 
     @Test
@@ -284,6 +378,7 @@ class PipelineJobExecutorTest {
             workspace.id,
             payloadJson(todayBindingJson),
             mapper.createObjectNode(),
+            SCHEMA,
         ) shouldBe "pipeline:a/p"
 
         every { pipelineService.findExecutable(workspace.id, ReadLens.Everything, datePipeline.record, 1) } returns stringPipeline
@@ -293,6 +388,7 @@ class PipelineJobExecutorTest {
                     workspace.id,
                     payloadJson(todayBindingJson),
                     mapper.createObjectNode(),
+                    SCHEMA,
                 )
             }
         refused.code shouldBe ScheduleErrorCodes.BINDING_INVALID
@@ -313,12 +409,13 @@ class PipelineJobExecutorTest {
                     workspace.id,
                     payloadJson(literalBindingJson),
                     mapper.readTree("""{"as_of_date":"2026-02-02"}"""),
+                    SCHEMA,
                 )
             }
         conflict.code shouldBe ScheduleErrorCodes.BINDING_CONFLICT
         conflict.details["parameter"] shouldBe "as_of_date"
 
-        reasonOf("""{"pipeline":"a/p","version":"current","reference_at":"2026-01-01T00:00:00Z"}""") shouldBe "unknown_field"
+        reasonOf("""{"pipeline":"a/p","version":1,"reference_at":"2026-01-01T00:00:00Z"}""") shouldBe "unknown_field"
         reasonOf(referenceSpoofJson) shouldBe "unknown_field"
     }
 
@@ -335,7 +432,7 @@ class PipelineJobExecutorTest {
                 admission(
                     payload =
                         payloadJson(
-                            """{"pipeline":"a/p","version":"current","parameter_bindings":""" +
+                            """{"pipeline":"a/p","version":1,"parameter_bindings":""" +
                                 """{"as_of_date":{"source":"keyword","name":"TODAY"},""" +
                                 """"previous_date":{"source":"keyword","name":"YESTERDAY"}}}""",
                         ),
@@ -492,25 +589,29 @@ class PipelineJobExecutorTest {
     }
 
     private fun reasonOf(payload: String): Any? =
-        shouldThrow<ScheduleException> { adapter.validate(workspace.id, mapper.readTree(payload), mapper.createObjectNode()) }
+        shouldThrow<ScheduleException> { adapter.validate(workspace.id, mapper.readTree(payload), mapper.createObjectNode(), SCHEMA) }
             .also { it.code shouldBe ScheduleErrorCodes.PAYLOAD_INVALID }
             .details["reason"]
 
-    private fun payload(name: String) = mapper.readTree("""{"pipeline":"$name","version":"current"}""")
+    /** A schema-2 payload pinning [version]; a null [version] is schema 1's `"current"` selector. */
+    private fun payload(
+        name: String,
+        version: Int? = 1,
+    ) = mapper.readTree("""{"pipeline":"$name","version":${version ?: "\"current\""}}""")
 
     /** A payload spelled out in full — bindings included. */
     private fun payloadJson(json: String) = mapper.readTree(json)
 
     private val todayBindingJson =
-        """{"pipeline":"a/p","version":"current","parameter_bindings":""" +
+        """{"pipeline":"a/p","version":1,"parameter_bindings":""" +
             """{"as_of_date":{"source":"keyword","name":"TODAY"}}}"""
 
     private val literalBindingJson =
-        """{"pipeline":"a/p","version":"current","parameter_bindings":""" +
+        """{"pipeline":"a/p","version":1,"parameter_bindings":""" +
             """{"as_of_date":{"source":"literal","value":"2026-01-01"}}}"""
 
     private val referenceSpoofJson =
-        """{"pipeline":"a/p","version":"current","parameter_bindings":""" +
+        """{"pipeline":"a/p","version":1,"parameter_bindings":""" +
             """{"as_of_date":{"source":"keyword","name":"TODAY","reference_at":"2026-01-01T00:00:00Z"}}}"""
 
     private fun admission(
@@ -518,6 +619,7 @@ class PipelineJobExecutorTest {
         parameters: com.fasterxml.jackson.databind.JsonNode = mapper.createObjectNode(),
         referenceAt: Instant = Instant.EPOCH,
         referenceTimezone: String = "UTC",
+        payloadSchemaVersion: Int = SCHEMA,
     ) = Admission(
         UUID.randomUUID(),
         workspace.id,
@@ -528,6 +630,7 @@ class PipelineJobExecutorTest {
         referenceTimezone,
         payload,
         parameters,
+        payloadSchemaVersion,
     )
 
     /** A record + parsed body declaring [params], the shape `findExecutable` returns. */
@@ -558,9 +661,9 @@ class PipelineJobExecutorTest {
         return PipelineService.ExecutablePipeline(record, 1, "{}", body)
     }
 
-    private fun detail() =
+    private fun detail(versionStatus: PipelineVersionStatus = PipelineVersionStatus.RELEASED) =
         mockk<PipelineVersionDetail> {
-            every { status } returns PipelineVersionStatus.RELEASED
+            every { status } returns versionStatus
             every { bodyHash } returns "h"
         }
 
@@ -609,5 +712,6 @@ class PipelineJobExecutorTest {
 
     private companion object {
         val SYSTEM_ID: UUID = UUID.fromString("5a570000-0000-0000-0000-000000000001")
+        const val SCHEMA = PipelineJobExecutor.PAYLOAD_SCHEMA_VERSION
     }
 }

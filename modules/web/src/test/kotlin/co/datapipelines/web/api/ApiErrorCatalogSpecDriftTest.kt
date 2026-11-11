@@ -372,8 +372,11 @@ class ApiErrorCatalogSpecDriftTest {
          * confirm, landed in the SAME commit as its constant and catalog row.
          * 506 → 507 with #786 R1: §13.14 gains `endpoint.version.last_release` (409, the `endpoint.version.` family
          * default), the guarded entity deletion's refusal, landed in the SAME commit as its constant.
+         * 507 → 508 with #786 U2 (recounted with [STATUS_ROW_REGEX]): §13.19 gains
+         * `schedule.validation.payload_schema_unsupported` (400, the `schedule.validation.` family default), the
+         * stored schema-1 payload's refusal, landed in the SAME commit as its constants.
          */
-        const val SECTION_13_ROW_COUNT = 507
+        const val SECTION_13_ROW_COUNT = 508
 
         /**
          * §12's distinct validation codes.

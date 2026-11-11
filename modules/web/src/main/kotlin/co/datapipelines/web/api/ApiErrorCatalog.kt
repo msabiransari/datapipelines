@@ -864,10 +864,14 @@ object ApiErrorCatalog {
             ScheduleErrorCodes.TARGET_NOT_FOUND to
                 "No pipeline by that name exists in this workspace. Pick one from the suggestions.",
             ScheduleErrorCodes.TARGET_NOT_RELEASED to
-                "This pipeline has no released version yet. Release it (or switch its current version), then schedule it.",
+                "This pipeline version isn't one this server runs — it was discarded, or it's a draft and drafts " +
+                "don't run here. Pick a released version.",
             ScheduleErrorCodes.PAYLOAD_INVALID to
                 "This schedule's job doesn't have the right shape — it must name one pipeline of this workspace " +
-                "with the version set to `current`.",
+                "and the exact version number to run.",
+            ScheduleErrorCodes.PAYLOAD_SCHEMA_UNSUPPORTED to
+                "This schedule was saved in the older format that followed the current version. Edit it and pick " +
+                "the exact version to run.",
             ScheduleErrorCodes.EXECUTOR_UNKNOWN to
                 "That kind of job can't be scheduled on this server.",
             PipelineErrorCodes.Versioning.AUTHORING_DISABLED to RECEIVER_USER_MESSAGE,

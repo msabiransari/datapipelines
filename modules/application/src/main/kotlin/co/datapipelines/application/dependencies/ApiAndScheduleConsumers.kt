@@ -39,9 +39,11 @@ class EndpointVersionPipelineConsumers(
  * by-target lookup makes.
  *
  * Every live (not deleted) schedule counts: paused and blocked ones too, since a resume or an unblock would run the
- * version again. A schema-1 payload names no version — it follows the pipeline's CURRENT — so until U2 stores exact
- * pins it protects the version CURRENT names now, and nothing while CURRENT is NULL; the entity scope counts it
- * regardless, because the entity purge removes the name it targets.
+ * version again. A schema-2 payload (#786 D.1) protects exactly the version its `version` field pins. A schema-1 payload
+ * names no version — it followed the pipeline's CURRENT, and the upgrade's conversion (D.5) rewrites every live one
+ * before serving — so one that is still there (planted, or a deployment mid-upgrade) protects the version CURRENT names
+ * now, and nothing while CURRENT is NULL; the entity scope counts every schedule regardless, because the entity purge
+ * removes the name it targets.
  *
  * [targetPrefix] is the pipeline executor's `target_ref` prefix, supplied by the assembling layer that owns it.
  */
@@ -60,14 +62,23 @@ class SchedulePipelineConsumers(
         pipelineName: String,
     ): List<SchedulePin> = resolved(workspaceId, pipelineName)
 
-    /** Each live schedule targeting [pipelineName] with the version it runs; null when it follows a NULL CURRENT. */
+    /**
+     * Each live schedule targeting [pipelineName] with the version it runs: the schema-2 exact pin, or for a schema-1
+     * row the pipeline's CURRENT (null when NULL). A schema-2 `version` that is not a plain positive integer cannot be
+     * saved; were one planted it reads as null rather than failing the discard's read.
+     */
     private fun resolved(
         workspaceId: UUID,
         pipelineName: String,
     ): List<SchedulePin> =
         jdbc.query(
             """
-            SELECT s.name, p.current_version AS pipeline_version
+            SELECT s.name,
+                   CASE WHEN s.payload_schema_version >= 2
+                        THEN CASE WHEN jsonb_typeof(s.payload_json -> 'version') = 'number'
+                                   AND (s.payload_json ->> 'version') ~ '^[1-9][0-9]{0,8}$'
+                                  THEN (s.payload_json ->> 'version')::int END
+                        ELSE p.current_version END AS pipeline_version
               FROM schedules s
               LEFT JOIN pipelines p ON p.workspace_id = s.workspace_id AND p.name = :name
              WHERE s.workspace_id = :ws AND s.target_ref = :ref AND s.deleted_at IS NULL

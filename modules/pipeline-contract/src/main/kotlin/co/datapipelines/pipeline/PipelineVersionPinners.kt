@@ -38,17 +38,17 @@ interface EndpointVersionConsumers {
 data class SchedulePin(
     val name: String,
     /**
-     * The pipeline version the schedule runs: its exact pin, or for a schema-1 payload the version CURRENT resolves to —
-     * null when that CURRENT is NULL (it runs nothing until one is released; only the entity scope counts it).
+     * The pipeline version the schedule runs: its exact pin (schema 2, #786 D.1), or for a leftover schema-1 payload the
+     * version CURRENT resolves to — null when that CURRENT is NULL (only the entity scope counts it).
      */
     val pipelineVersion: Int?,
 )
 
 /**
  * The pipeline aggregate's answer to "which schedules pin this release?" (#786 B.4; record §14, A39): every live
- * (not deleted) schedule protects the version it runs, paused and blocked ones included. Until U2 stores exact pins, a
- * schema-1 payload follows CURRENT, so it protects the version CURRENT names at the time of the check. `application`
- * binds it over `schedules`; no default, as [EndpointVersionConsumers].
+ * (not deleted) schedule protects the version it runs, paused and blocked ones included: the exact pin its schema-2
+ * payload stores (#786 D.1); a leftover schema-1 payload protects the version CURRENT names at the time of the check.
+ * `application` binds it over `schedules`; no default, as [EndpointVersionConsumers].
  */
 interface ScheduleConsumers {
     /** The live schedules that run exactly `pipelineName@version`. */

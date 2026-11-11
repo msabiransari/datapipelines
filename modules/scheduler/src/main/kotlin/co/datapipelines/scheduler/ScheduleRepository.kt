@@ -285,6 +285,52 @@ class ScheduleRepository(
                 rowMapper,
             ).singleOrNull()
 
+    /**
+     * #786 D.5 — every live schedule of [executorId] whose payload is stored in [schemaVersion], across workspaces, in
+     * workspace then name order: the upgrade's conversion selector. A deleted schedule is not selected — it never runs
+     * again, and the startup must not refuse over a row nobody can use.
+     */
+    fun listLiveAtSchema(
+        executorId: String,
+        schemaVersion: Int,
+    ): List<Schedule> =
+        jdbc.query(
+            """
+            SELECT * FROM schedules
+            WHERE executor_id = :executorId AND payload_schema_version = :schema AND deleted_at IS NULL
+            ORDER BY workspace_id, name, id
+            """.trimIndent(),
+            mapOf("executorId" to executorId, "schema" to schemaVersion),
+            rowMapper,
+        )
+
+    /**
+     * #786 D.5 — the in-place conversion's ONE write: the payload and its schema number, nothing else (parameters, cron,
+     * timezone, policy, notifications, `updated_by`/`updated_at` untouched), the revision bumped so an editor holding the
+     * old `If-Match` re-reads. Guarded by [expectedRevision] AND the stored [fromSchema]: false when a concurrent writer
+     * moved the revision or the row is already converted — the caller re-reads, never overwrites.
+     */
+    fun convertPayload(
+        id: UUID,
+        expectedRevision: Int,
+        fromSchema: Int,
+        payload: JsonNode,
+        toSchema: Int,
+    ): Boolean =
+        jdbc.update(
+            """
+            UPDATE schedules SET payload_json = CAST(:payload AS jsonb), payload_schema_version = :toSchema, revision = revision + 1
+            WHERE id = :id AND revision = :expected AND payload_schema_version = :fromSchema AND deleted_at IS NULL
+            """.trimIndent(),
+            mapOf(
+                "id" to id,
+                "expected" to expectedRevision,
+                "fromSchema" to fromSchema,
+                "toSchema" to toSchema,
+                "payload" to mapper.writeValueAsString(payload),
+            ),
+        ) == 1
+
     /** Soft delete (D-9.6/B17), guarded by the expected revision. False when the revision moved or it is gone. */
     fun softDelete(
         workspaceId: UUID,

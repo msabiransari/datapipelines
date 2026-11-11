@@ -270,6 +270,7 @@ class ScheduledRunWorker(
             referenceTimezone = run.referenceTimezone,
             payload = run.payload,
             parameters = run.parameters,
+            payloadSchemaVersion = run.payloadSchemaVersion,
         )
 
     companion object {

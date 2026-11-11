@@ -47,8 +47,14 @@ import java.util.concurrent.TimeoutException
  * - a template purge queued behind a pin save is refused `template.in_use` once the pin committed;
  * - an endpoint publish waits on the registry key, and a second publish of the same path is refused after the winner
  *   committed (`endpoint.path_conflict`, never a 500);
- * - a schedule create whose target pipeline loses its current version while the create waits is refused at
- *   validation (`schedule.validation.target_not_released`), never saved — the validation runs UNDER the guard.
+ * - a schedule create whose pinned version is discarded while the create waits is refused at validation
+ *   (`schedule.validation.target_not_released`), never saved — the validation runs UNDER the guard.
+ *
+ * #786 D.3 (A39) adds the schedule pin writers' races against the pinned version's discard, both orders, with REAL
+ * writers on both sides: the holder takes the workspace row, the first writer queues on it, the second queues behind the
+ * first, the holder commits, and the guard decides who goes first. Discard first: the create (or repin) re-validates
+ * under the guard and is refused, nothing written. Pin first: the discard sees the committed pin and is refused
+ * `pipeline.version.pinned` naming the schedule.
  *
  * The stand-in for a conflicting writer is a raw connection holding one lock in an open transaction — the workspace row
  * (`FOR NO KEY UPDATE`, as a release in flight holds it), the datasource's prerequisite key, or the endpoint registry
@@ -287,19 +293,134 @@ class G0WriterContentionE2eTest {
     private fun createSchedule(
         name: String,
         pipeline: String,
+        version: Int = 1,
     ): Response =
         rest()
             .contentType(ContentType.JSON)
-            .body(
-                mapper.writeValueAsString(
-                    mapOf(
-                        "name" to name,
-                        "payload" to mapOf("pipeline" to pipeline, "version" to "current"),
-                        "cron" to "0 3 * * *",
-                        "timezone" to "UTC",
-                    ),
-                ),
-            ).post("/api/v1/schedules")
+            .body(scheduleBody(name, pipeline, version))
+            .post("/api/v1/schedules")
+
+    private fun scheduleBody(
+        name: String,
+        pipeline: String,
+        version: Int,
+    ): String =
+        mapper.writeValueAsString(
+            mapOf(
+                "name" to name,
+                "payload" to mapOf("pipeline" to pipeline, "version" to version),
+                "cron" to "0 3 * * *",
+                "timezone" to "UTC",
+            ),
+        )
+
+    /** The schedule edit that changes the exact pin (§15.1 — it joins the writer protocol); `If-Match` = [etag]. */
+    private fun repinSchedule(
+        id: String,
+        etag: String,
+        name: String,
+        pipeline: String,
+        version: Int,
+    ): Response =
+        rest()
+            .contentType(ContentType.JSON)
+            .header("If-Match", etag)
+            .body(scheduleBody(name, pipeline, version))
+            .put("/api/v1/schedules/$id")
+
+    private fun discardVersion(
+        pipelineId: String,
+        version: Int,
+    ): Response = rest().contentType(ContentType.JSON).body("").post("/api/v1/pipelines/$pipelineId/versions/$version/discard")
+
+    /** [releasedPipeline], then a second released version (a description edit) — the pipeline's id. */
+    private fun releasedTwice(
+        name: String,
+        templateId: String,
+    ): String {
+        val (created, isError) = callTool("pipelines_create", pipelineArguments(name, templateId))
+        withClue("pipelines_create must succeed: $created") { isError shouldBe false }
+        val id = created["id"].asText()
+        release(id, created["draft"]["body_hash"].asText())
+        val (updated, updateError) =
+            callTool(
+                "pipelines_update",
+                pipelineArguments(name, templateId) +
+                    mapOf("id" to id, "expected_hash" to created["draft"]["body_hash"].asText(), "description" to "Version two."),
+            )
+        withClue("pipelines_update must succeed: $updated") { updateError shouldBe false }
+        release(id, updated["draft"]["body_hash"].asText())
+        return id
+    }
+
+    private fun release(
+        id: String,
+        bodyHash: String,
+    ) {
+        val released =
+            rest()
+                .header("If-Match", bodyHash)
+                .queryParam("release_pinned_templates", "true")
+                .post("/api/v1/pipelines/$id/release")
+        withClue(released.asString()) { released.statusCode shouldBe 200 }
+    }
+
+    /**
+     * #786 D.3 — [first] fired against the held workspace row, [second] queued behind it, then the holder commits; both
+     * answers. A writer that does not take the guard answers before the commit instead of queueing — the probe stops
+     * waiting for it ([awaitQueuedOrAnswered]) so the OUTCOME assertions, not the probe, are what turn red.
+     */
+    private fun raced(
+        first: () -> Response,
+        second: () -> Response,
+    ): Pair<Response, Response> =
+        holdWorkspace().use { holder ->
+            val a = CompletableFuture.supplyAsync({ first() }, pool)
+            awaitQueuedOrAnswered(holder, a, count = 1)
+            val b = CompletableFuture.supplyAsync({ second() }, pool)
+            awaitQueuedOrAnswered(holder, b, count = if (a.isDone) 1 else 2)
+            holder.connection.commit()
+            a.get(WRITER_TIMEOUT_SECONDS, TimeUnit.SECONDS) to b.get(WRITER_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        }
+
+    /** Polls until [count] backends wait on [holder] or [writer] answered without waiting; RED past the probe window. */
+    private fun awaitQueuedOrAnswered(
+        holder: Holder,
+        writer: CompletableFuture<*>,
+        count: Int,
+    ) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(WAIT_PROBE_SECONDS)
+        while (waitersOn(holder.pid) < count && !writer.isDone) {
+            withClue("no $count waiter(s) on the holder within the probe window") { (System.nanoTime() < deadline) shouldBe true }
+            Thread.sleep(PROBE_INTERVAL_MS)
+        }
+    }
+
+    private fun schedulesNamed(name: String): Int =
+        countOf("SELECT count(*) FROM schedules WHERE workspace_id = ?::uuid AND name = ? AND deleted_at IS NULL", WORKSPACE_ID, name)
+
+    private fun pinnedVersion(scheduleId: String): Int =
+        countOf("SELECT (payload_json->>'version')::int FROM schedules WHERE id = ?::uuid", scheduleId)
+
+    private fun versionStatus(
+        pipelineId: String,
+        version: Int,
+    ): String =
+        JdbcTemplate(DriverManagerDataSource(postgres.jdbcUrl, postgres.username, postgres.password)).queryForObject(
+            "SELECT status FROM pipeline_versions WHERE pipeline_id = ?::uuid AND version = ?",
+            String::class.java,
+            pipelineId,
+            version,
+        ) ?: "absent"
+
+    private fun assertPinnedRefusal(
+        discard: Response,
+        schedule: String,
+    ) {
+        withClue(discard.asString()) { discard.statusCode shouldBe 409 }
+        discard.jsonPath().getString("error.code") shouldBe "pipeline.version.pinned"
+        discard.jsonPath().getList<String>("error.details.referencing_schedules.schedule") shouldBe listOf(schedule)
+    }
 
     private fun registerDatasource(name: String) {
         rest()
@@ -459,20 +580,70 @@ class G0WriterContentionE2eTest {
 
     @Test
     @Order(12)
-    fun `a schedule whose target loses its current version while the create waits is refused at validation, never saved`() {
+    fun `D3 create vs discard, discard first - the create queued behind it re-validates under the guard, refused, never saved`() {
         val target = releasedPipeline(PIPELINE_WITHDRAWN, TEMPLATE)
-        val response =
-            holdWorkspace().use { holder ->
-                // The conflicting writer, under the workspace guard: the target stops having a version to follow.
-                holder.run("UPDATE pipelines SET current_version = NULL WHERE id = ?::uuid", target)
-                val create = CompletableFuture.supplyAsync({ createSchedule("g0/withdrawn", PIPELINE_WITHDRAWN) }, pool)
-                awaitWaiters(holder, create)
-                holder.connection.commit()
-                create.get(WRITER_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            }
-        // Validated BEFORE the guard, the create would have seen the version, then waited and saved it: a 201.
-        withClue(response.asString()) { response.statusCode shouldBe 400 }
-        response.jsonPath().getString("error.code") shouldBe "schedule.validation.target_not_released"
+        val (discard, create) = raced({ discardVersion(target, 1) }, { createSchedule("g0/withdrawn", PIPELINE_WITHDRAWN) })
+
+        withClue(discard.asString()) { discard.statusCode shouldBe 200 }
+        // Validated BEFORE the guard (or without it), the create would have answered first and saved the pin: a 201,
+        // and the discard behind it refused pinned.
+        withClue(create.asString()) { create.statusCode shouldBe 400 }
+        create.jsonPath().getString("error.code") shouldBe "schedule.validation.target_not_released"
+        schedulesNamed("g0/withdrawn") shouldBe 0
+        versionStatus(target, 1) shouldBe "DISCARDED"
+    }
+
+    @Test
+    @Order(18)
+    fun `D3 create vs discard, create first - the discard queued behind it sees the committed pin and is refused`() {
+        val target = releasedPipeline(PIPELINE_RACE_CREATE, TEMPLATE)
+        val (create, discard) = raced({ createSchedule("g0/race/create_first", PIPELINE_RACE_CREATE) }, { discardVersion(target, 1) })
+
+        withClue(create.asString()) { create.statusCode shouldBe 201 }
+        assertPinnedRefusal(discard, "g0/race/create_first")
+        versionStatus(target, 1) shouldBe "RELEASED"
+        pinnedVersion(create.jsonPath().getString("data.id")) shouldBe 1
+    }
+
+    @Test
+    @Order(19)
+    fun `D3 repin vs discard, discard first - the repin queued behind it re-validates under the guard, refused, pin unchanged`() {
+        val target = releasedTwice(PIPELINE_RACE_REPIN_A, TEMPLATE)
+        val created = createSchedule("g0/race/repin_after_discard", PIPELINE_RACE_REPIN_A, version = 2)
+        withClue(created.asString()) { created.statusCode shouldBe 201 }
+        val id = created.jsonPath().getString("data.id")
+
+        val (discard, repin) =
+            raced(
+                { discardVersion(target, 1) },
+                { repinSchedule(id, created.header("ETag"), "g0/race/repin_after_discard", PIPELINE_RACE_REPIN_A, 1) },
+            )
+
+        withClue(discard.asString()) { discard.statusCode shouldBe 200 }
+        withClue(repin.asString()) { repin.statusCode shouldBe 400 }
+        repin.jsonPath().getString("error.code") shouldBe "schedule.validation.target_not_released"
+        pinnedVersion(id) shouldBe 2
+        versionStatus(target, 1) shouldBe "DISCARDED"
+    }
+
+    @Test
+    @Order(20)
+    fun `D3 repin vs discard, repin first - the discard queued behind it sees the new pin and is refused`() {
+        val target = releasedTwice(PIPELINE_RACE_REPIN_B, TEMPLATE)
+        val created = createSchedule("g0/race/repin_first", PIPELINE_RACE_REPIN_B, version = 2)
+        withClue(created.asString()) { created.statusCode shouldBe 201 }
+        val id = created.jsonPath().getString("data.id")
+
+        val (repin, discard) =
+            raced(
+                { repinSchedule(id, created.header("ETag"), "g0/race/repin_first", PIPELINE_RACE_REPIN_B, 1) },
+                { discardVersion(target, 1) },
+            )
+
+        withClue(repin.asString()) { repin.statusCode shouldBe 200 }
+        assertPinnedRefusal(discard, "g0/race/repin_first")
+        pinnedVersion(id) shouldBe 1
+        versionStatus(target, 1) shouldBe "RELEASED"
     }
 
     // ---- busy on the remaining release families (the shared release guard's other callers) -------------------
@@ -577,6 +748,9 @@ class G0WriterContentionE2eTest {
         private const val TEMPLATE_UI = "test/g0/modal.sql"
         private const val PIPELINE = "test/g0/rows"
         private const val PIPELINE_WITHDRAWN = "test/g0/withdrawn"
+        private const val PIPELINE_RACE_CREATE = "test/g0/race_create"
+        private const val PIPELINE_RACE_REPIN_A = "test/g0/race_repin_a"
+        private const val PIPELINE_RACE_REPIN_B = "test/g0/race_repin_b"
         private const val PARAMETER_SET = "test/g0/filters"
         private const val VISUALIZATION = "test/g0/chart"
         private const val DASHBOARD = "test/g0/board"

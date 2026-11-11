@@ -215,6 +215,32 @@ class ApiAndScheduleConsumersIntegrationTest {
     }
 
     @Test
+    fun `#786 D1 - a schema-2 schedule protects exactly its pinned version, never what CURRENT resolves to`() {
+        schedule("pinned_v1", schema = 2, version = "1")
+
+        scheduleConsumers.liveVersionPins(workspaceId, pipelineName, 1) shouldContainExactly listOf(SchedulePin("pinned_v1", 1))
+        scheduleConsumers.liveVersionPins(workspaceId, pipelineName, 2).shouldBeEmpty()
+        scheduleConsumers.anyVersionPins(workspaceId, pipelineName) shouldContainExactly listOf(SchedulePin("pinned_v1", 1))
+
+        val refused = shouldThrow<DatapipelinesException> { service.discardVersion(workspaceId, pipelineId, 1, userId) }
+        refused.code shouldBe PipelineErrorCodes.Versioning.PINNED
+        refused.details["referencing_schedules"] shouldBe listOf(mapOf("schedule" to "pinned_v1", "pipeline_version" to 1))
+        // CURRENT is not what this schedule runs: moving or clearing the pointer never reaches it.
+        jdbc.update("UPDATE pipelines SET current_version = NULL WHERE id = :id", mapOf("id" to pipelineId))
+        scheduleConsumers.liveVersionPins(workspaceId, pipelineName, 1) shouldContainExactly listOf(SchedulePin("pinned_v1", 1))
+    }
+
+    @Test
+    fun `#786 D1 - a schema-2 payload whose version is not a positive integer pins nothing, and the entity scope still counts it`() {
+        schedule("planted_text", schema = 2, version = "\"current\"")
+        schedule("planted_zero", schema = 2, version = "0")
+
+        scheduleConsumers.liveVersionPins(workspaceId, pipelineName, 1).shouldBeEmpty()
+        scheduleConsumers.liveVersionPins(workspaceId, pipelineName, 2).shouldBeEmpty()
+        scheduleConsumers.anyVersionPins(workspaceId, pipelineName).map { it.pipelineVersion } shouldContainExactly listOf(null, null)
+    }
+
+    @Test
     fun `a schedule targeting another pipeline protects nothing here`() {
         schedule("other", target = TARGET_PREFIX + "a39/someone_else")
 
@@ -266,11 +292,13 @@ class ApiAndScheduleConsumersIntegrationTest {
         blocked: Boolean = false,
         deleted: Boolean = false,
         target: String = TARGET_PREFIX + pipelineName,
+        schema: Int = 1,
+        version: String? = null,
     ) = jdbc.update(
         """
         INSERT INTO schedules (id, workspace_id, name, executor_id, payload_schema_version, payload_json, target_ref, cron, timezone,
                                enabled, blocked_reason, blocked_at, created_by, updated_by, deleted_at, deleted_by)
-        VALUES (:id, :ws, :name, 'pipeline', 1, CAST(:payload AS jsonb), :target, '0 3 * * *', 'UTC', :enabled,
+        VALUES (:id, :ws, :name, 'pipeline', :schema, CAST(:payload AS jsonb), :target, '0 3 * * *', 'UTC', :enabled,
                 CASE WHEN :blocked THEN 'pipeline_not_released' END, CASE WHEN :blocked THEN NOW() END, :owner, :owner,
                 CASE WHEN :deleted THEN NOW() END, CASE WHEN :deleted THEN CAST(:owner AS UUID) END)
         """.trimIndent(),
@@ -278,7 +306,13 @@ class ApiAndScheduleConsumersIntegrationTest {
             "id" to UUID.randomUUID(),
             "ws" to workspaceId,
             "name" to name,
-            "payload" to """{"pipeline":"${target.removePrefix(TARGET_PREFIX)}"}""",
+            "schema" to schema,
+            "payload" to
+                if (version == null) {
+                    """{"pipeline":"${target.removePrefix(TARGET_PREFIX)}"}"""
+                } else {
+                    """{"pipeline":"${target.removePrefix(TARGET_PREFIX)}","version":$version}"""
+                },
             "target" to target,
             "enabled" to enabled,
             "blocked" to blocked,

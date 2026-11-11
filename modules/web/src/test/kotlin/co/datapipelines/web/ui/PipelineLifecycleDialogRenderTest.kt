@@ -406,7 +406,7 @@ class PipelineLifecycleDialogRenderTest {
 
         html shouldContain "data-discard-schedules"
         html shouldContain "Schedules that run this pipeline"
-        html shouldContain "they follow its current version"
+        html shouldContain "each runs another version of it"
         html shouldNotContain "blocks (the pointer is gone)"
         html shouldContain ">reports/nightly</span>"
         html shouldContain ">enabled</span>"

@@ -139,12 +139,15 @@ class ScheduleNotificationDeliveryE2eTest {
     fun `a run that could not start mails that, and the block it causes is mailed once`() {
         val pipelineId = createPipeline(REFUSED_PIPELINE, OK_TEMPLATE)
         val schedule = createSchedule("test/notify_refused", REFUSED_PIPELINE, listOf(REFUSED))
-        // #786 B.4 protects the release a live schedule runs, so a NULL pointer under one is legacy data: plant it as such.
-        sql("UPDATE pipelines SET current_version = NULL WHERE id = '$pipelineId'")
+        // #786 B.4 protects the release a live schedule runs, so a DISCARDED pin under one is legacy data: plant it as such.
+        sql(
+            "UPDATE pipeline_versions SET status = 'DISCARDED', discarded_at = NOW() WHERE pipeline_id = '$pipelineId' AND version = 1; " +
+                "UPDATE pipelines SET current_version = NULL WHERE id = '$pipelineId'",
+        )
         val run = runNow(schedule)
         val detail = awaitRun(schedule, run)
         detail["state"].asText() shouldBe "not_started"
-        detail["reason"].asText() shouldBe "pointer_null"
+        detail["reason"].asText() shouldBe "version_not_eligible"
         awaitSettled(run, expected = 2).map { it.outcome } shouldContainExactlyInAnyOrder listOf("could_not_start", "blocked")
 
         val again = session(ADMIN_SESSION).post("/api/v1/schedules/$schedule/run")
@@ -451,7 +454,7 @@ class ScheduleNotificationDeliveryE2eTest {
         val body =
             mapOf(
                 "name" to name,
-                "payload" to mapOf("pipeline" to pipeline, "version" to "current"),
+                "payload" to mapOf("pipeline" to pipeline, "version" to 1),
                 "parameters" to mapOf("marker" to MARKER),
                 "cron" to YEARLY,
                 "timezone" to "UTC",

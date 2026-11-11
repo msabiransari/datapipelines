@@ -172,12 +172,20 @@
     S.text(root, "revision", "revision " + s.revision);
     S.text(root, "pipeline-text", M().pipelineOf(s));
     var lastPrepared = (c.runs || []).filter(function (r) { return r.prepared && r.prepared.version !== undefined; })[0];
-    S.text(
+    // #786 D.4: the schedule's PIN — the exact version every run executes (payload schema 2). A
+    // schema-1 payload has no pin to show; it says so, since its runs are refused until edited.
+    var pinned = M().pinnedVersionOf(s);
+    var used = lastPrepared && lastPrepared.prepared.version !== pinned
+      ? " — the latest run used v" + lastPrepared.prepared.version +
+        (lastPrepared.prepared.version_status ? " (" + String(lastPrepared.prepared.version_status).toLowerCase() + ")" : "")
+      : "";
+    var version = S.text(
       root,
       "version",
-      "current version" + (lastPrepared ? " — the latest run used v" + lastPrepared.prepared.version +
-        (lastPrepared.prepared.version_status ? " (" + String(lastPrepared.prepared.version_status).toLowerCase() + ")" : "") : ""),
+      (pinned !== null ? "pinned to v" + pinned : "no exact version (saved in the older format — edit it to pick one)") + used,
     );
+    if (version && pinned !== null) version.setAttribute("data-pinned-version", String(pinned));
+    else if (version) version.removeAttribute("data-pinned-version");
     var preset = M().describeCron(s.cron);
     S.text(root, "when", preset.preset === "custom" ? "Custom pattern" : preset.label);
     S.text(root, "cron", s.cron);

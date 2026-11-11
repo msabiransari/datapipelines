@@ -18,6 +18,7 @@ import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.executor.ExecutorConfig
 import co.datapipelines.persistence.FailureShape
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.LakeExecutionMetadata
 import co.datapipelines.pipeline.ParameterBinder
 import co.datapipelines.pipeline.Pipeline
@@ -25,6 +26,7 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineNameGrammar
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.scheduler.Admission
 import co.datapipelines.scheduler.ExecutionOutcome
@@ -62,14 +64,23 @@ import kotlin.coroutines.cancellation.CancellationException
  * scheduler's opaque payload becomes a pipeline. It lives in `web` beside the runner it reuses
  * (A3: `web/config` is the composition root), and it never creates a second pipeline runner.
  *
- * ## The payload (schema version 1)
- * `{"pipeline": "<name>", "version": "current"}` — plus, since slice 3, the OPTIONAL additive
- * `parameter_bindings` object (design revision §5.2): `{"<parameter>": {"source": "keyword",
- * "name": "TODAY"|"YESTERDAY"} | {"source": "literal", "value": <wire value>}}`. It stays schema
- * version 1 — the record's own wire sketch shows the binding key under schema 1, and an
- * additive key breaks no stored payload. `current` follows the pipeline's sticky pointer
- * wherever it points, drafts included (R5); `latest` is refused at save, and exact numeric
- * versions are not accepted in v1. The schedule's literal `parameters` (R7) and every resolved
+ * ## The payload (schema version 2 — the exact pin, #786 §D; dependency-graph record §24)
+ * `{"pipeline": "<name>", "version": <int ≥ 1>}` — plus the OPTIONAL additive `parameter_bindings`
+ * object (design revision §5.2): `{"<parameter>": {"source": "keyword", "name": "TODAY"|"YESTERDAY"} |
+ * {"source": "literal", "value": <wire value>}}`. The version is an EXACT pipeline version: a run
+ * executes exactly that version, never what the pipeline's current pointer names when the run
+ * comes due. `"current"`, `"latest"`, a missing version and anything but a positive integer are
+ * refused at save (`payload_invalid`, `details.reason` naming which). At save the pinned version
+ * must exist and be eligible under this deployment's posture
+ * ([PipelineVersionStatus.eligibleForPointer] over [AuthoringGuard.developmentPosture] — released
+ * everywhere, a draft only where authoring is enabled); otherwise `target_not_released`.
+ *
+ * Schema version 1 (`"version": "current"`, the pointer-following payload before #786) is READ-
+ * checked, never upgraded at read time: [validate] refuses a stored schema-1 payload with
+ * `schedule.validation.payload_schema_unsupported` and [prepare] refuses its run
+ * `payload_schema_unsupported`, blocking (D.2). The upgrade's startup conversion
+ * ([ScheduleVersionConversion], D.5) rewrites every live schema-1 row in place first, so after
+ * it a schema-1 row can only be a planted one. The schedule's literal `parameters` (R7) and every resolved
  * binding are bound by the SAME binder an interactive run uses, so a refusal is exactly an
  * interactive run's — resolution ([PipelineInputResolver]) runs BEFORE the binder, and the same
  * name in `parameters` and `parameter_bindings` is the ambiguity refusal, never a precedence.
@@ -92,6 +103,8 @@ import kotlin.coroutines.cancellation.CancellationException
 class PipelineJobExecutor(
     private val pipelines: PipelineRepository,
     private val pipelineService: PipelineService,
+    /** #786 D.1 — the posture eligibility reads: the authoring capability, never the mail policy's posture (A37). */
+    private val authoring: AuthoringGuard,
     private val workspaces: WorkspaceRepository,
     private val users: UserService,
     private val runner: RecordingExecutionRunner,
@@ -112,12 +125,16 @@ class PipelineJobExecutor(
 
     // ---------------------------------------------------------------------------- save
 
+    @Suppress("ThrowsCount") // each refusal is a distinct catalogued code a caller must tell apart
     override fun validate(
         workspaceId: UUID,
         payload: JsonNode,
         parameters: JsonNode,
+        payloadSchemaVersion: Int,
     ): String {
-        val name = targetName(payload)
+        // D.2: the stored schema is READ — a schema-1 payload is refused, never re-read as an exact pin.
+        if (payloadSchemaVersion != PAYLOAD_SCHEMA_VERSION) throw schemaUnsupported(payloadSchemaVersion)
+        val (name, version) = target(payload)
         val record =
             findTarget(workspaceId, name)
                 ?: throw ScheduleException(
@@ -125,13 +142,22 @@ class PipelineJobExecutor(
                     "No pipeline named '$name' in this workspace.",
                     mapOf("pipeline" to name),
                 )
-        val version =
-            record.currentVersion
+        val detail =
+            pipelines.findVersionDetail(workspaceId, record.id, version)
                 ?: throw ScheduleException(
-                    ScheduleErrorCodes.TARGET_NOT_RELEASED,
-                    "Pipeline '$name' has no current version to follow — release it (or switch its current version) first.",
-                    mapOf("pipeline" to name),
+                    ScheduleErrorCodes.TARGET_NOT_FOUND,
+                    "Pipeline '$name' has no version $version.",
+                    mapOf("pipeline" to name, "version" to version),
                 )
+        // R3: the pin must be one this deployment runs — released, or a draft where authoring is enabled.
+        if (!PipelineVersionStatus.eligibleForPointer(detail.status, authoring.developmentPosture)) {
+            throw ScheduleException(
+                ScheduleErrorCodes.TARGET_NOT_RELEASED,
+                "Pipeline '$name' v$version is ${detail.status.name.lowercase()}, which this deployment does not run. " +
+                    "Pick a released version.",
+                mapOf("pipeline" to name, "version" to version, "status" to detail.status.name),
+            )
+        }
         val executable =
             pipelineService.findExecutable(workspaceId, ReadLens.Everything, record, version)
                 ?: throw ScheduleException(
@@ -163,22 +189,38 @@ class PipelineJobExecutor(
         if (!principal.holds(Permission.PIPELINE_READ) || !principal.holds(Permission.PIPELINE_EXECUTE)) {
             return refused(AUTHORITY_REFUSED, block = true, "The system identity may not read and execute pipelines here.")
         }
-        val name =
+        // D.2: the run row's own copy of the stored schema — a schema-1 payload never runs (and never reads CURRENT).
+        if (admission.payloadSchemaVersion != PAYLOAD_SCHEMA_VERSION) {
+            return refused(
+                PAYLOAD_SCHEMA_UNSUPPORTED,
+                block = true,
+                "The schedule's payload is stored in schema ${admission.payloadSchemaVersion}; this executor runs schema " +
+                    "$PAYLOAD_SCHEMA_VERSION (an exact version) only. Edit the schedule to pick the version to run.",
+            )
+        }
+        val (name, version) =
             try {
-                targetName(admission.payload)
+                target(admission.payload)
             } catch (e: ScheduleException) {
                 return refused(PAYLOAD_INVALID, block = true, e.message ?: "invalid payload")
             }
         val record = findTarget(workspace.id, name) ?: return refused(TARGET_NOT_FOUND, block = true, "No pipeline named '$name'.")
-        val version = record.currentVersion ?: return refused(POINTER_NULL, block = true, "Pipeline '$name' has no current version.")
+        // D.1: exactly the pinned version — no CURRENT read anywhere on the run path.
         val detail =
             pipelines.findVersionDetail(workspace.id, record.id, version)
-                ?: return refused(POINTER_NULL, block = true, "Pipeline '$name' names version $version, which does not exist.")
+                ?: return refused(TARGET_NOT_FOUND, block = true, "Pipeline '$name' has no version $version.")
+        if (!PipelineVersionStatus.eligibleForPointer(detail.status, authoring.developmentPosture)) {
+            return refused(
+                VERSION_NOT_ELIGIBLE,
+                block = true,
+                "Pipeline '$name' v$version is ${detail.status.name.lowercase()}, which this deployment does not run.",
+            )
+        }
         val executable =
             pipelineService.findExecutable(workspace.id, ReadLens.Everything, record, version)
                 ?: return refused(TARGET_NOT_FOUND, block = true, "Pipeline '$name' version $version has no stored body.")
         // §5.2: resolve the bindings against the run's FROZEN reference (the schedule's zone, its
-        // logical occurrence time — not the actual start) and the CURRENT version's declarations.
+        // logical occurrence time — not the actual start) and the PINNED version's declarations.
         // A binding that no longer fits — the parameter removed or retyped after save — is this
         // refusal, naming the binding in the message.
         val resolved =
@@ -203,7 +245,7 @@ class PipelineJobExecutor(
 
     /**
      * The run's resolved inputs: the payload's bindings parsed, envelope-checked and resolved
-     * against the frozen reference and the CURRENT version, then bound by the interactive
+     * against the frozen reference and the PINNED version, then bound by the interactive
      * binder — every refusal along the way reduces to `parameters_invalid` with its message.
      */
     private fun inputsFor(
@@ -272,7 +314,7 @@ class PipelineJobExecutor(
             pipelines.findById(workspace.id, pipelineId) ?: return notStarted(TARGET_NOT_FOUND, block = true, "The pipeline is gone.")
         val detail = pipelines.findVersionDetail(workspace.id, pipelineId, version)
         if (detail?.bodyHash != launch.snapshot.path("body_sha256").asText()) {
-            // A draft edited between preparation and launch: the frozen body no longer exists.
+            // D.1: the PINNED version's body changed between preparation and launch (a draft edited under its number).
             return notStarted(VERSION_CHANGED, block = false, "Pipeline '${record.name}' v$version changed after it was prepared.")
         }
         val executable =
@@ -497,11 +539,7 @@ class PipelineJobExecutor(
 
     // ---------------------------------------------------------------------------- helpers
 
-    /**
-     * The payload's pipeline name (schema version 1), or `schedule.validation.payload_invalid` — one
-     * throw per distinct `details.reason`, so a caller is told exactly what to fix.
-     */
-    @Suppress("ThrowsCount")
+    /** Binds the schedule's stored parameters against the pipeline's declared parameters (throws on a mismatch). */
     private fun bind(
         pipeline: Pipeline,
         parameters: Map<String, JsonNode>,
@@ -641,9 +679,18 @@ class PipelineJobExecutor(
     ) = StartOutcome.NotStarted(reason, block, message)
 
     companion object {
-        /** The shared save-time payload grammar, also used before an authority check. */
+        /** The payload's pipeline name and its exact version (schema 2). */
+        data class Target(
+            val pipeline: String,
+            val version: Int,
+        )
+
+        /** [target]'s pipeline name alone. */
+        fun targetName(payload: JsonNode): String = target(payload).pipeline
+
+        /** The shared save-time payload grammar (schema 2), also used before an authority check. */
         @Suppress("ThrowsCount") // each payload grammar refusal retains its established reason code
-        fun targetName(payload: JsonNode): String {
+        fun target(payload: JsonNode): Target {
             if (!payload.isObject) throw payloadInvalid("not_an_object", "The payload must be a JSON object.")
             val unknown =
                 payload
@@ -665,20 +712,49 @@ class PipelineJobExecutor(
             ) {
                 throw payloadInvalid("pipeline_name_invalid", "'${name.take(MAX_ECHO)}' is not a pipeline name.")
             }
-            when (val selector = payload.path("version").takeIf { it.isTextual }?.asText()) {
-                VERSION_CURRENT -> Unit
+            return Target(name, exactVersion(payload.path("version")))
+        }
 
-                "latest" -> throw payloadInvalid(VERSION_LATEST_REFUSED, "`latest` is not a version selector; use `current` (record §3.1).")
-
-                null -> throw payloadInvalid("version_missing", "The payload names no version selector; use `\"version\": \"current\"`.")
-
-                else -> throw payloadInvalid(
-                    "version_unsupported",
-                    "'${selector.take(MAX_ECHO)}' is not supported; v1 accepts `current` only.",
+        /** D.1 — the exact version: a positive JSON integer, nothing else (`current` and `latest` are refused by name). */
+        @Suppress("ThrowsCount") // each refusal keeps its own `details.reason`
+        private fun exactVersion(node: JsonNode): Int {
+            if (node.isMissingNode || node.isNull) {
+                throw payloadInvalid(
+                    VERSION_MISSING,
+                    "The payload names no version; give the exact pipeline version to run, like `\"version\": 3`.",
                 )
             }
-            return name
+            if (node.isTextual) {
+                throw when (node.asText()) {
+                    VERSION_CURRENT -> {
+                        payloadInvalid(
+                            VERSION_CURRENT_REFUSED,
+                            "`current` is no longer a version selector: a schedule runs one exact pipeline version. Give its number.",
+                        )
+                    }
+
+                    "latest" -> {
+                        payloadInvalid(VERSION_LATEST_REFUSED, "`latest` is not a version selector; give the exact version number.")
+                    }
+
+                    else -> {
+                        payloadInvalid(VERSION_INVALID, "'${node.asText().take(MAX_ECHO)}' is not a version number.")
+                    }
+                }
+            }
+            if (!node.isIntegralNumber || !node.canConvertToInt() || node.asInt() < 1) {
+                throw payloadInvalid(VERSION_INVALID, "The version must be a whole number of at least 1.")
+            }
+            return node.asInt()
         }
+
+        private fun schemaUnsupported(stored: Int) =
+            ScheduleException(
+                ScheduleErrorCodes.PAYLOAD_SCHEMA_UNSUPPORTED,
+                "This schedule's payload is stored in schema $stored; the pipeline executor accepts schema $PAYLOAD_SCHEMA_VERSION " +
+                    "(an exact version) only. Edit the schedule and pick the version to run.",
+                mapOf("stored" to stored, "supported" to PAYLOAD_SCHEMA_VERSION),
+            )
 
         private fun payloadInvalid(
             reason: String,
@@ -688,7 +764,9 @@ class PipelineJobExecutor(
         private val LOG = LoggerFactory.getLogger(PipelineJobExecutor::class.java)
 
         const val EXECUTOR_ID = "pipeline"
-        const val PAYLOAD_SCHEMA_VERSION = 1
+
+        /** #786 D.1 — the exact pin. Schema 1 (`"version": "current"`) is read-checked and refused (D.2). */
+        const val PAYLOAD_SCHEMA_VERSION = 2
 
         /** The payload's optional additive bindings key (design revision §5.2, slice 3). */
         const val BINDINGS_FIELD = "parameter_bindings"
@@ -702,9 +780,15 @@ class PipelineJobExecutor(
         /** `schedules.target_ref` for a pipeline (B15). */
         const val TARGET_PREFIX = "pipeline:"
 
+        /** Schema 1's pointer-following selector — refused in schema 2 by name ([VERSION_CURRENT_REFUSED]). */
         const val VERSION_CURRENT = "current"
 
-        /** Schema version 1's fields — the binding key is OPTIONAL and ADDITIVE (see the class KDoc). */
+        /** `details.reason` values of the version refusals (D.1). */
+        const val VERSION_CURRENT_REFUSED = "version_current_refused"
+        const val VERSION_MISSING = "version_missing"
+        const val VERSION_INVALID = "version_invalid"
+
+        /** Schema version 2's fields — the binding key is OPTIONAL and ADDITIVE (see the class KDoc). */
         private val PAYLOAD_FIELDS = setOf("pipeline", "version", BINDINGS_FIELD)
 
         /** Reasons this executor reports (record §7.1). */
@@ -718,6 +802,12 @@ class PipelineJobExecutor(
         const val RECORD_UNWRITABLE = "record_unwritable"
         const val START_REFUSED = "start_refused"
         const val SNAPSHOT_UNRESOLVED = "snapshot_unresolved"
+
+        /** #786 D.2 — the run's payload is stored in a schema this executor no longer runs (schema 1). Blocks. */
+        const val PAYLOAD_SCHEMA_UNSUPPORTED = "payload_schema_unsupported"
+
+        /** #786 D.1 — the pinned version is not one this deployment runs (discarded; a draft where authoring is off). Blocks. */
+        const val VERSION_NOT_ELIGIBLE = "version_not_eligible"
 
         /** The `start_refused` detail when the launch threw something with no catalogued code (#253). */
         const val LAUNCH_REFUSED_WITHOUT_CODE = "launch_refused"

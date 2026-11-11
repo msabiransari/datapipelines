@@ -260,5 +260,6 @@ class SchedulerRecoveryIntegrationTest {
             run.referenceTimezone,
             run.payload,
             run.parameters,
+            run.payloadSchemaVersion,
         )
 }

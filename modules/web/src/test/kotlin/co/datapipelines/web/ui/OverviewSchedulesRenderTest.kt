@@ -110,7 +110,7 @@ class OverviewSchedulesRenderTest {
             listOf("Up next", "Recently changed")
         doc.selectFirst(".app-overview-subtitle").shouldNotBeNull()
         doc.select("[data-overview-create] .app-overview-steps li b").map { it.text() } shouldContainExactly
-            listOf("Pick the pipeline.", "Set when it runs.", "Choose who is told.")
+            listOf("Pick the pipeline and its version.", "Set when it runs.", "Choose who is told.")
         doc.selectFirst(".app-overview-actions [data-overview-new-schedule]").shouldNotBeNull()
     }
 
@@ -189,7 +189,7 @@ class OverviewSchedulesRenderTest {
 
         doc.selectFirst("h1")!!.text() shouldBe "Schedules"
         doc.selectFirst("[data-overview-intro]")!!.text() shouldContain
-            "A schedule runs a pipeline's current version at the times a cron pattern names"
+            "A schedule runs one exact version of a pipeline at the times a cron pattern names"
         val create = doc.selectFirst("[data-overview-create]").shouldNotBeNull()
         create.select(".app-overview-steps li").size shouldBe 3
         create.text() shouldContain "nothing sends"

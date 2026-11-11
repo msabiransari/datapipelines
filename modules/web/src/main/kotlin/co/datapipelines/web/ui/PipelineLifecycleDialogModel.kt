@@ -343,8 +343,8 @@ class PipelineLifecycleDialogModel(
         val pinnerPipelines: List<PinnerView>,
         /**
          * #273 — the live schedules that run this pipeline, by name, through the caller's lens; empty renders no section.
-         * Since #786 B.4 the ones that run THIS version are blockers ([pinnerSchedules]); the rest follow a current
-         * version the discard leaves in place.
+         * Since #786 B.4 the ones that run THIS version are blockers ([pinnerSchedules]); the rest each pin another
+         * exact version (#786 D.1), which the discard leaves in place.
          */
         val schedules: List<ScheduleEvidence> = emptyList(),
         /** #320 — the live dashboard versions whose sources pin this version (`referencing_dashboards`); each refuses the discard. */
