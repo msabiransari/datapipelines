@@ -1,6 +1,6 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.68
+**Status:** v1.69
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-11
@@ -1373,9 +1373,26 @@ section, and an outsider can call any demo endpoint with it and no account
 60 requests per 60 s per key, `429 rate_limit.exceeded` — and the lake family's
 gate: the lake endpoint pays S3 egress per call, so it is published only while a
 budget stands behind it). Blank the setting in `deploy/secrets.env` and the next
-boot retracts the public API — no key, no demo endpoints, no page section; change
-the value and the next boot rotates the key. Nothing changes for keys real users
-mint on the `/api-keys` page.
+boot revokes the managed demo key and removes the page section; where authoring is enabled,
+it also retires the demo APIs so they stop serving. Change the value and the next boot
+rotates the key. Retraction, like a manifest that no longer
+names a path, goes through the API lifecycle (#889), and what it achieves depends on the
+authoring capability (`datapipelines.deployment.authoring-enabled`, configuration.md §3.19):
+
+- **Authoring enabled (the default):** a demo API that was released is retired, never
+  deleted — its draft is purged and every released version discarded, so the row and its
+  history stay and nothing serves. The revoked demo key gets `401`; any other caller whose
+  key is still valid and bound to the path gets `503 endpoint.pipeline_not_released`.
+  Setting a key (or naming the path) again releases a new version of the same API.
+- **Authoring disabled — a known limitation (#897):** the version verbs refuse there, so a
+  demo API that was released is **not** retired. Blanking the key still revokes
+  `demo-public-key`, but the API keeps its released versions and **keeps serving to any
+  other valid key bound to it**; each boot logs one INFO line,
+  `event=demo.endpoint_retire_deferred path=… pipeline=…`, per such API. Until #897 lands,
+  an operator who needs those paths dark revokes every other key bound to them on the
+  `/api-keys` page, or retires the API on a boot with authoring enabled.
+
+Nothing changes for keys real users mint on the `/api-keys` page.
 
 The **lake** family is different in kind from the other two and the difference is
 worth stating before the commands: it has a compose profile and a `--demo` flag
@@ -1671,6 +1688,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-11 | v1.69 | #889 demo API retirement through the lifecycle | **Appendix B, the demo API:** where authoring is enabled, blanking the key (or a manifest that drops a path) retires a released demo API through the API version verbs — draft purged, every released version discarded, the row kept; the revoked demo key gets `401`, another valid bound key `503 endpoint.pipeline_not_released` — instead of deleting it; a key set again releases a new version of the same API. Where authoring is disabled the managed key is revoked but the API is not retired and keeps serving to other valid bound keys — a known limitation tracked by #897, with the operator's workaround. |
 | 2026-11-11 | v1.68 | #786 schedules pin exact versions (U2) | **§8.2:** schedules join the upgrade's in-place conversion — each live schema-1 schedule (and its queued runs) is pinned to the version CURRENT names, only the version selector changing; a schedule whose pipeline has no current version refuses the start with `kind=schedule` lines; both kinds are checked before anything is written. |
 | 2026-11-10 | v1.67 | #786 API versions, exact pins (U1) | **§8.2:** the upgrade to API versions — stop the one server, apply, read the conversion report, or the refusal list with its fix (release the pipeline or delete the API on the previous version, then upgrade). No floor, no `Recreate`. Schedules join the same step in #786's second unit. |
 | 2026-11-09 | v1.66 | #863 merge follow-up | **§6.4/§8.3:** clarify Eviction API versus Deployment-rollout protection, soft versus hard skew, and single-domain scheduling without `minDomains`; document signed 32-bit availability limits. Correct the default-environment description and render verdict count (141), including upper-bound and disabled-field checks. |
