@@ -1373,8 +1373,9 @@ section, and an outsider can call any demo endpoint with it and no account
 60 requests per 60 s per key, `429 rate_limit.exceeded` — and the lake family's
 gate: the lake endpoint pays S3 egress per call, so it is published only while a
 budget stands behind it). Blank the setting in `deploy/secrets.env` and the next
-boot retracts the public API — no key, no demo endpoint serves, no page section; change
-the value and the next boot rotates the key. Retraction, like a manifest that no longer
+boot revokes the managed demo key and removes the page section; where authoring is enabled,
+it also retires the demo APIs so they stop serving. Change the value and the next boot
+rotates the key. Retraction, like a manifest that no longer
 names a path, goes through the API lifecycle (#889), and what it achieves depends on the
 authoring capability (`datapipelines.deployment.authoring-enabled`, configuration.md §3.19):
 
