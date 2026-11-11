@@ -29,7 +29,10 @@ import java.util.UUID
  *
  * 1. every DRAFT or RELEASED node of the re-walked closure whose family has a §6 datasource row (pipeline
  *    `DATASOURCE`, parameter set `PARAMETER_SOURCE_DATASOURCE` — read from [Relationship], never listed here) is read
- *    through its registry provider, ⌈n / `resolveBatchSize`⌉ batch reads per family;
+ *    through its registry provider in ⌈n / `resolveBatchSize`⌉ calls per family, each ONE batch statement: a provider
+ *    whose `resolveMany` is one statement per batch (the parameter set's) is read through it, and the pipeline arm —
+ *    whose `resolveMany` keeps G1's three reads per version — through its [DatasourceReferenceReader] bulk read
+ *    (#873 R1);
  * 2. the datasource names its outgoing references carry are the SAME extractor's ([DatasourceEdges]) the plan's walk used;
  * 3. each distinct name is resolved through the registry's datasource provider (G3's) in the caller's workspace as a
  *    MEMBER authority — never an unscoped lookup, never a connectivity test — so a name absent from the deployment and a
@@ -87,15 +90,21 @@ class RegistryPrerequisiteCheck(
         return requests.flatMap { outgoing[it].orEmpty() }
     }
 
-    /** [wanted]'s datasource references, per request, through [family]'s provider in batches; none without a provider. */
+    /**
+     * [wanted]'s datasource references, per request, through [family]'s provider in batches — its bulk
+     * [DatasourceReferenceReader] read when it has one (#873 R1), its `resolveMany` otherwise; none without a provider.
+     */
     private fun datasourceReferences(
         family: FamilyKey,
         wanted: List<ObjectRequest>,
         context: ResolveContext,
     ): List<Pair<ObjectRequest, List<Reference>>> {
         val provider = providerOf(family) ?: return emptyList()
-        return wanted
-            .chunked(planning.resolveBatchSize)
+        val batches = wanted.chunked(planning.resolveBatchSize)
+        if (provider is DatasourceReferenceReader) {
+            return batches.flatMap { batch -> provider.datasourceReferences(batch, context).toList() }
+        }
+        return batches
             .flatMap { batch -> provider.resolveMany(batch, context).entries }
             .mapNotNull { (request, outcome) ->
                 if (outcome is Outcome.Resolved) {
