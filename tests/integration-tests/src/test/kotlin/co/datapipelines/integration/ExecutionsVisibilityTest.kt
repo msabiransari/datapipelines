@@ -312,6 +312,17 @@ class ExecutionsVisibilityTest {
                         listOf(
                             "INSERT INTO published_endpoints (id, workspace_id, path_pattern, pipeline_id, timeout_seconds, created_by) " +
                                 "VALUES ('$ENDPOINT_ID', '$WS_ACME', '/acme/v1/report', '$PIPE_ID', 30, '$WANDA')",
+                            // #786: the API's own v1 — RELEASED, the exact pin of the pipeline's released v1, the V58
+                            // hash expression — and its pointer, as a native create leaves them. Seeded after boot, a
+                            // version-less row would be left for the NEXT context's startup conversion to rewrite.
+                            "INSERT INTO published_endpoint_versions (endpoint_id, version, status, pipeline_name, " +
+                                "pipeline_version, timeout_seconds, description, body_hash, released_at, released_by, created_by) " +
+                                "SELECT e.id, 1, 'RELEASED', p.name, 1, e.timeout_seconds, e.description, " +
+                                "encode(sha256(convert_to((jsonb_build_object('pipeline', p.name, 'pipeline_version', 1, " +
+                                "'timeout_seconds', e.timeout_seconds, 'description', e.description))::text, 'UTF8')), 'hex'), " +
+                                "NOW(), e.created_by, e.created_by FROM published_endpoints e JOIN pipelines p ON p.id = e.pipeline_id " +
+                                "WHERE e.id = '$ENDPOINT_ID'",
+                            "UPDATE published_endpoints SET current_version = 1 WHERE id = '$ENDPOINT_ID'",
                             "INSERT INTO endpoint_key_bindings (path_prefix, api_key_id, workspace_id, created_by) " +
                                 "VALUES ('/acme', '${API_KEY.id}', '$WS_ACME', '$WANDA')",
                         ).forEach { statement.execute(it) }

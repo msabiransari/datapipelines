@@ -37,7 +37,13 @@ class EndpointVersionConversionIntegrationTest {
     private lateinit var versions: PublishedEndpointVersionRepository
     private lateinit var registry: EndpointRegistry
     private lateinit var conversion: EndpointVersionConversion
+
+    // Every event this capture reads is logged by the class's own EndpointVersionConversion, inside run() or
+    // logPrecondition() called from a test method; TransactionTemplate runs each per-entity callback on that caller's
+    // thread, no other class in this module builds the conversion, and test forks are separate JVMs.
+    // raw-list-appender: synchronous — the conversion logs only on the test thread that calls it
     private val logs = ListAppender<ILoggingEvent>()
+
     private val logger = LoggerFactory.getLogger(EndpointVersionConversion::class.java) as Logger
 
     private var userId: UUID = UUID.randomUUID()

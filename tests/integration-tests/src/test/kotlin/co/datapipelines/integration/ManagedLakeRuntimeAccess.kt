@@ -180,6 +180,10 @@ internal class ManagedLakeRuntimeAccess(
                 .put("version", 1)
                 .put("body_sha256", property(executable, "BodyHash").toString())
         snapshot.set<JsonNode>("resolved_parameters", values)
+        val executor = bean("co.datapipelines.web.schedules.PipelineJobExecutor")
+        // #786 D.2: the run row's own payload schema travels on the admission. A row the scheduler admits today is
+        // stored in the schema the executor writes, so the drill asks the executor for it rather than spelling a
+        // number; an older schema stays the executor's read-time refusal (SchedulerE2eTest A33), never this drill's.
         val admission =
             construct(
                 "co.datapipelines.scheduler.Admission",
@@ -193,6 +197,7 @@ internal class ManagedLakeRuntimeAccess(
                     "referenceTimezone" to "UTC",
                     "payload" to mapper.createObjectNode(),
                     "parameters" to values,
+                    "payloadSchemaVersion" to property(executor, "PayloadSchemaVersion"),
                 ),
             )
         val capacityType = Class.forName("co.datapipelines.scheduler.CapacityLease")
@@ -212,7 +217,7 @@ internal class ManagedLakeRuntimeAccess(
                     "capacity" to capacity,
                 ),
             )
-        val result = call(bean("co.datapipelines.web.schedules.PipelineJobExecutor"), "start", launch)
+        val result = call(executor, "start", launch)
         check(result.javaClass.simpleName == "Started") { "Scheduler did not establish a durable start: ${result.javaClass.simpleName}" }
         return execution
     }
