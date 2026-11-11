@@ -269,7 +269,7 @@ class DatasourceValidator(
         name: String,
         errors: MutableList<ValidationError>,
     ) {
-        if (!NAME_PATTERN.matches(name) || name.length !in 1..MAX_NAME_LENGTH) {
+        if (!DatasourceNameGrammar.matches(name)) {
             errors +=
                 error(
                     DatasourceErrorCodes.NAME_INVALID,
@@ -545,8 +545,8 @@ class DatasourceValidator(
     ) = ValidationError(DatasourceErrorCodes.PROPERTIES_INVALID, field, message)
 
     companion object {
-        const val MAX_NAME_LENGTH = 63
-        private val NAME_PATTERN = Regex("^[a-z0-9_-]+$")
+        /** The grammar's bound ([DatasourceNameGrammar], #875): one definition, published for every caller. */
+        const val MAX_NAME_LENGTH = DatasourceNameGrammar.MAX_LENGTH
 
         /**
          * The §3.3/§7A allowlist entry alphabet — legal unquoted-identifier characters across the
