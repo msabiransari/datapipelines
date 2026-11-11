@@ -185,6 +185,9 @@ class ScheduleVersionConversionTest {
         val firstRun = run("first/pipeline")
         val secondRun = run("second/pipeline", id = UUID.randomUUID())
         every { schedules.listLiveAtSchema(PipelineJobExecutor.EXECUTOR_ID, 1) } returns listOf(firstSchedule, secondSchedule)
+        // By-id re-reads (the per-schedule shape round 8 replaced): stubbed so a regression fails on the assertions.
+        every { schedules.findAny(scheduleId) } returns firstSchedule
+        every { schedules.findAny(secondId) } returns secondSchedule
         every { schedules.convertPayload(any(), REVISION, 1, capture(schedulePayloads), 2) } returns true
         every { runs.listQueuedAtSchema(scheduleId, 1) } returns listOf(firstRun)
         every { runs.listQueuedAtSchema(secondId, 1) } returns listOf(secondRun)
@@ -215,6 +218,9 @@ class ScheduleVersionConversionTest {
         val firstSchedule = schedule("first/pipeline", name = "a_first")
         val secondSchedule = schedule("second/pipeline", id = secondId, name = "z_second")
         every { schedules.listLiveAtSchema(PipelineJobExecutor.EXECUTOR_ID, 1) } returns listOf(firstSchedule, secondSchedule)
+        // By-id re-reads (the per-schedule shape round 8 replaced): stubbed so a regression fails on the assertions.
+        every { schedules.findAny(scheduleId) } returns firstSchedule
+        every { schedules.findAny(secondId) } returns secondSchedule
         every { schedules.convertPayload(scheduleId, REVISION, 1, any(), 2) } returns true
         // The second schedule's first CAS loses to a concurrent edit; the retry wins.
         every { schedules.convertPayload(secondId, REVISION, 1, any(), 2) } returnsMany listOf(false, true)
