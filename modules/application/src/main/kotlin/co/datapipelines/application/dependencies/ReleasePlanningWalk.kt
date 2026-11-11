@@ -136,12 +136,17 @@ class ReleasePlanningWalk(
             } catch (expired: DeadlineExceeded) {
                 throw metadataUnavailable(root, expired)
             }
+        // #786 R2: the walker checks the deadline BEFORE each provider read, so a read that runs past it — the final
+        // needed batch, one answering Missing, or a traversal finished from the memo after it — would otherwise return a
+        // closure read outside its budget. The cumulative deadline covers the whole walk: expired at its end, refused.
+        if (context.deadline.expired()) throw metadataUnavailable(root, DeadlineExceeded(ReleaseDependencyFamilies.keyOf(root.family)))
         return ReleaseClosureAdapter.closure(root, graph)
     }
 
     companion object {
         /**
-         * The plan's deadline expired before a provider batch (record §25.4 erratum 6): `<root family>.release.
+         * The plan's deadline expired — before a provider batch, or during one (#786 R2: checked again when the walk
+         * ends) (record §25.4 erratum 6): `<root family>.release.
          * metadata_unavailable` — 503 with `Retry-After`, nothing released, no partial plan. The details name no fact
          * of the closure; the blocking family's key is not a visible identity, so it travels only in the log's cause.
          */
