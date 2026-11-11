@@ -383,15 +383,15 @@ class TemplateImportAllDiscardedE2eTest {
         pointer(id, WORKSPACE_B_ID) shouldBe 1
     }
 
-    // ---- Security: the role row is unchanged ------------------------------------------------------------------
+    // ---- Security: the role row is unchanged (auth.md §7.6 `template.import`: viewer and promoter refused) -------
 
     @Test
-    fun `an author is still refused the import of an all-discarded template, and nothing is written`() {
-        val id = "test/i883/author.sql"
+    fun `a viewer is still refused the import of an all-discarded template, and nothing is written`() {
+        val id = "test/i883/viewer.sql"
         allDiscarded(id, 1, { sqlEntry(id) })
         val before = versionRows()
 
-        val refused = importTemplates(sqlEntry(id, body = "SELECT 2 AS n"), session = SESSION_AUTHOR)
+        val refused = importTemplates(sqlEntry(id, body = "SELECT 2 AS n"), session = SESSION_VIEWER)
 
         withClue(refused.asString()) { refused.statusCode shouldBe 403 }
         versionRows() shouldBe before
@@ -424,12 +424,12 @@ class TemplateImportAllDiscardedE2eTest {
         private val WORKSPACE_A_ID: String = UUID.randomUUID().toString()
         private val WORKSPACE_B_ID: String = UUID.randomUUID().toString()
         private val ADMIN_ID: String = UUID.randomUUID().toString()
-        private val AUTHOR_ID: String = UUID.randomUUID().toString()
+        private val VIEWER_ID: String = UUID.randomUUID().toString()
         private val JWT_SECRET = E2eSession.newSecret()
         private val ENCRYPTION_KEY = E2eSession.newSecret()
         private val SESSION_A get() = E2eSession.jwt(JWT_SECRET, ADMIN_ID, "e2e-883-admin@datapipelines.test", WORKSPACE_A)
         private val SESSION_B get() = E2eSession.jwt(JWT_SECRET, ADMIN_ID, "e2e-883-admin@datapipelines.test", WORKSPACE_B)
-        private val SESSION_AUTHOR get() = E2eSession.jwt(JWT_SECRET, AUTHOR_ID, "e2e-883-author@datapipelines.test", WORKSPACE_A)
+        private val SESSION_VIEWER get() = E2eSession.jwt(JWT_SECRET, VIEWER_ID, "e2e-883-viewer@datapipelines.test", WORKSPACE_A)
 
         private val postgres get() = SharedE2e.postgres
         private val redis get() = SharedE2e.redis
@@ -468,12 +468,12 @@ class TemplateImportAllDiscardedE2eTest {
                     statement.execute(
                         "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES" +
                             " ('$ADMIN_ID', 'e2e-883-admin@datapipelines.test', 'E2E 883 admin', 'test', 'e2e-883-admin', TRUE, FALSE)," +
-                            " ('$AUTHOR_ID', 'e2e-883-author@datapipelines.test', 'E2E 883 author', 'test', 'e2e-883-auth', TRUE, FALSE)",
+                            " ('$VIEWER_ID', 'e2e-883-viewer@datapipelines.test', 'E2E 883 viewer', 'test', 'e2e-883-view', TRUE, FALSE)",
                     )
                     statement.execute(
                         "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES" +
                             " ('$WORKSPACE_A_ID', '$ADMIN_ID', 'workspace_admin'), ('$WORKSPACE_B_ID', '$ADMIN_ID', 'workspace_admin')," +
-                            " ('$WORKSPACE_A_ID', '$AUTHOR_ID', 'author')",
+                            " ('$WORKSPACE_A_ID', '$VIEWER_ID', 'viewer')",
                     )
                 }
             }
