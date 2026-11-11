@@ -6,8 +6,8 @@
 --    V23 datasource_workspaces, V25 learned_facts), every pipeline, template and parameter set names a datasource by
 --    name inside its body, and promotion matches datasources across deployments by name (§5.1). The incarnation is a
 --    LOCAL fact beside that key: a soft delete keeps it (and so would a restore), while a row recreated under the same
---    name (an operator's SQL delete-and-insert, a restore from backup) gets a new one from the DEFAULT. It is never
---    compared across deployments.
+--    name gets a new one when its INSERT uses the DEFAULT. A backup restore supplying the stored incarnation keeps
+--    that value: the DEFAULT never replaces an explicit value. It is never compared across deployments.
 -- 2. generation — a protected local counter of the row's identity-bearing facts (§5.3: never a credential-derived
 --    digest): the writers advance it by one inside their guarded section for a definition update, a credential
 --    change, a soft delete and a grant or revoke that changed a row; a connection test (an observation) does not.
