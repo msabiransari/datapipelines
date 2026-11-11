@@ -148,6 +148,32 @@ class StatementCeilingTest {
     }
 
     @Test
+    fun `expiry between the provider precheck and ceiling entry is the same retryable deadline refusal`() {
+        val expiryClock =
+            object : Clock() {
+                private var reads = 0
+
+                override fun instant(): Instant {
+                    reads += 1
+                    return clock.now.plusSeconds(if (reads > 2) 1 else 0)
+                }
+
+                override fun getZone(): ZoneId = ZoneOffset.UTC
+
+                override fun withZone(zone: ZoneId?): Clock = this
+            }
+        val context = context(Deadline.after(Duration.ofSeconds(1), expiryClock), Duration.ofSeconds(5))
+        val ceiling = PostgresStatementCeiling(mockk(relaxed = true))
+        val provider = ReleaseDependencyFamilies.descriptor(ReleaseFamily.PIPELINE, source, ceiling).provider
+
+        val refused = shouldThrow<DeadlineExceeded> { provider.resolveMany(listOf(request("a")), context) }
+
+        refused.family shouldBe FamilyKey.PIPELINE
+        refused.cause.shouldBeInstanceOf<StatementBudgetExhausted>()
+        reads.shouldBeEmpty()
+    }
+
+    @Test
     fun `the PostgreSQL ceiling rounds up to whole milliseconds, recognises 57014 anywhere in the chain, and needs a transaction`() {
         PostgresStatementCeiling.millis(Duration.ofMillis(1500)) shouldBe 1500L
         PostgresStatementCeiling.millis(Duration.ofSeconds(1).plusNanos(1)) shouldBe 1001L
@@ -155,7 +181,7 @@ class StatementCeilingTest {
         PostgresStatementCeiling.cancelled(RuntimeException(QueryTimeoutException("x", SQLException("c", "57014")))) shouldBe true
         PostgresStatementCeiling.cancelled(RuntimeException(SQLException("division by zero", "22012"))) shouldBe false
         shouldThrow<IllegalStateException> { PostgresStatementCeiling(mockk(relaxed = true)).within({ Duration.ofSeconds(1) }) { 1 } }
-        shouldThrow<IllegalArgumentException> { PostgresStatementCeiling(mockk(relaxed = true)).within({ Duration.ZERO }) { 1 } }
+        shouldThrow<StatementBudgetExhausted> { PostgresStatementCeiling(mockk(relaxed = true)).within({ Duration.ZERO }) { 1 } }
         PostgresStatementCeiling(mockk(relaxed = true)).within({ null }) { 7 } shouldBe 7
     }
 

@@ -97,7 +97,7 @@ class PostgresStatementCeiling(
         read: () -> T,
     ): T {
         val entry = bound() ?: return read()
-        require(entry > Duration.ZERO) { "a statement bound is positive when the read starts, got $entry" }
+        if (entry <= Duration.ZERO) throw StatementBudgetExhausted()
         check(TransactionSynchronizationManager.isActualTransactionActive() && TransactionSynchronizationManager.hasResource(source)) {
             "a release statement bound is SET LOCAL, so it applies only inside the walk's transaction on the ceiling's DataSource"
         }
