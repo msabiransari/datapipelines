@@ -1,11 +1,12 @@
 package co.datapipelines.web.release
 
+import co.datapipelines.application.dependencies.PipelineReleaseFamily
 import co.datapipelines.application.dependencies.PostgresStatementCeiling
-import co.datapipelines.application.dependencies.ReleaseDependencyFamilies
 import co.datapipelines.application.dependencies.ReleasePlanningDeadline
 import co.datapipelines.application.dependencies.ReleasePlanningWalk
 import co.datapipelines.application.dependencies.dashboard.DashboardReleaseProvider
 import co.datapipelines.application.dependencies.parameterset.ParameterSetReleaseProvider
+import co.datapipelines.application.dependencies.prerequisites.RegistryPrerequisiteCheck
 import co.datapipelines.application.dependencies.restore.WalkingRestoreDependencyGuard
 import co.datapipelines.application.dependencies.template.TemplateReleaseProvider
 import co.datapipelines.application.dependencies.visualization.VisualizationReleaseProvider
@@ -16,13 +17,11 @@ import co.datapipelines.parameters.ParameterSetRepository
 import co.datapipelines.parameters.ParameterSetService
 import co.datapipelines.pipeline.PipelineReleaseService
 import co.datapipelines.pipeline.PipelineRepository
-import co.datapipelines.pipeline.release.PipelineDependencySource
+import co.datapipelines.pipeline.release.PrerequisiteCheck
 import co.datapipelines.pipeline.release.ReleaseAuditSink
 import co.datapipelines.pipeline.release.ReleaseBounds
-import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import co.datapipelines.pipeline.release.ReleasedVersionObserver
-import co.datapipelines.pipeline.release.ResolvedNode
 import co.datapipelines.pipeline.release.RestoreDependencyGuard
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.visualization.DashboardRepository
@@ -94,11 +93,12 @@ class ReleaseConfiguration {
     /**
      * The pipeline family over its release source (record §4; G2 adds the other artifact families). The source reads
      * through a repository over the ceiling's template, never the shared repository bean: only that template bounds each
-     * statement (#786 R3).
+     * statement (#786 R3). #873 §F.1: the pipeline arm — `PipelineDependencySource`'s read and pins, plus the version's
+     * `DATASOURCE` edges.
      */
     @Bean
-    fun pipelineDependencyFamily(ceiling: PostgresStatementCeiling): FamilyDescriptor<ResolvedNode> =
-        ReleaseDependencyFamilies.descriptor(ReleaseFamily.PIPELINE, PipelineDependencySource(PipelineRepository(ceiling.jdbc)), ceiling)
+    fun pipelineDependencyFamily(ceiling: PostgresStatementCeiling): FamilyDescriptor<*> =
+        PipelineReleaseFamily.descriptor(PipelineRepository(ceiling.jdbc), ceiling)
 
     /**
      * The template family's NATIVE provider (#873 §A.2: exactly one descriptor per family — it replaces G1's adapted
@@ -109,10 +109,13 @@ class ReleaseConfiguration {
     fun templateDependencyFamily(ceiling: PostgresStatementCeiling): FamilyDescriptor<*> =
         TemplateReleaseProvider(TemplateRepository(ceiling.jdbc), ceiling).descriptor()
 
-    /** The parameter-set family's native provider (#873 G2): selector-template edges, one batch read per frontier. */
+    /**
+     * The parameter-set family's native provider (#873 G2): selector-template and selector-datasource edges (§F.2), one
+     * batch read per frontier plus at most one template-dialect read, both over the ceiling's template.
+     */
     @Bean
     fun parameterSetDependencyFamily(ceiling: PostgresStatementCeiling): FamilyDescriptor<*> =
-        ParameterSetReleaseProvider(ParameterSetRepository(ceiling.jdbc), ceiling).descriptor()
+        ParameterSetReleaseProvider(ParameterSetRepository(ceiling.jdbc), TemplateRepository(ceiling.jdbc), ceiling).descriptor()
 
     /** The visualization family's native provider (#873 G2): the transform-template edge, one batch read per frontier. */
     @Bean
@@ -180,6 +183,25 @@ class ReleaseConfiguration {
             planning = properties.toPlanningLimits(),
         )
 
+    /**
+     * #873 §F.3 c — the apply-time prerequisite check: the guarded closure's pipeline and parameter-set bodies read through
+     * the registry, their datasource names resolved by G3's provider in the caller's workspace, in the release's own
+     * transaction under the planner's bounds and a fresh deadline.
+     */
+    @Bean
+    fun releasePrerequisiteCheck(
+        registry: FamilyRegistry,
+        deadline: ReleasePlanningDeadline,
+        metadataTransactionManager: PlatformTransactionManager,
+        properties: ReleaseDependencyProperties,
+    ): PrerequisiteCheck =
+        RegistryPrerequisiteCheck(
+            registry = registry,
+            speculativeReads = ReleasePlanningWalk.speculativeReads(metadataTransactionManager),
+            deadline = deadline,
+            planning = properties.toPlanningLimits(),
+        )
+
     @Bean
     @Suppress("LongParameterList") // the coordinator's collaborators, one per step of the record's algorithm
     fun pipelineReleaseCoordinator(
@@ -194,6 +216,8 @@ class ReleaseConfiguration {
         bounds: ReleaseBounds,
         /** #778 — the lake reference scanner, told of every pipeline version the coordinator flips. */
         observer: ReleasedVersionObserver,
+        /** #873 §F.3 c — the datasource prerequisites, checked inside the release transaction on every path. */
+        prerequisites: PrerequisiteCheck,
         /** #786 — the API family's release steps: the coordinator's second root. */
         endpointSteps: EndpointReleaseSteps,
         /** #873 §B — the parameter-set, visualization and dashboard roots, through their services' planner seams. */
@@ -222,5 +246,6 @@ class ReleaseConfiguration {
             transactions = TransactionTemplate(metadataTransactionManager),
             bounds = bounds,
             observer = observer,
+            prerequisites = prerequisites,
         )
 }

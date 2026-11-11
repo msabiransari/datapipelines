@@ -11,6 +11,7 @@ import co.datapipelines.datasources.DatasourceReferences
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceTestOutcome
 import co.datapipelines.datasources.DeleteResult
+import co.datapipelines.datasources.ParameterSetDatasourceReference
 import co.datapipelines.datasources.TestResult
 import co.datapipelines.datasources.pooling.PoolSettings
 import co.datapipelines.typesystem.DatapipelinesException
@@ -57,7 +58,13 @@ class DatasourcePartialControllerTest {
             rules,
             DatasourceUpdateService(datasources, rules),
             grants,
-        ) { name -> references.referencesTo(name) }
+            // Both arms forwarded to the swappable [references] (#873 §F.3 e: the set arm is the interface's second method).
+            object : DatasourceReferences {
+                override fun referencesTo(datasourceName: String) = references.referencesTo(datasourceName)
+
+                override fun parameterSetReferencesTo(datasourceName: String) = references.parameterSetReferencesTo(datasourceName)
+            },
+        )
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -517,6 +524,28 @@ class DatasourcePartialControllerTest {
         model["forbidden"] shouldBe null
     }
 
+    /** #873 §F.3 e: a set-only reference locks the name — the dialog lists the selectors, each with its set and version. */
+    @Test
+    fun `the delete dialog lists parameter-set selectors beside the pipeline nodes`() {
+        every { datasources.getVisible("pg1", workspaceId) } returns bound("pg1")
+        references =
+            object : DatasourceReferences {
+                override fun referencesTo(datasourceName: String) = emptyList<DatasourceReference>()
+
+                override fun parameterSetReferencesTo(datasourceName: String) =
+                    listOf(
+                        ParameterSetDatasourceReference("acme/filters", 2, "DISCARDED", "parameters[0].source.datasource"),
+                        ParameterSetDatasourceReference("acme/filters", 1, "RELEASED", "parameters[0].source.datasource"),
+                    )
+            }
+
+        controller.deleteDialog(model, "pg1")
+
+        (model["usages"] as List<*>).size shouldBe 0
+        (model["setUsages"] as List<*>).size shouldBe 2
+        model["usedBySets"] shouldBe listOf("acme/filters")
+    }
+
     @Test
     fun `an unused datasource's dialog carries no usages`() {
         every { datasources.getVisible("pg1", workspaceId) } returns bound("pg1")
@@ -524,6 +553,7 @@ class DatasourcePartialControllerTest {
         controller.deleteDialog(model, "pg1")
 
         (model["usages"] as List<*>).size shouldBe 0
+        (model["setUsages"] as List<*>).size shouldBe 0
         model["forbidden"] shouldBe null
     }
 
@@ -575,6 +605,26 @@ class DatasourcePartialControllerTest {
 
         response.status shouldBe HttpStatus.BAD_REQUEST
         refusalMessage(response) shouldContain "still used by"
+    }
+
+    @Test
+    fun `the POST refusal counts a set-only reference - both families named`() {
+        every { datasources.getVisible("pg1", workspaceId) } returns bound("pg1")
+        every { rules.requireGlobalMutationAllowed(any(), any(), any()) } returns Unit
+        every { rules.requireMemberDatasourcesGate(any()) } returns Unit
+        every { datasources.delete("pg1") } returns
+            DeleteResult(
+                deleted = false,
+                name = "pg1",
+                errorCode = "datasource.in_use",
+                parameterSetReferences =
+                    listOf(ParameterSetDatasourceReference("acme/filters", 2, "DISCARDED", "parameters[0].source.datasource")),
+            )
+
+        val response = controller.delete(model, "pg1") as ModelAndView
+
+        response.status shouldBe HttpStatus.BAD_REQUEST
+        refusalMessage(response) shouldContain "0 pipeline(s) across 0 node(s) and 1 parameter set(s) across 1 selector(s)"
     }
 
     /**

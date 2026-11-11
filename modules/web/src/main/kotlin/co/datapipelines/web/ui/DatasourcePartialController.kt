@@ -339,6 +339,10 @@ class DatasourcePartialController(
         val usages = if (forbidden == null) references.referencesTo(name) else emptyList()
         model.addAttribute("usages", usages)
         model.addAttribute("usedByPipelines", usages.map { it.pipelineName }.distinct())
+        // #873 §F.3 e: a parameter-set selector locks the name too; listed beside the pipeline nodes, each with its link.
+        val setUsages = if (forbidden == null) references.parameterSetReferencesTo(name) else emptyList()
+        model.addAttribute("setUsages", setUsages)
+        model.addAttribute("usedBySets", setUsages.map { it.parameterSetName }.distinct())
         RoleModel.stamp(model, principal())
         return "partials/datasource-delete"
     }
@@ -366,7 +370,8 @@ class DatasourcePartialController(
             if (!result.deleted) {
                 return refused(
                     "'$name' is still used by ${result.referencingPipelines.size} pipeline(s) across " +
-                        "${result.references.size} node(s). Remove or repoint them first.",
+                        "${result.references.size} node(s) and ${result.referencingParameterSets.size} parameter set(s) across " +
+                        "${result.parameterSetReferences.size} selector(s). Remove or repoint them first.",
                 )
             }
             browse.fillList(model, principal(), null, null, null)

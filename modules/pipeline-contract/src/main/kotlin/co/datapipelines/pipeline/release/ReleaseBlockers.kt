@@ -78,6 +78,23 @@ object ReleaseBlockers {
         )
     }
 
+    /**
+     * The details of a refusal for [unavailable] prerequisites (#873 §F.3 c), the sibling of [details]:
+     * `{root, blockers:[{kind:"datasource", name, reason:"unavailable"}], blockers_truncated}`. A prerequisite blocker
+     * carries no family, version, status or path — a datasource has none of them, and absent and not visible are one
+     * reason (record §12). At most [maxBlockers] are listed, in the order the check answered them.
+     */
+    fun prerequisiteDetails(
+        closure: ReleaseClosure,
+        unavailable: List<ReleasePrerequisite>,
+        maxBlockers: Int,
+    ): Map<String, Any?> =
+        linkedMapOf(
+            "root" to identityOf(closure.rootNode),
+            "blockers" to unavailable.take(maxBlockers).map { it.blocker() },
+            "blockers_truncated" to (unavailable.size > maxBlockers),
+        )
+
     /** A node's typed identity as every refusal names it: the locator, the family word, the authored name, the version. */
     fun identityOf(node: ClosureNode): Map<String, Any?> = identity(node.nodeId, node.identity, node.name)
 

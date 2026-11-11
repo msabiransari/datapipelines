@@ -4,6 +4,7 @@ import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceProperties
 import co.datapipelines.datasources.DatasourceReference
 import co.datapipelines.datasources.DatasourceTestOutcome
+import co.datapipelines.datasources.ParameterSetDatasourceReference
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.datasources.DatasourcePoolForm
 import io.kotest.matchers.shouldBe
@@ -346,6 +347,31 @@ class DatasourcesTemplateRenderTest {
         html shouldNotContain "ds-button-danger"
     }
 
+    /** #873 §F.3 e: a set-only reference — a DISCARDED version included — is in use: listed with its link, no button. */
+    @Test
+    fun `a datasource referenced only by a parameter-set selector renders the selector and offers NO confirm button`() {
+        val html =
+            engine().process(
+                "partials/datasource-delete",
+                context().apply {
+                    fillDeleteModel()
+                    setVariable(
+                        "setUsages",
+                        listOf(ParameterSetDatasourceReference("acme/filters", 2, "DISCARDED", "parameters[0].source.datasource")),
+                    )
+                    setVariable("usedBySets", listOf("acme/filters"))
+                },
+            )
+
+        html shouldContain "id=\"ds-delete-in-use\""
+        html shouldContain "data-usage-kind=\"parameter_set\""
+        html shouldContain "href=\"/parameter-sets?q=acme/filters\""
+        html shouldContain "parameters[0].source.datasource"
+        html shouldContain "(v2 discarded)"
+        html shouldNotContain "hx-post=\"/partials/datasources/pg-prod/delete\""
+        html shouldNotContain "ds-button-danger"
+    }
+
     @Test
     fun `an unused datasource renders a confirm that names it`() {
         val html = engine().process("partials/datasource-delete", context().apply { fillDeleteModel() })
@@ -415,6 +441,8 @@ class DatasourcesTemplateRenderTest {
         setVariable("forbidden", null)
         setVariable("usages", emptyList<DatasourceReference>())
         setVariable("usedByPipelines", emptyList<String>())
+        setVariable("setUsages", emptyList<ParameterSetDatasourceReference>())
+        setVariable("usedBySets", emptyList<String>())
     }
 
     /**

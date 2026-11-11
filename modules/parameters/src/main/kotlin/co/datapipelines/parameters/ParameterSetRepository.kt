@@ -146,6 +146,39 @@ class ParameterSetRepository(
         )
     }
 
+    /**
+     * #873 §F.3 e — the name lock's parameter-set scan: every selector of every stored version (DRAFT, RELEASED and
+     * DISCARDED alike) of every live set in [workspaceId] whose `source.datasource` is [datasourceName], one row per
+     * selector occurrence, in set name, newest version, parameter order. The ANY-VERSION rule the pipeline scan keeps
+     * (061/T79): a stored version is restorable and executable by number, so its selector is a live use of the name. One
+     * parameterized statement; the name is compared as text, never spliced.
+     */
+    fun findAnyVersionDatasourceRefs(
+        workspaceId: UUID,
+        datasourceName: String,
+    ): List<ParameterSetDatasourceRef> =
+        jdbc.query(
+            """
+            SELECT s.name AS set_name, v.version, v.status, param.ordinality - 1 AS parameter_index
+              FROM parameter_sets s
+              JOIN parameter_set_versions v ON v.parameter_set_id = s.id
+             CROSS JOIN LATERAL jsonb_array_elements(
+                   CASE WHEN jsonb_typeof(v.body_json->'parameters') = 'array' THEN v.body_json->'parameters' ELSE '[]'::jsonb END
+                 ) WITH ORDINALITY AS param(value, ordinality)
+             WHERE s.workspace_id = :workspaceId AND $LIVE_S
+               AND param.value->'source'->>'datasource' = :datasourceName
+             ORDER BY s.name, v.version DESC, param.ordinality
+            """.trimIndent(),
+            mapOf("workspaceId" to workspaceId, "datasourceName" to datasourceName),
+        ) { rs, _ ->
+            ParameterSetDatasourceRef(
+                parameterSetName = rs.getString("set_name"),
+                version = rs.getInt("version"),
+                status = PipelineVersionStatus.fromWire(rs.getString("status")),
+                parameterIndex = rs.getInt("parameter_index"),
+            )
+        }
+
     /** The version the pointer names, or null (never released, or every release discarded). */
     fun findCurrent(
         workspaceId: UUID,
@@ -1130,4 +1163,15 @@ class ParameterSetRepository(
 
         private fun ResultSet.instant(column: String): Instant? = getObject(column, OffsetDateTime::class.java)?.toInstant()
     }
+}
+
+/** One selector of one stored set version that names a datasource (#873 §F.3 e): the set, the version, its status, the index. */
+data class ParameterSetDatasourceRef(
+    val parameterSetName: String,
+    val version: Int,
+    val status: PipelineVersionStatus,
+    val parameterIndex: Int,
+) {
+    /** The selector's field path, as every set refusal spells it. */
+    val path: String get() = "parameters[$parameterIndex].source.datasource"
 }

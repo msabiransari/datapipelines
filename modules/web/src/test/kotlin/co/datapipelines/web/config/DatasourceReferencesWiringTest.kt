@@ -3,6 +3,9 @@ package co.datapipelines.web.config
 import co.datapipelines.auth.Workspace
 import co.datapipelines.auth.WorkspaceRepository
 import co.datapipelines.datasources.DatasourceReference
+import co.datapipelines.datasources.ParameterSetDatasourceReference
+import co.datapipelines.parameters.ParameterSetDatasourceRef
+import co.datapipelines.parameters.ParameterSetRepository
 import co.datapipelines.pipeline.DatasourceRef
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.web.pipelines.PipelineBodies
@@ -35,7 +38,8 @@ import java.util.UUID
 class DatasourceReferencesWiringTest {
     private val bodies = mockk<PipelineBodies>()
     private val workspaces = mockk<WorkspaceRepository>()
-    private val references = DomainConfiguration().datasourceReferences(bodies, workspaces)
+    private val sets = mockk<ParameterSetRepository>()
+    private val references = DomainConfiguration().datasourceReferences(bodies, workspaces, sets)
 
     private val wsA = workspace("acme")
     private val wsB = workspace("globex")
@@ -107,6 +111,28 @@ class DatasourceReferencesWiringTest {
 
         verify(exactly = 1) { bodies.anyVersionReferences(wsA.id, "any") }
         io.mockk.confirmVerified(bodies)
+    }
+
+    /**
+     * #873 §F.3 e: the parameter-set arm reads the same two axes — every workspace, every version (a DISCARDED one
+     * included) — and projects each selector occurrence with its version, status and path.
+     */
+    @Test
+    fun `the parameter-set arm counts selector references across ALL workspaces and every version`() {
+        every { workspaces.findAll() } returns listOf(wsA, wsB)
+        every { sets.findAnyVersionDatasourceRefs(wsA.id, "warehouse") } returns
+            listOf(ParameterSetDatasourceRef("acme/filters", 2, PipelineVersionStatus.DISCARDED, 1))
+        every { sets.findAnyVersionDatasourceRefs(wsB.id, "warehouse") } returns
+            listOf(ParameterSetDatasourceRef("globex/filters", 1, PipelineVersionStatus.RELEASED, 0))
+
+        references.parameterSetReferencesTo("warehouse") shouldBe
+            listOf(
+                ParameterSetDatasourceReference("acme/filters", 2, "DISCARDED", "parameters[1].source.datasource"),
+                ParameterSetDatasourceReference("globex/filters", 1, "RELEASED", "parameters[0].source.datasource"),
+            )
+        verify(exactly = 1) { sets.findAnyVersionDatasourceRefs(wsA.id, "warehouse") }
+        verify(exactly = 1) { sets.findAnyVersionDatasourceRefs(wsB.id, "warehouse") }
+        io.mockk.confirmVerified(sets)
     }
 
     private fun ref(pipeline: String) = DatasourceRef(UUID.randomUUID(), pipeline, 1, PipelineVersionStatus.RELEASED, "n1")

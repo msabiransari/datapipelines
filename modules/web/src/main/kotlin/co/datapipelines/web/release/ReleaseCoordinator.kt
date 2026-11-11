@@ -12,6 +12,7 @@ import co.datapipelines.pipeline.release.PipelineDependencySource
 import co.datapipelines.pipeline.release.PipelineReleaseCoordination
 import co.datapipelines.pipeline.release.PipelineReleaseRequest
 import co.datapipelines.pipeline.release.PreparedRelease
+import co.datapipelines.pipeline.release.PrerequisiteCheck
 import co.datapipelines.pipeline.release.ReleaseAuditRow
 import co.datapipelines.pipeline.release.ReleaseAuditSink
 import co.datapipelines.pipeline.release.ReleaseBlockers
@@ -79,6 +80,13 @@ class ReleaseCoordinator(
      * the release back (the owner's 2026-11-02 seam ruling). [ReleasedVersionObserver.NONE] in a directly built test.
      */
     private val observer: ReleasedVersionObserver = ReleasedVersionObserver.NONE,
+    /**
+     * #873 §F.3 c — the datasource prerequisites of the guarded re-walk, resolved by NAME in the caller's workspace inside
+     * the release transaction on every entry path, after the closure checks and before any permission check or flip: an
+     * unavailable one refuses `<root family>.release.dependency_not_released` with nothing flipped.
+     * [PrerequisiteCheck.NONE] in a directly built test.
+     */
+    private val prerequisites: PrerequisiteCheck = PrerequisiteCheck.NONE,
     private val releaseIds: () -> UUID = UUID::randomUUID,
     /** [LegacyReleaseAlias.LEGACY_ALIAS_WITHOUT_PLAN_ADMITTED]; a parameter so both arms are testable (#522 flips it). */
     private val legacyAliasAdmitted: Boolean = LegacyReleaseAlias.LEGACY_ALIAS_WITHOUT_PLAN_ADMITTED,
@@ -162,6 +170,7 @@ class ReleaseCoordinator(
             val guarded = guardedWalk(rootIdentity, request.actor)
             if (treeHash != null && TreeHash.of(guarded, bounds.maxWireBytes) != treeHash) throw ReleaseRefusals.planConflict(rootFamily)
             if (treeHash == null) refuseBlockers(guarded, emptySet())
+            refusePrerequisites(guarded, request.actor)
             families.forEach { authorization.requireRelease(principal, it) }
             val dependencies = prepared.map { it to participant(it.node).commitPrepared(it, status) }
             val flipped = root.commitPrepared(preparedRoot, status)
@@ -203,6 +212,7 @@ class ReleaseCoordinator(
             val closure = guardedWalk(rootIdentity, request.actor)
             val included = if (alias) LegacyReleaseAlias.selection(closure) else emptySet()
             refuseAlias(root, closure, included)
+            refusePrerequisites(closure, request.actor)
             val order = LegacyReleaseAlias.order(closure, included).map(closure::node)
             (order.map { it.identity.family } + rootFamily).distinct().forEach { authorization.requireRelease(principal, it) }
             val inner = ReleaseContext(request.actor, closure, included + rootIdentity, "", null)
@@ -219,6 +229,18 @@ class ReleaseCoordinator(
             record(principal, request.workspaceId, event, details + common + ("dependencies_released" to released.map { it.toWire() }))
             RootReleased(flipped, released)
         }
+    }
+
+    /**
+     * #873 §F.3 c: the guarded closure's datasource prerequisites, by name in the caller's workspace; any unavailable one
+     * (absent or not granted — one outcome) refuses before any permission check and any flip.
+     */
+    private fun refusePrerequisites(
+        closure: ReleaseClosure,
+        actor: UUID,
+    ) {
+        val unavailable = prerequisites.check(closure, actor).filterNot { it.available }
+        if (unavailable.isNotEmpty()) throw PrerequisiteCheck.refusal(closure, unavailable, bounds.maxBlockers)
     }
 
     /** The compatibility path's refusal: [closure]'s blockers beyond [included], in [root]'s native keys. */
@@ -282,6 +304,7 @@ class ReleaseCoordinator(
                 val closure = guardedWalk(rootIdentity, request.actor)
                 val included = if (request.releasePinnedTemplates) LegacyReleaseAlias.selection(closure) else emptySet()
                 refuseBlockers(closure, included)
+                refusePrerequisites(closure, request.actor)
                 val order = LegacyReleaseAlias.order(closure, included).map(closure::node)
                 order.map { it.identity.family }.distinct().forEach(authorization::requireRelease)
                 val context = ReleaseContext(request.actor, closure, included + rootIdentity, "", null)
@@ -333,9 +356,9 @@ class ReleaseCoordinator(
             inTransaction { status ->
                 // Step 5: the guard, then the closure re-resolved and compared under it.
                 guard.acquire(request.workspaceId, ROOT)
-                if (TreeHash.of(guardedWalk(rootIdentity, request.actor), bounds.maxWireBytes) != treeHash) {
-                    throw ReleaseRefusals.planConflict(ROOT)
-                }
+                val guarded = guardedWalk(rootIdentity, request.actor)
+                if (TreeHash.of(guarded, bounds.maxWireBytes) != treeHash) throw ReleaseRefusals.planConflict(ROOT)
+                refusePrerequisites(guarded, request.actor)
                 families.forEach(authorization::requireRelease)
                 // Step 6: dependencies first, root last; each CAS at its consented hash.
                 val dependencies = prepared.map { it to participant(it.node).commitPrepared(it, status) }

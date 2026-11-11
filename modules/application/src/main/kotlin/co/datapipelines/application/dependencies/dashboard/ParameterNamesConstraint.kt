@@ -1,6 +1,7 @@
 package co.datapipelines.application.dependencies.dashboard
 
 import co.datapipelines.application.dependencies.StoredVersion
+import co.datapipelines.application.dependencies.parameterset.ParameterSetReleaseBody
 import co.datapipelines.dependencies.Constraint
 import co.datapipelines.dependencies.DependencyProvider
 import co.datapipelines.dependencies.Edge
@@ -81,7 +82,7 @@ class ParameterNamesConstraint(
             .flatMap { batch -> provider.resolveMany(batch, context).entries }
             .mapNotNull { (request, outcome) ->
                 val stored = (outcome as? Outcome.Resolved<*>)?.body as? StoredVersion<*>
-                (stored?.body as? ParameterSetBody)?.let { request to it }
+                (stored?.body as? ParameterSetReleaseBody)?.let { request to it.set }
             }.toMap()
     }
 

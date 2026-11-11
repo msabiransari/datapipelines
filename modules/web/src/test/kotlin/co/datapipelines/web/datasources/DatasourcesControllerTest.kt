@@ -13,6 +13,7 @@ import co.datapipelines.datasources.DatasourceProperties
 import co.datapipelines.datasources.DatasourceReference
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DeleteResult
+import co.datapipelines.datasources.ParameterSetDatasourceReference
 import co.datapipelines.datasources.TableInfo
 import co.datapipelines.datasources.TestResult
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -410,15 +411,76 @@ class DatasourcesControllerTest {
         val inUse = shouldThrow<ApiException> { controller.delete("busy") }
         inUse.code shouldBe "datasource.in_use"
         inUse.details["referencing_pipelines"] shouldBe listOf("monthly_revenue")
+        inUse.details["referencing_parameter_sets"] shouldBe emptyList<String>()
         inUse.details["references"] shouldBe
             listOf(
-                mapOf("pipeline" to "monthly_revenue", "node_id" to "extract", "pipeline_version" to 1, "version_status" to "RELEASED"),
-                mapOf("pipeline" to "monthly_revenue", "node_id" to "load", "pipeline_version" to 2, "version_status" to "RELEASED"),
+                pipelineEntry("extract", 1),
+                pipelineEntry("load", 2),
             )
 
         every { registry.delete("nope") } returns DeleteResult(deleted = false, name = "nope")
         shouldThrow<ApiException> { controller.delete("nope") }.code shouldBe "datasource.not_found"
     }
+
+    /**
+     * #873 §F.3 e: a parameter-set selector locks the name too — a set-only reference refuses, a DISCARDED-only one
+     * included — and every `references` entry names its `kind`; pipeline entries first, then set entries, in scan order.
+     */
+    @Test
+    fun `in_use names both families - set entries carry their version, status and selector path`() {
+        authenticate()
+        every { registry.getVisible("busy", workspaceId) } returns datasource()
+        every { registry.delete("busy") } returns
+            DeleteResult(
+                deleted = false,
+                name = "busy",
+                errorCode = PipelineErrorCodes.Datasource.IN_USE,
+                references = listOf(DatasourceReference("monthly_revenue", 1, "RELEASED", "extract")),
+                parameterSetReferences =
+                    listOf(
+                        ParameterSetDatasourceReference("acme/filters", 3, "DISCARDED", "parameters[0].source.datasource"),
+                        ParameterSetDatasourceReference("acme/filters", 2, "RELEASED", "parameters[1].source.datasource"),
+                    ),
+            )
+
+        val inUse = shouldThrow<ApiException> { controller.delete("busy") }
+
+        inUse.code shouldBe "datasource.in_use"
+        inUse.message shouldBe
+            "Datasource 'busy' is referenced by 1 pipeline(s) across 1 node(s) and 1 parameter set(s) across 2 selector(s)," +
+            " including historical versions. Remove or repoint the referencing nodes and selectors before deleting it."
+        inUse.details["referencing_pipelines"] shouldBe listOf("monthly_revenue")
+        inUse.details["referencing_parameter_sets"] shouldBe listOf("acme/filters")
+        inUse.details["references"] shouldBe
+            listOf(
+                pipelineEntry("extract", 1),
+                setEntry(3, "DISCARDED", "parameters[0].source.datasource"),
+                setEntry(2, "RELEASED", "parameters[1].source.datasource"),
+            )
+    }
+
+    private fun pipelineEntry(
+        node: String,
+        version: Int,
+    ) = mapOf(
+        "kind" to "pipeline",
+        "pipeline" to "monthly_revenue",
+        "node_id" to node,
+        "pipeline_version" to version,
+        "version_status" to "RELEASED",
+    )
+
+    private fun setEntry(
+        version: Int,
+        status: String,
+        path: String,
+    ) = mapOf(
+        "kind" to "parameter_set",
+        "parameter_set" to "acme/filters",
+        "parameter_set_version" to version,
+        "version_status" to status,
+        "path" to path,
+    )
 
     @Test
     fun `test-connection failure is 200 with connected false, never an HTTP error`() {

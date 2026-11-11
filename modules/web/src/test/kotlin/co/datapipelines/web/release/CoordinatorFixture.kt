@@ -19,6 +19,7 @@ import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.release.DependencySource
 import co.datapipelines.pipeline.release.PipelineReleaseRequest
+import co.datapipelines.pipeline.release.PrerequisiteCheck
 import co.datapipelines.pipeline.release.ReleaseAuditRow
 import co.datapipelines.pipeline.release.ReleaseAuditSink
 import co.datapipelines.pipeline.release.ReleaseBounds
@@ -535,6 +536,7 @@ internal class CoordinatorFixture(
         legacyAliasAdmitted: Boolean = true,
         planningTransactions: TransactionOperations = TransactionOperations.withoutTransaction(),
         deadline: ReleasePlanningDeadline = ReleasePlanningDeadline.NONE,
+        prerequisites: PrerequisiteCheck = PrerequisiteCheck.NONE,
     ) = ReleaseCoordinator(
         releases = releases,
         pipelines = pipelines,
@@ -561,6 +563,7 @@ internal class CoordinatorFixture(
         audit = audit,
         transactions = TransactionTemplate(transactions),
         bounds = bounds,
+        prerequisites = prerequisites,
         releaseIds = { releaseId },
         legacyAliasAdmitted = legacyAliasAdmitted,
     )

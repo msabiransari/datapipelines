@@ -8,6 +8,7 @@ import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.DeleteResult
 import co.datapipelines.datasources.DialectAdapters
 import co.datapipelines.datasources.pooling.PoolSettings
 import co.datapipelines.datasources.visibleDialectProperties
@@ -219,25 +220,7 @@ class DatasourcesController(
             result.deleted -> {}
 
             result.errorCode == PipelineErrorCodes.Datasource.IN_USE -> {
-                throw ApiException(
-                    PipelineErrorCodes.Datasource.IN_USE,
-                    "Datasource '$name' is referenced by ${result.referencingPipelines.size} pipeline(s)" +
-                        " across ${result.references.size} node(s), including historical pipeline versions." +
-                        " Remove or repoint the referencing nodes before deleting it.",
-                    mapOf(
-                        "datasource_name" to name,
-                        "referencing_pipelines" to result.referencingPipelines,
-                        "references" to
-                            result.references.map {
-                                mapOf(
-                                    "pipeline" to it.pipelineName,
-                                    "node_id" to it.nodeId,
-                                    "pipeline_version" to it.pipelineVersion,
-                                    "version_status" to it.versionStatus,
-                                )
-                            },
-                    ),
-                )
+                throw inUse(name, result)
             }
 
             else -> {
@@ -245,6 +228,49 @@ class DatasourcesController(
             }
         }
     }
+
+    /**
+     * `409 datasource.in_use` (§9.5; #873 §F.3 e names both families): the pipeline fields keep their wire —
+     * `referencing_pipelines` and each pipeline entry's `pipeline`, `node_id`, `pipeline_version`, `version_status` —
+     * and every `references` entry gains `kind` (`pipeline` or `parameter_set`). A parameter-set entry is
+     * `{kind, parameter_set, parameter_set_version, version_status, path}`, the selector's `parameters[i].source.datasource`
+     * path; `referencing_parameter_sets` lists the distinct sets. Pipeline entries first, then set entries, each in scan order.
+     */
+    private fun inUse(
+        name: String,
+        result: DeleteResult,
+    ): ApiException =
+        ApiException(
+            PipelineErrorCodes.Datasource.IN_USE,
+            "Datasource '$name' is referenced by ${result.referencingPipelines.size} pipeline(s) across ${result.references.size}" +
+                " node(s) and ${result.referencingParameterSets.size} parameter set(s) across ${result.parameterSetReferences.size}" +
+                " selector(s), including historical versions. Remove or repoint the referencing nodes and selectors before" +
+                " deleting it.",
+            mapOf(
+                "datasource_name" to name,
+                "referencing_pipelines" to result.referencingPipelines,
+                "referencing_parameter_sets" to result.referencingParameterSets,
+                "references" to
+                    result.references.map {
+                        linkedMapOf(
+                            "kind" to "pipeline",
+                            "pipeline" to it.pipelineName,
+                            "node_id" to it.nodeId,
+                            "pipeline_version" to it.pipelineVersion,
+                            "version_status" to it.versionStatus,
+                        )
+                    } +
+                    result.parameterSetReferences.map {
+                        linkedMapOf(
+                            "kind" to "parameter_set",
+                            "parameter_set" to it.parameterSetName,
+                            "parameter_set_version" to it.parameterSetVersion,
+                            "version_status" to it.versionStatus,
+                            "path" to it.path,
+                        )
+                    },
+            ),
+        )
 
     /**
      * §9.6 — live connectivity probe. A connection failure is **data** (`200` with

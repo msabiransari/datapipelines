@@ -313,6 +313,21 @@ data class DatasourceReference(
 )
 
 /**
+ * The parameter-set arm of the name lock (#873 §F.3 e, record erratum (7)): one selector of one stored parameter-set
+ * version that names a datasource at `parameters[i].source.datasource` ([path]). A datasource has no version, so release
+ * consent over it is its NAME; a set version — DRAFT, RELEASED or DISCARDED alike, because a version is restorable and its
+ * selector re-runs against that name — keeps the name locked exactly as a pipeline version does.
+ *
+ * [versionStatus] is the set version's status as its wire string, for the layering reason [DatasourceReference] gives.
+ */
+data class ParameterSetDatasourceReference(
+    val parameterSetName: String,
+    val parameterSetVersion: Int,
+    val versionStatus: String,
+    val path: String,
+)
+
+/**
  * Supplies the pipeline references that block a datasource delete, for the §6.2 in-use guard.
  *
  * The reference lives in `pipeline-contract`'s domain, which `datasources` cannot depend on, so
@@ -336,6 +351,13 @@ fun interface DatasourceReferences {
      * [DeleteResult.referencingPipelines] distinct-ifies for the message.
      */
     fun referencesTo(datasourceName: String): List<DatasourceReference>
+
+    /**
+     * #873 §F.3 e — every selector of every stored version of every non-deleted parameter set that names [datasourceName]
+     * (the same any-version rule); empty when none. Defaulted so a pipeline-only fake keeps compiling; production wires
+     * the parameter-set repository's scan beside the pipeline one.
+     */
+    fun parameterSetReferencesTo(datasourceName: String): List<ParameterSetDatasourceReference> = emptyList()
 
     companion object {
         val NONE = DatasourceReferences { emptyList() }

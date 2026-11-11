@@ -4,10 +4,12 @@
      branches, and only the last one has a button:
 
        1. D8 refuses (a member on a global datasource) — say so, offer nothing.
-       2. Pipelines reference it — list them, node by node, with the version that
-          carries the reference and that version's status, exactly as the REST
-          409 `datasource.in_use` details do (061/T79). The confirm button is not
-          rendered at all on this branch, so the refusal cannot be clicked past.
+       2. Pipelines or parameter sets reference it — list them, node by node and
+          selector by selector, with the version that carries the reference and
+          that version's status, exactly as the REST 409 `datasource.in_use`
+          details do (061/T79; #873 §F.3 e added the parameter-set selectors). The
+          confirm button is not rendered at all on this branch, so the refusal
+          cannot be clicked past.
        3. Nothing references it — a confirm that NAMES the datasource.
 
      The usage rows come from the same DatasourceReferences scan the 409 uses, so
@@ -29,12 +31,14 @@
 
     <th:block th:if="${forbidden} == null">
       <!-- 2. In use -->
-      <th:block th:unless="${#lists.isEmpty(usages)}">
+      <th:block th:unless="${#lists.isEmpty(usages) and #lists.isEmpty(setUsages)}">
         <p class="u-secondary u-text-sm" id="ds-delete-in-use">
           <strong th:text="${datasource.name}">pg-prod</strong> cannot be deleted: it is referenced by
           <span th:text="${#lists.size(usedByPipelines)}">2</span> pipeline(s) across
-          <span th:text="${#lists.size(usages)}">3</span> node(s), including historical pipeline versions.
-          Remove or repoint those nodes first.
+          <span th:text="${#lists.size(usages)}">3</span> node(s) and
+          <span th:text="${#lists.size(usedBySets)}">1</span> parameter set(s) across
+          <span th:text="${#lists.size(setUsages)}">1</span> selector(s), including historical versions.
+          Remove or repoint those nodes and selectors first.
         </p>
         <ul class="u-text-sm u-mb-md" id="ds-delete-usages">
           <li th:each="u : ${usages}">
@@ -44,13 +48,20 @@
             <span class="u-muted u-text-meta"
                   th:text="'(v' + ${u.pipelineVersion} + ' ' + ${#strings.toLowerCase(u.versionStatus)} + ')'">(v3 released)</span>
           </li>
+          <li th:each="u : ${setUsages}" data-usage-kind="parameter_set">
+            <a th:href="@{/parameter-sets(q=${u.parameterSetName})}" th:text="${u.parameterSetName}">acme/filters</a>
+            <span class="u-muted">›</span>
+            <span class="u-mono" th:text="${u.path}">parameters[0].source.datasource</span>
+            <span class="u-muted u-text-meta"
+                  th:text="'(v' + ${u.parameterSetVersion} + ' ' + ${#strings.toLowerCase(u.versionStatus)} + ')'">(v2 released)</span>
+          </li>
         </ul>
       </th:block>
 
       <!-- 3. Unused — the only branch with a button -->
-      <th:block th:if="${#lists.isEmpty(usages)}">
+      <th:block th:if="${#lists.isEmpty(usages) and #lists.isEmpty(setUsages)}">
         <p class="u-secondary u-text-sm" id="ds-delete-confirm-text">
-          No pipeline references <strong th:text="${datasource.name}">pg-prod</strong> in any stored version.
+          No pipeline or parameter set references <strong th:text="${datasource.name}">pg-prod</strong> in any stored version.
           Deleting it closes its connection pool on every instance — queries already running finish first.
         </p>
         <form th:attr="hx-post=@{/partials/datasources/{name}/delete(name=${datasource.name})}"

@@ -19,6 +19,7 @@ import co.datapipelines.datasources.DialectAdapters
 import co.datapipelines.datasources.LakeIntrospectionCache
 import co.datapipelines.datasources.LakeTableCatalog
 import co.datapipelines.datasources.LakeViewOutcomeRecorder
+import co.datapipelines.datasources.ParameterSetDatasourceReference
 import co.datapipelines.datasources.PoolInvalidationPublisher
 import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.crypto.CredentialEncryptor
@@ -26,6 +27,7 @@ import co.datapipelines.datasources.crypto.KeyProviderConfig
 import co.datapipelines.datasources.crypto.KeyProviders
 import co.datapipelines.datasources.pooling.PoolLifecycleMetrics
 import co.datapipelines.lake.LakeProperties
+import co.datapipelines.parameters.ParameterSetRepository
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.DatasourceFacts
 import co.datapipelines.pipeline.PipelineNames
@@ -335,18 +337,33 @@ class DomainConfiguration {
     fun datasourceReferences(
         bodies: PipelineBodies,
         workspaces: WorkspaceRepository,
+        /** #873 §F.3 e — the parameter-set arm of the name lock, by the same any-version, every-workspace rule. */
+        sets: ParameterSetRepository,
     ): DatasourceReferences =
-        DatasourceReferences { name ->
-            workspaces.findAll().flatMap { workspace ->
-                bodies.anyVersionReferences(workspace.id, name).map { ref ->
-                    DatasourceReference(
-                        pipelineName = ref.pipelineName,
-                        pipelineVersion = ref.pipelineVersion,
-                        versionStatus = ref.versionStatus.name,
-                        nodeId = ref.nodeId,
-                    )
+        object : DatasourceReferences {
+            override fun referencesTo(datasourceName: String): List<DatasourceReference> =
+                workspaces.findAll().flatMap { workspace ->
+                    bodies.anyVersionReferences(workspace.id, datasourceName).map { ref ->
+                        DatasourceReference(
+                            pipelineName = ref.pipelineName,
+                            pipelineVersion = ref.pipelineVersion,
+                            versionStatus = ref.versionStatus.name,
+                            nodeId = ref.nodeId,
+                        )
+                    }
                 }
-            }
+
+            override fun parameterSetReferencesTo(datasourceName: String): List<ParameterSetDatasourceReference> =
+                workspaces.findAll().flatMap { workspace ->
+                    sets.findAnyVersionDatasourceRefs(workspace.id, datasourceName).map { ref ->
+                        ParameterSetDatasourceReference(
+                            parameterSetName = ref.parameterSetName,
+                            parameterSetVersion = ref.version,
+                            versionStatus = ref.status.name,
+                            path = ref.path,
+                        )
+                    }
+                }
         }
 
     @Bean

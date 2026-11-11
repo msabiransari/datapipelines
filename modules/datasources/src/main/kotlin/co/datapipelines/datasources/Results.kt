@@ -198,7 +198,12 @@ data class DeleteResult(
     val name: String,
     val errorCode: String? = null,
     val references: List<DatasourceReference> = emptyList(),
+    /** #873 §F.3 e — the parameter-set selectors that lock the name, one per selector occurrence, in scan order. */
+    val parameterSetReferences: List<ParameterSetDatasourceReference> = emptyList(),
 ) {
     /** The blocking pipelines, distinct, in scan order — what a message counts and names. */
     val referencingPipelines: List<String> get() = references.map { it.pipelineName }.distinct()
+
+    /** The blocking parameter sets, distinct, in scan order. */
+    val referencingParameterSets: List<String> get() = parameterSetReferences.map { it.parameterSetName }.distinct()
 }
