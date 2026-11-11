@@ -1,14 +1,18 @@
 package co.datapipelines.web.dependencies
 
 import co.datapipelines.dependencies.FamilyKey
+import co.datapipelines.dependencies.wire.RefusalReason
 import co.datapipelines.pipeline.PipelineErrorCodes
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.Test
+import org.springframework.web.bind.annotation.GetMapping
 
 /**
  * The transport table has exactly one row per production family (#875 G4): a ninth production family without a row is
- * red, and a row for a family production does not have is red.
+ * red, and a row for a family production does not have is red. The same set equality holds three ways — the table's
+ * keys, `FamilyKey.PRODUCTION`, and the segments [DependenciesController] maps — so a route without a family, or a
+ * family without a route, is red.
  */
 class DependencyFamilyTransportTest {
     private val transport = DependencyFamilyTransport.production(DependenciesRequestTest.LENSES)
@@ -57,5 +61,38 @@ class DependencyFamilyTransportTest {
     fun `datasource has no lens - the seven others do`() {
         transport.row(FamilyKey.DATASOURCE).rootLens shouldBe RootLens.None
         (transport.families - FamilyKey.DATASOURCE).forEach { transport.row(it).rootLens.shouldBeInstanceOf<RootLens.Lensed>() }
+    }
+
+    @Test
+    fun `the controller maps exactly one literal route per production family - no variable, no ninth route`() {
+        val paths =
+            DependenciesController::class.java.declaredMethods
+                .mapNotNull { it.getAnnotation(GetMapping::class.java) }
+                .flatMap { (it.value + it.path).toList() }
+        paths.size shouldBe paths.toSet().size
+        paths.map { it.removePrefix(ROUTE_PREFIX) }.toSet() shouldBe
+            FamilyKey.PRODUCTION.keys
+                .map { it.wire }
+                .toSet()
+        paths.forEach { it.startsWith(ROUTE_PREFIX) shouldBe true }
+        transport.families.map { it.wire }.toSet() shouldBe paths.map { it.removePrefix(ROUTE_PREFIX) }.toSet()
+    }
+
+    @Test
+    fun `the catalog's reason tokens are exactly G1's refusal reasons`() {
+        val catalogued =
+            setOf(
+                PipelineErrorCodes.Dependencies.REASON_FAMILY_UNKNOWN,
+                PipelineErrorCodes.Dependencies.REASON_SELECTOR_INCOMPATIBLE,
+                PipelineErrorCodes.Dependencies.REASON_NAME_INVALID,
+                PipelineErrorCodes.Dependencies.REASON_ID_INVALID,
+                PipelineErrorCodes.Dependencies.REASON_VERSION_INVALID,
+                PipelineErrorCodes.Dependencies.REASON_VALUE_TOO_LONG,
+            )
+        catalogued shouldBe RefusalReason.entries.map { it.wire }.toSet()
+    }
+
+    private companion object {
+        const val ROUTE_PREFIX = "/api/v1/dependencies/"
     }
 }

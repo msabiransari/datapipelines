@@ -1117,6 +1117,60 @@ object PipelineErrorCodes {
         const val METADATA_TOO_LARGE = "navigation.metadata.too_large"
     }
 
+    /**
+     * The session-only dependency tree routes, `GET /api/v1/dependencies/<family>` (#875 G4; rest-api "Dependency trees",
+     * dependency-graph record §11.1). Three segments, like [Navigation]: the refused thing is the tree request or the
+     * metadata read behind it, never an artifact family — a hidden or absent ROOT answers its family's own not-found code.
+     * Raised by `web`'s dependency tree service; the static messages echo no caller input.
+     */
+    object Dependencies {
+        /**
+         * 400: the request does not name one root the family's route can read. `details.field` names the query field
+         * (`name`, `id`, `version`) and `details.reason` one of the reasons below — never the refused value.
+         */
+        const val REQUEST_INVALID = "dependencies.request.invalid"
+
+        /**
+         * 503, retryable: the metadata walk ran out of its deadline, a statement hit its bound, or a provider's read
+         * failed. No partial tree is answered. `Retry-After` names the wait; logged at WARN without a stack.
+         */
+        const val METADATA_UNAVAILABLE = "dependencies.metadata.unavailable"
+
+        /**
+         * 503: the projected tree is larger than `max-wire-bytes` although the walk stayed inside its traversal limits — the
+         * configured limits and byte budget disagree. Never a truncated tree; logged at ERROR with a stack.
+         */
+        const val RESPONSE_TOO_LARGE = "dependencies.response.too_large"
+
+        /** The `details` key naming the refused query field. */
+        const val DETAIL_FIELD = "field"
+
+        /** The `details` key naming the refusal reason. */
+        const val DETAIL_REASON = "reason"
+
+        /**
+         * `details.reason` — the record §11.1 tokens (G1's `RefusalReason`, pinned equal by a web test). `family_unknown`
+         * is the record's token for a family outside the eight; the routes never produce it — the family is the path, and
+         * an unknown segment is an unmapped path (erratum (8)(a)).
+         */
+        const val REASON_FAMILY_UNKNOWN = "family_unknown"
+
+        /** `id` on a named family, `name` on a schedule, `name` with `id`, `version` where forbidden, a repeated field. */
+        const val REASON_SELECTOR_INCOMPATIBLE = "selector_incompatible"
+
+        /** The family's native name grammar refused `name`. */
+        const val REASON_NAME_INVALID = "name_invalid"
+
+        /** `id` is not the canonical lower-case UUID form. */
+        const val REASON_ID_INVALID = "id_invalid"
+
+        /** `version` absent where required, not plain digits, zero-led, `current` or outside 1..2147483647. */
+        const val REASON_VERSION_INVALID = "version_invalid"
+
+        /** A value longer than 200 characters, or not UTF-8 — checked before any grammar. */
+        const val REASON_VALUE_TOO_LONG = "value_too_long"
+    }
+
     /** §13.11 — rate limiting / idempotency. */
     object Limits {
         /** Single code for every layer — REST, MCP, login (D5). */

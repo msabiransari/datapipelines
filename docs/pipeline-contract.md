@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.89 (revised — see Change Log)
+**Status:** v1.90 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-11-11
@@ -1791,6 +1791,16 @@ The `lake.definition.*` rows (#798, dp-lake P3; [lake.md](lake.md)) are the mana
 | `lake.definition.apply_unclassified` | — | The apply's commit step failed with an exception that is not one of the catalog's refusals (#811), so whether the commit landed is unknown. The row stays `applying` until `verifyApplying` settles it from the revision log; it is never recorded as `failed`. A release that reached this outcome has landed, and it returns the outcome. |
 
 
+### 13.26 Dependency trees
+
+The session-only dependency tree routes' refusals (#875; [REST API §25](rest-api.md#25-dependency-trees)). The eight literal routes `GET /api/v1/dependencies/<family>` (`pipeline`, `template`, `parameter_set`, `visualization`, `dashboard`, `api_endpoint`, `schedule`, `datasource`) each declare their family's existing READ permission. These three codes refuse the tree request or the metadata read behind it, never an artifact family. A root that is missing, or that the caller may not see (another workspace, an ungranted datasource, or a root the promoter's lens does not admit), answers its own family's existing not-found code and 404. The body is the same for a missing root and a hidden one, and the message names nothing the caller sent. A key of any kind is refused `403 endpoint.key_kind_refused` before the handler. Every message is static and echoes no query value. The two 503s never carry a partial tree. The metadata 503 answers `Retry-After: 5` (a constant) and is logged once at WARN without a stack, because a slow or failing metadata read is an outage to wait out. The response-budget 503 stays at ERROR with the stack: a tree over `max-wire-bytes` inside the traversal limits means the configured limits and the byte budget disagree. A traversal limit reached inside the walk is not a refusal: it answers 200 with `complete: false`, `acyclic: null` and a `LIMIT` diagnostic.
+
+| Code | HTTP | Description |
+|---|---|---|
+| `dependencies.request.invalid` | 400 | the query does not name one root the family's route can read. `details.field` names the query field (`name`, `id` or `version`) and `details.reason` the rule: `selector_incompatible` (`id` on a named family, `name` on a schedule, `name` with `id`, `version` on a schedule or datasource, a repeated field, or the family's key field absent), `name_invalid` (the family's native name grammar refused it), `id_invalid` (not the canonical lower-case UUID form), `version_invalid` (absent on an artifact family, not plain digits, zero-led, `current`, or outside 1..2147483647) or `value_too_long` (over 200 characters, or not UTF-8, checked before any grammar). The refused value is never echoed. `family_unknown` stays a schema token that the routes never produce, because an unknown segment is an unmapped path |
+| `dependencies.metadata.unavailable` | 503 | the metadata walk ran past its `metadata-timeout-seconds` deadline, a statement hit its bound, or a provider's read failed, so no tree is answered. Retryable: `Retry-After: 5`. Logged at WARN without a stack; no `details` |
+| `dependencies.response.too_large` | 503 | the projected tree is larger than `max-wire-bytes` although the walk stayed inside its traversal limits. No truncated tree is answered. Logged at ERROR with the stack (a server-side configuration defect) |
+
 ---
 ## 14. Pipeline Lifecycle Operations
 
@@ -2030,6 +2040,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-11 | v1.90 | #875 dependency trees (G4) | New §13.26 Dependency trees: `dependencies.request.invalid` (400), `dependencies.metadata.unavailable` (503, `Retry-After: 5`, WARN without stack) and `dependencies.response.too_large` (503, ERROR with stack) for the eight session routes `GET /api/v1/dependencies/<family>` (REST API §25). A hidden or missing root answers its own family's existing not-found code. Landed with the constants in `PipelineErrorCodes.Dependencies` and their catalog rows; the merged §13 row count was recounted with the drift test's own regex (508 → 511). |
 | 2026-11-11 | v1.89 | #896 docs: datasource ownership and grants as they are since V23 | **§13.8, no new code:** `datasource.validation.workspace_forbidden`'s description says what `DatasourceWorkspaceRules` refuses: `global: true` on create, the `global` flag in either value on update, and any mutation of an INSTANCE datasource (owned by no workspace) below super admin — not "non-admin … a global datasource" — plus the two refusals the row did not name, `global: true` with `workspace` and the #186 in-process-engine registration. |
 | 2026-11-11 | v1.88 | #786 U2 schedules pin exact versions | §13.19 gains `schedule.validation.payload_schema_unsupported` (400): a stored schema-1 payload is refused, never upgraded at read time (D.2). `payload_invalid`'s `pipeline` reasons are the schema-2 version grammar (an exact positive integer; `current`/`latest` refused by name); `target_not_found` also covers a version the pipeline does not have; `target_not_released` is now an ineligible PINNED version (discarded, or a draft where authoring is off), not a missing current pointer. Landed with the constants in `ScheduleErrorCodes` and `PipelineErrorCodes.Schedule` (merged §13 row count recounted with the drift test's own regex). |
 | 2026-11-10 | v1.87 | #841 G0 writer protocol — renumbered at merge after #860's v1.86 | §13.8 gains `datasource.write.busy` (409), §13.14 `endpoint.write.busy` (409), §13.19 `schedule.write.busy` (409): the exhausted writer-guard wait of the newly guarded datasource, endpoint and schedule writers, with the release families' message and `{lock_wait_seconds}` details, landed in the SAME commit as their constants and `ApiErrorCatalog` rows (merged §13 row count 477 → 480). |

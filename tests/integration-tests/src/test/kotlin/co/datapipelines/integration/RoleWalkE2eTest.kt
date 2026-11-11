@@ -106,13 +106,29 @@ class RoleWalkE2eTest {
             routes.any { it.pattern == "/api/v1/$family/tree" } shouldBe true
             routes.any { it.pattern == "/api/v1/$family/tree/search" } shouldBe true
         }
+        // #875: the eight dependency tree routes, each walked with its query-table entry naming a seeded root.
+        DependencyTreeQueries.FAMILIES.forEach { family ->
+            val walked = routes.filter { it.pattern == DependencyTreeQueries.route(family) }.map { it.path }
+            withClue("the ${DependencyTreeQueries.route(family)} route, walked with its seeded root") {
+                walked shouldBe listOf(treeRoots().path(family))
+            }
+        }
         val tallies = ROLES.associateWith { role -> walkRest(role, routes) }
         val counts = tallies.mapValues { (_, tally) -> tally.allowed to tally.refused }
 
         println("event=rolewalk.inventory routes=${routes.size} ${counts.summary()}")
         // Joined into ONE string: a collection assertion prints its first element and elides the
         // rest, and the point of a walk's failure is the LIST.
-        tallies.values.flatMap { it.mismatches }.joinToString("\n") shouldBe ""
+        // #875 C.1, the rule rather than a special case: an admitted GET that answers 400 to a walk with no query names a
+        // route this walk cannot reach. Each one already at the base is listed below with intent; any other is red, and
+        // so is a listed one that stopped answering 400 (the list may only shrink, to a query-table entry).
+        val queryOnly = tallies.values.flatMapTo(sortedSetOf()) { it.queryOnly }
+        queryOnly.forEach { println("event=rolewalk.query_only route=$it") }
+        val unreachable =
+            (queryOnly - KNOWN_QUERY_ONLY).map { "$it -> query-only route without fixtures" } +
+                (KNOWN_QUERY_ONLY - queryOnly).map { "$it -> listed as query-only, but no longer answers 400 without a query" }
+        (DependencyTreeQueries.unfixtured(routes.map { it.pattern }) + unreachable + tallies.values.flatMap { it.mismatches })
+            .joinToString("\n") shouldBe ""
 
         // Non-vacuity floors, per role and both directions.
         routes.size shouldBeGreaterThanOrEqual MINIMUM_ROUTES
@@ -234,6 +250,9 @@ class RoleWalkE2eTest {
         val mismatches = mutableListOf<String>()
         val unknown = mutableListOf<String>()
 
+        /** #875: admitted GETs with no query-table entry that answered 400 — the walk could not reach them. */
+        val queryOnly = sortedSetOf<String>()
+
         /** MCP: the refusal code each tool answered with (null = admitted). */
         val codes = mutableMapOf<String, String?>()
 
@@ -257,8 +276,33 @@ class RoleWalkE2eTest {
                     "$role ${route.method} ${route.pattern} (${route.handler}, ${route.permission}) -> " +
                     "${answer.status} ${answer.code ?: ""} but §7.6 says ${if (expectAllowed) "allowed" else "refused"}"
             }
+            val unfixturedGet = route.method == "GET" && DependencyTreeQueries.familyOf(route.pattern) == null
+            if (expectAllowed && unfixturedGet && answer.status == HTTP_BAD_REQUEST) {
+                tally.queryOnly += "${route.method} ${route.pattern}"
+            }
+            if (expectAllowed && !answer.roleRefused && !resolvesItsRoot(role, route, answer)) {
+                tally.mismatches +=
+                    "$role ${route.method} ${route.path} (${route.handler}) -> ${answer.status} ${answer.code ?: ""} " +
+                    "but its query fixture names a seeded root: an admitted role must reach it"
+            }
         }
         return tally
+    }
+
+    /**
+     * #875 non-vacuity: an admitted role's answer on a query-table route is the seeded root's tree — 200. The one other
+     * admitted answer is the PROMOTER's on a lensed family: this context configures no promotion target, so the lens is
+     * unavailable and the route answers its catalogued, retryable 503 (rest-api.md §25). Any 400 or 404 means the
+     * fixture named nothing, and the walk would have scored a route it never reached.
+     */
+    private fun resolvesItsRoot(
+        role: String,
+        route: Route,
+        answer: Answer,
+    ): Boolean {
+        val family = DependencyTreeQueries.familyOf(route.pattern) ?: return true
+        return answer.status == HTTP_OK ||
+            (role == "promoter" && family in DependencyTreeQueries.LENSED && answer.code == VIEW_UNAVAILABLE)
     }
 
     private fun walkMcp(
@@ -419,7 +463,7 @@ class RoleWalkE2eTest {
                 Route(
                     h.method,
                     h.pattern,
-                    EntryDiscovery.concretePath(h.pattern),
+                    DependencyTreeQueries.familyOf(h.pattern)?.let { treeRoots().path(it) } ?: EntryDiscovery.concretePath(h.pattern),
                     h.handler,
                     requireNotNull(h.permission) { "${h.handler} has no permission" },
                 )
@@ -539,6 +583,16 @@ class RoleWalkE2eTest {
             else -> "nobody-owns-this"
         }
 
+    /** #875: one seeded root per dependency tree route, authored once through REST by the super admin. */
+    private fun treeRoots(): DependencyTreeQueries.Roots {
+        seededTreeRoots?.let { return it }
+        ensureSeeded()
+        val superAdmin = sessionJwt(USERS.getValue("super_admin"), "super_admin@rolewalk.test")
+        return DependencyTreeQueries
+            .seed(port, superAdmin, WS_ID, prefix = "test/tree875/rolewalk", datasource = "tree875_rolewalk", registrar = superAdmin)
+            .also { seededTreeRoots = it }
+    }
+
     private fun sessionFor(role: String): (RequestSpecification) -> RequestSpecification =
         { spec -> spec.cookie(SESSION_COOKIE, sessionJwt(USERS.getValue(role), "$role@rolewalk.test")) }
 
@@ -552,6 +606,62 @@ class RoleWalkE2eTest {
         private const val API_KEY_HEADER = "DP-API-Key"
         private const val SECRET_BYTES = 32
         private const val HTTP_FORBIDDEN = 403
+        private const val HTTP_OK = 200
+        private const val HTTP_BAD_REQUEST = 400
+
+        /**
+         * #875: the GET routes at the base that answer an admitted role 400 on the walk's concrete path — each needs a
+         * query or a well-formed identifier the walk does not supply, so the walk reaches it only as far as its parse
+         * (past the interceptor, so its ROLE verdict holds, and no further). Recorded from the walk's own
+         * `event=rolewalk.query_only` lines at the lane's tip (42, the union over the five roles); a query-table
+         * entry for one moves it out of this list.
+         */
+        private val KNOWN_QUERY_ONLY: Set<String> =
+            sortedSetOf(
+                "GET /api/v1/dashboards/tree/search",
+                "GET /api/v1/parameter-sets/tree/search",
+                "GET /api/v1/pipelines/tree/search",
+                "GET /api/v1/schedules/preview",
+                "GET /api/v1/templates/tree/search",
+                "GET /api/v1/templates/versions",
+                "GET /api/v1/visualizations/tree/search",
+                "GET /dashboards/{id}/preview",
+                "GET /partials/admin/users/{userId}/mail/{kind}",
+                "GET /partials/dashboards/{id}/lifecycle/discard",
+                "GET /partials/dashboards/{id}/lifecycle/purge",
+                "GET /partials/dashboards/{id}/lifecycle/purge-version",
+                "GET /partials/dashboards/{id}/lifecycle/restore",
+                "GET /partials/dashboards/{id}/overview",
+                "GET /partials/datasources/{name}/delete",
+                "GET /partials/datasources/{name}/edit",
+                "GET /partials/datasources/{name}/facts",
+                "GET /partials/datasources/{name}/grants",
+                "GET /partials/endpoints/{id}/lifecycle/discard",
+                "GET /partials/endpoints/{id}/lifecycle/purge",
+                "GET /partials/endpoints/{id}/lifecycle/restore",
+                "GET /partials/endpoints/{id}/lifecycle/switch",
+                "GET /partials/pipelines/{id}/lifecycle/discard",
+                "GET /partials/pipelines/{id}/lifecycle/purge",
+                "GET /partials/pipelines/{id}/lifecycle/release",
+                "GET /partials/pipelines/{id}/lifecycle/restore",
+                "GET /partials/pipelines/{id}/lifecycle/switch",
+                "GET /partials/templates/editor/source",
+                "GET /partials/templates/lifecycle/discard",
+                "GET /partials/templates/lifecycle/purge",
+                "GET /partials/templates/lifecycle/purge-entity",
+                "GET /partials/templates/lifecycle/release",
+                "GET /partials/templates/lifecycle/restore",
+                "GET /partials/templates/runs",
+                "GET /partials/templates/script-face",
+                "GET /partials/visualizations/{id}/lifecycle/discard",
+                "GET /partials/visualizations/{id}/lifecycle/purge-draft",
+                "GET /partials/visualizations/{id}/lifecycle/purge-version",
+                "GET /partials/visualizations/{id}/lifecycle/restore",
+                "GET /partials/visualizations/{id}/overview",
+                "GET /partials/visualizations/{id}/preview",
+                "GET /templates/editor",
+            )
+        private const val VIEW_UNAVAILABLE = "navigation.view.unavailable"
         private const val LEAK_EXCERPT = 240
         private const val ROLE_REQUIRED = "auth.role_required"
         private const val PROMOTION_RECEIVER_PREFIX = "/api/v1/promotion/"
@@ -601,10 +711,14 @@ class RoleWalkE2eTest {
          * #786 (2026-11-10) raised the three REST floors to the walk's exact counts at the lane's tip, so a dropped route
          * or §7.6 literal cannot pass: 358 routes (viewer 154 / 204, author 299 / 59, promoter 141 / 217, workspace admin
          * 332 / 26, super admin 358 / 0), 413 handlers, 358 route literals; 61 tools, unchanged (the lane adds no tool).
+         *
+         * #875 (2026-11-11) adds the eight dependency tree routes, each walked with a seeded root: 366 routes (viewer
+         * 162 / 204, author 307 / 59, promoter 149 / 217, workspace admin 340 / 26, super admin 366 / 0), 421 handlers,
+         * 366 route literals; 61 tools, unchanged.
          */
-        private const val MINIMUM_ROUTES = 358
-        private const val MINIMUM_HANDLERS = 413
-        private const val MINIMUM_ROUTE_LITERALS = 358
+        private const val MINIMUM_ROUTES = 366
+        private const val MINIMUM_HANDLERS = 421
+        private const val MINIMUM_ROUTE_LITERALS = 366
 
         // Include nested braces in a variable's regex constraint, such as an id's length quantifier.
         private val ROUTE_VARIABLE = Regex("\\{(?:[^{}]|\\{[^{}]*})+}")
@@ -701,6 +815,7 @@ class RoleWalkE2eTest {
         private fun b64(value: ByteArray): String = Base64.getUrlEncoder().withoutPadding().encodeToString(value)
 
         private var seeded = false
+        private var seededTreeRoots: DependencyTreeQueries.Roots? = null
 
         /**
          * 179: the REST walk drives `DELETE /partials/mcp-key` (the top bar's

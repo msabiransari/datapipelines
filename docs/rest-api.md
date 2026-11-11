@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.115 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37) and 2026-11-11 (v2.112) rows for the deliberate breaks)
+**Status:** v2.116 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37) and 2026-11-11 (v2.112) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-11-11
@@ -2947,10 +2947,115 @@ browser persistence. Clients must reject foreign/stale responses even after abor
 
 ---
 
+## 25. Dependency trees
+
+`GET /api/v1/dependencies/<family>` is eight literal session-only reads, one per family:
+`pipeline`, `template`, `parameter_set`, `visualization`, `dashboard`, `api_endpoint`, `schedule`
+and `datasource`. Each route declares its family's existing READ permission ([Auth §7.6](auth.md)):
+`pipeline.read`, `template.read`, `parameter_set.read`, `visualization.read`, `dashboard.read`,
+`endpoint.read`, `schedule.read` and `datasource.read` respectively. The workspace comes from the
+principal. Keys gain no surface: a key of any kind is refused `403 endpoint.key_kind_refused` before
+the handler, and an unauthenticated call gets the platform's existing 401. An unknown segment, and the bare
+`/api/v1/dependencies`, are unmapped paths that get the application's ordinary answer for one. Every
+response uses the §4.1 envelope with the graph object as `data`, and `Cache-Control: no-store`. Every
+refusal uses the §4.2 envelope and is catalogued in
+[pipeline-contract §13.26](pipeline-contract.md#1326-dependency-trees). The read issues no mutation
+consent, probe or remote request. The authorized release dialog still uses its root's own `If-Match` and
+`tree_hash` consent.
+
+**Request.** The family is the path, so a `family` query field is not read; one supplied anyway is
+ignored, as is any field the table does not name. Values are form-encoded (`+` is a space).
+
+| Query field | Rule |
+|---|---|
+| any value | at most 200 characters and valid UTF-8, checked before any grammar; otherwise `details.reason = value_too_long` |
+| `name` | required for `pipeline`, `template`, `parameter_set`, `visualization`, `dashboard`, `api_endpoint` and `datasource`; forbidden for `schedule`. The family's own native name grammar decides it, never a repository lookup: pipeline and template names follow [pipeline-contract §3.2](pipeline-contract.md) and [Templates §3.2](templates.md), which parameter sets, visualizations and dashboards share. An API's name is its immutable path ([§19.1](#19-published-endpoints)), and a datasource name is `[a-z0-9_-]{1,63}` ([Datasources §3.3](datasources.md)). Slashes stay in the value. A refused name is `name_invalid` |
+| `id` | required instead of `name` for `schedule`, in the canonical 36-character lower-case UUID form, otherwise `id_invalid`. `id` on any other family is `selector_incompatible` |
+| `version` | required for the six artifact families; forbidden for `schedule` and `datasource` (`selector_incompatible`). Decimal digits only, no sign or leading zeros, `1 ≤ n ≤ 2147483647`. An absent, non-integer, `current` or out-of-range value is `version_invalid` |
+
+The family's key field absent, a field the family forbids, `name` with `id`, or a field given twice is
+`selector_incompatible`. The checks run in this order: length and encoding, then selector shape, then
+the native grammar, then the version. The first failure answers `400 dependencies.request.invalid`
+with `details.field` (`name`, `id` or `version`) and `details.reason`. The message is static and the
+refused value is never echoed. `family_unknown` stays a schema token that these routes never produce.
+
+**Root.** The root is read in the caller's workspace, through the same providers the release planner
+reads. A promoter's lens decides the root only. A root the lens does not admit answers like a missing
+one. An API root is judged at the version asked, through the native versioned read: a version that pins a
+pipeline the lens hides answers like a missing one, even when the API's current version is visible. Inside an admitted tree the lens narrows nothing, so a dependency the promotion target already has
+still appears. When the promotion view itself cannot be computed, the seven lensed families answer
+`503 navigation.view.unavailable` with `Retry-After: 5`
+([pipeline-contract §13.24](pipeline-contract.md#1324-navigation-trees)). The `datasource` route has no lens.
+A datasource tree is visible when the datasource is granted to the active workspace. A missing root,
+one in another workspace, an ungranted datasource and a root the lens hides all answer the family's own
+existing not-found code and 404 with the same body: `pipeline.execution.not_found`, `template.not_found`,
+`parameter.not_found`, `visualization.not_found`, `dashboard.not_found`, `endpoint.not_found`,
+`schedule.not_found` and `datasource.not_found`.
+
+**Response 200** — the whole safe bounded closure, also when it is incomplete:
+
+```text
+{ schema_version: 1, correlation_id: uuid,
+  data: { schema_version: 1, roots: [node_id], nodes: [Node], edges: [Edge], diagnostics: [Diagnostic],
+          complete: boolean, acyclic: true | false | null, observed_at: ISO-8601 UTC } }
+Node       = { node_id, entity_id: string | null, family, name | null, display_name | null, subtype | null,
+               version: { kind: "artifact" | "revision" | "unversioned", number: integer | null },
+               resolution: "resolved" | "missing" | "unsupported",
+               lifecycle: "DRAFT" | "RELEASED" | "DISCARDED" | null,
+               operational: Operational | null, current_version: integer | null, body_hash: string | null,
+               capabilities: { release: "ARTIFACT_RELEASE" | "NONE", promotion: "VERSIONED_ARTIFACT" | "NONE" } }
+Operational = schedule      { condition: "enabled" | "paused" | "blocked" }
+            | api_endpoint  { enabled: boolean }
+            | datasource    { readonly: boolean }
+            | visualization { evidence_ready: boolean }
+            | null for pipeline, template, parameter_set, dashboard
+Edge       = { edge_id, from: node_id, to: node_id, relationship: Relationship,
+               source_path: JSON pointer into the dependent's stored body (e.g. "/nodes/3/template") | null,
+               requested_selector: { kind: "exact_version" | "current" | "entity", number: integer | null },
+               resolved_version: integer | null, constraints: [Constraint] }
+Relationship = "TEMPLATE" | "CHILD_PIPELINE" | "DATASOURCE" | "IMPORT" | "PARAMETER_SOURCE_TEMPLATE"
+             | "PARAMETER_SOURCE_DATASOURCE" | "TRANSFORM_TEMPLATE" | "PARAMETER_SET" | "SOURCE_PIPELINE"
+             | "VISUALIZATION" | "PIPELINE_PIN" | "EXECUTOR_TARGET"
+Constraint = { kind: "parameter_names", names: [string] }
+           | { kind: "datasource_access", mode: "read" | "write" }
+           | { kind: "datasource_dialect", dialect: string }
+Diagnostic = { code: "MISSING" | "DISCARDED" | "UNSUPPORTED_FAMILY" | "CYCLE" | "LIMIT" | "INCOMPLETE_VIEW",
+               node_id | null, edge_id | null, message }
+```
+
+`entity_id` is the stable id of a resolved node's object: an entity UUID, or a datasource's name. It is
+`null` for every other resolution. `node_id` and `edge_id` are opaque local locators, never authority.
+`acyclic` is `true` or `false` only when the whole closure was enumerated (`complete: true`); otherwise
+it is `null`. A dependency the caller cannot resolve (absent, in another workspace, or an ungranted
+datasource) appears once as a `missing` node. It carries the name its parent spells, `entity_id: null`
+and no facts, and the absent and hidden cases are byte-identical. The routes run no probe to tell
+them apart and remove no node. `source_path` is `null` when a reference has no single field (a body
+read as a whole). The payload never carries a stored body, SQL, parameter values, an internal
+fingerprint or a hidden count.
+
+| Case | Answer |
+|---|---|
+| Incompatible selector shape, native grammar refused, non-UUID `id`, bad or out-of-range `version`, a value over 200 characters or not UTF-8 | `400 dependencies.request.invalid` with `details.field` and `details.reason` |
+| Unauthenticated, or a key of any kind | the platform's existing 401, or `403 endpoint.key_kind_refused` |
+| Root missing, in another workspace, ungranted, or not admitted by the promoter's lens | that family's existing not-found code and 404, identical for missing and hidden roots |
+| A traversal limit (depth, nodes, edges, diagnostics, payload budget) reached | `200` with `complete: false`, `acyclic: null` and a `LIMIT` diagnostic naming the limit |
+| Unsupported nodes inside the closure | `200` with an `UNSUPPORTED_FAMILY` diagnostic and `complete: false` |
+| The metadata walk exceeds `metadata-timeout-seconds`, a statement exceeds `statement-timeout-seconds`, or a provider read fails | `503 dependencies.metadata.unavailable`, `Retry-After: 5`, no partial tree; logged once at WARN without a stack |
+| The projected payload is still over `max-wire-bytes` after the limits | `503 dependencies.response.too_large`; logged at ERROR with the stack |
+| Any other failure | the platform's existing generic 500 envelope |
+
+The bounds are the `datapipelines.release.dependencies.*` keys
+([Configuration](configuration.md)), the same ones the release planner reads. The walk reads in one
+read-only READ COMMITTED transaction. Every provider statement is bounded by the lesser of
+`statement-timeout-seconds` and the time left on the one `metadata-timeout-seconds` deadline.
+
+---
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-11 | v2.116 | #875 dependency trees (G4) | **New §25 Dependency trees, additive:** the eight session-only routes `GET /api/v1/dependencies/<family>`, each with its family's READ permission, return the bounded dependency closure of one root (`name` + `version`, `id` for a schedule, `name` alone for a datasource) as the frozen dependency-graph wire contract. Refusals are catalogued in pipeline-contract §13.26; a hidden or missing root answers its family's own not-found. No key kind is admitted. |
 | 2026-11-11 | v2.115 | #896 review F2 | **§9.1:** distinguish `global: true` (super-admin-only) from `global: false` (accepted on create below super admin); the update rule in §9.4 still requires super admin for either value. No wire or authorization change. |
 | 2026-11-11 | v2.114 | #896 review F1 | **§9.3:** a by-name read is not-found when the datasource is not granted to the active workspace, whoever owns it. Ownership by another workspace alone does not make a granted datasource invisible. |
 | 2026-11-11 | v2.113 | #896 docs: datasource ownership and grants as they are since V23 | **Text only, no wire change.** §9.1's binding paragraph says what `global`/`workspace` set since V23 — the OWNER (`global: true` = an instance datasource, owned by no workspace) — and that visibility is the grant (a workspace-owned registration is granted to its owner; an instance datasource to nobody until a super admin grants it); its refusal sentence names super admin and `global: true` with `workspace`. §9.2's listing is the datasources GRANTED to the active workspace, not "bound plus all global ones"; §9.3's `workspace` field is the owning workspace's name; §9.4/§9.5's D8 gates say an INSTANCE datasource's mutation (a `readonly` flip and a delete included) needs super admin. |

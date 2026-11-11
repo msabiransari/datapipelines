@@ -375,8 +375,11 @@ class ApiErrorCatalogSpecDriftTest {
          * 507 → 508 with #786 U2 (recounted with [STATUS_ROW_REGEX]): §13.19 gains
          * `schedule.validation.payload_schema_unsupported` (400, the `schedule.validation.` family default), the
          * stored schema-1 payload's refusal, landed in the SAME commit as its constants.
+         * 508 → 511 with #875 (G4, recounted with [STATUS_ROW_REGEX]): the new §13.26 Dependency trees gains
+         * `dependencies.request.invalid` (400), `dependencies.metadata.unavailable` (503) and
+         * `dependencies.response.too_large` (503), landed in the SAME commit as their constants, catalog rows and routes.
          */
-        const val SECTION_13_ROW_COUNT = 508
+        const val SECTION_13_ROW_COUNT = 511
 
         /**
          * §12's distinct validation codes.
