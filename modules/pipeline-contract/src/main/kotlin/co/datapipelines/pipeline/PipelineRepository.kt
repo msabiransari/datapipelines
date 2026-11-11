@@ -72,6 +72,25 @@ data class PipelineVersionBody(
 )
 
 /**
+ * One pipeline version of ANY status, keyed by the pipeline's [name] and the matched [version] number — a row of
+ * [PipelineRepository.findVersionNodesByName], the bulk read the dependency graph's pipeline provider resolves a batch
+ * from (#887). It carries what [PipelineRepository.findByNameAnyStatus], [PipelineRepository.findVersionDetail] and
+ * [PipelineRepository.findVersionBody] answer together for that key: the pipeline's [pipelineId] and [currentVersion]
+ * (the entity's pointer, NOT the matched [version]), the version's [status] and [bodyHash], and [bodyJson] — the stored
+ * `body_json::TEXT`, exactly as [PipelineRepository.findVersionBody] returns it, or null for a DISCARDED version, whose
+ * body is never read.
+ */
+data class PipelineVersionNode(
+    val pipelineId: UUID,
+    val name: String,
+    val version: Int,
+    val currentVersion: Int?,
+    val status: PipelineVersionStatus,
+    val bodyHash: String,
+    val bodyJson: String?,
+)
+
+/**
  * Persistence for `pipelines` and `pipeline_versions` (metadata-db §4.4/§4.5/§6,
  * versioning §5/§9).
  *
@@ -458,6 +477,44 @@ class PipelineRepository(
             """.trimIndent(),
             mapOf("workspaceId" to workspaceId, "keys" to keys.map { (name, version) -> arrayOf<Any>(name, version) }),
         ) { rs, _ -> PipelineVersionBody(rs.getString("name"), rs.getInt("version"), rs.getString("body_json")) }
+    }
+
+    /**
+     * #887 — the versions of ANY status [keys] (pipeline name, version number) name in [workspaceId], in ONE parameterized
+     * statement whatever the number of keys; no statement for no key. Per key, the row is what [findByNameAnyStatus],
+     * [findVersionDetail] and [findVersionBody] answer one by one — their predicates' conjunction: the pipeline by name in
+     * the workspace whatever its derived entity status, the version by number under it whatever its status — and a
+     * DISCARDED version's body is not read (NULL in SQL). A key naming an absent pipeline, an absent version, or a
+     * pipeline of another workspace is absent from the result — one outcome, never distinguished. Rows come back in no
+     * particular order, and one call may name several versions of one pipeline: a caller keys them by `(name, version)`.
+     * Read-only; the caller bounds the batch size and the statement's time (the dependency-graph reads do so through their
+     * bounded batch read).
+     */
+    fun findVersionNodesByName(
+        workspaceId: UUID,
+        keys: Collection<Pair<String, Int>>,
+    ): List<PipelineVersionNode> {
+        if (keys.isEmpty()) return emptyList()
+        return jdbc.query(
+            """
+            SELECT p.id AS pipeline_id, p.name, v.version, p.current_version, v.status, v.body_hash,
+                   CASE WHEN v.status = 'DISCARDED' THEN NULL ELSE v.body_json::TEXT END AS body_json
+              FROM pipeline_versions v
+              JOIN pipelines p ON p.id = v.pipeline_id
+             WHERE p.workspace_id = :workspaceId AND (p.name, v.version) IN (:keys)
+            """.trimIndent(),
+            mapOf("workspaceId" to workspaceId, "keys" to keys.map { (name, version) -> arrayOf<Any>(name, version) }),
+        ) { rs, _ ->
+            PipelineVersionNode(
+                pipelineId = rs.getObject("pipeline_id", UUID::class.java),
+                name = rs.getString("name"),
+                version = rs.getInt("version"),
+                currentVersion = rs.getInt("current_version").takeUnless { rs.wasNull() },
+                status = PipelineVersionStatus.fromWire(rs.getString("status")),
+                bodyHash = rs.getString("body_hash"),
+                bodyJson = rs.getString("body_json"),
+            )
+        }
     }
 
     /** The execute path reads body, lifecycle, hash and derived write metadata in one database snapshot. */

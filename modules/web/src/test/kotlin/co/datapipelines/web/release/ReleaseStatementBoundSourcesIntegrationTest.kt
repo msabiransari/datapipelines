@@ -32,11 +32,11 @@ import java.util.UUID
 
 /**
  * #786 R3, landing review r4 (record §25.4), through the PRODUCTION descriptor bean methods of all three release families
- * on a real PostgreSQL: the API source (one statement), the pipeline source (three) and the template provider (one batch
- * read since #873) each
- * run every statement under `min(statement limit, remaining deadline)` measured when THAT statement starts. The descriptors
- * are built by `ReleaseConfiguration` / `EndpointsConfiguration` exactly as the context builds them, so a bean whose
- * source read through any template but the ceiling's would show a stale bound here.
+ * on a real PostgreSQL: the API source (one statement), the pipeline provider (one batch read since #887; it was three
+ * reads per node) and the template provider (one batch read since #873) each run every statement under
+ * `min(statement limit, remaining deadline)` measured when THAT statement starts. The descriptors are built by
+ * `ReleaseConfiguration` / `EndpointsConfiguration` exactly as the context builds them, so a bean whose source read
+ * through any template but the ceiling's would show a stale bound here.
  *
  * [ObservedStatements] records the `statement_timeout` each real statement executes under and advances the walk's clock
  * one second after each one.
@@ -106,8 +106,8 @@ class ReleaseStatementBoundSourcesIntegrationTest {
 
         closure.nodes.map { it.identity.family } shouldContainExactly
             listOf(ReleaseFamily.ENDPOINT, ReleaseFamily.PIPELINE, ReleaseFamily.TEMPLATE)
-        withClue("API 1, pipeline 3, template 1 (#873: one batch read); one second after each, from 10 s:\n${statements.observed}") {
-            statements.timeouts() shouldContainExactly listOf("10s", "9s", "8s", "7s", "6s")
+        withClue("API 1, pipeline 1, template 1 (#873, #887: one batch read each); 1 s after each, from 10 s:\n${statements.observed}") {
+            statements.timeouts() shouldContainExactly listOf("10s", "9s", "8s")
         }
     }
 
