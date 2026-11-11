@@ -25,9 +25,11 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.comparables.shouldBeLessThan
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.springframework.jdbc.core.ConnectionCallback
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
@@ -236,6 +238,19 @@ class ReleaseStatementBudgetPostgresTest {
             statements.observed shouldHaveSize 8
             after shouldBe "45s"
         }
+    }
+
+    @Test
+    fun `a raw connection callback inside the bound is refused - it would issue statements the per-statement hook never sees`() {
+        val template = ceiling.jdbc.jdbcTemplate
+        val refused =
+            TransactionTemplate(manager).execute {
+                shouldThrow<IllegalStateException> {
+                    ceiling.within({ Duration.ofSeconds(5) }) { template.execute(ConnectionCallback { 1 }) }
+                }
+            }
+        checkNotNull(refused).message shouldContain "bypasses the per-statement release bound"
+        withClue("outside the bound the ceiling's template is a plain one") { template.execute(ConnectionCallback { 1 }) shouldBe 1 }
     }
 
     /** After the first observed statement: [spent] passes on the walk's clock and another session locks `pipeline_versions`. */
