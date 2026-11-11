@@ -378,7 +378,7 @@ class ScheduleConversionRefusedException(
     val refusals: List<ScheduleConversionRefusal>,
 ) : IllegalStateException(
         "The schedule version conversion refused to start: ${refusals.size} schedule(s) or queued run(s) target a pipeline " +
-            "that has no current version to pin (${refusals.joinToString(transform = ::describe)}). $OPERATOR_FIX",
+            "that has no current version to pin (${refusals.joinToString { describe(it) }}). $OPERATOR_FIX",
     ) {
     companion object {
         private fun describe(it: ScheduleConversionRefusal): String =
