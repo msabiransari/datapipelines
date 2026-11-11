@@ -106,7 +106,7 @@ class ReleaseStatementBoundSourcesIntegrationTest {
 
         closure.nodes.map { it.identity.family } shouldContainExactly
             listOf(ReleaseFamily.ENDPOINT, ReleaseFamily.PIPELINE, ReleaseFamily.TEMPLATE)
-        withClue("API 1, pipeline 1, template 1 (#873, #887: one batch read each); one second after each, from 10 s:\n${statements.observed}") {
+        withClue("API 1, pipeline 1, template 1 (#873, #887: one batch read each); 1 s after each, from 10 s:\n${statements.observed}") {
             statements.timeouts() shouldContainExactly listOf("10s", "9s", "8s")
         }
     }

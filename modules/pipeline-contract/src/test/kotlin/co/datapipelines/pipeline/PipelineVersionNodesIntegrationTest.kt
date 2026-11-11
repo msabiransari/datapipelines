@@ -171,11 +171,11 @@ class PipelineVersionNodesIntegrationTest {
 
     /** [target], counting every `prepareStatement` on the connections it hands out (each query the repository sends). */
     private fun counting(target: DataSource): DataSource =
-        proxy(target) { method, args ->
+        proxy<DataSource> { method, args ->
             val answer = invoke(target, method, args)
             if (method.name == "getConnection") {
                 val connection = answer as Connection
-                proxy(connection) { inner, innerArgs ->
+                proxy<Connection> { inner, innerArgs ->
                     if (inner.name == "prepareStatement") prepared.incrementAndGet()
                     invoke(connection, inner, innerArgs)
                 }
@@ -184,10 +184,9 @@ class PipelineVersionNodesIntegrationTest {
             }
         }
 
-    private inline fun <reified T : Any> proxy(
-        target: T,
-        crossinline handle: (java.lang.reflect.Method, Array<out Any?>?) -> Any?,
-    ): T = Proxy.newProxyInstance(T::class.java.classLoader, arrayOf(T::class.java)) { _, method, args -> handle(method, args) } as T
+    /** A proxy of [T] whose every call goes to [handle] (which closes over the target it forwards to). */
+    private inline fun <reified T : Any> proxy(crossinline handle: (java.lang.reflect.Method, Array<out Any?>?) -> Any?): T =
+        Proxy.newProxyInstance(T::class.java.classLoader, arrayOf(T::class.java)) { _, method, args -> handle(method, args) } as T
 
     private fun invoke(
         target: Any,

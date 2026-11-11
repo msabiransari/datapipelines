@@ -194,7 +194,8 @@ class PipelineReleaseProviderPostgresTest {
         val outcomes = inTransaction { descriptor.provider.resolveMany(asked.map(::request), context()) }
 
         withClue("only the caller's own version resolves, with the caller's entity") {
-            outcomes.getValue(request(asked[0])).shouldBeInstanceOf<Outcome.Resolved<PipelineReleaseNode>>().body.node shouldBe mine
+            val resolved = outcomes.getValue(request(asked[0])).shouldBeInstanceOf<Outcome.Resolved<PipelineReleaseNode>>()
+            resolved.body.node shouldBe mine
         }
         withClue("their v2 of a shared name, their only pipeline, and nobody: one answer") {
             asked.drop(1).map { outcomes.getValue(request(it)) } shouldBe List(3) { Outcome.Missing }
@@ -245,7 +246,7 @@ class PipelineReleaseProviderPostgresTest {
         afterStatement = { clock.now = clock.now.plusSeconds(6) }
 
         shouldThrow<DeadlineExceeded> {
-            inTransaction { descriptor.provider.resolveMany(listOf(request(seed.identity(ReleaseFamily.PIPELINE, NAME, 1))), context(deadline)) }
+            inTransaction { descriptor.provider.resolveMany(listOf(one()), context(deadline)) }
         }
         withClue("the read itself succeeded: exactly one statement ran") { statements.observed shouldHaveSize 1 }
     }
@@ -257,7 +258,7 @@ class PipelineReleaseProviderPostgresTest {
         statements.observed.clear()
 
         shouldThrow<DeadlineExceeded> {
-            inTransaction { descriptor.provider.resolveMany(listOf(request(seed.identity(ReleaseFamily.PIPELINE, NAME, 1))), context(deadline)) }
+            inTransaction { descriptor.provider.resolveMany(listOf(one()), context(deadline)) }
         }
         statements.observed.shouldBeEmpty()
     }
@@ -361,7 +362,8 @@ class PipelineReleaseProviderPostgresTest {
     ) {
         val id = UUID.randomUUID()
         jdbc.update(
-            "INSERT INTO pipelines (id, name, display_name, owner_id, current_version, workspace_id) VALUES (:id, :name, 'P', :owner, :current, :ws)",
+            "INSERT INTO pipelines (id, name, display_name, owner_id, current_version, workspace_id)" +
+                " VALUES (:id, :name, 'P', :owner, :current, :ws)",
             mapOf("id" to id, "name" to name, "owner" to seed.userId, "current" to versions.max(), "ws" to workspace),
         )
         versions.forEach { version ->
@@ -401,9 +403,19 @@ class PipelineReleaseProviderPostgresTest {
 
     private fun context(
         deadline: Deadline = Deadline.after(Duration.ofSeconds(BUDGET_SECONDS)).withStatementLimit(Duration.ofSeconds(BUDGET_SECONDS)),
-    ) = ResolveContext(seed.workspaceId, MetadataSnapshot.READ_COMMITTED, Purpose.RELEASE_PLANNING, Authority.System, deadline, ReadIsolation.NONE)
+    ) = ResolveContext(
+        seed.workspaceId,
+        MetadataSnapshot.READ_COMMITTED,
+        Purpose.RELEASE_PLANNING,
+        Authority.System,
+        deadline,
+        ReadIsolation.NONE,
+    )
 
     private fun request(identity: ReleaseNodeIdentity): ObjectRequest = ReleaseDependencyFamilies.request(identity)
+
+    /** The request for [NAME] at version 1. */
+    private fun one(): ObjectRequest = request(seed.identity(ReleaseFamily.PIPELINE, NAME, 1))
 
     private fun <T> inTransaction(read: () -> T): T = checkNotNull(TransactionTemplate(manager).execute { read() })
 
