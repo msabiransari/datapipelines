@@ -66,7 +66,7 @@ class ReleaseAdaptersTest {
 
     @Test
     fun `a release family is an exact-version family with the artifact capability pair and section 6 pins`() {
-        val descriptor = ReleaseDependencyFamilies.descriptor(ReleaseFamily.PIPELINE, g.source())
+        val descriptor = ReleaseDependencyFamilies.descriptor(ReleaseFamily.PIPELINE, g.source(), StatementCeiling.NONE)
         descriptor.key shouldBe FamilyKey.PIPELINE
         descriptor.rootSelectors shouldBe setOf(SelectorKind.EXACT_VERSION)
         descriptor.capabilities shouldBe FamilyKey.PRODUCTION.getValue(FamilyKey.PIPELINE)
@@ -85,7 +85,7 @@ class ReleaseAdaptersTest {
 
     @Test
     fun `the pipeline adapter passes the provider conformance harness`() {
-        val descriptor = ReleaseDependencyFamilies.descriptor(ReleaseFamily.PIPELINE, g.source())
+        val descriptor = ReleaseDependencyFamilies.descriptor(ReleaseFamily.PIPELINE, g.source(), StatementCeiling.NONE)
         val absent = ReleaseDependencyFamilies.request(g.id("absent", 1, ReleaseFamily.PIPELINE))
         val fixture =
             ProviderConformance.Fixture(
@@ -103,7 +103,7 @@ class ReleaseAdaptersTest {
 
     @Test
     fun `a request the source cannot answer is unsupported, and a source that lies or pins outside section 6 is a defect`() {
-        val provider = ReleaseDependencyFamilies.descriptor(ReleaseFamily.PIPELINE, g.source()).provider
+        val provider = ReleaseDependencyFamilies.descriptor(ReleaseFamily.PIPELINE, g.source(), StatementCeiling.NONE).provider
         val current = ObjectRequest(ObjectAddress(FamilyKey.PIPELINE, LookupScope(g.workspaceId), "orders"), Selector.Current)
         val other = ReleaseDependencyFamilies.request(template)
         val unknown = ObjectRequest(ObjectAddress(FamilyKey.SCHEDULE, LookupScope(g.workspaceId), "x"), Selector.Entity)
@@ -115,6 +115,7 @@ class ReleaseAdaptersTest {
                 .descriptor(
                     ReleaseFamily.PIPELINE,
                     liar,
+                    StatementCeiling.NONE,
                 ).provider
                 .resolveMany(listOf(ReleaseDependencyFamilies.request(root)), context)
         }.message shouldContain "answered"
@@ -131,7 +132,7 @@ class ReleaseAdaptersTest {
                     UUID.randomUUID(),
                 )
             }
-        val descriptor = ReleaseDependencyFamilies.descriptor(ReleaseFamily.TEMPLATE, templatePinsPipeline)
+        val descriptor = ReleaseDependencyFamilies.descriptor(ReleaseFamily.TEMPLATE, templatePinsPipeline, StatementCeiling.NONE)
         val resolved =
             descriptor.provider
                 .resolveMany(listOf(ReleaseDependencyFamilies.request(template)), context)

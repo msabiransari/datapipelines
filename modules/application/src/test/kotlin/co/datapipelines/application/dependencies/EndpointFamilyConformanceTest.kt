@@ -40,7 +40,8 @@ class EndpointFamilyConformanceTest {
     private val endpointId = UUID.randomUUID()
     private val path = "/finance/v1/revenue"
     private val versions = mockk<PublishedEndpointVersionRepository>()
-    private val descriptor = ReleaseDependencyFamilies.descriptor(ReleaseFamily.ENDPOINT, EndpointDependencySource(versions))
+    private val descriptor =
+        ReleaseDependencyFamilies.descriptor(ReleaseFamily.ENDPOINT, EndpointDependencySource(versions), StatementCeiling.NONE)
     private val context =
         ResolveContext(
             workspaceId,

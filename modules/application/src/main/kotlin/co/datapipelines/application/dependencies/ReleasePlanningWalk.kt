@@ -99,7 +99,7 @@ class ReleasePlanningWalk(
     private val speculativeReads: ReadIsolation,
     private val deadline: ReleasePlanningDeadline,
     clock: Clock = Clock.systemUTC(),
-    planning: ReleasePlanningLimits = ReleasePlanningLimits.DEFAULT,
+    private val planning: ReleasePlanningLimits = ReleasePlanningLimits.DEFAULT,
 ) {
     /** Stops at the first cycle, as `ReleaseGraph` refused there: no read after the refusal can overtake it (#868 R1). */
     private val walker = DependencyWalker(registry, ReleaseGraphLimits.of(bounds, planning), clock, CycleHandling.STOP)
@@ -127,7 +127,9 @@ class ReleasePlanningWalk(
                 snapshot,
                 Purpose.RELEASE_PLANNING,
                 Authority.Member(actor),
-                deadline.open(),
+                // #786 R3 (§25.4): one statement's ceiling rides the deadline; each provider read is bounded by
+                // min(statement-timeout-seconds, the time left).
+                deadline.open().withStatementLimit(planning.statementTimeout),
                 speculativeReads,
             )
         val graph =
@@ -145,10 +147,11 @@ class ReleasePlanningWalk(
 
     companion object {
         /**
-         * The plan's deadline expired — before a provider batch, or during one (#786 R2: checked again when the walk
-         * ends) (record §25.4 erratum 6): `<root family>.release.
-         * metadata_unavailable` — 503 with `Retry-After`, nothing released, no partial plan. The details name no fact
-         * of the closure; the blocking family's key is not a visible identity, so it travels only in the log's cause.
+         * The plan's deadline expired — before a provider batch, during one (#786 R2: checked again when the walk
+         * ends), or a metadata statement was cancelled at its bound (#786 R3) (record §25.4 erratum 6):
+         * `<root family>.release.metadata_unavailable` — 503 with `Retry-After`, nothing released, no partial plan. The
+         * details name no fact of the closure; the blocking family's key is not a visible identity, so it travels only
+         * in the log's cause.
          */
         fun metadataUnavailable(
             root: ReleaseNodeIdentity,

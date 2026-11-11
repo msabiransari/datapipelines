@@ -1,6 +1,7 @@
 package co.datapipelines.application.dependencies
 
 import co.datapipelines.dependencies.Capabilities
+import co.datapipelines.dependencies.DeadlineExceeded
 import co.datapipelines.dependencies.DependencyProvider
 import co.datapipelines.dependencies.FamilyDescriptor
 import co.datapipelines.dependencies.FamilyKey
@@ -26,6 +27,7 @@ import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseNodeIdentity
 import co.datapipelines.pipeline.release.ReleaseNodeStatus
 import co.datapipelines.pipeline.release.ResolvedNode
+import java.time.Duration
 
 /**
  * The release sources behind the neutral contract (#868 G1, record §8: "a release adapter maps the generic graph to the
@@ -33,28 +35,40 @@ import co.datapipelines.pipeline.release.ResolvedNode
  * `EXACT_VERSION` as its only root selector and the `ARTIFACT_RELEASE` / `VERSIONED_ARTIFACT` pair, and each
  * [ResolvedNode] pin an outgoing [Reference] carrying its §6 [Relationship] (`TEMPLATE`, `CHILD_PIPELINE`; `IMPORT` stays
  * unproduced while the template source returns no pins).
+ *
+ * Every source read runs under the family's [StatementCeiling] (#786 R3, record §25.4): production wires
+ * [PostgresStatementCeiling], so each metadata statement is bounded by the context's `statementBound()`.
  */
 object ReleaseDependencyFamilies {
     /** The release capability pair every adapted release family declares (record §4). */
     val CAPABILITIES = Capabilities(ReleaseCapability.ARTIFACT_RELEASE, PromotionCapability.VERSIONED_ARTIFACT)
 
-    /** The descriptor of one release family over its existing source. */
+    /**
+     * The descriptor of one release family over its existing source, its reads bounded by [ceiling] (#786 R3). No default:
+     * a production descriptor names its ceiling; [StatementCeiling.NONE] is for sources that issue no statement.
+     */
     fun descriptor(
         family: ReleaseFamily,
         source: DependencySource,
+        ceiling: StatementCeiling,
     ): FamilyDescriptor<ResolvedNode> =
         FamilyDescriptor(
             key = keyOf(family),
             rootSelectors = setOf(SelectorKind.EXACT_VERSION),
             capabilities = CAPABILITIES,
             extractorSchemaVersion = EXTRACTOR_SCHEMA_VERSION,
-            provider = ReleaseSourceProvider(family, source),
+            provider = ReleaseSourceProvider(family, source, ceiling),
             safeSummary = FamilyDescriptor.NO_SAFE_SUMMARY,
         )
 
     /** A registry over [sources] (a directly built test's map); production assembles it from descriptor beans. */
-    fun registry(sources: Map<ReleaseFamily, DependencySource>): FamilyRegistry =
-        FamilyRegistry.production(sources.map { (family, source) -> descriptor(family, source) })
+    fun registry(
+        sources: Map<ReleaseFamily, DependencySource>,
+        ceiling: StatementCeiling = StatementCeiling.NONE,
+    ): FamilyRegistry = FamilyRegistry.production(sources.map { (family, source) -> descriptor(family, source, ceiling) })
+
+    /** The ceiling a release descriptor's reads run under; null for a descriptor this object did not build (the wiring guard's read). */
+    fun ceilingOf(descriptor: FamilyDescriptor<*>): StatementCeiling? = (descriptor.provider as? ReleaseSourceProvider)?.ceiling
 
     fun keyOf(family: ReleaseFamily): FamilyKey = FamilyKey(family.wire)
 
@@ -83,20 +97,29 @@ object ReleaseDependencyFamilies {
  * One release family's [DependencySource] as a [DependencyProvider]: one source read per request (the source has no
  * batch read; G2's providers batch), an absent or invisible version answered [Outcome.Missing], and a source exception
  * propagated, never turned into a missing node.
+ *
+ * #786 R3 (record §25.4): each source read runs under [ceiling] with the context's `statementBound()` read when that
+ * read starts — `min(statement limit, remaining deadline)` — so a batch of requests never outlives the deadline by more
+ * than one bounded read. A bound that is already zero refuses before the read ([DeadlineExceeded]: a zero timeout would
+ * mean "none"), and a statement cancelled at its bound is the same refusal, its cancellation the cause.
  */
 internal class ReleaseSourceProvider(
     private val family: ReleaseFamily,
     private val source: DependencySource,
+    internal val ceiling: StatementCeiling,
 ) : DependencyProvider<ResolvedNode> {
     override fun resolveMany(
         requests: List<ObjectRequest>,
         context: ResolveContext,
-    ): Map<ObjectRequest, Outcome<ResolvedNode>> = requests.associateWith(::resolve)
+    ): Map<ObjectRequest, Outcome<ResolvedNode>> = requests.associateWith { resolve(it, context) }
 
-    private fun resolve(request: ObjectRequest): Outcome<ResolvedNode> {
+    private fun resolve(
+        request: ObjectRequest,
+        context: ResolveContext,
+    ): Outcome<ResolvedNode> {
         val identity = ReleaseDependencyFamilies.identityOf(request)
         if (identity == null || identity.family != family) return Outcome.Unsupported
-        val node = source.resolve(identity) ?: return Outcome.Missing
+        val node = bounded(context) { source.resolve(identity) } ?: return Outcome.Missing
         check(node.identity == identity) { "the ${family.wire} source answered ${node.identity} for $identity" }
         return Outcome.Resolved(
             identity =
@@ -116,6 +139,19 @@ internal class ReleaseSourceProvider(
                 ),
             body = node,
         )
+    }
+
+    private fun <T> bounded(
+        context: ResolveContext,
+        read: () -> T,
+    ): T {
+        val bound = context.statementBound() ?: return read()
+        if (bound <= Duration.ZERO) throw DeadlineExceeded(ReleaseDependencyFamilies.keyOf(family))
+        return try {
+            ceiling.within(bound, read)
+        } catch (cancelled: StatementCancelled) {
+            throw DeadlineExceeded(ReleaseDependencyFamilies.keyOf(family)).apply { initCause(cancelled) }
+        }
     }
 
     override fun outgoing(resolved: Outcome.Resolved<ResolvedNode>): List<Reference> =

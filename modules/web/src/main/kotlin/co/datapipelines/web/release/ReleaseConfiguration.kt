@@ -1,8 +1,10 @@
 package co.datapipelines.web.release
 
+import co.datapipelines.application.dependencies.PostgresStatementCeiling
 import co.datapipelines.application.dependencies.ReleaseDependencyFamilies
 import co.datapipelines.application.dependencies.ReleasePlanningDeadline
 import co.datapipelines.application.dependencies.ReleasePlanningWalk
+import co.datapipelines.application.dependencies.StatementCeiling
 import co.datapipelines.application.endpoints.EndpointReleaseSteps
 import co.datapipelines.dependencies.FamilyDescriptor
 import co.datapipelines.dependencies.FamilyRegistry
@@ -66,15 +68,29 @@ class ReleaseConfiguration {
     @Bean
     fun releaseAuthorization(): ReleaseAuthorization = MatrixReleaseAuthorization()
 
+    /**
+     * #786 R3 (record §25.4) — the ONE statement bound every release source read runs under: `SET LOCAL statement_timeout`
+     * = `min(statement-timeout-seconds, remaining deadline)` on the metadata connection the walk's transaction holds.
+     * Every release family descriptor takes it; `ReleaseStatementCeilingWiringTest` asserts each one does.
+     */
+    @Bean
+    fun releaseStatementCeiling(jdbc: NamedParameterJdbcTemplate): StatementCeiling = PostgresStatementCeiling(jdbc.jdbcTemplate)
+
     /** The pipeline family over its release source (record §4; G2 adds the other artifact families). */
     @Bean
-    fun pipelineDependencyFamily(pipelines: PipelineRepository): FamilyDescriptor<ResolvedNode> =
-        ReleaseDependencyFamilies.descriptor(ReleaseFamily.PIPELINE, PipelineDependencySource(pipelines))
+    fun pipelineDependencyFamily(
+        pipelines: PipelineRepository,
+        ceiling: StatementCeiling,
+    ): FamilyDescriptor<ResolvedNode> =
+        ReleaseDependencyFamilies.descriptor(ReleaseFamily.PIPELINE, PipelineDependencySource(pipelines), ceiling)
 
     /** The template family over its release source (no pins today: #518 adds the import arm). */
     @Bean
-    fun templateDependencyFamily(templates: TemplateRepository): FamilyDescriptor<ResolvedNode> =
-        ReleaseDependencyFamilies.descriptor(ReleaseFamily.TEMPLATE, TemplateDependencySource(templates))
+    fun templateDependencyFamily(
+        templates: TemplateRepository,
+        ceiling: StatementCeiling,
+    ): FamilyDescriptor<ResolvedNode> =
+        ReleaseDependencyFamilies.descriptor(ReleaseFamily.TEMPLATE, TemplateDependencySource(templates), ceiling)
 
     /** Every descriptor bean, one registry; a duplicate or non-production key fails the context here. */
     @Bean

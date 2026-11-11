@@ -4,6 +4,7 @@ import co.datapipelines.application.dependencies.EndpointDependencySource
 import co.datapipelines.application.dependencies.EndpointVersionPipelineConsumers
 import co.datapipelines.application.dependencies.ReleaseDependencyFamilies
 import co.datapipelines.application.dependencies.ReleasePlanningWalk
+import co.datapipelines.application.dependencies.StatementCeiling
 import co.datapipelines.application.endpoints.EndpointAuthorizer
 import co.datapipelines.application.endpoints.EndpointInvalidationPublisher
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
@@ -244,8 +245,12 @@ class EndpointsConfiguration {
 
     /** #786 C.1 — the API family over its release source; `FamilyRegistry.production` admits `api_endpoint`. */
     @Bean
-    fun endpointDependencyFamily(versions: PublishedEndpointVersionRepository): FamilyDescriptor<ResolvedNode> =
-        ReleaseDependencyFamilies.descriptor(ReleaseFamily.ENDPOINT, EndpointDependencySource(versions))
+    fun endpointDependencyFamily(
+        versions: PublishedEndpointVersionRepository,
+        /** #786 R3 — the release statement bound every metadata read of the walk runs under (`ReleaseConfiguration`). */
+        ceiling: StatementCeiling,
+    ): FamilyDescriptor<ResolvedNode> =
+        ReleaseDependencyFamilies.descriptor(ReleaseFamily.ENDPOINT, EndpointDependencySource(versions), ceiling)
 
     /** §7.2/§7.7 — the one execution-visibility rule both execution reads share. */
     @Bean

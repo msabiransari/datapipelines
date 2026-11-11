@@ -109,6 +109,24 @@ class VocabularyTest {
     }
 
     @Test
+    fun `the provider context carries the section 25_4 statement bound on its deadline - min(statement limit, time left)`() {
+        val clock = SettableClock(java.time.Instant.parse("2026-11-11T00:00:00Z"))
+        val deadline = Deadline.after(Duration.ofSeconds(30), clock).withStatementLimit(TestGraph.LIMITS.statementTimeout)
+        val context =
+            ResolveContext(
+                java.util.UUID.randomUUID(),
+                MetadataSnapshot.READ_COMMITTED,
+                Purpose.RELEASE_PLANNING,
+                Authority.System,
+                deadline,
+                ReadIsolation.NONE,
+            )
+        context.statementBound() shouldBe Duration.ofSeconds(5)
+        clock.advance(Duration.ofSeconds(28))
+        context.statementBound() shouldBe Duration.ofSeconds(2)
+    }
+
+    @Test
     fun `GraphLimits carries the section 25_4 defaults as named constants and refuses values outside their ranges`() {
         val limits = TestGraph.LIMITS
         limits.resolveBatchSize shouldBe 256
