@@ -1738,8 +1738,11 @@ object PipelineErrorCodes {
         /** 400 — the payload names a target the workspace does not hold. */
         const val TARGET_NOT_FOUND = "schedule.validation.target_not_found"
 
-        /** 400 — the payload names a pipeline with no current version to follow (#280). */
+        /** 400 — the payload pins a pipeline version the deployment's posture does not run (#280; #786 D.1). */
         const val TARGET_NOT_RELEASED = "schedule.validation.target_not_released"
+
+        /** 400 — the stored payload's schema is one the executor no longer accepts (#786 D.2); `details.stored`, `details.supported`. */
+        const val PAYLOAD_SCHEMA_UNSUPPORTED = "schedule.validation.payload_schema_unsupported"
 
         /** 400 — a `parameter_bindings` entry cannot be resolved (#9 slice 3); `details` names why. */
         const val BINDING_INVALID = "schedule.validation.binding_invalid"

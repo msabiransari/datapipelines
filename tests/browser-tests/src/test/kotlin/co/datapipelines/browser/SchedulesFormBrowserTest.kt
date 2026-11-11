@@ -18,9 +18,10 @@ import org.junit.jupiter.api.Test
 /**
  * #9 slice 2, A.3 — the schedule form (ui-screens.md §4.20) in a real browser: create through the
  * form with the §20 refusals beside their fields IN THE CATALOGUE'S OWN WORDS (#280 — the family
- * line satisfies nobody), a draft-only pipeline named at pick time and refused at save with the
- * same release-first sentence, the detail's next five equal to §20.9 and the form's preview equal
- * to both, and an edit against a stale revision — the 409 rendered in the form, reloaded, saved.
+ * line satisfies nobody), the version picker (#786 D.4 — every version with its status, a draft
+ * pinnable only where drafts run, the release-first sentence at pick time where none runs), the
+ * detail's next five equal to §20.9 and the form's preview equal to both, and an edit against a
+ * stale revision — the 409 rendered in the form, reloaded, saved.
  *
  * The expected words are LITERALS here, not `ApiErrorCatalog.userMessageFor`: `modules/web`
  * reaches this module only through `modules:app`'s `implementation` dependency, so its classes
@@ -28,8 +29,13 @@ import org.junit.jupiter.api.Test
  * `err.user_message` → DOM, so a literal equality here pins the catalogue row end to end.
  */
 class SchedulesFormBrowserTest : SchedulesBrowserSuite() {
-    /** The catalogue's `schedule.validation.target_not_released` line (#280) — the words at the pipeline field. */
-    private val releaseFirst = "This pipeline has no released version yet. Release it (or switch its current version), then schedule it."
+    /** The form's pick-time release-first sentence (#280; `form.js` RELEASE_FIRST_TEXT) — the words at the pipeline field. */
+    private val releaseFirst = "This pipeline has no released version yet. Release it, then schedule it."
+
+    /** The catalogue's `schedule.validation.payload_invalid` line (#786: the payload names no exact version). */
+    private val exactVersionMissing =
+        "This schedule's job doesn't have the right shape — it must name one pipeline of this workspace " +
+            "and the exact version number to run."
 
     @Test
     fun `notification settings round trip and refusal appears beside the field while mail stays off`() {
@@ -87,7 +93,7 @@ class SchedulesFormBrowserTest : SchedulesBrowserSuite() {
         page.selectOption("#sch-f-timezone", "America/New_York")
         page.fill("#sch-f-name", "Not A Valid Name")
         page.fill("#sch-f-pipeline", pipeline)
-        // The pipeline's current version declares one required parameter: its field appears.
+        // The picked version (the newest release) declares one required parameter: its field appears.
         page.locator("#sch-f-param-$PARAMETER").waitFor()
         // Typed AT ONCE — the pipeline field's blur fires `change` right here, and the lane walk
         // lost a value typed at this moment to a redundant re-read re-rendering the fields. Every
@@ -147,10 +153,10 @@ class SchedulesFormBrowserTest : SchedulesBrowserSuite() {
         page.url() shouldContain "id=$id"
     }
 
-    // ------------------------------------------------------------------ #280 the draft-only pipeline
+    // ------------------------------------------------------------------ #280 / #786 D.4 the version picker
 
     @Test
-    fun `a draft-only pipeline is named at pick time and refused at save with the release-first words`() {
+    fun `the version picker - a draft-only pipeline pins its draft where drafts run, and is release-first where they do not`() {
         startTrace()
         val root = ready("schdraft")
         val draft = "$root/jobs/draftonly"
@@ -158,46 +164,63 @@ class SchedulesFormBrowserTest : SchedulesBrowserSuite() {
         val released = "$root/jobs/released"
         releasedPipeline(page, released)
         openSchedules()
+        val versionOptions = "os => os.map(o => [o.value, o.textContent, String(o.disabled)])"
 
+        // 1. This deployment authors (the development posture, stamped on the page root): a DRAFT
+        // runs here, so the picker offers v1 with its status and selects it; nothing is refused.
+        page.locator("[data-schedules-root][data-drafts-eligible='true']").waitFor()
         page.locator("[data-verb='schedule-create']").first().click()
         val form = page.locator("#sch-dialog [data-sch-form]")
         form.waitFor()
         page.fill("#sch-f-name", "$root/nightly/draft")
-        // Typing the draft-only pipeline's full name resolves it: the release-first words are at
-        // the pipeline field BEFORE any save — the parameters area carries nothing for it.
+        page.fill("#sch-f-pipeline", draft)
+        page.locator("#sch-f-param-$PARAMETER").waitFor()
+        page.locator("#sch-f-version option").evaluateAll(versionOptions) shouldBe listOf(listOf("1", "v1 · draft", "false"))
+        page.inputValue("#sch-f-version") shouldBe "1"
+        page.locator("[data-field-error='pipeline']").isHidden() shouldBe true
+        page.fill("#sch-f-param-$PARAMETER", "50")
+        page.locator("[data-verb='schedule-save']").click()
+        form.waitFor(Locator.WaitForOptions().setState(WaitForSelectorState.DETACHED))
+        detail().waitFor()
+        page.locator("#schedule-detail [data-slot='leaf']").textContent() shouldBe "draft"
+        page.locator("#schedule-detail [data-slot='version']").getAttribute("data-pinned-version") shouldBe "1"
+        page.locator("#schedule-detail [data-slot='version']").textContent() shouldContain "pinned to v1"
+
+        // 2. Where drafts do NOT run (the hardened posture — the page's stamp is what the picker
+        // reads, so this flips it; the server stays the authority): the draft is listed DISABLED
+        // with its reason, nothing is selected, and the release-first words are at the pipeline
+        // field before any save.
+        page.evaluate("() => document.querySelector('[data-drafts-eligible]').setAttribute('data-drafts-eligible', 'false')")
+        page.locator("[data-verb='schedule-create']").first().click()
+        form.waitFor()
+        page.fill("#sch-f-name", "$root/nightly/hardened")
         page.fill("#sch-f-pipeline", draft)
         val pipelineError = page.locator("[data-field-error='pipeline']:not([hidden])")
         pipelineError.waitFor()
-        pipelineError.textContent() shouldContain "has no released version yet"
         pipelineError.textContent() shouldBe releaseFirst
-        page.locator("[data-field-error='parameters']").isHidden() shouldBe true
+        page.locator("#sch-f-version option").evaluateAll(versionOptions) shouldBe
+            listOf(listOf("1", "v1 · draft — drafts do not run here", "true"))
+        page.inputValue("#sch-f-version") shouldBe ""
 
-        // The save still goes to the server (the authority) and its refusal lands in the same
-        // slot with the same words — the round-trip completed when the submit button is enabled
-        // again and the dialog is still open.
+        // The save still goes to the server: no version was picked, so the payload names none and
+        // the refusal lands at the VERSION field in the catalogue's words.
         page.locator("[data-verb='schedule-save']").click()
         page.waitForFunction("() => { const b = document.querySelector(\"[data-verb='schedule-save']\"); return b && !b.disabled; }")
         form.waitFor()
-        page.locator("[data-field-error='pipeline']:not([hidden])").waitFor()
-        val afterSave = page.locator("[data-field-error='pipeline']").textContent()
-        afterSave shouldContain "has no released version yet"
-        afterSave shouldBe releaseFirst
+        page.locator("[data-field-error='version']:not([hidden])").waitFor()
+        page.locator("[data-field-error='version']").textContent() shouldBe exactVersionMissing
 
-        // Picking the released pipeline clears the slot; the save then succeeds.
+        // Picking the released pipeline clears the pipeline slot and selects its release; the save succeeds.
         page.fill("#sch-f-pipeline", released)
         page.locator("#sch-f-param-$PARAMETER").waitFor()
         page.waitForFunction("() => { const p = document.querySelector(\"[data-field-error='pipeline']\"); return p && p.hidden; }")
+        page.locator("#sch-f-version option").evaluateAll(versionOptions) shouldBe listOf(listOf("1", "v1 · released", "false"))
         page.fill("#sch-f-param-$PARAMETER", "50")
         page.locator("[data-verb='schedule-save']").click()
-        form.waitFor(
-            com.microsoft.playwright.Locator
-                .WaitForOptions()
-                .setState(WaitForSelectorState.DETACHED),
-        )
+        form.waitFor(Locator.WaitForOptions().setState(WaitForSelectorState.DETACHED))
         detail().waitFor()
-        page.locator("#schedule-detail [data-slot='leaf']").textContent() shouldBe "draft"
-        page.locator("#schedule-detail [data-slot='parameters'] tr").evaluateAll("rs => rs.map(r => r.textContent)") shouldBe
-            listOf("${PARAMETER}50")
+        page.locator("#schedule-detail [data-slot='leaf']").textContent() shouldBe "hardened"
+        page.locator("#schedule-detail [data-slot='version']").getAttribute("data-pinned-version") shouldBe "1"
     }
 
     // ------------------------------------------------------------------ A.3 edit with a stale revision
@@ -221,7 +244,7 @@ class SchedulesFormBrowserTest : SchedulesBrowserSuite() {
                 page,
                 "PUT",
                 "/api/v1/schedules/$id",
-                """{"name":"$root/nightly/rows","payload":{"pipeline":"$pipeline","version":"current"},"parameters":{"$PARAMETER":99},""" +
+                """{"name":"$root/nightly/rows","payload":{"pipeline":"$pipeline","version":1},"parameters":{"$PARAMETER":99},""" +
                     """"cron":"$YEARLY","timezone":"Europe/London"}""",
                 ifMatch = etag(page, id),
             )

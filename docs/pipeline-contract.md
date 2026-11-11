@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.87 (revised — see Change Log)
+**Status:** v1.88 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-11-10
+**Last updated:** 2026-11-11
 
 ---
 
@@ -1502,9 +1502,10 @@ The scheduler's refusals (#9; [Scheduler](scheduler.md), the scheduler design re
 | `schedule.validation.timezone_invalid` | 400 | not an IANA region id (`Europe/Berlin`); a fixed offset such as `+02:00` is refused too |
 | `schedule.validation.interval_too_short` | 400 | two consecutive occurrences closer than `datapipelines.scheduler.min-interval-seconds` |
 | `schedule.validation.executor_unknown` | 400 | no executor is registered under that id (v1 registers `pipeline`) |
-| `schedule.validation.payload_invalid` | 400 | the executor refused the payload — for `pipeline`: an unknown field, no pipeline name, or a `version` other than `"current"` (`latest` is refused by name); `details.reason` names which — or the payload or parameters exceed 16 KiB or 8 levels |
-| `schedule.validation.target_not_found` | 400 | the payload names a pipeline the workspace does not hold, or its current version has no stored body; `details.pipeline` |
-| `schedule.validation.target_not_released` | 400 | the payload names a pipeline with no current version to follow (#280) — release it, or switch its current version, then save again; `details.pipeline` |
+| `schedule.validation.payload_invalid` | 400 | the executor refused the payload — for `pipeline` (payload schema 2, #786): an unknown field, no pipeline name, or a `version` that is not a positive integer — `"current"` and `"latest"` are refused by name (`version_current_refused`, `version_latest_refused`), a missing one is `version_missing`, anything else `version_invalid`; `details.reason` names which — or the payload or parameters exceed 16 KiB or 8 levels |
+| `schedule.validation.target_not_found` | 400 | the payload names a pipeline the workspace does not hold, a version that pipeline does not have, or a version with no stored body; `details.pipeline` (and `details.version` when the version is the missing part) |
+| `schedule.validation.target_not_released` | 400 | the payload pins a pipeline version this deployment's posture does not run (#280, #786) — a DISCARDED version, or a DRAFT where authoring is off; pick a released version and save again; `details.pipeline`, `details.version`, `details.status` |
+| `schedule.validation.payload_schema_unsupported` | 400 | the schedule's STORED payload is in a schema the executor no longer runs (#786 D.2): a schema-1 `"version": "current"` payload left after the upgrade's conversion, refused on update, unblock and Run now — never upgraded at read time; its runs refuse `payload_schema_unsupported` and block. Edit the schedule and pick the exact version; `details.stored`, `details.supported` |
 | `schedule.validation.binding_invalid` | 400 | a `parameter_bindings` entry cannot be resolved (#9 slice 3) — an unknown parameter, a non-`DATE` type, an unknown keyword (`TODAY`/`YESTERDAY` only), an unknown source, a literal binding without a value, or a keyword with no reference at run time; `details.reason` (`unknown_parameter` / `type_mismatch` / `unknown_keyword` / `unknown_source` / `literal_invalid` / `no_reference`) and `details.parameter` name why |
 | `schedule.validation.binding_conflict` | 400 | the same parameter is supplied in `parameters` and in `parameter_bindings` — give it one source; the resolver rejects ambiguity instead of applying a precedence rule (`details.parameter`) |
 | `schedule.validation.notifications_invalid` | 400 | Notification settings refused (#442a). `details` contains only `{field, reason}`: `notifications`, `notifications.recipients`, an indexed recipient or event field; `not_an_object`, `not_a_list`, `not_a_string`, `syntax`, `too_long`, `too_many`, `unknown_event`, `domain_not_allowed` (#442b: outside a non-empty recipient-domain allowlist). No address is echoed |
@@ -2029,6 +2030,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-11 | v1.88 | #786 U2 schedules pin exact versions | §13.19 gains `schedule.validation.payload_schema_unsupported` (400): a stored schema-1 payload is refused, never upgraded at read time (D.2). `payload_invalid`'s `pipeline` reasons are the schema-2 version grammar (an exact positive integer; `current`/`latest` refused by name); `target_not_found` also covers a version the pipeline does not have; `target_not_released` is now an ineligible PINNED version (discarded, or a draft where authoring is off), not a missing current pointer. Landed with the constants in `ScheduleErrorCodes` and `PipelineErrorCodes.Schedule` (merged §13 row count recounted with the drift test's own regex). |
 | 2026-11-10 | v1.87 | #841 G0 writer protocol — renumbered at merge after #860's v1.86 | §13.8 gains `datasource.write.busy` (409), §13.14 `endpoint.write.busy` (409), §13.19 `schedule.write.busy` (409): the exhausted writer-guard wait of the newly guarded datasource, endpoint and schedule writers, with the release families' message and `{lock_wait_seconds}` details, landed in the SAME commit as their constants and `ApiErrorCatalog` rows (merged §13 row count 477 → 480). |
 | 2026-11-08 | v1.86 | 860 (#860) — renumbered at merge after #823's v1.85 | §13.22: `visualization.validation.config_schema_invalid` describes the `chart` kind (the served v1 schema, then the `chart.*` save rules, `details.reason` and `details.renderer`) in place of the retired `plotly` kind; no code is added or removed. |
 | 2026-11-08 | v1.85 | #823 managed grant at creation | §13.8: `datasource.managed` (409) also answers a revoke of the managed lake's grant (REST `DELETE .../grants/{workspace}` and the UI's revoke). No new code. |

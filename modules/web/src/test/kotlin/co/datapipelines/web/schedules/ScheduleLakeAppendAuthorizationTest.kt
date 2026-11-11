@@ -38,7 +38,8 @@ class ScheduleLakeAppendAuthorizationTest {
         ScheduleRequest(
             "test/schedule",
             "pipeline",
-            mapper.readTree("""{"pipeline":"test/pipeline","version":"current"}"""),
+            // #786 D.1: the pin (2) is not CURRENT (3) — the PINNED version's body decides; CURRENT is never read.
+            mapper.readTree("""{"pipeline":"test/pipeline","version":2}"""),
             mapper.createObjectNode(),
             "0 0 * * *",
             "UTC",
@@ -48,7 +49,7 @@ class ScheduleLakeAppendAuthorizationTest {
     @BeforeEach
     fun setUp() {
         every { pipelines.findByNameAnyStatus(workspace, record.name) } returns record
-        every { service.findExecutable(workspace, ReadLens.Everything, record, 3) } returns
+        every { service.findExecutable(workspace, ReadLens.Everything, record, 2) } returns
             mockk {
                 every { writesManagedLake } answers { writes }
             }
@@ -64,12 +65,12 @@ class ScheduleLakeAppendAuthorizationTest {
     }
 
     @Test
-    fun `missing target or current body is refused instead of guessing read-only`() {
+    fun `missing target or pinned body is refused instead of guessing read-only`() {
         every { pipelines.findByNameAnyStatus(workspace, record.name) } returns null
         shouldThrow<ScheduleException> { subject.check(principal(WorkspaceRole.AUTHOR), request) }.code shouldBe
             ScheduleErrorCodes.TARGET_NOT_FOUND
         every { pipelines.findByNameAnyStatus(workspace, record.name) } returns record
-        every { service.findExecutable(workspace, ReadLens.Everything, record, 3) } returns null
+        every { service.findExecutable(workspace, ReadLens.Everything, record, 2) } returns null
         shouldThrow<ScheduleException> { subject.check(principal(WorkspaceRole.AUTHOR), request) }.code shouldBe
             ScheduleErrorCodes.TARGET_NOT_FOUND
     }

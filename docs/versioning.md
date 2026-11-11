@@ -1,9 +1,9 @@
 # Versioning: Draft, Release, Promotion
 
-**Status:** v1.36 — #786 (U1): published APIs pin an exact pipeline version and no longer follow the pipeline's pointer (§3.4, §3.5.3, §7, §7.2, §10.2). v1.35 — #841 (G0): §5.3's workspace writer guard is one class of the metadata writer protocol; `lock-wait-seconds` is one cumulative budget per write. v1.34 — #778: the receiver refuses a promotion batch that reads a lake table its registry does not hold, after landing, inside the batch transaction (§10.5). v1.33 — #737: a parameter-set restore tells `template_not_found` from `template_version_not_found` by the template entity row, as a pipeline restore does since #733 (§3.5.3). v1.32 — #575: all five wire inventory arms require a RELEASED current pointer (§10.2). v1.31 — #733: a pipeline restore tells `template_not_found` from `template_version_not_found` by the template entity row, not a version-1 probe (§3.5.3). v1.30 — #517: a release takes its whole dependency closure, flips consented dependency drafts in one transaction with strict audit, and every pin-affecting write takes the workspace writer guard (§5.3, §3.5, §10.4); a pipeline or parameter-set restore re-judges its outbound pins (§3.5.3). v1.29 — #563: an object whose current pointer names a DRAFT is not promotable and is invisible to a promoter whatever releases it holds (§10.2, §3.4). v1.28 — #459: draft authoring may pin DRAFT or RELEASED children (D58, §3); #462: both pipeline draft purges refuse named parent/dashboard pins before destructive writes. #328: the release flip records the caller output (§5.3). #349: the UI workspace row states the in-page version switch (§7.2); #344: the push closure is read at the pinned versions without the promoter lens (§10.4); #332: the three families audit every lifecycle verb (§7's blanket sentence); #348: §7.2's table disambiguates the REST `GET /api/v1/pipelines/{id}` from the UI read workspace `GET /pipelines/{id}`; #10 L1c-c: the count ceiling stated as aggregate; the receive's refused-dashboard rollback witnessed (§10.4); #320: the reverse arrows into other families (§3.5.3); #10: visualizations and dashboards join the lifecycle table (§3.5)
+**Status:** v1.37 — #786 (U2): schedules pin an exact pipeline version and no longer follow the pointer (§3.4, the NULL pointer, the edge list, the pin table). v1.36 — #786 (U1): published APIs pin an exact pipeline version and no longer follow the pipeline's pointer (§3.4, §3.5.3, §7, §7.2, §10.2). v1.35 — #841 (G0): §5.3's workspace writer guard is one class of the metadata writer protocol; `lock-wait-seconds` is one cumulative budget per write. v1.34 — #778: the receiver refuses a promotion batch that reads a lake table its registry does not hold, after landing, inside the batch transaction (§10.5). v1.33 — #737: a parameter-set restore tells `template_not_found` from `template_version_not_found` by the template entity row, as a pipeline restore does since #733 (§3.5.3). v1.32 — #575: all five wire inventory arms require a RELEASED current pointer (§10.2). v1.31 — #733: a pipeline restore tells `template_not_found` from `template_version_not_found` by the template entity row, not a version-1 probe (§3.5.3). v1.30 — #517: a release takes its whole dependency closure, flips consented dependency drafts in one transaction with strict audit, and every pin-affecting write takes the workspace writer guard (§5.3, §3.5, §10.4); a pipeline or parameter-set restore re-judges its outbound pins (§3.5.3). v1.29 — #563: an object whose current pointer names a DRAFT is not promotable and is invisible to a promoter whatever releases it holds (§10.2, §3.4). v1.28 — #459: draft authoring may pin DRAFT or RELEASED children (D58, §3); #462: both pipeline draft purges refuse named parent/dashboard pins before destructive writes. #328: the release flip records the caller output (§5.3). #349: the UI workspace row states the in-page version switch (§7.2); #344: the push closure is read at the pinned versions without the promoter lens (§10.4); #332: the three families audit every lifecycle verb (§7's blanket sentence); #348: §7.2's table disambiguates the REST `GET /api/v1/pipelines/{id}` from the UI read workspace `GET /pipelines/{id}`; #10 L1c-c: the count ceiling stated as aggregate; the receive's refused-dashboard rollback witnessed (§10.4); #320: the reverse arrows into other families (§3.5.3); #10: visualizations and dashboards join the lifecycle table (§3.5)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md) (§13 error catalog, §17 persistence), [Templates](templates.md), [Metadata DB](metadata-db.md) (§4.4/§4.5/§4.8/§4.9 — DDL authority), [REST API](rest-api.md), [Pipeline Editor UI](pipeline-editor.md)
-**Last updated:** 2026-11-10
+**Last updated:** 2026-11-11
 
 ---
 
@@ -180,11 +180,12 @@ draft-dominance that the table itself overrides.
 
 ### 3.4 `current_version` is sticky and event-driven (D60)
 
-`current_version` is the version every **pointer-following dependent** runs — promotion,
-schedules (#9 — a schedule's `version: "current"` follows it, drafts included; #786's second unit replaces this with an
-exact pin), dashboards later. **Published APIs no longer follow it (#786):** each API version pins an EXACT pipeline
-version, and serving reads the API's own current API version and runs that pin — moving the pipeline's pointer never
-retargets an API ([REST API §19](rest-api.md)). It is **sticky**: it no longer
+`current_version` is the version every **pointer-following dependent** runs — promotion, dashboards later.
+**Published APIs and schedules no longer follow it (#786):** each API version pins an EXACT pipeline version, and
+serving reads the API's own current API version and runs that pin — moving the pipeline's pointer never retargets an
+API ([REST API §19](rest-api.md)); a schedule's payload (schema 2) pins an exact version and every run executes it —
+moving the pointer never retargets a schedule ([Scheduler §2.1](scheduler.md#21-the-pipeline-payload)). The upgrade
+converted each schedule that followed the pointer to the version the pointer named then. It is **sticky**: it no longer
 means "the latest RELEASED version" as a derived fact. It moves ONLY on these events, and
 when it moves it picks the **highest-numbered ELIGIBLE live version**:
 
@@ -212,8 +213,8 @@ The published surface serves the pointer when it names a RELEASED version, which
 hardened postures is the only thing it can name.
 
 **NULL pointer.** A published API does not read this pointer (#786: it serves its own API version's exact pin, so a
-pipeline whose pointer is NULL changes nothing it serves); a schedule (#9) records a `not_started` run
-(reason `pointer_null`) and blocks until a person unblocks it ([Scheduler §5](scheduler.md#5-runs-states-and-reasons));
+pipeline whose pointer is NULL changes nothing it serves); nor does a schedule (#786: it runs its exact pin; before
+#786 a schedule recorded a `not_started` / `pointer_null` run and blocked, [Scheduler §5](scheduler.md#5-runs-states-and-reasons));
 promotion has nothing to push.
 
 **A draft pointer (D63, 2026-09-09).** Under the development posture the pointer may name a
@@ -241,8 +242,8 @@ dashboard releases only when its set is RELEASED, its sources RELEASED and read-
 pinned visualization RELEASED — or released with it in one transaction under
 `release_pinned_visualizations` (D61). Every leaf has an ordered
 version list. Dependencies are **edges**: exact-version pins (a pipeline node's template
-pin, a PIPELINE node's child pin, and since #786 an API version's pipeline pin) and pointer edges (schedule→current,
-until #786's second unit pins schedules exactly).
+pin, a PIPELINE node's child pin, and since #786 an API version's and a schedule's pipeline pin) and pointer edges
+(promotion→current).
 Three graph rules cover every refusal:
 
 1. A version with an **inbound exact pin from a LIVE (non-discarded) version** cannot be
@@ -426,11 +427,11 @@ reach them through a port `application` implements — no module's SQL names ano
 | visualization `transform.template` → template | draft purge, version purge, discard, entity purge, the exclusive-draft offer | `template.in_use` | `referencing_visualizations` (names), beside `pinned_by` and `referencing_parameter_sets` |
 | dashboard `sources[].pipeline` → pipeline version | draft purge, version purge, discard, entity purge | `pipeline.version.pinned` | `referencing_dashboards`: `[{dashboard, version, status}]`, beside `pinned_by` |
 | API version `(pipeline, pipeline_version)` → pipeline version (#786) | draft purge, version purge, discard, entity purge | `pipeline.version.pinned` | `referencing_api_versions`: `[{path, version, status, pipeline_version}]` — DRAFT and RELEASED API versions, noncurrent and disabled entities included; DISCARDED protects nothing |
-| schedule target → the pipeline version it runs (#786) | draft purge, version purge, discard, entity purge | `pipeline.version.pinned` | `referencing_schedules`: `[{schedule, pipeline_version}]` — every non-deleted schedule, paused and blocked included; a schema-1 payload runs CURRENT (null while CURRENT is NULL, counted by the entity purge only) |
+| schedule target → the pipeline version it runs (#786) | draft purge, version purge, discard, entity purge | `pipeline.version.pinned` | `referencing_schedules`: `[{schedule, pipeline_version}]` — every non-deleted schedule, paused and blocked included; the schema-2 payload's exact `version`; a leftover schema-1 payload runs CURRENT (null while CURRENT is NULL, counted by the entity purge only) |
 | dashboard `parameter_set` → parameter-set release | draft purge, version purge, discard, entity purge | `parameter.in_use` | `pinned_by`: `[{dashboard, version, status}]`, `id`, `version` (absent for an entity purge) |
 | dashboard `visualizations[].visualization` → visualization | draft purge, version purge, discard, entity purge | `visualization.version.pinned` (L1a) | `pinned_by`: `["dashboard@version"]` |
 
-Since #786 API versions pin an exact pipeline version, and a live schedule protects the version it runs (until U2 stores exact schedule pins, the one CURRENT names at the check); both arms are in the table above. The entity purge asks both for any version.
+Since #786 API versions pin an exact pipeline version, and a live schedule protects the exact version its schema-2 payload pins (a leftover schema-1 one, the one CURRENT names at the check); both arms are in the table above. The entity purge asks both for any version.
 
 **Which question each verb asks.** A discard and a draft purge that keeps other versions ask the LIVE exact-pin question
 (rule 1: DRAFT or RELEASED dependent versions pinning exactly this version). An entity purge, and a draft purge that
@@ -1594,6 +1595,7 @@ re-opening it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-11 | v1.37 | #786 schedules pin exact versions (U2) | **§3.4:** schedules are no longer pointer-following dependents — a schedule's schema-2 payload pins an exact pipeline version, a NULL pointer no longer refuses a schedule's run, the schedule→current pointer edge is now an exact pin, and the schedule arm of the pin table protects the stored `version`. |
 | 2026-11-10 | v1.36 | #786 API versions, exact pins (U1) | **§3.4:** published APIs are no longer pointer-following dependents — an API version pins an exact pipeline version and serving runs the API's own current version's pin; D63's draft testing is kept as a DRAFT pin where authoring is enabled; NULL-pointer and pointer-edge text corrected (schedules still follow the pointer until #786's second unit). **§3.5.3:** the API-version and schedule protection arms. **§7 / §7.2:** the create row and the serve row follow the exact pin. **§10.2:** APIs in a promotion batch (unchanged wire; receiver-only import pins the receiver's CURRENT; #879 is the exact-pin promotion). |
 | 2026-11-10 | v1.35 | #841 metadata writer protocol (G0) | **§5.3:** the workspace writer guard is one class of the release-dependencies design §4.4 writer protocol — a shared datasource's key is taken before the workspace row, and `lock-wait-seconds` bounds all of a write's lock waits cumulatively. Behaviour of the five release families is otherwise unchanged. |
 | 2026-11-02 | v1.34 | #778 lake reference scanner | **§10.5** gains the receiver's lake-table check: after a batch lands, the receiver checks every resolved lake-table reference of the landed pipeline and parameter-set versions against its own registry (the lake reference index, metadata-db §4.41–§4.42). One `pipeline.promotion.lake_table_unavailable` (409) for the whole batch, then a rollback. Partial, unscannable and unresolved positions are admitted; the runtime gate stays their defence. |

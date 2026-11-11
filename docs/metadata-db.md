@@ -1,9 +1,9 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.56 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.57 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
-**Last updated:** 2026-11-08
+**Last updated:** 2026-11-11
 
 ---
 
@@ -960,7 +960,7 @@ CREATE TABLE schedules (
     name                    TEXT        NOT NULL,       -- the pipeline path grammar (checked in code)
     revision                INT         NOT NULL DEFAULT 1,  -- the ETag / If-Match value; not a releasable version
     executor_id             TEXT        NOT NULL,       -- 'pipeline' in slice 1 — an allowlisted registry id
-    payload_schema_version  INT         NOT NULL,
+    payload_schema_version  INT         NOT NULL,       -- 'pipeline': 2 since #786 (the exact pin); 1 = pointer-following
     payload_json            JSONB       NOT NULL,       -- opaque; the executor validates it
     parameters_json         JSONB       NOT NULL DEFAULT '{}'::jsonb,  -- literal inputs (R7), opaque here
     target_ref              TEXT        NOT NULL,       -- the executor's generic reference (B15): 'pipeline:<name>'
@@ -998,6 +998,7 @@ CREATE INDEX idx_schedules_target ON schedules (workspace_id, target_ref) WHERE 
 
 **Notes:**
 - **Soft delete** (`deleted_at`, D-9.6/B17), not §2's `is_deleted` flag: the name is unique among LIVE schedules only (the partial index), so a deleted schedule keeps its runs and their trail and its name is free again. A deleted schedule is absent from every read.
+- **Payload schema 2 — the exact pin** (#786, no DDL change). The `pipeline` executor's payload is `{"pipeline": "<name>", "version": <int ≥ 1>}` at `payload_schema_version = 2`: every run executes exactly that pipeline version. Schema 1 (`"version": "current"`) followed the pointer; the executor READS the column and refuses a schema-1 payload (`schedule.validation.payload_schema_unsupported`; a run `payload_schema_unsupported`, blocking) rather than re-reading it. The upgrade's startup conversion rewrites every LIVE schema-1 row in place — only `payload_json.version` (`"current"` → the integer CURRENT names) and this column, under the row's revision CAS (so `revision` moves by one) — and the payload copy of each of its `queued` runs ([§4.23](#423-schedule_runs)) the same way; terminal runs keep the schema they ran under, as history. A deleted schedule is not converted. The pipeline discard's pin guard reads the schema-2 `version` as the version a schedule protects.
 - **`enabled` and `blocked_*` are independent operational controls** (record §1.1): pause flips `enabled`; an `unknown` run or a blocking refusal sets the block; resume never clears a block (unblock does).
 - **`next_due_at` is written only by the ONE occurrence function** (record §3.2) — at create, at the dispatcher's advance, and when resume, unblock or a cron/timezone edit recompute it from now.
 - **The dispatcher's scan** is `idx_schedules_due` joined to the workspace row (a deleted or DEACTIVATED workspace is not dispatched), locked `FOR UPDATE SKIP LOCKED`.
@@ -2622,6 +2623,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-11 | v1.57 | #786 U2 (no migration) | **§4.22:** the `pipeline` payload is schema 2 — `{"pipeline", "version": <int>}`, the exact pin; schema 1 is refused at read, never re-read; the upgrade's startup conversion rewrites each live schema-1 row's `version` and `payload_schema_version` in place under its revision CAS, and each of its queued runs' payload copies. |
 | 2026-11-10 | v1.56 | V58 (#786 U1) | New **§4.13a `published_endpoint_versions`** — one row per API version (DRAFT/RELEASED/DISCARDED), the exact pipeline pin by name and number, the shared body-hash expression (A44), the one-draft partial index and the pin lookup; **§4.13 `published_endpoints` gains `current_version`**, the API's own pointer, tied to a version row by the deferrable composite FK `fk_published_endpoints_current_version`; the legacy `pipeline_id` / `timeout_seconds` / `description` stay as the in-place conversion's source and the creation snapshot, never served. The "pins a pipeline, not a version" note is corrected. §5 gains the three indexes; §5A classifies the table promotable (by-path transfer until #879). No SQL backfill: the conversion is code (owner ruling 2026-11-08). |
 | 2026-11-08 | v1.55 | 851 (#844) | V57 replaces `idx_lake_deliveries_unsettled (table_id, state)` with `idx_lake_deliveries_unsettled_page (table_id, id)` under the same partial predicate (§4.53, §5): the settlement page is an index range scan with no sort. |
 | 2026-11-06 | v1.54 | 818e (#818) | V56 widens the lease kind and adds reader metadata pins, their check and index; writer fencing is unchanged. |

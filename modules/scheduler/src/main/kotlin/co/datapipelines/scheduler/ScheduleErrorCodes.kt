@@ -80,10 +80,17 @@ object ScheduleErrorCodes {
     const val TARGET_NOT_FOUND = "schedule.validation.target_not_found"
 
     /**
-     * 400 — the payload names a pipeline with no current version to follow (#280): release it, or switch
-     * its current version, then save again.
+     * 400 — the payload pins a pipeline version this deployment's posture does not run (#280; #786 D.1: a draft
+     * where drafts do not run, or a discarded version): pick a released version, then save again.
      */
     const val TARGET_NOT_RELEASED = "schedule.validation.target_not_released"
+
+    /**
+     * 400 — the schedule's STORED payload is in a schema its executor no longer accepts (#786 D.2: the pipeline
+     * executor accepts schema 2, the exact pin, only). `details.stored` and `details.supported` name both numbers.
+     * Never upgraded at read time: edit the schedule to pick an exact version.
+     */
+    const val PAYLOAD_SCHEMA_UNSUPPORTED = "schedule.validation.payload_schema_unsupported"
 
     /** 400 — a `parameter_bindings` entry cannot be resolved; `details.reason` and `details.parameter` name why. */
     const val BINDING_INVALID = "schedule.validation.binding_invalid"
@@ -124,6 +131,7 @@ object ScheduleErrorCodes {
             PAYLOAD_INVALID,
             TARGET_NOT_FOUND,
             TARGET_NOT_RELEASED,
+            PAYLOAD_SCHEMA_UNSUPPORTED,
             BINDING_INVALID,
             BINDING_CONFLICT,
         )

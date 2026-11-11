@@ -6,9 +6,10 @@ import java.util.UUID
 /**
  * Plants, in SQL, the state a pre-#786 discard left under a live schedule: the pipeline's only release
  * DISCARDED and its CURRENT pointer NULL. Since #786 B.4 a live schedule protects the version it runs, so
- * the discard verb refuses this (`pipeline.version.pinned`) and a blocked `pointer_null` schedule is
- * legacy data only — which is what the suites that walk the blocked state now seed. Restore then works
- * through the native verb exactly as it did after a real discard.
+ * the discard verb refuses this (`pipeline.version.pinned`), and a schedule whose exact pin (#786 D.1)
+ * is DISCARDED is legacy data only — which is what the suites that walk the blocked state now seed: its
+ * run is refused `version_not_eligible` and blocks. Restore then works through the native verb exactly
+ * as it did after a real discard.
  */
 internal fun plantLegacyDiscardedRelease(pipelineId: String) {
     val id = UUID.fromString(pipelineId)

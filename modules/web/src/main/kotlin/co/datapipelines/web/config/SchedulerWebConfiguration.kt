@@ -10,16 +10,22 @@ import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionSlots
 import co.datapipelines.executor.ExecutorConfig
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.scheduler.CapacityGate
 import co.datapipelines.scheduler.JobExecutor
 import co.datapipelines.scheduler.NotificationDeployment
 import co.datapipelines.scheduler.NotificationMailer
+import co.datapipelines.scheduler.ScheduleRepository
+import co.datapipelines.scheduler.ScheduleRunRepository
 import co.datapipelines.scheduler.SchedulerProperties
 import co.datapipelines.scheduler.SystemActorSource
+import co.datapipelines.typesystem.guard.MetadataWriterGuard
+import co.datapipelines.web.endpoints.StartupConversion
 import co.datapipelines.web.pipelines.RecordingExecutionRunner
 import co.datapipelines.web.schedules.PipelineJobExecutor
+import co.datapipelines.web.schedules.ScheduleVersionConversion
 import co.datapipelines.web.schedules.SlotCapacityGate
 import co.datapipelines.web.schedules.SmtpNotificationMailer
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -28,6 +34,8 @@ import org.springframework.beans.factory.ObjectProvider
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.core.env.Environment
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.support.TransactionTemplate
 
 /**
  * The scheduler's composition root (#9; scheduler design revision §6.2, A3 — `web/config`, since
@@ -52,6 +60,28 @@ class SchedulerWebConfiguration {
         co.datapipelines.web.schedules
             .ScheduleLakeAppendAuthorization(pipelines, pipelineService)
 
+    /** #786 §D.5 — the in-place schedule conversion (schema 1 → the exact pin); `modules/app`'s startup runner runs it. */
+    @Bean
+    fun scheduleVersionConversion(
+        schedules: ScheduleRepository,
+        runs: ScheduleRunRepository,
+        pipelines: PipelineRepository,
+        transactionManager: PlatformTransactionManager,
+        writeGuard: MetadataWriterGuard,
+    ): ScheduleVersionConversion =
+        ScheduleVersionConversion(schedules, runs, pipelines, TransactionTemplate(transactionManager), writeGuard)
+
+    /** The schedule step (D.5) beside the API step (E.1): same runner, E.0 read for both before either writes. */
+    @Bean
+    fun scheduleStartupConversion(conversion: ScheduleVersionConversion): StartupConversion =
+        object : StartupConversion {
+            override fun convert() {
+                conversion.run()
+            }
+
+            override fun logPrecondition(): Int = conversion.logPrecondition()
+        }
+
     /** The system identity's id — read once: the row never changes (auth.md §4.5). */
     @Bean
     fun schedulerSystemActor(users: UserService): SystemActorSource {
@@ -64,6 +94,7 @@ class SchedulerWebConfiguration {
     fun pipelineJobExecutor(
         pipelines: PipelineRepository,
         pipelineService: PipelineService,
+        authoring: AuthoringGuard,
         workspaces: WorkspaceRepository,
         users: UserService,
         runner: RecordingExecutionRunner,
@@ -77,6 +108,7 @@ class SchedulerWebConfiguration {
         PipelineJobExecutor(
             pipelines = pipelines,
             pipelineService = pipelineService,
+            authoring = authoring,
             workspaces = workspaces,
             users = users,
             runner = runner,

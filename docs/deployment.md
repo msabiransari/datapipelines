@@ -1,9 +1,9 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.67
+**Status:** v1.68
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-11-10
+**Last updated:** 2026-11-11
 
 ---
 
@@ -990,6 +990,25 @@ or its current version was discarded), the server **refuses to start** and write
 and an `event=endpoint.conversion.refused_summary` line with the fix — on the previous version, release that pipeline
 or delete the API, then upgrade again. There is no version floor, no `Recreate` step and no other runbook.
 
+**Schedules join the same conversion (#786 U2).** In the same startup step, before the scheduler dispatches anything,
+every live pipeline schedule still following its pipeline's current version (payload schema 1,
+`"version": "current"`) is pinned to the exact version CURRENT names at that moment (schema 2). Only the payload's
+`version` and its schema number change — bindings, parameters, cron, timezone, missed-run policy and notification
+settings are untouched. Each of the schedule's queued runs is pinned from its OWN payload copy: a run queued before an
+edit of the schedule's target still names the old pipeline, and is pinned to the version THAT pipeline's current
+version names — never the schedule's — in the same transaction as its schedule. One
+`event=scheduler.conversion.converted` line per schedule, one `event=scheduler.conversion.converted_run` line per queued
+run (its own pipeline and version) and an `event=scheduler.conversion.summary` total; a restart converts nothing twice.
+A schedule — or a queued run — whose pipeline is missing or has no current version refuses the start exactly as an API
+does: one `event=scheduler.conversion.refused` ERROR line each (`kind=schedule`, or `kind=run` naming the run and its
+schedule; pipeline, `reason=missing_pipeline|no_versions|no_current`) and an `event=scheduler.conversion.refused_summary`
+line — on the previous version, release that pipeline or delete the schedule, then upgrade again. Every API, schedule
+and queued run is checked before anything is written, so a refusal leaves all of them unconverted. Every schedule and
+queued run converts in ONE transaction: a target that loses its current version during the conversion, or any write
+that fails, rolls back every schedule and run already converted in that start and refuses the start the same way —
+nothing is left half converted. A current version that is a DRAFT the deployment does
+not run converts to that draft pin and keeps refusing at run, as before.
+
 ### 8.3 Upgrade procedure (recommended)
 
 1. Review release notes for breaking changes.
@@ -1652,6 +1671,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-11 | v1.68 | #786 schedules pin exact versions (U2) | **§8.2:** schedules join the upgrade's in-place conversion — each live schema-1 schedule (and its queued runs) is pinned to the version CURRENT names, only the version selector changing; a schedule whose pipeline has no current version refuses the start with `kind=schedule` lines; both kinds are checked before anything is written. |
 | 2026-11-10 | v1.67 | #786 API versions, exact pins (U1) | **§8.2:** the upgrade to API versions — stop the one server, apply, read the conversion report, or the refusal list with its fix (release the pipeline or delete the API on the previous version, then upgrade). No floor, no `Recreate`. Schedules join the same step in #786's second unit. |
 | 2026-11-09 | v1.66 | #863 merge follow-up | **§6.4/§8.3:** clarify Eviction API versus Deployment-rollout protection, soft versus hard skew, and single-domain scheduling without `minDomains`; document signed 32-bit availability limits. Correct the default-environment description and render verdict count (141), including upper-bound and disabled-field checks. |
 | 2026-11-08 | v1.65 | #863 egress proxy availability | **§6.4:** the proxy's optional availability blocks, both OFF by default (the one-replica default render unchanged): `lake.egressProxy.replicaCount` is render-validated (whole, > 0, unquoted); `podDisruptionBudget` renders a `policy/v1` PDB selecting only the proxy pods (the Deployment's own selector, never a value), with `minAvailable` ≥ 1 and strictly below `replicaCount` — `minAvailable = replicaCount` deadlocks every voluntary eviction and is refused, enabled on the one-replica default included; `topologySpreadConstraints` renders one best-effort constraint whose `labelSelector` is always the proxy's own (`maxSkew` whole > 0; `whenUnsatisfiable` `ScheduleAnyway`/`DoNotSchedule`; non-empty `topologyKey`); disabled blocks are inert. Chart 0.3.0 → 0.4.0. **§8.3:** the availability upgrade note — a replaced proxy pod fails in-flight managed reads, retried by httpfs on a fresh connection within the bounded budget; leases protect snapshots independently; keep the budget off on one node. CI paragraph: the verdict count is re-measured (133) and the egress/availability cases named. `helm-check.sh` gains `(j)`/`(j2)` renders and ten `(j-r)` refusals. |

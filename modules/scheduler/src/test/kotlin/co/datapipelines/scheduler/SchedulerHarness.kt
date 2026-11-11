@@ -155,7 +155,9 @@ internal class SettableJavaClock(
  */
 internal class FakeExecutor : JobExecutor {
     override val id: String = ID
-    override val payloadSchemaVersion: Int = 1
+
+    /** The schema this executor writes; a test raises it to model an upgraded executor over rows saved before (#786 D.2). */
+    @Volatile override var payloadSchemaVersion: Int = 1
 
     val prepared = CopyOnWriteArrayList<UUID>()
     val started = CopyOnWriteArrayList<UUID>()
@@ -183,12 +185,27 @@ internal class FakeExecutor : JobExecutor {
 
     @Volatile var duringValidate: (() -> Unit)? = null
 
+    /** #786 D.2 — the stored schema number each [validate] call received, in call order. */
+    val validatedSchemas: MutableList<Int> = java.util.concurrent.CopyOnWriteArrayList()
+
+    /** #786 D.2 — the stored schema number each [prepare] call received, in call order. */
+    val preparedSchemas: MutableList<Int> = java.util.concurrent.CopyOnWriteArrayList()
+
     override fun validate(
         workspaceId: UUID,
         payload: JsonNode,
         parameters: JsonNode,
+        payloadSchemaVersion: Int,
     ): String {
         validateCalls.incrementAndGet()
+        validatedSchemas += payloadSchemaVersion
+        if (payloadSchemaVersion != this.payloadSchemaVersion) {
+            throw ScheduleException(
+                ScheduleErrorCodes.PAYLOAD_SCHEMA_UNSUPPORTED,
+                "stored schema $payloadSchemaVersion",
+                mapOf("stored" to payloadSchemaVersion, "supported" to this.payloadSchemaVersion),
+            )
+        }
         duringValidate?.invoke()
         val job = payload.path("job").asText()
         if (job.isBlank()) throw ScheduleException(ScheduleErrorCodes.PAYLOAD_INVALID, "no job", mapOf("reason" to "job_missing"))
@@ -198,6 +215,7 @@ internal class FakeExecutor : JobExecutor {
 
     override fun prepare(admission: Admission): Preparation {
         prepared += admission.runId
+        preparedSchemas += admission.payloadSchemaVersion
         duringPrepare?.also { duringPrepare = null }?.invoke(admission)
         refuseAtPrepare?.let { return it }
         return Preparation.Prepared(
