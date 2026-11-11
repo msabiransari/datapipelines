@@ -6,6 +6,7 @@
   "nodes": [
     {
       "node_id": "n0",
+      "entity_id": "a3264f9f-02a6-59e2-87d0-e03a289638b9",
       "family": "parameter_set",
       "name": "test_widget/filters",
       "display_name": "Filters",
@@ -26,6 +27,7 @@
     },
     {
       "node_id": "n1",
+      "entity_id": "55a33d00-5023-5a09-b3e5-0f13df698e98",
       "family": "template",
       "name": "test_widget/query",
       "display_name": "Query",

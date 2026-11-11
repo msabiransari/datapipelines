@@ -6,6 +6,7 @@
   "nodes": [
     {
       "node_id": "n0",
+      "entity_id": "b650fb67-566b-5d09-ab2b-99fd147d566a",
       "family": "schedule",
       "name": "nightly test widget",
       "display_name": "Nightly Test Widget",
@@ -28,6 +29,7 @@
     },
     {
       "node_id": "n1",
+      "entity_id": "d86b260d-d1e2-5438-a934-b7f83ba82b0d",
       "family": "pipeline",
       "name": "test_widget/report",
       "display_name": "Report",
