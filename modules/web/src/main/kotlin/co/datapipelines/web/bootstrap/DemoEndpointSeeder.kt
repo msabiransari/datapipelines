@@ -83,6 +83,10 @@ private const val MAX_LOG_MESSAGE_CHARS = 300
  * to the pipeline's RELEASED current, released through the coordinator. Both triggers — a manifest that drops a path
  * and the blank-key kill switch — share this one producer.
  *
+ * Known limitation (owner ruling 2026-11-11, tracked by #897): where authoring is DISABLED the version verbs refuse, so
+ * a stale API holding release history is NOT retired — it keeps serving to any other valid key bound to it, and one
+ * INFO line (`event=demo.endpoint_retire_deferred`) says so. The kill switch still revokes the managed demo key.
+ *
  * ## The principal
  * The SYSTEM service account (auth.md §4.5) — the same actor the example content and every
  * automated write are attributed to, so `created_by` on a seeded endpoint names a row a reader
@@ -435,8 +439,10 @@ class DemoEndpointSeeder(
      * #889 — one stale API retired through the lifecycle's verbs; true when this boot changed it.
      * - Every version a DRAFT: the guarded entity deletion admits it, so the API is deleted (the pre-#786 path).
      * - Every version DISCARDED: already retired — no write and no line, so a retired API costs a boot nothing.
-     * - Release history on an authoring-disabled deployment: the version verbs refuse there by design (record §12), so
-     *   the API keeps serving and ONE INFO line says why; nothing is attempted, so nothing fails.
+     * - Release history on an authoring-disabled deployment: NOT retired. The version verbs refuse there by design
+     *   (record §12), so nothing is attempted and nothing fails; the API keeps serving to every other valid key bound to
+     *   it, and ONE INFO line per boot says so. A known limitation accepted for #889 by owner ruling (2026-11-11);
+     *   retraction on these deployments is #897. The blank-key branch still revokes the managed key itself.
      * - Otherwise the working draft is purged, then every RELEASED version discarded, oldest first: the pointer only
      *   ever recomputes to a version that is itself discarded later, and ends at none — nothing serves.
      */
@@ -460,7 +466,8 @@ class DemoEndpointSeeder(
             !authoring.developmentPosture -> {
                 log.info(
                     "event=demo.endpoint_retire_deferred path={} pipeline={} message=\"authoring is disabled on this " +
-                        "deployment, so the stale demo API's released versions cannot be discarded here; it keeps serving\"",
+                        "deployment, so the stale demo API is NOT retired: its released versions stay and it keeps " +
+                        "serving to any other valid key bound to it (known limitation, #897)\"",
                     endpoint.pathPattern,
                     pipeline,
                 )

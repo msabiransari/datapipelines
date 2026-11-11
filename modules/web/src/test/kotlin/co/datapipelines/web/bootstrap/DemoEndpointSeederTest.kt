@@ -636,17 +636,66 @@ class DemoEndpointSeederTest {
         happyStubs()
         val path = "/demo/nyc/mobility/gone_away"
         every { endpointRepository.findByWorkspace(demoId) } returns listOf(endpoint(path, "nyc/mobility/gone_away"))
-        holds(path, PipelineVersionStatus.RELEASED)
+        holds(path, PipelineVersionStatus.RELEASED, PipelineVersionStatus.DRAFT)
 
         val lines = logLines { seeder(authoringEnabled = false).afterSingletonsInstantiated() }
 
         assertAll(
             { verify(exactly = 0) { publishService.unpublish(any(), any()) } },
             { verify(exactly = 0) { versionService.discardVersion(any(), any(), any()) } },
-            { lines.count { it.second.startsWith("event=demo.endpoint_retire_deferred path=$path") } shouldBe 1 },
+            { verify(exactly = 0) { versionService.discardDraft(any(), any(), any()) } },
+            { deferredLines(lines, path) shouldBe 1 },
             { lines.filter { it.first.isGreaterOrEqual(Level.WARN) } shouldBe emptyList() },
+            // The API was NOT retired: the boot's count says so, and nothing claims otherwise.
+            { lines.single { it.second.startsWith("event=demo.api_key_seeded") }.second.contains("retired=0") shouldBe true },
+            { lines.filter { it.second.startsWith("event=demo.endpoint_retired") } shouldBe emptyList() },
         )
     }
+
+    @Test
+    fun `the kill switch on an authoring-disabled deployment defers the released API and still revokes the managed key`() {
+        // Owner ruling 2026-11-11 (#889 round 2): the gap is accepted, #897 tracks retraction. The three facts the
+        // ruling pins: no discard or delete is attempted, the managed demo key is still revoked, one deferral line.
+        happyStubs()
+        val path = "/demo/nyc/mobility/revenue-by-borough"
+        every { endpointRepository.findByWorkspace(demoId) } returns listOf(endpoint(path, "nyc/mobility/revenue_by_borough"))
+        holds(path, PipelineVersionStatus.RELEASED, PipelineVersionStatus.DRAFT)
+        val managed = issued(key).record
+        every { keyRepository.findByWorkspaceAndName(demoId, "demo-public-key") } returns listOf(managed)
+        every { apiKeyService.revokeWorkspaceEndpointKey(managed.id, demoId, systemActorId) } returns true
+
+        val lines = logLines { seeder(demoApiKey = "", authoringEnabled = false).afterSingletonsInstantiated() }
+
+        assertAll(
+            { verify(exactly = 0) { publishService.unpublish(any(), any()) } },
+            { verify(exactly = 0) { versionService.discardVersion(any(), any(), any()) } },
+            { verify(exactly = 0) { versionService.discardDraft(any(), any(), any()) } },
+            { verify(exactly = 1) { apiKeyService.revokeWorkspaceEndpointKey(managed.id, demoId, systemActorId) } },
+            { verify(exactly = 0) { keyService.issue(any(), any(), any(), any(), any(), any(), any()) } },
+            { deferredLines(lines, path) shouldBe 1 },
+            { lines.filter { it.first.isGreaterOrEqual(Level.WARN) } shouldBe emptyList() },
+            {
+                lines.single { it.second.startsWith("event=demo.api_key_unset") }.second shouldBe
+                    "event=demo.api_key_unset workspace=demo retired=0 revoked=1"
+            },
+        )
+    }
+
+    /**
+     * The deferral lines for [path] in [lines] that state the ruling plainly: the API keeps serving to other valid keys
+     * and #897 tracks it — the line must never read as a retirement.
+     */
+    private fun deferredLines(
+        lines: List<Pair<Level, String>>,
+        path: String,
+    ): Int =
+        lines.count { (level, message) ->
+            level == Level.INFO &&
+                message.startsWith("event=demo.endpoint_retire_deferred path=$path ") &&
+                message.contains("is NOT retired") &&
+                message.contains("keeps serving to any other valid key bound to it") &&
+                message.contains("#897")
+        }
 
     @Test
     fun `a failing retirement is one ERROR line and the next stale API is still retired`() {
