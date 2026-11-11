@@ -252,4 +252,72 @@
     motionPreference.addEventListener('change', configureMotion);
   }
   configureMotion();
+
+  /* ------------------------------------------------------
+     Docs anchors (713). The docs pages skip-render the body's
+     off-screen parts (content-visibility in docs.css). The
+     browser computes its jump-to-fragment destination from the
+     first layout — where the parts above the target are still
+     placeholders — and never re-runs it, so a deep link rests
+     short of its heading. And the site chrome scrolls SMOOTH
+     everywhere (scroll-behavior in site.css), so a plain
+     re-scroll only starts an animation across tens of
+     thousands of pixels: correct and instant here means
+     behavior 'instant', not the sheet's smooth. CSS alone
+     cannot express "the parts before the one containing
+     :target" (:has() may not nest inside :has()), so first
+     mark every part above the target rendered (the class
+     turns its content-visibility off — class state, like the
+     tabs above, never inline styles), then scroll again —
+     bounded, one frame apart — until the heading holds its
+     position in the viewport: each scrollIntoView re-reads
+     the live layout, so the walk ends on true heights no
+     matter which of the page's scroll writers ran last. Runs
+     after the stylesheet (deferred scripts wait for the
+     CSSOM), on load and on hashchange — the docs' in-page
+     cross-references go through the same walk. No hash, a
+     missing target, or a page without doc parts: untouched.
+     ------------------------------------------------------ */
+  function clearRenderedParts() {
+    Array.prototype.forEach.call(
+      document.querySelectorAll('.doc-part.is-rendered'),
+      function (part) { part.classList.remove('is-rendered'); }
+    );
+  }
+
+  function scrollToFragmentTarget() {
+    var hash = window.location.hash;
+    if (!hash || hash === '#') {
+      return;
+    }
+    var id;
+    try {
+      id = decodeURIComponent(hash.slice(1));
+    } catch (e) {
+      id = hash.slice(1);
+    }
+    var target = document.getElementById(id);
+    var part = target && target.closest ? target.closest('.doc-part') : null;
+    if (!part) {
+      return;
+    }
+    clearRenderedParts();
+    var cursor = part.previousElementSibling;
+    while (cursor) {
+      if (cursor.classList && cursor.classList.contains('doc-part')) {
+        cursor.classList.add('is-rendered');
+      }
+      cursor = cursor.previousElementSibling;
+    }
+    var attempts = 0;
+    (function correct() {
+      target.scrollIntoView({ behavior: 'instant', block: 'start' });
+      var box = target.getBoundingClientRect();
+      if (attempts++ < 10 && (box.top < -2 || box.top > window.innerHeight * 0.5)) {
+        window.requestAnimationFrame(correct);
+      }
+    })();
+  }
+  scrollToFragmentTarget();
+  window.addEventListener('hashchange', scrollToFragmentTarget);
 })();
