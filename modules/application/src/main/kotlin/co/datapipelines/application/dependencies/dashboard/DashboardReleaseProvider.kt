@@ -88,8 +88,9 @@ class DashboardReleaseProvider(
 
         /**
          * A34 — the constraint names [set] does not declare: a dashboard edge whose set lacks a bound name violates its
-         * constraint. The contract has no diagnostic slot on an edge yet (G4 projects one), so this is the evaluation G4
-         * and the dialogs read; the save-time validator already refuses such a body (`DashboardValidator`).
+         * constraint. The release planning walk evaluates it on every constrained edge ([ParameterNamesConstraint], #873
+         * R3) and refuses at that edge; the tree route's display of the same fact is G4's. The save-time validator
+         * already refuses such a body (`DashboardValidator`).
          */
         fun violations(
             names: List<String>,

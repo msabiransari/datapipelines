@@ -1,5 +1,6 @@
 package co.datapipelines.application.dependencies
 
+import co.datapipelines.application.dependencies.dashboard.ParameterNamesConstraint
 import co.datapipelines.dependencies.Authority
 import co.datapipelines.dependencies.CycleHandling
 import co.datapipelines.dependencies.Deadline
@@ -104,6 +105,9 @@ class ReleasePlanningWalk(
     /** Stops at the first cycle, as `ReleaseGraph` refused there: no read after the refusal can overtake it (#868 R1). */
     private val walker = DependencyWalker(registry, ReleaseGraphLimits.of(bounds, planning), clock, CycleHandling.STOP)
 
+    /** A34 (#873 R3): every walk — the plan's and the guarded re-walk — evaluates the dashboard set edges' bound names. */
+    private val parameterNames = ParameterNamesConstraint(registry, planning.resolveBatchSize, bounds.maxBlockers)
+
     /** The closure of [root] in the planning transaction; null when the root does not resolve. */
     fun plan(
         root: ReleaseNodeIdentity,
@@ -141,9 +145,22 @@ class ReleasePlanningWalk(
         // #786 R2: the walker checks the deadline BEFORE each provider read, so a read that runs past it — the final
         // needed batch, one answering Missing, or a traversal finished from the memo after it — would otherwise return a
         // closure read outside its budget. The cumulative deadline covers the whole walk: expired at its end, refused.
-        if (context.deadline.expired()) throw metadataUnavailable(root, DeadlineExceeded(ReleaseDependencyFamilies.keyOf(root.family)))
-        return ReleaseClosureAdapter.closure(root, graph)
+        if (context.deadline.expired()) throw metadataUnavailable(root, expiredAt(root))
+        val closure = ReleaseClosureAdapter.closure(root, graph) ?: return null
+        // #873 R3 (A34): a dashboard → parameter set edge whose bound names the exact set version lacks is the dashboard's
+        // native binding refusal, located at that edge — at plan, and again on the guarded re-walk before any flip. Its
+        // read (a walk without such an edge issues none) is held to the same cumulative deadline.
+        val read =
+            try {
+                parameterNames.check(graph, context)
+            } catch (expired: DeadlineExceeded) {
+                throw metadataUnavailable(root, expired)
+            }
+        if (read && context.deadline.expired()) throw metadataUnavailable(root, expiredAt(root))
+        return closure
     }
+
+    private fun expiredAt(root: ReleaseNodeIdentity) = DeadlineExceeded(ReleaseDependencyFamilies.keyOf(root.family))
 
     companion object {
         /**
