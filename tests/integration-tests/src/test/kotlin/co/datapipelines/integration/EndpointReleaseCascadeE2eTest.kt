@@ -395,8 +395,8 @@ class EndpointReleaseCascadeE2eTest {
         sql: String,
         vararg args: String,
     ): AuditNode {
-        val (uuid, current, status, hash) = rows(sql, *args).single().split(" | ")
-        return AuditNode("[\"$family\",\"$key\",$version]", uuid, current, status, hash)
+        val columns = rows(sql, *args).single().split(" | ")
+        return AuditNode("[\"$family\",\"$key\",$version]", columns[0], columns[1], columns[2], columns[3])
     }
 
     /** The API's closure as the oracle sees it: n0 the API v1, n1 the pipeline v2, n2/n3 the templates in pin order. */
