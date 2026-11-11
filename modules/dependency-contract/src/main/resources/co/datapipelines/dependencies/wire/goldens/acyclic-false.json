@@ -6,6 +6,7 @@
   "nodes": [
     {
       "node_id": "n0",
+      "entity_id": "d86b260d-d1e2-5438-a934-b7f83ba82b0d",
       "family": "pipeline",
       "name": "test_widget/report",
       "display_name": "Report",
@@ -26,6 +27,7 @@
     },
     {
       "node_id": "n1",
+      "entity_id": "da5436fa-975d-54d1-8105-93a4a4dd5cb5",
       "family": "pipeline",
       "name": "test_widget/child",
       "display_name": "Child",

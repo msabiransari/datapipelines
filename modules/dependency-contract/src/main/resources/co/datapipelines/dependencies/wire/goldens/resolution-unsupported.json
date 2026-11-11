@@ -6,6 +6,7 @@
   "nodes": [
     {
       "node_id": "n0",
+      "entity_id": "5dfd7595-d2f5-59cb-bbda-6cd5e19e2b47",
       "family": "dashboard",
       "name": "test_widget/sales",
       "display_name": "Sales",
@@ -26,6 +27,7 @@
     },
     {
       "node_id": "n1",
+      "entity_id": null,
       "family": "visualization",
       "name": "test_widget/chart",
       "display_name": null,
