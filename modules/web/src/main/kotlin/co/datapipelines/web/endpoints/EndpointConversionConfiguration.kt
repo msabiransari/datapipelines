@@ -45,9 +45,10 @@ interface ConversionAttempt {
 
     /**
      * Re-reads the family's candidates UNDER the runner's locks and writes their conversion. Throws
-     * [StartupConversionConflict] when a candidate appeared, vanished or moved outside [guarded] since [plan], or a CAS
-     * lost (the runner rolls back and re-plans); any other throw refuses the startup. Returns what may only happen
-     * after the joint commit.
+     * [StartupConversionConflict] when a candidate is outside [guarded] or this family's planned entity locks, or a CAS
+     * lost (the runner rolls back and re-plans). Rows already converted or removed no longer match the family's
+     * legacy-only selector and are skipped; new rows covered by its locks can convert. Any other throw refuses the
+     * startup. Returns what may only happen after the joint commit.
      */
     fun convert(guarded: Set<UUID>): CommitEffects
 }
