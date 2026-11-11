@@ -463,10 +463,24 @@ version — a template can lose version 1 to a preserved-number import or a draf
 for the entity, #733, #737), a pipeline's child pin `pipeline_not_found` / `pipeline_version_not_found` /
 `pipeline_reference_not_released` (`status: DISCARDED`). A present-but-DRAFT pin refuses
 `<family>.release.dependency_not_released` (409, the import-landing precedent, `reason: not_released` in the shared
-blockers shape); no save rule lets a once-released body pin a draft, so that branch is defensive. The dashboard and
-visualization restores have no such branch: they refuse the missing pin only and admit a present-but-DRAFT one. The 400
-answers first. Repair is bottom-up: restore the dependency, then the dependent. A refusal writes nothing — status, pointer and
+blockers shape); no save rule lets a once-released body pin a draft, so that branch is defensive. The dashboard,
+visualization and template restores answer the same way since #873: a present-but-DRAFT pin is
+`dashboard.release.dependency_not_released` / `visualization.release.dependency_not_released` /
+`template.release.dependency_not_released` (409, `reason: not_released`), a missing or DISCARDED import of a template the
+save rules' `template.validation.import_not_found` (400, `reason: discarded` for a DISCARDED version). The 400 answers
+first. Repair is bottom-up: restore the dependency, then the dependent. A refusal writes nothing — status, pointer and
 audit stand.
+
+**The recheck is transitive (#873, record §25.2 row G2, §25.4 D15).** Every family's restore walks the stored body's
+WHOLE closure, not its direct pins only: a RELEASED dependency's own pins can have been planted or changed since too, and
+a restore lands RELEASED with nobody consenting. The stored body of the DISCARDED version is read through its family's
+dependency provider and its references are the roots of one metadata-only walk under the writer guard the restore already
+holds (no probe, no evidence run, no datasource, type or dialect revalidation). A DISCARDED or MISSING node anywhere below
+stays terminal and is the family's native 400 AT THE PIN it hides under, its details carrying the full `path` and the
+intermediate nodes as `via` (`[{family, name, version}]`, the direct pin first); a DRAFT node below is a blocker of the 409
+with the same `via`. So a dashboard whose RELEASED visualization's transform template is now DRAFT does not restore, nor a
+template whose RELEASED library imports a DRAFT library. A cycle or a walk bound found below answers the restored family's
+`dependency_cycle` / `limit_exceeded`, an expired planning deadline its `metadata_unavailable` (503).
 
 **The lens.** `templates_used_by` and the template screen narrow the visualization arm like the others: a hidden
 visualization is never named, and a narrowing view reports RELEASED rows only. The refusals need no lens: every verb above
@@ -969,6 +983,15 @@ that makes it safe:
 
 Release ordering is therefore always templates-first. Pins are immutable references, so no
 cycle is possible.
+
+**Imports are release dependencies too (#873, record §7.2, §23.3).** A template's declared `imports` (exact
+`{id, version}` pins to libraries) are the same rule one level in: a template is released only when every version its
+import closure pins is RELEASED, or is selected in the same release plan, which releases the selected libraries first
+and the importer last in one transaction. The walk goes beneath a RELEASED library — its own imports are judged too —
+and a diamond loads a shared library once (two edge occurrences) and releases it once. An unselected DRAFT library, or
+a DISCARDED or missing one, is a `template.release.dependency_not_released` blocker; nothing is restored for you. An
+import cycle (unreachable through the save rules, which refuse one) is `template.release.dependency_cycle`. Saving is
+unchanged: a DRAFT may import a DRAFT. A template restore rechecks the same closure (§3.5.3, "The recheck is transitive").
 
 ---
 
