@@ -4,6 +4,7 @@ import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceProperties
 import co.datapipelines.datasources.DatasourceReference
 import co.datapipelines.datasources.DatasourceTestOutcome
+import co.datapipelines.datasources.ParameterSetDatasourceReference
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.datasources.DatasourcePoolForm
 import io.kotest.matchers.shouldBe
@@ -325,11 +326,12 @@ class DatasourcesTemplateRenderTest {
                 "partials/datasource-delete",
                 context().apply {
                     fillDeleteModel()
+                    setVariable("inUse", true)
                     setVariable(
                         "usages",
                         listOf(
-                            DatasourceReference("sales_daily", 3, "RELEASED", "extract"),
-                            DatasourceReference("sales_daily", 4, "DRAFT", "extract"),
+                            DatasourceReference("sales_daily", 3, "RELEASED", "extract", WORKSPACE),
+                            DatasourceReference("sales_daily", 4, "DRAFT", "extract", WORKSPACE),
                         ),
                     )
                     setVariable("usedByPipelines", listOf("sales_daily"))
@@ -342,6 +344,57 @@ class DatasourcesTemplateRenderTest {
         html shouldContain "(v3 released)"
         html shouldContain "(v4 draft)"
         // The refusal cannot be clicked past: there is no form and no button on this branch.
+        html shouldNotContain "hx-post=\"/partials/datasources/pg-prod/delete\""
+        html shouldNotContain "ds-button-danger"
+    }
+
+    /** #873 §F.3 e: a set-only reference — a DISCARDED version included — is in use: listed with its link, no button. */
+    @Test
+    fun `a datasource referenced only by a parameter-set selector renders the selector and offers NO confirm button`() {
+        val html =
+            engine().process(
+                "partials/datasource-delete",
+                context().apply {
+                    fillDeleteModel()
+                    setVariable("inUse", true)
+                    setVariable(
+                        "setUsages",
+                        listOf(
+                            ParameterSetDatasourceReference("acme/filters", 2, "DISCARDED", "parameters[0].source.datasource", WORKSPACE),
+                        ),
+                    )
+                    setVariable("usedBySets", listOf("acme/filters"))
+                },
+            )
+
+        html shouldContain "id=\"ds-delete-in-use\""
+        html shouldContain "data-usage-kind=\"parameter_set\""
+        html shouldContain "href=\"/parameter-sets?q=acme/filters\""
+        html shouldContain "parameters[0].source.datasource"
+        html shouldContain "(v2 discarded)"
+        html shouldNotContain "hx-post=\"/partials/datasources/pg-prod/delete\""
+        html shouldNotContain "ds-button-danger"
+    }
+
+    /**
+     * #873 §F.3 e — the delete refusal's details are scoped to the caller's workspaces: a datasource in use only where
+     * the caller cannot read is still refused (no button), and the dialog names nothing — no rows, no count, no link.
+     */
+    @Test
+    fun `a datasource in use only outside the caller's scope is refused and names nothing`() {
+        val html =
+            engine().process(
+                "partials/datasource-delete",
+                context().apply {
+                    fillDeleteModel()
+                    setVariable("inUse", true)
+                },
+            )
+
+        html shouldContain "id=\"ds-delete-in-use\""
+        html shouldContain "cannot be deleted: it is in use."
+        html shouldNotContain "id=\"ds-delete-usages\""
+        html shouldNotContain "pipeline(s)"
         html shouldNotContain "hx-post=\"/partials/datasources/pg-prod/delete\""
         html shouldNotContain "ds-button-danger"
     }
@@ -413,8 +466,11 @@ class DatasourcesTemplateRenderTest {
     private fun WebContext.fillDeleteModel() {
         setVariable("datasource", datasource("pg-prod"))
         setVariable("forbidden", null)
+        setVariable("inUse", false)
         setVariable("usages", emptyList<DatasourceReference>())
         setVariable("usedByPipelines", emptyList<String>())
+        setVariable("setUsages", emptyList<ParameterSetDatasourceReference>())
+        setVariable("usedBySets", emptyList<String>())
     }
 
     /**
@@ -582,4 +638,9 @@ class DatasourcesTemplateRenderTest {
                 },
             )
         }
+
+    private companion object {
+        /** The workspace the rendered references live in — the template never reads it (the controller scopes). */
+        val WORKSPACE: java.util.UUID = java.util.UUID(0, 1)
+    }
 }

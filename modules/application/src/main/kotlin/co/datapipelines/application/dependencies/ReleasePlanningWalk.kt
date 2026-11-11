@@ -16,6 +16,7 @@ import co.datapipelines.dependencies.ResolveContext
 import co.datapipelines.pipeline.release.ReleaseBounds
 import co.datapipelines.pipeline.release.ReleaseClosure
 import co.datapipelines.pipeline.release.ReleaseNodeIdentity
+import co.datapipelines.pipeline.release.ReleasePrerequisite
 import co.datapipelines.pipeline.release.ReleaseRefusal
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.transaction.PlatformTransactionManager
@@ -80,6 +81,12 @@ object ReleaseGraphLimits {
         )
 }
 
+/** A planning walk's split snapshot (#873 §F.3 b): the artifact [closure] and the datasource [prerequisites] it needs. */
+data class PlannedClosure(
+    val closure: ReleaseClosure,
+    val prerequisites: List<ReleasePrerequisite>,
+)
+
 /**
  * The release closure read through the neutral walk (#868 G1 section D.3): the registry's release families, the
  * [ReleaseClosureAdapter], purpose `RELEASE_PLANNING`, the caller as a member authority and the [deadline] supplier.
@@ -113,19 +120,28 @@ class ReleasePlanningWalk(
     fun plan(
         root: ReleaseNodeIdentity,
         actor: UUID,
-    ): ReleaseClosure? = planningTransactions.execute { walk(root, actor, MetadataSnapshot.SINGLE_REPEATABLE_READ) }
+    ): ReleaseClosure? = planned(root, actor)?.closure
+
+    /**
+     * The closure of [root] and its datasource prerequisites (#873 §F.3 b), read in ONE planning transaction: what a plan
+     * wire is built from (`ReleasePlan.session(closure, maxWireBytes, prerequisites)`). Null when the root does not resolve.
+     */
+    fun planned(
+        root: ReleaseNodeIdentity,
+        actor: UUID,
+    ): PlannedClosure? = planningTransactions.execute { walk(root, actor, MetadataSnapshot.SINGLE_REPEATABLE_READ) }
 
     /** The closure of [root] in the caller's transaction; null when the root does not resolve. */
     fun walkInCurrentTransaction(
         root: ReleaseNodeIdentity,
         actor: UUID,
-    ): ReleaseClosure? = walk(root, actor, MetadataSnapshot.READ_COMMITTED)
+    ): ReleaseClosure? = walk(root, actor, MetadataSnapshot.READ_COMMITTED)?.closure
 
     private fun walk(
         root: ReleaseNodeIdentity,
         actor: UUID,
         snapshot: MetadataSnapshot,
-    ): ReleaseClosure? {
+    ): PlannedClosure? {
         val context =
             ResolveContext(
                 root.workspaceId,
@@ -149,7 +165,7 @@ class ReleasePlanningWalk(
         if (context.deadline.expired()) throw metadataUnavailable(root, expiredAt(root))
         val closure = ReleaseClosureAdapter.closure(root, graph) ?: return null
         checkBoundNames(root, graph, context)
-        return closure
+        return PlannedClosure(closure, ReleaseClosureAdapter.prerequisites(graph))
     }
 
     /**

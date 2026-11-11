@@ -486,7 +486,8 @@ class DefaultDatasourceRegistry(
      * per referencing NODE — with the pipeline VERSION whose body holds it — because a
      * reference that lives only in a released v1 is exactly the one the old
      * `current_version`-only join could not see, and the operator's next move is to go and
-     * change that node in that version.
+     * change that node in that version. #873 §F.3 e adds the parameter-set selectors, by the
+     * same any-version rule.
      */
     override fun delete(name: String): DeleteResult =
         // #841 (G0): the managed check, the in-use scan and the soft delete under the datasource's prerequisite key
@@ -494,12 +495,15 @@ class DefaultDatasourceRegistry(
         repository.writes.definition(name) {
             refuseManagedWrite(name, stored = repository.findByName(name)?.toDatasource(), incoming = null)
             val referencing = references.referencesTo(name)
-            if (referencing.isNotEmpty()) {
+            // #873 §F.3 e: a parameter-set selector locks the name too — the same refusal, both families listed.
+            val referencingSets = references.parameterSetReferencesTo(name)
+            if (referencing.isNotEmpty() || referencingSets.isNotEmpty()) {
                 return@definition DeleteResult(
                     deleted = false,
                     name = name,
                     errorCode = DatasourceErrorCodes.IN_USE,
                     references = referencing,
+                    parameterSetReferences = referencingSets,
                 )
             }
             val deleted = repository.softDelete(name)

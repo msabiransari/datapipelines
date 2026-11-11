@@ -639,9 +639,11 @@ data class DeleteResult(
     val deleted: Boolean,
     val name: String,
     val errorCode: String? = null,          // 'datasource.in_use' when deleted = false
-    val references: List<DatasourceReference> = emptyList()  // the ANY-VERSION scan (§6.2): one entry per referencing NODE
+    val references: List<DatasourceReference> = emptyList(),  // the ANY-VERSION scan (§6.2): one entry per referencing NODE
+    val parameterSetReferences: List<ParameterSetDatasourceReference> = emptyList()  // #873: one per selector occurrence
 ) {
-    val referencingPipelines: List<String> get() = references.map { it.pipelineName }.distinct()
+    // The lock's evidence, every workspace's; a surface names it only through the caller's scope (§6.2).
+    fun usagesVisibleTo(visibility: ReferenceVisibility): DatasourceUsages
 }
 
 /** One node of one stored pipeline version referencing a datasource — the delete guard's evidence (§6.2). */
@@ -649,7 +651,17 @@ data class DatasourceReference(
     val pipelineName: String,
     val pipelineVersion: Int,               // WHICH stored version carries it — the field the old guard did not have
     val versionStatus: String,              // DRAFT | RELEASED | DISCARDED
-    val nodeId: String
+    val nodeId: String,
+    val workspaceId: UUID                   // where it was found — what a refusal is scoped by; never on a wire
+)
+
+/** #873: one selector of one stored parameter-set version naming a datasource (`parameters[i].source.datasource`). */
+data class ParameterSetDatasourceReference(
+    val parameterSetName: String,
+    val parameterSetVersion: Int,
+    val versionStatus: String,              // DRAFT | RELEASED | DISCARDED
+    val path: String,                       // parameters[i].source.datasource
+    val workspaceId: UUID
 )
 
 /** Which branch of §8A.3 rule 3 ran for one bootstrap entry. */
@@ -693,8 +705,8 @@ data class ValidationResult(
 ### 6.2 In-use check on delete
 
 `DELETE /api/v1/datasources/{name}` fails with `datasource.in_use` if any non-deleted pipeline
-references this name **in any version it has ever stored** — DRAFT, RELEASED and DISCARDED
-alike. Pipeline versions are immutable and executable by explicit version
+or parameter set, in **any** workspace, references this name **in any version it has ever stored** — DRAFT,
+RELEASED and DISCARDED alike (a parameter set through a selector's `parameters[i].source.datasource`, #873). Pipeline versions are immutable and executable by explicit version
 ([Versioning §7.1](versioning.md#71-authoring-reads-return-the-working-version-039)), so a reference living only in a released
 v1 that a later v2 dropped is a live reference: deleting the datasource out from under it fails
 that version's next execution at connect.
@@ -713,11 +725,30 @@ invisible and the delete succeeded.
 
 The error response carries the distinct pipeline names AND one entry per referencing node with
 the pipeline version and that version's status — the shape `template.in_use` uses — because the
-version is what tells the operator which body to go and change.
+version is what tells the operator which body to go and change. Since #873 every `references` entry
+carries `kind` (`pipeline` or `parameter_set`); a parameter-set entry is `{kind, parameter_set,
+parameter_set_version, version_status, path}`, and `referencing_parameter_sets` lists the distinct sets.
+
+**The details are scoped to the caller's workspaces (#873).** The lock counts every workspace's
+references, so a datasource granted to another workspace stays protected while that workspace uses it.
+The refusal NAMES only what the caller may read: a super admin sees every reference; anyone else sees only
+the references in the workspace they act in. A reference outside that scope contributes no name, version,
+link, count or workspace — a datasource in use only elsewhere is refused with empty lists and the message
+"Datasource '…' is in use and cannot be deleted.", the same body however many references lie outside. The
+scope comes from the authenticated caller, never from the request.
+
+**A datasource is a prerequisite node, never released (#873).** In the dependency graph a datasource is a
+leaf that pipelines and parameter sets point at. It has no version and no release status, so a release plan
+lists it in `prerequisites` (never as a node to tick), consent over it is that the named datasource exists
+when the release applies, recreating it under the same name does not invalidate a plan, and planning never
+connects to it. This name lock is what keeps consent by name safe: the name cannot disappear while a stored
+body names it. The release rules are [Versioning §5.3](versioning.md#53-release-lock) (a)–(f).
 
 **The screen asks the same question, first (094).** The datasources list's **Delete** action opens
 a dialog that runs THIS scan before it offers anything, and renders its rows as
-`pipeline › node (v3 released)`. On the in-use branch there is no confirm button at all, so the
+`pipeline › node (v3 released)`, and a parameter-set selector as `set › parameters[i].source.datasource
+(v2 discarded)` with its own link. The rows are scoped exactly as the `409` details are; a datasource in use
+only outside the caller's scope takes the in-use branch with no rows. On the in-use branch there is no confirm button at all, so the
 refusal cannot be clicked past; only an unused datasource gets a confirm, and that confirm names
 it. The dialog and the `409` cannot disagree because they are the same scan — but the POST
 **re-runs** the guard anyway: a pipeline can start referencing the datasource between the dialog

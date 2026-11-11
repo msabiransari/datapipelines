@@ -176,13 +176,17 @@ class ReleaseArtifactSeed(
         artifact("dashboards", "dashboard_versions", "dashboard_id", name, version, status) { BodyCodec.Dashboard.write(body) }
     }
 
-    /** A pipeline version with one DQL node per template pin, then one PIPELINE node per child pin, in order. */
+    /**
+     * A pipeline version with one DQL node per template pin, each reading datasource [source], then one PIPELINE node per
+     * child pin (output to tempdb), in order.
+     */
     fun pipeline(
         name: String,
         version: Int,
         status: PipelineVersionStatus = PipelineVersionStatus.RELEASED,
         templates: List<Pair<String, Int>> = emptyList(),
         children: List<Pair<String, Int>> = emptyList(),
+        source: String = "pg",
     ) {
         jdbc.update(
             "INSERT INTO pipelines (id, name, display_name, owner_id, current_version, workspace_id)" +
@@ -203,7 +207,7 @@ class ReleaseArtifactSeed(
                             id = "n$index",
                             description = "",
                             type = NodeType.DQL,
-                            source = "pg",
+                            source = source,
                             template = TemplateRef(pin.first, pin.second),
                             output = NodeOutput.Caller,
                             dependsOn = emptyList(),

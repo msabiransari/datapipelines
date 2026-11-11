@@ -21,7 +21,6 @@ import co.datapipelines.parameters.ParameterSetRepository
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineVersionStatus.DRAFT
 import co.datapipelines.pipeline.PipelineVersionStatus.RELEASED
-import co.datapipelines.pipeline.release.PipelineDependencySource
 import co.datapipelines.pipeline.release.ReleaseBounds
 import co.datapipelines.pipeline.release.ReleaseClosure
 import co.datapipelines.pipeline.release.ReleaseFamily
@@ -70,13 +69,9 @@ class ArtifactGraphFactsPostgresTest {
 
     private val descriptors =
         listOf(
-            ReleaseDependencyFamilies.descriptor(
-                ReleaseFamily.PIPELINE,
-                PipelineDependencySource(PipelineRepository(ceiling.jdbc)),
-                ceiling,
-            ),
+            PipelineReleaseFamily.descriptor(PipelineRepository(ceiling.jdbc), ceiling),
             TemplateReleaseProvider(TemplateRepository(ceiling.jdbc), ceiling).descriptor(),
-            ParameterSetReleaseProvider(ParameterSetRepository(ceiling.jdbc), ceiling).descriptor(),
+            ParameterSetReleaseProvider(ParameterSetRepository(ceiling.jdbc), TemplateRepository(ceiling.jdbc), ceiling).descriptor(),
             VisualizationReleaseProvider(visualizations, ceiling).descriptor(),
             DashboardReleaseProvider(DashboardRepository(ceiling.jdbc), ceiling).descriptor(),
         )

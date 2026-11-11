@@ -56,7 +56,13 @@ class DatasourceRegistryIntegrationTest {
         pipeline: String,
         version: Int = 1,
         nodeId: String = "n1",
-    ) = DatasourceReference(pipelineName = pipeline, pipelineVersion = version, versionStatus = "RELEASED", nodeId = nodeId)
+    ) = DatasourceReference(
+        pipelineName = pipeline,
+        pipelineVersion = version,
+        versionStatus = "RELEASED",
+        nodeId = nodeId,
+        workspaceId = java.util.UUID(0, 1),
+    )
 
     private fun registry(
         references: DatasourceReferences = DatasourceReferences.NONE,
@@ -465,7 +471,7 @@ class DatasourceRegistryIntegrationTest {
 
         result.deleted shouldBe false
         result.errorCode shouldBe DatasourceErrorCodes.IN_USE
-        result.referencingPipelines shouldBe listOf("pipeline_a")
+        result.references.map { it.pipelineName } shouldBe listOf("pipeline_a")
         // Still live.
         registry.exists("used") shouldBe true
     }

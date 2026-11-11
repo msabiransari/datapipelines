@@ -11,6 +11,7 @@ import co.datapipelines.dependencies.DeadlineExceeded
 import co.datapipelines.dependencies.DependencyProvider
 import co.datapipelines.dependencies.DependencyWalker
 import co.datapipelines.dependencies.DiagnosticKind
+import co.datapipelines.dependencies.FamilyDescriptor
 import co.datapipelines.dependencies.FamilyRegistry
 import co.datapipelines.dependencies.GraphSnapshot
 import co.datapipelines.dependencies.Lifecycle
@@ -44,16 +45,22 @@ import java.util.UUID
  * [speculativeReads], bounded by the release bounds and one fresh [deadline]. Every node the walk reaches that is not
  * RELEASED is one [RestoreReach] per direct reference, in the walk's edge order. G1's rules are never relaxed: a
  * DISCARDED or MISSING descendant is terminal; the first cycle or traversal bound is the root family's refusal.
+ *
+ * #873 §F: the walk sees release references only. A datasource is never released (record §8), so a restore has nothing
+ * to recheck on it, and this walk's [Authority.System] would resolve a datasource name deployment-wide — the unscoped
+ * lookup §F.3 f forbids. [releaseReferencesOnly] keeps the registry's release families and drops every reference to a
+ * family release cannot flip before the walker sees it: no datasource is read, counted against a bound, or reported.
  */
 class WalkingRestoreDependencyGuard(
-    private val registry: FamilyRegistry,
+    registry: FamilyRegistry,
     bounds: ReleaseBounds,
     private val speculativeReads: ReadIsolation,
     private val deadline: ReleasePlanningDeadline,
     clock: Clock = Clock.systemUTC(),
     private val planning: ReleasePlanningLimits = ReleasePlanningLimits.DEFAULT,
 ) : RestoreDependencyGuard {
-    private val walker = DependencyWalker(registry, ReleaseGraphLimits.of(bounds, planning), clock, CycleHandling.STOP)
+    private val registry = releaseReferencesOnly(registry)
+    private val walker = DependencyWalker(this.registry, ReleaseGraphLimits.of(bounds, planning), clock, CycleHandling.STOP)
 
     override fun recheck(root: ReleaseNodeIdentity): List<RestoreReach> =
         guarded(root) { context ->
@@ -170,13 +177,45 @@ class WalkingRestoreDependencyGuard(
         }
     }
 
-    private companion object {
+    /** A family's provider whose outgoing references are only those to a release family (the restore walk's view). */
+    private class ReleaseReferences<B : Any>(
+        private val inner: DependencyProvider<B>,
+    ) : DependencyProvider<B> {
+        override fun resolveMany(
+            requests: List<ObjectRequest>,
+            context: ResolveContext,
+        ): Map<ObjectRequest, Outcome<B>> = inner.resolveMany(requests, context)
+
+        override fun outgoing(resolved: Outcome.Resolved<B>): List<Reference> =
+            inner.outgoing(resolved).filter { ReleaseDependencyFamilies.familyOf(it.request.family) != null }
+    }
+
+    companion object {
+        /** [registry]'s release families, each provider's outgoing references narrowed to release families. */
+        fun releaseReferencesOnly(registry: FamilyRegistry): FamilyRegistry =
+            FamilyRegistry(
+                registry.keys
+                    .filter { ReleaseDependencyFamilies.familyOf(it) != null }
+                    .mapNotNull { registry[it] }
+                    .map { narrowed(it) },
+            )
+
+        private fun <B : Any> narrowed(descriptor: FamilyDescriptor<B>): FamilyDescriptor<B> =
+            FamilyDescriptor(
+                key = descriptor.key,
+                rootSelectors = descriptor.rootSelectors,
+                capabilities = descriptor.capabilities,
+                extractorSchemaVersion = descriptor.extractorSchemaVersion,
+                provider = ReleaseReferences(descriptor.provider),
+                safeSummary = descriptor.safeSummary,
+            )
+
         /** The walk's bounds release refuses with (`ReleaseClosureAdapter`'s): `versions` is the node bound. */
-        val RELEASE_LIMITS =
+        private val RELEASE_LIMITS =
             mapOf(LimitKind.NODES to ReleaseLimit.VERSIONS, LimitKind.EDGES to ReleaseLimit.EDGES, LimitKind.DEPTH to ReleaseLimit.DEPTH)
 
         /** A walk node as the release closure names it: an unresolved node is MISSING with the name its pin spelled. */
-        fun closureNode(node: Node): ClosureNode {
+        private fun closureNode(node: Node): ClosureNode {
             val identity =
                 checkNotNull(ReleaseDependencyFamilies.identityOf(ObjectRequest(node.requestedAddress, node.requestedSelector))) {
                     "a restore walks exact release-family pins only, got ${node.requestedAddress} ${node.requestedSelector}"
@@ -193,7 +232,7 @@ class WalkingRestoreDependencyGuard(
             )
         }
 
-        fun statusOf(lifecycle: Lifecycle): ReleaseNodeStatus =
+        private fun statusOf(lifecycle: Lifecycle): ReleaseNodeStatus =
             when (lifecycle) {
                 Lifecycle.DRAFT -> ReleaseNodeStatus.DRAFT
                 Lifecycle.RELEASED -> ReleaseNodeStatus.RELEASED

@@ -60,6 +60,18 @@ data class DatasourceRef(
 )
 
 /**
+ * One DRAFT or RELEASED pipeline version's stored body, keyed by the pipeline's [name] and the [version] number — a row
+ * of [PipelineRepository.findLiveVersionBodiesByName], the bulk read the release's apply-time prerequisite check feeds
+ * to its datasource extractor (#873 R1). [bodyJson] is the stored `body_json::TEXT`, exactly as [PipelineRepository.findVersionBody]
+ * returns it.
+ */
+data class PipelineVersionBody(
+    val name: String,
+    val version: Int,
+    val bodyJson: String,
+)
+
+/**
  * Persistence for `pipelines` and `pipeline_versions` (metadata-db §4.4/§4.5/§6,
  * versioning §5/§9).
  *
@@ -423,6 +435,30 @@ class PipelineRepository(
                 mapOf("pipelineId" to pipelineId, "version" to version, "workspaceId" to workspaceId),
             ) { rs, _ -> rs.getString("body_json") }
             .singleOrNull()
+
+    /**
+     * #873 R1 — the stored bodies of the DRAFT and RELEASED versions [keys] (pipeline name, version number) name in
+     * [workspaceId], in ONE parameterized statement whatever the number of keys; no statement for no key. A key naming a
+     * version that does not exist, is DISCARDED, or belongs to a pipeline of another workspace is absent from the
+     * result — one outcome, never distinguished. Rows come back in no particular order; a caller keys them by
+     * `(name, version)`. Read-only; the caller bounds the batch size and the statement's time (the dependency-graph
+     * reads do so through their bounded batch read), as for every other bulk graph read.
+     */
+    fun findLiveVersionBodiesByName(
+        workspaceId: UUID,
+        keys: Collection<Pair<String, Int>>,
+    ): List<PipelineVersionBody> {
+        if (keys.isEmpty()) return emptyList()
+        return jdbc.query(
+            """
+            SELECT p.name, v.version, v.body_json::TEXT AS body_json
+              FROM pipeline_versions v
+              JOIN pipelines p ON p.id = v.pipeline_id
+             WHERE p.workspace_id = :workspaceId AND v.status IN ('DRAFT', 'RELEASED') AND (p.name, v.version) IN (:keys)
+            """.trimIndent(),
+            mapOf("workspaceId" to workspaceId, "keys" to keys.map { (name, version) -> arrayOf<Any>(name, version) }),
+        ) { rs, _ -> PipelineVersionBody(rs.getString("name"), rs.getInt("version"), rs.getString("body_json")) }
+    }
 
     /** The execute path reads body, lifecycle, hash and derived write metadata in one database snapshot. */
     fun findExecutionSnapshot(

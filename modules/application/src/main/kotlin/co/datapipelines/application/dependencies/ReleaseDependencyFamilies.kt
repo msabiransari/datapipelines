@@ -26,6 +26,7 @@ import co.datapipelines.pipeline.release.DependencySource
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseNodeIdentity
 import co.datapipelines.pipeline.release.ReleaseNodeStatus
+import co.datapipelines.pipeline.release.ReleasePin
 import co.datapipelines.pipeline.release.ResolvedNode
 import java.time.Duration
 
@@ -110,6 +111,62 @@ object ReleaseDependencyFamilies {
         return ReleaseNodeIdentity(request.address.lookupScope.workspaceId, family, request.address.lookupKey, version)
     }
 
+    /**
+     * The resolved outcome of a source's [node] for [identity], carrying [body] (the [ResolvedNode] itself, or a family's
+     * richer body — the pipeline arm's [PipelineReleaseNode], #873 §F.1). One mapping for every adapted family, so the
+     * neutral facts of a release node never depend on which provider read it.
+     */
+    fun <B : Any> resolved(
+        identity: ReleaseNodeIdentity,
+        node: ResolvedNode,
+        body: B,
+    ): Outcome.Resolved<B> {
+        check(node.identity == identity) { "the ${identity.family.wire} source answered ${node.identity} for $identity" }
+        return Outcome.Resolved(
+            identity =
+                ResolvedIdentity(
+                    family = keyOf(identity.family),
+                    ownerScope = OwnerScope.Workspace(identity.workspaceId),
+                    stableEntityId = node.entityUuid.toString(),
+                    artifactVersion = identity.version,
+                ),
+            facts =
+                NodeFacts(
+                    name = node.name,
+                    versionInfo = VersionInfo.Artifact(identity.version),
+                    lifecycle = lifecycleOf(node.status),
+                    currentVersion = node.currentVersion,
+                    bodyHash = node.bodyHash,
+                ),
+            body = body,
+        )
+    }
+
+    /** A [family] node's release [pins] as outgoing references, in pin order, each with its §6 [Relationship]. */
+    fun pinReferences(
+        family: ReleaseFamily,
+        pins: List<ReleasePin>,
+    ): List<Reference> =
+        pins.map { pin ->
+            Reference(
+                request = request(pin.target),
+                relationship =
+                    checkNotNull(Relationship.between(keyOf(family), keyOf(pin.target.family))) {
+                        "a ${family.wire} pin to a ${pin.target.family.wire} is not a §6 row"
+                    },
+                sourcePath = pin.path,
+                spelledName = pin.targetName,
+            )
+        }
+
+    private fun lifecycleOf(status: ReleaseNodeStatus): Lifecycle =
+        when (status) {
+            ReleaseNodeStatus.DRAFT -> Lifecycle.DRAFT
+            ReleaseNodeStatus.RELEASED -> Lifecycle.RELEASED
+            ReleaseNodeStatus.DISCARDED -> Lifecycle.DISCARDED
+            ReleaseNodeStatus.MISSING -> error("a resolved node is never MISSING")
+        }
+
     /** The release pins are hashed by `TreeHash`, not by an extractor; version 1 is the adapter's first projection. */
     const val EXTRACTOR_SCHEMA_VERSION = 1
 }
@@ -144,47 +201,9 @@ internal class ReleaseSourceProvider(
         val identity = ReleaseDependencyFamilies.identityOf(request)
         if (identity == null || identity.family != family) return Outcome.Unsupported
         val node = ReleaseDependencyFamilies.bounded(family, ceiling, context) { source.resolve(identity) } ?: return Outcome.Missing
-        check(node.identity == identity) { "the ${family.wire} source answered ${node.identity} for $identity" }
-        return Outcome.Resolved(
-            identity =
-                ResolvedIdentity(
-                    family = ReleaseDependencyFamilies.keyOf(family),
-                    ownerScope = OwnerScope.Workspace(identity.workspaceId),
-                    stableEntityId = node.entityUuid.toString(),
-                    artifactVersion = identity.version,
-                ),
-            facts =
-                NodeFacts(
-                    name = node.name,
-                    versionInfo = VersionInfo.Artifact(identity.version),
-                    lifecycle = lifecycleOf(node.status),
-                    currentVersion = node.currentVersion,
-                    bodyHash = node.bodyHash,
-                ),
-            body = node,
-        )
+        return ReleaseDependencyFamilies.resolved(identity, node, body = node)
     }
 
     override fun outgoing(resolved: Outcome.Resolved<ResolvedNode>): List<Reference> =
-        resolved.body.pins.map { pin ->
-            Reference(
-                request = ReleaseDependencyFamilies.request(pin.target),
-                relationship = relationship(pin.target.family),
-                sourcePath = pin.path,
-                spelledName = pin.targetName,
-            )
-        }
-
-    private fun relationship(target: ReleaseFamily): Relationship =
-        checkNotNull(Relationship.between(ReleaseDependencyFamilies.keyOf(family), ReleaseDependencyFamilies.keyOf(target))) {
-            "a ${family.wire} pin to a ${target.wire} is not a §6 row"
-        }
-
-    private fun lifecycleOf(status: ReleaseNodeStatus): Lifecycle =
-        when (status) {
-            ReleaseNodeStatus.DRAFT -> Lifecycle.DRAFT
-            ReleaseNodeStatus.RELEASED -> Lifecycle.RELEASED
-            ReleaseNodeStatus.DISCARDED -> Lifecycle.DISCARDED
-            ReleaseNodeStatus.MISSING -> error("a resolved node is never MISSING")
-        }
+        ReleaseDependencyFamilies.pinReferences(family, resolved.body.pins)
 }

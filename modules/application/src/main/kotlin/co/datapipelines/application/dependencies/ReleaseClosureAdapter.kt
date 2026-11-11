@@ -1,11 +1,14 @@
 package co.datapipelines.application.dependencies
 
 import co.datapipelines.dependencies.DiagnosticKind
+import co.datapipelines.dependencies.Edge
+import co.datapipelines.dependencies.FamilyKey
 import co.datapipelines.dependencies.GraphSnapshot
 import co.datapipelines.dependencies.Lifecycle
 import co.datapipelines.dependencies.LimitKind
 import co.datapipelines.dependencies.Node
 import co.datapipelines.dependencies.ObjectRequest
+import co.datapipelines.dependencies.Operational
 import co.datapipelines.dependencies.Resolution
 import co.datapipelines.pipeline.release.ClosureEdge
 import co.datapipelines.pipeline.release.ClosureNode
@@ -13,6 +16,7 @@ import co.datapipelines.pipeline.release.ReleaseClosure
 import co.datapipelines.pipeline.release.ReleaseLimit
 import co.datapipelines.pipeline.release.ReleaseNodeIdentity
 import co.datapipelines.pipeline.release.ReleaseNodeStatus
+import co.datapipelines.pipeline.release.ReleasePrerequisite
 import co.datapipelines.pipeline.release.ReleaseRefusals
 import java.util.UUID
 
@@ -29,7 +33,15 @@ import java.util.UUID
  * its blockers from the nodes, bounded by `max_blockers`).
  */
 object ReleaseClosureAdapter {
-    /** The closure of [root], or null when the root itself did not resolve (the caller's native not-found). */
+    /**
+     * The closure of [root], or null when the root itself did not resolve (the caller's native not-found).
+     *
+     * #873 §F.3 b: the snapshot is SPLIT. Its datasource nodes are prerequisites ([prerequisites]), never closure nodes:
+     * they and the edges that reach them are left out, and the kept artifact nodes are numbered `n0`, `n1`… in snapshot
+     * order. A datasource is a leaf discovered after the references that precede it, so removing it leaves the artifact
+     * nodes and edges in exactly the order — and with exactly the ids — an artifact-only walk gives: `TreeHash` v1, the
+     * blockers and the plan wire over the closure are byte-identical.
+     */
     fun closure(
         root: ReleaseNodeIdentity,
         snapshot: GraphSnapshot,
@@ -37,14 +49,16 @@ object ReleaseClosureAdapter {
         val rootNode = snapshot.node(snapshot.roots.single())
         // An unresolved root is a leaf: no edge, so no cycle and no limit can precede it (ReleaseGraph's first check).
         if (rootNode.resolution != Resolution.RESOLVED) return null
-        val closureNodes = snapshot.nodes.associate { it.nodeId to closureNode(it) }
+        val kept = snapshot.nodes.filterNot(::isPrerequisite)
+        val closureNodes = kept.withIndex().associate { (index, node) -> node.nodeId to closureNode(node, "n$index") }
+        val edges = snapshot.edges.filter { it.toNodeId in closureNodes }
         refusal(root, snapshot, closureNodes)?.let { throw it }
-        val replay = Replay(snapshot)
+        val replay = Replay(rootNode.nodeId, edges)
         return ReleaseClosure(
             root = root,
-            nodes = snapshot.nodes.map { closureNodes.getValue(it.nodeId) },
+            nodes = kept.map { closureNodes.getValue(it.nodeId) },
             edges =
-                snapshot.edges.map { edge ->
+                edges.map { edge ->
                     ClosureEdge(
                         from = closureNodes.getValue(edge.fromNodeId).identity,
                         to = closureNodes.getValue(edge.toNodeId).identity,
@@ -55,6 +69,25 @@ object ReleaseClosureAdapter {
             dependencyFirst = replay.postOrder.map { closureNodes.getValue(it) },
         )
     }
+
+    /**
+     * The datasource prerequisites of [snapshot] (#873 §F.3 b), one per distinct authored name in discovery order: a
+     * RESOLVED node is available with its own `readonly` flag; a MISSING one (absent, or not granted to the caller's
+     * workspace — G3's provider answers both alike, record §12) or an UNSUPPORTED one is unavailable with `readonly`
+     * null. The row is built from the scoped outcome and the authored name alone, so the two unavailable cases are
+     * byte-identical.
+     */
+    fun prerequisites(snapshot: GraphSnapshot): List<ReleasePrerequisite> =
+        snapshot.nodes
+            .filter(::isPrerequisite)
+            .distinctBy { it.requestedAddress.lookupKey }
+            .map { node ->
+                val readonly = (node.operational as? Operational.Datasource)?.readonly.takeIf { node.resolution == Resolution.RESOLVED }
+                ReleasePrerequisite(node.requestedAddress.lookupKey, available = readonly != null, readonly = readonly)
+            }
+
+    /** A datasource node: a prerequisite a release needs and never flips (record §8). */
+    fun isPrerequisite(node: Node): Boolean = node.family == FamilyKey.DATASOURCE
 
     private fun refusal(
         root: ReleaseNodeIdentity,
@@ -69,14 +102,17 @@ object ReleaseClosureAdapter {
         return ReleaseRefusals.limit(root.family, RELEASE_LIMITS.getValue(requireNotNull(first.limit)), requireNotNull(first.maximum))
     }
 
-    private fun closureNode(node: Node): ClosureNode {
+    private fun closureNode(
+        node: Node,
+        nodeId: String,
+    ): ClosureNode {
         val identity =
             checkNotNull(ReleaseDependencyFamilies.identityOf(ObjectRequest(node.requestedAddress, node.requestedSelector))) {
                 "release walks exact release-family pins only, got ${node.requestedAddress} ${node.requestedSelector}"
             }
         val resolved = node.resolution == Resolution.RESOLVED
         return ClosureNode(
-            nodeId = node.nodeId,
+            nodeId = nodeId,
             identity = identity,
             name = requireNotNull(node.name) { "every release node carries the name it was found or pinned by" },
             status = if (resolved) statusOf(requireNotNull(node.lifecycle)) else ReleaseNodeStatus.MISSING,
@@ -99,14 +135,15 @@ object ReleaseClosureAdapter {
 
     /** The depth-first replay over a complete-or-leaf-truncated snapshot: post-order and longest path, both from the edges. */
     private class Replay(
-        snapshot: GraphSnapshot,
+        root: String,
+        edges: List<Edge>,
     ) {
-        private val outgoing = snapshot.edges.groupBy({ it.fromNodeId }, { it.toNodeId })
+        private val outgoing = edges.groupBy({ it.fromNodeId }, { it.toNodeId })
         private val heights = HashMap<String, Int>()
         val postOrder = ArrayList<String>()
 
         init {
-            visit(snapshot.roots.single())
+            visit(root)
         }
 
         fun height(nodeId: String): Int = heights.getValue(nodeId)

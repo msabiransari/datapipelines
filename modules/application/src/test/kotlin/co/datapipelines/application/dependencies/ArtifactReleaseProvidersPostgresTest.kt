@@ -2,19 +2,25 @@ package co.datapipelines.application.dependencies
 
 import co.datapipelines.application.SharedPostgres
 import co.datapipelines.application.dependencies.dashboard.DashboardReleaseProvider
+import co.datapipelines.application.dependencies.datasource.DatasourceDependencyFamily
 import co.datapipelines.application.dependencies.parameterset.ParameterSetReleaseProvider
 import co.datapipelines.application.dependencies.template.TemplateReleaseProvider
 import co.datapipelines.application.dependencies.visualization.VisualizationReleaseProvider
+import co.datapipelines.datasources.DatasourceRepository
 import co.datapipelines.dependencies.Authority
 import co.datapipelines.dependencies.Constraint
+import co.datapipelines.dependencies.CycleHandling
 import co.datapipelines.dependencies.Deadline
+import co.datapipelines.dependencies.DependencyWalker
 import co.datapipelines.dependencies.FamilyDescriptor
+import co.datapipelines.dependencies.FamilyKey
 import co.datapipelines.dependencies.FamilyRegistry
 import co.datapipelines.dependencies.MetadataSnapshot
 import co.datapipelines.dependencies.ObjectRequest
 import co.datapipelines.dependencies.Outcome
 import co.datapipelines.dependencies.Purpose
 import co.datapipelines.dependencies.ReadIsolation
+import co.datapipelines.dependencies.Resolution
 import co.datapipelines.dependencies.ResolveContext
 import co.datapipelines.dependencies.conformance.ProviderConformance
 import co.datapipelines.parameters.ParameterSetRepository
@@ -22,11 +28,11 @@ import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineVersionStatus.DISCARDED
 import co.datapipelines.pipeline.PipelineVersionStatus.DRAFT
 import co.datapipelines.pipeline.PipelineVersionStatus.RELEASED
-import co.datapipelines.pipeline.release.PipelineDependencySource
 import co.datapipelines.pipeline.release.ReleaseBounds
 import co.datapipelines.pipeline.release.ReleaseClosure
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseNodeIdentity
+import co.datapipelines.pipeline.release.ReleasePrerequisite
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.visualization.DashboardRepository
 import co.datapipelines.visualization.VisualizationRepository
@@ -44,6 +50,7 @@ import org.junit.jupiter.params.provider.EnumSource
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
+import java.time.Clock
 import java.time.Duration
 import java.util.UUID
 
@@ -51,8 +58,9 @@ import java.util.UUID
  * #873 §A on a real PostgreSQL, over descriptors built exactly as `ReleaseConfiguration`'s beans build them: the four
  * native artifact providers (template, parameter set, visualization, dashboard) pass G1's [ProviderConformance] harness
  * over seeded rows; `resolveMany` is ONE statement per call whatever the request count (review R1-8) and the walk batches
- * a frontier into ⌈n / 256⌉ calls; the record §5.4 worked graph resolves through the registry with exactly 9 nodes and
- * 9 edges and no datasource reference (U1); the import diamond loads `common@2` once with two edge occurrences (A02).
+ * a frontier into ⌈n / 256⌉ calls; the record §5.4 worked graph walks to exactly 10 nodes and 11 edges with `warehouse`
+ * loaded once (U2, #873 §F) while its release closure stays U1's 9 nodes and 9 edges; the import diamond loads
+ * `common@2` once with two edge occurrences (A02).
  *
  * The providers live in this module, so their database suite does too (the module's coverage is its own code's). The
  * §A.2 parity with the adapted `TemplateDependencySource` (a web class) is web's `TemplateProviderParityPostgresTest`,
@@ -63,18 +71,15 @@ class ArtifactReleaseProvidersPostgresTest {
     private val seed = ReleaseArtifactSeed(NamedParameterJdbcTemplate(SharedPostgres.dataSource()))
     private val manager = DataSourceTransactionManager(statements.dataSource)
     private val ceiling = PostgresStatementCeiling(statements.dataSource)
+    private val datasources = NonArtifactSeed(NamedParameterJdbcTemplate(SharedPostgres.dataSource()))
 
     /** The descriptors exactly as `ReleaseConfiguration`'s beans build them (web's parity and wiring tests read the beans). */
     private val descriptors =
         mapOf(
-            ReleaseFamily.PIPELINE to
-                ReleaseDependencyFamilies.descriptor(
-                    ReleaseFamily.PIPELINE,
-                    PipelineDependencySource(PipelineRepository(ceiling.jdbc)),
-                    ceiling,
-                ),
+            ReleaseFamily.PIPELINE to PipelineReleaseFamily.descriptor(PipelineRepository(ceiling.jdbc), ceiling),
             ReleaseFamily.TEMPLATE to TemplateReleaseProvider(TemplateRepository(ceiling.jdbc), ceiling).descriptor(),
-            ReleaseFamily.PARAMETER_SET to ParameterSetReleaseProvider(ParameterSetRepository(ceiling.jdbc), ceiling).descriptor(),
+            ReleaseFamily.PARAMETER_SET to
+                ParameterSetReleaseProvider(ParameterSetRepository(ceiling.jdbc), TemplateRepository(ceiling.jdbc), ceiling).descriptor(),
             ReleaseFamily.VISUALIZATION to VisualizationReleaseProvider(VisualizationRepository(ceiling.jdbc), ceiling).descriptor(),
             ReleaseFamily.DASHBOARD to DashboardReleaseProvider(DashboardRepository(ceiling.jdbc), ceiling).descriptor(),
         )
@@ -103,7 +108,7 @@ class ArtifactReleaseProvidersPostgresTest {
     }
 
     @Test
-    fun `the parameter-set provider conforms - one PARAMETER_SOURCE_TEMPLATE reference per selector template`() {
+    fun `the parameter-set provider conforms - a template and a datasource reference per selector`() {
         seed.template("states", 1)
         seed.template("cities", 4)
         seed.parameterSet("filters", 1, DRAFT, selectors = listOf("states" to 1, "cities" to 4))
@@ -113,7 +118,7 @@ class ArtifactReleaseProvidersPostgresTest {
             ReleaseFamily.PARAMETER_SET,
             present = listOf("filters" to 1, "filters" to 2),
             absent = listOf("filters" to 3),
-            fields = mapOf(("filters" to 1) to setOf("parameters[0].source.template", "parameters[1].source.template")),
+            fields = mapOf(("filters" to 1) to SELECTOR_FIELDS),
         )
     }
 
@@ -236,15 +241,34 @@ class ArtifactReleaseProvidersPostgresTest {
 
     // --------------------------------------------------------------------------------- the §5.4 graph and A02
 
+    /**
+     * U2 (#873 §F) re-runs the U1 fixture with the datasource family registered: the walk loads `warehouse` ONCE as a node
+     * reached by the two §5.4 datasource edges (10 nodes, 11 edges); the release closure is the U1 closure unchanged (9
+     * nodes, 9 edges — the datasource is a prerequisite, never a closure node) and the plan lists `warehouse` once.
+     */
     @Test
-    fun `the record's worked graph resolves through the registry - 9 nodes, 9 edges, no datasource reference`() {
+    fun `the record's worked graph - the walk loads warehouse once, 10 nodes and 11 edges, the closure stays 9 and 9`() {
         workedGraph()
+        val root = seed.identity(ReleaseFamily.DASHBOARD, "sales", 3)
 
-        val closure = plan(seed.identity(ReleaseFamily.DASHBOARD, "sales", 3))
+        val graph = inTransaction { walker(withDatasources()).walk(listOf(request(root)), memberContext()) }
 
-        closure.nodes.map { "${it.identity.entityId}@${it.identity.version}" } shouldContainExactlyInAnyOrder
+        graph.nodes.map { it.requestedAddress.lookupKey } shouldContainExactlyInAnyOrder
+            listOf("sales", "filters", "selector", "common", "report", "totals", "query", "chart", "formatter", "warehouse")
+        graph.edges shouldHaveSize 11
+        val datasourceEdges =
+            graph.edges
+                .filter { graph.node(it.toNodeId).family == FamilyKey.DATASOURCE }
+                .map { "${graph.node(it.fromNodeId).name} -${it.sourcePath}-> ${graph.node(it.toNodeId).name}" }
+        datasourceEdges shouldContainExactlyInAnyOrder
+            listOf("filters -parameters[0].source.datasource-> warehouse", "totals -nodes[0].source-> warehouse")
+        graph.nodes.single { it.family == FamilyKey.DATASOURCE }.resolution shouldBe Resolution.RESOLVED
+
+        val planned = checkNotNull(planningWalk(withDatasources()).planned(root, seed.userId))
+        planned.closure.nodes.map { "${it.identity.entityId}@${it.identity.version}" } shouldContainExactlyInAnyOrder
             listOf("sales@3", "filters@2", "selector@5", "common@4", "report@7", "totals@2", "query@6", "chart@2", "formatter@3")
-        val edges = closure.edges.map { "${it.from.entityId}@${it.from.version} -${it.path}-> ${it.to.entityId}@${it.to.version}" }
+        planned.closure.nodes.map { it.nodeId } shouldContainExactly (0 until 9).map { "n$it" }
+        val edges = planned.closure.edges.map { "${it.from.entityId}@${it.from.version} -${it.path}-> ${it.to.entityId}@${it.to.version}" }
         edges shouldContainExactlyInAnyOrder
             listOf(
                 "sales@3 -parameter_set-> filters@2",
@@ -257,11 +281,10 @@ class ArtifactReleaseProvidersPostgresTest {
                 "query@6 -imports[0]-> common@4",
                 "chart@2 -transform.template-> formatter@3",
             )
-        val references = closure.nodes.flatMap { outgoing(it.identity.family, it.identity.entityId to it.identity.version) }
-        withClue("U1 emits no datasource edge (U2 re-runs this fixture expecting 10 nodes / 11 edges)") {
-            references.filter { it.request.family.wire == "datasource" }.shouldBeEmpty()
+        planned.prerequisites shouldContainExactly listOf(ReleasePrerequisite("warehouse", available = true, readonly = false))
+        withClue("the artifact-only closure (U1's walk, no datasource family) is the same closure") {
+            plan(root) shouldBe planned.closure
         }
-        references shouldHaveSize 9
     }
 
     @Test
@@ -280,14 +303,19 @@ class ArtifactReleaseProvidersPostgresTest {
 
     // ------------------------------------------------------------------------------------------------ fixtures
 
-    /** Record §5.4, artifact-only (U1): the datasource `warehouse` is named by the selector but emits no edge yet. */
+    /**
+     * Record §5.4: the selector of `filters@2` and the DQL node of `totals@2` both name the datasource `warehouse`
+     * (granted to the seed's workspace); the PIPELINE node of `report@7` writes to tempdb, which is no datasource.
+     */
     private fun workedGraph() {
+        datasources.adopt(seed.userId, seed.workspaceId)
+        datasources.datasource("warehouse")
         seed.template("common", 4, library = true)
         seed.template("query", 6, imports = listOf("common" to 4))
         seed.template("selector", 5, imports = listOf("common" to 4))
         seed.template("formatter", 3)
         seed.parameterSet("filters", 2, DRAFT, selectors = listOf("selector" to 5))
-        seed.pipeline("totals", 2, templates = listOf("query" to 6))
+        seed.pipeline("totals", 2, templates = listOf("query" to 6), source = "warehouse")
         seed.pipeline("report", 7, DRAFT, children = listOf("totals" to 2))
         seed.visualization("chart", 2, DRAFT, transform = "formatter" to 3)
         seed.dashboard(
@@ -356,18 +384,34 @@ class ArtifactReleaseProvidersPostgresTest {
             provider.outgoing(resolved.shouldBeInstanceOf<Outcome.Resolved<Any>>())
         }
 
-    private fun plan(root: ReleaseNodeIdentity): ReleaseClosure {
-        val registry = FamilyRegistry.production(descriptors.values.toList())
-        val walk =
-            ReleasePlanningWalk(
-                registry,
-                ReleaseBounds(),
-                ReleasePlanningWalk.planningTransaction(manager),
-                ReleasePlanningWalk.speculativeReads(manager),
-                ReleasePlanningDeadline.after(Duration.ofSeconds(BUDGET_SECONDS)),
-            )
-        return checkNotNull(walk.plan(root, seed.userId)) { "$root resolves" }
-    }
+    private fun plan(root: ReleaseNodeIdentity): ReleaseClosure =
+        checkNotNull(planningWalk(FamilyRegistry.production(descriptors.values.toList())).plan(root, seed.userId)) { "$root resolves" }
+
+    private fun planningWalk(registry: FamilyRegistry) =
+        ReleasePlanningWalk(
+            registry,
+            ReleaseBounds(),
+            ReleasePlanningWalk.planningTransaction(manager),
+            ReleasePlanningWalk.speculativeReads(manager),
+            ReleasePlanningDeadline.after(Duration.ofSeconds(BUDGET_SECONDS)),
+        )
+
+    /** The release descriptors plus G3's datasource family, as production registers them. */
+    private fun withDatasources(): FamilyRegistry =
+        FamilyRegistry.production(
+            descriptors.values.toList() + DatasourceDependencyFamily.descriptor(DatasourceRepository(ceiling.jdbc), ceiling),
+        )
+
+    private fun walker(registry: FamilyRegistry) =
+        DependencyWalker(
+            registry,
+            ReleaseGraphLimits.of(ReleaseBounds(), ReleasePlanningLimits.DEFAULT),
+            Clock.systemUTC(),
+            CycleHandling.STOP,
+        )
+
+    /** The planning walk's own authority: the caller as a workspace member (a datasource resolves within its grants). */
+    private fun memberContext() = context().copy(authority = Authority.Member(seed.userId))
 
     private fun context() =
         ResolveContext(
@@ -388,5 +432,12 @@ class ArtifactReleaseProvidersPostgresTest {
         const val BATCH = 256
         const val BUDGET_SECONDS = 30L
         val IMPORTS_2 = setOf("imports[0]", "imports[1]")
+        val SELECTOR_FIELDS =
+            setOf(
+                "parameters[0].source.template",
+                "parameters[0].source.datasource",
+                "parameters[1].source.template",
+                "parameters[1].source.datasource",
+            )
     }
 }

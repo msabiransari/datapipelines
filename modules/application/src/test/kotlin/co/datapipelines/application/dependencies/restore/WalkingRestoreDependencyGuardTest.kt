@@ -2,8 +2,19 @@ package co.datapipelines.application.dependencies.restore
 
 import co.datapipelines.application.dependencies.ReleaseDependencyFamilies
 import co.datapipelines.application.dependencies.ReleasePlanningDeadline
+import co.datapipelines.application.dependencies.prerequisites.DatasourceEdges
 import co.datapipelines.dependencies.Deadline
+import co.datapipelines.dependencies.DependencyProvider
+import co.datapipelines.dependencies.FamilyDescriptor
+import co.datapipelines.dependencies.FamilyKey
+import co.datapipelines.dependencies.FamilyRegistry
+import co.datapipelines.dependencies.ObjectRequest
+import co.datapipelines.dependencies.Outcome
 import co.datapipelines.dependencies.ReadIsolation
+import co.datapipelines.dependencies.Reference
+import co.datapipelines.dependencies.Relationship
+import co.datapipelines.dependencies.ResolveContext
+import co.datapipelines.dependencies.SelectorKind
 import co.datapipelines.pipeline.release.DependencySource
 import co.datapipelines.pipeline.release.ReleaseBounds
 import co.datapipelines.pipeline.release.ReleaseFamily
@@ -14,6 +25,7 @@ import co.datapipelines.pipeline.release.ResolvedNode
 import co.datapipelines.pipeline.release.RestoreReach
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
@@ -147,6 +159,82 @@ class WalkingRestoreDependencyGuardTest {
         guard().recheck(root) shouldBe emptyList()
         summary(guard().recheck(root, listOf(ReleasePin(template, template.entityId, "nodes[0].template")))) shouldContainExactly
             listOf("test/lib.sql:DRAFT:nodes[0].template.imports[0]:[test/query.sql]")
+    }
+
+    /**
+     * #873 §F.3 f: the restore recheck walks as the SYSTEM authority, under which G3's datasource provider reads the
+     * whole deployment — so the guard walks release references only. A RELEASED pipeline below the restored body that
+     * names a datasource reaches nothing, and the registry's datasource provider is never called.
+     */
+    @Test
+    fun `a datasource below the restored body is never resolved - the recheck walks release references only`() {
+        val datasourceReads = mutableListOf<ObjectRequest>()
+        val pipeline = node(id(ReleaseFamily.PIPELINE, "test/report"), ReleaseNodeStatus.RELEASED)
+        val root = node(id(ReleaseFamily.DASHBOARD, "test/board"), ReleaseNodeStatus.DISCARDED, pipeline to "sources[0].pipeline")
+        val release = ReleaseDependencyFamilies.registry(ReleaseFamily.entries.associateWith { source })
+        val warehouse = DatasourceEdges.request(workspace, "warehouse")
+        val naming =
+            ReleaseFamily.entries.map { family ->
+                val descriptor = checkNotNull(release[ReleaseDependencyFamilies.keyOf(family)])
+                if (family == ReleaseFamily.PIPELINE) withDatasourceReference(descriptor, warehouse) else descriptor
+            }
+        val datasources =
+            FamilyDescriptor(
+                key = FamilyKey.DATASOURCE,
+                rootSelectors = setOf(SelectorKind.ENTITY),
+                capabilities = FamilyKey.PRODUCTION.getValue(FamilyKey.DATASOURCE),
+                extractorSchemaVersion = 1,
+                provider =
+                    object : DependencyProvider<Unit> {
+                        override fun resolveMany(
+                            requests: List<ObjectRequest>,
+                            context: ResolveContext,
+                        ): Map<ObjectRequest, Outcome<Unit>> {
+                            datasourceReads += requests
+                            return requests.associateWith { Outcome.Missing }
+                        }
+
+                        override fun outgoing(resolved: Outcome.Resolved<Unit>): List<Reference> = emptyList()
+                    },
+                safeSummary = FamilyDescriptor.NO_SAFE_SUMMARY,
+            )
+        val guard =
+            WalkingRestoreDependencyGuard(
+                registry = FamilyRegistry(naming + datasources),
+                bounds = ReleaseBounds(),
+                speculativeReads = ReadIsolation.NONE,
+                deadline = ReleasePlanningDeadline.NONE,
+            )
+
+        guard.recheck(root) shouldBe emptyList()
+        datasourceReads.shouldBeEmpty()
+        reads.map { it.entityId } shouldContainExactly listOf("test/board", "test/report")
+    }
+
+    @Suppress("UNCHECKED_CAST") // the adapted release descriptor's provider reads ResolvedNode bodies
+    private fun withDatasourceReference(
+        descriptor: FamilyDescriptor<*>,
+        datasource: ObjectRequest,
+    ): FamilyDescriptor<*> {
+        val inner = descriptor.provider as DependencyProvider<Any>
+        return FamilyDescriptor(
+            key = descriptor.key,
+            rootSelectors = descriptor.rootSelectors,
+            capabilities = descriptor.capabilities,
+            extractorSchemaVersion = descriptor.extractorSchemaVersion,
+            provider =
+                object : DependencyProvider<Any> {
+                    override fun resolveMany(
+                        requests: List<ObjectRequest>,
+                        context: ResolveContext,
+                    ) = inner.resolveMany(requests, context)
+
+                    override fun outgoing(resolved: Outcome.Resolved<Any>): List<Reference> =
+                        inner.outgoing(resolved) +
+                            Reference(datasource, Relationship.DATASOURCE, "nodes[0].source", spelledName = "warehouse")
+                },
+            safeSummary = descriptor.safeSummary,
+        )
     }
 
     @Test
