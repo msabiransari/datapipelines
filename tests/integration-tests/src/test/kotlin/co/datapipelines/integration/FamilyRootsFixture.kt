@@ -77,6 +77,7 @@ internal class FamilyRootsFixture(
     fun pipeline(
         name: String,
         template: Node,
+        parameters: Map<String, Any> = emptyMap(),
     ): Node {
         val node =
             mapOf(
@@ -87,7 +88,9 @@ internal class FamilyRootsFixture(
                 "template" to mapOf("id" to template.name, "version" to 1),
                 "depends_on" to emptyList<String>(),
             )
-        val document = mapOf("name" to name, "display_name" to "Family roots", "description" to "#873", "nodes" to listOf(node))
+        val document =
+            mapOf("name" to name, "display_name" to "Family roots", "description" to "#873", "nodes" to listOf(node)) +
+                (if (parameters.isEmpty()) emptyMap() else mapOf("parameters" to parameters))
         created(send("POST", "/api/v1/pipelines", mapper.writeValueAsString(document)))
         return Node("pipeline", name)
     }
@@ -127,17 +130,21 @@ internal class FamilyRootsFixture(
         return Node("visualization", name)
     }
 
+    /** A dashboard over [set], one [source] (binding each of [bound] to the set parameter of that name) and [visualization]. */
     fun dashboard(
         name: String,
         set: Node,
         source: Node,
         visualization: Node,
+        bound: List<String> = emptyList(),
     ): Node {
+        val parameters = bound.joinToString(", ") { "\"$it\": {\"parameter\": \"$it\"}" }
         val document =
             """
             {"name": "$name", "display_name": "Family roots", "description": "#873",
              "parameter_set": {"name": "${set.name}", "version": 1},
-             "sources": [{"name": "revenue_source", "pipeline": {"name": "${source.name}", "version": 1}}],
+             "sources": [{"name": "revenue_source", "pipeline": {"name": "${source.name}", "version": 1},
+                          "parameters": {$parameters}}],
              "visualizations": [{"name": "revenue_chart", "type": "visualization",
                                  "visualization": {"name": "${visualization.name}", "version": 1},
                                  "inputs": {"revenue": {"source": "revenue_source"}}}],
@@ -154,15 +161,22 @@ internal class FamilyRootsFixture(
         return chart to listOf(Edge(chart, template, "transform.template"))
     }
 
-    /** The dashboard closure under [prefix] — its set, source pipeline and chart with their templates — every node a DRAFT. */
-    fun dashboardClosure(prefix: String): Pair<Node, List<Edge>> {
+    /**
+     * The dashboard closure under [prefix] — its set, source pipeline and chart with their templates — every node a DRAFT.
+     * With [bindRegion] the source pipeline declares `region` and the dashboard binds it to the set's `region` (A34).
+     */
+    fun dashboardClosure(
+        prefix: String,
+        bindRegion: Boolean = false,
+    ): Pair<Node, List<Edge>> {
         val selectorTemplate = sqlTemplate("$prefix/selector.sql", SELECTOR_BODY)
         val set = parameterSet("$prefix/set", selectorTemplate)
         val query = sqlTemplate("$prefix/query.sql")
-        val source = pipeline("$prefix/source", query)
+        val declared = if (bindRegion) mapOf("region" to mapOf("type" to "STRING", "required" to false)) else emptyMap()
+        val source = pipeline("$prefix/source", query, declared)
         val shape = jsonataTemplate("$prefix/shape.jsonata")
         val chart = visualization("$prefix/chart", shape)
-        val board = dashboard("$prefix/board", set, source, chart)
+        val board = dashboard("$prefix/board", set, source, chart, if (bindRegion) listOf("region") else emptyList())
         return board to
             listOf(
                 Edge(board, set, "parameter_set"),
@@ -173,6 +187,67 @@ internal class FamilyRootsFixture(
                 Edge(chart, shape, "transform.template"),
             )
     }
+
+    /** [root] and its edges in pin order, for the closure of [family] under [prefix]; every node a DRAFT. */
+    fun closure(
+        family: String,
+        prefix: String,
+    ): Pair<Node, List<Edge>> =
+        when (family) {
+            "template" -> {
+                val lib = sqlTemplate("$prefix/lib.sql", "<#macro one>SELECT 1 AS \"n\"</#macro>", library = true)
+                val root = sqlTemplate("$prefix/root.sql", "<@lib0.one/>", imports = listOf(lib.name))
+                root to listOf(Edge(root, lib, "imports[0]"))
+            }
+
+            "parameter_set" -> {
+                val template = sqlTemplate("$prefix/selector.sql", SELECTOR_BODY)
+                val set = parameterSet("$prefix/set", template)
+                set to listOf(Edge(set, template, "parameters[0].source.template"))
+            }
+
+            "visualization" -> {
+                visualizationClosure(prefix)
+            }
+
+            else -> {
+                dashboardClosure(prefix)
+            }
+        }
+
+    /**
+     * The compatibility entry of [root] (#873 §C.3): the family's release DIALOG POST (template, visualization, dashboard —
+     * a session form with the CSRF double-submit) or, for a parameter set (no dialog until G6 U4), its REST route without
+     * a plan; each with its legacy consent flag set, at the root's stored hash.
+     */
+    fun releaseCompatible(root: Node): Response {
+        val row = row(root)
+        return when (root.family) {
+            "template" -> form("/partials/templates/lifecycle/release", mapOf("name" to root.name, "bodyHash" to row.hash))
+            "parameter_set" -> send("POST", "/api/v1/parameter-sets/${row.uuid}/release?release_pinned_templates=true", "", row.hash)
+            "visualization" ->
+                form(
+                    "/partials/visualizations/${row.uuid}/lifecycle/release",
+                    mapOf("body_hash" to row.hash, "release_pinned_templates" to "true"),
+                )
+            else ->
+                form(
+                    "/partials/dashboards/${row.uuid}/lifecycle/release",
+                    mapOf("bodyHash" to row.hash, "releasePinnedVisualizations" to "true"),
+                )
+        }
+    }
+
+    private fun form(
+        path: String,
+        fields: Map<String, String>,
+    ): Response =
+        given()
+            .port(port)
+            .asSession(session)
+            .contentType(ContentType.URLENC)
+            .apply { fields.forEach { (key, value) -> formParam(key, value) } }
+            .post(path)
 
     /** Releases [root] with a plan over [edges] selecting every node but the root, at the root's stored hash. */
     fun releaseWithPlan(
@@ -310,6 +385,12 @@ internal class FamilyRootsFixture(
                 "dashboard" to Triple("dashboards", "dashboard_versions", "dashboard_id"),
             )
 
-        private val ROUTES = mapOf("parameter_set" to "parameter-sets", "visualization" to "visualizations", "dashboard" to "dashboards")
+        private val ROUTES =
+            mapOf(
+                "pipeline" to "pipelines",
+                "parameter_set" to "parameter-sets",
+                "visualization" to "visualizations",
+                "dashboard" to "dashboards",
+            )
     }
 }

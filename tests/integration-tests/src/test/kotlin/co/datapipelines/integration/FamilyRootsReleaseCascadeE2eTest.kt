@@ -87,34 +87,10 @@ class FamilyRootsReleaseCascadeE2eTest {
 
     // ---- the four closures ------------------------------------------------------------------------------------
 
-    private fun selector(prefix: String) = fx.sqlTemplate("$prefix/selector.sql", FamilyRootsFixture.SELECTOR_BODY)
-
-    /** [root] and its edges in pin order, for the closure of [family] under [prefix]; every node a DRAFT. */
     private fun closure(
         family: String,
         prefix: String,
-    ): Pair<Node, List<Edge>> =
-        when (family) {
-            "template" -> {
-                val lib = fx.sqlTemplate("$prefix/lib.sql", "<#macro one>SELECT 1 AS \"n\"</#macro>", library = true)
-                val root = fx.sqlTemplate("$prefix/root.sql", "<@lib0.one/>", imports = listOf(lib.name))
-                root to listOf(Edge(root, lib, "imports[0]"))
-            }
-
-            "parameter_set" -> {
-                val template = selector(prefix)
-                val set = fx.parameterSet("$prefix/set", template)
-                set to listOf(Edge(set, template, "parameters[0].source.template"))
-            }
-
-            "visualization" -> {
-                fx.visualizationClosure(prefix)
-            }
-
-            else -> {
-                fx.dashboardClosure(prefix)
-            }
-        }
+    ): Pair<Node, List<Edge>> = fx.closure(family, prefix)
 
     /** The committed state of every node of a closure: status, hash and pointer per node. */
     private fun state(
