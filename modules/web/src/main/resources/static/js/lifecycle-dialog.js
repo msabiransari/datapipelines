@@ -1,6 +1,6 @@
 /*
  * 102 — the lifecycle dialogs' client half (ui-screens §4.3d): the ONE per-screen container
- * (#tx-dialog / #pe-dialog / #dp-dialog; the explorers' #px-dialog went with the pipelines pane,
+ * (#tx-dialog / #pe-dialog / #dp-dialog / #ax-dialog; the explorers' #px-dialog went with the pipelines pane,
  * #401, and the standalone template editor's #te-dialog with that page, #398), its close
  * paths, focus, and the typed confirm. Shared by the workspaces; it owns no verb, no fetch and
  * no toast — the dialogs are
@@ -40,7 +40,8 @@
 (function () {
   'use strict';
 
-  var CONTAINERS = ['tx-dialog', 'pe-dialog', 'dp-dialog'];
+  // #786: ax-dialog is the API versions page's container (api/endpoint.html).
+  var CONTAINERS = ['tx-dialog', 'pe-dialog', 'dp-dialog', 'ax-dialog'];
 
   function openContainer() {
     for (var i = 0; i < CONTAINERS.length; i++) {

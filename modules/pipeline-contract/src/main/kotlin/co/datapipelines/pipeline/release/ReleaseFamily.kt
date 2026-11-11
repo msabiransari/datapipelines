@@ -1,10 +1,13 @@
 package co.datapipelines.pipeline.release
 
 /**
- * The five artifact families a release closure spans (release-dependencies record §1.1). [wire] is the `family` word the
- * plan and the blockers carry (§2.1, §14); [codePrefix] is the family's error-code prefix — the two differ only for the
- * parameter set, whose codes have always been `parameter.*` (pipeline-contract §13.20) while its wire word is
- * `parameter_set` (the audit events', enums.md §15).
+ * The six releasable artifact families (release-dependencies record §1.1; dependency-graph record §8: an API draft
+ * version is the sixth releasable root, #786). [wire] is the `family` word the plan and the blockers carry (§2.1, §14)
+ * and the G1 registry key (`FamilyKey(wire)`); [codePrefix] is the
+ * family's error-code prefix. The two differ for the parameter set, whose codes have always been `parameter.*`
+ * (pipeline-contract §13.20) while its wire word is `parameter_set`, and for the API, whose codes have always been
+ * `endpoint.*` (§13.14) while its wire word is the G1 contract's frozen family key `api_endpoint` (dependency-graph
+ * record §6, `FamilyKey.API_ENDPOINT`, the `PIPELINE_PIN` relationship's source).
  */
 enum class ReleaseFamily(
     val wire: String,
@@ -15,6 +18,7 @@ enum class ReleaseFamily(
     PARAMETER_SET("parameter_set", "parameter"),
     VISUALIZATION("visualization", "visualization"),
     DASHBOARD("dashboard", "dashboard"),
+    ENDPOINT("api_endpoint", "endpoint"),
     ;
 
     /** The family-prefixed code for [refusal] — the ROOT's family, never the blocker's (record §14). */
@@ -22,9 +26,11 @@ enum class ReleaseFamily(
 }
 
 /**
- * The eight release-plan refusals every family carries (record §14, FROZEN by the 2026-10-18 ruling): one reason word,
- * five family-prefixed codes. `ReleaseFamilyTest` pins every `family × refusal` spelling to the family's catalogued
- * constant, so a family whose constant drifts from this enum is red.
+ * The nine release-plan refusals every family carries (record §14): one reason word, one family-prefixed code per family.
+ * The eight frozen by the 2026-10-18 ruling are extended by ONE, [METADATA_UNAVAILABLE], for the release-planning
+ * deadline only (owner ruling 2026-11-08, 868 review R1-4/R3-1, option 1; dependency-graph record Draft 10 erratum (6)).
+ * `ReleaseFamilyTest` pins every `family × refusal` spelling to the family's catalogued constant, so a family whose
+ * constant drifts from this enum is red.
  */
 enum class ReleaseRefusal(
     val wire: String,
@@ -37,6 +43,9 @@ enum class ReleaseRefusal(
     DEPENDENCY_LIMIT("dependency_limit"),
     BUSY("busy"),
     BUNDLE_UNSUPPORTED("bundle_unsupported"),
+
+    /** The cumulative metadata deadline of one planning walk expired (record §25.4): 503 + `Retry-After: 5`, no partial plan. */
+    METADATA_UNAVAILABLE("metadata_unavailable"),
 }
 
 /** A plan node's status (record §2.1): an absent or invisible pin is `MISSING` — the two are one answer (§13). */

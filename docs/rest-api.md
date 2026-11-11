@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v2.109 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.112 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37) and 2026-11-11 (v2.112) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-11-08
+**Last updated:** 2026-11-11
 
 ---
 
@@ -444,7 +444,10 @@ refuses before the pin check), plus `409 pipeline.version.pinned`: live parent p
 pinning the exact draft, and live dashboard versions pinning it. A sole-draft purge takes the
 entity and checks stored dashboard pins to any version (DISCARDED included for a dashboard with
 a live version); parent scope remains live/exact. `details.pinned_by` names `{pipeline, version, node}`;
-`details.referencing_dashboards` names `{dashboard, version, status}` when non-empty. Refusal
+`details.referencing_dashboards` names `{dashboard, version, status}` when non-empty; since #786
+`details.referencing_api_versions` (`{path, version, status, pipeline_version}`) and
+`details.referencing_schedules` (`{schedule, pipeline_version}`) name the live API versions and schedules the
+same way (any version for a sole-draft purge). Refusal
 precedes all deletion and preserves executions, hash and pointer.
 
 ### 5.12 Discard pipeline version
@@ -458,7 +461,7 @@ its executions and promotion history stay — and the sticky pointer recomputes 
 WAS the pointer (D60: highest eligible live version, else NULL; a DRAFT is eligible only
 under development posture). Refusals: `409 pipeline.version.not_released` (a draft is
 purged, never discarded; an already-discarded version needs restore), `409
-pipeline.version.pinned` (a live parent version — or, since #320, a live dashboard version whose source — exact-pins v; `details.pinned_by` names the pipelines, `details.referencing_dashboards` the dashboards), `404
+pipeline.version.pinned` (a live parent version — or, since #320, a live dashboard version whose source — exact-pins v; `details.pinned_by` names the pipelines, `details.referencing_dashboards` the dashboards; since #786 a live API version pinning v or a live schedule running it refuses too, `details.referencing_api_versions` / `details.referencing_schedules`), `404
 pipeline.execution.not_found` (unknown version), `403 pipeline.authoring.disabled`
 (hardened). **Session-only**; audited as `pipeline.version.discarded` (pointer
 before/after in `details`).
@@ -1374,6 +1377,8 @@ A script entry may carry `implements` (7e). The import keeps the ids that resolv
 
 Datasources are environment-specific connections. See [Datasources spec](datasources.md) for the entity model.
 
+**The writer guard (#841).** Every datasource write — register, update, credential change, delete, and a grant or revoke — takes the datasource's own guard, then every workspace the change is visible in ([release-dependencies design §4.4](superpowers/specs/2026-10-13-release-dependencies-design.md#44-the-metadata-writer-protocol-amended-2026-11-10-841-g0)). A wait past [`lock-wait-seconds`](configuration.md) answers `409 datasource.write.busy` (`details.lock_wait_seconds`; nothing was written — retry).
+
 ### 9.1 Register datasource
 
 ```
@@ -1457,9 +1462,11 @@ Updates connection details. The credential secret is optional — omit `credenti
 DELETE /datasources/{name}
 ```
 
-Fails with `datasource.in_use` if any non-deleted pipeline references it **in any version it has ever stored** — DRAFT, RELEASED and DISCARDED alike ([Datasources §6.2](datasources.md#62-in-use-check-on-delete)). Pipeline versions are immutable and executable by explicit version, so a reference from a released v1 that a later v2 dropped is a real reference; the guard that read each pipeline's current version only let that delete through and failed v1's next execution at connect.
+Fails with `datasource.in_use` if any non-deleted pipeline or parameter set, in any workspace, references it **in any version it has ever stored** — DRAFT, RELEASED and DISCARDED alike ([Datasources §6.2](datasources.md#62-in-use-check-on-delete)); a parameter set references it through a selector's `parameters[i].source.datasource` (#873). Pipeline versions are immutable and executable by explicit version, so a reference from a released v1 that a later v2 dropped is a real reference; the guard that read each pipeline's current version only let that delete through and failed v1's next execution at connect.
 
-`details` carries `datasource_name`, `referencing_pipelines` (the distinct pipeline names) and `references` — one entry per referencing node, `{"pipeline", "node_id", "pipeline_version", "version_status"}` — the same shape `template.in_use` uses (§8.6), because the version is what tells the operator which body to go and edit.
+`details` carries `datasource_name`, `referencing_pipelines` (the distinct pipeline names), `referencing_parameter_sets` (the distinct set names, #873) and `references` — one entry per referencing node, `{"kind": "pipeline", "pipeline", "node_id", "pipeline_version", "version_status"}`, then one per referencing selector, `{"kind": "parameter_set", "parameter_set", "parameter_set_version", "version_status", "path"}` — the same shape `template.in_use` uses (§8.6), because the version is what tells the operator which body to go and edit.
+
+The delete refusal's details are scoped to the caller's workspaces (#873): a super admin's lists name every workspace's references; anyone else's name only those in the workspace the request acts in. The refusal still fires when only another workspace's bodies use the name — then the lists are empty and the message is `Datasource '<name>' is in use and cannot be deleted.`, identical however many references lie outside.
 
 D8-gated like update: deleting a global datasource requires admin; a member needs the `member-datasources-enabled` gate for a bound one.
 
@@ -2167,7 +2174,7 @@ The whole batch rolls back on any of the above. The sender's own refusals — `p
 
 ## 19. Published Endpoints
 
-A released pipeline served as a **`GET` API** at `/api/<category>/<version>/<path…>`, whose
+One exact version of a read-only pipeline served as a **`GET` API** at `/api/<category>/<version>/<path…>`, whose
 response is the `data_ready` payload — the first page plus the cursor — with no event handling on
 the client (this section is the contract). Ruling R-EP5: the **category** is the engineer's
 namespace — a business domain, a team, a product line — and the product's own API is simply its
@@ -2202,10 +2209,18 @@ precedence is deliberately NOT offered in v1: because ambiguity cannot be publis
 pattern can match a request, and a reader of the registry can tell what a URL does by finding the
 one row it matches. `UNIQUE (path_pattern)` is deployment-wide — a URL is global.
 
+Publish and unpublish run under the workspace's writer guard, then the deployment-wide registry key, so the
+ambiguity check reads every committed path (#841, [release-dependencies design §4.4](superpowers/specs/2026-10-13-release-dependencies-design.md#44-the-metadata-writer-protocol-amended-2026-11-10-841-g0)).
+A wait past [`lock-wait-seconds`](configuration.md) answers `409 endpoint.write.busy` (`details.lock_wait_seconds`;
+nothing was published or removed — retry).
+
 ### 19.2 What may be published
 
-The pipeline must exist in the endpoint's workspace and have a **released** version, and it must
-be **side-effect-free**: every node of the current released version is `DQL` with `output.target`
+The API pins **one exact pipeline version** (`pipeline_version`, #786; dependency-graph record §24).
+That version must exist in the endpoint's workspace — a missing or DISCARDED one is
+`400 endpoint.pipeline_version.not_found` — and be eligible under the deployment's posture: RELEASED always, a
+DRAFT only where authoring is enabled (`409 endpoint.pipeline_version.not_eligible`). It must
+be **side-effect-free**: every node of the pinned version is `DQL` with `output.target`
 in {`tempdb`, `caller`}, a `DML`/`DDL` node whose `source` is `tempdb`, or a `PIPELINE` node whose
 pinned child satisfies the same rule transitively. `tempdb` is the execution's own in-memory H2,
 created for the run and discarded with it — a statement against it cannot outlive the request, so
@@ -2215,9 +2230,10 @@ read's type — refuses publication with `409 endpoint.pipeline_not_readonly` na
 the datasource.
 
 That rule is what makes `GET` safe here, and it is not a formality: `GET` is retried on timeout,
-preloaded by browsers and followed by crawlers. It is **re-checked on every serve**, because an
-endpoint pins a pipeline and serves its latest released version — a later release can put a write
-under a live URL.
+preloaded by browsers and followed by crawlers. It is checked when the API is created and at every draft save,
+and **re-checked on every serve** of the exact pipeline version the API's current version pins. The pin never
+moves when the pipeline's current version moves: a later pipeline release reaches the URL only through a new API
+version that pins it, released or switched to explicitly.
 
 Every path variable must name a declared parameter of that version
 (`400 endpoint.path_variable_unknown`); the pipeline may declare more, and they come from the
@@ -2232,7 +2248,7 @@ and a session is `401`. Authorisation is the key's hierarchical bindings
 `api_caller`) serves what is bound to it, the MCP key is refused here by kind, and so **a published
 path with no binding on any ancestor serves no one until a key is bound to it** (#215 B3).
 
-The accepted parameters are the released version's declared ones: **path variables** bind by
+The accepted parameters are the pinned pipeline version's declared ones: **path variables** bind by
 name, and the **query string** supplies the rest. Validation is strict and **reports every defect
 at once** — one `400 endpoint.request.invalid` whose `details.errors[]` carries
 `{parameter, code, message}` per problem, because a client fixes a request once:
@@ -2297,7 +2313,54 @@ answers a **promoter** through the lens (178, [Auth §11A.1](auth.md#11a1-the-40
 listed iff its pipeline is visible to that principal, so a hidden pipeline never leaks through
 the endpoint that publishes it.
 
-Both bodies (publish, and the binding in `POST /endpoints/bindings`) are read through the strict request mapper (#333): a number or boolean where a string is declared (`path`, `pipeline`, `description`, `path_prefix`, `api_key_name`, `api_key_id`) or a string or float for `timeout_seconds` is `400 pipeline.execution.invalid_parameter_type` with `details.reason: "wrong_type"` and `details.path`; an unknown key is `reason: "unknown_key"`; a missing required key is `reason: "missing"`. Before #333 a missing `path` answered `endpoint.path_invalid` with `reason: malformed_json`.
+**Create (#786).** `POST /api/v1/endpoints` takes `path`, `pipeline`, **`pipeline_version`** (REQUIRED, an integer of
+at least 1 — the exact pin, an authored input like a pipeline node's `template_version`), `timeout_seconds` and
+`description`, and answers `201` with the entity. It writes the entity and its **v1 DRAFT** in one transaction —
+no path leaves an entity without a version — and that draft is the API's current version: on an authoring-enabled
+deployment it serves under the normal runtime checks (the entity is enabled, the caller's key is bound, the pinned
+pipeline version is eligible). Creation is an authoring operation: a deployment with authoring disabled refuses it
+with `409 endpoint.authoring_disabled`, and there is no release to perform there. A promotion receiver creates an
+absent API through its own receiver-only import (§18), never through this route.
+
+**Delete (#786).** `DELETE /api/v1/endpoints?path=` is the **guarded entity deletion** (versioning §3.2, the
+parameter-set entity rule): an API is deleted — with its versions — only while every version it holds is a DRAFT.
+A RELEASED version, current or not, or a DISCARDED one refuses `409 endpoint.version.last_release` (`details`: this
+API's blocking `version` and its `status`) and nothing is removed: the entity, its current pointer, its versions and
+its key bindings all stay. Discard is per version (below); an API that was ever released keeps its history. The
+check reads the versions under the entity row lock in the transaction that deletes, after the writer guard and the
+registry key, so no release lands between the check and the delete. A legacy row (below) never serves and stays
+deletable whatever its converted version's status.
+
+**Versions (#786).** An API is versioned like a pipeline (record §24): each version is an immutable body — `pipeline`,
+`pipeline_version`, `timeout_seconds`, `description` — with a `status` (DRAFT, RELEASED, DISCARDED) and a
+`body_hash`; at most one DRAFT exists, and the entity's current pointer names the version that serves. The
+resources are addressed by the entity id (a path contains `/`):
+
+| Route | Permission | What it does |
+|---|---|---|
+| `GET /api/v1/endpoints/{id}/versions` | `endpoint.read` | Every version, newest first: `version`, `status`, `pipeline`, `pipeline_version`, `timeout_seconds`, `description`, `body_hash`, `is_current`, `eligible` (under the caller's posture), `created_at`, `released_at`. Never bindings or key data — those are the entity's |
+| `GET /api/v1/endpoints/{id}/versions/{version}` | `endpoint.read` | One version, the same fields; `404 endpoint.version.not_found` for an unknown number or an API the caller cannot see — one answer for both |
+| `PUT /api/v1/endpoints/{id}/draft` | `endpoint.publish` | Save the working draft — a repin, or new serve settings. `If-Match` is the body hash the edit is based on (the draft, or the current version when there is none; `409 endpoint.version.conflict` otherwise). The pin is checked as at create. An `mcp` key may call it |
+
+The lifecycle verbs are **session-only** (a key is `403 auth.session.required`), like a pipeline's (§5.10–§5.14),
+and every one of them — like create and the draft save — refuses on an authoring-disabled deployment regardless
+of role:
+
+| Route | Permission | What it does |
+|---|---|---|
+| `POST /api/v1/endpoints/{id}/release` | `endpoint.release` | Release the working draft through the shared release planner (`If-Match` = the draft's hash; an optional plan body carries `tree_hash`, `include_dependencies`, `check_overrides`). A DRAFT pipeline version below it is `409 endpoint.release.dependency_not_released` unless the plan releases it; the release moves the current pointer to the released version |
+| `POST /api/v1/endpoints/{id}/draft/discard` | `endpoint.version.manage` | Purge the working draft (`If-Match`; there is no discarded-draft status); the sole version takes the entity, `204` |
+| `POST /api/v1/endpoints/{id}/versions/{version}/discard` | `endpoint.version.manage` | Discard a RELEASED version (`409 endpoint.version.not_released` otherwise); answers `version`, `current_version_before`, `current_version_after` — the pointer recomputes by the pipeline rule |
+| `POST /api/v1/endpoints/{id}/versions/{version}/restore` | `endpoint.version.manage` | Restore a DISCARDED version to RELEASED after rechecking its pin transitively: a missing or DISCARDED pinned version is `400 endpoint.pipeline_version.not_found`, a DRAFT one is `409 endpoint.release.dependency_not_released` (`reason: not_released`); nothing is written on a refusal |
+| `DELETE /api/v1/endpoints/{id}/versions/{version}` | `endpoint.version.manage` | Purge a DRAFT version (`409 endpoint.version.not_draft` otherwise); the sole version takes the entity, `204` |
+| `POST /api/v1/endpoints/{id}/current` | `endpoint.version.manage` | Switch the API's current version, body `{"version": n}`: the target must be eligible under the posture (`409 endpoint.version.not_eligible`) and its pin is rechecked. This explicit switch is how an older pin serves again |
+
+An API version pins a pipeline version, so the pipeline's own discard and purge refuse while a live (DRAFT or
+RELEASED) API version pins it — `409 pipeline.version.pinned` with `details.referencing_api_versions` (§5.11, §5.12, §5.14).
+Audit kinds: `endpoint.draft_saved`, `endpoint.released`, `endpoint.version_discarded`, `endpoint.version_restored`,
+`endpoint.version_purged`, `endpoint.current_switched` ([Enums](enums.md)).
+
+The create, draft and binding bodies are read through the strict request mapper (#333): a number or boolean where a string is declared (`path`, `pipeline`, `description`, `path_prefix`, `api_key_name`, `api_key_id`) or a string or float for `timeout_seconds` or `pipeline_version` is `400 pipeline.execution.invalid_parameter_type` with `details.reason: "wrong_type"` and `details.path`; an unknown key is `reason: "unknown_key"`; a missing required key is `reason: "missing"`. Before #333 a missing `path` answered `endpoint.path_invalid` with `reason: malformed_json`.
 
 **Legacy rows (#274).** A stored row whose `path_pattern` predates the current grammar — fewer
 than three segments, saved before R-EP5 — is **retired, never fatal**: it cannot boot-refuse the
@@ -2307,7 +2370,7 @@ listing answers it after the valid rows with the keys `path`, `pipeline`, `enabl
 carries none of the valid shape's parse-derived fields (`path_variables`, `bindings`,
 timestamps), because there is no parse. Once V41 has run its `enabled` is `false`; a single read
 (`?path=`) resolves valid rows only and answers the legacy path `404`, like the serve path. The
-one verb the legacy row supports is **`DELETE`** — the same unpublish route, unchanged — which
+one verb the legacy row supports is **`DELETE`** — the same unpublish route, exempt from its version rule — which
 removes it; republishing at a current-grammar path is the replacement. The API console page lists
 the row flagged with the same reason and offers only that verb. The flag is the parse verdict taken on every read, not the `retired_reason` column (an audit marker); a legacy `path` (and its `url`) is echoed as stored up to the grammar's 200 characters and cut there (#286 — `path_pattern` is `TEXT` with no CHECK, so only a database write can store a longer one; every API write has been held to 200 since the registry was born, so every row the product wrote is echoed exactly and stays addressable by `DELETE ?path=`, and a longer one is unpublished by its full stored path; the cut falls on a code-point boundary, and such a row's `reason` is the length sentence — it never quotes more of the stored path than the echo shows (#298) — and the console offers no Unpublish on it (#293)), and a row malformed in a way V41's two-segment predicate does not name is listed `legacy: true` with `enabled: true` and is never served either. A **promotion** batch (§10.5) never carries a legacy row — the target's grammar would refuse it — and the sender logs the omission (`event=endpoint.promotion_legacy_omitted`, the count over the promoted pipelines, never a path); the promotion result does not list it.
 
@@ -2343,7 +2406,7 @@ The same operations exist as MCP tools ([MCP Server §6.2](mcp-server.md#62-tool
 | 406 | An `Accept` this surface cannot satisfy |
 | 429 | Rate limit or concurrency limit, with `Retry-After` |
 | 500 / 502 | Pipeline failure, mapped by [Pipeline Contract §13](pipeline-contract.md#13-error-code-catalog) (datasource connection failures are `502`) |
-| 503 | The pipeline has no released version, or is no longer side-effect-free |
+| 503 | The API's current version, or the exact pipeline version it pins, is not servable under this deployment's posture, or is no longer side-effect-free. The body names no version |
 
 ### 19.7 Not in v1
 
@@ -2417,8 +2480,8 @@ A **schedule** runs a registered executor's job — in v1 the `pipeline` executo
 | `name` | string | A folder path, `finance/daily/revenue` — the pipeline/template name grammar, unique among the workspace's live schedules; rename/move keeps the id and the history |
 | `revision` | int | Starts at 1; every edit, pause, resume, unblock and delete a person makes bumps it (a block the scheduler sets does not) |
 | `executor` | string | The registered executor (`pipeline`) |
-| `payload_schema_version` | int | The executor's payload schema version (1) |
-| `payload` | object | The executor's payload. For `pipeline`: `{"pipeline": "<name>", "version": "current"}` — `current` follows the pipeline's current-version pointer at each run, drafts included; nothing else is accepted in v1. Since slice 3 the payload MAY also carry the optional, additive `parameter_bindings` object (§20.2) |
+| `payload_schema_version` | int | The executor's payload schema version: `2` for `pipeline` since #786 (a schedule saved before it was converted in place at the upgrade; a leftover `1` is refused `schedule.validation.payload_schema_unsupported`, never re-read) |
+| `payload` | object | The executor's payload. For `pipeline` (schema 2): `{"pipeline": "<name>", "version": <int ≥ 1>}` — the EXACT pipeline version every run executes, never what the current-version pointer names at run time; `"current"` and `"latest"` are refused by name. The version must exist and be eligible under the deployment's posture (RELEASED; a DRAFT only where authoring is enabled). The payload MAY also carry the optional, additive `parameter_bindings` object (§20.2) |
 | `parameters` | object | Literal values for the pipeline's declared parameters, validated by the binder an interactive run uses |
 | `target_ref` | string | The executor's reference to what it runs (`pipeline:<name>`) |
 | `cron` | string | Five fields, Unix style (`minute hour day-of-month month day-of-week`) |
@@ -2466,14 +2529,16 @@ A **schedule** runs a registered executor's job — in v1 the `pipeline` executo
 
 `POST /schedules` — `schedule.create`. Body: `name`, `payload`, `cron`, `timezone` (required); `executor` (default `pipeline`), `parameters` (default `{}`), `missed_run_policy` (default `skip`). Optional `Idempotency-Key`, held durably: a replay of the same request answers `200` with the original schedule; a replay with a different body is `409 idempotency.key_reused_for_different_request`. `201` with the schedule and its `ETag`. Refusals: the `schedule.validation.*` family, `409 schedule.name_taken`, `409 schedule.limit.per_workspace`, and a parameter refusal exactly as an interactive run's (§13.4).
 
+**The writer guard (#841).** A create takes the workspace's writer guard FIRST, validates the target under it, then saves, all in one transaction: a pinned version discarded or purged by a write already holding the guard is seen by the validation, and the create is refused with that target code (`schedule.validation.target_not_found` / `target_not_released`), never saved against a target that just stopped existing; a discard that comes second sees the new pin and refuses `409 pipeline.version.pinned` (#786 D.3). An update that changes the executor or the payload (the pin) takes the same guard; a pin-unchanged edit does not. A wait past [`lock-wait-seconds`](configuration.md) answers `409 schedule.write.busy` (`details.lock_wait_seconds`; nothing was saved — retry).
+
 **`notifications`** (#442a) is optional: absent or JSON null creates no recipients and events `failure`, `unknown`, `blocked` (start/success off). A present object accepts optional `recipients` (list of strings) and `events` (list of the five event names); an omitted member uses its create default. Example: `{"recipients":["a@example.com"],"events":["failure","unknown","blocked"]}`. Addresses are trimmed, domains lower-cased and duplicates removed case-insensitively, preserving first spelling and order; events deduplicate. One WHATWG valid e-mail address grammar, at most 254 characters, refuses header injection. The configured recipient limit defaults to 20. The idempotency hash includes normalized effective settings; case-only duplicates and reordered event choices replay the same meaning. Pre-V49 create keys still replay when the effective notification settings are the old defaults (no recipients and the three default events); different settings cannot match that legacy hash. A schedule's `notifications` in a response is `{recipient_count, events, delivery}`, plus `recipients` for a `schedule.update` holder only; `delivery` is the DEPLOYMENT's computed state, never stored (#442b, [Scheduler §2.3](scheduler.md#23-notification-settings-442)): `{"state":"on"}`, or `{"state":"off","reason":…}` with `disabled` (the enable flag is false — the default), `mail_unconfigured` or `no_allowlist` (the `development` posture with an empty recipient-domain allowlist). Settings are saved in every state; while off nothing is queued or sent.
 
 A refused `notifications` object is `400 schedule.validation.notifications_invalid` (#442a; the catalogue row is pipeline-contract §13.19). `details` contains only `{field, reason}`: `notifications`, `notifications.recipients`, an indexed recipient or event field; `not_an_object`, `not_a_list`, `not_a_string`, `syntax`, `too_long`, `too_many`, `unknown_event`, and `domain_not_allowed` (#442b: a recipient outside a non-empty `recipient-domains` allowlist, [Configuration §3.29](configuration.md#329-scheduler-9)). No address is echoed
 
-**`payload.parameter_bindings`** (#9 slice 3) — an optional, ADDITIVE key of payload schema 1. One binding per declared `DATE` parameter:
+**`payload.parameter_bindings`** (#9 slice 3) — an optional, ADDITIVE key of the payload (schema 1, and schema 2 since #786). One binding per declared `DATE` parameter:
 
 ```json
-{"pipeline": "<name>", "version": "current",
+{"pipeline": "<name>", "version": 3,
  "parameter_bindings": {
    "as_of_date":    {"source": "keyword", "name": "TODAY"},
    "previous_date": {"source": "keyword", "name": "YESTERDAY"},
@@ -2495,7 +2560,7 @@ Keywords are an exact allowlist — `TODAY` and `YESTERDAY`, uppercase — and a
 
 ### 20.5 Edit a schedule
 
-`PUT /schedules/{id}` with `If-Match: "<revision>"` — `schedule.update`. Body as §20.2 (the whole schedule), `parameter_bindings` included — replacing the saved bindings wholesale, like every other body field. A stale revision is `409 schedule.revision_conflict` (`details.current_revision`); a missing `If-Match` is refused as on §5.5. Changing the cron or timezone recomputes `next_due_at` from now — occurrences of the old pattern are not "missed". Runs already recorded keep the revision they were recorded under.
+`PUT /schedules/{id}` with `If-Match: "<revision>"` — `schedule.update`. Body as §20.2 (the whole schedule), `parameter_bindings` included — replacing the saved bindings wholesale, like every other body field. A stale revision is `409 schedule.revision_conflict` (`details.current_revision`); a missing `If-Match` is refused as on §5.5. An edit that changes the executor or its payload re-validates the target under the workspace's writer guard, exactly as a create does (§20.2); an edit that keeps them stays on the revision check alone. Changing the cron or timezone recomputes `next_due_at` from now — occurrences of the old pattern are not "missed". Runs already recorded keep the revision they were recorded under.
 
 **Additive frozen-contract rule (#442a):** absent or JSON-null `notifications` KEEPS the stored settings, so clients written before this field cannot wipe them. A present object replaces each supplied member; an omitted member keeps its stored value. `recipients: []` turns mail off; `events: []` selects no events. Neither omission resets a member to its create default.
 
@@ -2509,7 +2574,7 @@ Keywords are an exact allowlist — `TODAY` and `YESTERDAY`, uppercase — and a
 
 ### 20.8 Unblock
 
-`POST /schedules/{id}/unblock` — `schedule.pause`. A schedule blocks when a run's outcome is `unknown` (nobody can say whether its work happened) or an executor refusal asks for it (the pipeline has no current version, the parameters no longer bind, …). Unblock re-validates the saved payload and parameters first — a refusal there is the same `400` a save would get — then clears the block, recomputes `next_due_at` from now and writes an `unblocked` row on the blocking run's trail. `409 schedule.not_blocked` when it is not blocked.
+`POST /schedules/{id}/unblock` — `schedule.pause`. A schedule blocks when a run's outcome is `unknown` (nobody can say whether its work happened) or an executor refusal asks for it (the pinned version is no longer eligible, the parameters no longer bind, the stored payload is schema 1, …). Unblock re-validates the saved payload and parameters first — a refusal there is the same `400` a save would get — then clears the block, recomputes `next_due_at` from now and writes an `unblocked` row on the blocking run's trail. `409 schedule.not_blocked` when it is not blocked.
 
 ### 20.9 Upcoming occurrences
 
@@ -2527,7 +2592,7 @@ Keywords are an exact allowlist — `TODAY` and `YESTERDAY`, uppercase — and a
 
 ### 20.12 Run now
 
-`POST /schedules/{id}/run` — `schedule.run`. Records a manual run (`origin = manual`, `requested_by` = you) and answers `202` with it; it then runs like any other — as the system identity, through the same capacity and admission. Allowed on a paused schedule; refused on a blocked one (`409 schedule.blocked`) and while one of its runs is queued, starting or running (`409 schedule.run.overlap`). Optional `Idempotency-Key`, durable: the same key answers `200` with the original run.
+`POST /schedules/{id}/run` — `schedule.run`. Records a manual run (`origin = manual`, `requested_by` = you) and answers `202` with it; it then runs like any other — as the system identity, through the same capacity and admission. Allowed on a paused schedule; refused on a blocked one (`409 schedule.blocked`) and while one of its runs is queued, starting or running (`409 schedule.run.overlap`); a schedule whose stored payload is in a schema the executor no longer runs (a leftover schema 1, #786) is refused `400 schedule.validation.payload_schema_unsupported` and records nothing. Optional `Idempotency-Key`, durable: the same key answers `200` with the original run.
 
 ### 20.13 Resend a notification
 
@@ -2886,6 +2951,9 @@ browser persistence. Clients must reject foreign/stale responses even after abor
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-11 | v2.112 | #786 U2 schedules pin exact versions — a deliberate break | **§20.1, §20.2, §20.8:** the pipeline payload is schema 2, `{"pipeline", "version": <int ≥ 1>}`: a schedule runs one exact version; `"version": "current"` (schema 1) is refused `400 schedule.validation.payload_invalid` (`details.reason=version_current_refused`), `latest` by name, a missing or non-integer version too; the pin must exist (`target_not_found`) and be eligible under the posture (`target_not_released`). `payload_schema_version` reads `2`; a leftover schema-1 row is refused `400 schedule.validation.payload_schema_unsupported` on update, unblock and Run now. The upgrade converts every live schedule in place (only the version selector changes). A pin-changing update joins the create's writer guard. |
+| 2026-11-11 | v2.111 | #786 U1 R1 (API versions — guarded entity deletion) | **§19.5:** `DELETE /api/v1/endpoints` is the guarded entity deletion — an API holding a RELEASED (current or not) or DISCARDED version is refused `409 endpoint.version.last_release` with nothing removed (entity, pointer, versions, bindings); a draft-only API and a legacy row are deleted as before. MCP `endpoints_delete` answers the same ([MCP §6.2.26](mcp-server.md#6226-endpoints_delete)). A new refusal on an existing route; no route, field or permission change. |
+| 2026-11-10 | v2.110 | #841 metadata writer protocol (G0) — renumbered at merge after #860's v2.109 | **§9, §19, §20.2, §20.5:** datasource writes (register, update, credential, delete, grant, revoke), endpoint publish/unpublish, a schedule create and a target-changing schedule edit run under the metadata writer guard (release-dependencies design §4.4); an exhausted wait is `409 datasource.write.busy` / `endpoint.write.busy` / `schedule.write.busy` (`details.lock_wait_seconds`, nothing written). A schedule create validates its target under the guard. Additive: new refusals on existing routes, no route or field change. |
 | 2026-11-08 | v2.109 | 860 (#860) | Additive. **§22.2:** a visualization's `POST` and `PUT` answer `warnings` beside the full JSON, always present (`[]` on a clean save, else `{code, path, library}` per partly drawn chart field). **§23.3:** each `chart` occurrence of `GET /{id}/runtime/config` carries `columns`, `{field: LogicalType}` of its encoded fields; `renderer.bundle` is `"2d"` for every v1 kind. |
 | 2026-11-03 | v2.108 | #782 logout CSRF | **§16.4:** the root-level browser logout has a narrow same-origin Fetch Metadata exemption; other callers retain double-submit validation. A refused browser navigation gets the 403 page and preserves its session; machine callers keep JSON. |
 | 2026-11-01 | v2.107 | 758 (#758) | **§24:** fixes the tree search whitespace alphabet on both client and server, after the shared raw-term bound; names the code points and empty-term browse behavior. |

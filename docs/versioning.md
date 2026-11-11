@@ -1,9 +1,9 @@
 # Versioning: Draft, Release, Promotion
 
-**Status:** v1.34 — #778: the receiver refuses a promotion batch that reads a lake table its registry does not hold, after landing, inside the batch transaction (§10.5). v1.33 — #737: a parameter-set restore tells `template_not_found` from `template_version_not_found` by the template entity row, as a pipeline restore does since #733 (§3.5.3). v1.32 — #575: all five wire inventory arms require a RELEASED current pointer (§10.2). v1.31 — #733: a pipeline restore tells `template_not_found` from `template_version_not_found` by the template entity row, not a version-1 probe (§3.5.3). v1.30 — #517: a release takes its whole dependency closure, flips consented dependency drafts in one transaction with strict audit, and every pin-affecting write takes the workspace writer guard (§5.3, §3.5, §10.4); a pipeline or parameter-set restore re-judges its outbound pins (§3.5.3). v1.29 — #563: an object whose current pointer names a DRAFT is not promotable and is invisible to a promoter whatever releases it holds (§10.2, §3.4). v1.28 — #459: draft authoring may pin DRAFT or RELEASED children (D58, §3); #462: both pipeline draft purges refuse named parent/dashboard pins before destructive writes. #328: the release flip records the caller output (§5.3). #349: the UI workspace row states the in-page version switch (§7.2); #344: the push closure is read at the pinned versions without the promoter lens (§10.4); #332: the three families audit every lifecycle verb (§7's blanket sentence); #348: §7.2's table disambiguates the REST `GET /api/v1/pipelines/{id}` from the UI read workspace `GET /pipelines/{id}`; #10 L1c-c: the count ceiling stated as aggregate; the receive's refused-dashboard rollback witnessed (§10.4); #320: the reverse arrows into other families (§3.5.3); #10: visualizations and dashboards join the lifecycle table (§3.5)
+**Status:** v1.37 — #786 (U2): schedules pin an exact pipeline version and no longer follow the pointer (§3.4, the NULL pointer, the edge list, the pin table). v1.36 — #786 (U1): published APIs pin an exact pipeline version and no longer follow the pipeline's pointer (§3.4, §3.5.3, §7, §7.2, §10.2). v1.35 — #841 (G0): §5.3's workspace writer guard is one class of the metadata writer protocol; `lock-wait-seconds` is one cumulative budget per write. v1.34 — #778: the receiver refuses a promotion batch that reads a lake table its registry does not hold, after landing, inside the batch transaction (§10.5). v1.33 — #737: a parameter-set restore tells `template_not_found` from `template_version_not_found` by the template entity row, as a pipeline restore does since #733 (§3.5.3). v1.32 — #575: all five wire inventory arms require a RELEASED current pointer (§10.2). v1.31 — #733: a pipeline restore tells `template_not_found` from `template_version_not_found` by the template entity row, not a version-1 probe (§3.5.3). v1.30 — #517: a release takes its whole dependency closure, flips consented dependency drafts in one transaction with strict audit, and every pin-affecting write takes the workspace writer guard (§5.3, §3.5, §10.4); a pipeline or parameter-set restore re-judges its outbound pins (§3.5.3). v1.29 — #563: an object whose current pointer names a DRAFT is not promotable and is invisible to a promoter whatever releases it holds (§10.2, §3.4). v1.28 — #459: draft authoring may pin DRAFT or RELEASED children (D58, §3); #462: both pipeline draft purges refuse named parent/dashboard pins before destructive writes. #328: the release flip records the caller output (§5.3). #349: the UI workspace row states the in-page version switch (§7.2); #344: the push closure is read at the pinned versions without the promoter lens (§10.4); #332: the three families audit every lifecycle verb (§7's blanket sentence); #348: §7.2's table disambiguates the REST `GET /api/v1/pipelines/{id}` from the UI read workspace `GET /pipelines/{id}`; #10 L1c-c: the count ceiling stated as aggregate; the receive's refused-dashboard rollback witnessed (§10.4); #320: the reverse arrows into other families (§3.5.3); #10: visualizations and dashboards join the lifecycle table (§3.5)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md) (§13 error catalog, §17 persistence), [Templates](templates.md), [Metadata DB](metadata-db.md) (§4.4/§4.5/§4.8/§4.9 — DDL authority), [REST API](rest-api.md), [Pipeline Editor UI](pipeline-editor.md)
-**Last updated:** 2026-10-28
+**Last updated:** 2026-11-11
 
 ---
 
@@ -180,8 +180,12 @@ draft-dominance that the table itself overrides.
 
 ### 3.4 `current_version` is sticky and event-driven (D60)
 
-`current_version` is the version every **pointer-following dependent** runs — published
-endpoints, promotion, schedules (#9 — a schedule's `version: "current"` follows it, drafts included), dashboards later. It is **sticky**: it no longer
+`current_version` is the version every **pointer-following dependent** runs — promotion, dashboards later.
+**Published APIs and schedules no longer follow it (#786):** each API version pins an EXACT pipeline version, and
+serving reads the API's own current API version and runs that pin — moving the pipeline's pointer never retargets an
+API ([REST API §19](rest-api.md)); a schedule's payload (schema 2) pins an exact version and every run executes it —
+moving the pointer never retargets a schedule ([Scheduler §2.1](scheduler.md#21-the-pipeline-payload)). The upgrade
+converted each schedule that followed the pointer to the version the pointer named then. It is **sticky**: it no longer
 means "the latest RELEASED version" as a derived fact. It moves ONLY on these events, and
 when it moves it picks the **highest-numbered ELIGIBLE live version**:
 
@@ -208,18 +212,17 @@ exists, else the latest release — resolved in one place (`PipelineService.work
 The published surface serves the pointer when it names a RELEASED version, which under
 hardened postures is the only thing it can name.
 
-**NULL pointer.** A published endpoint answers `endpoint.pipeline_not_released` at serve
-time — the endpoint row is not deleted, and an entity whose status is DISCARDED answers
-the same refusal rather than a 404; a schedule (#9) records a `not_started` run
-(reason `pointer_null`) and blocks until a person unblocks it ([Scheduler §5](scheduler.md#5-runs-states-and-reasons));
+**NULL pointer.** A published API does not read this pointer (#786: it serves its own API version's exact pin, so a
+pipeline whose pointer is NULL changes nothing it serves); nor does a schedule (#786: it runs its exact pin; before
+#786 a schedule recorded a `not_started` / `pointer_null` run and blocked, [Scheduler §5](scheduler.md#5-runs-states-and-reasons));
 promotion has nothing to push.
 
 **A draft pointer (D63, 2026-09-09).** Under the development posture the pointer may name a
-DRAFT (the D60 fallback, or a manual switch), and a published endpoint **serves it** — the
-endpoint has to be testable before the release, so in development the API can be pointed at
-any live version. Outside development no draft exists, so a release is served by
-construction; the serve path checks the same eligibility rule the pointer uses
-(`PipelineVersionStatus.eligibleForPointer`), never a status of its own.
+DRAFT (the D60 fallback, or a manual switch). D63's purpose — an API testable before the release — is kept by #786 in
+a different way: where authoring is enabled an API version may PIN an eligible DRAFT pipeline version (and be a DRAFT
+itself), while an authoring-disabled deployment admits RELEASED pins only. The serve path checks the same eligibility
+rule the pointer uses (`PipelineVersionStatus.eligibleForPointer`) for the API's current version and for its pin, never
+a status of its own.
 
 ### 3.5 The lifecycle table
 
@@ -239,7 +242,8 @@ dashboard releases only when its set is RELEASED, its sources RELEASED and read-
 pinned visualization RELEASED — or released with it in one transaction under
 `release_pinned_visualizations` (D61). Every leaf has an ordered
 version list. Dependencies are **edges**: exact-version pins (a pipeline node's template
-pin, a PIPELINE node's child pin) and pointer edges (endpoint→current, schedule→current).
+pin, a PIPELINE node's child pin, and since #786 an API version's and a schedule's pipeline pin) and pointer edges
+(promotion→current).
 Three graph rules cover every refusal:
 
 1. A version with an **inbound exact pin from a LIVE (non-discarded) version** cannot be
@@ -422,10 +426,12 @@ reach them through a port `application` implements — no module's SQL names ano
 |---|---|---|---|
 | visualization `transform.template` → template | draft purge, version purge, discard, entity purge, the exclusive-draft offer | `template.in_use` | `referencing_visualizations` (names), beside `pinned_by` and `referencing_parameter_sets` |
 | dashboard `sources[].pipeline` → pipeline version | draft purge, version purge, discard, entity purge | `pipeline.version.pinned` | `referencing_dashboards`: `[{dashboard, version, status}]`, beside `pinned_by` |
+| API version `(pipeline, pipeline_version)` → pipeline version (#786) | draft purge, version purge, discard, entity purge | `pipeline.version.pinned` | `referencing_api_versions`: `[{path, version, status, pipeline_version}]` — DRAFT and RELEASED API versions, noncurrent and disabled entities included; DISCARDED protects nothing |
+| schedule target → the pipeline version it runs (#786) | draft purge, version purge, discard, entity purge | `pipeline.version.pinned` | `referencing_schedules`: `[{schedule, pipeline_version}]` — every non-deleted schedule, paused and blocked included; the schema-2 payload's exact `version`; a leftover schema-1 payload runs CURRENT (null while CURRENT is NULL, counted by the entity purge only) |
 | dashboard `parameter_set` → parameter-set release | draft purge, version purge, discard, entity purge | `parameter.in_use` | `pinned_by`: `[{dashboard, version, status}]`, `id`, `version` (absent for an entity purge) |
 | dashboard `visualizations[].visualization` → visualization | draft purge, version purge, discard, entity purge | `visualization.version.pinned` (L1a) | `pinned_by`: `["dashboard@version"]` |
 
-Endpoints and schedules pin nothing (pointer edges, rule 2): no arm exists for them.
+Since #786 API versions pin an exact pipeline version, and a live schedule protects the exact version its schema-2 payload pins (a leftover schema-1 one, the one CURRENT names at the check); both arms are in the table above. The entity purge asks both for any version.
 
 **Which question each verb asks.** A discard and a draft purge that keeps other versions ask the LIVE exact-pin question
 (rule 1: DRAFT or RELEASED dependent versions pinning exactly this version). An entity purge, and a draft purge that
@@ -458,10 +464,24 @@ version — a template can lose version 1 to a preserved-number import or a draf
 for the entity, #733, #737), a pipeline's child pin `pipeline_not_found` / `pipeline_version_not_found` /
 `pipeline_reference_not_released` (`status: DISCARDED`). A present-but-DRAFT pin refuses
 `<family>.release.dependency_not_released` (409, the import-landing precedent, `reason: not_released` in the shared
-blockers shape); no save rule lets a once-released body pin a draft, so that branch is defensive. The dashboard and
-visualization restores have no such branch: they refuse the missing pin only and admit a present-but-DRAFT one. The 400
-answers first. Repair is bottom-up: restore the dependency, then the dependent. A refusal writes nothing — status, pointer and
+blockers shape); no save rule lets a once-released body pin a draft, so that branch is defensive. The dashboard,
+visualization and template restores answer the same way since #873: a present-but-DRAFT pin is
+`dashboard.release.dependency_not_released` / `visualization.release.dependency_not_released` /
+`template.release.dependency_not_released` (409, `reason: not_released`), a missing or DISCARDED import of a template the
+save rules' `template.validation.import_not_found` (400, `reason: discarded` for a DISCARDED version). The 400 answers
+first. Repair is bottom-up: restore the dependency, then the dependent. A refusal writes nothing — status, pointer and
 audit stand.
+
+**The recheck is transitive (#873, record §25.2 row G2, §25.4 D15).** Every family's restore walks the stored body's
+WHOLE closure, not its direct pins only: a RELEASED dependency's own pins can have been planted or changed since too, and
+a restore lands RELEASED with nobody consenting. The stored body of the DISCARDED version is read through its family's
+dependency provider and its references are the roots of one metadata-only walk under the writer guard the restore already
+holds (no probe, no evidence run, no datasource, type or dialect revalidation). A DISCARDED or MISSING node anywhere below
+stays terminal and is the family's native 400 AT THE PIN it hides under, its details carrying the full `path` and the
+intermediate nodes as `via` (`[{family, name, version}]`, the direct pin first); a DRAFT node below is a blocker of the 409
+with the same `via`. So a dashboard whose RELEASED visualization's transform template is now DRAFT does not restore, nor a
+template whose RELEASED library imports a DRAFT library. A cycle or a walk bound found below answers the restored family's
+`dependency_cycle` / `limit_exceeded`, an expired planning deadline its `metadata_unavailable` (503).
 
 **The lens.** `templates_used_by` and the template screen narrow the visualization arm like the others: a hidden
 visualization is never named, and a narrowing view reports RELEASED rows only. The refusals need no lens: every verb above
@@ -775,6 +795,61 @@ Preconditions, evaluated server-side before the statement runs:
      which stays `true` until the release dialog sends `tree_hash` (#522): until then a bare alias is the legacy
      cascade above, unchanged.
 
+   **The other roots (#873).** A template, a parameter set, a visualization and a dashboard release through the same
+   planner, on their existing routes and dialogs, with the same plan fields (`tree_hash`, `include_dependencies`; a
+   template's body carries them beside `name`) and the same refusals spelled in the root's family
+   (`parameter.release.*`, `visualization.release.*`, `dashboard.release.*`, `template.release.*`,
+   [pipeline-contract §13](pipeline-contract.md)). The closure is the planner's for every family: a template's
+   declared imports, a set's selector templates, a visualization's transform template, a dashboard's set, source
+   pipelines and visualizations, each transitively. Without a plan field each family keeps its legacy consent, scoped
+   to exactly the direct drafts it released before and never broadened: `release_pinned_templates` on a set or a
+   visualization = its DRAFT templates; `release_pinned_visualizations` on a dashboard = its DRAFT visualizations only
+   (not their templates, not its set, not its source pipelines); a template has no alias. On that path the refusal
+   keeps the family's own `details` keys (`pins_not_released`, `dependencies_not_released`), now naming deeper blockers
+   too. Every native preparation that may open a customer connection (a set's selector probe, a visualization's evidence
+   gate, a dashboard's §3.2 rules) runs before the transaction on a plan; the commit (a visualization's evidence
+   verdict, a dashboard's strict source re-validation, the exact-hash flip) runs inside it. A stale root `If-Match`
+   keeps the family's native `*.version.conflict`; any other drift is the root family's `plan_conflict`. The services
+   write no audit row of their own any more: the coordinator writes one row per flip, in the transaction, for every
+   entry (REST and dialog alike).
+
+   **A dashboard's DRAFT source pipeline (#873 §C.4).** A source pipeline that is still a DRAFT is a dependency like any
+   other: a plan may select it, and it then flips first with its own checks (and `check_overrides` per node). Without
+   a plan, or under `release_pinned_visualizations`, it refuses `409 dashboard.release.dependency_not_released` with
+   kind `pipeline` — where the validator's `400 dashboard.validation.source_not_released` answered before. That 400
+   remains the dashboard's import rule and the commit's strict re-validation: a dashboard never commits over a source
+   that is not RELEASED.
+
+   **Datasources are prerequisites, never released (#873 §F, owner ruling 2026-11-08).** A pipeline node that reads or
+   writes a registered datasource (a DQL/DML/DDL source, a datasource output; never `tempdb`) and a parameter-set
+   selector that names one (`parameters[i].source.datasource`) reach that datasource in the release walk. A datasource
+   has no version and no release status, so consent over it is that the NAMED datasource exists:
+   - (a) *`tree_hash` is unchanged.* No datasource fact enters the canonical form; the closure a plan digests is the
+     artifact closure exactly as before, and the existing digests stay byte-identical.
+   - (b) *The plan lists them, never as nodes.* The plan carries a top-level `prerequisites` array, one row per distinct
+     name: `{kind: "datasource", name, available, readonly}`. It is never a checkbox, a version or a status, and
+     releasing never connects to the datasource. `readonly` is a boolean only when `available` is true; when the name
+     is unavailable it is `null` (unknown, never looked up). An unavailable name blocks the plan with the versionless
+     blocker `{kind: "datasource", name, reason: "unavailable"}`, after the node blockers and inside `max_blockers`.
+   - (c) *Apply re-checks the names.* Inside the guarded transaction, after the re-walk and before any permission
+     recheck or flip, every guarded entry (a pipeline or artifact root, on the plan and on the compatibility path)
+     resolves each name again. An unavailable one refuses `409 <root family>.release.dependency_not_released` with that
+     blocker, before anything flips. A node that FLIPS is refused earlier by its own native validation, outside the
+     transaction and still before any flip, exactly as before #873 — for a pipeline, `400
+     pipeline.validation.unknown_datasource`. The apply check answers for a datasource held by a closure member that
+     does not flip (a RELEASED child below a DRAFT root, a dashboard's RELEASED source) and for a datasource that
+     disappears between native preparation and the guarded section.
+   - (d) *Recreation keeps consent.* A datasource recreated under the same name, a credential or configuration change,
+     or a new generation does not invalidate a plan: the check compares nothing but the name's resolution.
+   - (e) *The name is locked.* A datasource cannot be deleted while any stored version — DRAFT, RELEASED or DISCARDED —
+     of a live pipeline or parameter set in ANY workspace names it (`409 datasource.in_use`), and there is no rename.
+     The refusal's details are scoped to the caller's workspaces: a super admin sees every reference; anyone else sees
+     only the references in the workspace they act in. A datasource in use only elsewhere is refused with no names, no
+     count and no links ([datasources §6.2](datasources.md#62-in-use-check-on-delete)).
+   - (f) *Absent and inaccessible are one outcome.* A name that does not exist and a name granted only to another
+     workspace give byte-identical plan rows and refusals; no owner workspace, count or metadata of a hidden
+     datasource appears. The name itself is echoed only because the caller wrote it into the body.
+
    **One transaction, strictly audited.** Every release — consent or none — runs in ONE metadata transaction:
    the workspace writer guard first (below), then the dependencies flip dependency-first, each at the hash the
    closure read, the pipeline last; one `*.version.released` audit row per actual flip is written in that same
@@ -797,6 +872,10 @@ Preconditions, evaluated server-side before the statement runs:
    workspace's own `workspaces` row (`SET LOCAL lock_timeout` from the server-validated
    `lock-wait-seconds`, then `SELECT … FOR NO KEY UPDATE`). Writers in one workspace serialise; other workspaces
    never wait. A wait past the bound answers the writer's family `<family>.release.busy` and nothing is written.
+   Since #841 (G0) this guard is one class of the metadata writer protocol
+   ([release-dependencies design §4.4](superpowers/specs/2026-10-13-release-dependencies-design.md#44-the-metadata-writer-protocol-amended-2026-11-10-841-g0)):
+   a write that also needs a shared datasource's key takes it BEFORE the workspace row, and `lock-wait-seconds` is
+   one cumulative budget for all of a write's lock waits, not a fresh wait per lock.
 
 3. Full [pipeline-contract §12](pipeline-contract.md) validation re-runs on the draft body. Release is the final save-time
    gate; nothing is released that the validator would refuse.
@@ -936,6 +1015,15 @@ that makes it safe:
 Release ordering is therefore always templates-first. Pins are immutable references, so no
 cycle is possible.
 
+**Imports are release dependencies too (#873, record §7.2, §23.3).** A template's declared `imports` (exact
+`{id, version}` pins to libraries) are the same rule one level in: a template is released only when every version its
+import closure pins is RELEASED, or is selected in the same release plan, which releases the selected libraries first
+and the importer last in one transaction. The walk goes beneath a RELEASED library — its own imports are judged too —
+and a diamond loads a shared library once (two edge occurrences) and releases it once. An unselected DRAFT library, or
+a DISCARDED or missing one, is a `template.release.dependency_not_released` blocker; nothing is restored for you. An
+import cycle (unreachable through the save rules, which refuse one) is `template.release.dependency_cycle`. Saving is
+unchanged: a DRAFT may import a DRAFT. A template restore rechecks the same closure (§3.5.3, "The recheck is transitive").
+
 ---
 
 ## 7. REST Surface Changes
@@ -958,7 +1046,7 @@ Additive; existing routes keep their shapes. Exact wire contracts land in
 | `GET /api/v1/pipelines/{id}` | Read shape gains the version's `status` and `body_hash`, `current_version`, and the `draft` pointer when one exists. **Since 039 the default body is the working version (§7.1): the DRAFT when one exists, else the current released version.** |
 | `GET /api/v1/pipelines` (and `?prefix=`) | Each row's `version` is the **working** version and a new `status` field says `DRAFT` or `RELEASED` — since D55 a listing that reported `current_version` alone would show nothing for every freshly authored pipeline. |
 | `GET /api/v1/pipelines/{id}/export` | A pipeline with no RELEASED version is refused with `pipeline.promotion.not_released` (409, "release it from the UI first"): an export feeds a promotion import, which lands RELEASED content. |
-| `POST /api/v1/endpoints` | Publishing over a pipeline whose `current_version` is null is refused with `endpoint.pipeline_not_released` — the code and the check already existed; since D55 it is an ordinary state rather than an unreachable one. |
+| `POST /api/v1/endpoints` | Since #786 the request names the exact `pipeline_version` it pins; a version that does not exist is `endpoint.pipeline_version.not_found`, and one the deployment's authoring posture does not admit (a DRAFT where authoring is off) is `endpoint.pipeline_version.not_eligible`. The pipeline's `current_version` is not read. (Before #786: refused with `endpoint.pipeline_not_released` while the pointer was null.) |
 | Templates (`/api/v1/templates/...`) | Mirror of all the above (release = §8.9, discard = §8.10 in rest-api.md) — addressed by name in query/body since rest-api v2.0 (§9.6: the name never travels in a path segment). The 101 verbs are twins by name: `POST /api/v1/templates/version/discard|restore|current` (name + version in the body) and `DELETE /api/v1/templates` (the entity purge). |
 
 **The 101 verbs are human verbs (D4 family).** All carry
@@ -1030,7 +1118,7 @@ well, and it is what "we always run the LAST version" means:
 | `datapipelines://pipelines/{id}` (MCP resource, no `/versions/{n}`) | working version |
 | `pipelines_get`, `GET /api/v1/pipelines/{id}` | working version (§7.1, unchanged) |
 | The UI read workspace (`GET /pipelines/{id}`, #348) | the **ACTUAL current pointer** when its body is admitted (a development-posture current draft shows as the draft it is, never rewritten as a release), then an accessible draft, then a choose-a-version state — never "latest release"; an explicit `?version=N` renders exactly or 404. The workspace's own execute POST always carries its viewed version, so this default never decides a run. #349: the viewed version moves IN PAGE (the selector and the Versions tab fetch the admitted body through the REST version read — never a document reload, so an active run keeps its stream), and the viewed-version state the client carries is the lens-filtered admitted history the page resolved — a hidden current or draft never enters it. |
-| A published endpoint (`GET` on the published tree) | **whatever the pointer names** — in development that may be a draft (D63, §3.4 "A draft pointer"); outside development no draft exists, so released only by construction |
+| A published API (`GET` on the published tree) | **the exact pipeline version its current API version pins (#786)** — where authoring is enabled that may be a draft (§3.4 "A draft pointer"); where it is off, RELEASED only; never the pipeline's pointer |
 | Promotion candidates and the promotion push | **released only** (D6); unchanged |
 
 One place resolves it: `PipelineService.workingVersion(workspaceId, record)`. It was three
@@ -1176,6 +1264,13 @@ endpoints are specified in [REST API §18](rest-api.md#18-promotion-endpoints-re
 > entries are never listed.
 
 The wire inventory ([REST API §18.1](rest-api.md#181-promotion-inventory)) obeys the same released-pointer rule for all five families, omitting draft-pointer and never-released objects (#575).
+
+**APIs in a batch (#786, minimal preservation; owner ruling 2026-11-08).** The wire is unchanged: the sender reads each
+API's CURRENT API version (pipeline name, timeout, description) and key bindings still travel by name. The receiver
+creates an absent API through a receiver-only import whose v1 pins the receiver's CURRENT version of that pipeline at
+receive time — RELEASED when that version is, DRAFT otherwise — so an API serves at the target exactly when it would
+have before #786. A pipeline with no CURRENT refuses the batch (`endpoint.pipeline_not_released`). Promotion of exact
+API pins (the version and hash on the wire) is follow-up #879.
 
 **The same rule is the promoter LENS (178, [Auth §11A.1](auth.md#11a1-the-404-rule)).** Since
 R2 a promoter sees, on EVERY read surface — lists, levels, counts, search, gets, the editor
@@ -1501,6 +1596,11 @@ and the test goes red (a guard that cannot fail is not a guard).
 - **One-draft index:** second draft insert violates the partial unique index.
 - **Release pin rule:** pipeline release with a DRAFT template pin ⇒
   `pipeline.release.dependency_not_released`; with all pins released ⇒ succeeds.
+- **The other roots (#873):** per root family, a plan flips dependencies first and the root last in one transaction,
+  one audit row per flip sharing one `release_id`; preparation outside the transaction and commit inside it; the
+  legacy alias selects exactly its old direct drafts and its refusal `details` equal the pre-#873 keys; a dashboard's
+  DRAFT source pipeline refuses `dashboard.release.dependency_not_released` kind `pipeline` without a plan and flips
+  with one (`ReleaseCoordinatorArtifactRootsTest`, `ReleaseAliasParityTest`, `FamilyRootsReleaseCascadeE2eTest`).
 - **Import table (§9.2):** each row of the conflict table as a case; hash recompute guard
   catches a doctored payload; the D60 pointer rule (subsequent import never moves the
   pointer; first import onto a current-less entity sets it).
@@ -1578,6 +1678,9 @@ re-opening it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-11 | v1.37 | #786 schedules pin exact versions (U2) | **§3.4:** schedules are no longer pointer-following dependents — a schedule's schema-2 payload pins an exact pipeline version, a NULL pointer no longer refuses a schedule's run, the schedule→current pointer edge is now an exact pin, and the schedule arm of the pin table protects the stored `version`. |
+| 2026-11-10 | v1.36 | #786 API versions, exact pins (U1) | **§3.4:** published APIs are no longer pointer-following dependents — an API version pins an exact pipeline version and serving runs the API's own current version's pin; D63's draft testing is kept as a DRAFT pin where authoring is enabled; NULL-pointer and pointer-edge text corrected (schedules still follow the pointer until #786's second unit). **§3.5.3:** the API-version and schedule protection arms. **§7 / §7.2:** the create row and the serve row follow the exact pin. **§10.2:** APIs in a promotion batch (unchanged wire; receiver-only import pins the receiver's CURRENT; #879 is the exact-pin promotion). |
+| 2026-11-10 | v1.35 | #841 metadata writer protocol (G0) | **§5.3:** the workspace writer guard is one class of the release-dependencies design §4.4 writer protocol — a shared datasource's key is taken before the workspace row, and `lock-wait-seconds` bounds all of a write's lock waits cumulatively. Behaviour of the five release families is otherwise unchanged. |
 | 2026-11-02 | v1.34 | #778 lake reference scanner | **§10.5** gains the receiver's lake-table check: after a batch lands, the receiver checks every resolved lake-table reference of the landed pipeline and parameter-set versions against its own registry (the lake reference index, metadata-db §4.41–§4.42). One `pipeline.promotion.lake_table_unavailable` (409) for the whole batch, then a rollback. Partial, unscannable and unresolved positions are admitted; the runtime gate stays their defence. |
 | 2026-10-28 | v1.33 | #737 parameter-set restore template classification | **§3.5.3** (the restore recheck paragraph): a parameter-set restore's selector pin that is missing answers `template_version_not_found` when the template ENTITY is registered in the workspace and `template_not_found` when it is not — the rule v1.31 stated for pipelines; the version-1 probe the set recheck still used is gone. A template whose every version is DISCARDED is registered; another workspace's template of the same id is not. |
 | 2026-10-27 | v1.32 | #575 wire inventory parity | §10.2: the wire inventory obeys the same RELEASED-current-pointer rule in all five families; draft-pointer and never-released objects are omitted. |

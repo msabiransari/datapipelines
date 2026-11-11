@@ -3,9 +3,12 @@ package co.datapipelines.pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes.Validation
 import co.datapipelines.pipeline.release.PipelineDependencySource
 import co.datapipelines.pipeline.release.ReleaseFamily
+import co.datapipelines.pipeline.release.ReleaseNodeStatus
 import co.datapipelines.pipeline.release.ReleasePin
-import co.datapipelines.pipeline.release.ReleaseRefusals
 import co.datapipelines.pipeline.release.RestoreBlocker
+import co.datapipelines.pipeline.release.RestoreDependencyGuard
+import co.datapipelines.pipeline.release.RestoreReach
+import co.datapipelines.pipeline.release.RestoreRechecks
 import java.util.UUID
 
 /**
@@ -32,6 +35,8 @@ internal class PipelineRestorePins(
     private val templateIds: TemplateIds,
     private val maxBlockers: Int,
     private val deserializer: PipelineDeserializer,
+    /** #873 §D.3 — the closure BELOW each live pin, walked through the shared port ([RestoreDependencyGuard]). */
+    private val transitive: RestoreDependencyGuard = RestoreDependencyGuard.DIRECT_ONLY,
 ) {
     /** Refuses the restore of [record]'s [version], stored as [body], when a pin dangles (400) or is a draft (409). */
     fun recheck(
@@ -44,7 +49,8 @@ internal class PipelineRestorePins(
         val nodeIds = pipeline.nodes.withIndex().associate { (index, node) -> "nodes[$index].pipeline" to node.id }
         val failures = FailureCollector()
         val drafts = mutableListOf<RestoreBlocker>()
-        for (pin in PipelineDependencySource.pinsOf(workspaceId, pipeline)) {
+        val pins = PipelineDependencySource.pinsOf(workspaceId, pipeline)
+        for (pin in pins) {
             val status =
                 if (pin.target.family == ReleaseFamily.PIPELINE) {
                     childStatus(workspaceId, pin, nodeIds.getValue(pin.path), failures)
@@ -55,17 +61,62 @@ internal class PipelineRestorePins(
                 drafts += RestoreBlocker(pin.target, pin.targetName, PipelineDependencySource.statusOf(status), pin.path)
             }
         }
+        val root = PipelineDependencySource.identity(workspaceId, record.name, version)
+        // §D.3: the direct pins are judged above in their native codes; the walk adds what lies BELOW a live pin.
+        val below = transitive.recheck(root, pins).filter { it.transitive }
+        below.filter { it.dangling }.forEach { reach -> danglingBelow(reach, failures) }
         val result = failures.toResult()
         if (result.failures.isNotEmpty()) throw PipelineValidationException(result)
-        if (drafts.isNotEmpty()) {
-            throw ReleaseRefusals.restoreDependencyNotReleased(
-                PipelineDependencySource.identity(workspaceId, record.name, version),
-                record.name,
-                drafts,
-                maxBlockers,
-            )
+        RestoreRechecks.notReleased(root, record.name, below, maxBlockers, extra = drafts)?.let { throw it }
+    }
+
+    /**
+     * A missing or DISCARDED node below a live pin (§D.3): the save rules' own code for its family — a template's
+     * `template_version_not_found`, a child pipeline's `pipeline_version_not_found` (missing) or
+     * `pipeline_reference_not_released` (DISCARDED) — at the full path from this body, with `reason: discarded` for a
+     * DISCARDED version and the intermediate nodes as `via`.
+     */
+    private fun danglingBelow(
+        reach: RestoreReach,
+        into: FailureCollector,
+    ) {
+        val name = reach.identity.entityId.truncateForError()
+        val version = reach.identity.version
+        val discarded = if (reach.status == ReleaseNodeStatus.DISCARDED) mapOf("reason" to "discarded") else emptyMap()
+        val via = mapOf("path" to reach.path, "via" to reach.viaDetails())
+        when {
+            reach.identity.family == ReleaseFamily.TEMPLATE -> {
+                into.add(
+                    Validation.TEMPLATE_VERSION_NOT_FOUND,
+                    reach.directPath,
+                    "Template '$name' version $version, reached through '${reach.path}', is ${reach.status.wireWord()}; a restore " +
+                        "lands RELEASED and everything below it must be live.",
+                    mapOf("template" to name, "version" to version) + discarded + via,
+                )
+            }
+
+            reach.status == ReleaseNodeStatus.DISCARDED -> {
+                into.add(
+                    Validation.PIPELINE_REFERENCE_NOT_RELEASED,
+                    reach.directPath,
+                    "Pipeline '$name' version $version, reached through '${reach.path}', is DISCARDED; a restore lands " +
+                        "RELEASED and everything below it must be live.",
+                    mapOf("pipeline" to name, "pipeline_version" to version, "status" to reach.status.name) + discarded + via,
+                )
+            }
+
+            else -> {
+                into.add(
+                    Validation.PIPELINE_VERSION_NOT_FOUND,
+                    reach.directPath,
+                    "Pipeline '$name' has no version $version, reached through '${reach.path}'.",
+                    mapOf("pipeline" to name, "version" to version) + via,
+                )
+            }
         }
     }
+
+    private fun ReleaseNodeStatus.wireWord(): String = if (this == ReleaseNodeStatus.DISCARDED) "discarded" else "missing"
 
     /** The pinned template version's status, or null after reporting it missing or DISCARDED. */
     private fun templateStatus(

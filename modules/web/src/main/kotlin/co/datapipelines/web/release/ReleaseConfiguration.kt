@@ -1,15 +1,33 @@
 package co.datapipelines.web.release
 
+import co.datapipelines.application.dependencies.PipelineReleaseFamily
+import co.datapipelines.application.dependencies.PostgresStatementCeiling
+import co.datapipelines.application.dependencies.ReleasePlanningDeadline
+import co.datapipelines.application.dependencies.ReleasePlanningWalk
+import co.datapipelines.application.dependencies.dashboard.DashboardReleaseProvider
+import co.datapipelines.application.dependencies.parameterset.ParameterSetReleaseProvider
+import co.datapipelines.application.dependencies.prerequisites.RegistryPrerequisiteCheck
+import co.datapipelines.application.dependencies.restore.WalkingRestoreDependencyGuard
+import co.datapipelines.application.dependencies.template.TemplateReleaseProvider
+import co.datapipelines.application.dependencies.visualization.VisualizationReleaseProvider
+import co.datapipelines.application.endpoints.EndpointReleaseSteps
+import co.datapipelines.dependencies.FamilyDescriptor
+import co.datapipelines.dependencies.FamilyRegistry
+import co.datapipelines.parameters.ParameterSetRepository
+import co.datapipelines.parameters.ParameterSetService
 import co.datapipelines.pipeline.PipelineReleaseService
 import co.datapipelines.pipeline.PipelineRepository
-import co.datapipelines.pipeline.release.PipelineDependencySource
-import co.datapipelines.pipeline.release.PipelineReleaseCoordination
+import co.datapipelines.pipeline.release.PrerequisiteCheck
 import co.datapipelines.pipeline.release.ReleaseAuditSink
 import co.datapipelines.pipeline.release.ReleaseBounds
-import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import co.datapipelines.pipeline.release.ReleasedVersionObserver
+import co.datapipelines.pipeline.release.RestoreDependencyGuard
 import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.visualization.DashboardRepository
+import co.datapipelines.visualization.DashboardService
+import co.datapipelines.visualization.VisualizationRepository
+import co.datapipelines.visualization.VisualizationService
 import co.datapipelines.web.config.ReleaseDependencyProperties
 import co.datapipelines.web.templates.TemplateReleaseService
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -24,7 +42,15 @@ import org.springframework.transaction.support.TransactionTemplate
  * The release-dependencies assembly (record §4.2: contracts in `pipeline-contract`, adapters and the coordinator here):
  * the configured bounds (configuration §3.35), the workspace writer guard every pin-affecting writer acquires, the
  * strict release audit sink, the S1 dependency sources and participants, and the pipeline coordinator — all on the ONE
- * `metadataTransactionManager` (never a customer, staging or new manager; never REQUIRES_NEW).
+ * `metadataTransactionManager` (never a customer, staging or new manager). The release write transaction never runs
+ * REQUIRES_NEW; the plan's first closure read is its own read-only REPEATABLE READ transaction, REQUIRES_NEW on the same
+ * manager so it never joins a weaker caller (#868 G1, record §7.2 step 2).
+ *
+ * The neutral dependency registry (#868 G1, record §3.2) is assembled here by DI from the descriptor beans: the pipeline
+ * release source (G1's adapter), the native template, parameter-set, visualization and dashboard providers (#873 G2),
+ * plus the API family (#786, its descriptor in `EndpointsConfiguration`).
+ * [FamilyRegistry.production] refuses a duplicate key and a key outside `FamilyKey.PRODUCTION`, so either fails the
+ * context at startup.
  */
 @Configuration
 @EnableConfigurationProperties(ReleaseDependencyProperties::class)
@@ -32,11 +58,16 @@ class ReleaseConfiguration {
     @Bean
     fun releaseBounds(properties: ReleaseDependencyProperties): ReleaseBounds = properties.toBounds()
 
+    /**
+     * The writer guard, declared as its concrete type so ONE bean answers both faces: the release families'
+     * [ReleaseMutationGuard] and the family-neutral `MetadataWriterGuard` the endpoint, datasource and schedule writers
+     * take (#841 G0) — one lock order, one per-transaction bookkeeping, one cumulative deadline.
+     */
     @Bean
     fun releaseMutationGuard(
         jdbc: NamedParameterJdbcTemplate,
         bounds: ReleaseBounds,
-    ): ReleaseMutationGuard = JdbcReleaseMutationGuard(jdbc.jdbcTemplate, bounds.lockWaitSeconds)
+    ): JdbcReleaseMutationGuard = JdbcReleaseMutationGuard(jdbc.jdbcTemplate, bounds.lockWaitSeconds)
 
     /** The same JSON the general audit logger writes, so every `audit_log` reader parses a release row unchanged. */
     @Bean
@@ -48,13 +79,136 @@ class ReleaseConfiguration {
     @Bean
     fun releaseAuthorization(): ReleaseAuthorization = MatrixReleaseAuthorization()
 
+    /**
+     * #786 R3 (record §25.4) — the ONE statement bound every release source read runs under: `SET LOCAL statement_timeout`
+     * = `min(statement-timeout-seconds, remaining deadline)`, set on the metadata connection the walk's transaction holds
+     * immediately before EACH statement a source issues through the ceiling's own template (`PostgresStatementCeiling.jdbc`,
+     * over the same metadata `DataSource` the repository beans use). Every release family descriptor takes it and builds
+     * its source's repositories over that template; `ReleaseStatementCeilingWiringTest` asserts both for each one.
+     */
+    @Bean
+    fun releaseStatementCeiling(jdbc: NamedParameterJdbcTemplate): PostgresStatementCeiling =
+        PostgresStatementCeiling(checkNotNull(jdbc.jdbcTemplate.dataSource) { "the metadata JdbcTemplate has a DataSource" })
+
+    /**
+     * The pipeline family over its release source (record §4; G2 adds the other artifact families). The source reads
+     * through a repository over the ceiling's template, never the shared repository bean: only that template bounds each
+     * statement (#786 R3). #873 §F.1: the pipeline arm — `PipelineDependencySource`'s read and pins, plus the version's
+     * `DATASOURCE` edges.
+     */
+    @Bean
+    fun pipelineDependencyFamily(ceiling: PostgresStatementCeiling): FamilyDescriptor<*> =
+        PipelineReleaseFamily.descriptor(PipelineRepository(ceiling.jdbc), ceiling)
+
+    /**
+     * The template family's NATIVE provider (#873 §A.2: exactly one descriptor per family — it replaces G1's adapted
+     * template source, which stays as the parity oracle only): one batch read per frontier, the `IMPORT` edges, over the
+     * ceiling's template.
+     */
+    @Bean
+    fun templateDependencyFamily(ceiling: PostgresStatementCeiling): FamilyDescriptor<*> =
+        TemplateReleaseProvider(TemplateRepository(ceiling.jdbc), ceiling).descriptor()
+
+    /**
+     * The parameter-set family's native provider (#873 G2): selector-template and selector-datasource edges (§F.2), one
+     * batch read per frontier plus at most one template-dialect read, both over the ceiling's template.
+     */
+    @Bean
+    fun parameterSetDependencyFamily(ceiling: PostgresStatementCeiling): FamilyDescriptor<*> =
+        ParameterSetReleaseProvider(ParameterSetRepository(ceiling.jdbc), TemplateRepository(ceiling.jdbc), ceiling).descriptor()
+
+    /** The visualization family's native provider (#873 G2): the transform-template edge, one batch read per frontier. */
+    @Bean
+    fun visualizationDependencyFamily(ceiling: PostgresStatementCeiling): FamilyDescriptor<*> =
+        VisualizationReleaseProvider(VisualizationRepository(ceiling.jdbc), ceiling).descriptor()
+
+    /** The dashboard family's native provider (#873 G2): set, source-pipeline and visualization edges, one batch read per frontier. */
+    @Bean
+    fun dashboardDependencyFamily(ceiling: PostgresStatementCeiling): FamilyDescriptor<*> =
+        DashboardReleaseProvider(DashboardRepository(ceiling.jdbc), ceiling).descriptor()
+
+    /** Every descriptor bean, one registry; a duplicate or non-production key fails the context here. */
+    @Bean
+    fun dependencyFamilyRegistry(descriptors: List<FamilyDescriptor<*>>): FamilyRegistry = FamilyRegistry.production(descriptors)
+
+    /**
+     * The release planning deadline (#786 §E.3; owner ruling 2026-11-08, 868 review R1-4 option 1): every plan opens a
+     * fresh deadline of `metadata-timeout-seconds`; an expired plan is refused `<family>.release.metadata_unavailable`.
+     * G1 pinned this bean to `Deadline.none()`; `ReleasePlanningDeadlineWiringTest` asserts the finite one.
+     */
+    @Bean
+    fun releasePlanningDeadline(properties: ReleaseDependencyProperties): ReleasePlanningDeadline =
+        ReleasePlanningDeadline.after(properties.toPlanningLimits().metadataTimeout)
+
+    /**
+     * G1's planner walk as ONE bean (#786): the coordinator plans with it, and an API restore rechecks its pin's closure
+     * through it in the restore's own transaction — one walk, one set of bounds, one deadline.
+     */
+    @Bean
+    fun releasePlanningWalk(
+        registry: FamilyRegistry,
+        deadline: ReleasePlanningDeadline,
+        metadataTransactionManager: PlatformTransactionManager,
+        bounds: ReleaseBounds,
+        properties: ReleaseDependencyProperties,
+    ): ReleasePlanningWalk =
+        ReleasePlanningWalk(
+            registry = registry,
+            bounds = bounds,
+            planningTransactions = ReleasePlanningWalk.planningTransaction(metadataTransactionManager),
+            // #868 R1: a failed speculative read rolls back to its savepoint and never aborts the walk's transaction.
+            speculativeReads = ReleasePlanningWalk.speculativeReads(metadataTransactionManager),
+            deadline = deadline,
+            planning = properties.toPlanningLimits(),
+        )
+
+    /**
+     * #873 §D.0 — the restore recheck port the five families' restore verbs call: the DISCARDED version's stored body
+     * read through its family's provider, its references walked as the roots of ONE lifecycle-guard walk in the
+     * restore's own guarded transaction — the registry, bounds and deadline the planner uses.
+     */
+    @Bean
+    fun restoreDependencyGuard(
+        registry: FamilyRegistry,
+        deadline: ReleasePlanningDeadline,
+        metadataTransactionManager: PlatformTransactionManager,
+        bounds: ReleaseBounds,
+        properties: ReleaseDependencyProperties,
+    ): RestoreDependencyGuard =
+        WalkingRestoreDependencyGuard(
+            registry = registry,
+            bounds = bounds,
+            speculativeReads = ReleasePlanningWalk.speculativeReads(metadataTransactionManager),
+            deadline = deadline,
+            planning = properties.toPlanningLimits(),
+        )
+
+    /**
+     * #873 §F.3 c — the apply-time prerequisite check: the guarded closure's pipeline and parameter-set bodies read through
+     * the registry, their datasource names resolved by G3's provider in the caller's workspace, in the release's own
+     * transaction under the planner's bounds and a fresh deadline.
+     */
+    @Bean
+    fun releasePrerequisiteCheck(
+        registry: FamilyRegistry,
+        deadline: ReleasePlanningDeadline,
+        metadataTransactionManager: PlatformTransactionManager,
+        properties: ReleaseDependencyProperties,
+    ): PrerequisiteCheck =
+        RegistryPrerequisiteCheck(
+            registry = registry,
+            speculativeReads = ReleasePlanningWalk.speculativeReads(metadataTransactionManager),
+            deadline = deadline,
+            planning = properties.toPlanningLimits(),
+        )
+
     @Bean
     @Suppress("LongParameterList") // the coordinator's collaborators, one per step of the record's algorithm
     fun pipelineReleaseCoordinator(
         releases: PipelineReleaseService,
         pipelines: PipelineRepository,
-        templates: TemplateRepository,
         templateReleases: TemplateReleaseService,
+        planning: ReleasePlanningWalk,
         authorization: ReleaseAuthorization,
         guard: ReleaseMutationGuard,
         audit: ReleaseAuditSink,
@@ -62,16 +216,28 @@ class ReleaseConfiguration {
         bounds: ReleaseBounds,
         /** #778 — the lake reference scanner, told of every pipeline version the coordinator flips. */
         observer: ReleasedVersionObserver,
-    ): PipelineReleaseCoordination =
+        /** #873 §F.3 c — the datasource prerequisites, checked inside the release transaction on every path. */
+        prerequisites: PrerequisiteCheck,
+        /** #786 — the API family's release steps: the coordinator's second root. */
+        endpointSteps: EndpointReleaseSteps,
+        /** #873 §B — the parameter-set, visualization and dashboard roots, through their services' planner seams. */
+        parameterSets: ParameterSetService,
+        visualizations: VisualizationService,
+        dashboards: DashboardService,
+    ): ReleaseCoordinator =
         ReleaseCoordinator(
             releases = releases,
             pipelines = pipelines,
-            sources =
-                mapOf(
-                    ReleaseFamily.PIPELINE to PipelineDependencySource(pipelines),
-                    ReleaseFamily.TEMPLATE to TemplateDependencySource(templates),
+            planning = planning,
+            participants =
+                listOf(
+                    PipelineReleaseParticipant(releases, pipelines),
+                    TemplateReleaseParticipant(templateReleases),
+                    EndpointReleaseParticipant(endpointSteps),
+                    ParameterSetReleaseParticipant(parameterSets),
+                    VisualizationReleaseParticipant(visualizations),
+                    DashboardReleaseParticipant(dashboards),
                 ),
-            participants = listOf(PipelineReleaseParticipant(releases, pipelines), TemplateReleaseParticipant(templateReleases)),
             authorization = authorization,
             guard = guard,
             audit = audit,
@@ -80,5 +246,6 @@ class ReleaseConfiguration {
             transactions = TransactionTemplate(metadataTransactionManager),
             bounds = bounds,
             observer = observer,
+            prerequisites = prerequisites,
         )
 }

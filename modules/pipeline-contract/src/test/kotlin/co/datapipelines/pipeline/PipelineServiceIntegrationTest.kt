@@ -94,10 +94,21 @@ class PipelineServiceIntegrationTest {
             pipelines = repository,
             validator = validator,
             drafts = PipelineDraftService(repository, authoring),
-            releases = PipelineReleaseService(repository, statuses, validator, authoring, dashboards = recordingDashboards()),
+            releases =
+                PipelineReleaseService(
+                    repository,
+                    statuses,
+                    validator,
+                    authoring,
+                    dashboards = recordingDashboards(),
+                    endpointVersions = NoApiVersionPins,
+                    schedules = NoSchedulePins,
+                ),
             authoring = authoring,
             draftTemplates = draftTemplates,
             dashboards = recordingDashboards(),
+            endpointVersions = NoApiVersionPins,
+            schedules = NoSchedulePins,
             templateStatuses = statuses,
         )
     }

@@ -130,6 +130,7 @@ class BootstrapCredentialResyncIntegrationTest {
         rotateRolePasswordOutOfBand()
         val beforeBoot = definitionSnapshot()
         val staleCiphertext = passwordHex()
+        val generationBefore = repository.findIncarnation(NAME).shouldNotBeNull().generation
 
         val (summary, lines) = capturingLogs { registrar().register(bootstrapFile(), actor) }
 
@@ -146,6 +147,8 @@ class BootstrapCredentialResyncIntegrationTest {
         definitionSnapshot() shouldBe beforeBoot
         passwordHex() shouldNotBe staleCiphertext
         leaseSucceeds() shouldBe true
+        // #874: a credential change is a protected local generation (record §15.1) — exactly one advance.
+        repository.findIncarnation(NAME).shouldNotBeNull().generation shouldBe generationBefore + 1
 
         // §8.1B: the outcome is on the row, so the screen can say so without an execution.
         val lastTest =
@@ -275,10 +278,13 @@ class BootstrapCredentialResyncIntegrationTest {
     fun `a healthy restart probes nothing at all`() {
         register(ORIGINAL_PASSWORD)
         val beforeBoot = preV9Snapshot()
+        val generationBefore = repository.findIncarnation(NAME).shouldNotBeNull().generation
 
         registrar().register(bootstrapFile(ORIGINAL_PASSWORD), actor)
 
         preV9Snapshot() shouldBe beforeBoot
+        // #874: nothing was written, so nothing advanced.
+        repository.findIncarnation(NAME).shouldNotBeNull().generation shouldBe generationBefore
         repository
             .findByName(NAME)
             .shouldNotBeNull()

@@ -8,6 +8,7 @@ import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
@@ -314,6 +315,44 @@ class TemplateRepositoryIntegrationTest {
         repository.findCurrentVersions(workspaceId, listOf("test/a.sql", "test/b.sql", "test/c.sql", "test/nope.sql")) shouldBe
             mapOf("test/a.sql" to 1, "test/b.sql" to 1)
         repository.findCurrentVersions(workspaceId, emptyList()) shouldBe emptyMap()
+    }
+
+    @Test
+    fun `findReleaseVersions reads exact versions of any status in one batch - with the entity id and the live pointer`() {
+        // #873 §A.1: the template dependency provider's batch read. A DRAFT is read as such, a discarded entity's version
+        // still resolves (its pointer reads NULL: no longer live), an unknown key or version is absent.
+        val a = repository.createReleased(workspaceId, draft(id = "test/a.sql", body = "SELECT 1"), actor)
+        val second = draft(id = "test/a.sql", body = "SELECT 2")
+        checkNotNull(repository.createDraft(workspaceId, "test/a.sql", second, a.bodyHash, actor, WriteSurface.SESSION))
+        repository.createReleased(workspaceId, draft(id = "test/c.sql"), actor)
+        discardOnlyRelease("test/c.sql")
+
+        val rows =
+            repository.findReleaseVersions(
+                workspaceId,
+                listOf("test/a.sql" to 1, "test/a.sql" to 2, "test/c.sql" to 1, "test/a.sql" to 9, "test/nope.sql" to 1),
+            )
+
+        val read = rows.map { Triple("${it.template.id}@${it.template.version}", it.template.status, it.currentVersion) }
+        read shouldContainExactlyInAnyOrder
+            listOf(
+                Triple("test/a.sql@1", PipelineVersionStatus.RELEASED, 1),
+                Triple("test/a.sql@2", PipelineVersionStatus.DRAFT, 1),
+                Triple("test/c.sql@1", PipelineVersionStatus.DISCARDED, null),
+            )
+        rows.filter { it.template.id == "test/a.sql" }.map { it.entityUuid }.toSet() shouldBe
+            setOf(repository.findEntityUuid(workspaceId, "test/a.sql"))
+        repository.findReleaseVersions(workspaceId, emptyList()) shouldBe emptyList()
+    }
+
+    @Test
+    fun `findNameByEntityUuid is the inverse of findEntityUuid - and null for an id that is not a template here`() {
+        repository.createReleased(workspaceId, draft(id = "test/a.sql"), actor)
+        val entity = checkNotNull(repository.findEntityUuid(workspaceId, "test/a.sql"))
+
+        repository.findNameByEntityUuid(workspaceId, entity) shouldBe "test/a.sql"
+        repository.findNameByEntityUuid(workspaceId, UUID.randomUUID()) shouldBe null
+        repository.findNameByEntityUuid(UUID.randomUUID(), entity) shouldBe null
     }
 
     @Test

@@ -69,7 +69,7 @@
   "missed_run_policy": "skip",
   "payload": {
     "pipeline": "finance/pipelines/daily_revenue",
-    "version": "current",
+    "version": 3,
     "parameter_bindings": {
       "as_of_date": { "source": "keyword", "name": "YESTERDAY" }
     }
@@ -128,7 +128,7 @@
       <ul class="fact-list fact-list-plain">
         <li><strong>Mail is optional.</strong> Notices are queued only when scheduler mail is enabled and the schedule has recipients; failure, unknown and blocked events default on.</li>
         <li><strong>It runs pipelines only.</strong> The pipeline is the job type the scheduler runs today; a report or AI job would arrive as a new job type, with no date announced. No report delivery, no SQL-condition alerts, no PDF exports and no scheduled dashboard refresh.</li>
-        <li><strong>It follows the current pointer.</strong> A schedule runs the version the pipeline's pointer names, which can be a draft in development. Each run records the exact version it ran.</li>
+        <li><strong>It does not follow releases.</strong> A schedule runs the one exact pipeline version it names; releasing a newer version does not move it, so a person edits the schedule to pick the new one. Each run records the exact version it ran.</li>
         <li><strong>People manage it, agents do not.</strong> No MCP tool reads or writes a schedule, and the routes need a signed-in session; a management credential for your own backend is a later slice.</li>
       </ul>
     </div>

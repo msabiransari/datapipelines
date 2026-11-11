@@ -1,9 +1,9 @@
 # Datasources Specification
 
-**Status:** v2.67 (frozen contract — additive-only changes after this point)
+**Status:** v2.69 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
-**Last updated:** 2026-11-08
+**Last updated:** 2026-11-11
 
 ---
 
@@ -137,6 +137,8 @@ Identical to request, except:
 | `global` | boolean | optional (write) | Workspaces D8: `true` binds the datasource to NO workspace (global, visible to everyone) — **admin-only** to set, either direction. Mutually exclusive with `workspace`. |
 | `workspace` | string | optional (write) | Workspaces D8: the workspace to bind to — must be one the caller can access (member or admin); `datasource.validation.workspace_forbidden` otherwise. Default: the caller's ACTIVE workspace. |
 | `readonly` | boolean | optional | The §5.7 flag. Editable by whoever may edit the datasource, except on a GLOBAL datasource where only admin may flip it. On update, absent keeps the stored value. |
+| `incarnation_id` | UUID | — (server) | **Internal, never on the wire.** Which incarnation of the name this row is: assigned once when the row is inserted (V59's `DEFAULT gen_random_uuid()`), kept by every update and by a soft delete, new only when a row is recreated under the same name. Never in a DTO, a log line, an evidence file, promotion or release consent. See §11.2. |
+| `generation` | integer | — (server) | **Internal, never on the wire.** A local counter of the row's identity-bearing facts, starting at 1 and advanced by exactly one by the writers listed in §11.2 inside their guarded section; a connection test never advances it. Same exclusions as `incarnation_id`. |
 
 **Visibility (workspaces design §5.3, normative):** every listing and by-name read sees the ACTIVE
 workspace's bound datasources plus all global ones — enforced in the repository's SQL
@@ -637,9 +639,11 @@ data class DeleteResult(
     val deleted: Boolean,
     val name: String,
     val errorCode: String? = null,          // 'datasource.in_use' when deleted = false
-    val references: List<DatasourceReference> = emptyList()  // the ANY-VERSION scan (§6.2): one entry per referencing NODE
+    val references: List<DatasourceReference> = emptyList(),  // the ANY-VERSION scan (§6.2): one entry per referencing NODE
+    val parameterSetReferences: List<ParameterSetDatasourceReference> = emptyList()  // #873: one per selector occurrence
 ) {
-    val referencingPipelines: List<String> get() = references.map { it.pipelineName }.distinct()
+    // The lock's evidence, every workspace's; a surface names it only through the caller's scope (§6.2).
+    fun usagesVisibleTo(visibility: ReferenceVisibility): DatasourceUsages
 }
 
 /** One node of one stored pipeline version referencing a datasource — the delete guard's evidence (§6.2). */
@@ -647,7 +651,17 @@ data class DatasourceReference(
     val pipelineName: String,
     val pipelineVersion: Int,               // WHICH stored version carries it — the field the old guard did not have
     val versionStatus: String,              // DRAFT | RELEASED | DISCARDED
-    val nodeId: String
+    val nodeId: String,
+    val workspaceId: UUID                   // where it was found — what a refusal is scoped by; never on a wire
+)
+
+/** #873: one selector of one stored parameter-set version naming a datasource (`parameters[i].source.datasource`). */
+data class ParameterSetDatasourceReference(
+    val parameterSetName: String,
+    val parameterSetVersion: Int,
+    val versionStatus: String,              // DRAFT | RELEASED | DISCARDED
+    val path: String,                       // parameters[i].source.datasource
+    val workspaceId: UUID
 )
 
 /** Which branch of §8A.3 rule 3 ran for one bootstrap entry. */
@@ -691,8 +705,8 @@ data class ValidationResult(
 ### 6.2 In-use check on delete
 
 `DELETE /api/v1/datasources/{name}` fails with `datasource.in_use` if any non-deleted pipeline
-references this name **in any version it has ever stored** — DRAFT, RELEASED and DISCARDED
-alike. Pipeline versions are immutable and executable by explicit version
+or parameter set, in **any** workspace, references this name **in any version it has ever stored** — DRAFT,
+RELEASED and DISCARDED alike (a parameter set through a selector's `parameters[i].source.datasource`, #873). Pipeline versions are immutable and executable by explicit version
 ([Versioning §7.1](versioning.md#71-authoring-reads-return-the-working-version-039)), so a reference living only in a released
 v1 that a later v2 dropped is a live reference: deleting the datasource out from under it fails
 that version's next execution at connect.
@@ -711,11 +725,30 @@ invisible and the delete succeeded.
 
 The error response carries the distinct pipeline names AND one entry per referencing node with
 the pipeline version and that version's status — the shape `template.in_use` uses — because the
-version is what tells the operator which body to go and change.
+version is what tells the operator which body to go and change. Since #873 every `references` entry
+carries `kind` (`pipeline` or `parameter_set`); a parameter-set entry is `{kind, parameter_set,
+parameter_set_version, version_status, path}`, and `referencing_parameter_sets` lists the distinct sets.
+
+**The details are scoped to the caller's workspaces (#873).** The lock counts every workspace's
+references, so a datasource granted to another workspace stays protected while that workspace uses it.
+The refusal NAMES only what the caller may read: a super admin sees every reference; anyone else sees only
+the references in the workspace they act in. A reference outside that scope contributes no name, version,
+link, count or workspace — a datasource in use only elsewhere is refused with empty lists and the message
+"Datasource '…' is in use and cannot be deleted.", the same body however many references lie outside. The
+scope comes from the authenticated caller, never from the request.
+
+**A datasource is a prerequisite node, never released (#873).** In the dependency graph a datasource is a
+leaf that pipelines and parameter sets point at. It has no version and no release status, so a release plan
+lists it in `prerequisites` (never as a node to tick), consent over it is that the named datasource exists
+when the release applies, recreating it under the same name does not invalidate a plan, and planning never
+connects to it. This name lock is what keeps consent by name safe: the name cannot disappear while a stored
+body names it. The release rules are [Versioning §5.3](versioning.md#53-release-lock) (a)–(f).
 
 **The screen asks the same question, first (094).** The datasources list's **Delete** action opens
 a dialog that runs THIS scan before it offers anything, and renders its rows as
-`pipeline › node (v3 released)`. On the in-use branch there is no confirm button at all, so the
+`pipeline › node (v3 released)`, and a parameter-set selector as `set › parameters[i].source.datasource
+(v2 discarded)` with its own link. The rows are scoped exactly as the `409` details are; a datasource in use
+only outside the caller's scope takes the in-use branch with no rows. On the in-use branch there is no confirm button at all, so the
 refusal cannot be clicked past; only an unused datasource gets a confirm, and that confirm names
 it. The dialog and the `409` cannot disagree because they are the same scan — but the POST
 **re-runs** the guard anyway: a pipeline can start referencing the datasource between the dialog
@@ -1567,7 +1600,7 @@ Managed lake tables (tables DP defines and writes, [Lake §9](lake.md#9-reads)) 
 - **A generation is bounded in age.** The statement-free `dp-reaper` pass retires a managed generation past its age bound, even with no borrower, and hands close to `dp-pool-close`. The reaper delay is 7 s. The five-term boot rule is age + 2 × reaper delay + managed retire ceiling (§5.2, #824) + freshness tick ≤ protection window / 24 ([Lake §9](lake.md#9-reads)). This bounds staleness. A reader's termination is unbounded on a trickling store, so snapshot safety uses reader leases instead: pin before publication, heartbeat on `dp-reader-lease` while any physical handle remains, release only after confirmed closure. A failed pin is `lake.unavailable`; a lost heartbeat retires the generation and logs `lake.reader_lease_lost`. The pin deadline is the build instant plus the protection window. The HTTP SETs remain locked hygiene for silent stores; their values are unchanged. P6 must honour live pins in both snapshot expiry and orphan removal; a metadata outage lasting TTL can lose a live reader's pin and cause a missing-file error ([Lake §9](lake.md#9-reads)).
 - **Freshness.** New data is visible to the next query on this server and within a minute on others. A peer learns of a commit from the pool invalidation message (§5.7), or else from its next freshness tick. The "next query on this server" half needs the write path to retire the local generation when it commits; that is the lake write path's work (#799), not this datasource's. Until then, the tick bounds freshness on every server.
 - **No generation from an unverified read.** When the catalog read that builds a new generation fails, no generation is built, and the lease fails with `lake.unavailable` (503). A live generation keeps serving until its age bound. A failed tick read logs `lake.freshness_read_failed` (with its SQLState) and changes nothing. A generation's build reads the catalog once, and that one read is both its views and its availability; a managed table's view never falls back to the registry row's `location`.
-- **The tick's statements are bounded.** The freshness tick runs on the shared scheduler thread, so each of its statements (the catalog read per live generation and the one grant `INSERT`) carries its own 5 s statement timeout, and the boot-time system actor is reused rather than provisioned per tick. A step that fails is one `lake.freshness_tick_failed` WARN; the tick's next step, the next tick and the other scheduled jobs still run. The catalog read a lease's build makes runs on the request's thread and carries its own 5 s statement timeout too (a code constant, `MANAGED_BUILD_READ_TIMEOUT_SECONDS`, not a key; #833). Under a held lock on the catalog tables the read is cancelled (SQLState `57014`) and that build fails `lake.unavailable` as any failed catalog read does, so a lease that needs a new generation waits at most that bound; a live generation's leases keep serving. The listings' managed enrichment chooses its bound at each call (#867). Outside a metadata transaction (the introspection and stats listings) it reads through its own bounded template: the same 5 s statement timeout and a 10 s socket read bound (the statement bound + 5 s, #837). Against a server that never answers, the read ends when the driver's cancel attempt gives up: 5 s + the driver's 10 s `cancelSignalTimeout`, about 15 s in all (measured 15.0 s against a paused metadata database). The pool discards that connection, and the next borrower gets the pool's own timeout back. Inside a metadata transaction (a release's, an import's and a promotion's: the lake reference scan, the backfill, the promotion check) it reads on the shared, unbounded template on the transaction's own connection. It inherits that transaction's policy: a bounded read's socket bound would stay on the transaction's connection until the transaction ends and cut the transaction's later, longer statements (#833 merge review). The choice follows whether a connection is bound for the metadata DataSource on the calling thread, so a scope that already holds one runs the read on it unbounded. Only the managed enrichment carries this bound. The listing's first read of the registry rows, and the rest of the caller's work, are separate, so a listing request as a whole has no wall-clock bound from this. These are code constants, not keys.
+- **The tick's statements are bounded.** The freshness tick runs on the shared scheduler thread, so each of its two steps, when queued behind a held lock, ends within 5 s. The catalog read per live generation carries its own 5 s statement timeout. The grant repair takes the datasource's writer lock first (its prerequisite key, then each lacking workspace's row; #841) and then makes its one grant `INSERT`, in one transaction under ONE 5 s budget that every wait in it shares: a wait at a lock another writer holds ends as a busy refusal (SQLState `55P03`), a statement that outlives what is left of the budget is cancelled (`57014`), and the transaction rolls back with nothing granted, the next tick repairing it. So a server whose repair queues behind another server's held grant delays its other jobs by at most 5 s for that step, never a bound for the key and another for the `INSERT` (#841 R4). Every statement of the repair, the lock's included, also carries the 10 s socket bound. The boot-time system actor is reused rather than provisioned per tick. A step that fails is one `lake.freshness_tick_failed` WARN; the tick's next step, the next tick and the other scheduled jobs still run. The catalog read a lease's build makes runs on the request's thread and carries its own 5 s statement timeout too (a code constant, `MANAGED_BUILD_READ_TIMEOUT_SECONDS`, not a key; #833). Under a held lock on the catalog tables the read is cancelled (SQLState `57014`) and that build fails `lake.unavailable` as any failed catalog read does, so a lease that needs a new generation waits at most that bound; a live generation's leases keep serving. The listings' managed enrichment chooses its bound at each call (#867). Outside a metadata transaction (the introspection and stats listings) it reads through its own bounded template: the same 5 s statement timeout and a 10 s socket read bound (the statement bound + 5 s, #837). Against a server that never answers, the read ends when the driver's cancel attempt gives up: 5 s + the driver's 10 s `cancelSignalTimeout`, about 15 s in all (measured 15.0 s against a paused metadata database). The pool discards that connection, and the next borrower gets the pool's own timeout back. Inside a metadata transaction (a release's, an import's and a promotion's: the lake reference scan, the backfill, the promotion check) it reads on the shared, unbounded template on the transaction's own connection. It inherits that transaction's policy: a bounded read's socket bound would stay on the transaction's connection until the transaction ends and cut the transaction's later, longer statements (#833 merge review). The choice follows whether a connection is bound for the metadata DataSource on the calling thread, so a scope that already holds one runs the read on it unbounded. Only the managed enrichment carries this bound. The listing's first read of the registry rows, and the rest of the caller's work, are separate, so a listing request as a whole has no wall-clock bound from this. These are code constants, not keys.
 - **Locked down after its views.** Once the views are created, each managed instance turns off local file access and locks its configuration, and this holds on every connection of the generation. A query cannot read or write a local file, attach a database, or undo the lock. The engine limits of §8C.4 apply, with `datapipelines.lake.reads.memory-limit` (default `512MB`) as the instance's memory limit. With local files off, the instance cannot spill, so a query that needs more memory fails.
 - **Its object-store traffic leaves through the egress proxy (#845).** With `datapipelines.lake.reads.egress-proxy` set (compose and the Helm chart set it), the row carries `properties.dialect.egress_proxy = "<host:port>"` and every generation runs `SET http_proxy` right after the HTTP bounds and before the lockdown, which then refuses `SET`, `SET SESSION`, `SET GLOBAL` and `RESET` of it and of the proxy credentials. The key is accepted only on this row (`managed: true` with a `catalog.kind`) and only as `host:port`; any other datasource, or another shape, is refused with `datasource.validation.properties_invalid`, and `properties.jdbc.http_proxy*` is refused on every `DUCKDB` and `LAKE` datasource (§5.6). The proxy cuts each object-store connection at `datapipelines.lake.reads.egress-max-age-seconds`, so a store that trickles above curl's low-speed limit cannot hold a reader forever; httpfs retries a cut, so such a reader ends by (`http_retries` + 1) × max-age + slack (one derivation, `LakeHttpBounds.egressReaderEndByMillis`; [Lake §9](lake.md#9-reads)). A hygiene bound, not a safety premise (reader pins are), and a temporary accommodation until [duckdb-httpfs#519](https://github.com/duckdb/duckdb-httpfs/issues/519) lands ([Lake §9](lake.md#9-reads)). Adding or removing the key changes the row, so the first boot after an upgrade that sets it rewrites the row and builds a new generation.
 
@@ -1668,6 +1701,17 @@ Wire contracts (envelopes, status codes, examples) live in [REST API §9](rest-a
 - `PUT /api/v1/datasources/{name}` ignores no field silently: a body whose `name` differs from the path segment is rejected with `datasource.validation.name_invalid` (`field: "name"`, message stating immutability). Every other field, including `dialect`, `jdbc_url`, credentials, `query_timeout_seconds` and `properties`, is updatable.
 - A rename is therefore **delete + create**: create the new datasource, repoint the referencing pipelines (a new pipeline version per [Pipeline Contract §14](pipeline-contract.md#14-pipeline-lifecycle-operations)), then delete the old one.
 - The delete step is the guard that makes this safe: it is **blocked while any non-deleted pipeline references the name** (`datasource.in_use`, §6.2), so the old datasource cannot disappear until the repointing is complete. Order matters — create → repoint → delete.
+
+### 11.2 Identity across delete and recreation
+
+#874; dependency-graph record §5.1, §5.3. The name stays the datasource's key everywhere: the primary key, the three foreign keys onto it, every pipeline, template and parameter-set body, and promotion, which matches datasources across deployments by name. Beside the name, each row carries two **internal** facts (V59, [Metadata DB §4.10](metadata-db.md#410-datasources)):
+
+- **`incarnation_id`** says which incarnation of the name the row is. Every update keeps it, and so does a soft delete (which sets `is_deleted` and advances the generation, never the incarnation). A row inserted again under the same name gets a new one when the insert omits `incarnation_id` and uses its default, even when every other column is identical. Restoring a backup that includes the stored incarnation preserves that value; the default does not replace an explicitly supplied value. It is never compared across deployments.
+- **`generation`** is a protected local counter (never a digest of any credential). It starts at 1 and advances by exactly one, inside the writer's guarded section (the datasource's prerequisite key, dependency-graph record §15.1), for: a definition update through the registry's save (create starts at 1), the managed LAKE row's re-sync when the configuration changed, a credential change (`updateCredential`, the bootstrap credential re-sync), a soft delete, and a grant or revoke **that changed a row** (a re-grant of an existing grant, a revoke of an absent one, changes nothing and advances nothing). It does **not** advance for a connection test (§8.1/§8.1B record an observation, not a definition change), an unchanged managed re-sync, the registry-row backfill, or any read.
+
+Neither value reaches any wire, log line, export, promotion bundle or release consent: a release that names a datasource consents to the named datasource's existence (dependency-graph record erratum (7)), so recreating a datasource under the same name keeps every release plan that names it valid. Inside the server the pair is folded into the dependency graph's internal fingerprint of the datasource node — the graph node itself shows only `name`, `display_name`, the dialect as its subtype and `readonly` — so the graph can tell a changed or recreated datasource from an unchanged one.
+
+**No restore, no hard delete (owner ruling 2026-11-10, option (b)).** The product offers neither: a soft-deleted name stays taken (§8A.3), and a `create` under it is `datasource.validation.duplicate_name`. The incarnation distinguishes a SQL delete-and-insert that uses the default from the original row; a backup restore that retains the stored identity retains its incarnation. The "restore keeps the incarnation" half is proven at the repository level by flipping `is_deleted` back with SQL. A restore or purge action would be its own issue, with its own roles row.
 
 ---
 
@@ -1800,6 +1844,8 @@ fixture) get their Testcontainers twin.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-11 | v2.69 | #874 G3 datasource identity | **§3.3 gains the two internal fields `incarnation_id` and `generation`** (V59), never on the wire. **New §11.2 identity across delete and recreation**: the name stays the key everywhere; the incarnation is kept by updates and soft delete and new on a same-name recreation; the generation advances by one inside the guarded section for a definition update, a changed managed re-sync, a credential change, a soft delete and a grant or revoke that changed a row, and never for a connection test; neither enters a wire, a log, promotion or release consent (record erratum (7)); the dependency graph folds both into its internal node fingerprint. The owner's ruling (b) — no restore and no hard delete action — is recorded there. |
+| 2026-11-10 | v2.68 | #841 R4 freshness repair budget | §8C.10: the freshness tick's grant repair takes the datasource's writer lock (#841 G0) and its key wait, workspace-row waits and `INSERT` share ONE 5 s budget (busy `55P03` or cancelled `57014`, rolled back, repaired next tick) instead of a full bound each; every statement of the repair carries the 10 s socket bound. No new key; the 5 s bound is unchanged. |
 | 2026-11-08 | v2.67 | #867 listing enrichment bounds | §8C.10: the listings' managed enrichment is bounded outside a metadata transaction (5 s statement, 10 s socket, about 15 s against a server that never answers) and keeps the transaction's own connection and policy inside one (release, import, promotion). The generation build's bound, the retire ceiling and the close deadline are unchanged; no new key. |
 | 2026-11-08 | v2.66 | #823 managed grant at creation | §8C.10: a new workspace is granted the managed lake in its creation transaction; a revoke of that grant is refused with `datasource.managed` (REST and UI); the tick stays the repair path. Additive. |
 | 2026-11-07 | v2.65 | 833 (#833, #824, #840) managed generation bounds | §8C.10: the catalog read a generation build makes carries its own 5 s statement timeout (`MANAGED_BUILD_READ_TIMEOUT_SECONDS`, not a key); under a held catalog lock the build fails `lake.unavailable` within it; the listings' managed enrichment stays unbounded. §5.2: a retired managed generation has its own ceiling, `managed-retire-ceiling-seconds` (default `node-query-timeout-max-seconds` + 30 = 930 s), and §8C.10's boot rule counts it. §5.2: a retired pool's close deadline is its own: its `connectionTimeout` + 3 × 10 + 5 s, plus a managed generation's reader-pin release bound (90 s for a managed generation at the shipped 10 s metadata acquire bound; 65 s, as before, for any other pool on HikariCP's default), and the stuck line carries `deadline_seconds`. |

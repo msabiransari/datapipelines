@@ -133,7 +133,15 @@ object McpFixtures {
         templateVersions: TemplateVersionStatuses = TemplateVersionStatuses { _, _, _ -> null },
         drafts: PipelineDraftService = PipelineDraftService(pipelines, authoring),
         releases: PipelineReleaseService =
-            PipelineReleaseService(pipelines, templateVersions, validator, authoring, dashboards = mockk(relaxed = true)),
+            PipelineReleaseService(
+                pipelines,
+                templateVersions,
+                validator,
+                authoring,
+                dashboards = mockk(relaxed = true),
+                endpointVersions = mockk(relaxed = true),
+                schedules = mockk(relaxed = true),
+            ),
     ): PipelineService =
         PipelineService(
             pipelines = pipelines,
@@ -168,6 +176,9 @@ object McpFixtures {
                         pipelineName: String,
                     ) = emptyList<co.datapipelines.pipeline.DashboardPin>()
                 },
+            // #786 B.4 — nor API versions or schedules pinning a pipeline version (relaxed: every read answers empty).
+            endpointVersions = mockk(relaxed = true),
+            schedules = mockk(relaxed = true),
         )
 
     fun request(

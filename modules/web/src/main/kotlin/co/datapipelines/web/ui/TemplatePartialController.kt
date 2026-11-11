@@ -12,6 +12,7 @@ import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDraft
+import co.datapipelines.templates.TemplateDraftService
 import co.datapipelines.templates.TemplateNameGrammar
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidationException
@@ -55,6 +56,8 @@ class TemplatePartialController(
     private val authoring: AuthoringGuard,
     /** 178 — the promoter lens: every fragment here renders the caller's view. */
     private val lens: PromoterLens,
+    /** #841 — the template writers' guarded seam: the create runs under the workspace writer guard, as the REST one does. */
+    private val drafts: TemplateDraftService,
 ) : ShellPage {
     @GetMapping("/partials/templates")
     @RequiredScope(Permission.TEMPLATE_READ)
@@ -124,8 +127,10 @@ class TemplatePartialController(
     /**
      * The create modal's action (§9.3; Q1(b) — the browser keeps authoring templates) —
      * form-encoded fields, the §5 idiom, bound into a [TemplateDraft] and put through the
-     * **same** [TemplateValidator] and repository call the REST `POST /api/v1/templates`
-     * uses. One component, two surfaces: a refusal the API would give is a refusal here.
+     * **same** [TemplateValidator] and guarded create ([TemplateDraftService.create]) the REST
+     * `POST /api/v1/templates` uses. One component, two surfaces: a refusal the API would give is a
+     * refusal here — `template.release.busy` included, when the workspace writer guard's wait runs
+     * out (#841 G0: the references are re-checked and the row written under the guard).
      *
      * `type` is a create-time input and appears on no other form (§5.3 makes it immutable);
      * `dialect` is conditional on it — required for `sql`, absent for `html` and the script
@@ -194,7 +199,7 @@ class TemplatePartialController(
                 }
             validator.validateOrThrow(draft, workspaceId)
             // D55: the editor's create lands version 1 DRAFT — the same rule the API follows.
-            templates.create(workspaceId, draft, principal.userId, CreateLifecycle.DRAFT, WriteSurface.SESSION)
+            drafts.create(workspaceId, draft, principal.userId, CreateLifecycle.DRAFT, WriteSurface.SESSION)
             // Shape A (§5.1): the success node lands in #template-create-result — its arrival
             // is what closes the modal — and the refreshed CATALOG list rides along
             // out-of-band (the modal lives on the catalog page, #398). No HX-Redirect: a

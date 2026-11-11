@@ -17,10 +17,12 @@ class ReleaseFamilyTest {
             ReleaseFamily.PARAMETER_SET to PipelineErrorCodes.Parameters::class.java,
             ReleaseFamily.VISUALIZATION to PipelineErrorCodes.Visualization::class.java,
             ReleaseFamily.DASHBOARD to PipelineErrorCodes.Dashboard::class.java,
+            // #786 — the API, the sixth releasable root (dependency-graph record §8).
+            ReleaseFamily.ENDPOINT to PipelineErrorCodes.Endpoint::class.java,
         )
 
     @Test
-    fun `every family spells each of the eight refusals as its catalogued RELEASE constant`() {
+    fun `every family spells each of the nine refusals as its catalogued RELEASE constant`() {
         groups.keys shouldBe ReleaseFamily.entries.toSet()
         ReleaseFamily.entries.forEach { family ->
             val catalogued = releaseConstants(groups.getValue(family))
@@ -30,14 +32,18 @@ class ReleaseFamilyTest {
     }
 
     @Test
-    fun `the parameter set is the one family whose wire word and code prefix differ`() {
-        ReleaseFamily.entries.filter { it.wire != it.codePrefix } shouldBe listOf(ReleaseFamily.PARAMETER_SET)
+    fun `the parameter set and the API are the two families whose wire word and code prefix differ`() {
+        ReleaseFamily.entries.filter { it.wire != it.codePrefix } shouldBe listOf(ReleaseFamily.PARAMETER_SET, ReleaseFamily.ENDPOINT)
         ReleaseFamily.PARAMETER_SET.code(ReleaseRefusal.BUSY) shouldBe "parameter.release.busy"
         ReleaseFamily.PARAMETER_SET.wire shouldBe "parameter_set"
+        // #786: the API's codes keep §13.14's `endpoint.` prefix; its wire word is G1's frozen `api_endpoint` key.
+        ReleaseFamily.ENDPOINT.code(ReleaseRefusal.BUSY) shouldBe "endpoint.release.busy"
+        ReleaseFamily.ENDPOINT.wire shouldBe "api_endpoint"
     }
 
     @Test
-    fun `there are exactly eight refusals with the record's reason words`() {
+    fun `there are exactly nine refusals with the record's reason words`() {
+        // The 2026-10-18 eight, extended by metadata_unavailable (owner ruling 2026-11-08, record Draft 10 erratum (6)).
         ReleaseRefusal.entries.map { it.wire } shouldBe
             listOf(
                 "dependency_not_released",
@@ -48,6 +54,7 @@ class ReleaseFamilyTest {
                 "dependency_limit",
                 "busy",
                 "bundle_unsupported",
+                "metadata_unavailable",
             )
     }
 

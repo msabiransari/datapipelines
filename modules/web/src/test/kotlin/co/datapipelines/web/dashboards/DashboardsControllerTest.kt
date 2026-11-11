@@ -174,19 +174,8 @@ class DashboardsControllerTest {
             .single()
             .get("version")
             .asInt() shouldBe 3
-        // #332 — the release audit, the auditRelease twin: the cascaded VISUALIZATION's own event
-        // first (the 142 "who released X v3 and why" provenance: the dashboard release it rode on),
-        // then the dashboard's own event naming it.
-        audit.events shouldBe listOf("visualization.version.released", "dashboard.version.released")
-        audit.details.first()["name"] shouldBe "finance/visualizations/monthly_revenue"
-        audit.details.first()["version"] shouldBe 3
-        audit.details.first()["cascade_from_dashboard_id"] shouldBe id.toString()
-        audit.details.first()["cascade_from_version"] shouldBe 1
-        audit.details.last()["dashboard_id"] shouldBe id.toString()
-        audit.details.last()["dashboard_name"] shouldBe NAME
-        audit.details.last()["version"] shouldBe 1
-        audit.details.last()["visualizations_released"] shouldBe
-            listOf(mapOf("name" to "finance/visualizations/monthly_revenue", "version" to 3))
+        // #873 §C.7 — the coordinator is the ONE writer of release events, inside its transaction; none here.
+        audit.events shouldBe emptyList()
     }
 
     @Test

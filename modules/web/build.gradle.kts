@@ -32,6 +32,9 @@ dependencies {
     implementation(project(":modules:visualization"))
     // #785 — the managed lake: LakeCatalogStartupCheck calls its after-Flyway boot check (web/config).
     implementation(project(":modules:lake"))
+    // #868 G1 — the release wiring: the production FamilyRegistry, GraphLimits and the ReleasePlanningDeadline seam
+    // (web/release/ReleaseConfiguration) are dependency-contract types.
+    implementation(project(":modules:dependency-contract"))
 
     implementation(libs.spring.boot.starter.web)
     implementation(libs.spring.boot.starter.actuator)

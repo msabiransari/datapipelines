@@ -91,7 +91,8 @@ class TemplateLifecycleDialogControllerTest {
                     "/templates/nyc/mobility/probe.sql?tab=versions&ok=released",
                 ),
             )
-        audit.events shouldBe listOf("template.version.released")
+        // #873 §C.7 — T187's row is the coordinator's, written inside its transaction; the dialog writes none.
+        audit.events shouldBe emptyList()
     }
 
     @Test

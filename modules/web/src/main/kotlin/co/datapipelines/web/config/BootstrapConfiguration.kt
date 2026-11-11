@@ -93,6 +93,10 @@ class BootstrapConfiguration {
         apiKeyService: co.datapipelines.auth.ApiKeyService,
         secretHasher: co.datapipelines.auth.SecretHasher,
         users: UserService,
+        authoring: co.datapipelines.pipeline.AuthoringGuard,
+        endpointVersions: co.datapipelines.application.endpoints.PublishedEndpointVersionRepository,
+        releases: co.datapipelines.web.release.ReleaseCoordinator,
+        versionService: co.datapipelines.application.endpoints.EndpointVersionService,
     ): DemoEndpointSeeder =
         DemoEndpointSeeder(
             properties,
@@ -108,5 +112,9 @@ class BootstrapConfiguration {
             apiKeyService,
             secretHasher,
             users,
+            authoring,
+            endpointVersions,
+            releases,
+            versionService,
         )
 }

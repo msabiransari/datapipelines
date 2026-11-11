@@ -13,11 +13,13 @@ import co.datapipelines.datasources.DatasourceReferences
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceRepository
 import co.datapipelines.datasources.DatasourceValidator
+import co.datapipelines.datasources.DatasourceWriteGuarding
 import co.datapipelines.datasources.DefaultDatasourceRegistry
 import co.datapipelines.datasources.DialectAdapters
 import co.datapipelines.datasources.LakeIntrospectionCache
 import co.datapipelines.datasources.LakeTableCatalog
 import co.datapipelines.datasources.LakeViewOutcomeRecorder
+import co.datapipelines.datasources.ParameterSetDatasourceReference
 import co.datapipelines.datasources.PoolInvalidationPublisher
 import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.crypto.CredentialEncryptor
@@ -25,6 +27,7 @@ import co.datapipelines.datasources.crypto.KeyProviderConfig
 import co.datapipelines.datasources.crypto.KeyProviders
 import co.datapipelines.datasources.pooling.PoolLifecycleMetrics
 import co.datapipelines.lake.LakeProperties
+import co.datapipelines.parameters.ParameterSetRepository
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.DatasourceFacts
 import co.datapipelines.pipeline.PipelineNames
@@ -89,8 +92,29 @@ import co.datapipelines.pipeline.DatasourceRegistry as ContractDatasourceRegistr
 // `datasourceUpdateService`.
 @Suppress("TooManyFunctions")
 class DomainConfiguration {
+    /**
+     * #841 (G0, dependency-graph record §15.1) — the datasource writers' guarding: the datasource's prerequisite key,
+     * then its affected workspaces, in the metadata transaction, on the ONE writer guard. Shared by the definition and
+     * grant repositories (and the freshness tick's bounded grant repository), never [DatasourceWriteGuarding.UNGUARDED].
+     */
     @Bean
-    fun datasourceRepository(jdbc: NamedParameterJdbcTemplate): DatasourceRepository = DatasourceRepository(jdbc)
+    fun datasourceWriteGuarding(
+        jdbc: NamedParameterJdbcTemplate,
+        transactionManager: org.springframework.transaction.PlatformTransactionManager,
+        writeGuard: co.datapipelines.typesystem.guard.MetadataWriterGuard,
+    ): DatasourceWriteGuarding =
+        DatasourceWriteGuarding(
+            jdbc,
+            org.springframework.transaction.support
+                .TransactionTemplate(transactionManager),
+            writeGuard,
+        )
+
+    @Bean
+    fun datasourceRepository(
+        jdbc: NamedParameterJdbcTemplate,
+        writes: DatasourceWriteGuarding,
+    ): DatasourceRepository = DatasourceRepository(jdbc, writes = writes)
 
     /**
      * `datasource_workspaces` (metadata-db §4.16) — the table that replaced
@@ -99,8 +123,10 @@ class DomainConfiguration {
      * management half.
      */
     @Bean
-    fun datasourceGrantRepository(jdbc: NamedParameterJdbcTemplate): co.datapipelines.datasources.DatasourceGrantRepository =
-        co.datapipelines.datasources.DatasourceGrantRepository(jdbc)
+    fun datasourceGrantRepository(
+        jdbc: NamedParameterJdbcTemplate,
+        writes: DatasourceWriteGuarding,
+    ): co.datapipelines.datasources.DatasourceGrantRepository = co.datapipelines.datasources.DatasourceGrantRepository(jdbc, writes)
 
     /** The D8 rules the REST datasource surface and the UI's form partial share (workspaces design §8). */
     @Bean
@@ -126,7 +152,9 @@ class DomainConfiguration {
         datasources: DatasourceRegistry,
         rules: co.datapipelines.web.datasources.DatasourceWorkspaceRules,
         grants: co.datapipelines.datasources.DatasourceGrantRepository,
-    ): DatasourceCreateService = DatasourceCreateService(datasources, rules::resolveCreateBinding, grants)
+        // #841 (G0) — the registration and its grant commit together under the datasource writer guard.
+        writes: DatasourceWriteGuarding,
+    ): DatasourceCreateService = DatasourceCreateService(datasources, rules::resolveCreateBinding, grants, writes)
 
     /**
      * The ONE gated datasource-update path behind `PUT /api/v1/datasources/{name}` and the
@@ -304,23 +332,44 @@ class DomainConfiguration {
      * references saved while the datasource was global survive the re-bind. Reading the
      * row's binding here serves nothing anymore; the caller's workspace never mattered
      * (022 review F5) and the row's own binding no longer does either.
+     *
+     * Every reference carries the workspace it was found in. The LOCK counts all of them; a refusal NAMES only those its
+     * caller may read (`DatasourceUsages`, #873 §F.3 e — the delete refusal's details are scoped to the caller's
+     * workspaces).
      */
     @Bean
     fun datasourceReferences(
         bodies: PipelineBodies,
         workspaces: WorkspaceRepository,
+        /** #873 §F.3 e — the parameter-set arm of the name lock, by the same any-version, every-workspace rule. */
+        sets: ParameterSetRepository,
     ): DatasourceReferences =
-        DatasourceReferences { name ->
-            workspaces.findAll().flatMap { workspace ->
-                bodies.anyVersionReferences(workspace.id, name).map { ref ->
-                    DatasourceReference(
-                        pipelineName = ref.pipelineName,
-                        pipelineVersion = ref.pipelineVersion,
-                        versionStatus = ref.versionStatus.name,
-                        nodeId = ref.nodeId,
-                    )
+        object : DatasourceReferences {
+            override fun referencesTo(datasourceName: String): List<DatasourceReference> =
+                workspaces.findAll().flatMap { workspace ->
+                    bodies.anyVersionReferences(workspace.id, datasourceName).map { ref ->
+                        DatasourceReference(
+                            pipelineName = ref.pipelineName,
+                            pipelineVersion = ref.pipelineVersion,
+                            versionStatus = ref.versionStatus.name,
+                            nodeId = ref.nodeId,
+                            workspaceId = workspace.id,
+                        )
+                    }
                 }
-            }
+
+            override fun parameterSetReferencesTo(datasourceName: String): List<ParameterSetDatasourceReference> =
+                workspaces.findAll().flatMap { workspace ->
+                    sets.findAnyVersionDatasourceRefs(workspace.id, datasourceName).map { ref ->
+                        ParameterSetDatasourceReference(
+                            parameterSetName = ref.parameterSetName,
+                            parameterSetVersion = ref.version,
+                            versionStatus = ref.status.name,
+                            path = ref.path,
+                            workspaceId = workspace.id,
+                        )
+                    }
+                }
         }
 
     @Bean

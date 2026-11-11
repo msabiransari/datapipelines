@@ -2,7 +2,8 @@
      pointer (D60). The fallback line is §3.4's own rule pre-read from the same versions the
      service's fallback will scan; the toast after the POST names the SERVICE's outcome.
      Parents pinning this version (pipeline.version.pinned's evidence) leave no button, and since
-     #320 neither do the DASHBOARDS whose sources pin it (`referencing_dashboards`). -->
+     #320 neither do the DASHBOARDS whose sources pin it (`referencing_dashboards`), nor since #786
+     the live API versions and schedules that run it. -->
 <div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" data-lifecycle-dialog="pipeline-discard">
   <div class="ds-card app-modal app-modal-md" role="dialog" aria-modal="true" aria-labelledby="plc-discard-title">
     <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
@@ -12,10 +13,10 @@
     <h2 class="ds-title u-m0 u-mb-md" id="plc-discard-title"
         th:text="'Discard v' + ${dlg.version} + '?'">Discard v2?</h2>
 
-    <th:block th:if="${!#lists.isEmpty(dlg.pinnerPipelines) or !#lists.isEmpty(dlg.pinnerDashboards)}">
+    <th:block th:if="${dlg.blocked}">
       <p class="u-secondary u-text-sm">
-        <strong th:text="'v' + ${dlg.version}">v2</strong> cannot be discarded: it is pinned by live pipeline
-        or dashboard version(s) — remove or repoint them first.
+        <strong th:text="'v' + ${dlg.version}">v2</strong> cannot be discarded: it is pinned by live pipeline,
+        dashboard or API version(s) or schedule(s) — remove or repoint them first.
       </p>
       <ul class="u-text-sm u-mb-md" data-discard-pinnerPipelines>
         <li th:each="p : ${dlg.pinnerPipelines}">
@@ -26,10 +27,18 @@
           <span class="u-mono" th:text="${d.name}">acme/boards/revenue</span>
           <span class="u-muted u-text-meta" th:text="'v' + ${d.version} + ' · dashboard'">v4 · dashboard</span>
         </li>
+        <li th:each="a : ${dlg.pinnerApiVersions}" data-discard-pinner-api-version>
+          <span class="u-mono" th:text="${a.path}">/lending/home</span>
+          <span class="u-muted u-text-meta" th:text="'v' + ${a.version} + ' · API version · ' + ${a.status}">v2 · API version · RELEASED</span>
+        </li>
+        <li th:each="s : ${dlg.pinnerSchedules}" data-discard-pinner-schedule>
+          <span class="u-mono" th:text="${s.name}">reports/nightly</span>
+          <span class="u-muted u-text-meta">schedule</span>
+        </li>
       </ul>
     </th:block>
 
-    <th:block th:if="${#lists.isEmpty(dlg.pinnerPipelines) and #lists.isEmpty(dlg.pinnerDashboards)}">
+    <th:block th:if="${!dlg.blocked}">
       <p class="u-secondary u-text-sm" th:if="${dlg.isCurrent}">
         v<span th:text="${dlg.version}">2</span> is current —
         <span th:text="${dlg.fallback}">v1 becomes current.</span>
@@ -40,12 +49,13 @@
       <p class="u-secondary u-text-sm u-mb-md">Discard is reversible — Restore brings it back.</p>
 
       <!-- #273: the schedules that run this pipeline, from the SAME read the Usage tab makes
-           (lensed for the caller). The discard succeeds, and each of these then blocks at its
-           next run — the pointer it follows is gone — until repointed or deleted. -->
+           (lensed for the caller). Since #786 B.4 a schedule that runs THIS version is a blocker
+           (listed above, no button); the ones listed here each pin another exact version (#786
+           D.1), which the discard leaves in place. -->
       <th:block th:if="${!#lists.isEmpty(dlg.schedules)}">
         <p class="u-secondary u-text-sm" data-discard-schedules-note>
-          <strong>Schedules that run this pipeline</strong> — discarding does not pause them:
-          at its next run each blocks (the pointer is gone) until repointed or deleted.
+          <strong>Schedules that run this pipeline</strong> — each runs another version of it,
+          which this discard leaves in place.
         </p>
         <ul class="u-text-sm u-mb-md" data-discard-schedules>
           <li th:each="s : ${dlg.schedules}">

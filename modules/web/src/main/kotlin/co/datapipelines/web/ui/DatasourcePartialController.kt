@@ -10,9 +10,11 @@ import co.datapipelines.datasources.DatasourceGrantRepository
 import co.datapipelines.datasources.DatasourceProperties
 import co.datapipelines.datasources.DatasourceReferences
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.DatasourceUsages
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.datasources.DatasourcePoolForm
 import co.datapipelines.web.datasources.DatasourceWorkspaceRules
+import co.datapipelines.web.datasources.referenceVisibilityOf
 import org.springframework.http.HttpStatus
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.stereotype.Controller
@@ -336,9 +338,24 @@ class DatasourcePartialController(
                 }
             }
         model.addAttribute("forbidden", forbidden)
-        val usages = if (forbidden == null) references.referencesTo(name) else emptyList()
-        model.addAttribute("usages", usages)
-        model.addAttribute("usedByPipelines", usages.map { it.pipelineName }.distinct())
+        // #873 §F.3 e: a parameter-set selector locks the name too, listed beside the pipeline nodes with its own link.
+        // The delete refusal's details are scoped to the caller's workspaces: `inUse` is the lock over every workspace
+        // (so the dialog never offers a button the delete would refuse), the rows only what the caller may read.
+        val usages =
+            if (forbidden == null) {
+                DatasourceUsages.of(
+                    references.referencesTo(name),
+                    references.parameterSetReferencesTo(name),
+                    referenceVisibilityOf(principal),
+                )
+            } else {
+                DatasourceUsages(inUse = false, references = emptyList(), parameterSetReferences = emptyList())
+            }
+        model.addAttribute("inUse", usages.inUse)
+        model.addAttribute("usages", usages.references)
+        model.addAttribute("usedByPipelines", usages.referencingPipelines)
+        model.addAttribute("setUsages", usages.parameterSetReferences)
+        model.addAttribute("usedBySets", usages.referencingParameterSets)
         RoleModel.stamp(model, principal())
         return "partials/datasource-delete"
     }
@@ -364,9 +381,16 @@ class DatasourcePartialController(
             rules.requireMemberDatasourcesGate(principal)
             val result = datasources.delete(name)
             if (!result.deleted) {
+                // Scoped like the dialog and the REST 409: references outside the caller's workspaces are not counted.
+                val usages = result.usagesVisibleTo(referenceVisibilityOf(principal))
                 return refused(
-                    "'$name' is still used by ${result.referencingPipelines.size} pipeline(s) across " +
-                        "${result.references.size} node(s). Remove or repoint them first.",
+                    if (usages.named) {
+                        "'$name' is still used by ${usages.referencingPipelines.size} pipeline(s) across " +
+                            "${usages.references.size} node(s) and ${usages.referencingParameterSets.size} parameter set(s) across " +
+                            "${usages.parameterSetReferences.size} selector(s). Remove or repoint them first."
+                    } else {
+                        "'$name' is in use and cannot be deleted."
+                    },
                 )
             }
             browse.fillList(model, principal(), null, null, null)

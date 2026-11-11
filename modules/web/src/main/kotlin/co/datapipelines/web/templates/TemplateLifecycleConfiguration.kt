@@ -26,7 +26,22 @@ class TemplateLifecycleConfiguration {
         authoring: AuthoringGuard,
         // 7e — the citation rows the write lands `implements` in (inherit or replace).
         citations: co.datapipelines.templates.TemplateImplementsRepository,
-    ): TemplateDraftService = TemplateDraftService(templates, authoring, citations)
+        // #841 (G0, #744) — the reference re-check, the metadata transaction and the workspace writer guard every
+        // create and draft write (and the MCP sole-draft purge) acquires first.
+        validator: TemplateValidator,
+        transactionManager: org.springframework.transaction.PlatformTransactionManager,
+        guard: co.datapipelines.pipeline.release.ReleaseMutationGuard,
+    ): TemplateDraftService =
+        TemplateDraftService(
+            templates,
+            authoring,
+            citations,
+            validator = validator,
+            transactions =
+                org.springframework.transaction.support
+                    .TransactionTemplate(transactionManager),
+            guard = guard,
+        )
 
     @Bean
     fun parameterSetTemplatePins(jdbc: NamedParameterJdbcTemplate): co.datapipelines.parameters.ParameterSetTemplatePins =
@@ -52,6 +67,7 @@ class TemplateLifecycleConfiguration {
         )
 
     @Bean
+    @Suppress("LongParameterList") // a bean factory: one parameter per injected collaborator of the service
     fun templateReleaseService(
         templates: TemplateRepository,
         validator: TemplateValidator,
@@ -60,5 +76,22 @@ class TemplateLifecycleConfiguration {
         usage: co.datapipelines.application.templates.TemplateUsage,
         // #517 — the workspace writer guard every lifecycle verb acquires first.
         guard: co.datapipelines.pipeline.release.ReleaseMutationGuard,
-    ): TemplateReleaseService = TemplateReleaseService(templates, validator, authoring, usage, guard)
+        // #873 §C.1 — the shared release planner, read per release (it holds this service's participant: no cycle).
+        coordinator: org.springframework.beans.factory.ObjectProvider<co.datapipelines.web.release.ReleaseCoordinator>,
+        // #873 §D.2 — a restore rechecks the stored body's whole import closure (the shared port) and its blocker bound.
+        restoreGuard: co.datapipelines.pipeline.release.RestoreDependencyGuard,
+        bounds: co.datapipelines.pipeline.release.ReleaseBounds,
+    ): TemplateReleaseService =
+        TemplateReleaseService(
+            templates,
+            validator,
+            authoring,
+            usage,
+            guard,
+            coordination =
+                co.datapipelines.web.release.TemplateReleaseParticipant
+                    .coordination { coordinator.getObject() },
+            restoreGuard = restoreGuard,
+            maxBlockers = bounds.maxBlockers,
+        )
 }

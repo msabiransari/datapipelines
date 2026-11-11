@@ -1,5 +1,6 @@
 package co.datapipelines.scheduler
 
+import co.datapipelines.typesystem.guard.MetadataWriterGuard
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.github.kagkarlsson.scheduler.Scheduler
@@ -191,6 +192,9 @@ class SchedulerAutoConfiguration {
         jdbc: NamedParameterJdbcTemplate,
         notificationPolicy: NotificationPolicy,
         notifications: NotificationRepository,
+        // #841 (G0): required, never defaulted — an application without the writer guard bean fails to start
+        // rather than running the schedule writers unguarded.
+        writeGuard: MetadataWriterGuard,
     ): ScheduleService =
         ScheduleService(
             schedules,
@@ -205,6 +209,7 @@ class SchedulerAutoConfiguration {
             scheduleTargetReads(jdbc),
             notificationPolicy,
             notifications,
+            writeGuard,
             systemActor::userId,
         )
 

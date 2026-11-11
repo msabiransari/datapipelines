@@ -1431,6 +1431,19 @@ class PromoterLensSweepTest {
                     "('${UUID.randomUUID()}', '$WS_ID', '$HIDDEN_ENDPOINT', '$PIPE_BEHIND', 30, 'hidden', '$owner'), " +
                     "('${UUID.randomUUID()}', '$WS_ID', '$VISIBLE_ENDPOINT', '$PIPE_NEWER', 30, 'visible', '$owner')",
             )
+            // #786: an API is visible to the promoter iff the pipeline its CURRENT VERSION pins is. These rows are
+            // seeded after boot, so the startup conversion never saw them: write the v1 the conversion would have
+            // written (RELEASED, pinning the pipeline's current version, the V58 hash expression) and point at it.
+            statement.execute(
+                "INSERT INTO published_endpoint_versions (endpoint_id, version, status, pipeline_name, pipeline_version, " +
+                    "timeout_seconds, description, body_hash, released_at, released_by, created_by) " +
+                    "SELECT e.id, 1, 'RELEASED', p.name, p.current_version, e.timeout_seconds, e.description, " +
+                    "encode(sha256(convert_to((jsonb_build_object('pipeline', p.name, 'pipeline_version', p.current_version, " +
+                    "'timeout_seconds', e.timeout_seconds, 'description', e.description))::text, 'UTF8')), 'hex'), " +
+                    "NOW(), e.created_by, e.created_by FROM published_endpoints e JOIN pipelines p ON p.id = e.pipeline_id " +
+                    "WHERE e.workspace_id = '$WS_ID'",
+            )
+            statement.execute("UPDATE published_endpoints SET current_version = 1 WHERE workspace_id = '$WS_ID'")
         }
 
         private fun seedKeys(connection: java.sql.Connection) {

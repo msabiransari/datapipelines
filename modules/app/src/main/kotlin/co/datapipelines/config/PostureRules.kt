@@ -1,6 +1,7 @@
 package co.datapipelines.config
 
 import co.datapipelines.web.config.DeploymentEnv
+import org.springframework.core.env.Environment
 
 /**
  * The §3.23 posture rules (075), lifted out of [ConfigValidator]'s companion so neither
@@ -198,6 +199,37 @@ internal object PostureRules {
             }
         }
     }
+
+    /**
+     * §7 / §3.19 / §3.23 (#786 §E.4) — a `hardened` deployment does not author: authoring enabled under it REFUSES the
+     * startup. A hardened deployment is a promotion RECEIVER, and an API version may pin a DRAFT pipeline version only
+     * where authoring runs (the development posture), so an override that turned authoring on would let hardened APIs
+     * serve drafts. Only an explicit `true` refuses: the hardened profile's default is `false`, and an unreadable value
+     * is the binding's own startup refusal.
+     */
+    fun checkHardenedAuthoring(
+        snapshot: ConfigSnapshot,
+        violations: MutableList<String>,
+    ) {
+        val env = DeploymentEnv.resolveEnv(snapshot.env, snapshot.deploymentName)
+        if (DeploymentEnv.resolvePosture(snapshot.posture, env) != DeploymentEnv.HARDENED) return
+        if (snapshot.authoringEnabled != true) return
+        violations +=
+            "$AUTHORING_KEY is true under ${DeploymentEnv.POSTURE_KEY}=${DeploymentEnv.HARDENED} (env '$env', §3.23). " +
+            "A hardened deployment receives promoted releases and does not author. Unset " +
+            "DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED (the hardened default is false), or run this environment as " +
+            "${DeploymentEnv.DEVELOPMENT}."
+    }
+
+    /** §3.19 — the authoring capability's key; `AuthoringGuard.CONFIG_KEY` in pipeline-contract, which `app` does not see. */
+    const val AUTHORING_KEY = "datapipelines.deployment.authoring-enabled"
+
+    /**
+     * §3.19 (#786 §E.4) — the RESOLVED capability [checkHardenedAuthoring] judges: the posture profile's default or an
+     * override. A value Spring cannot read as a boolean is the binding's own refusal, so it is carried as unknown (null).
+     */
+    fun authoringEnabledOf(environment: Environment): Boolean? =
+        runCatching { environment.getProperty(AUTHORING_KEY, Boolean::class.java) }.getOrNull()
 
     /**
      * §7 / §3.23 (#189) — a passwordless Redis off loopback is a REFUSAL under `hardened`,

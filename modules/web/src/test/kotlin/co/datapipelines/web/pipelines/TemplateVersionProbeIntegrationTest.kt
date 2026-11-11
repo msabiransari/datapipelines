@@ -110,10 +110,21 @@ class TemplateVersionProbeIntegrationTest {
                 pipelines = pipelines,
                 validator = pipelineValidator,
                 drafts = PipelineDraftService(pipelines, authoring),
-                releases = PipelineReleaseService(pipelines, statuses, pipelineValidator, authoring, dashboards = NO_DASHBOARDS),
+                releases =
+                    PipelineReleaseService(
+                        pipelines,
+                        statuses,
+                        pipelineValidator,
+                        authoring,
+                        dashboards = NO_DASHBOARDS,
+                        endpointVersions = co.datapipelines.web.NO_API_VERSION_PINS,
+                        schedules = co.datapipelines.web.NO_SCHEDULE_PINS,
+                    ),
                 authoring = authoring,
                 draftTemplates = NO_EXCLUSIVE_DRAFT_TEMPLATES,
                 dashboards = NO_DASHBOARDS,
+                endpointVersions = co.datapipelines.web.NO_API_VERSION_PINS,
+                schedules = co.datapipelines.web.NO_SCHEDULE_PINS,
                 templateStatuses = statuses,
                 templateIds = wiring.templateIds(templates),
             )

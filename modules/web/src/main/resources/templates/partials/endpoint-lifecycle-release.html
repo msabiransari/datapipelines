@@ -1,0 +1,48 @@
+<!-- #786 C.3 — the API release dialog: the shared planner's closure (record §6). DRAFT dependencies the release flips
+     FIRST sit under one consent box, checked by default; unchecked, the server refuses
+     endpoint.release.dependency_not_released (the order rule is the server's). A MISSING or DISCARDED pin no consent
+     passes is a blocker, and then the button does not exist. tree_hash is the closure THIS dialog read: a closure that
+     changed since answers plan_conflict. bodyHash is the draft it read: a changed draft answers version.conflict. -->
+<div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" data-lifecycle-dialog="endpoint-release">
+  <div class="ds-card app-modal app-modal-md" role="dialog" aria-modal="true" aria-labelledby="axr-title">
+    <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
+            aria-label="Close" data-lifecycle-close>
+      <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+    </button>
+    <h2 class="ds-title u-m0 u-mb-md" id="axr-title" th:text="'Release v' + ${dlg.version} + '?'">Release v3?</h2>
+    <p class="u-text-sm">Pins <span class="u-mono" th:text="${dlg.pinLabel}" data-api-release-pin>finance/revenue@3</span>.</p>
+    <th:block th:if="${!#lists.isEmpty(dlg.blockers)}">
+      <p class="u-text-sm u-mb-xs">These pins block the release:</p>
+      <ul class="u-text-sm" data-api-release-blockers>
+        <li th:each="b : ${dlg.blockers}">
+          <span class="u-mono" th:text="${b.label}">x@1</span>
+          <span class="ds-badge ds-badge-danger" th:text="${b.status}">MISSING</span>
+        </li>
+      </ul>
+    </th:block>
+    <form th:if="${#lists.isEmpty(dlg.blockers)}"
+          th:attr="hx-post=@{'/partials/endpoints/{id}/lifecycle/release'(id=${dlg.id})}" hx-swap="none">
+      <input type="hidden" name="bodyHash" th:value="${dlg.bodyHash}">
+      <input type="hidden" name="treeHash" th:value="${dlg.treeHash}">
+      <div class="u-text-sm u-mb-md" th:if="${!#lists.isEmpty(dlg.drafts)}" data-api-release-cascade>
+        <label>
+          <input type="checkbox" name="includeDependencies" value="true" checked data-consent-input>
+          Also release these draft dependencies first
+        </label>
+        <ul>
+          <li th:each="d : ${dlg.drafts}">
+            <input type="hidden" name="dependency" th:value="${d.nodeId}">
+            <span class="u-mono" th:text="${d.label}">finance/revenue@3</span>
+            <span class="ds-badge ds-badge-default" th:text="${d.family}">pipeline</span>
+          </li>
+        </ul>
+      </div>
+      <p class="u-secondary u-text-sm">Releasing locks this version and makes it the API's current version.</p>
+      <div class="app-page-actions">
+        <button type="button" class="ds-button ds-button-ghost" data-lifecycle-close>Cancel</button>
+        <button type="submit" class="ds-button ds-button-primary" data-api-submit
+                th:attr="data-consent-submit=${!#lists.isEmpty(dlg.drafts)} ? 'true' : null">Release</button>
+      </div>
+    </form>
+  </div>
+</div>

@@ -155,9 +155,10 @@ internal object ScheduleFixtures {
     }
 
     /**
-     * A calculator pipeline that was NEVER released (#280): the draft is live, `current_version`
-     * is null — the shape `PipelineJobExecutor.validate` refuses with
-     * `schedule.validation.target_not_released` and the form names at pick time. Returns its id.
+     * A calculator pipeline that was NEVER released (#280): its only version is the v1 DRAFT. Where
+     * drafts do not run (the hardened posture) `PipelineJobExecutor.validate` refuses a pin of it
+     * with `schedule.validation.target_not_released` and the form names it at pick time; where
+     * they do (this suite's development posture, #786 D.1) the v1 draft is pinnable. Returns its id.
      */
     fun draftPipeline(
         page: Page,
@@ -233,7 +234,7 @@ internal object ScheduleFixtures {
                 page,
                 "POST",
                 "/api/v1/schedules",
-                """{"name":"$name","payload":{"pipeline":"$pipeline","version":"current"},""" +
+                """{"name":"$name","payload":{"pipeline":"$pipeline","version":1},""" +
                     """"parameters":{"$PARAMETER":$batchSize},"cron":"$cron","timezone":"$timezone"}""",
             )
         check(created.status == 201) { "schedule create ${created.status}: ${created.body.take(400)}" }
@@ -257,7 +258,7 @@ internal object ScheduleFixtures {
                 page,
                 "POST",
                 "/api/v1/schedules",
-                """{"name":"$name","payload":{"pipeline":"$pipeline","version":"current",""" +
+                """{"name":"$name","payload":{"pipeline":"$pipeline","version":1,""" +
                     """"parameter_bindings":{"$DATE_PARAMETER":{"source":"keyword","name":"$keyword"}}},""" +
                     """"cron":"$cron","timezone":"$timezone"}""",
             )

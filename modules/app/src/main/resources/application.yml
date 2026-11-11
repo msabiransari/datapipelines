@@ -652,6 +652,9 @@ datapipelines:
       max-blockers: ${DATAPIPELINES_RELEASE_DEPENDENCIES_MAX_BLOCKERS:100}
       max-wire-bytes: ${DATAPIPELINES_RELEASE_DEPENDENCIES_MAX_WIRE_BYTES:1048576}
       lock-wait-seconds: ${DATAPIPELINES_RELEASE_DEPENDENCIES_LOCK_WAIT_SECONDS:5}
+      max-resolve-batch-size: ${DATAPIPELINES_RELEASE_DEPENDENCIES_MAX_RESOLVE_BATCH_SIZE:256}
+      metadata-timeout-seconds: ${DATAPIPELINES_RELEASE_DEPENDENCIES_METADATA_TIMEOUT_SECONDS:30}
+      statement-timeout-seconds: ${DATAPIPELINES_RELEASE_DEPENDENCIES_STATEMENT_TIMEOUT_SECONDS:5}
   # The managed lake (configuration.md §3.36, #785 dp-lake P2; design record §6). Server configuration,
   # never UI. Inert unless enabled. Appended after the whole datapipelines: tree (the reparenting lesson —
   # MISTAKES.md); LakeConfigKeysSpecDriftTest pins every key, its default and its neighbours. Sizes use

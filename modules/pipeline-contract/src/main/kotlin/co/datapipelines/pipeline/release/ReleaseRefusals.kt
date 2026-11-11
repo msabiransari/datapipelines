@@ -1,6 +1,7 @@
 package co.datapipelines.pipeline.release
 
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.guard.WriterBusy
 
 /**
  * The eight release-plan refusals as exceptions (record §14). Every one carries the ROOT's family prefix — the blocker's
@@ -104,11 +105,5 @@ object ReleaseRefusals {
         family: ReleaseFamily,
         lockWaitSeconds: Int,
         cause: Throwable? = null,
-    ): DatapipelinesException =
-        DatapipelinesException(
-            code = family.code(ReleaseRefusal.BUSY),
-            message = "Another change in this workspace is in progress. Nothing was written; try again in a moment.",
-            details = mapOf("lock_wait_seconds" to lockWaitSeconds),
-            cause = cause,
-        )
+    ): DatapipelinesException = WriterBusy.refusal(family.code(ReleaseRefusal.BUSY), lockWaitSeconds, cause)
 }

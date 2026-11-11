@@ -1,9 +1,9 @@
 # Observability Specification
 
-**Status:** v1.68 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.70 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-11-08
+**Last updated:** 2026-11-11
 
 ---
 
@@ -230,6 +230,11 @@ The scheduler ([Scheduler](scheduler.md)) logs its own work under `scheduler.*`.
 | ERROR | `scheduler.notification.render_failed` (#442b) | A notice could not be rendered (a defect); the delivery is `failed` / `render_failed`, nothing was sent | `delivery_id`, `schedule_id`, `run_id`, `error` (the exception class) |
 | ERROR | `scheduler.notification.port_failed` (#442b) | The mail port threw instead of answering (a defect); the delivery is `uncertain` / `interrupted` | `delivery_id`, `schedule_id`, `run_id`, `error` (the exception class) |
 | WARN | `scheduler.notification.settle_lost` (#442b) | A send finished after its claim had already been recovered as interrupted; the recovered state stands | `delivery_id`, `schedule_id`, `run_id`, `message` |
+| INFO | `scheduler.conversion.converted` (#786 §D.5) | The upgrade's in-place conversion pinned a schema-1 (`"version": "current"`) pipeline schedule to the exact version its pipeline's CURRENT names, at startup before dispatch: one line per converted schedule — the schedule half of the conversion report ([Deployment §8](deployment.md)). Only the payload's `version` and `payload_schema_version` changed | `id`, `name`, `pipeline`, `pipeline_version` (the exact pin), `status` (that version's status: `RELEASED`, or `DRAFT` — a draft pin keeps refusing where drafts do not run), `queued_runs` (how many of its queued runs were pinned in the same transaction — each to its own pipeline's version, see `scheduler.conversion.converted_run`) |
+| INFO | `scheduler.conversion.converted_run` (#786 §D.5, round 7) | One line per queued run the conversion pinned, after its schedule's line. A run's payload is its own frozen copy, so after an edit of the schedule's target it can name a different pipeline than its schedule: it is pinned to the version ITS pipeline's CURRENT names, never the schedule's | `id` (the run), `schedule`, `pipeline` (the run's own), `pipeline_version`, `status` |
+| INFO | `scheduler.conversion.summary` (#786 §D.5) | One line per startup after the schedule conversion ran; `converted=0` on every later startup (the selector is schema 1) | `converted`, `released`, `draft`, `queued_runs` |
+| ERROR | `scheduler.conversion.refused` (#786 §E.0) | A live schema-1 schedule's pipeline, or the pipeline one of its schema-1 queued runs names, cannot be pinned exactly; the server refuses to start and nothing is written. One line per schedule or run | `kind=schedule` with `id` (the schedule), or `kind=run` with `id` (the run) and `schedule`; `name` (the schedule's), `pipeline` (the target that failed), `reason` (`missing_pipeline`, `no_versions`, `no_current`) |
+| ERROR | `scheduler.conversion.refused_summary` (#786 §E.0) | Follows the per-schedule lines once; the startup then fails with a non-zero exit (after the API lines, if any: every step's precondition is read before any writes) | `refused`, `fix` (static: release the pipeline or delete the schedule on the previous version, then upgrade) |
 
 The notification lines carry ids, the notice and the recipient's DOMAIN; never an address, a subject or a body. A notice's history of record is the run's trail (`notification_enqueued` / `_sent` / `_failed` / `_uncertain`, whose details carry no domain either) and its delivery rows ([Metadata DB §4.40](metadata-db.md#440-schedule_notification_deliveries)).
 
@@ -250,6 +255,10 @@ A `published_endpoints` row whose stored path fails today's grammar is RETIRED, 
 | WARN | `endpoint.registry_invalidation_publish_failed` | A committed endpoint change could not be published to Redis; one line per failed publish. Peers may serve their previous snapshot until their next reload | `message` (exception message), `reason` (static explanation) |
 | WARN | `endpoint.registry_invalidation_malformed` | A pub/sub message could not be parsed and was dropped; one line per malformed message, subscriber stays alive | `reason=dropped`, `message` (first 200 characters of the parser exception's message) |
 | INFO | `endpoint.registry_invalidated_remotely` | A parsed message from another instance dropped this instance's snapshot; one line per peer message, own-origin messages are ignored. The next request reloads | `origin`, `message` (static explanation) |
+| INFO | `endpoint.conversion.converted` | (#786 §E.1) The upgrade's in-place conversion gave a pre-V58 API its version 1 at startup, before serving: one line per converted API — the conversion report ([Deployment §8](deployment.md)) | `path` (stored pattern), `pipeline`, `pipeline_version` (the exact pin: the legacy pipeline's CURRENT), `status` (`RELEASED` iff that pipeline version is RELEASED, else `DRAFT`) |
+| INFO | `endpoint.conversion.summary` | (#786 §E.1) One line per startup after the conversion ran; `converted=0` on every later startup (the selector is legacy-only) | `converted`, `released`, `draft` |
+| ERROR | `endpoint.conversion.refused` | (#786 §E.0) A pre-V58 API's pipeline cannot be pinned exactly; the server refuses to start and nothing is written. One line per API | `kind=api`, `id`, `path`, `pipeline` (name, or the legacy id when the row is gone), `reason` (`missing_pipeline`, `no_versions`, `no_current`) |
+| ERROR | `endpoint.conversion.refused_summary` | (#786 §E.0) Follows the per-API lines once; the startup then fails with a non-zero exit | `refused`, `fix` (static: release the pipeline or delete the API on the previous version, then upgrade) |
 
 Neither legacy-row line is an alert: the API console lists every legacy row with its reason. A steady `promotion_legacy_omitted` means an endpoint that will not reach the target until someone republishes it at a legal path.
 
@@ -288,7 +297,7 @@ Every `@Scheduled` job but the pool reaper — the stale-execution sweep (every 
 |---|---|---|---|---|
 | Stale-execution sweep (`execution.sweep_failed`) | 10 s | 15 s | 20 s | 30 s |
 | Dashboard refresh sweep (`dashboard.refresh_sweep_failed`) | 10 s | 15 s | 20 s | 30 s |
-| Managed lake freshness tick (two statements) | 5 s | 10 s | 15 s | 25 s |
+| Managed lake freshness tick (two steps; the grant repair's statements, its lock's included, share ONE 5 s budget, #841 R4) | 5 s | 10 s | 15 s | 25 s |
 | Retention sweep (`retention.step_failed`, six isolated steps) | 25 s | 30 s | 35 s | 45 s |
 | Lake settlement tick (`lake.settle.sweep_deferred`) | 5 s per statement | 10 s | 15 s | 25 s |
 
@@ -775,6 +784,8 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-11 | v1.70 | #786 U2 | **§3.4**: four `scheduler.conversion.*` rows — the upgrade's in-place schedule conversion (`converted`, `summary`) and its E.0 refusal (`refused` with `kind=schedule`, `refused_summary`). |
+| 2026-11-10 | v1.69 | 841 (#841 R4) | **§3.4H**: the freshness tick's row names two steps: the grant repair's statements, the writer lock's included, share one 5 s budget and each carries the 10 s socket bound, so a step queued behind a held lock still ends at 5 s. No new event or metric. |
 | 2026-11-08 | v1.68 | 858 (#858) | **§3.4H**: the lake settlement tick's statements carry the socket bound too, through the lake runtime's own template: its row reads a 5 s statement bound, a 10 s socket bound, a 15 s end against a hung server and 25 s with the 10 s acquire, named as a separate wait; the shutdown row lists its 15 s end. No new event or metric. |
 | 2026-11-08 | v1.67 | 833 (#833, #824, #840) managed generation bounds | **§3.4A**: `datasource.pool_close_stuck` is reported at each pool's own deadline, from its `connectionTimeout` plus, for a managed lake generation, its reader-pin release bound (was a constant 65 s), and gains `deadline_seconds`. `datasource.pool_hard_closed` reports a managed generation at the managed retire ceiling (`datasources.managed-retire-ceiling-seconds`, #824). **§4.1**: `datapipelines.datasource.pool.close_stuck` counts against that per-pool deadline. |
 | 2026-11-08 | v1.66 | 851 (#851) | §3.4S `lake.settle.metadata_read_stuck`: the abandoned read stops itself at its next chunk; `lake.settle.metadata_read_ended` gains `cause=abandoned` for that end. No event added or renamed. |

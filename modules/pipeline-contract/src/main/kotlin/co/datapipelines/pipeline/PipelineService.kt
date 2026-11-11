@@ -6,6 +6,7 @@ import co.datapipelines.pipeline.release.ReleaseBounds
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import co.datapipelines.pipeline.release.ReleasePlanRequest
+import co.datapipelines.pipeline.release.RestoreDependencyGuard
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
@@ -112,6 +113,10 @@ open class PipelineService(
     private val draftTemplates: ExclusiveDraftTemplates,
     /** #320 — the dashboards that pin a release: a source pins `pipeline {name, version}` exactly (graph rule 1). */
     private val dashboards: PipelineVersionConsumers,
+    /** #786 B.4 — the live API versions that pin a pipeline version exactly (record §14, A39). */
+    private val endpointVersions: EndpointVersionConsumers,
+    /** #786 B.4 — the live schedules that run a pipeline version, paused and blocked included (record §14, A39). */
+    private val schedules: ScheduleConsumers,
     private val deserializer: PipelineDeserializer = PipelineDeserializer(),
     private val serializer: PipelineSerializer = PipelineSerializer(),
     /**
@@ -135,9 +140,11 @@ open class PipelineService(
     private val templateIds: TemplateIds = TemplateIds { _, _ -> false },
     /** Blockers one restore refusal lists (`datapipelines.release.dependencies.max-blockers`, record §14). */
     private val maxBlockers: Int = ReleaseBounds.DEFAULT_MAX_BLOCKERS,
+    /** #873 §D.3 — the transitive restore recheck; [RestoreDependencyGuard.DIRECT_ONLY] in a directly constructed test. */
+    private val restoreGuard: RestoreDependencyGuard = RestoreDependencyGuard.DIRECT_ONLY,
 ) {
-    private val pinGuard = PipelinePurgePinGuard(pipelines, dashboards)
-    private val restorePins = PipelineRestorePins(pipelines, templateStatuses, templateIds, maxBlockers, deserializer)
+    private val pinGuard = PipelinePurgePinGuard(pipelines, dashboards, endpointVersions, schedules)
+    private val restorePins = PipelineRestorePins(pipelines, templateStatuses, templateIds, maxBlockers, deserializer, restoreGuard)
 
     /** The writer guard, acquired first inside every pin-affecting write's transaction. */
     private fun lockWorkspace(workspaceId: UUID) = guard.acquire(workspaceId, ReleaseFamily.PIPELINE)
@@ -961,13 +968,6 @@ open class PipelineService(
         entityPurge: Boolean = false,
     ) = pinGuard.refuseIfPinned(workspaceId, record, version, entityPurge)
 
-    private fun pinned(
-        record: PipelineRecord,
-        version: Int,
-        pinners: List<TemplatePin>,
-        dashboardPins: List<DashboardPin> = emptyList(),
-    ): DatapipelinesException = pinGuard.pinned(record, version, pinners, dashboardPins)
-
     /**
      * The discard statement returned zero rows after the service-side guard passed: a pin
      * landed in between, or a concurrent discard won.
@@ -977,9 +977,8 @@ open class PipelineService(
         record: PipelineRecord,
         version: Int,
     ): DatapipelinesException {
-        val pinners = pipelines.findLiveParentsPinningVersion(workspaceId, record.name, version)
-        val dashboardPins = dashboards.liveVersionPins(workspaceId, record.name, version)
-        if (pinners.isNotEmpty() || dashboardPins.isNotEmpty()) return pinned(record, version, pinners, dashboardPins)
+        val pinners = pinGuard.pinnersOf(workspaceId, record, version)
+        if (!pinners.isEmpty) return pinGuard.pinned(record, version, pinners)
         val current = pipelines.findVersionDetail(workspaceId, record.id, version) ?: throw versionNotFound(record.id, version)
         return when (current.status) {
             PipelineVersionStatus.RELEASED -> {

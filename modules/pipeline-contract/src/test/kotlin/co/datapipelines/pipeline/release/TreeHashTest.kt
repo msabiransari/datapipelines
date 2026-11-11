@@ -102,7 +102,7 @@ class TreeHashTest {
         plan.treeHash shouldBe GOLDEN_DIGEST
         plan.blockers.map { it.first.name to it.second } shouldBe listOf("acme/gone" to BlockerReason.MISSING)
         val wire = plan.toWire(ReleaseBounds.DEFAULT_MAX_BLOCKERS)
-        wire.keys.toList() shouldBe listOf("root", "nodes", "edges", "complete", "blockers", "tree_hash")
+        wire.keys.toList() shouldBe listOf("root", "nodes", "edges", "complete", "blockers", "tree_hash", "prerequisites")
         @Suppress("UNCHECKED_CAST")
         val nodes = wire["nodes"] as List<Map<String, Any?>>
         nodes.map { it["name"] to it["selectable"] } shouldBe

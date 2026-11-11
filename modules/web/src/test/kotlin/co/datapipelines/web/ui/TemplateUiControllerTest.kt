@@ -8,6 +8,7 @@ import co.datapipelines.pipeline.LifecycleBucket
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.Template
+import co.datapipelines.templates.TemplateDraftService
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateUsageService
 import co.datapipelines.templates.TemplateValidator
@@ -63,6 +64,7 @@ class TemplateUiControllerTest {
             mockk<TemplateValidator>(),
             mockk<AuthoringGuard>(),
             co.datapipelines.web.EVERYTHING_LENS,
+            TemplateDraftService(repository, AuthoringGuard(true), mockk(relaxed = true)),
         )
 
     private val userId = UUID.randomUUID()

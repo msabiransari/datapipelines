@@ -1,5 +1,6 @@
 package co.datapipelines.config
 
+import co.datapipelines.web.endpoints.StartupConversion
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.core.env.Environment
@@ -13,4 +14,8 @@ import org.springframework.core.env.Environment
 class AppConfiguration {
     @Bean
     fun configValidator(environment: Environment): ConfigValidator = ConfigValidator(environment)
+
+    /** #786 §E.1 — the upgrade's in-place conversion steps, run after Flyway and before serving or dispatch. */
+    @Bean
+    fun conversionStartup(steps: List<StartupConversion>): ConversionStartup = ConversionStartup(steps)
 }

@@ -6,6 +6,7 @@ import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.SearchNeedle
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.pipeline.WriteSurface
+import co.datapipelines.pipeline.release.RaceSavepoint
 import co.datapipelines.typesystem.Dialect
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
@@ -191,6 +192,29 @@ class TemplateRepository(
         findDraftDetail(workspaceId, id)
             ?.let { findVersion(workspaceId, id, it.version) }
             ?: findLatest(workspaceId, id)
+
+    /**
+     * #873 (dependency-graph record §7.1, brief R1-8) — the exact versions [keys] name, `(template id, version)` pairs, any
+     * status, in ONE `IN`-list statement: the template dependency provider's batch read. Each row carries the entity's
+     * surrogate id and its current pointer as [findCurrentVersions] reports it (live entities only, NULL never
+     * released). A key with no stored row is absent. Empty [keys] issues nothing (`IN ()` would not prepare).
+     */
+    fun findReleaseVersions(
+        workspaceId: UUID,
+        keys: Collection<Pair<String, Int>>,
+    ): List<TemplateReleaseRow> {
+        if (keys.isEmpty()) return emptyList()
+        return jdbc.query(
+            "$SELECT_RELEASE_ROW WHERE t.workspace_id = :workspaceId AND (t.name, v.version) IN (:keys)",
+            mapOf("workspaceId" to workspaceId, "keys" to keys.map { (id, version) -> arrayOf<Any>(id, version) }),
+        ) { rs, rowNum ->
+            TemplateReleaseRow(
+                entityUuid = rs.getObject("entity_uuid", UUID::class.java),
+                currentVersion = rs.getObject("live_current_version") as Int?,
+                template = checkNotNull(MAPPER.mapRow(rs, rowNum)),
+            )
+        }
+    }
 
     /** A specific stored version's full record, including of a soft-deleted template (§5.1). */
     fun findVersion(
@@ -603,7 +627,8 @@ class TemplateRepository(
         block: () -> T,
     ): T =
         try {
-            block()
+            // #841 (G0): inside the writer guard's transaction the losing statement rolls back to a savepoint only.
+            RaceSavepoint.attempt(jdbc.jdbcTemplate, block)
         } catch (e: org.springframework.dao.DuplicateKeyException) {
             if (e.mostSpecificCause.message?.contains(NAME_CONSTRAINT) != true) throw e
             throw co.datapipelines.typesystem.DatapipelinesException(
@@ -625,6 +650,9 @@ class TemplateRepository(
      * order. Measured by the forced race in `TemplateRepositoryIntegrationTest`; the index-only
      * mapping answered it with a raw `DuplicateKeyException`. `PipelineRepository` and
      * `ParameterSetRepository` map the same pair.
+     *
+     * Inside the writer guard's transaction (#841 G0, the #517 precedent) the statement runs under a savepoint, so the
+     * winner read below still answers instead of failing on an aborted transaction.
      */
     private fun <T> mappingDraftRace(
         workspaceId: UUID,
@@ -632,7 +660,7 @@ class TemplateRepository(
         block: () -> T,
     ): T =
         try {
-            block()
+            RaceSavepoint.attempt(jdbc.jdbcTemplate, block)
         } catch (e: org.springframework.dao.DuplicateKeyException) {
             val violated = e.mostSpecificCause.message.orEmpty()
             if (DRAFT_INDEX !in violated && DRAFT_PK !in violated) throw e
@@ -668,6 +696,21 @@ class TemplateRepository(
                 "SELECT id FROM templates WHERE workspace_id = :workspaceId AND name = :name",
                 mapOf("workspaceId" to workspaceId, "name" to name),
             ) { rs, _ -> rs.getObject("id", UUID::class.java) }
+            .singleOrNull()
+
+    /**
+     * The template name (its authored id) behind surrogate [entityUuid] in [workspaceId] — the inverse of [findEntityUuid],
+     * for a release root named by its entity id (#873 §C.1, `RootReleaseRequest`). Null when no such template is here.
+     */
+    fun findNameByEntityUuid(
+        workspaceId: UUID,
+        entityUuid: UUID,
+    ): String? =
+        jdbc
+            .query(
+                "SELECT name FROM templates WHERE workspace_id = :workspaceId AND id = :id",
+                mapOf("workspaceId" to workspaceId, "id" to entityUuid),
+            ) { rs, _ -> rs.getString("name") }
             .singleOrNull()
 
     /** One version's lifecycle detail, or null when the template/version does not exist in the workspace. */
@@ -1220,6 +1263,13 @@ class TemplateRepository(
               FROM templates t
               JOIN template_versions v ON v.template_id = t.id
             """.trimIndent()
+
+        /** [SELECT_JOINED] plus the entity's surrogate id and its live current pointer — [findReleaseVersions]' row. */
+        private val SELECT_RELEASE_ROW =
+            SELECT_JOINED.replaceFirst(
+                "SELECT ",
+                "SELECT t.id AS entity_uuid, CASE WHEN $TEMPLATE_LIVE_T THEN t.current_version END AS live_current_version, ",
+            )
 
         /**
          * The working-version page predicate of [list], shared with [count] (034 E3)
@@ -1903,3 +1953,13 @@ class TemplateRepository(
             }
     }
 }
+
+/**
+ * One stored template version as the dependency provider reads it (#873, [TemplateRepository.findReleaseVersions]): the
+ * full version, the entity's surrogate id, and its current pointer — null when never released or no longer live.
+ */
+data class TemplateReleaseRow(
+    val entityUuid: UUID,
+    val currentVersion: Int?,
+    val template: Template,
+)

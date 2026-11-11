@@ -75,6 +75,20 @@ class ConfigValidatorPostureTest {
     }
 
     @Test
+    fun `authoring is allowed under development and refused under hardened - 786`() {
+        ConfigValidator.validate(validSnapshot().copy(authoringEnabled = true)).violations.shouldBeEmpty()
+        // The hardened profile's own default, and an unset value, are not refusals.
+        ConfigValidator.validate(hardened().copy(authoringEnabled = false)).violations.shouldBeEmpty()
+        ConfigValidator.validate(hardened().copy(authoringEnabled = null)).violations.shouldBeEmpty()
+
+        val report = ConfigValidator.validate(hardened().copy(authoringEnabled = true))
+        report.violations.shouldHaveSize(1)
+        report.violations.single().shouldContain("datapipelines.deployment.authoring-enabled")
+        report.violations.single().shouldContain("DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED")
+        report.violations.single().shouldContain("hardened")
+    }
+
+    @Test
     fun `a bootstrap password is allowed under development and refused under hardened`() {
         val seeded =
             validSnapshot().copy(

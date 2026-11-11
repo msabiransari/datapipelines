@@ -77,6 +77,12 @@ class DatasourceCreateService(
     private val datasources: DatasourceRegistry,
     private val binding: DatasourceCreateBinding,
     private val grants: DatasourceGrantRepository,
+    /**
+     * #841 (G0): the datasource writer guarding the registration and its grant commit under; the directly constructed
+     * unit-test default is unguarded, production wires the shared bean (`DomainConfiguration`).
+     */
+    private val writes: co.datapipelines.datasources.DatasourceWriteGuarding =
+        co.datapipelines.datasources.DatasourceWriteGuarding.UNGUARDED,
 ) {
     /**
      * Registers the datasource described by [body] on behalf of [principal].
@@ -114,12 +120,16 @@ class DatasourceCreateService(
                 mapOf("datasource_name" to datasource.name),
             )
         }
-        val saved = datasources.save(datasource, principal.userId)
-        // D-R7: visibility is the grant, and registering a datasource you then cannot see would
-        // be a bug wearing a rule's clothes. A workspace-owned datasource is granted to its own
-        // workspace here; an INSTANCE datasource (no owner) is granted to nothing — a super
-        // admin grants it explicitly, which is the decision the design wants made out loud.
-        saved.ownerWorkspaceId?.let { owner -> grants.grantOnRegistration(saved.name, owner, principal.userId) }
-        return saved
+        // #841 (G0): the registration and the grant it implies commit together, under the datasource's prerequisite
+        // key and the owning workspace (the registry's and the grant's own guarded writes join this transaction).
+        return writes.definition(datasource.name, listOf(datasource.ownerWorkspaceId)) {
+            val saved = datasources.save(datasource, principal.userId)
+            // D-R7: visibility is the grant, and registering a datasource you then cannot see would
+            // be a bug wearing a rule's clothes. A workspace-owned datasource is granted to its own
+            // workspace here; an INSTANCE datasource (no owner) is granted to nothing — a super
+            // admin grants it explicitly, which is the decision the design wants made out loud.
+            saved.ownerWorkspaceId?.let { owner -> grants.grantOnRegistration(saved.name, owner, principal.userId) }
+            saved
+        }
     }
 }

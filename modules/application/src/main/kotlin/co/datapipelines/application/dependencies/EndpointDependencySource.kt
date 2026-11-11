@@ -1,0 +1,56 @@
+package co.datapipelines.application.dependencies
+
+import co.datapipelines.application.endpoints.PublishedEndpointVersionRepository
+import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.release.DependencySource
+import co.datapipelines.pipeline.release.PipelineDependencySource
+import co.datapipelines.pipeline.release.ReleaseFamily
+import co.datapipelines.pipeline.release.ReleaseNodeIdentity
+import co.datapipelines.pipeline.release.ReleasePin
+import co.datapipelines.pipeline.release.ResolvedNode
+
+/**
+ * The API family's read of the release graph (#786; dependency-graph record §6 `PIPELINE_PIN`, §8 "an API draft version
+ * is a releasable root", §11.1): an API version is looked up by its workspace and its IMMUTABLE path (the family's pin
+ * key — a path change makes another entity, §24) at an exact version; its one outgoing pin is the exact pipeline version
+ * its body names, at field path `pipeline_version`. Registered through G1's [ReleaseDependencyFamilies.descriptor], so
+ * the walk, the batching and the savepoint isolation are G1's; this class adds a family, not a walker.
+ *
+ * A DISCARDED version resolves (a restore recheck names it) but its pin is never walked, the rule every release source
+ * follows. An absent path or version answers null — the graph's MISSING.
+ */
+class EndpointDependencySource(
+    private val versions: PublishedEndpointVersionRepository,
+) : DependencySource {
+    override fun resolve(identity: ReleaseNodeIdentity): ResolvedNode? {
+        if (identity.family != ReleaseFamily.ENDPOINT) return null
+        val (entity, version) = versions.findByPath(identity.workspaceId, identity.entityId, identity.version) ?: return null
+        val status = PipelineDependencySource.statusOf(version.status)
+        val pins =
+            if (version.status == PipelineVersionStatus.DISCARDED) {
+                emptyList()
+            } else {
+                val body = version.body
+                listOf(
+                    ReleasePin(
+                        PipelineDependencySource.identity(identity.workspaceId, body.pipelineName, body.pipelineVersion),
+                        body.pipelineName,
+                        PIN_PATH,
+                    ),
+                )
+            }
+        return ResolvedNode(identity, identity.entityId, status, version.bodyHash, entity.currentVersion, pins, entity.endpointId)
+    }
+
+    companion object {
+        /** The field path of an API version's one pin — what a blocker's `path` names. */
+        const val PIN_PATH = "pipeline_version"
+
+        /** The release identity of the API at [pathPattern], version [version], in [workspaceId]. */
+        fun identity(
+            workspaceId: java.util.UUID,
+            pathPattern: String,
+            version: Int,
+        ): ReleaseNodeIdentity = ReleaseNodeIdentity(workspaceId, ReleaseFamily.ENDPOINT, pathPattern, version)
+    }
+}

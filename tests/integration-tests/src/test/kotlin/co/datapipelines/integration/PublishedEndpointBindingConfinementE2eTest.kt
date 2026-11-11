@@ -270,7 +270,7 @@ class PublishedEndpointBindingConfinementE2eTest {
             .port(port)
             .contentType(ContentType.JSON)
             .asSession(ADMIN_SESSION)
-            .body("""{"path": "$path", "pipeline": "$pipeline", "timeout_seconds": 60}""")
+            .body("""{"path": "$path", "pipeline": "$pipeline", "pipeline_version": 1, "timeout_seconds": 60}""")
             .`when`()
             .post("/api/v1/endpoints")
             .then()

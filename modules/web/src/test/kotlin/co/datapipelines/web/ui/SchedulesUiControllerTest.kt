@@ -3,6 +3,7 @@ package co.datapipelines.web.ui
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.RolePermissions
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.scheduler.DeliveryOffReason
 import co.datapipelines.scheduler.LastRunOutcome
 import co.datapipelines.scheduler.NotificationDeliveryState
@@ -38,7 +39,7 @@ import org.springframework.web.server.ResponseStatusException
 class SchedulesUiControllerTest {
     private val themeResolver = mockk<ThemeResolver>()
     private val schedules = mockk<ScheduleService>()
-    private val controller = SchedulesUiController(themeResolver, schedules)
+    private val controller = SchedulesUiController(themeResolver, schedules, AuthoringGuard(false))
 
     @Test
     fun `the page renders the schedules shell with the theme, the roles and the zone list`() {
@@ -51,6 +52,8 @@ class SchedulesUiControllerTest {
         model["activeTheme"] shouldBe "dark"
         // No principal in this unit context: RoleModel's NONE — every verb boolean false.
         model["canAuthor"] shouldBe false
+        // #786 D.4: the version picker's eligibility posture — a hardened deployment runs no draft.
+        model["draftsEligible"] shouldBe false
         model["timezoneGroups"] shouldBe ScheduleTimezones.GROUPS
         // #442: the deployment's COMPUTED mail state, reason included, for the form's note.
         model["notificationDelivery"] shouldBe mapOf("state" to "off", "reason" to "no_allowlist")

@@ -100,6 +100,10 @@ object ApiErrorCatalog {
             // 074 §13.14 — the request validator is the biggest half of the family and every
             // one of its codes is a 400, so 400 is the honest default; the publish-time and
             // resolution-time refusals each name their own status in EXCEPTIONS below.
+            // #786 §13.14 — the API version lifecycle and its release are state conflicts, the pipeline.version. /
+            // pipeline.release. shape; listed BEFORE the family's 400 so the first matching prefix is the specific one.
+            "endpoint.version." to HttpStatus.CONFLICT,
+            "endpoint.release." to HttpStatus.CONFLICT,
             "endpoint." to HttpStatus.BAD_REQUEST,
             // #9 §13.19 — the scheduler's save-time validation: every one is the caller's request, 400.
             "schedule.validation." to HttpStatus.BAD_REQUEST,
@@ -268,6 +272,10 @@ object ApiErrorCatalog {
             // #818 (dp-lake record §6) — the managed lake datasource is configuration's, so an edit or a delete
             // conflicts with the server's ownership of the row: 409, like `datasource.in_use`.
             PipelineErrorCodes.Datasource.MANAGED to HttpStatus.CONFLICT,
+            // #841 (G0) — an exhausted writer-guard wait: another change holds the lock, retry later, like every
+            // `<family>.release.busy`. `datasource.` and `endpoint.` have no 409 family default; `schedule.` does.
+            PipelineErrorCodes.Datasource.WRITE_BUSY to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Endpoint.WRITE_BUSY to HttpStatus.CONFLICT,
             // #818 (record §10) — the catalog read a new managed generation needs failed, so none was built:
             // the metadata database is the dependency, and the condition is temporary.
             PipelineErrorCodes.Lake.UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
@@ -384,6 +392,18 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Dashboard.RELEASE_PLAN_REQUIRED to HttpStatus.PRECONDITION_REQUIRED,
             PipelineErrorCodes.Dashboard.RELEASE_PLAN_INVALID to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Dashboard.RELEASE_DEPENDENCY_LIMIT to HttpStatus.UNPROCESSABLE_ENTITY,
+            PipelineErrorCodes.Endpoint.RELEASE_PLAN_REQUIRED to HttpStatus.PRECONDITION_REQUIRED,
+            PipelineErrorCodes.Endpoint.RELEASE_PLAN_INVALID to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Endpoint.RELEASE_DEPENDENCY_LIMIT to HttpStatus.UNPROCESSABLE_ENTITY,
+            // #786 E.3 (record §25.4, erratum (6)) — the release-planning deadline expired: the metadata database did not
+            // answer in time, so no plan was built. Retryable: 503 + the catalog's constant Retry-After, WARN without a
+            // stack ([EXPECTED_UNAVAILABLE]); one row per family because the ROOT's family prefixes the code.
+            PipelineErrorCodes.Versioning.RELEASE_METADATA_UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Template.RELEASE_METADATA_UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Parameters.RELEASE_METADATA_UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Visualization.RELEASE_METADATA_UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Dashboard.RELEASE_METADATA_UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Endpoint.RELEASE_METADATA_UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
             // §13.7 (055) — 401 like the auth.promotion family default, same A2 reason.
             PipelineErrorCodes.Auth.PROMOTION_KEY_INVALID to HttpStatus.UNAUTHORIZED,
             // §13.7 — bad credentials is the one `auth.login.*` code that is a 401,
@@ -449,6 +469,15 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Endpoint.KEY_NOT_BOUND to HttpStatus.FORBIDDEN,
             PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED to HttpStatus.FORBIDDEN,
             PipelineErrorCodes.Endpoint.PROMOTION_KEY_MISSING to HttpStatus.CONFLICT,
+            // #786 §13.14 — an unknown API version is a 404 under the version family's 409; an exact pin the caller's
+            // posture does not admit, and an authoring-disabled deployment's API write, are state conflicts (409) under
+            // the family's 400. `endpoint.pipeline_version.not_found` keeps the 400: the request names a version that
+            // is not there (a restore's missing pin is the native 400, record §25.4).
+            PipelineErrorCodes.Endpoint.VERSION_NOT_FOUND to HttpStatus.NOT_FOUND,
+            // The purge dialog's typed confirm is the caller's input, never the version's state: 400, as its twins.
+            PipelineErrorCodes.Endpoint.VERSION_CONFIRM_MISMATCH to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Endpoint.PIPELINE_VERSION_NOT_ELIGIBLE to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Endpoint.AUTHORING_DISABLED to HttpStatus.CONFLICT,
             // 118 §13.15 — the learned semantic layer. Bare `semantics.` codes with no family
             // default (the auth.role_required reasoning): each row is explicit.
             PipelineErrorCodes.Semantics.KIND_INVALID to HttpStatus.BAD_REQUEST,
@@ -569,21 +598,45 @@ object ApiErrorCatalog {
      * NOT here — a node over the page budget is a server-side defect and keeps its stack.
      */
     val EXPECTED_UNAVAILABLE: Set<String> =
-        setOf(
-            PipelineErrorCodes.Navigation.VIEW_UNAVAILABLE,
-        )
+        // #786 E.3 — beside the view, the release-planning deadline's refusal, one per family (record §25.4: WARN
+        // without stack).
+        setOf(PipelineErrorCodes.Navigation.VIEW_UNAVAILABLE) + RELEASE_METADATA_UNAVAILABLE
+
+    /** #786 E.3 — every family's `<family>.release.metadata_unavailable` (record §25.4, erratum (6)). */
+    private val RELEASE_METADATA_UNAVAILABLE: Set<String>
+        get() =
+            setOf(
+                PipelineErrorCodes.Versioning.RELEASE_METADATA_UNAVAILABLE,
+                PipelineErrorCodes.Template.RELEASE_METADATA_UNAVAILABLE,
+                PipelineErrorCodes.Parameters.RELEASE_METADATA_UNAVAILABLE,
+                PipelineErrorCodes.Visualization.RELEASE_METADATA_UNAVAILABLE,
+                PipelineErrorCodes.Dashboard.RELEASE_METADATA_UNAVAILABLE,
+                PipelineErrorCodes.Endpoint.RELEASE_METADATA_UNAVAILABLE,
+            )
 
     /** The `Retry-After` the navigation view 503 answers (#464 §13.24): a constant, never derived from input. */
     const val RETRY_AFTER_VIEW_UNAVAILABLE_SECONDS = 5
+
+    /** The `Retry-After` a release-planning deadline 503 answers (#786 E.3, record §25.4): a constant. */
+    const val RETRY_AFTER_RELEASE_METADATA_SECONDS = 5
 
     /** The `Retry-After` seconds [code] answers with, or null when its response carries none. */
     fun retryAfterSeconds(code: String): Int? =
         when (code) {
             PipelineErrorCodes.Navigation.VIEW_UNAVAILABLE -> RETRY_AFTER_VIEW_UNAVAILABLE_SECONDS
+            in RELEASE_METADATA_UNAVAILABLE -> RETRY_AFTER_RELEASE_METADATA_SECONDS
             else -> null
         }
 
+    /** #786 E.3 — the release plan could not be read in time; nothing was released. */
+    private const val RELEASE_METADATA_USER_MESSAGE =
+        "The release plan couldn't be read in time. Nothing was released; try again in a moment."
+
     private const val GENERIC_USER_MESSAGE = "Something went wrong on our side. Quote the correlation id when reporting this."
+
+    /** #841 (G0): the exhausted writer-guard wait — another change holds the lock; nothing was written, retry. */
+    private const val WRITER_BUSY_USER_MESSAGE =
+        "Another change in this workspace is in progress. Nothing was written; try again in a moment."
 
     /** versioning §5.5: both authoring-disabled mirrors share one actionable sentence. */
     private const val RECEIVER_USER_MESSAGE =
@@ -615,6 +668,11 @@ object ApiErrorCatalog {
             // family message is written for THEM (a machine client's developer), not for an
             // author. The publish-time refusals carry their own overrides below.
             "endpoint.request." to "The request to this endpoint isn't valid. Every problem with it is listed in the error details.",
+            // #786 — the API version lifecycle and its release are an AUTHOR's refusals, not a serve caller's.
+            "endpoint.version." to "This API version can't do that right now. The details say why.",
+            "endpoint.release." to "This API can't be released yet. The details say what to release first.",
+            "endpoint.pipeline_version." to "That pipeline version can't be pinned by this API. The details say why.",
+            "endpoint.authoring_disabled" to RECEIVER_USER_MESSAGE,
             "endpoint." to "This published endpoint couldn't serve the request.",
             // #9 — the schedule families: validation names the field in its details; the rest
             // is a state the schedule is in, which the message and details spell out.
@@ -662,7 +720,7 @@ object ApiErrorCatalog {
             "lake." to "The lake is busy with another change to this table. Try again shortly.",
         )
 
-    private val USER_MESSAGE_OVERRIDES: Map<String, String> =
+    private val AUTHORED_USER_MESSAGES: Map<String, String> =
         mapOf(
             PipelineErrorCodes.Lake.CAPACITY_BUSY to "Delivery capacity is busy. Retry when an ingestion slot and scratch are available.",
             PipelineErrorCodes.Lake.APPEND_GRANT_MISSING to "The execution has no checked authority to append to the lake.",
@@ -746,6 +804,10 @@ object ApiErrorCatalog {
                 "This connection's database user isn't allowed to read that table. Ask the database owner for access.",
             PipelineErrorCodes.Datasource.LAKE_TABLE_UNAVAILABLE to
                 "A registered table on this data lake couldn't be read. The recorded reason is in the error details.",
+            // #841 (G0) — the exhausted writer-guard wait; the family lines do not say "try again".
+            PipelineErrorCodes.Datasource.WRITE_BUSY to WRITER_BUSY_USER_MESSAGE,
+            PipelineErrorCodes.Endpoint.WRITE_BUSY to WRITER_BUSY_USER_MESSAGE,
+            PipelineErrorCodes.Schedule.WRITE_BUSY to WRITER_BUSY_USER_MESSAGE,
             // #818 — the "lake." family line ("busy with another change") describes neither of these.
             PipelineErrorCodes.Datasource.MANAGED to
                 "This connection is the server's managed lake. It is set in the server configuration and can't be changed here.",
@@ -802,13 +864,24 @@ object ApiErrorCatalog {
             ScheduleErrorCodes.TARGET_NOT_FOUND to
                 "No pipeline by that name exists in this workspace. Pick one from the suggestions.",
             ScheduleErrorCodes.TARGET_NOT_RELEASED to
-                "This pipeline has no released version yet. Release it (or switch its current version), then schedule it.",
+                "This pipeline version isn't one this server runs — it was discarded, or it's a draft and drafts " +
+                "don't run here. Pick a released version.",
             ScheduleErrorCodes.PAYLOAD_INVALID to
                 "This schedule's job doesn't have the right shape — it must name one pipeline of this workspace " +
-                "with the version set to `current`.",
+                "and the exact version number to run.",
+            ScheduleErrorCodes.PAYLOAD_SCHEMA_UNSUPPORTED to
+                "This schedule was saved in the older format that followed the current version. Edit it and pick " +
+                "the exact version to run.",
             ScheduleErrorCodes.EXECUTOR_UNKNOWN to
                 "That kind of job can't be scheduled on this server.",
             PipelineErrorCodes.Versioning.AUTHORING_DISABLED to RECEIVER_USER_MESSAGE,
             PipelineErrorCodes.Template.AUTHORING_DISABLED to RECEIVER_USER_MESSAGE,
         )
+
+    /**
+     * #786 E.3 — the planning deadline is an outage to wait out, not a dependency to release first. The family codes
+     * come first, so an authored entry still wins a clash exactly as it did when they were spread at the literal's head.
+     */
+    private val USER_MESSAGE_OVERRIDES: Map<String, String> =
+        RELEASE_METADATA_UNAVAILABLE.associateWith { RELEASE_METADATA_USER_MESSAGE } + AUTHORED_USER_MESSAGES
 }

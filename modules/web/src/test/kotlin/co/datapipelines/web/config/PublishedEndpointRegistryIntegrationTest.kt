@@ -2,8 +2,12 @@ package co.datapipelines.web.config
 
 import co.datapipelines.application.endpoints.EndpointInvalidationPublisher
 import co.datapipelines.application.endpoints.EndpointRegistry
+import co.datapipelines.application.endpoints.EndpointVersionBody
+import co.datapipelines.application.endpoints.LegacyEndpointColumns
 import co.datapipelines.application.endpoints.PublishedEndpoint
 import co.datapipelines.application.endpoints.PublishedEndpointRepository
+import co.datapipelines.application.endpoints.PublishedEndpointVersionRepository
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.SharedPostgres
 import co.datapipelines.web.TestRedis
@@ -52,6 +56,7 @@ import java.util.concurrent.TimeUnit
 class PublishedEndpointRegistryIntegrationTest {
     private lateinit var jdbc: NamedParameterJdbcTemplate
     private lateinit var repository: PublishedEndpointRepository
+    private lateinit var versions: PublishedEndpointVersionRepository
     private lateinit var transactions: TransactionTemplate
     private lateinit var redis: StringRedisTemplate
     private val containers = mutableListOf<RedisMessageListenerContainer>()
@@ -64,6 +69,7 @@ class PublishedEndpointRegistryIntegrationTest {
         // released the instant the SELECT returned, which is exactly when it is needed.
         transactions = TransactionTemplate(DataSourceTransactionManager(dataSource))
         repository = PublishedEndpointRepository(jdbc)
+        versions = PublishedEndpointVersionRepository(jdbc)
         redis = TestRedis.template()
         TestRedis.flush(redis)
         cleanTables()
@@ -86,8 +92,8 @@ class PublishedEndpointRegistryIntegrationTest {
 
         val stored = repository.findByPath("/nyc/v1/revenue/{borough}")
         assertAll(
-            { stored?.pipelineId shouldBe PIPELINE_ID },
-            { stored?.timeoutSeconds shouldBe 30 },
+            // #786: the pin and the timeout are the current VERSION's, never the legacy columns.
+            { stored?.current?.body shouldBe EndpointVersionBody(PIPELINE_NAME, 1, 30, "") },
             { stored?.isEnabled shouldBe true },
             { stored?.pathVariables shouldBe listOf("borough") },
         )
@@ -219,23 +225,28 @@ class PublishedEndpointRegistryIntegrationTest {
         await { registry.matcher().match("/nyc/v1/revenue") }.shouldNotBeNull()
     }
 
-    /** Publishes [pattern] inside a transaction — the repository's advisory lock needs one. */
+    /**
+     * Publishes [pattern] inside a transaction — the repository's advisory lock needs one — with its version 1 RELEASED
+     * pinned to the seeded pipeline at version 1 and pointed at (#786: no creation path leaves an entity versionless).
+     */
     private fun publish(pattern: String): PublishedEndpoint =
         transactions.execute {
-            repository.insert(
-                PublishedEndpoint.of(
-                    id = UUID.randomUUID(),
-                    workspaceId = WORKSPACE_ID,
-                    pathPattern = pattern,
-                    pipelineId = PIPELINE_ID,
-                    timeoutSeconds = 30,
-                    description = "",
-                    isEnabled = true,
-                    createdBy = USER_ID,
-                    createdAt = Instant.now(),
-                    updatedAt = Instant.now(),
-                ),
-            )
+            repository
+                .insert(
+                    PublishedEndpoint.of(
+                        id = UUID.randomUUID(),
+                        workspaceId = WORKSPACE_ID,
+                        pathPattern = pattern,
+                        isEnabled = true,
+                        createdBy = USER_ID,
+                        createdAt = Instant.now(),
+                        updatedAt = Instant.now(),
+                    ),
+                    LegacyEndpointColumns(PIPELINE_ID, 30, ""),
+                ).also {
+                    versions.insert(it.id, 1, PipelineVersionStatus.RELEASED, EndpointVersionBody(PIPELINE_NAME, 1, 30, ""), USER_ID)
+                    versions.setCurrent(it.id, 1)
+                }
         }!!
 
     /** The PRODUCTION publisher, so the message shape under test is the shipped one. */
@@ -307,6 +318,7 @@ class PublishedEndpointRegistryIntegrationTest {
         val WORKSPACE_ID: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
         val USER_ID: UUID = UUID.fromString("00000000-0000-0000-0000-0000000000e4")
         val PIPELINE_ID: UUID = UUID.fromString("00000000-0000-0000-0000-0000000000e5")
+        const val PIPELINE_NAME = "revenue_by_borough"
 
         const val INSTANCE_A = "instance-A"
         const val INSTANCE_B = "instance-B"

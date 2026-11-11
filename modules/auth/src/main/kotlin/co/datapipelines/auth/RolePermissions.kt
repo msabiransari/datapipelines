@@ -25,8 +25,10 @@ import co.datapipelines.auth.Permission.DATASOURCE_TEST
 import co.datapipelines.auth.Permission.DOCS_READ
 import co.datapipelines.auth.Permission.ENDPOINT_PUBLISH
 import co.datapipelines.auth.Permission.ENDPOINT_READ
+import co.datapipelines.auth.Permission.ENDPOINT_RELEASE
 import co.datapipelines.auth.Permission.ENDPOINT_SERVE
 import co.datapipelines.auth.Permission.ENDPOINT_UNPUBLISH
+import co.datapipelines.auth.Permission.ENDPOINT_VERSION_MANAGE
 import co.datapipelines.auth.Permission.EXECUTION_CANCEL
 import co.datapipelines.auth.Permission.EXECUTION_CANCEL_ALL
 import co.datapipelines.auth.Permission.EXECUTION_READ
@@ -210,6 +212,9 @@ object RolePermissions {
                 LAKE_APPEND,
                 ENDPOINT_PUBLISH,
                 ENDPOINT_UNPUBLISH,
+                // #786: an API's release and its version lifecycle are the author's, exactly as a pipeline's.
+                ENDPOINT_RELEASE,
+                ENDPOINT_VERSION_MANAGE,
                 SEMANTIC_RECORD,
                 SEMANTIC_RETIRE,
                 PROMOTION_READ,

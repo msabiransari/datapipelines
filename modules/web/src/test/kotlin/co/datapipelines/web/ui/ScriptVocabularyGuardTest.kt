@@ -297,6 +297,50 @@ class ScriptVocabularyGuardTest {
                     "the visualization §13.21/§13.22 rows (the block pin) — a future node noun stays red here",
                 ),
                 Triple(
+                    Regex(
+                        "^modules/(?:dependency-contract/src/|application/src/test/(?:kotlin/co/datapipelines/application/" +
+                            "dependencies/|resources/dependencies/release-goldens/))",
+                    ),
+                    Regex("TRANSFORM_TEMPLATE|transform\\.template|/transform/template"),
+                    "the visualization block pin as the dependency-graph record's §6/§11.1 edge (#868): the TRANSFORM_TEMPLATE " +
+                        "token, the `transform.template` path and its JSON pointer — a node noun stays red here",
+                ),
+                Triple(
+                    Regex("^modules/application/src/main/kotlin/co/datapipelines/application/dependencies/visualization/"),
+                    Regex("transform", setOf(IGNORE_CASE)),
+                    "the visualization family's native release provider (#873 G2) reads the block's `transform` pin as its one edge",
+                ),
+                Triple(
+                    Regex(
+                        "^modules/application/src/test/kotlin/co/datapipelines/application/dependencies/" +
+                            "(?:ArtifactReleaseProvidersPostgresTest|ReleaseArtifactSeed)\\.kt$",
+                    ),
+                    Regex("transform(?: pin|s? template|-template|\\.template|-free| = |: Pair)|TransformBinding"),
+                    "the native release providers' database suite and its seed (#873 G2, moved beside the providers): the " +
+                        "block's pin, phrase by phrase — a node noun stays red here",
+                ),
+                Triple(
+                    Regex(
+                        "^modules/web/src/(?:main|test)/kotlin/co/datapipelines/web/release/" +
+                            "(?:VisualizationReleaseParticipant|ReleaseConfiguration|ReleaseArtifactSeed|" +
+                            "TemplateProviderParityPostgresTest|ArtifactRootGraph|ReleaseAliasParityTest|" +
+                            "ReleaseCoordinatorArtifactRootsTest)\\.kt$",
+                    ),
+                    Regex("transform(?: pin|s? template|-template|\\.template|-free| = |: Pair)|TransformBinding|_transform\\.sql"),
+                    "the visualization release participant, its provider's wiring and their fixtures (#873 G2): the block's pin, " +
+                        "phrase by phrase — a node noun stays red here",
+                ),
+                Triple(
+                    Regex(
+                        "^tests/integration-tests/src/test/kotlin/co/datapipelines/integration/" +
+                            "(?:FamilyRootsFixture|FamilyRootsReleaseCascadeE2eTest|FamilyRootsAuditE2eTest|" +
+                            "RestoreOutboundPinsE2eTest|TemplateImportClosureE2eTest)\\.kt$",
+                    ),
+                    Regex("transform\\.template|transform template|\"transform\":"),
+                    "the #873 release and restore closures over a visualization (G2): the block's pin, its wire path and its JSON " +
+                        "key — a node noun stays red here",
+                ),
+                Triple(
                     Regex("^docs/rest-api\\.md$"),
                     Regex("transform pin|transform template|the transform|transform,|transform`", setOf(IGNORE_CASE)),
                     "the visualization/dashboard rows and the runtime stage list (the block)",
@@ -442,8 +486,8 @@ class ScriptVocabularyGuardTest {
                 ),
                 Triple(
                     Regex("^docs/versioning\\.md$"),
-                    Regex("its transform pin RELEASED|the transform pins of any pushed visualization"),
-                    "the visualization release gate and the transfer closure (the block's pin)",
+                    Regex("its transform pin RELEASED|the transform pins of any pushed visualization|visualization's transform template"),
+                    "the visualization release gate, the transfer closure and the #873 release/restore closures (the block's pin)",
                 ),
                 Triple(
                     Regex("^docs/ui-screens\\.md$"),
@@ -509,6 +553,8 @@ class ScriptVocabularyGuardTest {
         /** Restored kept-sense lines (#640, #663) a path entry must admit — path to line. */
         private val ADMITTED =
             listOf(
+                "modules/dependency-contract/src/main/kotlin/co/datapipelines/dependencies/Vocabularies.kt" to
+                    "    TRANSFORM_TEMPLATE(FamilyKey.VISUALIZATION, FamilyKey.TEMPLATE),",
                 XSLT_POLICY_PATH to "    $XSLT_POLICY_LINE",
                 "guard.css" to "transform: translateX(0);",
                 "guard.css" to "text-transform: uppercase;",
@@ -544,6 +590,8 @@ class ScriptVocabularyGuardTest {
         /** The node noun in those same files stays red: the path entries admit the block, not the word. */
         private val NOT_ADMITTED =
             listOf(
+                "modules/dependency-contract/src/main/kotlin/co/datapipelines/dependencies/Families.kt" to
+                    "val TRANSFORM = FamilyKey(\"transform\")",
                 XSLT_POLICY_PATH to "val transformNode = 1",
                 XSLT_POLICY_PATH to "$XSLT_POLICY_LINE // a TRANSFORM node",
                 "guard.css" to ".type-transform {",

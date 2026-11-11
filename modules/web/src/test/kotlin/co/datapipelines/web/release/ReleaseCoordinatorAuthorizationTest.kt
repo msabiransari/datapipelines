@@ -21,6 +21,8 @@ import io.kotest.matchers.shouldBe
 import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import java.util.UUID
@@ -117,6 +119,46 @@ class ReleaseCoordinatorAuthorizationTest {
         }
     }
 
+    /**
+     * #873 §C (record §5): the four artifact roots — an author who may release the ROOT but not the CHILD family the plan
+     * flips is refused before any preparation, guard or flip. One case per root and child: the set's template, the
+     * visualization's template, the dashboard's visualization, the dashboard's DRAFT source pipeline.
+     */
+    @ParameterizedTest
+    @CsvSource(
+        "PARAMETER_SET, TEMPLATE_RELEASE",
+        "VISUALIZATION, TEMPLATE_RELEASE",
+        "DASHBOARD, VISUALIZATION_RELEASE",
+        "DASHBOARD, PIPELINE_RELEASE",
+    )
+    fun `an author without the child family's release is refused before any preparation, guard or flip`(
+        root: ReleaseFamily,
+        withheld: Permission,
+    ) {
+        val roots = ArtifactRootGraph(CoordinatorFixture())
+        val request = roots.planned(root)
+        PermissionResolverInstallation(without(withheld)).use {
+            actingAs(AuthenticatedPrincipal(roots.fx.actor, "author@datapipelines.test", "Author", AuthMethod.OIDC, workspace = context))
+            val error = shouldThrow<DatapipelinesException> { roots.fx.coordinator(MatrixReleaseAuthorization()).releaseRoot(request) }
+            error.code shouldBe AuthErrorCodes.ROLE_REQUIRED
+        }
+        withClue("nothing prepared, guarded or flipped: ${roots.fx.log}") { roots.fx.log shouldBe emptyList() }
+        roots.fx.phases shouldBe emptyList()
+    }
+
+    /** The production answer, minus [withheld] for an author. */
+    private fun without(withheld: Permission) =
+        object : PermissionResolver {
+            override fun holds(
+                workspaceId: UUID?,
+                role: WorkspaceRole?,
+                superAdmin: Boolean,
+                permission: Permission,
+            ): Boolean =
+                !(role == WorkspaceRole.AUTHOR && permission == withheld) &&
+                    RolePermissionsResolver.holds(workspaceId, role, superAdmin, permission)
+        }
+
     @Test
     fun `each family maps to its own native release permission - no new string`() {
         ReleaseFamily.entries.associateWith(MatrixReleaseAuthorization::permissionOf) shouldBe
@@ -126,6 +168,8 @@ class ReleaseCoordinatorAuthorizationTest {
                 ReleaseFamily.PARAMETER_SET to Permission.PARAMETER_SET_RELEASE,
                 ReleaseFamily.VISUALIZATION to Permission.VISUALIZATION_RELEASE,
                 ReleaseFamily.DASHBOARD to Permission.DASHBOARD_RELEASE,
+                // #786 — the API family's own native release row (brief Roles table: cells copied from pipeline.release).
+                ReleaseFamily.ENDPOINT to Permission.ENDPOINT_RELEASE,
             )
     }
 }

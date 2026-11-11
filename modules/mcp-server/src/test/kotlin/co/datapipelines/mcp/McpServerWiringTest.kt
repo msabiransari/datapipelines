@@ -60,7 +60,7 @@ class McpServerWiringTest {
             TemplatesRenderTool(templates, engines),
             // 7b — the script evaluator, appended the way the shipped bean does.
             TemplatesEvaluateTool(mockk<co.datapipelines.application.templates.TemplateEvaluateService>()),
-            TemplatesPurgeDraftTool(templates, usage, authoringGuard, McpFixtures.EVERYTHING_LENS),
+            TemplatesPurgeDraftTool(templates, usage, authoringGuard, McpFixtures.EVERYTHING_LENS, drafts),
         )
 
     /** The composed reverse arrow over its four collaborators (#320 added the pipeline repository and the visualization scans). */
@@ -114,10 +114,7 @@ class McpServerWiringTest {
             CalculatorsGetTool(),
             // 074 — the four published-endpoint tools, appended the way the shipped bean does.
         ) +
-            EndpointsTools.all(
-                mockk<co.datapipelines.application.endpoints.EndpointPublishService>(),
-                mockk<co.datapipelines.pipeline.PipelineRepository>(),
-            ) +
+            EndpointsTools.all(mockk<co.datapipelines.application.endpoints.EndpointPublishService>()) +
             // 089 §A — the three dp-lake catalog tools, appended after the endpoint tools.
             LakeTableTools.all(
                 datasources,

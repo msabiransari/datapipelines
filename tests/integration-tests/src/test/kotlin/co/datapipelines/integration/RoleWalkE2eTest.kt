@@ -597,10 +597,14 @@ class RoleWalkE2eTest {
          * every member's MCP key refused on 185 / 185, `promotion_receiver` 185 / 185, `api_caller`
          * 181 (it reaches the published catch-all and its runs' three execution routes).
          * A walk well under these numbers is a broken scan, not a leaner app.
+         *
+         * #786 (2026-11-10) raised the three REST floors to the walk's exact counts at the lane's tip, so a dropped route
+         * or §7.6 literal cannot pass: 358 routes (viewer 154 / 204, author 299 / 59, promoter 141 / 217, workspace admin
+         * 332 / 26, super admin 358 / 0), 413 handlers, 358 route literals; 61 tools, unchanged (the lane adds no tool).
          */
-        private const val MINIMUM_ROUTES = 65
-        private const val MINIMUM_HANDLERS = 105
-        private const val MINIMUM_ROUTE_LITERALS = 335
+        private const val MINIMUM_ROUTES = 358
+        private const val MINIMUM_HANDLERS = 413
+        private const val MINIMUM_ROUTE_LITERALS = 358
 
         // Include nested braces in a variable's regex constraint, such as an id's length quantifier.
         private val ROUTE_VARIABLE = Regex("\\{(?:[^{}]|\\{[^{}]*})+}")
