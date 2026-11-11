@@ -19,7 +19,6 @@ import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
-import java.lang.reflect.InvocationTargetException
 import java.security.SecureRandom
 import java.sql.Connection
 import java.time.Clock
@@ -56,7 +55,7 @@ import java.util.concurrent.TimeUnit
  *
  * **Reaching the real beans.** module-structure §4.2 lets this module compile against `:modules:app` only
  * (`verifyModuleDependencies`), so the writers, the binder, G0's key helper and G1's walker are reached at RUNTIME through
- * [Internal] — the production beans out of the application context and the production classes by name, the
+ * [ProductionInternals] — the production beans out of the application context and the production classes by name, the
  * `AuditLogRetentionE2eTest` precedent — never a copy and never a new build edge.
  *
  * The identity values themselves never leave this class: the witness lines print lock coordinates and counts only.
@@ -71,12 +70,12 @@ class DatasourceIncarnationE2eTest {
 
     @Autowired private lateinit var transactions: PlatformTransactionManager
 
-    private val registry by lazy { Internal.bean(context, "datasources.DatasourceRegistry") }
-    private val repository by lazy { Internal.bean(context, "datasources.DatasourceRepository") }
-    private val grants by lazy { Internal.bean(context, "datasources.DatasourceGrantRepository") }
-    private val families by lazy { Internal.bean(context, "dependencies.FamilyRegistry") }
-    private val registrar by lazy { Internal.bean(context, "web.config.ManagedLakeDatasourceRegistrar") }
-    private val binder by lazy { Internal.singleton("application.datasources.DatasourcePayloadBinder") }
+    private val registry by lazy { ProductionInternals.bean(context, "datasources.DatasourceRegistry") }
+    private val repository by lazy { ProductionInternals.bean(context, "datasources.DatasourceRepository") }
+    private val grants by lazy { ProductionInternals.bean(context, "datasources.DatasourceGrantRepository") }
+    private val families by lazy { ProductionInternals.bean(context, "dependencies.FamilyRegistry") }
+    private val registrar by lazy { ProductionInternals.bean(context, "web.config.ManagedLakeDatasourceRegistrar") }
+    private val binder by lazy { ProductionInternals.singleton("application.datasources.DatasourcePayloadBinder") }
 
     private val mapper = ObjectMapper()
     private val threads = Executors.newCachedThreadPool()
@@ -217,9 +216,9 @@ class DatasourceIncarnationE2eTest {
     fun `iv - the managed LAKE row carries an incarnation after boot and an UNCHANGED re-sync leaves its generation`() {
         // A re-sync also grants the lake to every workspace, so the first call absorbs this class's SQL-seeded
         // workspaces; the second finds everything in place — the boot-after-boot case.
-        Internal.call(registrar, "register")
+        ProductionInternals.call(registrar, "register")
         val settled = generation(LAKE)
-        Internal.call(registrar, "register")
+        ProductionInternals.call(registrar, "register")
 
         generation(LAKE) shouldBe settled
         count("SELECT count(*) FROM datasources WHERE name = '$LAKE' AND incarnation_id IS NOT NULL") shouldBe 1
@@ -259,7 +258,7 @@ class DatasourceIncarnationE2eTest {
 
     /** The real create path: the binder over a create payload (no identity on the input), the registry's save, a grant. */
     private fun create(name: String): String {
-        Internal.call(registry, "save", bind(payload(name, "Created"), CREATE_SHAPE, null), ACTOR)
+        ProductionInternals.call(registry, "save", bind(payload(name, "Created"), CREATE_SHAPE, null), ACTOR)
         grant(name, WORKSPACE) shouldBe true
         return name
     }
@@ -269,27 +268,27 @@ class DatasourceIncarnationE2eTest {
         name: String,
         label: String,
     ) {
-        Internal.call(registry, "save", bind(payload(name, label), UPDATE_SHAPE, name), ACTOR)
+        ProductionInternals.call(registry, "save", bind(payload(name, label), UPDATE_SHAPE, name), ACTOR)
     }
 
     private fun bind(
         body: JsonNode,
         shape: Boolean,
         pathName: String?,
-    ): Any = checkNotNull(Internal.call(binder, "bind", body, shape, pathName))
+    ): Any = checkNotNull(ProductionInternals.call(binder, "bind", body, shape, pathName))
 
     private fun grant(
         name: String,
         workspace: UUID,
-    ): Boolean = Internal.call(grants, "grant", name, workspace, ACTOR) as Boolean
+    ): Boolean = ProductionInternals.call(grants, "grant", name, workspace, ACTOR) as Boolean
 
     /** The observation writer itself (`DatasourceRepository.recordTestOutcome`), as `testConnection` calls it. */
     private fun recordTestOutcome(
         name: String,
         ok: Boolean,
     ): Boolean {
-        val outcome = Internal.construct("datasources.DatasourceTestOutcome", Instant.now(), ok, null)
-        return Internal.call(repository, "recordTestOutcome", name, outcome) as Boolean
+        val outcome = ProductionInternals.construct("datasources.DatasourceTestOutcome", Instant.now(), ok, null)
+        return ProductionInternals.call(repository, "recordTestOutcome", name, outcome) as Boolean
     }
 
     private fun payload(
@@ -314,7 +313,7 @@ class DatasourceIncarnationE2eTest {
         checkNotNull(
             TransactionTemplate(transactions).execute {
                 val limits =
-                    Internal.construct(
+                    ProductionInternals.construct(
                         "dependencies.GraphLimits",
                         WALK_BOUND,
                         WALK_BOUND,
@@ -326,14 +325,18 @@ class DatasourceIncarnationE2eTest {
                         WAIT,
                         Duration.ofSeconds(STATEMENT_SECONDS),
                     )
-                val cycles = Internal.enumOf("dependencies.CycleHandling", "DIAGNOSE")
-                val walker = Internal.construct("dependencies.DependencyWalker", families, limits, Clock.systemUTC(), cycles)
-                val snapshot = checkNotNull(Internal.call(walker, "walk", listOf(datasourceRequest(name)), resolveContext()))
+                val cycles = ProductionInternals.enumOf("dependencies.CycleHandling", "DIAGNOSE")
+                val walker = ProductionInternals.construct("dependencies.DependencyWalker", families, limits, Clock.systemUTC(), cycles)
+                val snapshot = checkNotNull(ProductionInternals.call(walker, "walk", listOf(datasourceRequest(name)), resolveContext()))
                 Walked(
-                    fingerprint = Internal.call(snapshot, "getInternalFingerprint") as String,
+                    fingerprint = ProductionInternals.call(snapshot, "getInternalFingerprint") as String,
                     resolvedIds =
-                        (Internal.call(snapshot, "getNodes") as List<*>).mapNotNull { node ->
-                            Internal.call(checkNotNull(node), "getIdentity")?.let { Internal.call(it, "getStableEntityId") as String }
+                        (ProductionInternals.call(snapshot, "getNodes") as List<*>).mapNotNull { node ->
+                            ProductionInternals
+                                .call(
+                                    checkNotNull(node),
+                                    "getIdentity",
+                                )?.let { ProductionInternals.call(it, "getStableEntityId") as String }
                         },
                 )
             },
@@ -347,28 +350,45 @@ class DatasourceIncarnationE2eTest {
     /** An ENTITY request for datasource [name]; `FamilyKey` is a value class, so the family travels as its `String`. */
     private fun datasourceRequest(name: String): Any {
         val address =
-            Internal.construct("dependencies.ObjectAddress", "datasource", Internal.construct("dependencies.LookupScope", WORKSPACE), name)
-        return Internal.construct("dependencies.ObjectRequest", address, Internal.singleton("dependencies.Selector\$Entity"))
+            ProductionInternals.construct(
+                "dependencies.ObjectAddress",
+                "datasource",
+                ProductionInternals.construct("dependencies.LookupScope", WORKSPACE),
+                name,
+            )
+        return ProductionInternals.construct(
+            "dependencies.ObjectRequest",
+            address,
+            ProductionInternals.singleton("dependencies.Selector\$Entity"),
+        )
     }
 
     private fun resolveContext(): Any {
         val deadline =
-            checkNotNull(Internal.call(checkNotNull(Internal.companion("dependencies.Deadline")), "after", WAIT, Clock.systemUTC()))
-        return Internal.construct(
+            checkNotNull(
+                ProductionInternals.call(
+                    checkNotNull(ProductionInternals.companion("dependencies.Deadline")),
+                    "after",
+                    WAIT,
+                    Clock.systemUTC(),
+                ),
+            )
+        return ProductionInternals.construct(
             "dependencies.ResolveContext",
             WORKSPACE,
-            Internal.enumOf("dependencies.MetadataSnapshot", "READ_COMMITTED"),
-            Internal.enumOf("dependencies.Purpose", "INTERACTIVE_READ"),
-            Internal.construct("dependencies.Authority\$Member", ACTOR),
-            Internal.call(deadline, "withStatementLimit", WAIT),
-            Internal.call(checkNotNull(Internal.companion("dependencies.ReadIsolation")), "getNONE"),
+            ProductionInternals.enumOf("dependencies.MetadataSnapshot", "READ_COMMITTED"),
+            ProductionInternals.enumOf("dependencies.Purpose", "INTERACTIVE_READ"),
+            ProductionInternals.construct("dependencies.Authority\$Member", ACTOR),
+            ProductionInternals.call(deadline, "withStatementLimit", WAIT),
+            ProductionInternals.call(checkNotNull(ProductionInternals.companion("dependencies.ReadIsolation")), "getNONE"),
         )
     }
 
     /** The provider's own batch read (§C.0) of [name], as the identity pair it carries. */
     private fun graphRead(name: String): Pair<UUID, Long> {
-        val facts = checkNotNull((Internal.call(repository, "findVisibleGraphFacts", listOf(name), WORKSPACE) as List<*>).single())
-        return Internal.call(facts, "getIncarnationId") as UUID to Internal.call(facts, "getGeneration") as Long
+        val facts =
+            checkNotNull((ProductionInternals.call(repository, "findVisibleGraphFacts", listOf(name), WORKSPACE) as List<*>).single())
+        return ProductionInternals.call(facts, "getIncarnationId") as UUID to ProductionInternals.call(facts, "getGeneration") as Long
     }
 
     // ------------------------------------------------------------------------------------------------ SQL witnesses
@@ -385,11 +405,18 @@ class DatasourceIncarnationE2eTest {
         val pid: Int
 
         init {
-            val key = checkNotNull(Internal.call(checkNotNull(Internal.companion("typesystem.guard.PrerequisiteKey")), "datasource", name))
-            val lock = checkNotNull(Internal.call(key, "getLock"))
+            val key =
+                checkNotNull(
+                    ProductionInternals.call(
+                        checkNotNull(ProductionInternals.companion("typesystem.guard.PrerequisiteKey")),
+                        "datasource",
+                        name,
+                    ),
+                )
+            val lock = checkNotNull(ProductionInternals.call(key, "getLock"))
             connection.prepareStatement("SELECT pg_advisory_xact_lock(?, ?)::text").use { statement ->
-                statement.setInt(1, Internal.call(lock, "getLockSpace") as Int)
-                statement.setInt(2, Internal.call(lock, "getSubKey") as Int)
+                statement.setInt(1, ProductionInternals.call(lock, "getLockSpace") as Int)
+                statement.setInt(2, ProductionInternals.call(lock, "getSubKey") as Int)
                 statement.executeQuery().close()
             }
             pid =
@@ -524,62 +551,4 @@ class DatasourceIncarnationE2eTest {
             ManagedLakeDeliveryProperties.register(registry, SIGNING_KEY, oidc.issuer, LAKE, BUCKET)
         }
     }
-}
-
-/**
- * The production classes this module may not compile against (module-structure §4.2), reached by NAME at runtime —
- * beans out of the application context, Kotlin objects and companions by their JVM fields, constructors and methods by
- * arity. A Kotlin value-class parameter is erased to its underlying type and moves the constructor to a synthetic one
- * ending in `DefaultConstructorMarker`, which [construct] admits (passing null for the marker). The cause of a reflective
- * call's failure is rethrown unwrapped, so an assertion inside production code reads as itself.
- */
-private object Internal {
-    private const val ROOT = "co.datapipelines."
-    private const val MARKER = "kotlin.jvm.internal.DefaultConstructorMarker"
-
-    fun type(name: String): Class<*> = Class.forName(ROOT + name)
-
-    fun bean(
-        context: ApplicationContext,
-        name: String,
-    ): Any = context.getBean(type(name))
-
-    fun singleton(name: String): Any = type(name).getField("INSTANCE").get(null)
-
-    fun companion(name: String): Any? = type(name).getField("Companion").get(null)
-
-    fun enumOf(
-        name: String,
-        constant: String,
-    ): Any = type(name).enumConstants.single { (it as Enum<*>).name == constant }
-
-    fun construct(
-        name: String,
-        vararg args: Any?,
-    ): Any {
-        val constructors = type(name).constructors
-        val constructor =
-            constructors.firstOrNull { it.parameterCount == args.size }
-                ?: constructors.single { it.parameterCount == args.size + 1 && it.parameterTypes.last().name == MARKER }
-        val actual = if (constructor.parameterCount == args.size) args else arrayOf(*args, null)
-        return unwrapped { constructor.newInstance(*actual) }
-    }
-
-    fun call(
-        target: Any,
-        method: String,
-        vararg args: Any?,
-    ): Any? {
-        val found =
-            target.javaClass.methods.firstOrNull { it.name == method && it.parameterCount == args.size && !it.isBridge && !it.isSynthetic }
-                ?: error("${target.javaClass.name} has no public $method with ${args.size} parameters")
-        return unwrapped { found.invoke(target, *args) }
-    }
-
-    private fun <T> unwrapped(call: () -> T): T =
-        try {
-            call()
-        } catch (failure: InvocationTargetException) {
-            throw failure.targetException
-        }
 }
