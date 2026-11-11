@@ -260,6 +260,29 @@ class TemplateRepository(
         ) == true
 
     /**
+     * #883 — the template's **established type** (046 §5.3), read from its RETAINED versions: any status, DISCARDED
+     * included, workspace-scoped. Null exactly when [existsId] is false — no version of [id] in [workspaceId]; another
+     * workspace's template of the same name is not read.
+     *
+     * The working-version reads ([findWorking], [findLatest]) answer nothing for a template whose every version is
+     * DISCARDED, yet that template is registered (versioning §3.2) and an import onto it versions it (§9.2, D60). The type
+     * is identical across a template's versions by rule, so the highest-numbered row is as authoritative as any and
+     * makes the answer one deterministic row. The unknown-wire fallback is the row mappers' own, so this read and
+     * [findWorking] can never disagree on a template that has a working version.
+     */
+    fun findEstablishedType(
+        workspaceId: UUID,
+        id: String,
+    ): TemplateType? =
+        jdbc
+            .query(
+                "SELECT v.type FROM template_versions v JOIN templates t ON t.id = v.template_id" +
+                    " WHERE t.name = :name AND t.workspace_id = :workspaceId ORDER BY v.version DESC LIMIT 1",
+                mapOf("name" to id, "workspaceId" to workspaceId),
+            ) { rs, _ -> TemplateType.fromWire(rs.getString("type")) ?: TemplateType.SQL }
+            .singleOrNull()
+
+    /**
      * The `GET /templates?dialect=&q=&offset=&limit=` page (templates.md §9, rest-api §8.5).
      *
      * Returns each live template at its **current** version, `name`-ordered so paging is stable.
