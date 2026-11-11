@@ -21,7 +21,9 @@ import co.datapipelines.scheduler.ScheduleRepository
 import co.datapipelines.scheduler.ScheduleRunRepository
 import co.datapipelines.scheduler.SchedulerProperties
 import co.datapipelines.scheduler.SystemActorSource
-import co.datapipelines.typesystem.guard.MetadataWriterGuard
+import co.datapipelines.web.endpoints.CommitEffects
+import co.datapipelines.web.endpoints.ConversionAttempt
+import co.datapipelines.web.endpoints.EndpointConversionConfiguration
 import co.datapipelines.web.endpoints.StartupConversion
 import co.datapipelines.web.pipelines.RecordingExecutionRunner
 import co.datapipelines.web.schedules.PipelineJobExecutor
@@ -33,9 +35,9 @@ import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.core.annotation.Order
 import org.springframework.core.env.Environment
-import org.springframework.transaction.PlatformTransactionManager
-import org.springframework.transaction.support.TransactionTemplate
+import java.util.UUID
 
 /**
  * The scheduler's composition root (#9; scheduler design revision §6.2, A3 — `web/config`, since
@@ -66,20 +68,27 @@ class SchedulerWebConfiguration {
         schedules: ScheduleRepository,
         runs: ScheduleRunRepository,
         pipelines: PipelineRepository,
-        transactionManager: PlatformTransactionManager,
-        writeGuard: MetadataWriterGuard,
-    ): ScheduleVersionConversion =
-        ScheduleVersionConversion(schedules, runs, pipelines, TransactionTemplate(transactionManager), writeGuard)
+    ): ScheduleVersionConversion = ScheduleVersionConversion(schedules, runs, pipelines)
 
-    /** The schedule step (D.5) beside the API step (E.1): same runner, E.0 read for both before either writes. */
+    /**
+     * The schedule family (D.5), SECOND in the runner's order after the API family (E.1): one runner, E.0 read for both
+     * before either writes, both converted in the runner's one transaction (#895).
+     */
     @Bean
+    @Order(EndpointConversionConfiguration.SCHEDULE_FAMILY_ORDER)
     fun scheduleStartupConversion(conversion: ScheduleVersionConversion): StartupConversion =
         object : StartupConversion {
-            override fun convert() {
-                conversion.run()
-            }
-
             override fun logPrecondition(): Int = conversion.logPrecondition()
+
+            override fun plan(): ConversionAttempt {
+                val attempt = conversion.plan()
+                return object : ConversionAttempt {
+                    override val workspaces: Set<UUID> = attempt.workspaces
+
+                    override fun convert(guarded: Set<UUID>): CommitEffects =
+                        attempt.convert(guarded).let { outcome -> CommitEffects { outcome.publish() } }
+                }
+            }
         }
 
     /** The system identity's id — read once: the row never changes (auth.md §4.5). */
