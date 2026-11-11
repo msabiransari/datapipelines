@@ -49,6 +49,7 @@ import java.util.UUID
  * revoked, retired and rebound, and what is deliberately left alone; the rows-in-the-database
  * proof is [co.datapipelines.integration.DemoApiKeyE2eTest]'s.
  */
+@Suppress("LargeClass") // one seeder contract: publish, key reconciliation, retirement, deferral and revival share one fixture
 class DemoEndpointSeederTest {
     private val demoId = UUID.fromString("de000000-0000-0000-0000-000000000001")
     private val systemActorId = UUID.fromString("00000000-0000-0000-0000-00000000d001")
