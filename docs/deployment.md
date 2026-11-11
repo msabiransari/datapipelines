@@ -1,6 +1,6 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.68
+**Status:** v1.69
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-11
@@ -1373,9 +1373,13 @@ section, and an outsider can call any demo endpoint with it and no account
 60 requests per 60 s per key, `429 rate_limit.exceeded` — and the lake family's
 gate: the lake endpoint pays S3 egress per call, so it is published only while a
 budget stands behind it). Blank the setting in `deploy/secrets.env` and the next
-boot retracts the public API — no key, no demo endpoints, no page section; change
-the value and the next boot rotates the key. Nothing changes for keys real users
-mint on the `/api-keys` page.
+boot retracts the public API — no key, no demo endpoint serves, no page section; change
+the value and the next boot rotates the key. Retraction, like a manifest that no longer
+names a path, goes through the API lifecycle (#889): a demo API that was released is never
+deleted — its draft is purged and every released version discarded, so the row stays,
+inert, and its path answers `503 endpoint.pipeline_not_released` to any key; setting a
+key (or naming the path) again releases a new version of the same API. Nothing changes
+for keys real users mint on the `/api-keys` page.
 
 The **lake** family is different in kind from the other two and the difference is
 worth stating before the commands: it has a compose profile and a `--demo` flag
@@ -1671,6 +1675,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-11 | v1.69 | #889 demo API retirement through the lifecycle | **Appendix B, the demo API:** blanking the key (or a manifest that drops a path) retires a released demo API through the API version verbs — draft purged, every released version discarded, the row kept and answering `503 endpoint.pipeline_not_released` — instead of deleting it; a key set again releases a new version of the same API. |
 | 2026-11-11 | v1.68 | #786 schedules pin exact versions (U2) | **§8.2:** schedules join the upgrade's in-place conversion — each live schema-1 schedule (and its queued runs) is pinned to the version CURRENT names, only the version selector changing; a schedule whose pipeline has no current version refuses the start with `kind=schedule` lines; both kinds are checked before anything is written. |
 | 2026-11-10 | v1.67 | #786 API versions, exact pins (U1) | **§8.2:** the upgrade to API versions — stop the one server, apply, read the conversion report, or the refusal list with its fix (release the pipeline or delete the API on the previous version, then upgrade). No floor, no `Recreate`. Schedules join the same step in #786's second unit. |
 | 2026-11-09 | v1.66 | #863 merge follow-up | **§6.4/§8.3:** clarify Eviction API versus Deployment-rollout protection, soft versus hard skew, and single-domain scheduling without `minDomains`; document signed 32-bit availability limits. Correct the default-environment description and render verdict count (141), including upper-bound and disabled-field checks. |
