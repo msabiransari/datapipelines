@@ -6,6 +6,7 @@ import co.datapipelines.calculators.CalculatorRegistry
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.LakeBrokenTable
+import co.datapipelines.datasources.ReadOnlyConnectionMode
 import co.datapipelines.datasources.ResultRowReader
 import co.datapipelines.persistence.FailureShape
 import co.datapipelines.pipeline.CalculatorInputResolver
@@ -156,6 +157,8 @@ data class NodeExecutionContext(
     val lakeLineage: co.datapipelines.pipeline.LakeExecutionLineage? = null,
     /** The one delivery node whose successful SQL must be followed by the trusted re-list. */
     val lakeDeliveryNodeId: String? = null,
+    /** [ExecuteRequest.readOnly]: DQL datasource statements run in the per-lease read-only mode (#463). */
+    val readOnly: Boolean = false,
     /** The root surface's admission check, retained through every composed child execution. */
     val pipelineAdmission: ((Pipeline, UUID, Int) -> Unit)? = null,
 )
@@ -776,8 +779,18 @@ class NodeRunner(
             }
         return connection.use { conn ->
             when (node.type) {
+                // #463: on a read-only run the per-lease mode encloses datasourceQuery whole and owns the restore;
+                // an entry failure fails closed with the connect code (this `use` closes the lease), a restore
+                // failure after a returned query fails like a refused streaming commit.
                 NodeType.DQL -> {
-                    datasourceQuery(node, conn, bound, ctx, startedAt, resolved, datasource.dialect)
+                    ReadOnlyConnectionMode.within(
+                        connection = conn,
+                        dialect = datasource.dialect,
+                        discard = { datasourceRegistry.poolFor(datasource).discard(it) },
+                        active = ctx.readOnly,
+                        onEntryFailure = { asNodeFailure(it, NodePhase.CONNECT, node.id) },
+                        onExitFailure = SourceCommit::commitFailedSignal,
+                    ) { datasourceQuery(node, conn, bound, ctx, startedAt, resolved, datasource.dialect) }
                 }
 
                 NodeType.DML -> {
@@ -1269,8 +1282,11 @@ internal object SourceCommit {
         }
     }
 
-    /** The success-path refusal as the node's own failure: the catalogued code, the refusal as cause. */
-    private fun commitFailedSignal(refusal: Throwable): NodeFailedSignal =
+    /**
+     * The success-path refusal as the node's own failure: the catalogued code, the refusal as cause. Internal
+     * for the read-only mode's restore failure after a returned query (#463), which fails the node the same way.
+     */
+    internal fun commitFailedSignal(refusal: Throwable): NodeFailedSignal =
         NodeFailedSignal(
             MappedError(
                 code = PipelineErrorCodes.Node.COMMIT_FAILED,

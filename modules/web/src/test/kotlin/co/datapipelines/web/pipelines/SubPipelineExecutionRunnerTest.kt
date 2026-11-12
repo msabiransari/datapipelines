@@ -348,6 +348,33 @@ class SubPipelineExecutionRunnerTest {
     }
 
     /**
+     * #463 — the read-only fact follows the composition: a read-only parent (a dashboard source, a
+     * published GET endpoint) runs read-only children, so a child cannot be the way around the
+     * per-lease read-only mode; a writable parent's child stays writable.
+     */
+    @Test
+    fun `#463 - a read-only parent's child request is read-only`() =
+        runTest {
+            stubRegistry()
+            val stub = ExecutorStub()
+
+            runner(stub).run(pipelineNode(), context().copy(readOnly = true))
+
+            stub.captured.single().readOnly shouldBe true
+        }
+
+    @Test
+    fun `#463 - a writable parent's child request stays writable`() =
+        runTest {
+            stubRegistry()
+            val stub = ExecutorStub()
+
+            runner(stub).run(pipelineNode(), context().copy(readOnly = false))
+
+            stub.captured.single().readOnly shouldBe false
+        }
+
+    /**
      * F5 — the child minted `correlationId = UUID.randomUUID()`, so its `pipeline_executions` row,
      * its SSE payloads (via `SseEventProjection`) and its logs all carried an id unrelated to the
      * request that started the family. Correlation id is the one field designed to join exactly

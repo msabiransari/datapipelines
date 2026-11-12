@@ -255,6 +255,8 @@ class PublishedEndpointServeService(
                 // it as its own, workspace admins see it, the key's creator does not.
                 executedByKeyKind = principal.executedByKeyKind(),
                 executionId = executionId,
+                // #463: a published GET reads only — the database refuses a write where the dialect can.
+                readOnly = true,
                 // rootExecutionId stays null on purpose: a root request takes a concurrency slot,
                 // and an endpoint serve must be governed by the same limits every other run is.
             )
