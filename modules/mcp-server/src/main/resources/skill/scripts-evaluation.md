@@ -18,8 +18,9 @@ check. A `sql`/`html` id passed to evaluate is `template.contract_invalid`
 an evaluation fails remain in `details.console`. A missing isolate refuses JavaScript with
 `script.js.unavailable`.
 
-The bounds: one case ≤ `datapipelines.script.evaluate-timeout-seconds`, the suite ≤
-`datapipelines.script.suite-timeout-seconds`; the JSONata depth bound
+The bounds: one case ≤ `datapipelines.script.evaluate-timeout-seconds`; a suite still running
+at `datapipelines.script.suite-timeout-seconds` fails (`details.timeout = suite`), though the
+call can return somewhat later; the JSONata depth bound
 `datapipelines.script.max-depth` (default `${script_max_depth}`) counts
 every evaluate entry and exit — nested expressions and non-tail lambda recursion alike, and
 set-level work over hundreds of rows evaluates at the default (#260) — while a tail-recursive
