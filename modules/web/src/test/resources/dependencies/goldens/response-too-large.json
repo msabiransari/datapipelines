@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "correlation_id": "00000000-0000-4000-8000-000000000000",
+  "error": {
+    "code": "dependencies.response.too_large",
+    "message": "The dependency tree is larger than the response budget.",
+    "user_message": "This object has too many dependencies to show at once. Quote the correlation id when reporting this.",
+    "details": { },
+    "doc_url": "https://datapipelines.co/docs/pipeline-contract#1326-dependency-trees"
+  }
+}

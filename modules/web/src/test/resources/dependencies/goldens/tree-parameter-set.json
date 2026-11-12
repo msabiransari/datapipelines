@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "correlation_id": "00000000-0000-4000-8000-000000000000",
+  "data": {
+    "schema_version": 1,
+    "roots": [
+      "n0"
+    ],
+    "nodes": [
+      {
+        "node_id": "n0",
+        "entity_id": "00000000-0000-4000-8000-000000000001",
+        "family": "parameter_set",
+        "name": "test/tree875/golden/set",
+        "display_name": null,
+        "subtype": null,
+        "version": {
+          "kind": "artifact",
+          "number": 1
+        },
+        "resolution": "resolved",
+        "lifecycle": "DRAFT",
+        "operational": null,
+        "current_version": null,
+        "body_hash": "0000000000000000000000000000000000000000000000000000000000000001",
+        "capabilities": {
+          "release": "ARTIFACT_RELEASE",
+          "promotion": "VERSIONED_ARTIFACT"
+        }
+      },
+      {
+        "node_id": "n1",
+        "entity_id": "00000000-0000-4000-8000-000000000002",
+        "family": "template",
+        "name": "test/tree875/golden/selector.sql",
+        "display_name": null,
+        "subtype": null,
+        "version": {
+          "kind": "artifact",
+          "number": 1
+        },
+        "resolution": "resolved",
+        "lifecycle": "DRAFT",
+        "operational": null,
+        "current_version": null,
+        "body_hash": "0000000000000000000000000000000000000000000000000000000000000002",
+        "capabilities": {
+          "release": "ARTIFACT_RELEASE",
+          "promotion": "VERSIONED_ARTIFACT"
+        }
+      },
+      {
+        "node_id": "n2",
+        "entity_id": "tree875_golden",
+        "family": "datasource",
+        "name": "tree875_golden",
+        "display_name": "Dependency goldens",
+        "subtype": "H2",
+        "version": {
+          "kind": "unversioned",
+          "number": null
+        },
+        "resolution": "resolved",
+        "lifecycle": null,
+        "operational": {
+          "readonly": false
+        },
+        "current_version": null,
+        "body_hash": null,
+        "capabilities": {
+          "release": "NONE",
+          "promotion": "NONE"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "edge_id": "e0",
+        "from": "n0",
+        "to": "n1",
+        "relationship": "PARAMETER_SOURCE_TEMPLATE",
+        "source_path": "/parameters/0/source/template",
+        "requested_selector": {
+          "kind": "exact_version",
+          "number": 1
+        },
+        "resolved_version": 1,
+        "constraints": [ ]
+      },
+      {
+        "edge_id": "e1",
+        "from": "n0",
+        "to": "n2",
+        "relationship": "PARAMETER_SOURCE_DATASOURCE",
+        "source_path": "/parameters/0/source/datasource",
+        "requested_selector": {
+          "kind": "entity",
+          "number": null
+        },
+        "resolved_version": null,
+        "constraints": [
+          {
+            "kind": "datasource_dialect",
+            "dialect": "H2"
+          }
+        ]
+      }
+    ],
+    "diagnostics": [ ],
+    "complete": true,
+    "acyclic": true,
+    "observed_at": "2026-01-01T00:00:00Z"
+  }
+}

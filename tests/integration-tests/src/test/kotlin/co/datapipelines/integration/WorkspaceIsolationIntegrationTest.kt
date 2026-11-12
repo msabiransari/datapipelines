@@ -407,7 +407,9 @@ class WorkspaceIsolationIntegrationTest {
         /** The instance's super admin (no membership anywhere) — the one principal who may deactivate a workspace. */
         private const val EVE = "eee00000-0000-0000-0000-000000000005"
         private const val WS_ACME = "aca00000-0000-0000-0000-000000000001"
-        private const val WS_GLOBEX = "b0b00000-0000-0000-0000-000000000002"
+
+        /** Exposed for [WorkspaceIsolationSweepTest]'s dependency tree differential, which authors globex roots (#875). */
+        const val WS_GLOBEX = "b0b00000-0000-0000-0000-000000000002"
         private const val PIPE_ACME = "a1b00000-0000-0000-0000-000000000001"
         const val PIPE_GLOBEX = "b2b00000-0000-0000-0000-000000000002"
 
@@ -496,6 +498,12 @@ class WorkspaceIsolationIntegrationTest {
         fun acmeSession(): String = sessionJwt(ALICE, "alice@acme.test", "acme")
 
         fun acmeKey(): String = ALICE_KEY.plaintext
+
+        /** #875: globex's workspace admin's session — the sweep authors globex-only dependency roots with it. */
+        fun globexSession(): String = BOB_SESSION
+
+        /** #875: the instance's super admin, active in globex — registers the globex-only datasource the roots read. */
+        fun globexSuperAdminSession(): String = sessionJwt(EVE, "eve@instance.test", "globex")
 
         private var seeded = false
 

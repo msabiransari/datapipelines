@@ -306,6 +306,16 @@ class ScriptVocabularyGuardTest {
                         "token, the `transform.template` path and its JSON pointer — a node noun stays red here",
                 ),
                 Triple(
+                    Regex(
+                        "^(?:docs/rest-api\\.md$|modules/web/src/test/(?:kotlin/co/datapipelines/web/dependencies/|" +
+                            "resources/dependencies/goldens/)|tests/integration-tests/src/test/kotlin/co/datapipelines/" +
+                            "integration/DependenciesGoldenE2eTest\\.kt$)",
+                    ),
+                    Regex("TRANSFORM_TEMPLATE|transform\\.template|/transform/template|\"transform\":"),
+                    "the same edge on the dependency tree routes (#875 G4): REST §25's relationship list, the projection test, " +
+                        "the enveloped goldens and the visualization the golden fixture authors — a node noun stays red here",
+                ),
+                Triple(
                     Regex("^modules/application/src/main/kotlin/co/datapipelines/application/dependencies/visualization/"),
                     Regex("transform", setOf(IGNORE_CASE)),
                     "the visualization family's native release provider (#873 G2) reads the block's `transform` pin as its one edge",
