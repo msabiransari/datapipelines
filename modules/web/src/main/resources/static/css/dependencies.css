@@ -1,0 +1,143 @@
+/* #876 G6 — the object-level Dependencies pane (record §13): the status note, the graph/list toggle, the
+   Cytoscape canvas and its selection panel, and the accessible tables. Tokens only — every colour, length and
+   type size is a design-system variable; Cytoscape's own colours come from the same tokens through
+   dependencies/renderer.js's probe. The status chips are the shared `.ds-badge` tones (text + colour, WCAG 1.4.1). */
+
+.dp-deps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  padding: var(--space-3) var(--space-4);
+  min-width: 0;
+}
+
+.dp-deps-note,
+.dp-deps-text {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.dp-deps-text {
+  color: var(--text-primary);
+}
+
+.dp-deps-toggle {
+  display: flex;
+  gap: var(--gap-xs);
+}
+
+.dp-deps-toggle [aria-pressed="true"] {
+  border-color: var(--border-focus);
+  background: var(--surface-selected);
+}
+
+.dp-deps-notes {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--gap-xs);
+}
+
+.dp-deps-graph {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, calc(var(--space-24) * 3));
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--gap-sm);
+  min-width: 0;
+}
+
+.dp-deps-graph[hidden],
+.dp-deps-list[hidden],
+.dp-deps-toggle[hidden] {
+  display: none;
+}
+
+.dp-deps-toolbar {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: var(--gap-xs);
+}
+
+.dp-deps-canvas {
+  height: calc(var(--space-24) * 4.5);
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-default);
+  overflow: hidden;
+}
+
+.dp-deps-canvas:focus-visible,
+.dp-deps-row:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.dp-deps-panel {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--text-sm);
+}
+
+.dp-deps-panel p {
+  margin: 0 0 var(--space-1);
+}
+
+.dp-deps-panel-heading {
+  font-weight: var(--weight-semibold);
+}
+
+.dp-deps-panel-list {
+  margin: 0 0 var(--space-2);
+  padding-left: var(--space-4);
+}
+
+.dp-deps-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-md);
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.dp-deps-table {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.dp-deps-table td {
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+
+.dp-deps-caption {
+  text-align: left;
+  font-weight: var(--weight-semibold);
+  padding-bottom: var(--space-1);
+}
+
+.dp-deps-row[aria-selected="true"] {
+  background: var(--surface-selected);
+}
+
+.dp-deps-kind {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+}
+
+.dp-deps-name a,
+.dp-deps-name span {
+  overflow-wrap: anywhere;
+}
+
+.dp-deps-root-mark {
+  margin-left: var(--space-1);
+}
+
+.dp-deps-diagnostic {
+  display: block;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
