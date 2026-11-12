@@ -39,6 +39,27 @@
   min-width: 0;
 }
 
+/* #548 — why the action buttons are unavailable: one sentence the buttons name through
+   aria-describedby. Shown only for the state the person can fix (invalid parameters), muted like
+   the parameter notes; the transient states keep the sentence for assistive technology only,
+   with the status chip's clip pattern (never display:none, which would drop the description).
+   An available row's note is empty and clipped, so it occupies no gap. */
+.dp-dashboard-actions-note {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--app-text-support);
+  color: var(--text-muted);
+}
+
+.dp-dashboard-actions-note-visually-hidden {
+  position: absolute;
+  width: var(--space-px);
+  height: var(--space-px);
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 /* A group row is a FIELDSET on a two-column grid (#499): the caption and the trailing
    note/error rows span the full width; each option's box and its label share one centred
    row, the boxes left-aligned in the first column. The UA fieldset chrome is stripped. */

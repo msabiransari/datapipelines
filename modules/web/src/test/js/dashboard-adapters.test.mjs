@@ -130,7 +130,7 @@ function uninstallDom() {
 }
 
 // #543 — fixture transport, but the real bootstrap, composite and action gate.
-async function actionBoard({ adapter, config: overrides = {} } = {}) {
+async function actionBoard({ adapter, config: overrides = {}, wrap } = {}) {
   const runtime = require(resolveStatic("datapipelines-dashboard.js"));
   if (!runtime._internal.renderers().table) {
     runtime.registerRenderer({ kind: "table", version: "1", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
@@ -144,13 +144,40 @@ async function actionBoard({ adapter, config: overrides = {} } = {}) {
     action_controls: [{ name: "apply", label: "Apply", action: "refresh_all" }],
   }, overrides);
   const composite = adapter || runtime.adapters(container, { parametersContainer: panel });
+  // #548 — `wrap` sees the adapter before init and a holder whose `instance` is set before bootstrap's first await.
+  const holder = {};
+  if (wrap) wrap(composite, holder);
   const instance = runtime.init({
     server: { fixtures: { config } }, dashboard: { id: "actions-board", version: "released" },
     container, adapter: composite,
   });
+  holder.instance = instance;
   await instance.ready;
   return { instance, adapter: composite, container, panel };
 }
+
+// #548 — what the one gate would throw right now: the oracle is the gate itself, never the published value.
+function gateRefusal(instance) {
+  try {
+    instance._requireActionGate();
+    return null;
+  } catch (error) {
+    return error.code;
+  }
+}
+
+// #548 — the composite's described note for a button: the element `aria-describedby` names, or null.
+function describedNote(panel, button) {
+  const id = button.getAttribute("aria-describedby");
+  if (!id) return null;
+  return panel.querySelectorAll(".dp-dashboard-actions-note").find((note) => note.getAttribute("id") === id) || null;
+}
+
+const AVAILABILITY_SENTENCES = {
+  "actions.locked": "Applying is paused while the parameters are checked.",
+  "actions.not_ready": "The dashboard is still loading.",
+  "parameters.invalid": "Fix the parameter errors to apply.",
+};
 
 test("#543: a configured explicit control renders its authored label as text in the pane and survives every parameter render", async () => {
   installDom();
@@ -255,10 +282,16 @@ test("#543: a button press during a real pending evaluation is refused, then a v
       return originalStream.call(this, body, handlers);
     };
     const pending = instance._evaluateParameters("parent_change");
-    board.panel.querySelector(".dp-dashboard-action-control").fire("click");
+    // #548 — the press while the gate is closed is suppressed in the composite: the button says why instead.
+    const lockedButton = board.panel.querySelector(".dp-dashboard-action-control");
+    assert.equal(lockedButton.getAttribute("aria-disabled"), "true", "a pending evaluation makes Apply unavailable");
+    assert.equal(describedNote(board.panel, lockedButton)?.textContent, AVAILABILITY_SENTENCES["actions.locked"]);
+    lockedButton.fire("click");
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(streamBodies.length, 0, "no refresh crosses a pending evaluation");
-    assert.ok(notices.some((notice) => notice.code === "actions.locked"));
+    await assert.rejects(instance.refresh({ scope: "all" }), (error) => error.code === "actions.locked",
+      "the runtime gate stays authoritative for a programmatic press");
+    assert.equal(streamBodies.length, 0, "the refused programmatic press sends nothing");
     resolveEvaluation(compositeState());
     await pending;
     board.panel.querySelector(".dp-dashboard-action-control").fire("click");
@@ -268,10 +301,16 @@ test("#543: a button press during a real pending evaluation is refused, then a v
     const invalid = instance._evaluateParameters("parent_change");
     resolveEvaluation(compositeState({ valid: false }));
     await invalid;
-    board.panel.querySelector(".dp-dashboard-action-control").fire("click");
+    const invalidButton = board.panel.querySelector(".dp-dashboard-action-control");
+    assert.equal(invalidButton.getAttribute("aria-disabled"), "true", "invalid parameters make Apply unavailable");
+    assert.equal(describedNote(board.panel, invalidButton)?.textContent, AVAILABILITY_SENTENCES["parameters.invalid"]);
+    invalidButton.fire("click");
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(streamBodies.length, 1, "invalid parameters still refuse a press");
-    assert.ok(notices.some((notice) => notice.code === "parameters.invalid"));
+    await assert.rejects(instance.refresh({ scope: "all" }), (error) => error.code === "parameters.invalid");
+    assert.equal(streamBodies.length, 1, "the refused programmatic press sends nothing");
+    assert.ok(!notices.some((notice) => notice.code === "actions.locked" || notice.code === "parameters.invalid"),
+      "a suppressed press publishes no refusal: the button already said why");
   } finally {
     if (instance) instance.dispose();
     uninstallDom();
@@ -307,6 +346,276 @@ for (const withHook of [true, false]) {
         assert.ok(notices.some((n) => n.code === "actions.unknown" && n.severity === "warning"));
       } else {
         assert.deepEqual(events, ["layout"]);
+      }
+    } finally {
+      if (instance) instance.dispose();
+      uninstallDom();
+    }
+  });
+}
+
+// ------------------------------------------------------------------------------- #548 action availability
+
+test("#548: the published availability equals the gate's refusal at every transition", async () => {
+  installDom();
+  let instance;
+  try {
+    const published = [];
+    const board = await actionBoard({
+      wrap(composite, holder) {
+        const original = composite.renderActionAvailability;
+        composite.renderActionAvailability = function (availability) {
+          published.push({ availability, gate: gateRefusal(holder.instance) });
+          return original.call(this, availability);
+        };
+      },
+    });
+    instance = board.instance;
+    const last = () => published.at(-1).availability;
+    const agrees = (step) => {
+      for (const entry of published) {
+        assert.equal(entry.availability.reason, entry.gate, `${step}: a publish disagreed with the gate at its moment`);
+        assert.equal(entry.availability.available, entry.gate === null, `${step}: available mirrors the reason`);
+      }
+      assert.equal(last().reason, gateRefusal(instance), `${step}: the last publish is the gate now`);
+    };
+    // Bootstrap: unavailable from the first draw of the buttons, then open once ready.
+    assert.deepEqual(published.map((entry) => entry.availability.reason), ["actions.not_ready", null]);
+    agrees("bootstrap");
+
+    let resolveEvaluation;
+    instance._call = () => new Promise((resolve) => { resolveEvaluation = resolve; });
+    const pending = instance._evaluateParameters("parent_change");
+    assert.equal(last().reason, "actions.locked");
+    agrees("pending evaluation");
+    resolveEvaluation(compositeState());
+    await pending;
+    assert.equal(last().reason, null);
+    agrees("valid answer");
+
+    const invalid = instance._evaluateParameters("parent_change");
+    resolveEvaluation(compositeState({ valid: false }));
+    await invalid;
+    assert.equal(last().reason, "parameters.invalid");
+    agrees("invalid answer");
+
+    const retry = instance._evaluateParameters("retry");
+    assert.equal(last().reason, "actions.locked");
+    resolveEvaluation(compositeState());
+    await retry;
+    assert.equal(last().reason, null);
+    agrees("valid retry");
+
+    const expiring = instance._evaluateParameters("parent_change");
+    assert.equal(last().reason, "actions.locked");
+    // The timer's own path, without waiting for it: the deadline expires the attempt it was armed for.
+    const expired = instance._lock;
+    instance._clearLockTimer(expired);
+    instance._lockExpired(expired);
+    assert.equal(last().reason, null, "a lock timeout reopens the gate over the last applied (valid) state");
+    agrees("lock timeout");
+    resolveEvaluation(compositeState({ valid: false }));
+    await assert.rejects(expiring, (error) => error.code === "parameters.superseded");
+    assert.equal(last().reason, null, "the late answer after the timeout changes nothing");
+    agrees("late answer");
+
+    // The supersede path is the parameters-only form's; its transport is held, the lock handling is the runtime's.
+    instance._parametersOnly = true;
+    instance._init.parameterSet = { id: "ps-548", version: 1 };
+    instance._streamEvaluateParameters = () => new Promise(() => {});
+    const before = published.length;
+    instance._evaluateParameters("commit");
+    instance._evaluateParameters("commit");
+    assert.deepEqual(published.slice(before).map((entry) => entry.availability.reason), ["actions.locked"],
+      "a supersede never publishes the instant between releasing n and acquiring n+1");
+    agrees("supersede");
+    const superseding = instance._lock;
+    instance._clearLockTimer(superseding);
+    instance._lockExpired(superseding);
+    instance._parametersOnly = false;
+    assert.equal(last().reason, null);
+
+    const quiet = published.length;
+    await instance.reset();
+    assert.equal(published.length, quiet, "reset keeps the applied validity, so nothing is republished");
+    agrees("reset");
+
+    instance._fixtureStream = () => ({ close() {} });
+    const refreshing = instance.refresh({ scope: "all" });
+    assert.equal(gateRefusal(instance), null, "an in-flight refresh does not close the gate");
+    assert.equal(last().reason, null);
+    agrees("in-flight refresh");
+    refreshing.catch(() => {});
+  } finally {
+    if (instance) instance.dispose();
+    uninstallDom();
+  }
+});
+
+test("#548: the runtime assigns the gate's four inputs only through _setGate and the constructor", () => {
+  const fs = require("node:fs");
+  const source = fs.readFileSync(resolveStatic("datapipelines-dashboard.js"), "utf8");
+  const span = (start, end) => {
+    const from = source.indexOf(start);
+    assert.notEqual(from, -1, `the scan anchor '${start}' must exist`);
+    const to = source.indexOf(end, from);
+    assert.notEqual(to, -1);
+    return [from, to + end.length];
+  };
+  const constructor = span("function DashboardInstance(initOptions, env) {", "\n  }\n");
+  const setter = span("DashboardInstance.prototype._setGate = function", "\n  };\n");
+  const inside = (index, [from, to]) => index >= from && index < to;
+  const writes = [...source.matchAll(/\b(?:this|self)\._(lock|bootstrapped|disposed|parameters)\b\s*=(?!=)/g)];
+  const stray = writes.filter((m) => !inside(m.index, constructor) && !inside(m.index, setter))
+    .map((m) => `${m[0]} at line ${source.slice(0, m.index).split("\n").length}`);
+  assert.deepEqual(stray, [], "every gate-input write goes through _setGate");
+  const initialisers = writes.filter((m) => inside(m.index, constructor)).map((m) => m[1]).sort();
+  assert.deepEqual(initialisers, ["bootstrapped", "disposed", "lock", "parameters"], "non-vacuity: the constructor's four initialisers");
+  const calls = (source.match(/\._setGate\(/g) || []).length;
+  assert.ok(calls >= 10, `non-vacuity: at least ten _setGate( call sites, found ${calls}`);
+});
+
+test("#548: before ready the composite's button is unavailable with the loading sentence; after ready both are gone", async () => {
+  installDom();
+  let instance;
+  try {
+    let snapshot = null;
+    const board = await actionBoard({
+      config: { visualizations: [{ name: "chart", renderer: { kind: "table", version: "1" }, config: {} }] },
+      wrap(composite, holder) {
+        const mount = composite.mountVisualization;
+        composite.mountVisualization = function (...args) {
+          const button = composite.parametersRoot.querySelector(".dp-dashboard-action-control");
+          const note = describedNote(composite.parametersRoot, button);
+          snapshot = {
+            disabled: button.getAttribute("aria-disabled"),
+            note: note && note.textContent,
+            hidden: note && note.className.includes("dp-dashboard-actions-note-visually-hidden"),
+            gate: gateRefusal(holder.instance),
+          };
+          return mount.apply(this, args);
+        };
+      },
+    });
+    instance = board.instance;
+    assert.deepEqual(snapshot, { disabled: "true", note: "The dashboard is still loading.", hidden: true, gate: "actions.not_ready" });
+    const button = board.panel.querySelector(".dp-dashboard-action-control");
+    assert.equal(button.getAttribute("aria-disabled"), null, "ready: available");
+    assert.equal(button.getAttribute("aria-describedby"), null, "ready: no description");
+    assert.equal(board.panel.querySelector(".dp-dashboard-actions-note").textContent, "", "ready: the note is empty");
+    assert.equal(button.disabled, false, "never the disabled property: focus stays on the button");
+  } finally {
+    if (instance) instance.dispose();
+    uninstallDom();
+  }
+});
+
+test("#548: every parameter re-render rebuilds the buttons with the current availability; only the invalid sentence shows", async () => {
+  installDom();
+  let instance;
+  try {
+    const board = await actionBoard();
+    instance = board.instance;
+    board.adapter.renderActionAvailability({ available: false, reason: "parameters.invalid" });
+    await board.adapter.renderParameters(compositeState({ valid: false }));
+    let button = board.panel.querySelector(".dp-dashboard-action-control");
+    let note = describedNote(board.panel, button);
+    assert.equal(button.getAttribute("aria-disabled"), "true", "a re-render keeps the button unavailable");
+    assert.equal(note.textContent, AVAILABILITY_SENTENCES["parameters.invalid"]);
+    assert.equal(note.className, "dp-dashboard-actions-note", "the fixable state's sentence is visible");
+    assert.equal(note.parentNode.className, "dp-dashboard-actions", "the note lives in the actions row");
+    assert.equal(note.innerHTML, null, "the sentence is text, never markup");
+    const firstId = note.getAttribute("id");
+    assert.match(firstId, /^dp-actions-note-[0-9a-f-]+-\d+$/, "the id is the adapter token and a counter, never data");
+
+    for (const reason of ["actions.locked", "actions.not_ready"]) {
+      board.adapter.renderActionAvailability({ available: false, reason });
+      await board.adapter.renderParameters(compositeState({ parameter_revision: 5 }));
+      button = board.panel.querySelector(".dp-dashboard-action-control");
+      note = describedNote(board.panel, button);
+      assert.equal(button.getAttribute("aria-disabled"), "true");
+      assert.equal(note.textContent, AVAILABILITY_SENTENCES[reason]);
+      assert.ok(note.className.includes("dp-dashboard-actions-note-visually-hidden"), `${reason} is described, not shown`);
+      assert.notEqual(note.getAttribute("id"), firstId, "a rebuilt note takes a fresh id");
+    }
+
+    board.adapter.renderActionAvailability({ available: true, reason: null });
+    await board.adapter.renderParameters(compositeState({ parameter_revision: 6 }));
+    button = board.panel.querySelector(".dp-dashboard-action-control");
+    assert.equal(button.getAttribute("aria-disabled"), null);
+    assert.equal(button.getAttribute("aria-describedby"), null);
+    assert.equal(board.panel.querySelectorAll(".dp-dashboard-actions-note").length, 1, "one note per actions row");
+    assert.equal(board.panel.querySelector(".dp-dashboard-actions-note").textContent, "");
+  } finally {
+    if (instance) instance.dispose();
+    uninstallDom();
+  }
+});
+
+test("#548: a press while unavailable calls nothing and stops the click; a press while available is forwarded", async () => {
+  installDom();
+  let instance;
+  try {
+    const board = await actionBoard();
+    instance = board.instance;
+    const actions = [];
+    board.adapter.onAction((payload) => actions.push(payload));
+    const press = () => {
+      const event = { stopped: false, stopPropagation() { this.stopped = true; } };
+      board.panel.querySelector(".dp-dashboard-action-control").fire("click", event);
+      return event.stopped;
+    };
+    board.adapter.renderActionAvailability({ available: false, reason: "actions.locked" });
+    assert.equal(press(), true, "an unavailable press stops before the page's filters-panel listener");
+    assert.deepEqual(actions, [], "an unavailable press reaches no listener");
+    board.panel.querySelector(".dp-dashboard-action-control").fire("click");
+    assert.deepEqual(actions, [], "a press with no event object is suppressed as well");
+    board.adapter.renderActionAvailability({ available: true, reason: null });
+    assert.equal(press(), false, "an available press propagates as before");
+    assert.deepEqual(actions, [{ action: "refresh_all", name: "apply", type: "action_control" }]);
+  } finally {
+    if (instance) instance.dispose();
+    uninstallDom();
+  }
+});
+
+for (const variant of ["recorded", "absent", "throwing"]) {
+  test(`#548: an adapter whose renderActionAvailability is ${variant} boots and keeps the gate`, async () => {
+    installDom();
+    let instance;
+    try {
+      const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+      const notices = [];
+      const calls = [];
+      const adapter = Object.fromEntries(runtime._internal.REQUIRED_ADAPTER_FUNCTIONS.map((name) => [name, () => {}]));
+      adapter.notify = (notice) => { notices.push(notice); };
+      adapter.renderActionControls = () => {};
+      if (variant === "recorded") adapter.renderActionAvailability = (availability) => { calls.push(availability); };
+      if (variant === "throwing") adapter.renderActionAvailability = () => { throw new Error("host bug"); };
+      ({ instance } = await actionBoard({ adapter }));
+      assert.equal(gateRefusal(instance), null, "the board is ready and its gate open");
+      let resolveEvaluation;
+      instance._call = () => new Promise((resolve) => { resolveEvaluation = resolve; });
+      const pending = instance._evaluateParameters("parent_change");
+      await assert.rejects(instance.refresh({ scope: "all" }), (error) => error.code === "actions.locked");
+      resolveEvaluation(compositeState());
+      await pending;
+      assert.equal(gateRefusal(instance), null);
+      const failures = notices.filter((n) => n.code === "actions.availability_failed");
+      if (variant === "recorded") {
+        assert.deepEqual(calls, [
+          { available: false, reason: "actions.not_ready" },
+          { available: true, reason: null },
+          { available: false, reason: "actions.locked" },
+          { available: true, reason: null },
+        ], "called after the controls and on every change of reason, never twice for the same one");
+      }
+      if (variant === "throwing") {
+        assert.equal(failures.length, 1, "a throwing hook is reported once, never silently swallowed");
+        assert.equal(failures[0].scope, "actions");
+        assert.equal(failures[0].severity, "warning");
+      } else {
+        assert.equal(failures.length, 0);
       }
     } finally {
       if (instance) instance.dispose();
