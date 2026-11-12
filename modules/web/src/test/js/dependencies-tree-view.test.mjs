@@ -195,5 +195,19 @@ test("every graph label over every golden carries the node's family, version lab
   }
   assert.ok(labels >= 40, `non-vacuity: ${labels} labels`);
   const long = renderer.graphLabel({ familyLabel: "Template", name: "a/".repeat(40), versionLabel: "v1", statusText: "Draft" });
-  assert.ok(long.split("\n")[0].length <= "Template · ".length + 48 + " v1".length && long.includes("…"), "a long name is ellipsised in the graph only");
+  const visible = long.split("\n")[0].replaceAll("\u200b", "");
+  assert.ok(visible.length <= "Template · ".length + 48 + " v1".length && long.includes("…"), "a long name is ellipsised in the graph only");
+});
+
+test("a graph label wraps between a name's segments, and no segment outruns a line", () => {
+  // Cytoscape wraps a label only at whitespace and U+200B: a folder path gets a U+200B after each "/" (#876 R1 — the
+  // unbroken path ran over the node's family glyph).
+  const label = renderer.graphLabel({ familyLabel: "Template", name: "test/depsabcd/formatter.jsonata", versionLabel: "v1", statusText: "Draft" });
+  assert.equal(label, "Template · test/\u200bdepsabcd/\u200bformatter.jsonata v1\nDraft");
+  const long = renderer.graphLabel({ familyLabel: "Template", name: "test/" + "x".repeat(40), versionLabel: "v1", statusText: "Draft" });
+  const segments = long.split("\n")[0].split(/[\s\u200b]+/);
+  assert.ok(segments.every(s => s.length <= 22), `every wrap-free run fits a line: ${JSON.stringify(segments)}`);
+  assert.ok(long.includes("x".repeat(21) + "…"), "the long segment keeps its start and says it was cut");
+  assert.equal(renderer.graphLabel({ familyLabel: "Datasource", name: "warehouse", versionLabel: "Unversioned", statusText: "Registered" }),
+    "Datasource · warehouse Unversioned\nRegistered", "a name with no folder is drawn as it is");
 });

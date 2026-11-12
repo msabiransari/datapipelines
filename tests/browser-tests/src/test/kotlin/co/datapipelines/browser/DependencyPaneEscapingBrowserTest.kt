@@ -11,7 +11,8 @@ import org.junit.jupiter.api.Test
  * #876 G6 Security — every name the tree payload carries reaches the DOM as TEXT. A real name cannot hold markup (the
  * name grammar refuses it), so the route's own answer is rewritten on the way in: the worked graph's shared library is
  * renamed `<img src=x onerror=…>`. The list's name cell, the edge table and the selection panel show the string
- * verbatim and no element is ever parsed from it (zero `img` in the pane, the handler never ran, no CSP report).
+ * verbatim and no element is ever parsed from it (zero `img` in the pane, the handler never ran, no CSP report); the
+ * graph's family-glyph layer holds glyph elements only, with no text.
  */
 class DependencyPaneEscapingBrowserTest : DependencyPaneBrowserSuite() {
     private val board = "#dp-pane-dependencies"
@@ -43,6 +44,20 @@ class DependencyPaneEscapingBrowserTest : DependencyPaneBrowserSuite() {
         page.locator("$board [data-dp-deps-view='graph']").click()
         page.locator("$board .dp-deps-panel").innerText() shouldContain HOSTILE
         page.locator("$board img").count() shouldBe 0
+        // The graph's family-glyph layer (R1) holds only glyphs: one svg + use per drawn node, no text, nothing parsed.
+        @Suppress("UNCHECKED_CAST")
+        val layer =
+            page.evaluate(
+                "s => { const l = document.querySelector(s + ' [data-dp-deps-glyphs]'); return l ? { tags: [...new Set(" +
+                    "[...l.querySelectorAll('*')].map(e => e.localName))].sort(), text: l.textContent, svgs: l.querySelectorAll('svg').length } : null; }",
+                board,
+            ) as Map<String, Any?>?
+        withClue("the glyph layer: $layer") {
+            val drawn = requireNotNull(layer) { "the graph drew no glyph layer" }
+            drawn["tags"] shouldBe listOf("svg", "use")
+            drawn["text"] shouldBe ""
+            drawn["svgs"] shouldBe WORKED_NODES
+        }
         page.evaluate("() => window.__dpHostile === undefined") shouldBe true
         drainCspViolations() shouldBe emptyList()
     }
@@ -50,5 +65,6 @@ class DependencyPaneEscapingBrowserTest : DependencyPaneBrowserSuite() {
     private companion object {
         const val HOSTILE = "<img src=x onerror=window.__dpHostile=1>"
         const val IMPORTERS = 2
+        const val WORKED_NODES = 9
     }
 }

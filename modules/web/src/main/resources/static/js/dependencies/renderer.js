@@ -20,6 +20,14 @@
    *
    * Token bridge: COPIED from parameter-workspace/graph.js:17-125 (toLegacyRgb, the fresh-probe resolveToken,
    * readTokens) — that file is outside this lane's fence and exports none of them; the copy keeps its recipe.
+   *
+   * Family glyphs (§A.2, the view-model's `glyph`): a DOM layer over the canvas holds one
+   * `<svg><use href="/vendor/icons/lucide-sprite.svg#…">` per drawn node — the list's and the Flow graph's own way of
+   * drawing a lucide glyph. Cytoscape cannot draw a sprite `<symbol>` (an image URL cannot address one), and an image
+   * on the canvas would not inherit `currentColor`; in the DOM the glyph takes its colour from the stylesheet, so a
+   * theme switch recolours it with no token read, and no extra request or string-built image is needed. The layer
+   * ignores the pointer (pan, zoom and tap stay the canvas's), follows every render through a CSSOM transform (no
+   * style attribute markup, CSP-clean) and carries no payload text: the glyph name and the node id ride as attributes.
    */
 
   var TOKENS = {
@@ -37,6 +45,18 @@
 
   /** The longest name the graph label draws; the full name rides in the list, the panel and their titles. */
   var LABEL_NAME_MAX = 48;
+  /** The longest name segment one label line holds at the label's width and font (about 6.5px a character). */
+  var LABEL_SEGMENT_MAX = 22;
+  /** A zero-width space: a wrap point Cytoscape honours (its wrap splits on whitespace and U+200B). */
+  var WRAP_POINT = "\u200b";
+
+  var SVG = "http://www.w3.org/2000/svg";
+  var SPRITE = "/vendor/icons/lucide-sprite.svg#";
+  /** Node box and the strip at its left the glyph sits in (model units; the label is shifted right to clear it). */
+  var NODE_WIDTH = 196;
+  var NODE_HEIGHT = 64;
+  var GLYPH_INSET = 10;
+  var LABEL_SHIFT = 12;
 
   function toLegacyRgb(computed) {
     if (!computed) return null;
@@ -87,14 +107,15 @@
         selector: "node",
         style: {
           shape: "round-rectangle",
-          width: 196,
-          height: 64,
+          width: NODE_WIDTH,
+          height: NODE_HEIGHT,
           "background-color": t.surface,
           "border-width": 2,
           "border-color": t.border,
           label: "data(text)",
           "text-wrap": "wrap",
-          "text-max-width": 184,
+          "text-max-width": NODE_WIDTH - 2 * (GLYPH_INSET + LABEL_SHIFT) - 4,
+          "text-margin-x": LABEL_SHIFT,
           "text-valign": "center",
           "text-halign": "center",
           "font-family": t.font,
@@ -131,9 +152,21 @@
     ];
   }
 
+  /**
+   * A node's two-line label: kind, name and version, then the status text. Cytoscape wraps only at whitespace and
+   * U+200B, and a folder-path name has neither, so a long name ran past the wrap width — over the family glyph and out
+   * of its box. The drawn name gets a U+200B after every "/" and any one segment longer than a line is ellipsised; the
+   * list, the panel and their titles carry the full name.
+   */
   function graphLabel(node) {
     var name = node.name.length > LABEL_NAME_MAX ? node.name.slice(0, LABEL_NAME_MAX - 1) + "…" : node.name;
-    return node.familyLabel + " · " + name + " " + node.versionLabel + "\n" + node.statusText;
+    var drawn = name
+      .split("/")
+      .map(function (segment) {
+        return segment.length > LABEL_SEGMENT_MAX ? segment.slice(0, LABEL_SEGMENT_MAX - 1) + "…" : segment;
+      })
+      .join("/" + WRAP_POINT);
+    return node.familyLabel + " · " + drawn + " " + node.versionLabel + "\n" + node.statusText;
   }
 
   function el(tag, className, text) {
@@ -141,6 +174,46 @@
     if (className) node.className = className;
     if (text !== undefined && text !== null) node.textContent = text;
     return node;
+  }
+
+  /**
+   * The glyph layer: one sprite glyph per node, positioned over the node's left strip on every render. Returns
+   * `{ update() }`; the caller calls it from Cytoscape's `render` event.
+   */
+  function glyphLayer(stage, canvas, cy, view) {
+    var layer = el("div", "dp-deps-glyphs");
+    layer.setAttribute("aria-hidden", "true");
+    layer.setAttribute("data-dp-deps-glyphs", "");
+    stage.appendChild(layer);
+    var glyphs = view.nodes.map(function (n) {
+      var svg = document.createElementNS(SVG, "svg");
+      svg.setAttribute("class", "ds-icon ds-icon-sm dp-deps-node-glyph");
+      svg.setAttribute("aria-hidden", "true");
+      svg.setAttribute("focusable", "false");
+      svg.setAttribute("data-dp-deps-glyph", n.glyph);
+      svg.setAttribute("data-node", n.id);
+      var use = document.createElementNS(SVG, "use");
+      use.setAttribute("href", SPRITE + n.glyph);
+      svg.appendChild(use);
+      layer.appendChild(svg);
+      return { svg: svg, node: cy.getElementById(n.id) };
+    });
+    function update() {
+      // The canvas's border offsets Cytoscape's rendered coordinates inside the stage.
+      var offsetX = canvas.offsetLeft + canvas.clientLeft;
+      var offsetY = canvas.offsetTop + canvas.clientTop;
+      var zoom = cy.zoom();
+      glyphs.forEach(function (g) {
+        if (!g.node || g.node.empty()) return;
+        var box = g.node.renderedBoundingBox({ includeLabels: false, includeOverlays: false });
+        // The computed height is the icon token's, untouched by the transform (origin top left, in the CSS).
+        var size = parseFloat(getComputedStyle(g.svg).height) || 0;
+        var x = offsetX + box.x1 + GLYPH_INSET * zoom;
+        var y = offsetY + box.y1 + (box.h - size * zoom) / 2;
+        g.svg.style.transform = "translate(" + x + "px, " + y + "px) scale(" + zoom + ")";
+      });
+    }
+    return { update: update };
   }
 
   /** The selection panel's content for one node: identity, link, both directions, diagnostics. */
@@ -202,13 +275,15 @@
     var toolbar = el("div", "dp-deps-toolbar");
     toolbar.setAttribute("role", "group");
     toolbar.setAttribute("aria-label", "Graph view controls");
+    var stage = el("div", "dp-deps-stage");
     var canvas = el("div", "dp-deps-canvas");
+    stage.appendChild(canvas);
     canvas.setAttribute("tabindex", "0");
     canvas.setAttribute("role", "group");
     canvas.setAttribute("aria-label", "Dependency graph. Arrow keys move between objects; the list view shows the same objects.");
     var panel = el("div", "dp-deps-panel");
     panel.setAttribute("aria-live", "polite");
-    host.replaceChildren(toolbar, canvas, panel);
+    host.replaceChildren(toolbar, stage, panel);
 
     var cy = window.cytoscape({
       container: canvas,
@@ -231,6 +306,9 @@
       boxSelectionEnabled: false,
       autoungrabify: true,
     });
+    var glyphs = glyphLayer(stage, canvas, cy, view);
+    cy.on("render", glyphs.update);
+    glyphs.update();
     var initialZoom = cy.zoom();
     var initialPan = cy.pan();
     var order = view.nodes.map(function (n) {

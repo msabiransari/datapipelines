@@ -23,7 +23,8 @@ import java.nio.file.Paths
  * errors, (b) the §5.4 worked graph — every object with a text status, a shared object drawn once and its dependents
  * highlighted, (c) the list's keyboard, (d) a self-import cycle, (e) the node limit, (f) the A26 race, (g) a 200-character
  * name, (h) the empty leaf, (i) the mount on a cold load, a boosted round trip and a history restore, (j) the
- * choose-a-version state, (k) the request shape and (l) the links.
+ * choose-a-version state, (k) the request shape, (l) the links and (m) every graph node's family glyph in both
+ * themes.
  *
  * (e) runs against a LOW node limit set for this class's own application context ([LIMIT], the brief's first option):
  * the limit is real G4 behaviour, not a fulfilled payload, and the §5.4 graph's nine objects fit under it.
@@ -47,6 +48,14 @@ class DependencyTreeRendererBrowserTest : DependencyPaneBrowserSuite() {
             scope,
         ) as Map<String, Any?>
 
+    /** The user's own theme select (PipelineWorkspaceTabsBrowserTest's walk). */
+    private fun useTheme(theme: String) {
+        page.navigate("$baseUrl/settings")
+        if (page.inputValue("#themeSelect") != theme) {
+            page.waitForResponse("**/partials/profile/theme") { page.selectOption("#themeSelect", theme) }
+        }
+    }
+
     private fun shot(name: String) {
         Files.createDirectories(SHOTS)
         page.screenshot(Page.ScreenshotOptions().setPath(SHOTS.resolve("$name.png")).setFullPage(false))
@@ -60,10 +69,7 @@ class DependencyTreeRendererBrowserTest : DependencyPaneBrowserSuite() {
         page.onConsoleMessage { if (it.type() == "error") errors += it.text() }
         val visited = mutableSetOf<String>()
         for (theme in listOf("dark", "light")) {
-            page.navigate("$baseUrl/settings")
-            if (page.inputValue("#themeSelect") != theme) {
-                page.waitForResponse("**/partials/profile/theme") { page.selectOption("#themeSelect", theme) }
-            }
+            useTheme(theme)
             openBoardDependencies(world)
             visited += page.evaluate("() => document.documentElement.getAttribute('data-theme')") as String
             page.locator("$board [data-dp-deps-view='graph']").click()
@@ -483,7 +489,79 @@ class DependencyTreeRendererBrowserTest : DependencyPaneBrowserSuite() {
         )
     }
 
+    /**
+     * The drawn graph's family glyphs, one entry per Cytoscape node: the node's kind word (its label's first part —
+     * the oracle maps it, never the product's table), the glyph the layer drew for it, whether that glyph sits inside
+     * the node's box and left of its label, the referenced symbol's drawn width (zero when the sprite has no such
+     * symbol), its visibility, its colour and the node's fill.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun graphGlyphs(scope: String): List<Map<String, Any?>> = page.evaluate(GLYPHS_JS, scope) as List<Map<String, Any?>>
+
+    @Test
+    fun `(m) every graph node shows its family's glyph beside its text, in both themes, zero console and CSP errors`() {
+        startTrace()
+        val world = seedWorkedGraph(ready("depglyph"))
+        val errors = mutableListOf<String>()
+        page.onConsoleMessage { if (it.type() == "error") errors += it.text() }
+        val colours = mutableMapOf<String, Set<String>>()
+        for (theme in listOf("dark", "light")) {
+            useTheme(theme)
+            openBoardDependencies(world)
+            page.locator("$board [data-dp-deps-view='graph']").click()
+            page.waitForFunction("s => { const c = document.querySelector(s + ' .dp-deps-canvas'); return c && c._cyreg; }", board)
+            // A symbol the sprite lacks draws nothing: wait a bounded time for every glyph to draw, then assert.
+            runCatching { page.waitForFunction(GLYPHS_DRAWN_JS, board, Page.WaitForFunctionOptions().setTimeout(GLYPH_WAIT_MS)) }
+            val glyphs = graphGlyphs(board)
+            withClue("$theme: one glyph per drawn node, its family's, drawn and visible inside the node beside its text: $glyphs") {
+                glyphs shouldHaveSize WORKED_NODES
+                glyphs.map { it["kind"] }.toSet() shouldBe FAMILY_GLYPHS.keys
+                glyphs.map { it["glyph"] } shouldBe glyphs.map { FAMILY_GLYPHS[it["kind"]] }
+                glyphs.filterNot {
+                    it["inside"] == true && it["beside"] == true && (it["width"] as Int) > 0 && it["visible"] == true &&
+                        it["color"] != it["fill"]
+                }.shouldBeEmpty()
+            }
+            colours[theme] = glyphs.map { it["color"] as String }.toSet()
+            shot("renderer-graph-glyphs-$theme")
+        }
+        withClue("the glyph colour follows the theme: $colours") { colours["dark"] shouldNotBe colours["light"] }
+        errors.shouldBeEmpty()
+        drainCspViolations().filter { !it.contains(PLAYWRIGHT_SCREENSHOT_HASH) }.shouldBeEmpty()
+    }
+
     companion object {
+        /** The oracle: the rail's lucide glyph per kind word (layouts/default.html), the worked graph's six kinds. */
+        val FAMILY_GLYPHS =
+            mapOf(
+                "Dashboard" to "boxes",
+                "Parameter set" to "sliders-horizontal",
+                "Pipeline" to "workflow",
+                "Visualization" to "chart-line",
+                "Template" to "code",
+                "Datasource" to "database",
+            )
+        const val GLYPH_WAIT_MS = 5_000.0
+        const val GLYPHS_DRAWN_JS =
+            "s => { const l = document.querySelector(s + ' [data-dp-deps-glyphs]'); const u = l ? [...l.querySelectorAll('use')] : [];" +
+                " return u.length > 0 && u.every(e => e.getBoundingClientRect().width > 0); }"
+        const val GLYPHS_JS =
+            """s => { const c = document.querySelector(s + ' .dp-deps-canvas'); const cy = c._cyreg.cy;
+              const cr = c.getBoundingClientRect(); const ox = cr.left + c.clientLeft, oy = cr.top + c.clientTop;
+              const layer = document.querySelector(s + ' [data-dp-deps-glyphs]'); const flat = v => String(v).replace(/\s/g, '');
+              return cy.nodes().map(n => {
+                const kind = n.data('text').split(' · ')[0];
+                const g = layer ? [...layer.querySelectorAll('svg')].find(e => e.getAttribute('data-node') === n.id()) : null;
+                if (!g) return { kind: kind, glyph: null };
+                const b = n.renderedBoundingBox({ includeLabels: false, includeOverlays: false });
+                const t = n.renderedBoundingBox({ includeNodes: false, includeLabels: true, includeOverlays: false });
+                const r = g.getBoundingClientRect(); const cs = getComputedStyle(g); const use = g.querySelector('use');
+                return { kind: kind, glyph: (use.getAttribute('href') || '').split('#')[1],
+                  inside: r.left >= ox + b.x1 - 1 && r.right <= ox + b.x2 + 1 && r.top >= oy + b.y1 - 1 && r.bottom <= oy + b.y2 + 1,
+                  beside: r.right <= ox + t.x1 + 1, width: Math.round(use.getBoundingClientRect().width),
+                  visible: cs.visibility === 'visible' && cs.display !== 'none' && parseFloat(cs.opacity) === 1 && r.width > 0,
+                  color: flat(cs.color), fill: flat(n.style('background-color')) }; }); }"""
+
         /** The node limit this class's application runs with (record §25.4's `max-versions`, lowered). */
         const val LIMIT = 12
         const val WORKED_NODES = 9

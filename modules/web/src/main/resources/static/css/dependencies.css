@@ -70,6 +70,30 @@
   overflow: hidden;
 }
 
+/* The canvas and the family-glyph layer over it (renderer.js glyphLayer): the layer ignores the pointer, so pan,
+   zoom and tap stay the canvas's, and clips a glyph panned out of the canvas. Each glyph is placed by a CSSOM
+   transform from its top left corner; its colour is the stylesheet's, so a theme switch recolours it. */
+.dp-deps-stage {
+  position: relative;
+  min-width: 0;
+}
+
+.dp-deps-glyphs {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  pointer-events: none;
+}
+
+.dp-deps-node-glyph {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  color: var(--text-secondary);
+}
+
 .dp-deps-canvas:focus-visible,
 .dp-deps-row:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
