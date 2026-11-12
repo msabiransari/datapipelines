@@ -13,8 +13,8 @@ import java.util.UUID
  * The pipeline aggregate's answer to "which API versions pin this release?" (#786 B.4; record §14, A39): the
  * [EndpointVersionConsumers] port as an adapter over the pipeline family's API arm (#877 §C — `findIncoming` paged to
  * exhaustion), composed in `application` as [DashboardPipelineConsumers] is. Live = DRAFT or RELEASED, the noncurrent
- * versions and a disabled entity's included; DISCARDED protects nothing — on BOTH questions (an API version is never
- * restored, so the arm's ANY is its LIVE). Path, then version order.
+ * versions and a disabled entity's included; DISCARDED protects nothing — on BOTH questions (restoring an API version
+ * revalidates its pin, so the arm's ANY is its LIVE). Path, then version order.
  */
 class EndpointVersionPipelineConsumers(
     private val incoming: IncomingRows,
