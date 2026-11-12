@@ -332,7 +332,8 @@ class ReleaseDialogCheckOverridesE2eTest {
                         "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES" +
                             " ('$ADMIN_ID', 'e2e-876-overrides@datapipelines.test', 'E2E 876', 'test'," +
                             " 'e2e-876-overrides-sub', TRUE, TRUE)," +
-                            " ('$VIEWER_ID', 'e2e-876-viewer@datapipelines.test', 'E2E 876 viewer', 'test', 'e2e-876-viewer-sub', TRUE, FALSE)",
+                            " ('$VIEWER_ID', 'e2e-876-viewer@datapipelines.test', 'E2E 876 viewer', 'test'," +
+                            " 'e2e-876-viewer-sub', TRUE, FALSE)",
                     )
                     statement.execute(
                         "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES" +
