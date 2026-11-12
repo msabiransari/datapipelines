@@ -281,6 +281,33 @@ class RecordingExecutionRunnerTest {
             verify { executionRepository.recordResult(executionId, 42L, 512L, schema) }
         }
 
+    /**
+     * #905 — the result write goes through the run's emitter (ordered behind an unconfirmed RUNNING
+     * insert): a write that matches no row is the emitter's one WARN naming the execution.
+     */
+    @Test
+    fun `a result write that matches no row is one WARN from the run's emitter`() {
+        val executor = mockk<PipelineExecutor>()
+        coEvery { executor.execute(any()) } returns result()
+        every { templateEngines.engineFor(workspaceId) } returns mockk()
+        every { resultStore.describe("dp:result:$executionId") } returns view(rows = 42, bytes = 512)
+        every { executionRepository.recordResult(executionId, 42L, 512L, emptyList()) } returns false
+
+        val warns = emitterWarns { kotlinx.coroutines.runBlocking { runner(executor).run(request(), workspaceId, ExecutionTrigger.MCP) } }
+
+        warns.filter { "not found by its result columns write" in it && executionId.toString() in it }.size shouldBe 1
+    }
+
+    /** The run emitter's WARN lines while [block] runs (#905: the result write is the emitter's). */
+    private fun emitterWarns(block: () -> Unit): List<String> =
+        co.datapipelines.logcapture
+            .capturingLogEvents(
+                org.slf4j.LoggerFactory.getLogger(co.datapipelines.web.sse.WebEventEmitter::class.java)
+                    as ch.qos.logback.classic.Logger,
+                block = block,
+            ).filter { it.level == ch.qos.logback.classic.Level.WARN }
+            .map { it.formattedMessage }
+
     @Test
     fun `no resultRef means no bookkeeping`() =
         runTest {

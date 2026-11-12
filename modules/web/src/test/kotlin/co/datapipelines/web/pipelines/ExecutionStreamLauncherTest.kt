@@ -85,6 +85,7 @@ class ExecutionStreamLauncherTest {
     private fun launcher(
         scope: CoroutineScope = CoroutineScope(UnconfinedTestDispatcher()),
         store: IdempotencyStore = idempotencyStore,
+        resultStore: ResultStore = mockk(),
         executorFactory: (co.datapipelines.web.sse.WebEventEmitter) -> PipelineExecutor,
     ): ExecutionStreamLauncher =
         ExecutionStreamLauncher(
@@ -92,7 +93,7 @@ class ExecutionStreamLauncherTest {
             datasourceRegistry = mockk(),
             stagingFactory = mockk(),
             writebackRunner = mockk(),
-            resultStore = mockk<ResultStore>(),
+            resultStore = resultStore,
             cancellationRegistry = mockk(),
             cancellationFlags = mockk(),
             executionSlots = mockk(),
@@ -487,6 +488,50 @@ class ExecutionStreamLauncherTest {
                 warnings.stop()
             }
         }
+    }
+
+    /**
+     * #905 — the result write goes through the run's emitter (ordered behind an unconfirmed RUNNING
+     * insert): a write that matches no row is the emitter's one WARN naming the execution.
+     */
+    @Test
+    fun `a result write that matches no row is one WARN from the run's emitter`() {
+        val executionId = UUID.randomUUID()
+        val ref = "dp:result:$executionId"
+        val executor = mockk<PipelineExecutor>()
+        coEvery { executor.execute(any()) } returns
+            co.datapipelines.executor.ExecutionResult(
+                executionId = executionId,
+                status = co.datapipelines.executor.ExecutionStatus.SUCCESS,
+                nodeStats = emptyList(),
+                resultRef = ref,
+                startedAt = Instant.EPOCH,
+                completedAt = Instant.EPOCH,
+                durationMs = 5,
+            )
+        val store = mockk<ResultStore>()
+        every { store.describe(ref) } returns
+            co.datapipelines.executor.StoredResultView(
+                key = ref,
+                executionId = executionId,
+                schema = emptyList(),
+                firstPage = emptyList(),
+                totalRows = 42,
+                bytes = 512,
+                expiresAt = Instant.EPOCH,
+            )
+        every { executionRepository.recordResult(executionId, 42L, 512L, emptyList()) } returns false
+
+        val warns =
+            co.datapipelines.logcapture
+                .capturingLogEvents(
+                    org.slf4j.LoggerFactory.getLogger(co.datapipelines.web.sse.WebEventEmitter::class.java)
+                        as ch.qos.logback.classic.Logger,
+                ) { launcher(resultStore = store) { executor }.launch(launchRequest()) }
+                .filter { it.level == ch.qos.logback.classic.Level.WARN }
+                .map { it.formattedMessage }
+
+        warns.filter { "not found by its result columns write" in it && executionId.toString() in it }.size shouldBe 1
     }
 
     @Test

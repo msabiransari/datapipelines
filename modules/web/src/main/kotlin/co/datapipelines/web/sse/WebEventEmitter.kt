@@ -126,6 +126,11 @@ data class ExecutionContext(
  * again. A fail-closed (scheduled) run never reaches a terminal event, so a late insert of its own
  * is still the stale sweep's to reap.
  *
+ * The run's result-history write (`ExecutionRepository.recordResult`, issued by the surface after
+ * `execute` returns) follows the same rule through [writeBehindUnconfirmedInsert] (#905): behind a
+ * pending insert it would match 0 rows. It needs no order against the terminal UPDATE, which keeps
+ * recorded result columns.
+ *
  * ## Failure policy
  * A persistence failure is logged and **swallowed** — deliberately, and only here. dag-executor
  * §10 requires the emitter never to throw: an exception raised inside `emit` propagates into the
@@ -426,10 +431,8 @@ class WebEventEmitter(
         executionId: UUID,
         update: () -> Boolean,
     ) {
-        val insert = unconfirmedInsert.get()
-        // A late insert that has landed by now is a confirmed one: the ordinary bounded path. One still
-        // running, or one that failed late (a failed Deferred reads as cancelled), is ordered behind.
-        if (insert != null && (!insert.isCompleted || insert.isCancelled)) {
+        val insert = pendingInsert()
+        if (insert != null) {
             completeBehindUnconfirmedInsert(insert, executionId, update)
             return
         }
@@ -450,7 +453,8 @@ class WebEventEmitter(
      * never runs — the UPDATE as a task on [persistenceDispatcher]: the insert landed → the UPDATE
      * runs there (its own failure or 0 rows is one WARN, not a second count); the insert failed →
      * the UPDATE is dropped with one WARN. An aborted run's duration is read in that task, after
-     * the row exists.
+     * the row exists. The continuation is [runBehindInsert], the one [writeBehindUnconfirmedInsert]
+     * registers too.
      */
     private fun completeBehindUnconfirmedInsert(
         insert: Deferred<*>,
@@ -464,21 +468,72 @@ class WebEventEmitter(
             "ordered behind its unconfirmed RUNNING insert",
             LifecycleWriteUnconfirmedException(lifecycleWriteTimeout),
         )
+        runBehindInsert(insert, id, TERMINAL_UPDATE, update)
+    }
+
+    /**
+     * #905 — a later write to this execution's row (the §10.2 result-history columns,
+     * `ExecutionRepository.recordResult`) under the rule the terminal UPDATE follows (#325): with no
+     * RUNNING insert pending, [write] runs here, on the caller's thread, as such writes always did;
+     * behind a RUNNING insert that outlived [lifecycleWriteTimeout] it is registered on that insert's
+     * completion handle and, once the insert lands, runs once as a task on [persistenceDispatcher] —
+     * dropped with one WARN when the insert failed. Never blocks, never throws, never counts
+     * `lifecycle_write_failed` (the run's terminal UPDATE already counted the unconfirmed insert).
+     * [write] returning false (0 rows updated) or throwing is one WARN naming the execution id and
+     * [what], wherever it ran.
+     *
+     * Only the database write belongs in [write]: anything the caller can compute itself (describing
+     * the stored result) stays on its own thread.
+     */
+    fun writeBehindUnconfirmedInsert(
+        executionId: UUID,
+        what: String,
+        write: () -> Boolean,
+    ) {
+        val insert = pendingInsert()
+        if (insert == null) {
+            runRowWrite(executionId, what, write)
+        } else {
+            runBehindInsert(insert, executionId, what, write)
+        }
+    }
+
+    /**
+     * #325 — the unconfirmed RUNNING insert a write must wait for, or null. A late insert that has
+     * landed by now is a confirmed one (the write proceeds as usual); one still running, or one that
+     * failed late (a failed Deferred reads as cancelled), is returned.
+     */
+    private fun pendingInsert(): Deferred<*>? = unconfirmedInsert.get()?.takeIf { !it.isCompleted || it.isCancelled }
+
+    /**
+     * #325/#905 — the ONE continuation behind an unconfirmed RUNNING insert. It runs on the thread
+     * that completed the insert (or here, if it completed meanwhile) and only DISPATCHES — never
+     * runs — [write] as a task on [persistenceDispatcher]: the insert landed → [write] runs there via
+     * [runRowWrite]; the insert failed → [write] is dropped with one WARN.
+     */
+    private fun runBehindInsert(
+        insert: Deferred<*>,
+        id: UUID,
+        what: String,
+        write: () -> Boolean,
+    ) {
         insert.invokeOnCompletion { insertFailure ->
             if (insertFailure != null) {
                 log.warn(
-                    "pipeline_executions row for execution {} was never created (error={} sql_state={}) — its terminal update is dropped.",
+                    "pipeline_executions row for execution {} was never created (error={} sql_state={}) — its {} is dropped.",
                     id,
                     insertFailure.javaClass.simpleName,
                     FailureShape.sqlState(insertFailure),
+                    what,
                 )
             } else {
                 // A completion handler must not throw: a pool that refuses the task is one WARN.
-                runCatching { persistenceDispatcher.dispatch(EmptyCoroutineContext) { runDeferredUpdate(id, update) } }
+                runCatching { persistenceDispatcher.dispatch(EmptyCoroutineContext) { runRowWrite(id, "deferred $what", write) } }
                     .onFailure {
                         log.warn(
-                            "pipeline_executions row for execution {}: its deferred terminal update could not be dispatched: error={}",
+                            "pipeline_executions row for execution {}: its deferred {} could not be dispatched: error={}",
                             id,
+                            what,
                             it.javaClass.simpleName,
                         )
                     }
@@ -486,23 +541,22 @@ class WebEventEmitter(
         }
     }
 
-    /** The deferred terminal UPDATE on [persistenceDispatcher]: already counted, so WARN only. */
-    private fun runDeferredUpdate(
+    /** One row write whose outcome is logged, never counted or thrown: 0 rows or a failure is one WARN. */
+    private fun runRowWrite(
         executionId: UUID,
-        update: () -> Boolean,
+        what: String,
+        write: () -> Boolean,
     ) {
-        runCatching(update)
+        runCatching(write)
             .onSuccess { updated ->
                 if (!updated) {
-                    log.warn(
-                        "pipeline_executions row for execution {} not found by its deferred terminal update (0 rows updated).",
-                        executionId,
-                    )
+                    log.warn("pipeline_executions row for execution {} not found by its {} (0 rows updated).", executionId, what)
                 }
             }.onFailure {
                 log.warn(
-                    "pipeline_executions row for execution {} not completed by its deferred terminal update: error={} sql_state={}",
+                    "pipeline_executions row for execution {} not written by its {}: error={} sql_state={}",
                     executionId,
+                    what,
                     it.javaClass.simpleName,
                     FailureShape.sqlState(it),
                 )
@@ -605,6 +659,11 @@ class WebEventEmitter(
 
     private fun ExecutionEvent.isTerminalOnTheWire(): Boolean =
         this is PipelineCompleted || this is PipelineFailed || this is ExecutionAborted || this is DataReady
+
+    private companion object {
+        /** The terminal UPDATE's name in the deferred-write WARNs (#325). */
+        const val TERMINAL_UPDATE = "terminal update"
+    }
 }
 
 /**

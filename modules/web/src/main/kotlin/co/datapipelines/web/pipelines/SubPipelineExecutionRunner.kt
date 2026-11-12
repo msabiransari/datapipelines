@@ -172,8 +172,9 @@ class SubPipelineExecutionRunner(
         ctx.operations.tracker(node.id)?.childExecution(childExecutionId)
         val outcome = SinkOutcome()
         val request = childRequest(node, ctx, ref, record, child, metadata, childExecutionId, outcome)
-        val result = executeChild(node, record, request, workspaceId)
-        recordResultColumns(result)
+        val emitter = childEmitter(record, request, workspaceId)
+        val result = executeChild(node, request, workspaceId, emitter)
+        recordResultColumns(result, emitter)
         ensureOutputDelivered(node, request.executionId, outcome)
 
         return NodeResult.of(
@@ -320,44 +321,54 @@ class SubPipelineExecutionRunner(
     )
 
     /**
-     * Runs the child through a per-run executor with a recording emitter (no SSE stream — the
-     * McpRecordingExecutionRunner shape), and maps a child failure onto the parent node's
-     * catalogued code. Cancellation propagates untouched (design §4.3, D8).
+     * The child run's recording emitter (no SSE stream — the McpRecordingExecutionRunner shape). Built
+     * here rather than inside [executeChild] because the child's result-history write goes through it
+     * too (#905: ordered behind an unconfirmed RUNNING insert).
      */
-    private suspend fun executeChild(
-        node: ExecutableNode,
+    private fun childEmitter(
         record: PipelineRecord,
         request: ExecuteRequest,
         workspaceId: UUID,
-    ): ExecutionResult {
-        val emitter =
-            WebEventEmitter(
-                context =
-                    ExecutionContext(
-                        pipelineId = record.id,
-                        pipelineVersion = request.pipelineVersion,
-                        userId = request.userId,
-                        executedByKeyKind = request.executedByKeyKind,
-                        // Non-null by `childRequest`; the elvis is the type's, not a second policy.
-                        correlationId = request.correlationId ?: UUID.randomUUID(),
-                        triggeredVia = ExecutionTrigger.PIPELINE,
-                        parametersJson = ExecutorJson.mapper.writeValueAsString(request.parameters),
-                        workspaceId = workspaceId,
-                        parentExecutionId = request.parentExecutionId,
-                        parentNodeId = request.parentNodeId,
-                        rootExecutionId = request.rootExecutionId,
-                    ),
-                stream = null,
-                streams = streams,
-                eventLog = eventLog,
-                eventRepository = eventRepository,
-                executionRepository = executionRepository,
-                persistenceDispatcher = persistenceDispatcher,
-                lifecycleWriteTimeout = java.time.Duration.ofSeconds(executorConfig.lifecycleWriteTimeoutSeconds.toLong()),
-                metrics = executorMetrics,
-                eventRecorder = eventRecorder,
-            )
-        return try {
+    ): WebEventEmitter =
+        WebEventEmitter(
+            context =
+                ExecutionContext(
+                    pipelineId = record.id,
+                    pipelineVersion = request.pipelineVersion,
+                    userId = request.userId,
+                    executedByKeyKind = request.executedByKeyKind,
+                    // Non-null by `childRequest`; the elvis is the type's, not a second policy.
+                    correlationId = request.correlationId ?: UUID.randomUUID(),
+                    triggeredVia = ExecutionTrigger.PIPELINE,
+                    parametersJson = ExecutorJson.mapper.writeValueAsString(request.parameters),
+                    workspaceId = workspaceId,
+                    parentExecutionId = request.parentExecutionId,
+                    parentNodeId = request.parentNodeId,
+                    rootExecutionId = request.rootExecutionId,
+                ),
+            stream = null,
+            streams = streams,
+            eventLog = eventLog,
+            eventRepository = eventRepository,
+            executionRepository = executionRepository,
+            persistenceDispatcher = persistenceDispatcher,
+            lifecycleWriteTimeout = java.time.Duration.ofSeconds(executorConfig.lifecycleWriteTimeoutSeconds.toLong()),
+            metrics = executorMetrics,
+            eventRecorder = eventRecorder,
+        )
+
+    /**
+     * Runs the child through a per-run executor with its recording [emitter], and maps a child
+     * failure onto the parent node's catalogued code. Cancellation propagates untouched (design
+     * §4.3, D8).
+     */
+    private suspend fun executeChild(
+        node: ExecutableNode,
+        request: ExecuteRequest,
+        workspaceId: UUID,
+        emitter: WebEventEmitter,
+    ): ExecutionResult =
+        try {
             (executorFactory?.invoke(emitter) ?: newExecutor(emitter, workspaceId)).execute(request)
         } catch (e: CancellationException) {
             // Family cancellation (design §4.3, D8) — never relabelled as a node failure.
@@ -367,7 +378,6 @@ class SubPipelineExecutionRunner(
         ) {
             throw childFailure(node, request.executionId, e)
         }
-    }
 
     /**
      * §12.9 makes a missing delivery unreachable (output is only legal on a child WITH a caller
@@ -682,13 +692,19 @@ class SubPipelineExecutionRunner(
      * The §10.2 result-history columns, as [McpRecordingExecutionRunner] records them: a child
      * whose result streamed `direct` has no stored result (early return); a side-effect child's
      * own materialized result lands here. Bookkeeping only — a failure is logged, never fails
-     * the completed child.
+     * the completed child. #905: the write goes through the child's [emitter], ordered behind an
+     * unconfirmed RUNNING insert.
      */
-    private fun recordResultColumns(result: ExecutionResult) {
+    private fun recordResultColumns(
+        result: ExecutionResult,
+        emitter: WebEventEmitter,
+    ) {
         val ref = result.resultRef ?: return
         runCatching {
             val view = resultStore.describe(ref) ?: return
-            executionRepository.recordResult(result.executionId, view.totalRows, view.bytes, view.schema)
+            emitter.writeBehindUnconfirmedInsert(result.executionId, RESULT_COLUMNS_WRITE) {
+                executionRepository.recordResult(result.executionId, view.totalRows, view.bytes, view.schema)
+            }
         }.onFailure { log.warn("Result columns for child execution {} not recorded.", result.executionId, it) }
     }
 
