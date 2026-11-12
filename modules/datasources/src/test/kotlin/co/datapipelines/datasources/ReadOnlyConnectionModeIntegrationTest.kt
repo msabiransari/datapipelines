@@ -332,7 +332,7 @@ internal abstract class ReadOnlyConnectionModeContract {
         connection: Connection,
         discard: (Connection) -> Unit,
         block: () -> T,
-    ): T = ReadOnlyConnectionMode.within(connection, subject.dialect, discard, block)
+    ): T = ReadOnlyConnectionMode.within(connection, subject.dialect, discard, block = block)
 
     /** The pool's own discard of the REAL lease, whatever wrapper the mode was handed. */
     private fun discardOf(lease: Connection): (Connection) -> Unit = { pool.discard(lease) }

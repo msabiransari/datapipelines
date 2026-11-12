@@ -4,7 +4,7 @@ import co.datapipelines.typesystem.Dialect
 import java.sql.Connection
 
 /**
- * The per-lease **read-only mode** (#463; dag-executor.md §10's per-dialect table): a leased
+ * The per-lease **read-only mode** (#463; dag-executor.md §8.2's per-dialect table): a leased
  * connection asks its DATABASE to refuse writes for exactly the span of one block, on the
  * execution paths that promise to read only — dashboard sources (refresh and draft preview),
  * published GET endpoints, and every child those paths compose.
