@@ -2,6 +2,7 @@ package co.datapipelines.browser
 
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.Route
+import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
@@ -91,7 +92,11 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         page.waitForFunction("() => window.DatapipelinesSidebarTrees instanceof Map")
         pinShellNodes()
         val requests = mutableListOf<String>()
-        page.onRequest { if (it.url().contains("/tree")) requests += it.url() }
+        // #932: count only the sidebar's REST tree reads (`/api/v1/<family>/tree` and `tree/search`), as
+        // RoleVisibilityBrowserTest does. A bare `contains("/tree")` also matched page scripts such as
+        // `/js/dependencies/tree-view.js`, which the pipeline editor's on-mount catalog fetches and then executes on
+        // its first load, so the pipelines leg counted two script loads as tree requests.
+        page.onRequest { if (it.url().contains("/api/v1/") && it.url().contains("/tree")) requests += it.url() }
         listOf("pipelines", "templates", "dashboards", "visualizations", "parameter-sets").forEach { family ->
             val panel = "#nav-tree-$family"
             openBrowserTree(family)
@@ -138,7 +143,9 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
                     "window.__familyRow===document.querySelector('#nav-tree-'+family+' [role=treeitem]')",
                 family,
             ) shouldBe true
-            requests.size shouldBe before
+            withClue("$family: tree requests added between its leaf click and the assertion: ${requests.drop(before)}") {
+                requests.size shouldBe before
+            }
         }
     }
 
