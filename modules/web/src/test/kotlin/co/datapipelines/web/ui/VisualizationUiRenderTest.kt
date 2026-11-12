@@ -136,8 +136,10 @@ class VisualizationUiRenderTest {
         body shouldContain "data-lazy-url=\"/partials/visualizations/$vizId/used-by\""
         // #876 G6: the Dependencies pane is a mount over the SELECTED version, not a lazy partial.
         body shouldContain ">Dependencies</button>"
-        Regex("<div class=\"dp-deps\" data-dp-deps data-family=\"visualization\"[^>]*data-name=\"acme/charts/revenue\"[^>]*data-version=\"3\"")
-            .containsMatchIn(body) shouldBe true
+        Regex(
+            "<div class=\"dp-deps\" data-dp-deps data-family=\"visualization\"" +
+                "[^>]*data-name=\"acme/charts/revenue\"[^>]*data-version=\"3\"",
+        ).containsMatchIn(body) shouldBe true
         Regex("id=\"viz-pane-dependencies\"[^>]*data-lazy-url").containsMatchIn(body) shouldBe false
         val catalog = body.substringAfter("<template data-page-assets>").substringBefore("</template>")
         Regex("src=\"(/[^\"]+)\"").findAll(catalog).map { it.groupValues[1] }.toList().takeLast(8) shouldBe DEPENDENCY_CATALOG

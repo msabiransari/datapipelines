@@ -422,7 +422,7 @@ class PipelineWorkspaceTabsBrowserTest : BrowserSuite() {
             page.selectOption("#themeSelect", theme)
             page.waitForTimeout(300.0)
             openWorkspace(id)
-            for (tab in listOf("#pe-tab-overview", "#pe-tab-parameters", "#pe-tab-runs", "#pe-tab-usage", "#pe-tab-versions")) {
+            for (tab in listOf("overview", "parameters", "runs", "usage", "dependencies", "versions").map { "#pe-tab-$it" }) {
                 page.locator(tab).click()
                 page.waitForTimeout(300.0)
             }

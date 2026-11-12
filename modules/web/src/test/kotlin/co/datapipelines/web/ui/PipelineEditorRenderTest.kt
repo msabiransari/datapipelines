@@ -277,7 +277,8 @@ class PipelineEditorRenderTest {
         pane shouldContain "data-version=\"1\""
         pane shouldContain "x-bind:data-version=\"viewedVersion\""
         Regex("id=\"pe-pane-dependencies\"[^>]*\\shidden\\s").containsMatchIn(html) shouldBe true
-        val catalog = html.substringAfter("<template id=\"pe-runtime-scripts\" data-page-assets=\"on-mount\">").substringBefore("</template>")
+        val catalog =
+            html.substringAfter("<template id=\"pe-runtime-scripts\" data-page-assets=\"on-mount\">").substringBefore("</template>")
         val sources = Regex("src=\"(/[^\"]+)\"").findAll(catalog).map { it.groupValues[1] }.toList()
         sources.takeLast(5) shouldBe DEPENDENCY_MODULES
         DEPENDENCY_CATALOG.take(3).forEach { vendor -> sources.count { it == vendor } shouldBe 1 }
