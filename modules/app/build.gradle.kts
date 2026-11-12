@@ -41,6 +41,8 @@ dependencies {
     // Metadata-DB driver at runtime.
     runtimeOnly(libs.postgresql)
 
+    // #756 — the shared snapshot log capture (module-structure §5.23); test-only, testImplementation alone.
+    testImplementation(project(":modules:log-capture"))
     testImplementation(libs.spring.boot.starter.test)
     // The @SpringBootTest smoke test brings its own Postgres and Redis so it is
     // self-contained — it must not depend on deploy/compose.laptop-infra.yml being up.

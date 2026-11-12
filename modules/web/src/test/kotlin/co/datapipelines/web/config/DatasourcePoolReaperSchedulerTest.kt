@@ -5,7 +5,7 @@ import ch.qos.logback.classic.Logger
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.pooling.PoolLifecycleMetrics
 import co.datapipelines.datasources.pooling.ReapOutcome
-import co.datapipelines.web.capturingLogEvents
+import co.datapipelines.logcapture.capturingLogEvents
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.mockk.every

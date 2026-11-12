@@ -7,9 +7,10 @@ import java.io.File
  * #484 — a raw Logback `ListAppender` exposes a plain `ArrayList` that every logging thread appends
  * to, so a test that reads it while another thread can still log is a `ConcurrentModificationException`
  * or a torn read waiting for a slow runner (#362, #391). Every capture in the module and integration
- * test sources therefore either reads detached snapshots through its module's `SnapshotListAppender`
- * or is a raw capture marked `// raw-list-appender: synchronous — <reason>` — on its construction line
- * when the line stays within 120 columns, else alone on the line directly above it.
+ * test sources therefore either reads detached snapshots through the shared `SnapshotListAppender` of
+ * the test-only `modules/log-capture` (#756; module-structure §5.23) or is a raw capture marked
+ * `// raw-list-appender: synchronous — <reason>` — on its construction line when the line stays within
+ * 120 columns, else alone on the line directly above it.
  * This scan refuses any other raw construction, naming it `path:line`, so the inventory cannot grow
  * unclassified again.
  *
@@ -17,6 +18,10 @@ import java.io.File
  * by ktlint's chain wrapping, leaving `.ListAppender<…>()` on its own line) followed by its call, an
  * anonymous or named subclass included; an import alias or a typealias of the class is refused too,
  * since a construction through it would carry neither name. Type positions alone construct nothing.
+ *
+ * The shared module's MAIN sources are scanned too (#756): its helper file is exempt by name, so the scan
+ * must read it for that exemption to be exercised, and any other raw construction placed there is refused
+ * like one in a test source. No second copy of the helper or its test may exist outside that module.
  */
 class RawListAppenderGuardTest {
     private val repoRoot: File
@@ -26,10 +31,11 @@ class RawListAppenderGuardTest {
                 .parentFile
 
     private fun testSources(): List<File> =
-        listOf("modules", "tests")
-            .flatMap { parent -> childDirectories(repoRoot.resolve(parent)) }
-            .map { it.resolve("src/test/kotlin") }
-            .filter { it.isDirectory }
+        (
+            listOf("modules", "tests")
+                .flatMap { parent -> childDirectories(repoRoot.resolve(parent)) }
+                .map { it.resolve("src/test/kotlin") } + repoRoot.resolve(SHARED_MAIN_SOURCES)
+        ).filter { it.isDirectory }
             .flatMap { root -> root.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList() }
 
     private fun childDirectories(parent: File): List<File> = parent.listFiles { child -> child.isDirectory }.orEmpty().toList()
@@ -43,7 +49,8 @@ class RawListAppenderGuardTest {
         assertEquals(
             emptyList<String>(),
             offenders,
-            "raw ListAppender captures with no class marker — read snapshots through the module's SnapshotListAppender, " +
+            "raw ListAppender captures with no class marker — read snapshots through the shared SnapshotListAppender " +
+                "(co.datapipelines.logcapture, testImplementation(project(\":modules:log-capture\"))), " +
                 "or, when only the test thread logs between attach and the last read, mark the construction " +
                 "'// $MARKER<reason>' on its line or alone on the line above (DEVELOPMENT.md §9.6)",
         )
@@ -51,8 +58,35 @@ class RawListAppenderGuardTest {
 
     @Test
     fun `the scan is not vacuous - it reads the files that hold the captures`() {
-        val mentioning = testSources().count { it.readText().contains("ListAppender") }
+        val scanned = testSources()
+        val mentioning = scanned.count { it.readText().contains("ListAppender") }
         assertTrue(mentioning >= MENTIONING_FLOOR, "only $mentioning test sources mention ListAppender — is the glob wrong?")
+        val shared = scanned.map { it.relativeTo(repoRoot).invariantSeparatorsPath }
+        assertTrue(
+            "$SHARED_MAIN_SOURCES/co/datapipelines/logcapture/$HELPER_FILE" in shared,
+            "the shared helper is not among the scanned files, so its name exemption is never exercised " +
+                "— is $SHARED_MAIN_SOURCES scanned?",
+        )
+    }
+
+    @Test
+    fun `no copy of the helper or its test exists outside the shared module`() {
+        val names = setOf(HELPER_FILE, "SnapshotListAppenderTest.kt")
+        val copies =
+            listOf("modules", "tests")
+                .flatMap { parent -> childDirectories(repoRoot.resolve(parent)) }
+                .filter { it.relativeTo(repoRoot).invariantSeparatorsPath != SHARED_MODULE }
+                .map { it.resolve("src") }
+                .filter { it.isDirectory }
+                .flatMap { src -> src.walkTopDown().filter { it.isFile && it.name in names }.toList() }
+                .map { it.relativeTo(repoRoot).invariantSeparatorsPath }
+                .sorted()
+        assertEquals(
+            emptyList<String>(),
+            copies,
+            "a module-local log-capture copy — delete it and depend on the shared module: " +
+                "testImplementation(project(\":modules:log-capture\")), import co.datapipelines.logcapture.* (#756)",
+        )
     }
 
     @Test
@@ -151,7 +185,15 @@ class RawListAppenderGuardTest {
         const val MARKER = "raw-list-appender: synchronous — "
         const val HELPER_FILE = "SnapshotListAppender.kt"
 
-        /** 51 files at #484's inventory; 40 survives migrations and deletions, and fails on a wrong glob. */
+        /** The one shared log-capture module (#756) — a `modules/` project whose helper lives in MAIN sources. */
+        const val SHARED_MODULE = "modules/log-capture"
+        const val SHARED_MAIN_SOURCES = "$SHARED_MODULE/src/main/kotlin"
+
+        /**
+         * 51 files at #484's inventory; 55 after #756 (53 test sources once the nine module copies and their
+         * nine tests were deleted, plus the shared module's helper and its test). 40 survives migrations and
+         * deletions, and fails on a wrong glob.
+         */
         const val MENTIONING_FLOOR = 40
 
         val CONSTRUCTION = Regex("""(?:ch\.qos\.logback\.core\.read\.)?\bListAppender(?:<[^<>()]*(?:<[^<>()]*>)?[^<>()]*>)?\s*\(""")

@@ -6,8 +6,8 @@ import co.datapipelines.datasources.DatasourceErrorCodes
 import co.datapipelines.datasources.DatasourceGrantRepository
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.ManagedLakeCatalog
+import co.datapipelines.logcapture.capturingLogEvents
 import co.datapipelines.typesystem.guard.WriterBusy
-import co.datapipelines.web.capturingLogEvents
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.mockk.every

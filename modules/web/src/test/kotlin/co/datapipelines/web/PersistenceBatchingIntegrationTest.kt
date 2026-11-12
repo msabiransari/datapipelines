@@ -20,6 +20,7 @@ import co.datapipelines.executor.ExecutorConfig
 import co.datapipelines.executor.ExecutorJson
 import co.datapipelines.executor.InMemoryCancellationRegistry
 import co.datapipelines.executor.RedisCancellationFlags
+import co.datapipelines.logcapture.SnapshotListAppender
 import co.datapipelines.persistence.BatchingConfig
 import co.datapipelines.persistence.BatchingWriter
 import co.datapipelines.web.config.ExecutionDrainLifecycle

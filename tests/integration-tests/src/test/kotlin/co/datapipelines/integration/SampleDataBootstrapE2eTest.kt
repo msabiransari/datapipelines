@@ -2,6 +2,7 @@ package co.datapipelines.integration
 
 import ch.qos.logback.classic.Logger
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.logcapture.capturingLogEvents
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldBeNull

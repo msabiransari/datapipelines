@@ -5,7 +5,7 @@ import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import co.datapipelines.DatapipelinesApplication
 import co.datapipelines.SharedPostgres
-import co.datapipelines.SnapshotListAppender
+import co.datapipelines.logcapture.SnapshotListAppender
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test

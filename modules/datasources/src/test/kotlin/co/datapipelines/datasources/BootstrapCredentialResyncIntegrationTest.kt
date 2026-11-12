@@ -1,8 +1,6 @@
 package co.datapipelines.datasources
 
 import ch.qos.logback.classic.Logger
-import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.datasources.crypto.CredentialEncryptor
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -455,7 +453,7 @@ class BootstrapCredentialResyncIntegrationTest {
      * logging — so the raw `appender.list` iteration was a latent `ConcurrentModificationException`.
      */
     private fun <T> capturingLogs(block: () -> T): Pair<T, List<String>> {
-        val appender = co.datapipelines.datasources.SnapshotListAppender()
+        val appender = co.datapipelines.logcapture.SnapshotListAppender()
         val root = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
         root.addAppender(appender)
         try {

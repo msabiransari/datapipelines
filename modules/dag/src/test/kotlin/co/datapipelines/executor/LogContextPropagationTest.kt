@@ -3,6 +3,7 @@ package co.datapipelines.executor
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import co.datapipelines.events.ExecutionStarted
+import co.datapipelines.logcapture.SnapshotListAppender
 import co.datapipelines.pipeline.NodeType
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.scripting.EvaluationLimits
