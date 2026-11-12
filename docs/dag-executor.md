@@ -1,6 +1,6 @@
 # DAG Executor Specification
 
-**Status:** v1.40 (revised — see Change Log)
+**Status:** v1.41 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract spec](pipeline-contract.md), [Templates spec](templates.md), [Datasources spec](datasources.md), [Staging spec](staging.md)
 **Last updated:** 2026-11-12
@@ -799,9 +799,10 @@ After the last batch the declared invariants are evaluated over `{ rows, rejects
 `max-input-rows` on the COMBINED count: rows + rejects + table inputs, and in row mode also
 the caller output's buffered rows and rejects plus the streamed input table — so an input and
 an output each just over half the cap refuse together though each alone is under it
-(`pipeline.script.invariants_too_large`). Known gap (recorded, not built): a `table` caller
-output's gated rows are NOT part of the count — only its inputs are. A template that declares
-no invariants streams without any read-back. Then `strict: true` with a
+(`pipeline.script.invariants_too_large`). A `table` caller output writes no tempdb table, so its
+gated rows count with its inputs (a tempdb output's gated rows are its written table, counted
+once). A template that declares no invariants streams without any read-back and without this
+bound. Then `strict: true` with a
 non-empty rejects table fails with `pipeline.script.rejects_strict` (count + first ten
 reasons). Failure after a write began is atomic (record §5.5): staging rolls back the partial
 table it is writing ([Staging §4.3](staging.md)) and the executor drops the **other** completed
@@ -1656,6 +1657,7 @@ document a customer can read before they need it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-12 | v1.41 | #821 invariants count a table caller output | §6.3.4 invariants paragraph: the recorded gap is closed — a `table` caller output's gated rows count with its inputs toward `max-input-rows` (refused as `pipeline.script.invariants_too_large`), a tempdb output's gated rows are not counted twice, and nothing changes when no invariant is declared (record §5.4: rows + rejects + table inputs). |
 | 2026-11-12 | v1.40 | #463 review F1 | §8.2: distinguish measured rows from the fixed LAKE, ORACLE and MSSQL limits, record the host-run MSSQL experiment, and state the lifecycle and write-refusal claims at their measured scope. |
 | 2026-11-12 | v1.39 | #463 read-only execution at the connection | §8.2: read-only paths (dashboard sources, published GET endpoints, their composed children) run each DQL node's datasource statements in the per-lease read-only mode; the restore-and-evict guarantee, the failure codes, the write-shaped-DQL behaviour change, the honest limit, and the measured per-dialect table (`DATABASE` on Postgres, MySQL and SQLite) held to the code by `ReadOnlyEnforcementSpecDriftTest`. |
 | 2026-11-12 | v1.38 | 325 (#325) | §10.1: a terminal write never overtakes its unconfirmed RUNNING insert — the UPDATE is ordered behind the insert's completion handle (dispatched after it lands, dropped with a WARN if it fails), counted once, no second lifecycle wait; the composition no longer ends as a sweep-marked ABORTED. A fail-closed run's late insert is still reaped by the sweep beside its `record_unwritable` trail (stated). |
