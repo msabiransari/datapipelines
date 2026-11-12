@@ -155,6 +155,14 @@
     var consent = consentMet(boxes);
     var plan = container.querySelector('[data-release-plan]');
     var admitted = planAdmits(plan ? plan.getAttribute('data-release-submittable') : null);
+    // A child's reason is optional, but a nonblank one uses the root override's trimmed-character floor.
+    var childReasons = container.querySelectorAll('[name="check_override_reason"]');
+    for (var r = 0; r < childReasons.length; r++) {
+      var child = childReasons[r];
+      if (child.value.trim() !== '' && !minCharsMet(child.value, parseInt(child.getAttribute('minlength') || '10', 10))) {
+        admitted = false;
+      }
+    }
     for (var i = 0; i < buttons.length; i++) {
       var button = buttons[i];
       var needsReason = button.hasAttribute('data-min-chars-submit');
@@ -179,7 +187,7 @@
       var onGateInput = function (event) {
         var source = event.target;
         if (!source || !source.matches) return;
-        if (!source.matches('[data-min-chars-input], [data-consent-input]')) return;
+        if (!source.matches('[data-min-chars-input], [data-consent-input], [name="check_override_reason"]')) return;
         evaluateReleaseGates(container);
       };
       container.addEventListener('input', onGateInput);

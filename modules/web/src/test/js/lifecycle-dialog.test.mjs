@@ -10,6 +10,8 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import fs from "node:fs";
+import vm from "node:vm";
 
 const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -100,4 +102,50 @@ test("the plan arm admits only the literal true, and an absent plan admits", () 
   assert.equal(dialogs.planAdmits(undefined), true);
   assert.equal(dialogs.planAdmits("false"), false);
   assert.equal(dialogs.planAdmits("yes"), false); // any other word fails closed
+});
+
+test("each optional child override uses trimmed characters and rejudges the live footer", () => {
+  const swaps = {};
+  const listeners = {};
+  const reason = {
+    value: "",
+    getAttribute: () => "10",
+    matches: selector => selector.includes('[name="check_override_reason"]'),
+  };
+  const otherReason = { ...reason, value: "" };
+  const button = { disabled: true, hasAttribute: name => name === "data-consent-submit" };
+  const container = {
+    id: "dp-dialog", dataset: {}, children: [{}],
+    addEventListener: (name, listener) => { listeners[name] = listener; },
+    querySelector: selector => selector === "[data-release-plan]" ? { getAttribute: () => "true" } : null,
+    querySelectorAll: selector => {
+      if (selector === '[name="check_override_reason"]') return [reason, otherReason];
+      if (selector === "[data-min-chars-submit], [data-consent-submit]") return [button];
+      return [];
+    },
+  };
+  vm.runInNewContext(fs.readFileSync(path.resolve(here, "../../main/resources/static/js/lifecycle-dialog.js"), "utf8"), {
+    window: { addEventListener() {} },
+    document: {
+      addEventListener() {}, querySelectorAll: () => [],
+      body: { addEventListener: (name, listener) => { swaps[name] = listener; } },
+    },
+  });
+  swaps["htmx:afterSwap"]({ detail: { target: container } });
+  assert.equal(button.disabled, false, "empty optional reasons admit");
+  reason.value = "         x";
+  listeners.input({ target: reason });
+  assert.equal(button.disabled, true, "padding cannot satisfy the ten-character floor");
+  reason.value = "  0123456789  ";
+  listeners.input({ target: reason });
+  assert.equal(button.disabled, false);
+  otherReason.value = "short";
+  listeners.change({ target: otherReason });
+  assert.equal(button.disabled, true, "every child reason is judged independently");
+  otherReason.value = "";
+  listeners.input({ target: otherReason });
+  assert.equal(button.disabled, false);
+  reason.value = "          ";
+  listeners.input({ target: reason });
+  assert.equal(button.disabled, false, "a blank reason is no override");
 });

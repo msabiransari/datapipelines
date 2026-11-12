@@ -123,7 +123,7 @@ class ReleaseDialogRound4BrowserTest : DependencyPaneBrowserSuite() {
 
         // The row's own override, typed into its collapsed field: released, the reason on the SOURCE's row alone.
         override.locator("summary").click()
-        override.locator("textarea[name='check_override_reason']").fill(REASON)
+        assertOptionalReasonMinimum(override)
         dialog.locator("button[type=submit]").click()
         page.waitForURL("**/dashboards/$boardId*ok=released*")
         pipelineStatus(sourceId) shouldBe "RELEASED"
@@ -136,6 +136,15 @@ class ReleaseDialogRound4BrowserTest : DependencyPaneBrowserSuite() {
     }
 
     // ------------------------------------------------------------------ R1
+
+    private fun assertOptionalReasonMinimum(override: Locator) {
+        override.locator("textarea[name='check_override_reason']").fill("         x")
+        page.waitForFunction("() => document.querySelector('#dp-dialog button[type=submit]').disabled")
+        override.locator("textarea[name='check_override_reason']").fill("")
+        page.waitForFunction("() => !document.querySelector('#dp-dialog button[type=submit]').disabled")
+        override.locator("textarea[name='check_override_reason']").fill(REASON)
+        page.waitForFunction("() => !document.querySelector('#dp-dialog button[type=submit]').disabled")
+    }
 
     private fun blockedPin(
         root: String,
