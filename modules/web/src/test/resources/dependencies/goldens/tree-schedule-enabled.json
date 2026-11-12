@@ -1,0 +1,150 @@
+{
+  "schema_version": 1,
+  "correlation_id": "00000000-0000-4000-8000-000000000000",
+  "data": {
+    "schema_version": 1,
+    "roots": [
+      "n0"
+    ],
+    "nodes": [
+      {
+        "node_id": "n0",
+        "entity_id": "00000000-0000-4000-8000-000000000001",
+        "family": "schedule",
+        "name": "test/tree875/golden/schedule_enabled",
+        "display_name": null,
+        "subtype": null,
+        "version": {
+          "kind": "revision",
+          "number": 1
+        },
+        "resolution": "resolved",
+        "lifecycle": null,
+        "operational": {
+          "condition": "enabled"
+        },
+        "current_version": null,
+        "body_hash": null,
+        "capabilities": {
+          "release": "NONE",
+          "promotion": "NONE"
+        }
+      },
+      {
+        "node_id": "n1",
+        "entity_id": "00000000-0000-4000-8000-000000000002",
+        "family": "pipeline",
+        "name": "test/tree875/golden/source",
+        "display_name": null,
+        "subtype": null,
+        "version": {
+          "kind": "artifact",
+          "number": 1
+        },
+        "resolution": "resolved",
+        "lifecycle": "RELEASED",
+        "operational": null,
+        "current_version": 1,
+        "body_hash": "0000000000000000000000000000000000000000000000000000000000000001",
+        "capabilities": {
+          "release": "ARTIFACT_RELEASE",
+          "promotion": "VERSIONED_ARTIFACT"
+        }
+      },
+      {
+        "node_id": "n2",
+        "entity_id": "00000000-0000-4000-8000-000000000003",
+        "family": "template",
+        "name": "test/tree875/golden/query.sql",
+        "display_name": null,
+        "subtype": null,
+        "version": {
+          "kind": "artifact",
+          "number": 1
+        },
+        "resolution": "resolved",
+        "lifecycle": "RELEASED",
+        "operational": null,
+        "current_version": 1,
+        "body_hash": "0000000000000000000000000000000000000000000000000000000000000002",
+        "capabilities": {
+          "release": "ARTIFACT_RELEASE",
+          "promotion": "VERSIONED_ARTIFACT"
+        }
+      },
+      {
+        "node_id": "n3",
+        "entity_id": "tree875_golden",
+        "family": "datasource",
+        "name": "tree875_golden",
+        "display_name": "Dependency goldens",
+        "subtype": "H2",
+        "version": {
+          "kind": "unversioned",
+          "number": null
+        },
+        "resolution": "resolved",
+        "lifecycle": null,
+        "operational": {
+          "readonly": false
+        },
+        "current_version": null,
+        "body_hash": null,
+        "capabilities": {
+          "release": "NONE",
+          "promotion": "NONE"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "edge_id": "e0",
+        "from": "n0",
+        "to": "n1",
+        "relationship": "EXECUTOR_TARGET",
+        "source_path": "/pipeline",
+        "requested_selector": {
+          "kind": "exact_version",
+          "number": 1
+        },
+        "resolved_version": 1,
+        "constraints": [ ]
+      },
+      {
+        "edge_id": "e1",
+        "from": "n1",
+        "to": "n2",
+        "relationship": "TEMPLATE",
+        "source_path": "/nodes/0/template",
+        "requested_selector": {
+          "kind": "exact_version",
+          "number": 1
+        },
+        "resolved_version": 1,
+        "constraints": [ ]
+      },
+      {
+        "edge_id": "e2",
+        "from": "n1",
+        "to": "n3",
+        "relationship": "DATASOURCE",
+        "source_path": "/nodes/0/source",
+        "requested_selector": {
+          "kind": "entity",
+          "number": null
+        },
+        "resolved_version": null,
+        "constraints": [
+          {
+            "kind": "datasource_access",
+            "mode": "read"
+          }
+        ]
+      }
+    ],
+    "diagnostics": [ ],
+    "complete": true,
+    "acyclic": true,
+    "observed_at": "2026-01-01T00:00:00Z"
+  }
+}

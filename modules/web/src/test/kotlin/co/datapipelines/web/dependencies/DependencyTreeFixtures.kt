@@ -115,6 +115,13 @@ internal class StubFamily(
     val calls = ArrayList<List<ObjectRequest>>()
     var beforeBatch: (List<ObjectRequest>, ResolveContext) -> Unit = { _, _ -> }
 
+    /** Back to empty: no objects, no calls, no hook — one stub reused for several worlds. */
+    fun clear() {
+        objects.clear()
+        calls.clear()
+        beforeBatch = { _, _ -> }
+    }
+
     fun put(
         request: ObjectRequest,
         lifecycle: Lifecycle? = Lifecycle.RELEASED,

@@ -3040,6 +3040,7 @@ fingerprint or a hidden count.
 | Root missing, in another workspace, ungranted, or not admitted by the promoter's lens | that family's existing not-found code and 404, identical for missing and hidden roots |
 | A traversal limit (depth, nodes, edges, diagnostics, payload budget) reached | `200` with `complete: false`, `acyclic: null` and a `LIMIT` diagnostic naming the limit |
 | Unsupported nodes inside the closure | `200` with an `UNSUPPORTED_FAMILY` diagnostic and `complete: false` |
+| A DISCARDED version in the closure, the root included | `200` with a `DISCARDED` diagnostic on its node; its own dependencies are not expanded, so `complete: false` and `acyclic: null` |
 | The metadata walk exceeds `metadata-timeout-seconds`, a statement exceeds `statement-timeout-seconds`, or a provider read fails | `503 dependencies.metadata.unavailable`, `Retry-After: 5`, no partial tree; logged once at WARN without a stack |
 | The projected payload is still over `max-wire-bytes` after the limits | `503 dependencies.response.too_large`; logged at ERROR with the stack |
 | Any other failure | the platform's existing generic 500 envelope |
@@ -3049,13 +3050,16 @@ The bounds are the `datapipelines.release.dependencies.*` keys
 read-only READ COMMITTED transaction. Every provider statement is bounded by the lesser of
 `statement-timeout-seconds` and the time left on the one `metadata-timeout-seconds` deadline.
 
+Every case above is pinned by an enveloped golden answer, one file per case, in
+`modules/web/src/test/resources/dependencies/goldens/`.
+
 ---
 
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-11 | v2.116 | #875 dependency trees (G4) | **New §25 Dependency trees, additive:** the eight session-only routes `GET /api/v1/dependencies/<family>`, each with its family's READ permission, return the bounded dependency closure of one root (`name` + `version`, `id` for a schedule, `name` alone for a datasource) as the frozen dependency-graph wire contract. Refusals are catalogued in pipeline-contract §13.26; a hidden or missing root answers its family's own not-found. No key kind is admitted. |
+| 2026-11-11 | v2.116 | #875 dependency trees (G4) | **New §25 Dependency trees, additive:** the eight session-only routes `GET /api/v1/dependencies/<family>`, each with its family's READ permission, return the bounded dependency closure of one root (`name` + `version`, `id` for a schedule, `name` alone for a datasource) as the frozen dependency-graph wire contract. Refusals are catalogued in pipeline-contract §13.26; a hidden or missing root answers its family's own not-found. No key kind is admitted. A DISCARDED version is a terminal node (`complete: false`, `acyclic: null`). Each case is pinned by an enveloped golden. |
 | 2026-11-11 | v2.115 | #896 review F2 | **§9.1:** distinguish `global: true` (super-admin-only) from `global: false` (accepted on create below super admin); the update rule in §9.4 still requires super admin for either value. No wire or authorization change. |
 | 2026-11-11 | v2.114 | #896 review F1 | **§9.3:** a by-name read is not-found when the datasource is not granted to the active workspace, whoever owns it. Ownership by another workspace alone does not make a granted datasource invisible. |
 | 2026-11-11 | v2.113 | #896 docs: datasource ownership and grants as they are since V23 | **Text only, no wire change.** §9.1's binding paragraph says what `global`/`workspace` set since V23 — the OWNER (`global: true` = an instance datasource, owned by no workspace) — and that visibility is the grant (a workspace-owned registration is granted to its owner; an instance datasource to nobody until a super admin grants it); its refusal sentence names super admin and `global: true` with `workspace`. §9.2's listing is the datasources GRANTED to the active workspace, not "bound plus all global ones"; §9.3's `workspace` field is the owning workspace's name; §9.4/§9.5's D8 gates say an INSTANCE datasource's mutation (a `readonly` flip and a delete included) needs super admin. |
