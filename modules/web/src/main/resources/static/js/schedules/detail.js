@@ -43,6 +43,7 @@
 
   function paneMessage(title, description) {
     var view = pane();
+    if (window.DependenciesMount) window.DependenciesMount.unmount(view);
     S.clear(view);
     var t = document.createElement("p");
     t.className = "ds-empty-title";
@@ -131,6 +132,7 @@
     renderDependencies(content, s, depsOpen);
     renderRuns(content, c);
 
+    if (window.DependenciesMount) window.DependenciesMount.unmount(view);
     S.clear(view);
     view.appendChild(content);
     // #876 G6 U2: bind the cloned pane (the page's own catalog mount scans main once; a clone arrives later).

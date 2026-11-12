@@ -47,6 +47,7 @@ class DependenciesScheduleBrowserTest : DependencyPaneBrowserSuite() {
             url.path shouldBe "${TREE_ROUTE}schedule"
             url.rawQuery shouldBe "id=$first"
         }
+        val firstGraph = page.evaluateHandle("s => document.querySelector(s + ' .dp-deps-canvas')._cyreg.cy", scope)
         showList(scope)
         val rows = listRows(scope)
         withClue("the rows: $rows") {
@@ -71,12 +72,44 @@ class DependenciesScheduleBrowserTest : DependencyPaneBrowserSuite() {
         )
         page.locator(scope).getAttribute("open") shouldBe null
         paneState(scope) shouldBe "idle"
+        withClue("selecting another schedule destroys the removed dependency graph") {
+            firstGraph.evaluate("cy => cy.destroyed()") shouldBe true
+        }
+        firstGraph.dispose()
         page.waitForTimeout(SETTLE_MS)
         treeRequests shouldHaveSize 1
         page.locator("$scope > summary").click()
         awaitSettled(scope) shouldBe "ready"
         treeRequests shouldHaveSize 2
         URI(treeRequests[1]).rawQuery shouldBe "id=$second"
+        drainCspViolations() shouldBe emptyList()
+    }
+
+    @Test
+    fun `a revision releases the replaced graph and keeps the Dependencies section open`() {
+        startTrace()
+        val root = ready("depschedrev")
+        val pipeline = "$root/jobs/rows"
+        releasedPipeline(page, pipeline)
+        val schedule = createSchedule(page, "$root/nightly/rows", pipeline)
+        countTreeRequests()
+        page.navigate("$baseUrl/schedules?id=$schedule")
+        page.locator("$scope > summary").click()
+        awaitSettled(scope) shouldBe "ready"
+        val graph = page.evaluateHandle("s => document.querySelector(s + ' .dp-deps-canvas')._cyreg.cy", scope)
+
+        page.locator("#schedule-detail [data-verb='schedule-pause']").click()
+        page.waitForFunction(
+            "s => document.querySelector(s + ' [data-dp-deps]').getAttribute('data-revision') === '2'",
+            scope,
+        )
+        page.locator(scope).getAttribute("open") shouldBe ""
+        awaitSettled(scope) shouldBe "ready"
+        withClue("a schedule revision destroys the replaced dependency graph") {
+            graph.evaluate("cy => cy.destroyed()") shouldBe true
+        }
+        graph.dispose()
+        treeRequests shouldHaveSize 2
         drainCspViolations() shouldBe emptyList()
     }
 

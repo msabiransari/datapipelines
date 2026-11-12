@@ -383,7 +383,7 @@
     for (var i = 0; i < panes.length; i++) bind(panes[i]);
   }
 
-  /** History save: tear down every bound pane inside the saved root (CSP-clean, inert snapshot). */
+  /** History save or pane replacement: tear down every bound pane inside the root (CSP-clean, inert snapshot). */
   function beforeHistorySave(historyRoot) {
     live.slice().forEach(function (state) {
       if (!historyRoot || !historyRoot.contains || historyRoot.contains(state.pane)) state.teardown();
@@ -394,6 +394,8 @@
     scan(main || document.getElementById("app-main") || document.body);
   };
   window.DependenciesMount.scan = scan;
+  // Call before removing a client-rendered pane: abort its read, disconnect observers and destroy its graph.
+  window.DependenciesMount.unmount = beforeHistorySave;
   // The per-page view choice, for the unit test that drives this file in a VM (no page code calls these).
   window.DependenciesMount._views = { preferred: preferredView, remember: rememberView, key: VIEW_KEY, max: VIEW_PAGES_MAX };
   window.__dpHistoryStyleCleanups = window.__dpHistoryStyleCleanups || [];
