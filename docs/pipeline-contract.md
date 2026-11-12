@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.88 (revised — see Change Log)
+**Status:** v1.89 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-11-11
+**Last updated:** 2026-11-12
 
 ---
 
@@ -1474,7 +1474,7 @@ checks are §12.13's ten `pipeline.validation.script_…` rows.
 | `pipeline.script.precision_lost` | 500 | a numeric value does not fit its declared precision/scale (record §5.3, R1 — DECIMAL rounds half-even; BIGDECIMAL is exact). |
 | `pipeline.script.value_too_large` | 500 | a value/object output or a single string above the byte caps (record §4.3: `max-value-bytes`, `max-string-bytes`). |
 | `pipeline.script.invariant_failed` | 500 | an invariant evaluated to other than `true`; names the invariant and its message (record §5.4). |
-| `pipeline.script.invariants_too_large` | 500 | the invariants' read-back exceeded `max-input-rows` on the COMBINED count — the written outputs and rejects plus the table inputs together (row mode also adds the streamed input and, for a caller output, its buffered rows and rejects); an input and an output each under the cap can still refuse together (record §5.4 — an assertion over an unbounded table is a SQL node or a release check, not an invariant). |
+| `pipeline.script.invariants_too_large` | 500 | the invariants' read-back exceeded `max-input-rows` on the COMBINED count — the written outputs and rejects plus the table inputs together (row mode also adds the streamed input and, for a caller output, its buffered rows and rejects; table mode adds a caller output's gated rows); an input and an output each under the cap can still refuse together (record §5.4 — an assertion over an unbounded table is a SQL node or a release check, not an invariant). |
 | `pipeline.script.rejects_strict` | 500 | `strict: true` and the rejects table is non-empty; carries the count and the first ten reasons (record §5.4). |
 | `script.js.unavailable` | 400 | the JavaScript isolate is not installed (D-T16): disabled and reported once at INFO at boot, refused at save/evaluate; never a 503. |
 
@@ -2030,6 +2030,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-12 | v1.89 | #821 invariants count a table caller output | §13.18 `invariants_too_large`: the COMBINED count also includes a `table` caller output's gated rows (it writes no tempdb table; a tempdb output is counted once, as its written table). No code, code count or permission change. |
 | 2026-11-11 | v1.88 | #786 U2 schedules pin exact versions | §13.19 gains `schedule.validation.payload_schema_unsupported` (400): a stored schema-1 payload is refused, never upgraded at read time (D.2). `payload_invalid`'s `pipeline` reasons are the schema-2 version grammar (an exact positive integer; `current`/`latest` refused by name); `target_not_found` also covers a version the pipeline does not have; `target_not_released` is now an ineligible PINNED version (discarded, or a draft where authoring is off), not a missing current pointer. Landed with the constants in `ScheduleErrorCodes` and `PipelineErrorCodes.Schedule` (merged §13 row count recounted with the drift test's own regex). |
 | 2026-11-10 | v1.87 | #841 G0 writer protocol — renumbered at merge after #860's v1.86 | §13.8 gains `datasource.write.busy` (409), §13.14 `endpoint.write.busy` (409), §13.19 `schedule.write.busy` (409): the exhausted writer-guard wait of the newly guarded datasource, endpoint and schedule writers, with the release families' message and `{lock_wait_seconds}` details, landed in the SAME commit as their constants and `ApiErrorCatalog` rows (merged §13 row count 477 → 480). |
 | 2026-11-08 | v1.86 | 860 (#860) — renumbered at merge after #823's v1.85 | §13.22: `visualization.validation.config_schema_invalid` describes the `chart` kind (the served v1 schema, then the `chart.*` save rules, `details.reason` and `details.renderer`) in place of the retired `plotly` kind; no code is added or removed. |

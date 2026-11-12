@@ -90,8 +90,8 @@ is on the COMBINED count, not on each table: the written outputs and rejects plu
 inputs (row mode adds the streamed input, and — for a caller output — the buffered caller
 rows and rejects) must together fit `datapipelines.script.max-input-rows`. An input and an
 output each just over half the cap fail together, though each alone is under it; past the
-combined count is `pipeline.script.invariants_too_large`. Known gap: a `table` caller
-output's gated rows are NOT part of the count (only its inputs are). No invariants declared
+combined count is `pipeline.script.invariants_too_large`. A `table` caller output's gated
+rows count with its inputs (a tempdb output is counted once, as its table). No invariants declared
 means no invariant read-back or combined read-back row bound; the table/value input caps
 above still apply. The run also stays bounded by
 `datapipelines.script.max-value-bytes`, `datapipelines.script.max-string-bytes`,
