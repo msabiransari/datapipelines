@@ -137,18 +137,24 @@ read -r -a GATE_EXTRA_ARGS <<< "${GATE_GRADLE_ARGS:-}"
 GATE_BUILD_BROWSER_ARGS=(-x :tests:browser-tests:test -x :tests:browser-tests:verifyTestsExecuted :tests:browser-tests:testClasses)
 
 run() { # run <logfile> <args...>  → echoes exit code, never pipes gradle
-  local log="$1"; shift
+  local log="$1" rc; shift
   # The invocation's start marker (<log>.started): a HotSpot report not older than it is
   # this invocation's (#773, gate_crash_reports). A marker that cannot be written leaves
   # the crash lines unattributed; it never changes the invocation's exit.
   : > "$log.started"
   ./gradlew "$@" "${GATE_EXTRA_ARGS[@]}" 9>&- 10>&- 11>&- > "$log" 2>&1
-  echo $?
+  rc=$?
+  # Classified NOW (<log>.crashclass, #132): the next invocation rewrites the JUnit XML that
+  # tells a test's own EOFException from a tooling crash. Silent — stdout is the exit code.
+  gate_after_invocation "$rc" "$log" "$ROOT/modules" "$ROOT/tests" "$ROOT/buildSrc" > /dev/null 2>&1 || true
+  echo "$rc"
 }
 
 # A crash is not a test failure — gate_crashed() detects the signatures we
 # have actually seen (scripts/lib/gate-stages.sh, shared with the buildSrc
-# stage below). gate_crash_explain() then names a crashed test JVM's HotSpot
+# stage below); it answers from the class run() stored right after the
+# invocation, since a crash word a test reported in its JUnit XML is a test
+# failure and the next invocation rewrites that XML (#132). gate_crash_explain() then names a crashed test JVM's HotSpot
 # report (module, path, signal and frame lines only) or says why there is none
 # (#773, DEVELOPMENT.md §9.4) — the same helper pregate.sh calls.
 
