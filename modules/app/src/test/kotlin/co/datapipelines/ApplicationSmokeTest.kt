@@ -319,6 +319,20 @@ class ApplicationSmokeTest {
     }
 
     /**
+     * #716: the production shape holds ONE meter registry — Boot's Prometheus registry, the one the scrape
+     * reads — and no composite. A second registry bean (the user `SimpleMeterRegistry` `EngineConfiguration`
+     * declared until #716) makes Boot wrap both in a `@Primary` composite, so every meter is held twice and
+     * the in-memory copy is read by nobody.
+     */
+    @Test
+    fun `the booted application holds exactly one meter registry`() {
+        val beans = applicationContext.getBeansOfType(MeterRegistry::class.java)
+        withClue("MeterRegistry beans: ${beans.mapValues { it.value::class.java.name }}") {
+            beans.values.map { it::class.java.name } shouldBe listOf(PROMETHEUS_REGISTRY)
+        }
+    }
+
+    /**
      * The `datapipelines_*` families of the management scrape, taken from their `# TYPE` lines, and the
      * subset with no `# HELP` line or a blank one. The exporter OMITS the HELP line of an undescribed
      * family rather than writing a blank one, so the families come from TYPE, independently of HELP.
@@ -373,6 +387,9 @@ class ApplicationSmokeTest {
 
         /** The scrape's first lines printed as lane evidence (#708). */
         private const val SCRAPE_EVIDENCE_LINES = 20
+
+        /** Named, not imported: the Prometheus registry is a runtime-only dependency of `app` (#708). */
+        const val PROMETHEUS_REGISTRY = "io.micrometer.prometheusmetrics.PrometheusMeterRegistry"
 
         /** `MeterCatalogue.PREFIX` as the Prometheus exporter spells a family name. */
         private const val SCRAPE_PREFIX = "datapipelines_"

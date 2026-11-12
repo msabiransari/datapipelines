@@ -1,8 +1,11 @@
 package co.datapipelines
 
 import co.datapipelines.config.SharedRedis
+import io.kotest.assertions.withClue
+import io.kotest.matchers.shouldBe
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.composite.CompositeMeterRegistry
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -32,9 +35,22 @@ class ApplicationDefaultMetricsShapeTest {
     @Autowired
     private lateinit var applicationContext: ApplicationContext
 
+    /**
+     * Exactly one registry, Boot's [SimpleMeterRegistry], and it RECORDS: a probe counter incremented through
+     * the resolved `MeterRegistry` reads back 1.0. Without it (simple export switched off as well) Boot
+     * builds an empty composite that accepts every increment and keeps none, so a full-context test reading
+     * a count would read zero.
+     */
     @Test
-    fun `the default test context's meter registries - measured`() {
+    fun `the default test context holds exactly one recording meter registry`() {
         println("event=meter.registries shape=default ${meterRegistryShape(applicationContext)}")
+        val beans = applicationContext.getBeansOfType(MeterRegistry::class.java)
+        withClue("MeterRegistry beans: ${beans.mapValues { it.value::class.java.name }}") {
+            beans.values.map { it::class.java.name } shouldBe listOf(SimpleMeterRegistry::class.java.name)
+        }
+        val registry = applicationContext.getBean(MeterRegistry::class.java)
+        registry.counter(PROBE).increment()
+        registry.find(PROBE).counter()?.count() shouldBe 1.0
     }
 
     private companion object {
@@ -42,6 +58,9 @@ class ApplicationDefaultMetricsShapeTest {
         private val redis get() = SharedRedis.redis
 
         private const val SECRET_BYTES = 32
+
+        /** Outside the `datapipelines.` prefix, so no catalogue or registry guard ever reads it. */
+        private const val PROBE = "test.default_shape.recording_probe"
 
         private val oidc = OidcDiscoveryStub()
 
