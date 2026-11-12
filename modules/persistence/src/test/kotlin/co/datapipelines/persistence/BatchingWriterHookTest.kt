@@ -2,6 +2,7 @@ package co.datapipelines.persistence
 
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
+import co.datapipelines.logcapture.SnapshotListAppender
 import co.datapipelines.persistence.BatchingWriterTest.Item
 import co.datapipelines.persistence.BatchingWriterTest.RecordingHooks
 import co.datapipelines.persistence.BatchingWriterTest.RecordingSink

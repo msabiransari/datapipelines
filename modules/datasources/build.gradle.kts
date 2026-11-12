@@ -42,6 +42,8 @@ dependencies {
         runtimeOnly(libs.mysql.connector.j) // GPL + FOSS exception
     }
 
+    // #756 — the shared snapshot log capture (module-structure §5.23); test-only, testImplementation alone.
+    testImplementation(project(":modules:log-capture"))
     // Integration tests via Testcontainers (§13.2): real PG / MySQL / MSSQL containers exercise
     // each dialect's adapter, encryption round-trip and type mapping. The bundled drivers
     // (postgresql, mssql-jdbc, h2, …) are already on the test runtime via `runtimeOnly`; the

@@ -330,7 +330,7 @@ class WebEventEmitterTest {
 
         /** The emitter's WARN lines while [block] runs. */
         fun capturingWarns(block: () -> Unit): List<String> =
-            co.datapipelines.web
+            co.datapipelines.logcapture
                 .capturingLogEvents(
                     org.slf4j.LoggerFactory.getLogger(WebEventEmitter::class.java) as ch.qos.logback.classic.Logger,
                     block = block,

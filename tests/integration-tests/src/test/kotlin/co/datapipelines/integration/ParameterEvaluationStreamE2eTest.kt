@@ -3,6 +3,7 @@ package co.datapipelines.integration
 import ch.qos.logback.classic.Logger
 import co.datapipelines.DatapipelinesApplication
 import co.datapipelines.integration.E2eSession.asSession
+import co.datapipelines.logcapture.SnapshotListAppender
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.withClue

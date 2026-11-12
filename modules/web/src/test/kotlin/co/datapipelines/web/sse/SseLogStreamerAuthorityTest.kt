@@ -3,9 +3,9 @@ package co.datapipelines.web.sse
 import ch.qos.logback.classic.Logger
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.logcapture.SnapshotListAppender
+import co.datapipelines.logcapture.capturingLogEvents
 import co.datapipelines.web.CapturingSseEmitter
-import co.datapipelines.web.SnapshotListAppender
-import co.datapipelines.web.capturingLogEvents
 import com.fasterxml.jackson.databind.json.JsonMapper
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain

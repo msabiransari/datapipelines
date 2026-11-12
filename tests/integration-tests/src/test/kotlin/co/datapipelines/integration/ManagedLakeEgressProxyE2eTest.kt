@@ -2,6 +2,7 @@ package co.datapipelines.integration
 
 import ch.qos.logback.classic.Logger
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.logcapture.SnapshotListAppender
 import io.kotest.assertions.withClue
 import io.kotest.matchers.longs.shouldBeGreaterThan
 import io.kotest.matchers.longs.shouldBeLessThanOrEqual
