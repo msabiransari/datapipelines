@@ -160,7 +160,7 @@ class TemplatesControllerTest {
                 evaluateService,
             )
         // The authoring refusal for delete comes from the service the controller delegates to.
-        every { releases.purgeEntity(any(), "test/fetch_orders.sql") } throws
+        every { releases.purgeEntity(any(), "test/fetch_orders.sql", any()) } throws
             DatapipelinesException(
                 code = PipelineErrorCodes.Template.AUTHORING_DISABLED,
                 message = "authoring disabled",
@@ -234,7 +234,7 @@ class TemplatesControllerTest {
 
         // 101: the entity purge's 404 — the service raises template.not_found; the controller
         // is a thin session-gated delegate.
-        every { releases.purgeEntity(any(), "nope.sql") } throws
+        every { releases.purgeEntity(any(), "nope.sql", any()) } throws
             co.datapipelines.typesystem.DatapipelinesException(
                 code = PipelineErrorCodes.Template.NOT_FOUND,
                 message = "Template 'nope.sql' does not exist.",
@@ -248,12 +248,12 @@ class TemplatesControllerTest {
     fun `delete delegates to the entity purge and propagates its in_use refusal`() {
         authenticate()
         // 204 path: the controller is a thin delegate; the purge rules are the service's.
-        every { releases.purgeEntity(any(), "test/fetch_orders.sql") } returns Unit
+        every { releases.purgeEntity(any(), "test/fetch_orders.sql", any()) } returns Unit
         controller.delete("test/fetch_orders.sql")
 
         // The refusal propagates untouched: template.in_use with the pinner names (the
         // service's guard read them through the live pin scan).
-        every { releases.purgeEntity(any(), "pinned.sql") } throws
+        every { releases.purgeEntity(any(), "pinned.sql", any()) } throws
             co.datapipelines.typesystem.DatapipelinesException(
                 code = PipelineErrorCodes.Template.IN_USE,
                 message = "Version of template 'pinned.sql' is pinned by 1 live pipeline version(s): p1.",
@@ -344,7 +344,7 @@ class TemplatesControllerTest {
         // T187's row is the coordinator's now, written inside its transaction (#873 §C.7): the handler writes none.
         audited shouldBe emptyList()
 
-        every { releases.purge(any(), "test/fetch_orders.sql", "hash-v3") } returns Unit
+        every { releases.purge(any(), "test/fetch_orders.sql", "hash-v3", any()) } returns Unit
         controller.discard("hash-v3", """{"name":"test/fetch_orders.sql"}""")
     }
 

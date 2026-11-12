@@ -96,6 +96,8 @@ class TemplateLifecycleDialogModel(
         /** #320 — the parameter sets and visualizations that pin it, beside the pipelines. */
         val inUseParameterSets: List<String> = emptyList(),
         val inUseVisualizations: List<String> = emptyList(),
+        /** #877 §D — the templates whose live versions import it (ANY version, for the sole draft). */
+        val inUseTemplates: List<String> = emptyList(),
     )
 
     @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal the dialog renders
@@ -131,6 +133,7 @@ class TemplateLifecycleDialogModel(
                 },
             inUseParameterSets = pins.parameterSets.map { it.setName }.distinct(),
             inUseVisualizations = pins.visualizations.map { it.name }.distinct(),
+            inUseTemplates = pins.templates.map { it.importerName }.distinct(),
         )
     }
 
@@ -145,6 +148,8 @@ class TemplateLifecycleDialogModel(
         /** #320 — the parameter sets and visualizations whose LIVE versions pin it. */
         val pinnerParameterSets: List<String> = emptyList(),
         val pinnerVisualizations: List<String> = emptyList(),
+        /** #877 §D — the templates whose LIVE versions import it. */
+        val pinnerTemplates: List<String> = emptyList(),
     )
 
     @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal the dialog renders
@@ -188,6 +193,7 @@ class TemplateLifecycleDialogModel(
             pins.pipelines.map { it.pipelineName }.distinct(),
             pins.parameterSets.map { it.setName }.distinct(),
             pins.visualizations.map { it.name }.distinct(),
+            pins.templates.map { it.importerName }.distinct(),
         )
     }
 
@@ -236,6 +242,8 @@ class TemplateLifecycleDialogModel(
         /** #320 — the parameter sets and visualizations that pin ANY version of it. */
         val inUseParameterSets: List<String> = emptyList(),
         val inUseVisualizations: List<String> = emptyList(),
+        /** #877 §D — the templates any of whose stored versions import ANY version of it. */
+        val inUseTemplates: List<String> = emptyList(),
     )
 
     fun purgeEntity(
@@ -262,6 +270,7 @@ class TemplateLifecycleDialogModel(
             expected = id,
             inUseParameterSets = pins.parameterSets.map { it.setName }.distinct(),
             inUseVisualizations = pins.visualizations.map { it.name }.distinct(),
+            inUseTemplates = pins.templates.map { it.importerName }.distinct(),
             refusal =
                 when {
                     !pins.isEmpty() -> {
@@ -301,6 +310,11 @@ class TemplateLifecycleDialogModel(
                 .distinct()
                 .takeIf { it.isNotEmpty() }
                 ?.let { "${it.size} visualization(s): ${it.joinToString(", ")}" },
+            pins.templates
+                .map { it.importerName }
+                .distinct()
+                .takeIf { it.isNotEmpty() }
+                ?.let { "${it.size} importing template(s): ${it.joinToString(", ")}" },
         ).joinToString(" and ")
 
     /** §3.4: RELEASED always, DRAFT only under the development posture. */

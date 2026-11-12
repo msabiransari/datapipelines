@@ -145,7 +145,8 @@ class PipelineLifecycleConfiguration {
              * The templates module's statement answers "no OTHER PIPELINE pins it" (R12: every stored version of
              * every other pipeline). A parameter set or a visualization that pins the draft template is an inbound
              * edge that statement cannot see — #320 found the offer deleting a set's template — so the candidates
-             * are judged here, over the whole workspace, by the same [TemplateUsage] evidence every other guard reads.
+             * are judged here, over the whole workspace, by the same [TemplateUsage] evidence every other guard reads —
+             * since #877 §D the importing templates' arm as well.
              */
             private fun blockers(
                 workspaceId: java.util.UUID,
@@ -164,6 +165,14 @@ class PipelineLifecycleConfiguration {
                         .distinct()
                         .takeIf { it.isNotEmpty() }
                         ?.let { put("referencing_visualizations", it) }
+                    // #877 §D: a template version that imports ANY version of the draft is an inbound edge too (rule 3,
+                    // a discarded importer included — a restore would dangle its import).
+                    usage
+                        .importedBy(workspaceId, templateId, null, co.datapipelines.pipeline.inverse.InverseScope.ANY)
+                        .map { it.importerName }
+                        .distinct()
+                        .takeIf { it.isNotEmpty() }
+                        ?.let { put("referencing_templates", it) }
                 }
 
             override fun exclusiveIds(

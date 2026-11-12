@@ -1,5 +1,6 @@
 package co.datapipelines.web.templates
 
+import co.datapipelines.application.lens.LensedView
 import co.datapipelines.application.templates.TemplateUsage
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -61,7 +62,9 @@ data class TemplateReleaseRequest(
  * aggregates that pin templates: pipelines, parameter sets and visualizations. Discard and the draft purge of a
  * template that keeps other versions ask the LIVE-exact question (rule 1); an entity purge, and a draft purge that
  * takes the entity with it (the only version), ask the ANY-version question (rule 3, R12: a discarded dependent
- * version can be restored and must keep what it pins).
+ * version can be restored and must keep what it pins). #877 §D adds the fourth aggregate, importing TEMPLATES: a
+ * library pinned by a live importer's `imports` is refused the same way. Each removing verb takes the caller's
+ * [LensedView]: the guard decides on the whole workspace, and [TemplateInUseRefusal] narrows only the refusal's echo.
  *
  * ## The writer guard (#517, release-dependencies record §4.3)
  * Every verb here changes what a release resolves — a status, a pointer, a version's existence — so each runs in a
@@ -275,13 +278,14 @@ open class TemplateReleaseService(
         workspaceId: UUID,
         id: String,
         expectedHash: String,
+        view: LensedView,
     ) {
         // §5.5: purging authored content is authoring — a promotion receiver refuses it.
         authoring.requireTemplateAuthoring()
         lockWorkspace(workspaceId)
 
         val draft = templates.findDraftDetail(workspaceId, id) ?: throw notDraft(id)
-        refuseIfDraftPinned(workspaceId, id, draft.version)
+        refuseIfDraftPinned(workspaceId, id, draft.version, view)
         if (!templates.purgeDraft(workspaceId, id, expectedHash, authoring.developmentPosture)) {
             throw conflictAfterGuardFailure(workspaceId, id)
         }
@@ -301,16 +305,17 @@ open class TemplateReleaseService(
         id: String,
         version: Int,
         actor: UUID,
+        view: LensedView,
     ): TemplateVersionDetail {
         authoring.requireTemplateAuthoring()
         lockWorkspace(workspaceId)
         requireTemplate(workspaceId, id)
         val detail = findVersionOr404(workspaceId, id, version)
         if (detail.status != PipelineVersionStatus.RELEASED) throw notReleased(id, version, detail.status)
-        refuseIfPinned(workspaceId, id, version)
+        refuseIfPinned(workspaceId, id, version, view)
 
         return templates.discardVersion(workspaceId, id, version, actor, authoring.developmentPosture)
-            ?: throw pinnedOrConcurrent(workspaceId, id, version)
+            ?: throw pinnedOrConcurrent(workspaceId, id, version, view)
     }
 
     /**
@@ -364,13 +369,14 @@ open class TemplateReleaseService(
         workspaceId: UUID,
         id: String,
         version: Int,
+        view: LensedView,
     ) {
         authoring.requireTemplateAuthoring()
         lockWorkspace(workspaceId)
         requireTemplate(workspaceId, id)
         val detail = findVersionOr404(workspaceId, id, version)
         if (detail.status != PipelineVersionStatus.DRAFT) throw lastRelease(id, version, detail.status)
-        refuseIfDraftPinned(workspaceId, id, version)
+        refuseIfDraftPinned(workspaceId, id, version, view)
         if (!templates.purgeDraft(workspaceId, id, null, authoring.developmentPosture)) {
             throw templateNotFound(id, version)
         }
@@ -385,6 +391,7 @@ open class TemplateReleaseService(
     open fun purgeEntity(
         workspaceId: UUID,
         id: String,
+        view: LensedView,
     ) {
         authoring.requireTemplateAuthoring()
         lockWorkspace(workspaceId)
@@ -394,9 +401,10 @@ open class TemplateReleaseService(
             throw lastReleaseEntity(id, versions.size)
         }
         // Graph rule 3: no inbound edges — any pin of ANY version, from any stored pipeline version, since 194d
-        // from any parameter set version (the record's §8.4), and since #320 from any visualization version.
+        // from any parameter set version (the record's §8.4), since #320 from any visualization version, and since #877
+        // §D from any template version that imports it.
         val pins = usage.everPins(workspaceId, id)
-        if (!pins.isEmpty()) throw inUse(id, pins)
+        if (!pins.isEmpty()) throw TemplateInUseRefusal.of(id, pins, view)
         templates.deleteTemplateRow(workspaceId, id)
     }
 
@@ -434,9 +442,10 @@ open class TemplateReleaseService(
         workspaceId: UUID,
         id: String,
         version: Int,
+        view: LensedView,
     ) {
         val pins = usage.liveVersionPins(workspaceId, id, version)
-        if (!pins.isEmpty()) throw inUse(id, pins)
+        if (!pins.isEmpty()) throw TemplateInUseRefusal.of(id, pins, view)
     }
 
     /**
@@ -448,19 +457,21 @@ open class TemplateReleaseService(
         workspaceId: UUID,
         id: String,
         version: Int,
+        view: LensedView,
     ) {
         val takesTheEntity = templates.listVersions(workspaceId, id).size == 1
         val pins = if (takesTheEntity) usage.everPins(workspaceId, id) else usage.liveVersionPins(workspaceId, id, version)
-        if (!pins.isEmpty()) throw inUse(id, pins)
+        if (!pins.isEmpty()) throw TemplateInUseRefusal.of(id, pins, view)
     }
 
     private fun pinnedOrConcurrent(
         workspaceId: UUID,
         id: String,
         version: Int,
+        view: LensedView,
     ): DatapipelinesException {
         val pins = usage.liveVersionPins(workspaceId, id, version)
-        if (!pins.isEmpty()) return inUse(id, pins)
+        if (!pins.isEmpty()) return TemplateInUseRefusal.of(id, pins, view)
         val current = findVersionOr404(workspaceId, id, version)
         return if (current.status == PipelineVersionStatus.RELEASED) {
             DatapipelinesException(
@@ -471,36 +482,6 @@ open class TemplateReleaseService(
         } else {
             notReleased(id, version, current.status)
         }
-    }
-
-    private fun inUse(
-        id: String,
-        pins: TemplateUsage.Pins,
-    ): DatapipelinesException {
-        val pipelineNames = pins.pipelines.map { it.pipelineName }.distinct()
-        val setNames = pins.parameterSets.map { it.setName }.distinct()
-        val visualizationNames = pins.visualizations.map { it.name }.distinct()
-        val sentences =
-            listOfNotNull(
-                pipelineNames.takeIf { it.isNotEmpty() }?.let {
-                    "${pins.pipelines.size} live pipeline version(s): ${it.joinToString(
-                        ", ",
-                    )}"
-                },
-                setNames.takeIf { it.isNotEmpty() }?.let { "${it.size} parameter set version(s): ${it.joinToString(", ")}" },
-                visualizationNames.takeIf { it.isNotEmpty() }?.let { "${it.size} visualization version(s): ${it.joinToString(", ")}" },
-            )
-        return DatapipelinesException(
-            code = PipelineErrorCodes.Template.IN_USE,
-            message = "Version of template '$id' is pinned by ${sentences.joinToString(" and ")}; discard or repoint them first.",
-            details =
-                buildMap {
-                    put("template_id", id)
-                    put("pinned_by", pipelineNames)
-                    if (setNames.isNotEmpty()) put("referencing_parameter_sets", setNames)
-                    if (visualizationNames.isNotEmpty()) put("referencing_visualizations", visualizationNames)
-                },
-        )
     }
 
     private fun lastRelease(

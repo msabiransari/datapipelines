@@ -1,6 +1,6 @@
 # Templates Specification
 
-**Status:** v1.24 (frozen contract — additive-only changes after this point)
+**Status:** v1.25 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Configuration Reference](configuration.md), [Metadata DB spec](metadata-db.md)
 **Last updated:** 2026-11-03
@@ -349,7 +349,7 @@ questions — never one query**:
 | Question | Scans | Drives |
 |---|---|---|
 | *Who is using `t@2` right now?* | each pipeline's **working version** — the draft when one exists, else the latest released (the §7 read rule, [Versioning §7.1](versioning.md#71-authoring-reads-return-the-working-version-039)) — **and, since #194 lane D, each parameter set's working version** (the same rule over `parameter_set_versions`) **and, since #320, each visualization's working version** (its `transform.template` pin, over `visualization_versions`) | the `templates_used_by` MCP tool (pipeline rows, set rows **and `visualization_references`**), the template screen's per-version in-use count and "Used by" card (sets and visualizations included), the pipeline read's upgrade signal — and, since lane D, the set read's `upgrade_available` per pinned template |
-| *Is it safe to remove `t`?* | **any pipeline version, ever**, **any parameter-set version, ever** and **any visualization version, ever** — historical versions are immutable and executable, so their pins are real references (the discard and the draft purge of a template that keeps other versions ask the exact version, LIVE dependents only) | the `409 template.in_use` refusal on every removing verb (§5.1), whose `details` carry `referencing_parameter_sets` and `referencing_visualizations` beside `pinned_by` |
+| *Is it safe to remove `t`?* | **any pipeline version, ever**, **any parameter-set version, ever**, **any visualization version, ever** and — since #877 — **any version, ever, of a template whose `imports` pin it** (a library is protected by its importers; an importer whose every version is DISCARDED pins nothing, the rule every reverse arm shares, and restoring it is refused `template.validation.import_not_found`) — historical versions are immutable and executable, so their pins are real references (the discard and the draft purge of a template that keeps other versions ask the exact version, LIVE dependents only) | the `409 template.in_use` refusal on every removing verb (§5.1), whose `details` carry `referencing_parameter_sets`, `referencing_visualizations` and `referencing_templates` beside `pinned_by` — the names the caller's view admits, `pins_hidden: true` when others exist (#877) |
 
 The split is load-bearing in both directions: a working-version-only delete guard would let a
 still-pinned historical version be removed, and an any-version used-by listing would nag about
@@ -796,6 +796,7 @@ ORDER BY r.total DESC
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-11 | v1.25 | #877 G7 importer arm | §5.4: a template version whose `imports` pin `t` is a reference too — every removing verb refuses `template.in_use` with `referencing_templates` (record §23.3 item 5); the refusal's echo narrows by the caller's view (`pins_hidden`). `templates_used_by` and the Used-by card are unchanged. |
 | 2026-11-02 | v1.24 | #787 | `.get_optional_template` / `.getOptionalTemplate` joins the §4.2 forbidden list (a by-key render-time load; only the synthesized imports may load) — refused at save (§7 `dangerous_construct`), and the loader now enforces the §6.3 declared import closure: a render resolves its own key and the `imports` it declares, nothing else. |
 | 2026-10-22 | v1.23 | 8b (#8) | The JavaScript statements body, immutable frame, isolate availability and pooled save verdict ship. |
 | 2026-10-21 | v1.22 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The script template types**: "script types", §"Script templates", the CHECK `chk_script_blocks`, the script face and its editor, the `script.*` codes. A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |

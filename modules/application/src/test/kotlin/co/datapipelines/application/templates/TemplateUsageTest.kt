@@ -15,6 +15,7 @@ import co.datapipelines.visualization.ArtifactPin
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
@@ -261,28 +262,75 @@ class TemplateUsageTest {
     }
 
     @Test
-    fun `liveVersionPins asks all three aggregates for the exact pin under LIVE - unlensed`() {
+    fun `liveVersionPins asks all four aggregates for the exact pin under LIVE - unlensed`() {
         val viz = vizPin("acme/v/chart", PipelineVersionStatus.DRAFT, pinnedVersion = 3)
         pipelines(InverseScope.LIVE, 3, pipelinePin)
         sets(InverseScope.LIVE, 3, hiddenReleased)
         visualizations(InverseScope.LIVE, 3, viz)
+        answer(InverseArm.TEMPLATE_FROM_TEMPLATE, InverseScope.LIVE, 3, listOf(importRow("acme/t/report.sql", 2, alias = "lib")))
 
         val pins = usage.liveVersionPins(workspaceId, templateId, 3)
 
         pins.pipelines shouldContainExactly listOf(pipelinePin)
         pins.parameterSets shouldContainExactly listOf(hiddenReleased)
         pins.visualizations shouldContainExactly listOf(viz)
+        pins.templates.map { it.importerName to it.pinnedVersion } shouldContainExactly listOf("acme/t/report.sql" to 3)
         pins.isEmpty() shouldBe false
     }
 
     @Test
-    fun `everPins asks all three aggregates for ANY version under ANY - and is empty only when every arm is`() {
+    fun `an importer alone makes the pins non-empty - the fourth arm protects like the other three (#877 D)`() {
+        answer(InverseArm.TEMPLATE_FROM_TEMPLATE, InverseScope.LIVE, 3, listOf(importRow("acme/t/report.sql", 1, alias = "lib")))
+
+        usage.liveVersionPins(workspaceId, templateId, 3).let {
+            it.pipelines.shouldBeEmpty()
+            it.isEmpty() shouldBe false
+        }
+    }
+
+    @Test
+    fun `importedBy maps each import row to its importer pin and orders by importer name, newest version, then alias`() {
+        val id = UUID.randomUUID()
+        answer(
+            InverseArm.TEMPLATE_FROM_TEMPLATE,
+            InverseScope.ANY,
+            null,
+            listOf(
+                importRow("acme/t/z.sql", 1, alias = null),
+                importRow("acme/t/a.sql", 1, alias = "lib", importerId = id, status = PipelineVersionStatus.DISCARDED),
+                importRow("acme/t/a.sql", 2, alias = "other", importerId = id),
+                importRow("acme/t/a.sql", 2, alias = "lib", importerId = id),
+            ),
+        )
+
+        usage.importedBy(workspaceId, templateId, null, InverseScope.ANY) shouldContainExactly
+            listOf(
+                TemplateUsage.TemplateImportPin(id, "acme/t/a.sql", 2, PipelineVersionStatus.DRAFT, 3, "lib"),
+                TemplateUsage.TemplateImportPin(id, "acme/t/a.sql", 2, PipelineVersionStatus.DRAFT, 3, "other"),
+                TemplateUsage.TemplateImportPin(id, "acme/t/a.sql", 1, PipelineVersionStatus.DISCARDED, 3, "lib"),
+                TemplateUsage.TemplateImportPin(IMPORTER, "acme/t/z.sql", 1, PipelineVersionStatus.DRAFT, 3, null),
+            )
+        asked shouldContainExactly listOf(Triple(InverseArm.TEMPLATE_FROM_TEMPLATE, InverseScope.ANY, null))
+    }
+
+    @Test
+    fun `the read answers are unchanged by the importer arm - usedBy and inUseCounts never ask it`() {
+        answer(InverseArm.TEMPLATE_FROM_TEMPLATE, InverseScope.WORKING, 1, listOf(importRow("acme/t/report.sql", 1, alias = "lib")))
+
+        usage.usedBy(workspaceId, everything, templateId, 1).isEmpty() shouldBe true
+        usage.inUseCounts(workspaceId, everything, templateId) shouldBe emptyMap()
+        asked.map { it.first }.distinct() shouldNotContain InverseArm.TEMPLATE_FROM_TEMPLATE
+    }
+
+    @Test
+    fun `everPins asks all four aggregates for ANY version under ANY - and is empty only when every arm is`() {
         usage.everPins(workspaceId, templateId).isEmpty() shouldBe true
         asked.toSet() shouldBe
             setOf(
                 Triple(InverseArm.TEMPLATE_FROM_PIPELINE, InverseScope.ANY, null),
                 Triple(InverseArm.TEMPLATE_FROM_PARAMETER_SET, InverseScope.ANY, null),
                 Triple(InverseArm.TEMPLATE_FROM_VISUALIZATION, InverseScope.ANY, null),
+                Triple(InverseArm.TEMPLATE_FROM_TEMPLATE, InverseScope.ANY, null),
             )
 
         val viz = vizPin("acme/v/restorable", PipelineVersionStatus.DISCARDED, pinnedVersion = 1)
@@ -294,6 +342,17 @@ class TemplateUsageTest {
     }
 
     private companion object {
+        val IMPORTER: UUID = UUID.nameUUIDFromBytes("importer".toByteArray())
+
+        /** One `imports[i]` row of the template family's importer arm: the importer pins version 3 under [alias]. */
+        fun importRow(
+            importer: String,
+            version: Int,
+            alias: String?,
+            importerId: UUID = IMPORTER,
+            status: PipelineVersionStatus = PipelineVersionStatus.DRAFT,
+        ) = InverseRow(importerId.toString(), importer, version, status, "imports[0]", 3, alias)
+
         fun row(pin: TemplatePin) =
             InverseRow(
                 pin.pipelineId.toString(),

@@ -95,7 +95,7 @@ class TemplateVersionProbeIntegrationTest {
         )
         val validator = mockk<TemplateValidator>()
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
-        val noPins = TemplateUsage.Pins(emptyList(), emptyList(), emptyList())
+        val noPins = TemplateUsage.Pins(emptyList(), emptyList(), emptyList(), emptyList())
         val usage = mockk<TemplateUsage>()
         every { usage.liveVersionPins(any(), any(), any()) } returns noPins
         every { usage.everPins(any(), any()) } returns noPins
@@ -137,7 +137,7 @@ class TemplateVersionProbeIntegrationTest {
         templates.create(WORKSPACE, draft(TEMPLATE), actor, CreateLifecycle.DRAFT, WriteSurface.SESSION)
         versionsOf(WORKSPACE, TEMPLATE) shouldContainExactly listOf(1 to "DRAFT")
 
-        releases.purgeVersion(WORKSPACE, TEMPLATE, 1)
+        releases.purgeVersion(WORKSPACE, TEMPLATE, 1, co.datapipelines.application.lens.LensedView.EVERYTHING)
 
         templates.existsId(WORKSPACE, TEMPLATE) shouldBe false
         versionsOf(WORKSPACE, TEMPLATE) shouldContainExactly emptyList()
@@ -151,7 +151,10 @@ class TemplateVersionProbeIntegrationTest {
         )
         versionsOf(WORKSPACE, TEMPLATE) shouldContainExactly listOf(1 to "RELEASED", 2 to "DRAFT")
 
-        val refused = shouldThrow<DatapipelinesException> { releases.purgeVersion(WORKSPACE, TEMPLATE, 1) }
+        val refused =
+            shouldThrow<DatapipelinesException> {
+                releases.purgeVersion(WORKSPACE, TEMPLATE, 1, co.datapipelines.application.lens.LensedView.EVERYTHING)
+            }
 
         refused.code shouldBe PipelineErrorCodes.Template.VERSION_LAST_RELEASE
         versionsOf(WORKSPACE, TEMPLATE) shouldContainExactly listOf(1 to "RELEASED", 2 to "DRAFT")
@@ -171,7 +174,7 @@ class TemplateVersionProbeIntegrationTest {
         importPreserved(TEMPLATE, version = 2)
         versionsOf(WORKSPACE, TEMPLATE) shouldContainExactly listOf(1 to "DRAFT", 2 to "RELEASED")
 
-        releases.purgeVersion(WORKSPACE, TEMPLATE, 1)
+        releases.purgeVersion(WORKSPACE, TEMPLATE, 1, co.datapipelines.application.lens.LensedView.EVERYTHING)
 
         versionsOf(WORKSPACE, TEMPLATE) shouldContainExactly listOf(2 to "RELEASED")
         templates.existsId(WORKSPACE, TEMPLATE) shouldBe true
@@ -191,7 +194,7 @@ class TemplateVersionProbeIntegrationTest {
     fun `the same answer for the template the draft purge left without v1`() {
         templates.create(WORKSPACE, draft(TEMPLATE), actor, CreateLifecycle.DRAFT, WriteSurface.SESSION)
         importPreserved(TEMPLATE, version = 2)
-        releases.purgeVersion(WORKSPACE, TEMPLATE, 1)
+        releases.purgeVersion(WORKSPACE, TEMPLATE, 1, co.datapipelines.application.lens.LensedView.EVERYTHING)
         val parent = discardedParentPinning(TEMPLATE, 5)
 
         restoreRefusalCodes(parent) shouldContainExactly listOf(PipelineErrorCodes.Validation.TEMPLATE_VERSION_NOT_FOUND)

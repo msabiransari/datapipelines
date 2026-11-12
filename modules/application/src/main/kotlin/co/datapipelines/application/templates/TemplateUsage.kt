@@ -7,6 +7,7 @@ import co.datapipelines.parameters.ParameterSetPin
 import co.datapipelines.parameters.ParameterSetTemplatePins
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplatePin
+import co.datapipelines.pipeline.inverse.InverseRow
 import co.datapipelines.pipeline.inverse.InverseScope
 import co.datapipelines.pipeline.inverse.PipelinePinRows
 import co.datapipelines.pipeline.through
@@ -55,6 +56,13 @@ import java.util.UUID
  * received before, in the same order. [templates] is asked only for [usedBy]'s not-found refusal; it scans nothing here.
  * Filtering owners (§C.2): the methods taking a [LensedView] narrow inside, as before; [liveVersionPins] and
  * [everPins] are unlensed (the refusal builder narrows the echo).
+ *
+ * ## The fourth arm — importers (#877 §D, record §23.3 item 5)
+ * A template version pins a LIBRARY by `imports[i]` (`{id, version, alias}`), so a library pinned by a live importer is
+ * protected exactly as one a live pipeline pins: [importedBy] reads the template family's importer arm at the scope the
+ * verb asks, and the guards' [Pins.templates] carries it — LIVE for the discard and the draft purge (a DISCARDED
+ * importer does not protect, the pipelines' rule), ANY for the entity purge. The read answers ([usedBy],
+ * [inUseCounts]) are unchanged: `templates_used_by`'s output and the Used-by view keep their shapes.
  */
 class TemplateUsage(
     private val incoming: IncomingRows,
@@ -83,9 +91,24 @@ class TemplateUsage(
         val pipelines: List<TemplatePin>,
         val parameterSets: List<ParameterSetPin>,
         val visualizations: List<ArtifactPin>,
+        /** #877 §D — the template versions whose `imports` pin it (the importer arm). */
+        val templates: List<TemplateImportPin>,
     ) {
-        fun isEmpty(): Boolean = pipelines.isEmpty() && parameterSets.isEmpty() && visualizations.isEmpty()
+        fun isEmpty(): Boolean = pipelines.isEmpty() && parameterSets.isEmpty() && visualizations.isEmpty() && templates.isEmpty()
     }
+
+    /**
+     * One stored IMPORT occurrence: version [importerVersion] of template [importerName] (status [versionStatus]) declares
+     * `imports[i]` = the pinned template at [pinnedVersion] under [alias].
+     */
+    data class TemplateImportPin(
+        val importerId: UUID,
+        val importerName: String,
+        val importerVersion: Int,
+        val versionStatus: PipelineVersionStatus,
+        val pinnedVersion: Int,
+        val alias: String?,
+    )
 
     /**
      * Question 1, combined: who pins `id@version` in their working version right now? The
@@ -142,6 +165,7 @@ class TemplateUsage(
             pipelines = pipelinePins(workspaceId, id, version, InverseScope.LIVE, PipelinePinRows.BY_NAME_THEN_NODE),
             parameterSets = setPins(workspaceId, id, version, InverseScope.LIVE, ParameterSetTemplatePins.BY_NAME_NEWEST_THEN_PARAMETER),
             visualizations = visualizationPins(workspaceId, id, version, InverseScope.LIVE),
+            templates = importedBy(workspaceId, id, version, InverseScope.LIVE),
         )
 
     /**
@@ -157,7 +181,26 @@ class TemplateUsage(
             pipelines = anyVersionPipelinePins(workspaceId, id),
             parameterSets = anyVersionSetPins(workspaceId, id),
             visualizations = visualizationPins(workspaceId, id, null, InverseScope.ANY),
+            templates = importedBy(workspaceId, id, null, InverseScope.ANY),
         )
+
+    /**
+     * The importer arm (#877 §D): every template version under [scope] — WORKING (each importer's working version), LIVE
+     * (every DRAFT or RELEASED version) or ANY (every stored version of an importer that still has a live one, a DISCARDED
+     * one included) — whose `imports` pin `id@version`, or any version of `id` when [version] is null. Unlensed and
+     * workspace-scoped: the guard decides on the whole workspace; only a refusal's echo is narrowed, by its builder.
+     * Ordered by importer name, newest importer version first, then the declared alias.
+     */
+    fun importedBy(
+        workspaceId: UUID,
+        id: String,
+        version: Int?,
+        scope: InverseScope,
+    ): List<TemplateImportPin> =
+        incoming
+            .rows(workspaceId, InverseArm.TEMPLATE_FROM_TEMPLATE, id, version, scope)
+            .map(::importPin)
+            .sortedWith(BY_IMPORTER_NEWEST_THEN_ALIAS)
 
     /**
      * Question 2, combined — the delete guard's evidence: EVERY version, ever, of both
@@ -298,6 +341,16 @@ class TemplateUsage(
         scope: InverseScope,
     ): List<ArtifactPin> = ArtifactDependents.pinsOf(incoming.rows(workspaceId, InverseArm.TEMPLATE_FROM_VISUALIZATION, id, version, scope))
 
+    private fun importPin(row: InverseRow): TemplateImportPin =
+        TemplateImportPin(
+            importerId = UUID.fromString(row.dependentId),
+            importerName = row.dependentName,
+            importerVersion = row.dependentVersion,
+            versionStatus = checkNotNull(row.status) { "an import row carries its version status" },
+            pinnedVersion = checkNotNull(row.storedVersion) { "an import pins an exact version" },
+            alias = row.elementId,
+        )
+
     /** A narrowing view reports RELEASED rows only (178b, every arm). */
     private fun visible(
         view: LensedView,
@@ -305,4 +358,11 @@ class TemplateUsage(
     ): Boolean =
         (view.pipelines.isEverything && view.parameterSets.isEverything && view.visualizations.isEverything) ||
             status == PipelineVersionStatus.RELEASED
+
+    private companion object {
+        val BY_IMPORTER_NEWEST_THEN_ALIAS: Comparator<TemplateImportPin> =
+            compareBy<TemplateImportPin> { it.importerName }
+                .thenByDescending { it.importerVersion }
+                .thenBy(nullsFirst()) { it.alias }
+    }
 }

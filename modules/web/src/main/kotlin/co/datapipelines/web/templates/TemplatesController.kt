@@ -355,7 +355,7 @@ class TemplatesController(
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
         val name = nameOf(body)
-        releases.purge(workspaceId, name, IfMatchHeader.required(ifMatch))
+        releases.purge(workspaceId, name, IfMatchHeader.required(ifMatch), lens.viewFor(principal))
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.TEMPLATE_AUDIT_VERSION_PURGED,
@@ -379,7 +379,7 @@ class TemplatesController(
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
         val request = versionVerbRequestOf(body)
-        val detail = releases.discardVersion(workspaceId, request.name, request.version, principal.userId)
+        val detail = releases.discardVersion(workspaceId, request.name, request.version, principal.userId, lens.viewFor(principal))
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.TEMPLATE_AUDIT_VERSION_DISCARDED,
@@ -420,7 +420,7 @@ class TemplatesController(
     ) {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
-        releases.purgeVersion(workspaceId, name, version)
+        releases.purgeVersion(workspaceId, name, version, lens.viewFor(principal))
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.TEMPLATE_AUDIT_VERSION_PURGED,
@@ -496,7 +496,7 @@ class TemplatesController(
         @RequestParam name: String,
     ) {
         val principal = LifecycleVerbs.requireSession()
-        releases.purgeEntity(principal.requireWorkspace().id, name)
+        releases.purgeEntity(principal.requireWorkspace().id, name, lens.viewFor(principal))
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.TEMPLATE_AUDIT_ENTITY_PURGED,
