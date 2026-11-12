@@ -107,6 +107,36 @@ class RecordingSourceStarterTest {
     }
 
     @Test
+    fun `#463 - a refresh of a released source sends a read-only request`() {
+        runTest {
+            val seen = mutableListOf<ExecuteRequest>()
+            coEvery { runner.run(any(), workspace, ExecutionTrigger.DASHBOARD, any(), any()) } coAnswers {
+                seen += firstArg<ExecuteRequest>()
+                result()
+            }
+            starter.run(launch()) {} shouldBe SourceOutcome.Succeeded(executionId)
+            seen.single().readOnly shouldBe true
+        }
+    }
+
+    @Test
+    fun `#463 - a draft preview sends a read-only request too`() {
+        runTest {
+            every { pipelines.findVersionDetail(any(), any(), any()) } returns
+                mockk {
+                    every { status } returns co.datapipelines.pipeline.PipelineVersionStatus.DRAFT
+                }
+            val seen = mutableListOf<ExecuteRequest>()
+            coEvery { runner.run(any(), workspace, ExecutionTrigger.DASHBOARD, any(), any()) } coAnswers {
+                seen += firstArg<ExecuteRequest>()
+                result()
+            }
+            starter.run(launch().copy(allowDraftDependencies = true)) {} shouldBe SourceOutcome.Succeeded(executionId)
+            seen.single().readOnly shouldBe true
+        }
+    }
+
+    @Test
     fun `the admission callback refuses an exact loaded child that now writes to a datasource`() {
         runTest {
             var admission: ((Pipeline, UUID, Int) -> Unit)? = null

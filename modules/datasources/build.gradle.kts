@@ -91,6 +91,12 @@ tasks.named<Test>("test") {
         .file(rootProject.file("docs/datasources.md"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .withPropertyName("dialectChecklistSpec")
+    // #463 — `ReadOnlyEnforcementSpecDriftTest` reads dag-executor.md §8.2's read-only table the same
+    // way, so the same stale-green rule applies to it.
+    inputs
+        .file(rootProject.file("docs/dag-executor.md"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+        .withPropertyName("readOnlyEnforcementSpec")
 }
 
 // #781 — the DuckDB driver version as RESOLVED, packaged beside the code that loads it, so what the
