@@ -440,12 +440,12 @@ Bootstrap is the record's four-step barrier; `init` on an owned container throws
 > into a library-neutral model — order, aggregation, formats, labels — and its Plotly converter
 > (`datapipelines-dashboard-plotly.js`) converts that model into a figure, so no stored path is substituted. The
 > data call that runs is the mounted handle's `handle.renderData(occurrenceRef, rows, bindings)` (three arguments;
-> the list below names a `refreshId` and omits `rows`). Current text: [Dashboards §6.2 and §6.3](../../dashboards.md).
+> the list below carries them since #852). Current text: [Dashboards §6.2 and §6.3](../../dashboards.md).
 
 Required functions (initialisation rejects a missing one; a no-op is not conformant — §10.5):
 `mountLayout(layout) → Promise`, `mountVisualization(occurrence, renderer) → Promise`,
 `renderParameters(state) → Promise`, `readSelections() → {name: value}`,
-`onEdit/onCommit/onAction(callback)` registration, `renderData(occurrence, refreshId, bindings) →
+`onEdit/onCommit/onAction(callback)` registration, `renderData(occurrenceRef, rows, bindings) →
 Promise<'rendered' | 'no-data'>`, `renderStatus(occurrence, {state, stale, reason})`,
 `notify(notification) → void` (with `recover(intent)` reporting), `resize()`, `dispose()`.
 Every callback carries `{instanceId, name, type, refreshId}`. The Plotly adapter

@@ -454,6 +454,40 @@ test("#459: KPI values and comparison use native binding paths", async () => {
   }
 });
 
+// #852 — the composite's adapter-level renderData has the handle's three arguments and forwards
+// exactly those: (occurrenceRef, rows, bindings), `rows` the frame's row count.
+test("#852: the composite's renderData forwards exactly (occurrenceRef, rows, bindings) to the mounted handle", async () => {
+  installDom();
+  try {
+    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+    let recorded = null;
+    runtime.registerRenderer({
+      kind: "args-recorder-852",
+      version: "1",
+      create: () => ({
+        renderData: function () {
+          recorded = Array.from(arguments);
+          return Promise.resolve("rendered");
+        },
+      }),
+    });
+    const container = fakeElement("div");
+    const adapter = runtime.adapters(container);
+    await adapter.mountLayout({ columns: 12, grid: [{ name: "chart", x: 0, y: 0, w: 6, h: 4 }] });
+    await adapter.mountVisualization(
+      { name: "chart", renderer: { kind: "args-recorder-852", version: "1" }, config: {} },
+      { kind: "args-recorder-852", version: "1" },
+    );
+    const ref = { name: "chart", type: "visualization", occurrence: { name: "chart" } };
+    const bindings = { x: [1, 2, 3] };
+    assert.equal(await adapter.renderData(ref, 3, bindings), "rendered");
+    assert.deepEqual(recorded, [ref, 3, bindings], "the handle receives the three arguments, no more");
+    adapter.dispose();
+  } finally {
+    uninstallDom();
+  }
+});
+
 test("the composite adapter builds the grid, mounts renderers by kind and renders status text-only", async () => {
   installDom();
   try {
