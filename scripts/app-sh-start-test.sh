@@ -238,12 +238,12 @@ mkdir -p "$tmp/modules/app/build"
 : >"$tmp/modules/app/build/stale.class"
 [ -f "$tmp/modules/app/build/stale.class" ] || fail "8a: the planted stale.class does not exist"
 start_build_saw
-grep -q "wiping build outputs not written by app.sh" <<<"$out" || fail "8a: no stamp and a build dir must print the wiping line, got:
-$out"
 if grep -q "stale.class" "$tmp/run-saw.log"; then
   fail "8a: the build ran on top of stale.class — the wipe did not happen before it:
 $(cat "$tmp/run-saw.log")"
 fi
+grep -q "wiping build outputs not written by app.sh" <<<"$out" || fail "8a: no stamp and a build dir must print the wiping line, got:
+$out"
 run_line=$(grep -n '^run .*\./gradlew' "$ARGV_LOG" | head -1 | cut -d: -f1)
 build_line=$(grep -n '^build -t ' "$ARGV_LOG" | head -1 | cut -d: -f1)
 [[ -n $run_line && -n $build_line ]] && ((run_line < build_line)) \
