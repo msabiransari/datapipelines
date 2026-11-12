@@ -292,20 +292,30 @@ class ApplicationSmokeTest {
         runtime.size shouldBeGreaterThanOrEqual RUNTIME_METER_FLOOR
     }
 
-    /** #715 / #716 A.1: the measurement, printed before any edit. */
+    /**
+     * #715: every `datapipelines.*` meter the booted application holds carries a description, read twice — at
+     * the registry (`id.description`) and on the wire, where the exporter OMITS the `# HELP` line of an
+     * undescribed family. Both lists are collected before the one assertion, so neither half hides the other.
+     * Eager meters only: a meter created on its first event is not in a freshly booted registry. Also prints
+     * the context's registry beans (#716 evidence).
+     */
     @Test
-    fun `meter registries and undescribed datapipelines meters - measured`() {
+    fun `every datapipelines meter the booted registry holds carries a description - registry and scrape`() {
         println("event=meter.registries shape=production ${meterRegistryShape(applicationContext)}")
         val runtime = meterRegistry.meters.filter { it.id.name.startsWith(MeterCatalogue.PREFIX) }
-        runtime
-            .filter { it.id.description.isNullOrBlank() }
-            .map { it.id.name to it.id.tags.map { tag -> tag.key } }
-            .distinct()
-            .sortedBy { it.first }
-            .forEach { (name, tagKeys) -> println("event=meter.undescribed name=$name tag_keys=$tagKeys") }
+        val undescribed =
+            runtime
+                .filter { it.id.description.isNullOrBlank() }
+                .map { it.id.name }
+                .toSortedSet()
         val (typed, withoutHelp) = scrapeFamilies()
+        println("event=meter.undescribed registry=${undescribed.size} ${undescribed.joinToString(",")}")
         println("event=meter.scrape type_families=${typed.size} without_help=${withoutHelp.size} ${withoutHelp.joinToString(",")}")
-        println("event=meter.scrape typed=${typed.joinToString(",")}")
+        withClue("registry undescribed: ${undescribed.toList()}; scrape families without HELP: ${withoutHelp.toList()}") {
+            (undescribed.toList() to withoutHelp.toList()) shouldBe (emptyList<String>() to emptyList())
+        }
+        runtime.size shouldBeGreaterThanOrEqual RUNTIME_METER_FLOOR
+        typed.size shouldBeGreaterThanOrEqual RUNTIME_METER_FLOOR
     }
 
     /**
