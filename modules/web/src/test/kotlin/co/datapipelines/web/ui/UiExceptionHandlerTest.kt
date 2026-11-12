@@ -77,6 +77,35 @@ class UiExceptionHandlerTest {
         every { this@mockk.method } returns method
     }
 
+    /**
+     * #847 — `POST /login` and the password change meet a native verification fault as a 503 error
+     * page (htmx: a toast), never a `/login?error=credentials` redirect; the library's text stays
+     * on the exception's cause and out of the page and the toast.
+     */
+    @Test
+    fun `a native verification fault is a 503 page or toast, free of the native text`() {
+        val error =
+            co.datapipelines.auth.SecretVerificationUnavailableException(
+                -22,
+                IllegalStateException("argon2id_verify failed: Memory allocation error (-22)"),
+            )
+
+        val page = handler.onAuth(error, mockRequest(method = "POST")).shouldBeInstanceOf<ModelAndView>()
+        page.status shouldBe HttpStatus.SERVICE_UNAVAILABLE
+        page.viewName shouldBe "error/500"
+        page.model.values.joinToString().let { model ->
+            model shouldNotContain "emory"
+            model shouldNotContain "-22"
+        }
+
+        val toast = handler.onAuth(error, mockRequest(htmx = true, method = "POST")).shouldBeInstanceOf<ResponseEntity<*>>()
+        toast.statusCode shouldBe HttpStatus.SERVICE_UNAVAILABLE
+        val body = toast.body as String
+        body shouldContain co.datapipelines.auth.AuthErrorCodes.SECRET_VERIFICATION_UNAVAILABLE
+        body shouldNotContain "emory"
+        body shouldNotContain "(-22)"
+    }
+
     @Test
     fun `access denied maps to error 403 view with forbidden status`() {
         val request = mockRequest()
