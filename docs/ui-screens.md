@@ -1,6 +1,6 @@
 # UI Screens Inventory
 
-**Status:** v1.237
+**Status:** v1.238
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
 **Last updated:** 2026-11-12
@@ -2235,6 +2235,8 @@ service's guard and a POST that re-runs it and answers `HX-Redirect` with an `ap
 The draft dialog's picker lists the chosen pipeline's live versions with status and eligibility; an ineligible version is
 listed and disabled, never hidden. Design tokens and the vendored lucide sprite only. Guard: `ApiVersionsBrowserTest`.
 
+**Dependencies (#876 G6, record §13).** A third card, between the version card and the API card and only when a version is selected: the SELECTED version's dependencies (never implicitly the current pointer's) in the shared pane (§4.4's Graph/List and tables). Unlike the two cards around it, it is a `<details>` CLOSED by default that sends nothing until it is first opened, then one §15 tree read naming the API's stored path and the viewed version (`/api/v1/dependencies/api_endpoint?name=/<path>&version=<n>`). It shows the API version with its lifecycle and the entity's enabled/disabled, and its one **Pipeline** edge to the exact pipeline version that version pins. The page has no tab strip and none is added; another version is another page load (`?version=n`), so the pane never changes version in place. Enabling and key bindings stay in the API card. Guards: `EndpointVersionsPageRenderTest`, `DependenciesApiEndpointBrowserTest`.
+
 ---
 
 ### 4.19 API keys (keys v2 — the ONE creation path for every kind)
@@ -3189,6 +3191,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-12 | v1.238 | #876 G6 the API version's Dependencies card | **§4.18b**: a Dependencies card between the version card and the API card, only when a version is selected — the SELECTED version's tree (the API version with its lifecycle and enabled/disabled, its one **Pipeline** edge to the pinned pipeline version), a `<details>` closed by default, one tree read carrying the stored path and the viewed version on first open; no tab strip, another version is a page load. Tests: `EndpointVersionsPageRenderTest`, `DependenciesApiEndpointBrowserTest`. |
 | 2026-11-12 | v1.237 | #876 G6 the datasource's Dependencies section | **§4.5c**: after Learned facts, a Dependencies section — the shared pane in a `<details>` closed by default, one tree read carrying the datasource's name alone on first open; the honest leaf (`Unversioned`, `Registered datasource · read-only\|read-write`, **No dependencies**), no Used-by line. Tests: `DatasourceDetailRenderTest`, `DependenciesDatasourceBrowserTest`. |
 | 2026-11-12 | v1.236 | #876 G6 the schedule's Dependencies section | **§4.20**: the schedule detail's reading column ends with a Dependencies section — the shared pane (§4.4) in a `<details>` closed by default that sends nothing until first opened, then one tree read carrying the schedule's id alone; it shows "Revision N" with the condition and the one **Runs pipeline** edge to the exact pinned pipeline version. Each selected schedule gets its own closed section and its own read. Tests: `SchedulesDetailRenderTest`, `DependenciesScheduleBrowserTest`. |
 | 2026-11-12 | v1.235 | #876 G6 the Dependencies graph's glyphs and the per-page view | **§4.4, §4.7, §4.21, §4.23, §4.24** (the shared pane): every node the Dependencies graph draws shows its family's lucide glyph (the rail's own, the List's kind cell's) at its left, beside its text — an `svg` + `use` layer over the canvas that ignores the pointer and takes the theme's text colour; a folder-path name wraps between its segments in the graph label. The Graph/List choice is kept PER PAGE (the page's path, so it holds across the page's own `?tab=` and `?version=` changes, a reload and Back), under one `localStorage` key `dp.deps.views` that keeps the 50 most recently chosen pages; a page never chosen on opens in List under `prefers-reduced-motion`, Graph otherwise. Tests: `DependencyTreeRendererBrowserTest` (m) and (n), `dependencies-mount.test.mjs`, `dependencies-tree-view.test.mjs`. |
