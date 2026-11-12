@@ -16,11 +16,12 @@ spec:
     spec:
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       securityContext:
-        # The image runs as the non-root `datapipelines` user (deployment.md §3.1).
+        # The image's `datapipelines` account is UID/GID 999 (Dockerfile; deployment.md §3.1);
+        # numeric because the image's USER is a name.
         runAsNonRoot: true
-        runAsUser: 1000
-        runAsGroup: 1000
-        fsGroup: 1000
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
       containers:
         - name: {{ include "datapipelines.name" . }}
           image: {{ include "datapipelines.image" . }}

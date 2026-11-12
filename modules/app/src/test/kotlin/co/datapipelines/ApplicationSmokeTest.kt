@@ -293,6 +293,64 @@ class ApplicationSmokeTest {
     }
 
     /**
+     * #715: every `datapipelines.*` meter the booted application holds carries a description, read twice — at
+     * the registry (`id.description`) and on the wire, where the exporter OMITS the `# HELP` line of an
+     * undescribed family. Both lists are collected before the one assertion, so neither half hides the other.
+     * Eager meters only: a meter created on its first event is not in a freshly booted registry. Also prints
+     * the context's registry beans (#716 evidence).
+     */
+    @Test
+    fun `every datapipelines meter the booted registry holds carries a description - registry and scrape`() {
+        println("event=meter.registries shape=production ${meterRegistryShape(applicationContext)}")
+        val runtime = meterRegistry.meters.filter { it.id.name.startsWith(MeterCatalogue.PREFIX) }
+        val undescribed =
+            runtime
+                .filter { it.id.description.isNullOrBlank() }
+                .map { it.id.name }
+                .toSortedSet()
+        val (typed, withoutHelp) = scrapeFamilies()
+        println("event=meter.undescribed registry=${undescribed.size} ${undescribed.joinToString(",")}")
+        println("event=meter.scrape type_families=${typed.size} without_help=${withoutHelp.size} ${withoutHelp.joinToString(",")}")
+        withClue("registry undescribed: ${undescribed.toList()}; scrape families without HELP: ${withoutHelp.toList()}") {
+            (undescribed.toList() to withoutHelp.toList()) shouldBe (emptyList<String>() to emptyList())
+        }
+        runtime.size shouldBeGreaterThanOrEqual RUNTIME_METER_FLOOR
+        typed.size shouldBeGreaterThanOrEqual RUNTIME_METER_FLOOR
+    }
+
+    /**
+     * #716: the production shape holds ONE meter registry — Boot's Prometheus registry, the one the scrape
+     * reads — and no composite. A second registry bean (the user `SimpleMeterRegistry` `EngineConfiguration`
+     * declared until #716) makes Boot wrap both in a `@Primary` composite, so every meter is held twice and
+     * the in-memory copy is read by nobody.
+     */
+    @Test
+    fun `the booted application holds exactly one meter registry`() {
+        val beans = applicationContext.getBeansOfType(MeterRegistry::class.java)
+        withClue("MeterRegistry beans: ${beans.mapValues { it.value::class.java.name }}") {
+            beans.values.map { it::class.java.name } shouldBe listOf(PROMETHEUS_REGISTRY)
+        }
+    }
+
+    /**
+     * The `datapipelines_*` families of the management scrape, taken from their `# TYPE` lines, and the
+     * subset with no `# HELP` line or a blank one. The exporter OMITS the HELP line of an undescribed
+     * family rather than writing a blank one, so the families come from TYPE, independently of HELP.
+     */
+    private fun scrapeFamilies(): Pair<Set<String>, Set<String>> {
+        val lines = get(managementPort, "/actuator/prometheus").body().lines()
+
+        fun families(kind: String) =
+            lines
+                .filter { it.startsWith("# $kind $SCRAPE_PREFIX") }
+                .map { it.removePrefix("# $kind ").split(' ', limit = 2) }
+
+        val typed = families("TYPE").map { it[0] }.toSortedSet()
+        val helped = families("HELP").filter { it.size == 2 && it[1].isNotBlank() }.map { it[0] }.toSet()
+        return typed to (typed - helped).toSortedSet()
+    }
+
+    /**
      * The composition wiring (design 2026-08-13-pipeline-node-type §4.1), asserted at the bean
      * graph the assembled app actually boots: the `SubPipelineRunner` port and the
      * repository-backed `PipelineResolver` must both exist, or a PIPELINE node would fail closed
@@ -331,6 +389,12 @@ class ApplicationSmokeTest {
 
         /** The scrape's first lines printed as lane evidence (#708). */
         private const val SCRAPE_EVIDENCE_LINES = 20
+
+        /** Named, not imported: the Prometheus registry is a runtime-only dependency of `app` (#708). */
+        const val PROMETHEUS_REGISTRY = "io.micrometer.prometheusmetrics.PrometheusMeterRegistry"
+
+        /** `MeterCatalogue.PREFIX` as the Prometheus exporter spells a family name. */
+        private const val SCRAPE_PREFIX = "datapipelines_"
 
         /** The eagerly-registered `datapipelines.*` meters a booted app holds (gauges and eager counters). */
         private const val RUNTIME_METER_FLOOR = 10
