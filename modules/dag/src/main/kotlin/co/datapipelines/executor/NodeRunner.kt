@@ -524,10 +524,12 @@ class NodeRunner(
     /**
      * `CREATE TABLE <table> AS <sql>` on the staging connection.
      *
-     * Run through `withConnection` rather than `Staging.execute` so the statement gets a
-     * `queryTimeout` and is registered for `Statement.cancel()`: staging sets **no** timeout on
-     * `execute`/`withConnection`, so author tempdb SQL could otherwise hold its leased connection
-     * for as long as it liked with the execution timeout as the only backstop. The memory budget
+     * Run through `withConnection` rather than `Staging.execute` so the statement gets the node's
+     * `queryTimeout` and is registered for the node's `Statement.cancel()`: staging bounds
+     * `execute` and `withQuery` with its own `query-timeout-seconds` and cancels them only when the
+     * whole database closes, and it bounds **no** `withConnection` statement, so this one is the
+     * executor's to bound — otherwise author tempdb SQL could hold its leased connection for as
+     * long as it liked with the execution timeout as the only backstop. The memory budget
      * `execute` would have checked is checked explicitly afterwards ([checkStagingBudget]).
      *
      * ## Why the row count is a second statement
