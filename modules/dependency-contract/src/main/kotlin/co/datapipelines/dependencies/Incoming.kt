@@ -104,7 +104,10 @@ data class IncomingCursor(
 /**
  * One stored reference occurrence pointing at the target (§A.3) — the page unit. [storedVersion] is the version the
  * dependent's body names (null for an unversioned or CURRENT-selector reference); [elementId] is the dependent body's
- * own element id where a port reports one (a pipeline node's `id`), null elsewhere.
+ * own element id where a port reports one (a pipeline node's `id`), null elsewhere. [followsCurrent] is true when the
+ * stored reference names the target's CURRENT pointer instead of a version (a legacy schema-1 schedule payload, #877
+ * §A.3 extension): it stores no version, so an exact-version target never matches it, and an adapter whose port resolves
+ * it to the version CURRENT names now reads this flag rather than guessing from a null [storedVersion].
  */
 data class IncomingEdge(
     val dependent: ResolvedIdentity,
@@ -115,6 +118,7 @@ data class IncomingEdge(
     val sourcePath: String,
     val storedVersion: Int?,
     val elementId: String? = null,
+    val followsCurrent: Boolean = false,
 ) {
     /** The occurrence's order key (§A.3), version component 0 when the dependent is unversioned. */
     val dependentVersion: Int get() = dependent.artifactVersion ?: 0

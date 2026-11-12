@@ -52,10 +52,9 @@ class TemplateCreatePartialTest {
         pipelines: PipelineRepository,
     ): co.datapipelines.application.templates.TemplateUsage =
         co.datapipelines.application.templates.TemplateUsage(
+            co.datapipelines.application.dependencies
+                .IncomingRows { _, _, _, _, _ -> emptyList() },
             TemplateUsageService(templates, pipelines),
-            io.mockk.mockk<co.datapipelines.parameters.ParameterSetTemplatePins>(relaxed = true),
-            pipelines,
-            io.mockk.mockk<co.datapipelines.visualization.ArtifactDependents>(relaxed = true),
         )
 
     private val repository = mockk<TemplateRepository>()

@@ -35,10 +35,8 @@ class TemplatesPurgeDraftToolTest {
     private val visualizationPins = mockk<co.datapipelines.visualization.ArtifactDependents>()
     private val usage =
         co.datapipelines.application.templates.TemplateUsage(
+            ScannedIncomingRows(pipelines, parameterPins, visualizationPins),
             TemplateUsageService(templates, pipelines),
-            parameterPins,
-            pipelines,
-            visualizationPins,
         )
 
     // #841: the purge runs on the draft service's guarded transaction; DIRECT + NONE here (no transaction, no lock).

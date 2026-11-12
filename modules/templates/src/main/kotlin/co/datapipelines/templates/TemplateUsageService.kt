@@ -65,22 +65,25 @@ class TemplateUsageService(
         id: String,
         version: Int,
     ): UsedBy {
+        requireVisibleVersion(workspaceId, templateLens, id, version)
+        return usedByOf(id, version, pipelines.findWorkingVersionTemplatePins(workspaceId, id, version), templateLens, pipelineLens)
+    }
+
+    /**
+     * #877 §C — [usedBy]'s refusal alone: the template must exist, be admitted by [templateLens] and carry [version] as
+     * the lens sees it (a DRAFT template version is "version not found" under a narrowing lens, 178b). The application
+     * adapter over `findIncoming` asks this before reading its pins, so the not-found semantics stay this class's.
+     *
+     * @throws DatapipelinesException `template.not_found`.
+     */
+    fun requireVisibleVersion(
+        workspaceId: UUID,
+        templateLens: ReadLens,
+        id: String,
+        version: Int,
+    ) {
         if (!templateLens.admits(id) || !templates.existsId(workspaceId, id)) throw templateNotFound(id)
-        // 178b: through the façade — a DRAFT template version is "version not found" under a
-        // narrowing lens, and a DRAFT pipeline pin (a visible pipeline's pending draft) is
-        // dropped when either lens narrows: a promoter sees released pins of released versions.
         if (reads.findVersionStatus(workspaceId, templateLens, id, version) == null) throw templateVersionNotFound(id, version)
-        val references =
-            pipelines
-                .findWorkingVersionTemplatePins(workspaceId, id, version)
-                .through(pipelineLens) { it.pipelineName }
-                .filter { (templateLens.isEverything && pipelineLens.isEverything) || it.versionStatus == PipelineVersionStatus.RELEASED }
-        return UsedBy(
-            templateId = id,
-            version = version,
-            references = references,
-            pipelineCount = references.map(TemplatePin::pipelineId).distinct().size,
-        )
     }
 
     /**
@@ -116,10 +119,7 @@ class TemplateUsageService(
         templateLens: ReadLens,
         pipelineLens: ReadLens,
         id: String,
-    ): List<TemplatePin> =
-        referencedAnywhere(workspaceId, id)
-            .through(pipelineLens) { it.pipelineName }
-            .filter { (templateLens.isEverything && pipelineLens.isEverything) || it.versionStatus == PipelineVersionStatus.RELEASED }
+    ): List<TemplatePin> = narrow(referencedAnywhere(workspaceId, id), templateLens, pipelineLens)
 
     /**
      * One entry of the pipeline read's upgrade signal (040 D5): node [node] pins
@@ -193,7 +193,38 @@ class TemplateUsageService(
             details = mapOf("template_id" to id, "version" to version),
         )
 
-    private companion object {
-        val MAPPER = TemplateJson.objectMapper()
+    companion object {
+        /**
+         * #877 §C — the pipeline arm's visibility rule, ONE definition for this class and the application adapter: pins
+         * of pipelines [pipelineLens] hides drop out, and when either lens narrows only RELEASED pipeline versions remain
+         * (178b — a promoter sees released pins of released versions, never a pending draft's).
+         */
+        fun narrow(
+            pins: List<TemplatePin>,
+            templateLens: ReadLens,
+            pipelineLens: ReadLens,
+        ): List<TemplatePin> =
+            pins
+                .through(pipelineLens) { it.pipelineName }
+                .filter { (templateLens.isEverything && pipelineLens.isEverything) || it.versionStatus == PipelineVersionStatus.RELEASED }
+
+        /** [usedBy]'s answer over the working-version pins of `id@version`, narrowed; the count is the visible pipelines'. */
+        fun usedByOf(
+            id: String,
+            version: Int,
+            workingPins: List<TemplatePin>,
+            templateLens: ReadLens,
+            pipelineLens: ReadLens,
+        ): UsedBy {
+            val references = narrow(workingPins, templateLens, pipelineLens)
+            return UsedBy(
+                templateId = id,
+                version = version,
+                references = references,
+                pipelineCount = references.map(TemplatePin::pipelineId).distinct().size,
+            )
+        }
+
+        private val MAPPER = TemplateJson.objectMapper()
     }
 }

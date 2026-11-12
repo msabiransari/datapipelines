@@ -4,6 +4,7 @@ import co.datapipelines.pipeline.inverse.InverseRequest
 import co.datapipelines.pipeline.inverse.InverseRow
 import co.datapipelines.pipeline.inverse.InverseScope
 import co.datapipelines.pipeline.inverse.InverseSql
+import co.datapipelines.pipeline.inverse.PipelinePinRows
 import co.datapipelines.pipeline.release.RaceSavepoint
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.dao.DuplicateKeyException
@@ -366,11 +367,7 @@ class PipelineRepository(
         datasourceName: String,
     ): List<DatasourceRef> =
         exhaust(workspaceId, datasourceName, null, InverseScope.ANY, inverse::datasourceRefs)
-            // One row per NODE (a node naming the datasource as both source and output is one reference here).
-            .distinctBy { Triple(it.dependentId, it.dependentVersion, it.elementId) }
-            .map { row ->
-                DatasourceRef(row.dependentUuid, row.dependentName, row.dependentVersion, statusOf(row), row.elementId.orEmpty())
-            }.sortedWith(compareBy<DatasourceRef> { it.pipelineName }.thenByDescending { it.pipelineVersion }.thenBy { it.nodeId })
+            .let(PipelinePinRows::datasourceRefs)
 
     /**
      * **One level** of the pipeline tree under [prefix] — its direct sub-folders and its
@@ -792,8 +789,8 @@ class PipelineRepository(
         version: Int,
     ): List<TemplatePin> =
         exhaust(workspaceId, templateId, version, InverseScope.WORKING, inverse::templatePins)
-            .map(::templatePin)
-            .sortedWith(BY_NAME_THEN_NODE)
+            .map(PipelinePinRows::templatePin)
+            .sortedWith(PipelinePinRows.BY_NAME_THEN_NODE)
 
     /**
      * **Is it safe to remove `templateId` (any version of it)?** (040 D1, question 2.)
@@ -816,8 +813,8 @@ class PipelineRepository(
         templateId: String,
     ): List<TemplatePin> =
         exhaust(workspaceId, templateId, null, InverseScope.ANY, inverse::templatePins)
-            .map(::templatePin)
-            .sortedWith(compareBy<TemplatePin> { it.pipelineName }.thenByDescending { it.pipelineVersion }.thenBy { it.nodeId })
+            .map(PipelinePinRows::templatePin)
+            .sortedWith(PipelinePinRows.BY_NAME_NEWEST_THEN_NODE)
 
     /**
      * Distinct live pipelines pinning each version of [templateId], counted over the
@@ -832,9 +829,7 @@ class PipelineRepository(
         templateId: String,
     ): Map<Int, Int> =
         exhaust(workspaceId, templateId, null, InverseScope.WORKING, inverse::templatePins)
-            .filter { it.storedVersion != null }
-            .groupBy { checkNotNull(it.storedVersion) }
-            .mapValues { (_, rows) -> rows.map { it.dependentId }.distinct().size }
+            .let(PipelinePinRows::countByPinnedVersion)
 
     /**
      * The content hash of a candidate body, computed by the SAME database expression every
@@ -1236,18 +1231,6 @@ class PipelineRepository(
             read(InverseRequest(workspaceId, key, version, scope, after, InverseSql.EXHAUST_PAGE))
         }
 
-    private fun statusOf(row: InverseRow): PipelineVersionStatus = checkNotNull(row.status) { "a pipeline version has a status" }
-
-    private fun templatePin(row: InverseRow): TemplatePin =
-        TemplatePin(
-            row.dependentUuid,
-            row.dependentName,
-            row.dependentVersion,
-            statusOf(row),
-            row.elementId.orEmpty(),
-            row.storedVersion ?: 0,
-        )
-
     /**
      * LIVE parent versions pinning `pipelineName@version` — graph rule 1's evidence (the
      * `pipeline.version.pinned` refusal names them). A parent version is LIVE when its own
@@ -1261,9 +1244,7 @@ class PipelineRepository(
     ): List<TemplatePin> =
         exhaust(workspaceId, pipelineName, version, InverseScope.LIVE, inverse::childPins)
             // A pipeline's own versions never count as its parents (the native scan excluded the target's id).
-            .filter { it.dependentName != pipelineName }
-            .map(::templatePin)
-            .sortedWith(BY_NAME_THEN_NODE)
+            .let { rows -> PipelinePinRows.parents(rows, pipelineName) }
 
     /**
      * LIVE pipeline versions pinning `templateId@version` — the template-side twin of graph
@@ -1276,8 +1257,8 @@ class PipelineRepository(
         version: Int,
     ): List<TemplatePin> =
         exhaust(workspaceId, templateId, version, InverseScope.LIVE, inverse::templatePins)
-            .map(::templatePin)
-            .sortedWith(BY_NAME_THEN_NODE)
+            .map(PipelinePinRows::templatePin)
+            .sortedWith(PipelinePinRows.BY_NAME_THEN_NODE)
 
     /**
      * **Is the entity LIVE (ACTIVE)?** — the §3.2 derivation, read directly. The
@@ -1517,8 +1498,6 @@ class PipelineRepository(
             ).singleOrNull()
 
     private companion object {
-        private val BY_NAME_THEN_NODE = compareBy<TemplatePin> { it.pipelineName }.thenBy { it.nodeId }
-
         /**
          * The per-workspace name constraint behind `UNIQUE (workspace_id, name)` (metadata-db
          * §4.4, V4). Since D59 names are unique FOREVER: a discarded pipeline keeps its name

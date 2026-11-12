@@ -67,6 +67,8 @@ data class InverseRow(
     val sourcePath: String,
     val storedVersion: Int?,
     val elementId: String?,
+    /** The stored reference names the target's CURRENT pointer, not a version (a schema-1 schedule payload). */
+    val followsCurrent: Boolean = false,
 ) {
     val after: InverseAfter get() = InverseAfter(dependentId, dependentVersion, sourcePath)
 
@@ -153,6 +155,7 @@ object InverseSql {
         occurrences: String,
         params: Map<String, Any?>,
         request: InverseRequest,
+        mapper: RowMapper<InverseRow> = ROW_MAPPER,
     ): List<InverseRow> {
         val after = request.after
         val keyset =
@@ -184,7 +187,7 @@ object InverseSql {
                     "inverseAfterPath" to after?.sourcePath,
                     "inverseLimit" to request.limit + 1,
                 )
-        return jdbc.query(sql, binds, ROW_MAPPER)
+        return jdbc.query(sql, binds, mapper)
     }
 
     /**

@@ -2,6 +2,7 @@ package co.datapipelines.parameters
 
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.inverse.InverseRequest
+import co.datapipelines.pipeline.inverse.InverseRow
 import co.datapipelines.pipeline.inverse.InverseScope
 import co.datapipelines.pipeline.inverse.InverseSql
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
@@ -85,8 +86,7 @@ class ParameterSetTemplatePins(
         templateId: String,
     ): Map<Int, Int> =
         pins(workspaceId, templateId, null, InverseScope.WORKING)
-            .groupBy { it.pinnedVersion }
-            .mapValues { (_, pins) -> pins.map { it.setId }.distinct().size }
+            .let(::countByPinnedVersion)
 
     private fun pins(
         workspaceId: UUID,
@@ -97,8 +97,23 @@ class ParameterSetTemplatePins(
         InverseSql
             .exhaust(InverseSql.EXHAUST_PAGE) { after ->
                 sets.findTemplatePinOccurrences(InverseRequest(workspaceId, templateId, version, scope, after, InverseSql.EXHAUST_PAGE))
-            }.mapNotNull { row ->
-                // The native scans cast the stored version; a non-integral one never counted as a pin.
+            }.let(::pinsOf)
+
+    /**
+     * #877 §C — the set arm's rows as this class's answers: ONE mapping and ONE order, read by these scans (which page
+     * the native query in place) and by the application adapter over `findIncoming` (which receives the same rows).
+     */
+    companion object {
+        /** The working listings' order: set name, then parameter. */
+        val BY_NAME_THEN_PARAMETER: Comparator<ParameterSetPin> = compareBy<ParameterSetPin> { it.setName }.thenBy { it.parameter }
+
+        /** The live and any-version scans' order: set name, newest set version first, then parameter. */
+        val BY_NAME_NEWEST_THEN_PARAMETER: Comparator<ParameterSetPin> =
+            compareBy<ParameterSetPin> { it.setName }.thenByDescending { it.setVersion }.thenBy { it.parameter }
+
+        /** Rows as pins, unordered. The native scans cast the stored version; a non-integral one never counted as a pin. */
+        fun pinsOf(rows: List<InverseRow>): List<ParameterSetPin> =
+            rows.mapNotNull { row ->
                 row.storedVersion?.let { pinned ->
                     ParameterSetPin(
                         setId = row.dependentUuid,
@@ -111,9 +126,8 @@ class ParameterSetTemplatePins(
                 }
             }
 
-    private companion object {
-        private val BY_NAME_THEN_PARAMETER = compareBy<ParameterSetPin> { it.setName }.thenBy { it.parameter }
-        private val BY_NAME_NEWEST_THEN_PARAMETER =
-            compareBy<ParameterSetPin> { it.setName }.thenByDescending { it.setVersion }.thenBy { it.parameter }
+        /** Distinct sets per pinned template version (the template screen's per-version count). */
+        fun countByPinnedVersion(pins: List<ParameterSetPin>): Map<Int, Int> =
+            pins.groupBy { it.pinnedVersion }.mapValues { (_, pinning) -> pinning.map { it.setId }.distinct().size }
     }
 }

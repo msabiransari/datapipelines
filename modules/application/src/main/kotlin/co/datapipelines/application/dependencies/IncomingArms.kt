@@ -109,6 +109,7 @@ class IncomingArms(
             sourcePath = row.sourcePath,
             storedVersion = row.storedVersion,
             elementId = row.elementId,
+            followsCurrent = row.followsCurrent,
         )
 
     companion object {

@@ -109,20 +109,29 @@ class ArtifactDependents(
         InverseSql
             .exhaust(InverseSql.EXHAUST_PAGE) { after ->
                 arm(InverseRequest(workspaceId, key, version, scope.inverse, after, InverseSql.EXHAUST_PAGE))
-            }.map { row ->
-                ArtifactPin(
-                    artifactId = row.dependentUuid,
-                    name = row.dependentName,
-                    version = row.dependentVersion,
-                    status = requireNotNull(row.status) { "a versioned dependent row carries its status" },
-                    pinnedVersion = row.storedVersion ?: 0,
-                )
-            }.distinct()
-            .sortedWith(BY_NAME_NEWEST_FIRST)
+            }.let(::pinsOf)
 
-    private companion object {
-        val BY_NAME_NEWEST_FIRST: Comparator<ArtifactPin> =
+    /**
+     * #877 §C — the artifact arms' rows as this class's answers: ONE mapping, dedupe and order, read by these scans
+     * (which page the native query in place) and by the application adapters over `findIncoming`.
+     */
+    companion object {
+        private val BY_NAME_NEWEST_FIRST: Comparator<ArtifactPin> =
             compareBy<ArtifactPin> { it.name }.thenByDescending { it.version }.thenBy { it.pinnedVersion }
+
+        /** Rows as pins: one per (artifact version, pinned version), name, newest version, pinned version order. */
+        fun pinsOf(rows: List<InverseRow>): List<ArtifactPin> =
+            rows
+                .map { row ->
+                    ArtifactPin(
+                        artifactId = row.dependentUuid,
+                        name = row.dependentName,
+                        version = row.dependentVersion,
+                        status = requireNotNull(row.status) { "a versioned dependent row carries its status" },
+                        pinnedVersion = row.storedVersion ?: 0,
+                    )
+                }.distinct()
+                .sortedWith(BY_NAME_NEWEST_FIRST)
     }
 }
 

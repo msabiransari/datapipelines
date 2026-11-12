@@ -1,17 +1,18 @@
 package co.datapipelines.application.templates
 
+import co.datapipelines.application.dependencies.IncomingRows
+import co.datapipelines.application.dependencies.InverseArm
 import co.datapipelines.application.lens.LensedView
 import co.datapipelines.parameters.ParameterSetPin
 import co.datapipelines.parameters.ParameterSetTemplatePins
-import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineVersionStatus
-import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.TemplatePin
+import co.datapipelines.pipeline.inverse.InverseScope
+import co.datapipelines.pipeline.inverse.PipelinePinRows
 import co.datapipelines.pipeline.through
 import co.datapipelines.templates.TemplateUsageService
 import co.datapipelines.visualization.ArtifactDependents
 import co.datapipelines.visualization.ArtifactPin
-import co.datapipelines.visualization.PinScope
 import java.util.UUID
 
 /**
@@ -46,12 +47,18 @@ import java.util.UUID
  * `view.visualizations`. The guards' evidence has its OWN two methods, both unlensed — a guard
  * runs over the whole workspace and the caller's view decides only what its refusal may echo:
  * [liveVersionPins] (the discard and draft-purge verbs) and [everPins] (the entity purge).
+ *
+ * ## An adapter over the inverse query (#877 §C)
+ * Every pin comes from [IncomingRows] — the target family's `findIncoming`, paged to exhaustion, one bounded statement
+ * per page — mapped and ordered by the SAME functions the domain scans use ([PipelinePinRows],
+ * [ParameterSetTemplatePins.pinsOf], [ArtifactDependents.pinsOf]), so every caller receives the complete answer it
+ * received before, in the same order. [templates] is asked only for [usedBy]'s not-found refusal; it scans nothing here.
+ * Filtering owners (§C.2): the methods taking a [LensedView] narrow inside, as before; [liveVersionPins] and
+ * [everPins] are unlensed (the refusal builder narrows the echo).
  */
 class TemplateUsage(
-    private val pipelines: TemplateUsageService,
-    private val parameterSets: ParameterSetTemplatePins,
-    private val pipelineVersions: PipelineRepository,
-    private val visualizations: ArtifactDependents,
+    private val incoming: IncomingRows,
+    private val templates: TemplateUsageService,
 ) {
     /** The combined used-by answer: one row per pinning NODE (pipelines) and per pinning PARAMETER (sets). */
     data class Combined(
@@ -82,8 +89,8 @@ class TemplateUsage(
 
     /**
      * Question 1, combined: who pins `id@version` in their working version right now? The
-     * template must exist and carry that version — [TemplateUsageService.usedBy]'s refusal —
-     * before either scan runs.
+     * template must exist and carry that version — [TemplateUsageService.requireVisibleVersion]'s refusal —
+     * before any scan runs.
      *
      * @throws co.datapipelines.typesystem.DatapipelinesException `template.not_found`, exactly
      *   as the pipeline-only answer did (a hidden template is an absent one).
@@ -94,16 +101,21 @@ class TemplateUsage(
         id: String,
         version: Int,
     ): Combined {
+        templates.requireVisibleVersion(workspaceId, view.templates, id, version)
         val pipelinesAnswer =
-            pipelines.usedBy(workspaceId, view.templates, view.pipelines, id, version)
+            TemplateUsageService.usedByOf(
+                id,
+                version,
+                pipelinePins(workspaceId, id, version, InverseScope.WORKING, PipelinePinRows.BY_NAME_THEN_NODE),
+                view.templates,
+                view.pipelines,
+            )
         val setPins =
-            parameterSets
-                .workingVersionPins(workspaceId, id, version)
+            setPins(workspaceId, id, version, InverseScope.WORKING, ParameterSetTemplatePins.BY_NAME_THEN_PARAMETER)
                 .through(view.parameterSets) { it.setName }
                 .filter { visible(view, it.versionStatus) }
         val visualizationPins =
-            visualizations
-                .visualizationsPinningTemplate(workspaceId, id, version, PinScope.WORKING)
+            visualizationPins(workspaceId, id, version, InverseScope.WORKING)
                 .through(view.visualizations) { it.name }
                 .filter { visible(view, it.status) }
         return Combined(
@@ -127,9 +139,9 @@ class TemplateUsage(
         version: Int,
     ): Pins =
         Pins(
-            pipelines = pipelineVersions.findLiveVersionsPinningTemplateVersion(workspaceId, id, version),
-            parameterSets = parameterSets.liveVersionPins(workspaceId, id, version),
-            visualizations = visualizations.visualizationsPinningTemplate(workspaceId, id, version, PinScope.LIVE),
+            pipelines = pipelinePins(workspaceId, id, version, InverseScope.LIVE, PipelinePinRows.BY_NAME_THEN_NODE),
+            parameterSets = setPins(workspaceId, id, version, InverseScope.LIVE, ParameterSetTemplatePins.BY_NAME_NEWEST_THEN_PARAMETER),
+            visualizations = visualizationPins(workspaceId, id, version, InverseScope.LIVE),
         )
 
     /**
@@ -142,9 +154,9 @@ class TemplateUsage(
         id: String,
     ): Pins =
         Pins(
-            pipelines = pipelineVersions.findAnyVersionTemplatePins(workspaceId, id),
-            parameterSets = parameterSets.anyVersionPins(workspaceId, id),
-            visualizations = visualizations.visualizationsPinningTemplate(workspaceId, id, null, PinScope.ANY),
+            pipelines = anyVersionPipelinePins(workspaceId, id),
+            parameterSets = anyVersionSetPins(workspaceId, id),
+            visualizations = visualizationPins(workspaceId, id, null, InverseScope.ANY),
         )
 
     /**
@@ -158,8 +170,7 @@ class TemplateUsage(
         view: LensedView,
         id: String,
     ): List<ParameterSetPin> =
-        parameterSets
-            .anyVersionPins(workspaceId, id)
+        anyVersionSetPins(workspaceId, id)
             .through(view.parameterSets) { it.setName }
             .filter { visible(view, it.versionStatus) }
 
@@ -173,8 +184,7 @@ class TemplateUsage(
         view: LensedView,
         id: String,
     ): List<ArtifactPin> =
-        visualizations
-            .visualizationsPinningTemplate(workspaceId, id, null, PinScope.ANY)
+        visualizationPins(workspaceId, id, null, InverseScope.ANY)
             .through(view.visualizations) { it.name }
             .filter { visible(view, it.status) }
 
@@ -187,7 +197,8 @@ class TemplateUsage(
         workspaceId: UUID,
         view: LensedView,
         id: String,
-    ): List<co.datapipelines.pipeline.TemplatePin> = pipelines.referencedAnywhere(workspaceId, view.templates, view.pipelines, id)
+    ): List<co.datapipelines.pipeline.TemplatePin> =
+        TemplateUsageService.narrow(anyVersionPipelinePins(workspaceId, id), view.templates, view.pipelines)
 
     /** The template screen's per-version in-use counts, sets included (040 D6, one level up). */
     fun inUseCounts(
@@ -195,45 +206,45 @@ class TemplateUsage(
         view: LensedView,
         id: String,
     ): Map<Int, Int> {
+        val pipelineRows = incoming.rows(workspaceId, InverseArm.TEMPLATE_FROM_PIPELINE, id, null, InverseScope.WORKING)
         val fromPipelines =
-            pipelines.inUseCounts(workspaceId, id).let { counts ->
-                if (view.pipelines.isEverything && view.templates.isEverything) {
-                    counts
-                } else {
-                    // #340: a narrowing view counts only pipelines it admits, RELEASED working versions only — the rule
-                    // [usedBy] applies to the same rows, so the count and the listing agree. The aggregate has no lens,
-                    // so re-derive from the pinned rows, one version at a time (the aggregate's keys say which).
-                    workingPipelineCounts(workspaceId, view, id, counts.keys)
-                }
+            if (view.pipelines.isEverything && view.templates.isEverything) {
+                PipelinePinRows.countByPinnedVersion(pipelineRows)
+            } else {
+                // #340: a narrowing view counts only pipelines it admits, RELEASED working versions only — the rule
+                // [usedBy] applies to the same rows, so the count and the listing agree.
+                workingPipelineCounts(pipelineRows, view)
             }
+        val setPins = setPins(workspaceId, id, null, InverseScope.WORKING, ParameterSetTemplatePins.BY_NAME_THEN_PARAMETER)
         val fromSets =
-            parameterSets
-                .countWorkingPinsByPinnedVersion(workspaceId, id)
-                .let { counts ->
-                    if (view.parameterSets.isEverything) {
-                        counts
-                    } else {
-                        // A narrowing view counts only sets it admits — re-derive from the
-                        // pinned rows, the counts statement has no lens.
-                        workingSetCounts(workspaceId, view, id)
-                    }
-                }
-        val fromVisualizations = workingVisualizationCounts(workspaceId, view, id)
+            if (view.parameterSets.isEverything) {
+                ParameterSetTemplatePins.countByPinnedVersion(setPins)
+            } else {
+                // A narrowing view counts only sets it admits.
+                val admitted = setPins.filter { view.parameterSets.admits(it.setName) && visible(view, it.versionStatus) }
+                distinctByPinned(admitted, ParameterSetPin::pinnedVersion, ParameterSetPin::setId)
+            }
+        val admittedVisualizations =
+            visualizationPins(workspaceId, id, null, InverseScope.WORKING).filter {
+                view.visualizations.admits(it.name) && visible(view, it.status)
+            }
+        val fromVisualizations = distinctByPinned(admittedVisualizations, ArtifactPin::pinnedVersion, ArtifactPin::artifactId)
         return (fromPipelines.keys + fromSets.keys + fromVisualizations.keys).associateWith { version ->
             (fromPipelines[version] ?: 0) + (fromSets[version] ?: 0) + (fromVisualizations[version] ?: 0)
         }
     }
 
+    /** Per stored version, the distinct visible pipelines among the working pins (the narrowed count, #340). */
     private fun workingPipelineCounts(
-        workspaceId: UUID,
+        rows: List<co.datapipelines.pipeline.inverse.InverseRow>,
         view: LensedView,
-        id: String,
-        versions: Set<Int>,
     ): Map<Int, Int> =
-        versions
-            .associateWith { version ->
-                pipelineVersions
-                    .findWorkingVersionTemplatePins(workspaceId, id, version)
+        rows
+            .filter { it.storedVersion != null }
+            .groupBy { checkNotNull(it.storedVersion) }
+            .mapValues { (_, pinning) ->
+                pinning
+                    .map(PipelinePinRows::templatePin)
                     .through(view.pipelines) { it.pipelineName }
                     .filter { it.versionStatus == PipelineVersionStatus.RELEASED }
                     .map(TemplatePin::pipelineId)
@@ -241,29 +252,51 @@ class TemplateUsage(
                     .size
             }.filterValues { it > 0 }
 
-    private fun workingVisualizationCounts(
-        workspaceId: UUID,
-        view: LensedView,
-        id: String,
-    ): Map<Int, Int> =
-        visualizations
-            .visualizationsPinningTemplate(workspaceId, id, null, PinScope.WORKING)
-            .asSequence()
-            .filter { view.visualizations.admits(it.name) && visible(view, it.status) }
-            .groupBy { it.pinnedVersion }
-            .mapValues { (_, pins) -> pins.map(ArtifactPin::artifactId).distinct().size }
+    private fun <T> distinctByPinned(
+        pins: List<T>,
+        pinned: (T) -> Int,
+        identity: (T) -> Any,
+    ): Map<Int, Int> = pins.groupBy(pinned).mapValues { (_, pinning) -> pinning.map(identity).distinct().size }
 
-    private fun workingSetCounts(
+    private fun pipelinePins(
         workspaceId: UUID,
-        view: LensedView,
         id: String,
-    ): Map<Int, Int> =
-        parameterSets
-            .workingVersionPins(workspaceId, id)
-            .asSequence()
-            .filter { view.parameterSets.admits(it.setName) && visible(view, it.versionStatus) }
-            .groupBy { it.pinnedVersion }
-            .mapValues { (_, pins) -> pins.map(ParameterSetPin::setId).distinct().size }
+        version: Int?,
+        scope: InverseScope,
+        order: Comparator<TemplatePin>,
+    ): List<TemplatePin> =
+        incoming
+            .rows(workspaceId, InverseArm.TEMPLATE_FROM_PIPELINE, id, version, scope)
+            .map(PipelinePinRows::templatePin)
+            .sortedWith(order)
+
+    private fun anyVersionPipelinePins(
+        workspaceId: UUID,
+        id: String,
+    ): List<TemplatePin> = pipelinePins(workspaceId, id, null, InverseScope.ANY, PipelinePinRows.BY_NAME_NEWEST_THEN_NODE)
+
+    private fun setPins(
+        workspaceId: UUID,
+        id: String,
+        version: Int?,
+        scope: InverseScope,
+        order: Comparator<ParameterSetPin>,
+    ): List<ParameterSetPin> =
+        ParameterSetTemplatePins
+            .pinsOf(incoming.rows(workspaceId, InverseArm.TEMPLATE_FROM_PARAMETER_SET, id, version, scope))
+            .sortedWith(order)
+
+    private fun anyVersionSetPins(
+        workspaceId: UUID,
+        id: String,
+    ): List<ParameterSetPin> = setPins(workspaceId, id, null, InverseScope.ANY, ParameterSetTemplatePins.BY_NAME_NEWEST_THEN_PARAMETER)
+
+    private fun visualizationPins(
+        workspaceId: UUID,
+        id: String,
+        version: Int?,
+        scope: InverseScope,
+    ): List<ArtifactPin> = ArtifactDependents.pinsOf(incoming.rows(workspaceId, InverseArm.TEMPLATE_FROM_VISUALIZATION, id, version, scope))
 
     /** A narrowing view reports RELEASED rows only (178b, every arm). */
     private fun visible(

@@ -53,21 +53,16 @@ class TemplateWorkspaceControllerTest {
     private val themeResolver = mockk<ThemeResolver>()
     private val pipelines = mockk<co.datapipelines.pipeline.PipelineRepository>()
 
-    /** The composed usage the model reads (the record's §8.4 arrow), over the same doubles. */
+    /**
+     * The composed usage the model reads (the record's §8.4 arrow), over the same doubles. The Used-by facts read the
+     * inverse arms; the tests here are about the VERSION resolution, so every arm answers empty.
+     */
     private val usage =
         TemplateUsage(
+            co.datapipelines.application.dependencies
+                .IncomingRows { _, _, _, _, _ -> emptyList() },
             co.datapipelines.templates.TemplateUsageService(repository, pipelines),
-            mockk<co.datapipelines.parameters.ParameterSetTemplatePins>(relaxed = true),
-            pipelines,
-            mockk<co.datapipelines.visualization.ArtifactDependents>(relaxed = true),
         )
-
-    init {
-        // The Used-by facts read the composed reverse arrow; the tests here are about the
-        // VERSION resolution, so the pin reads answer empty.
-        every { pipelines.countWorkingTemplatePinsByPinnedVersion(any(), any()) } returns emptyMap()
-        every { pipelines.findAnyVersionTemplatePins(any(), any()) } returns emptyList()
-    }
 
     private val actorFixture = TemplateReleaseActorFixture()
     private val actors = actorFixture.actors

@@ -166,13 +166,7 @@ class ParameterSetRepository(
                 findDatasourceOccurrences(
                     InverseRequest(workspaceId, datasourceName, null, InverseScope.ANY, after, InverseSql.EXHAUST_PAGE),
                 )
-            }.map { row ->
-                ParameterSetDatasourceRef(row.dependentName, row.dependentVersion, statusOf(row), parameterIndex(row))
-            }.sortedWith(
-                compareBy<ParameterSetDatasourceRef> { it.parameterSetName }
-                    .thenByDescending { it.version }
-                    .thenBy { it.parameterIndex },
-            )
+            }.let(::datasourceRefsOf)
 
     /**
      * #877 §B.3 — ONE page of the stored selector-template pins (`parameters[i].source.template`, `{id, version}`) of
@@ -229,17 +223,6 @@ class ParameterSetRepository(
 
     private fun inverseBinds(request: InverseRequest): Map<String, Any?> =
         mapOf("workspaceId" to request.workspaceId, "targetKey" to request.targetKey, "targetVersion" to request.targetVersion)
-
-    private fun statusOf(row: InverseRow): PipelineVersionStatus = checkNotNull(row.status) { "a set version has a status" }
-
-    private fun parameterIndex(row: InverseRow): Int =
-        checkNotNull(
-            PARAMETER_INDEX
-                .find(row.sourcePath)
-                ?.groupValues
-                ?.get(1)
-                ?.toInt(),
-        ) { "a selector path names its parameter" }
 
     /** The version the pointer names, or null (never released, or every release discarded). */
     fun findCurrent(
@@ -891,6 +874,35 @@ class ParameterSetRepository(
                 "updated_by" to (current?.updatedBy?.toString() ?: ""),
                 "updated_at" to (current?.updatedAt?.toString() ?: ""),
             )
+
+        /**
+         * #877 §C — selector-datasource rows as the name lock's [ParameterSetDatasourceRef]s, set name, newest version,
+         * parameter order: ONE mapping, read by [findAnyVersionDatasourceRefs] (which pages the native query in place)
+         * and by the delete guard's adapter over `findIncoming` (which receives the same rows).
+         */
+        fun datasourceRefsOf(rows: List<InverseRow>): List<ParameterSetDatasourceRef> =
+            rows
+                .map { row ->
+                    ParameterSetDatasourceRef(
+                        row.dependentName,
+                        row.dependentVersion,
+                        checkNotNull(row.status) { "a set version has a status" },
+                        parameterIndex(row),
+                    )
+                }.sortedWith(
+                    compareBy<ParameterSetDatasourceRef> { it.parameterSetName }
+                        .thenByDescending { it.version }
+                        .thenBy { it.parameterIndex },
+                )
+
+        private fun parameterIndex(row: InverseRow): Int =
+            checkNotNull(
+                PARAMETER_INDEX
+                    .find(row.sourcePath)
+                    ?.groupValues
+                    ?.get(1)
+                    ?.toInt(),
+            ) { "a selector path names its parameter" }
 
         private fun escapeLike(term: String): String = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 

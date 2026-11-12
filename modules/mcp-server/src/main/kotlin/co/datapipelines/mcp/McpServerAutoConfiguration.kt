@@ -177,18 +177,13 @@ class McpServerAutoConfiguration {
         // pattern.
         visualizationTestSessions: co.datapipelines.visualization.VisualizationTestSessionService,
         visualizationTestLinks: co.datapipelines.visualization.TestSessionLinks,
+        // #877 §C — the ONE combined reverse arrow (`web`'s TemplateLifecycleConfiguration bean, an adapter over the
+        // template family's inverse arms): every guard and listing here reads the same answer REST and the UI read, a
+        // set-only or visualization-only pin included. Never constructed here.
+        usage: co.datapipelines.application.templates.TemplateUsage,
     ): List<McpTool> {
         val runtime =
             inlineRuntime(pipelines, templates, templateEngines, datasources, introspector, jdbc)
-        // 040's used-by service COMPOSED with the parameter-set scanner (the record's §8.4):
-        // a set-only pin is a real reference to every guard and listing here.
-        val usage =
-            co.datapipelines.application.templates.TemplateUsage(
-                runtime.usage,
-                co.datapipelines.parameters.ParameterSetTemplatePins(jdbc),
-                pipelines,
-                co.datapipelines.visualization.ArtifactDependents(jdbc),
-            )
         // The authoring capability (versioning §5.5), read from the same property web's guard
         // bean reads — immutable config, so two instances cannot disagree. The template tools
         // still take it, until slice B.
