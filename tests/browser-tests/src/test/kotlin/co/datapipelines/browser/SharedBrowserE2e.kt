@@ -23,18 +23,21 @@ import java.sql.SQLException
  * **The connection budget (#933).** Every class of the module shares this ONE server, so its
  * [MAX_CONNECTIONS] is a budget the whole run spends. Measured 2026-11-12 on 151 classes, one fork,
  * alphabetical order (`spec/dependency-graph` `bd9eded1a`): the server reached 400 of 400 at
- * `PipelineWorkspacePromoterAdmittedBrowserTest` and refused 94 cases. At the 300 crossing
- * (`DashboardWorkspaceBrowserTest`, 305 backends, all idle) the owners were 2 cached application
- * pools x 10 (Hikari's `minimumIdle` defaults to the pool size) = 20, plus 95 pools of the
- * `dbr-src-*` datasources the dashboard cases register against this server = 285 (about 3 each:
- * the product's `minimumIdle` 2 plus connections not yet idle-retired); direct `DriverManager`
- * connections were all closed. A registered datasource's pool lives as long as its context and
- * nothing in a run removes it, so demand grew by one pool per registering case.
+ * `PipelineWorkspacePromoterAdmittedBrowserTest` and refused 94 cases. At the refusal the owners
+ * were 8 cached application contexts' pools x 10 (Hikari's `minimumIdle` defaults to the pool
+ * size) = 80, plus 156 pools of the `*-src-*` datasources the cases register against this server
+ * x 2 (the product's `minimumIdle`) = 312: 392 of 400, the other 8 connections not yet
+ * idle-retired; direct `DriverManager` connections were all closed. A registered datasource's pool
+ * lives as long as its context and nothing in a run removes it, so the floor grew by 2 per
+ * registering case (300 was crossed at `DashboardWorkspaceBrowserTest`).
  *
  * Bounded where it is produced, not here: [SOURCE_DATASOURCE_POOL_FIELDS] (every helper that
  * registers this server as a datasource keeps nothing warm) and [BrowserSuite]'s
- * `spring.datasource.hikari.*` (a cached context keeps few). [BrowserSuite]'s class-level budget
- * check fails the class that pushes the server past [CONNECTION_BUDGET_THRESHOLD], by name.
+ * `spring.datasource.hikari.*` (a cached context keeps at most 2 idle). Measured after, same run
+ * shape and order: peak 29 (`DashboardWorkspaceBrowserTest`); at the end 10 contexts x at most 2
+ * plus 160 registered pools x 0 idle = 22. [MAX_CONNECTIONS] therefore stays 400. [BrowserSuite]'s
+ * class-level budget check fails the class that pushes the server past
+ * [CONNECTION_BUDGET_THRESHOLD], by name.
  */
 internal object SharedBrowserE2e {
     private const val PG_IMAGE = "postgres:16-alpine"
