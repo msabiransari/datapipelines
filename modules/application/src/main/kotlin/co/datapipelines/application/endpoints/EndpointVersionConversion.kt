@@ -1,46 +1,49 @@
 package co.datapipelines.application.endpoints
 
-import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
-import co.datapipelines.typesystem.guard.MetadataWriterGuard
 import org.slf4j.LoggerFactory
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
-import org.springframework.transaction.support.TransactionOperations
 import java.sql.ResultSet
 import java.util.UUID
 
 /**
  * The in-place conversion of existing APIs (#786 §E; record §24; owner ruling 2026-11-08: one server, convert in place,
  * no floor). An API saved before V58 is an entity row with its legacy `pipeline_id`/`timeout_seconds`/`description`
- * and NO version row; this step gives each one its version 1 — the exact pin of what it serves today.
+ * and NO version row; this family gives each one its version 1 — the exact pin of what it serves today.
  *
- * - **E.0 precondition, before any write.** Every version-less entity's legacy pipeline must exist, have a version and
- *   have a CURRENT pointer. Any failure refuses the whole run ([ConversionRefusedException], one structured ERROR line
- *   per row plus a summary naming the operator's fix) and nothing is written: no pin is invented, no row is disabled.
- *   A CURRENT the deployment's posture makes ineligible (a DRAFT pointer where drafts do not serve) is NOT a failure —
- *   it converts to an exact DRAFT pin and keeps refusing at serve exactly as before.
- * - **E.1, per entity, under the G0 protocol** (workspace guard → registry key → entity row → write): the candidate is
- *   re-read under those locks — a concurrent conversion or a native create already wrote v1 → skipped; a concurrent
- *   discard moved or cleared CURRENT → the pin is the CURRENT read under the lock, or the run refuses as E.0 would.
- *   v1 = the portable pipeline name, that exact version, the legacy timeout and description, the shared hash;
- *   RELEASED iff that pipeline version is RELEASED, else DRAFT; `current_version = 1`. `is_enabled` and the key
- *   bindings are untouched; no closure is evaluated (ruling 2).
+ * - **E.0 precondition, before any write** ([precondition], [logPrecondition]). Every version-less entity's legacy
+ *   pipeline must exist, have a version and have a CURRENT pointer. Any failure is one structured ERROR line per row
+ *   plus a summary naming the operator's fix; the startup runner refuses the server after EVERY family's precondition
+ *   was read, so nothing is written: no pin is invented, no row is disabled. A CURRENT the deployment's posture makes
+ *   ineligible (a DRAFT pointer where drafts do not serve) is NOT a failure — it converts to an exact DRAFT pin and
+ *   keeps refusing at serve exactly as before.
+ * - **E.1, inside the runner's ONE transaction** (#895: every API, schedule and queued run of one startup converts in
+ *   one transaction, so a failure anywhere rolls every family back). This family owns no transaction and takes no
+ *   workspace or registry lock: [plan] reads the candidates and reports their workspaces; the runner acquires the
+ *   workspace guard over the union of every family's workspaces, then the endpoint registry key (G0 classes 2, 3);
+ *   [Attempt.lockEntities] then locks each planned entity row in id order (class 4); [Attempt.convert] re-reads the
+ *   candidates under those locks — a concurrent conversion or a native create already wrote v1 → no longer selected; a
+ *   concurrent discard moved or cleared CURRENT → the pin is the CURRENT read under the lock, or the start refuses as
+ *   E.0 would; a candidate that appeared since the plan, or sits in a workspace the union does not cover → an
+ *   [EndpointConversionConflict] (the runner rolls back and re-plans). v1 = the portable pipeline name, that exact
+ *   version, the legacy timeout and description, the shared hash; RELEASED iff that pipeline version is RELEASED,
+ *   else DRAFT; `current_version = 1`. `is_enabled` and the key bindings are untouched; no closure is evaluated
+ *   (ruling 2).
+ * - **Commit-time effects.** The converted lines, the registry invalidation (required after COMMIT) and the summary are
+ *   [EndpointConversionOutcome.publish], which the runner calls once, after the joint commit — never for an attempt
+ *   that rolled back.
  * - **The selector is legacy-only by construction** (E.2): every creation path writes v1 in its own transaction, so a
  *   rerun selects nothing and is a no-op.
- *
- * The one advisory key that serialises the run against every API writer is the endpoint registry key (G0 class 3).
  */
 class EndpointVersionConversion(
     private val jdbc: NamedParameterJdbcTemplate,
     private val versions: PublishedEndpointVersionRepository,
     private val registry: EndpointRegistry,
-    private val transactions: TransactionOperations,
-    private val writeGuard: MetadataWriterGuard,
 ) {
     private val log = LoggerFactory.getLogger(EndpointVersionConversion::class.java)
 
     /** E.0 — every version-less entity whose legacy pipeline cannot be pinned, in path order; empty = convertible. */
-    fun precondition(): List<ConversionRefusal> = candidates(null).mapNotNull { it.refusal() }
+    fun precondition(): List<ConversionRefusal> = candidates().mapNotNull { it.refusal() }
 
     /** [precondition], each refusal logged as its structured ERROR line plus the summary; writes nothing (#786 D.5). */
     fun logPrecondition(): Int {
@@ -49,41 +52,52 @@ class EndpointVersionConversion(
         return refusals.size
     }
 
-    /**
-     * E.0 then E.1. Throws [ConversionRefusedException] (after logging the list) when E.0 fails — before any write — or
-     * when a candidate's pipeline lost its CURRENT between the precondition and its locked re-read (that entity's
-     * transaction rolls back; earlier entities stay converted, each exactly as this run would convert it again).
-     */
-    fun run(): ConversionReport {
-        refuseIfAny(precondition())
-        val converted = candidates(null).mapNotNull { convertOne(it.endpointId) }
-        if (converted.isNotEmpty()) registry.invalidate()
-        val report = ConversionReport(converted)
-        log.info(
-            "event=endpoint.conversion.summary converted={} released={} draft={}",
-            report.converted.size,
-            report.converted.count { it.status == PipelineVersionStatus.RELEASED },
-            report.converted.count { it.status == PipelineVersionStatus.DRAFT },
-        )
-        return report
+    /** One attempt's plan, read inside the runner's transaction before any lock: the candidates and their workspaces. */
+    fun plan(): Attempt =
+        candidates().let { planned ->
+            Attempt(planned.map { it.endpointId }, planned.mapTo(sortedSetOf()) { it.workspaceId })
+        }
+
+    /** This family's part of one attempt of the runner's transaction. */
+    inner class Attempt internal constructor(
+        private val planned: List<UUID>,
+        /** Every workspace the planned candidates sit in. */
+        val workspaces: Set<UUID>,
+    ) {
+        private val locked = sortedSetOf<UUID>()
+
+        /** G0 class 4, after the runner's workspace guard and registry key: each planned entity row, in id order. */
+        fun lockEntities() {
+            planned.sorted().forEach { id -> versions.lockEntity(id)?.let { locked += it.endpointId } }
+        }
+
+        /**
+         * Re-reads the candidates under the locks and writes each one's v1, in path order. Throws
+         * [EndpointConversionConflict] for a candidate the locks do not cover, and [ConversionRefusedException] (after
+         * logging it) when a candidate's pipeline lost its CURRENT since the precondition; either way the runner's
+         * transaction rolls back every write of this startup.
+         */
+        fun convert(guarded: Set<UUID>): EndpointConversionOutcome {
+            val current = candidates()
+            current.firstOrNull { it.workspaceId !in guarded || it.endpointId !in locked }?.let {
+                throw EndpointConversionConflict("API ${it.path} appeared outside the planned locks; re-planning from fresh rows")
+            }
+            return EndpointConversionOutcome(ConversionReport(current.map { convertLocked(it) }), this@EndpointVersionConversion::publish)
+        }
     }
 
-    private fun convertOne(endpointId: UUID): ConvertedEndpoint? {
-        var outcome: ConvertedEndpoint? = null
-        transactions.executeWithoutResult {
-            val first = candidates(endpointId).singleOrNull() ?: return@executeWithoutResult
-            writeGuard.workspaces(listOf(first.workspaceId), PipelineErrorCodes.Endpoint.WRITE_BUSY)
-            writeGuard.endpointRegistry(PipelineErrorCodes.Endpoint.WRITE_BUSY)
-            versions.lockEntity(endpointId) ?: return@executeWithoutResult
-            // Re-read UNDER the locks: what a concurrent writer committed while this transaction waited is what counts.
-            val locked = candidates(endpointId).singleOrNull() ?: return@executeWithoutResult
-            locked.refusal()?.let { refuseIfAny(listOf(it)) }
-            val pin = locked.pin()
-            versions.insert(endpointId, EndpointWrites.FIRST_VERSION, pin.status, pin.body, locked.createdBy)
-            versions.setCurrent(endpointId, EndpointWrites.FIRST_VERSION)
-            outcome = ConvertedEndpoint(locked.path, pin.body.pipelineName, pin.body.pipelineVersion, pin.status)
-        }
-        outcome?.let {
+    /** Converts [locked], a candidate re-read under the runner's locks, inside the runner's transaction. */
+    private fun convertLocked(locked: Candidate): ConvertedEndpoint {
+        locked.refusal()?.let { refuseIfAny(listOf(it)) }
+        val pin = locked.pin()
+        versions.insert(locked.endpointId, EndpointWrites.FIRST_VERSION, pin.status, pin.body, locked.createdBy)
+        versions.setCurrent(locked.endpointId, EndpointWrites.FIRST_VERSION)
+        return ConvertedEndpoint(locked.path, pin.body.pipelineName, pin.body.pipelineVersion, pin.status)
+    }
+
+    /** The commit-time effects of [report]: one line per converted API, the invalidation (after COMMIT), the summary. */
+    private fun publish(report: ConversionReport) {
+        report.converted.forEach {
             log.info(
                 "event=endpoint.conversion.converted path={} pipeline={} pipeline_version={} status={}",
                 it.path,
@@ -92,7 +106,13 @@ class EndpointVersionConversion(
                 it.status,
             )
         }
-        return outcome
+        if (report.converted.isNotEmpty()) registry.invalidate()
+        log.info(
+            "event=endpoint.conversion.summary converted={} released={} draft={}",
+            report.converted.size,
+            report.converted.count { it.status == PipelineVersionStatus.RELEASED },
+            report.converted.count { it.status == PipelineVersionStatus.DRAFT },
+        )
     }
 
     private fun refuseIfAny(refusals: List<ConversionRefusal>) {
@@ -119,11 +139,8 @@ class EndpointVersionConversion(
         )
     }
 
-    private fun candidates(only: UUID?): List<Candidate> =
-        jdbc.query(
-            CANDIDATES_SQL + (if (only == null) "" else " AND e.id = :id") + " ORDER BY e.path_pattern, e.id",
-            if (only == null) emptyMap() else mapOf("id" to only),
-        ) { rs, _ -> candidate(rs) }
+    private fun candidates(): List<Candidate> =
+        jdbc.query("$CANDIDATES_SQL ORDER BY e.path_pattern, e.id", emptyMap<String, Any>()) { rs, _ -> candidate(rs) }
 
     private fun candidate(rs: ResultSet) =
         Candidate(
@@ -242,6 +259,20 @@ data class ConvertedEndpoint(
 data class ConversionReport(
     val converted: List<ConvertedEndpoint>,
 )
+
+/** One committed-or-discarded attempt's [report] and its commit-time effects, which only the runner [publish]es. */
+class EndpointConversionOutcome internal constructor(
+    val report: ConversionReport,
+    private val effects: (ConversionReport) -> Unit,
+) {
+    /** Logs the converted lines and the summary and invalidates the registry — call only after the joint COMMIT. */
+    fun publish() = effects(report)
+}
+
+/** A candidate the runner's locks do not cover: the runner rolls the whole transaction back and re-plans. */
+class EndpointConversionConflict(
+    message: String,
+) : RuntimeException(message)
 
 /** E.0 refused: the server must not start. [refusals] names every row; nothing was written for them. */
 class ConversionRefusedException(

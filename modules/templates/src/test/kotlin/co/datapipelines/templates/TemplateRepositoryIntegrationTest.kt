@@ -293,6 +293,36 @@ class TemplateRepositoryIntegrationTest {
     }
 
     @Test
+    fun `findEstablishedType reads the retained history - an all-discarded template answers, an absent or foreign one is null`() {
+        // #883: the working-version reads answer nothing for an all-discarded template that is still registered; the
+        // import's §5.3 type resolution reads this instead. Workspace-scoped: a peer's same-named template is not read.
+        val peer = UUID.randomUUID()
+        jdbc.update("INSERT INTO workspaces (id, name, display_name) VALUES (:id, 'peer', 'Peer')", mapOf("id" to peer))
+        val html = "test/card.html"
+        repository.createReleased(
+            workspaceId,
+            draft(id = html, body = "<p>x</p>").copy(type = co.datapipelines.pipeline.TemplateType.HTML, dialect = null),
+            actor,
+        )
+        repository.createReleased(workspaceId, draft(), actor)
+        discardOnlyRelease(html)
+        discardOnlyRelease("test/fetch_orders.sql")
+        repository.createReleased(peer, draft(id = "test/peer_only.sql"), actor)
+
+        withClue("the precondition: no working version is left to read") {
+            repository.findWorking(workspaceId, html).shouldBeNull()
+            repository.existsId(workspaceId, html) shouldBe true
+        }
+        repository.findEstablishedType(workspaceId, html) shouldBe co.datapipelines.pipeline.TemplateType.HTML
+        repository.findEstablishedType(workspaceId, "test/fetch_orders.sql") shouldBe co.datapipelines.pipeline.TemplateType.SQL
+        repository.findEstablishedType(workspaceId, "test/absent.sql").shouldBeNull()
+        withClue("another workspace's template is absent here") {
+            repository.findEstablishedType(workspaceId, "test/peer_only.sql").shouldBeNull()
+            repository.findEstablishedType(peer, html).shouldBeNull()
+        }
+    }
+
+    @Test
     fun `findCurrentVersions answers latest released per id, absent for deleted, empty for no ids`() {
         // 040 D5's lookup: current_version IS the latest released version by the lifecycle's
         // invariant, and a draft must not move the answer.

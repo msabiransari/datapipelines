@@ -2,6 +2,7 @@ package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
 import co.datapipelines.integration.E2eSession.asSession
+import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
@@ -52,6 +53,12 @@ import java.util.concurrent.atomic.AtomicBoolean
  *   RELEASED, the persisted state the "all unchanged" assertion then sees) → red.
  * - **Control.** The same plan with nothing armed releases P then A in one commit: two rows sharing one `release_id`,
  *   P's first.
+ * - **#894 provenance.** A second closure — API v1 DRAFT pins pipeline Q's v2 DRAFT (v1 released, so the two version
+ *   numbers differ), Q pins two DRAFT templates — released with every dependency ticked: exactly those two
+ *   `template.version.released` rows, each naming the API in `cascade_from_api_endpoint_id` with the API's version in
+ *   `cascade_from_version`, no `cascade_from_pipeline_id`, `cascade_root` unchanged (release-dependencies record §11,
+ *   the 2026-11-11 amendment). Falsified by sending the API root back through the pipeline arm (red on the key) and by
+ *   taking the version from Q (red on the version).
  */
 @SpringBootTest(
     classes = [DatapipelinesApplication::class],
@@ -312,6 +319,232 @@ class EndpointReleaseCascadeE2eTest {
         }
     }
 
+    // ---- #894: under an API root a cascaded template row names the API -----------------------------------------
+
+    private lateinit var auditPipelineId: String
+    private lateinit var auditEndpointId: String
+
+    private fun send(
+        path: String,
+        body: String?,
+        ifMatch: String? = null,
+        method: String = "POST",
+        session: String = SESSION,
+    ): Response =
+        given()
+            .port(port)
+            .asSession(session)
+            .apply { ifMatch?.let { header("If-Match", it) } }
+            .apply { body?.let { contentType(ContentType.JSON).body(it) } }
+            .request(method, path)
+
+    private fun answered(
+        response: Response,
+        status: Int,
+    ): Response {
+        withClue(response.asString()) { response.statusCode shouldBe status }
+        return response
+    }
+
+    /** The audit pipeline's body: v1 one CALCULATOR node, v2 one DQL node per [AUDIT_TEMPLATES] member, in order. */
+    private fun auditPipelineBody(withTemplates: Boolean): String {
+        val calculator =
+            mapOf(
+                "id" to "fq",
+                "type" to "CALCULATOR",
+                "kind" to "fiscal_quarter",
+                "context_key" to "run_fiscal_quarter",
+                "inputs" to mapOf("date" to "\$current_date", "fiscal_start" to "\$org_fiscal_start_date"),
+            )
+        val dql =
+            AUDIT_TEMPLATES.mapIndexed { index, template ->
+                // At most one node answers the caller: the others stage to tempdb.
+                buildMap<String, Any?> {
+                    put("id", "n$index")
+                    put("type", "DQL")
+                    put("source", AUDIT_DATASOURCE)
+                    put("description", "One row")
+                    put("template", mapOf("id" to template, "version" to 1))
+                    put("depends_on", emptyList<String>())
+                    if (index < AUDIT_TEMPLATES.lastIndex) put("output", mapOf("target" to "tempdb", "table" to "step_$index"))
+                }
+            }
+        return mapper.writeValueAsString(
+            mapOf(
+                "name" to AUDIT_PIPELINE,
+                "display_name" to "Cascade 894",
+                "description" to "894 fixture.",
+                "nodes" to if (withTemplates) dql else listOf(calculator),
+            ),
+        )
+    }
+
+    /** One version row, read at the TABLE: `[family, key, version]`, the entity's uuid, its pointer, status and hash. */
+    private data class AuditNode(
+        val id: String,
+        val uuid: String,
+        val current: String,
+        val status: String,
+        val hash: String,
+    )
+
+    private fun auditNode(
+        family: String,
+        key: String,
+        version: Int,
+        sql: String,
+        vararg args: String,
+    ): AuditNode {
+        val columns = rows(sql, *args).single().split(" | ")
+        return AuditNode("[\"$family\",\"$key\",$version]", columns[0], columns[1], columns[2], columns[3])
+    }
+
+    /** The API's closure as the oracle sees it: n0 the API v1, n1 the pipeline v2, n2/n3 the templates in pin order. */
+    private fun auditClosure(): List<AuditNode> {
+        val path = rows("SELECT path_pattern FROM published_endpoints WHERE id = ?::uuid", auditEndpointId).single()
+        val api =
+            auditNode(
+                "api_endpoint",
+                path,
+                API_VERSION,
+                "SELECT e.id, e.current_version, v.status, v.body_hash FROM published_endpoints e" +
+                    " JOIN published_endpoint_versions v ON v.endpoint_id = e.id WHERE e.id = ?::uuid AND v.version = $API_VERSION",
+                auditEndpointId,
+            )
+        val pipeline =
+            auditNode(
+                "pipeline",
+                AUDIT_PIPELINE,
+                PIPELINE_VERSION,
+                "SELECT p.id, p.current_version, v.status, v.body_hash FROM pipelines p" +
+                    " JOIN pipeline_versions v ON v.pipeline_id = p.id WHERE p.id = ?::uuid AND v.version = $PIPELINE_VERSION",
+                auditPipelineId,
+            )
+        val templates =
+            AUDIT_TEMPLATES.map { name ->
+                auditNode(
+                    "template",
+                    name,
+                    1,
+                    "SELECT t.id, t.current_version, v.status, v.body_hash FROM templates t" +
+                        " JOIN template_versions v ON v.template_id = t.id WHERE t.workspace_id = ?::uuid AND t.name = ? AND v.version = 1",
+                    WORKSPACE_ID,
+                    name,
+                )
+            }
+        return listOf(api, pipeline) + templates
+    }
+
+    /** The §2.1 `v1` tree hash of [closure], recomputed independently of the product (the [treeHash] mold). */
+    private fun auditTreeHash(closure: List<AuditNode>): String {
+        val (api, pipeline) = closure
+        val nodes =
+            closure.map {
+                "{\"id\":${it.id},\"entity_uuid\":\"${it.uuid}\",\"status\":\"${it.status}\"," +
+                    "\"body_hash\":\"${it.hash}\",\"current\":${it.current}}"
+            }
+        val edges =
+            listOf("{\"from\":${api.id},\"to\":${pipeline.id},\"path\":\"pipeline_version\"}") +
+                closure.drop(2).mapIndexed { index, template ->
+                    "{\"from\":${pipeline.id},\"to\":${template.id},\"path\":\"nodes[$index].template\"}"
+                }
+        val canonical =
+            "{\"format\":\"v1\",\"workspace\":\"$WORKSPACE_ID\",\"root\":${api.id}," +
+                "\"nodes\":${nodes.sorted().joinToString(",", "[", "]")},\"edges\":${edges.sorted().joinToString(",", "[", "]")}}"
+        val digest = MessageDigest.getInstance("SHA-256").digest(canonical.toByteArray(Charsets.UTF_8))
+        return "v1:" + digest.joinToString("") { "%02x".format(it) }
+    }
+
+    @Test
+    @Order(5)
+    fun `894 fixture - API v1 DRAFT pins pipeline v2 DRAFT, which pins two DRAFT templates`() {
+        DriverManager.getConnection(H2_JDBC_URL, "sa", "sa").use { it.createStatement().execute("SELECT 1") }
+        answered(
+            send(
+                "/api/v1/datasources",
+                """{"name": "$AUDIT_DATASOURCE", "display_name": "Cascade 894", "dialect": "H2",
+                   "jdbc_url": "$H2_JDBC_URL", "username": "sa", "password": "sa"}""",
+                session = SUPER_SESSION,
+            ),
+            CREATED,
+        )
+        AUDIT_TEMPLATES.forEach { name ->
+            val template =
+                mapOf(
+                    "id" to name,
+                    "dialect" to "H2",
+                    "display_name" to "Cascade 894",
+                    "description" to "894 fixture.",
+                    "imports" to emptyList<Any>(),
+                    "body" to "SELECT 1 AS n",
+                )
+            answered(send("/api/v1/templates", mapper.writeValueAsString(template)), CREATED)
+        }
+        // v1 pins nothing and is released at once, so the API pins the pipeline's v2: the two version numbers differ.
+        val v1 = answered(send("/api/v1/pipelines", auditPipelineBody(withTemplates = false)), CREATED).jsonPath()
+        auditPipelineId = v1.getString("data.id")
+        answered(send("/api/v1/pipelines/$auditPipelineId/release", null, v1.getString("data.body_hash")), OK)
+        val v1Hash = rows("SELECT body_hash FROM pipeline_versions WHERE pipeline_id = ?::uuid AND version = 1", auditPipelineId).single()
+        answered(send("/api/v1/pipelines/$auditPipelineId", auditPipelineBody(withTemplates = true), v1Hash, "PUT"), OK)
+        auditEndpointId =
+            answered(
+                send(
+                    "/api/v1/endpoints",
+                    """{"path": "/cascade894/v1/probe", "pipeline": "$AUDIT_PIPELINE", "pipeline_version": $PIPELINE_VERSION}""",
+                ),
+                CREATED,
+            ).jsonPath().getString("data.id")
+
+        val closure = auditClosure()
+        withClue(closure) {
+            closure.map { it.status } shouldBe listOf("DRAFT", "DRAFT", "DRAFT", "DRAFT")
+            closure[1].current shouldBe "1"
+            (closure[0].uuid == closure[1].uuid) shouldBe false
+        }
+    }
+
+    @Test
+    @Order(6)
+    fun `894 - under an API root each cascaded template row names the API and the API's version, never a pipeline`() {
+        val watermark = rows("SELECT coalesce(max(id), 0) FROM audit_log").single()
+        val closure = auditClosure()
+        val plan = mapOf("tree_hash" to auditTreeHash(closure), "include_dependencies" to listOf("n1", "n2", "n3"))
+        answered(send("/api/v1/endpoints/$auditEndpointId/release", mapper.writeValueAsString(plan), closure[0].hash), OK)
+
+        val written =
+            rows(
+                "SELECT event, details_json::text FROM audit_log WHERE details_json ->> 'workspace_id' = ? AND id > ?::bigint ORDER BY id",
+                WORKSPACE_ID,
+                watermark,
+            ).map { it.split(" | ", limit = 2) }
+        val templateRows =
+            written.filter { it[0] == "template.version.released" }.map { mapper.readValue(it[1], DETAILS) }
+        withClue("exactly the two cascaded template rows, by template id, before any row is read: $written") {
+            templateRows.map { it["template_id"] }.sortedBy { it.toString() } shouldBe AUDIT_TEMPLATES.sorted()
+        }
+        val apiRoot = mapOf("family" to "api_endpoint", "id" to auditEndpointId, "version" to API_VERSION)
+        templateRows.forEach { row ->
+            withClue(row) {
+                row["cascade_from_api_endpoint_id"] shouldBe auditEndpointId
+                row.containsKey("cascade_from_pipeline_id") shouldBe false
+                row["cascade_from_version"] shouldBe API_VERSION
+                row["cascade_root"] shouldBe apiRoot
+                row.filterKeys { it != "release_id" } shouldBe
+                    mapOf(
+                        "template_id" to row["template_id"],
+                        "version" to 1,
+                        "via" to "session",
+                        "cascade_from_api_endpoint_id" to auditEndpointId,
+                        "cascade_from_version" to API_VERSION,
+                        "scope" to "version",
+                        "cascade_root" to apiRoot,
+                        "workspace_id" to WORKSPACE_ID,
+                    )
+            }
+        }
+        println("894 API-root cascaded template row: ${written.first { it[0] == "template.version.released" }[1]}")
+    }
+
     @AfterAll
     fun dropAndProve() {
         dropWitness()
@@ -376,7 +609,16 @@ class EndpointReleaseCascadeE2eTest {
         private const val CHILD_FIRST = "dp786_child_first"
         private const val ROOT_FIRST = "dp786_root_first"
 
+        private const val AUDIT_PIPELINE = "test/cascade_894"
+        private const val AUDIT_DATASOURCE = "h2-cascade-894"
+        private const val H2_JDBC_URL = "jdbc:h2:mem:cascade894;DB_CLOSE_DELAY=-1"
+        private val AUDIT_TEMPLATES = listOf("test/cascade_894/t_a.sql", "test/cascade_894/t_b.sql")
+        private const val API_VERSION = 1
+        private val DETAILS = object : TypeReference<Map<String, Any?>>() {}
+        private const val PIPELINE_VERSION = 2
+
         private const val OK = 200
+        private const val CREATED = 201
         private const val CONFLICT = 409
         private const val INTERNAL_ERROR = 500
         private const val STATUS_COLUMN = 2
@@ -386,6 +628,10 @@ class EndpointReleaseCascadeE2eTest {
         private val JWT_SECRET = E2eSession.newSecret()
         private val ENCRYPTION_KEY = E2eSession.newSecret()
         private val SESSION get() = E2eSession.jwt(JWT_SECRET, ADMIN_ID, "e2e-786-cascade@datapipelines.test", WORKSPACE)
+
+        /** #894: member datasource management is off on this server, so a super admin member registers the H2 source. */
+        private val SUPER_ID: String = UUID.randomUUID().toString()
+        private val SUPER_SESSION get() = E2eSession.jwt(JWT_SECRET, SUPER_ID, "e2e-894-super@datapipelines.test", WORKSPACE)
 
         private val postgres get() = SharedE2e.postgres
         private val redis get() = SharedE2e.redis
@@ -428,6 +674,14 @@ class EndpointReleaseCascadeE2eTest {
                     statement.execute(
                         "INSERT INTO workspace_members (workspace_id, user_id, role) " +
                             "VALUES ('$WORKSPACE_ID', '$ADMIN_ID', 'workspace_admin')",
+                    )
+                    statement.execute(
+                        "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES" +
+                            " ('$SUPER_ID', 'e2e-894-super@datapipelines.test', 'E2E 894', 'test', 'e2e-894-super-sub', TRUE, TRUE)",
+                    )
+                    statement.execute(
+                        "INSERT INTO workspace_members (workspace_id, user_id, role) " +
+                            "VALUES ('$WORKSPACE_ID', '$SUPER_ID', 'workspace_admin')",
                     )
                 }
             }

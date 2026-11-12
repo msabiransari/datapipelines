@@ -9,15 +9,17 @@ import co.datapipelines.scheduler.Schedule
 import co.datapipelines.scheduler.ScheduleRepository
 import co.datapipelines.scheduler.ScheduleRun
 import co.datapipelines.scheduler.ScheduleRunRepository
-import co.datapipelines.typesystem.guard.MetadataWriterGuard
 import co.datapipelines.web.capturingLogEvents
+import co.datapipelines.web.endpoints.StartupConversionConflict
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.every
@@ -36,11 +38,13 @@ import java.util.UUID
  * #786 round 7, R1 — the startup conversion of a schedule's QUEUED runs, with the production [ScheduleVersionConversion]
  * over recording repositories and a transaction manager that records commit and rollback. The contract under test: a
  * queued run converts from ITS OWN frozen payload — its own pipeline's CURRENT, never the live schedule's resolved
- * version; the precondition covers every run target (named `kind=run`, separately from schedules) before any write; the
- * whole step is ONE transaction (round 8), so a run target that fails under the guard on a LATER schedule rolls back
- * every earlier schedule and run with it, and a lost CAS retries the whole step. The real-database legs (the A-to-B
- * edit at a real upgrade boot, the refused boot, the rollback race, the multi-schedule rollback, the rerun) are
- * `ScheduleVersionConversionE2eTest`.
+ * version; the precondition covers every run target (named `kind=run`, separately from schedules) before any write;
+ * the step runs inside the startup runner's ONE transaction (#895, driven here as the runner drives it: E.0, then plan
+ * and convert in one transaction, then the commit-time effects), so a run target that fails under the guard on a LATER
+ * schedule rolls back every earlier schedule and run with it, and a lost CAS is a conflict the step does NOT retry
+ * itself — the runner's retry of the whole joint transaction is `ConversionRollbackBoundaryE2eTest`'s (B.6). The
+ * real-database legs (the A-to-B edit at a real upgrade boot, the refused boot, the rollback race, the multi-schedule
+ * rollback, the rerun) are `ScheduleVersionConversionE2eTest`.
  */
 class ScheduleVersionConversionTest {
     private val mapper = ObjectMapper()
@@ -54,8 +58,7 @@ class ScheduleVersionConversionTest {
     private val schedulePayloads = mutableListOf<JsonNode>()
     private val runPayloads = mutableListOf<JsonNode>()
 
-    private val conversion =
-        ScheduleVersionConversion(schedules, runs, pipelines, TransactionTemplate(transactions), MetadataWriterGuard.NONE)
+    private val conversion = ScheduleVersionConversion(schedules, runs, pipelines)
 
     /** The live schedule names [schedulePipeline]; its one queued run's payload copy still names [runPipeline]. */
     private fun fixture(
@@ -94,7 +97,7 @@ class ScheduleVersionConversionTest {
         pipeline("new/pipeline", current = 5)
         fixture(schedulePipeline = "new/pipeline", runPipeline = "new/pipeline")
 
-        conversion.run()
+        runOnce()
 
         runPayloads.single() shouldBe mapper.readTree(RUN_PAYLOAD.format("new/pipeline", "5"))
     }
@@ -106,7 +109,7 @@ class ScheduleVersionConversionTest {
         pipeline("new/pipeline", current = 5)
         fixture(schedulePipeline = "new/pipeline", runPipeline = "old/pipeline")
 
-        val report = conversion.run()
+        val report = runOnce()
 
         schedulePayloads.single()["version"].asInt() shouldBe 5
         // Only the run's `version` selector changes: its pipeline, its bindings and every other member stay its own.
@@ -137,9 +140,15 @@ class ScheduleVersionConversionTest {
                 Triple(scheduleId, "old/gone", ScheduleConversionRefusal.Reason.MISSING_PIPELINE),
                 Triple(scheduleId, "old/no_current", ScheduleConversionRefusal.Reason.NO_CURRENT),
             )
-        val refused = shouldThrow<ScheduleConversionRefusedException> { conversion.run() }
-        refused.message shouldContain "$NAME queued run ${missing.id} -> old/gone: missing_pipeline"
-        refused.message shouldContain "$NAME queued run ${noCurrent.id} -> old/no_current: no_current"
+        // E.0 as the runner reads it: each refusal logged with its own structured line; the runner refuses the start.
+        val lines = captured { conversion.logPrecondition() shouldBe 2 }
+        lines shouldContainAll
+            listOf(
+                "event=scheduler.conversion.refused kind=run id=${missing.id} schedule=$scheduleId name=$NAME pipeline=old/gone " +
+                    "reason=missing_pipeline",
+                "event=scheduler.conversion.refused kind=run id=${noCurrent.id} schedule=$scheduleId name=$NAME " +
+                    "pipeline=old/no_current reason=no_current",
+            )
         verify(exactly = 0) { schedules.convertPayload(any(), any(), any(), any(), any()) }
         verify(exactly = 0) { runs.convertQueuedPayload(any(), any(), any(), any()) }
         transactions.commits shouldBe 0
@@ -158,7 +167,7 @@ class ScheduleVersionConversionTest {
         // The precondition reads CURRENT 2; the guarded re-read inside the transaction finds it gone.
         every { pipelines.findCurrentVersionDetail(workspace, old) } returnsMany listOf(two, null)
 
-        val refused = shouldThrow<ScheduleConversionRefusedException> { conversion.run() }
+        val refused = shouldThrow<ScheduleConversionRefusedException> { runOnce() }
 
         refused.refusals.single().pipeline shouldBe "old/pipeline"
         refused.refusals.single().reason shouldBe ScheduleConversionRefusal.Reason.NO_VERSIONS
@@ -195,7 +204,7 @@ class ScheduleVersionConversionTest {
         // after the first pair's writes, finds it gone.
         every { pipelines.findCurrentVersionDetail(workspace, second) } returnsMany listOf(seven, seven, null)
 
-        val lines = captured { shouldThrow<ScheduleConversionRefusedException> { conversion.run() } }
+        val lines = captured { shouldThrow<ScheduleConversionRefusedException> { runOnce() } }
 
         verify(exactly = 1) { schedules.convertPayload(scheduleId, REVISION, 1, any(), 2) }
         verify(exactly = 1) { runs.convertQueuedPayload(runId, 1, any(), 2) }
@@ -210,27 +219,61 @@ class ScheduleVersionConversionTest {
     }
 
     @Test
-    fun `a lost CAS rolls the WHOLE step back and the retry converts every schedule from fresh rows`() {
+    fun `a lost CAS is a conflict the step does not retry itself, and the transaction rolls back with no converted line`() {
         pipeline("first/pipeline", current = 3)
         pipeline("second/pipeline", current = 7)
         val secondId = UUID.randomUUID()
         val firstSchedule = schedule("first/pipeline", name = "a_first")
         val secondSchedule = schedule("second/pipeline", id = secondId, name = "z_second")
         every { schedules.listLiveAtSchema(PipelineJobExecutor.EXECUTOR_ID, 1) } returns listOf(firstSchedule, secondSchedule)
-        // By-id re-reads (the per-schedule shape round 8 replaced): stubbed so a regression fails on the assertions.
-        every { schedules.findAny(scheduleId) } returns firstSchedule
-        every { schedules.findAny(secondId) } returns secondSchedule
         every { schedules.convertPayload(scheduleId, REVISION, 1, any(), 2) } returns true
-        // The second schedule's first CAS loses to a concurrent edit; the retry wins.
+        // The second schedule's CAS loses to a concurrent edit; a step-local retry would win on the second call.
         every { schedules.convertPayload(secondId, REVISION, 1, any(), 2) } returnsMany listOf(false, true)
         every { runs.listQueuedAtSchema(any(), 1) } returns emptyList()
 
-        val report = conversion.run()
+        // Moved, not dropped (#895 B.5/B.6): the whole-transaction retry is the runner's, asserted on a real database in
+        // ConversionRollbackBoundaryE2eTest; here the step hands the conflict up after ONE try.
+        val lines = captured { shouldThrow<StartupConversionConflict> { runOnce() } }
 
-        report.converted.map { it.scheduleId } shouldContainExactly listOf(scheduleId, secondId)
-        verify(exactly = 2) { schedules.convertPayload(scheduleId, REVISION, 1, any(), 2) }
+        verify(exactly = 1) { schedules.convertPayload(scheduleId, REVISION, 1, any(), 2) }
+        verify(exactly = 1) { schedules.convertPayload(secondId, REVISION, 1, any(), 2) }
         transactions.rollbacks shouldBe 1
-        transactions.commits shouldBe 1
+        transactions.commits shouldBe 0
+        lines.none { it.startsWith("event=scheduler.conversion.") } shouldBe true
+    }
+
+    @Test
+    fun `convert reports nothing itself - the converted lines and the summary are published only by the outcome`() {
+        pipeline("new/pipeline", current = 5)
+        fixture(schedulePipeline = "new/pipeline", runPipeline = "new/pipeline")
+        val attempt = conversion.plan()
+        lateinit var outcome: ScheduleConversionOutcome
+
+        val whileConverting = captured { outcome = attempt.convert(attempt.workspaces) }
+        val published = captured { outcome.publish() }
+
+        whileConverting.shouldBeEmpty()
+        published shouldContainExactly
+            listOf(
+                "event=scheduler.conversion.converted id=$scheduleId name=$NAME pipeline=new/pipeline pipeline_version=5 " +
+                    "status=RELEASED queued_runs=1",
+                "event=scheduler.conversion.converted_run id=$runId schedule=$scheduleId pipeline=new/pipeline pipeline_version=5 " +
+                    "status=RELEASED",
+                "event=scheduler.conversion.summary converted=1 released=1 draft=0 queued_runs=1",
+            )
+    }
+
+    @Test
+    fun `a schedule or queued run outside the guarded workspaces is a conflict, before any write`() {
+        pipeline("new/pipeline", current = 5)
+        fixture(schedulePipeline = "new/pipeline", runPipeline = "new/pipeline")
+        val attempt = conversion.plan()
+
+        attempt.workspaces shouldContainExactly setOf(workspace)
+        shouldThrow<StartupConversionConflict> { attempt.convert(emptySet()) }
+
+        verify(exactly = 0) { schedules.convertPayload(any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { runs.convertQueuedPayload(any(), any(), any(), any()) }
     }
 
     @Test
@@ -239,7 +282,7 @@ class ScheduleVersionConversionTest {
         pipeline("new/pipeline", current = 5)
         fixture(schedulePipeline = "new/pipeline", runPipeline = "old/pipeline")
 
-        val lines = captured { conversion.run() }
+        val lines = captured { runOnce() }
 
         lines shouldContainAll
             listOf(
@@ -251,6 +294,17 @@ class ScheduleVersionConversionTest {
     }
 
     // ------------------------------------------------------------------ fixtures
+
+    /** One run as the startup runner drives this step: E.0, then plan and convert in ONE transaction, then publish. */
+    private fun runOnce(): ScheduleConversionReport {
+        conversion.logPrecondition() shouldBe 0
+        val outcome =
+            TransactionTemplate(transactions)
+                .execute { conversion.plan().let { attempt -> attempt.convert(attempt.workspaces) } }
+                .shouldNotBeNull()
+        outcome.publish()
+        return outcome.report
+    }
 
     private fun schedule(
         pipeline: String,
