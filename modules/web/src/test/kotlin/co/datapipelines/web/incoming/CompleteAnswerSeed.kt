@@ -34,10 +34,10 @@ import java.util.UUID
  */
 class CompleteAnswerSeed(
     private val jdbc: NamedParameterJdbcTemplate,
+    /** The seeding user and workspace; [IncomingParityCorpus] writes through this seed under its own pair. */
+    val userId: UUID = idOf("user", "seed"),
+    val workspaceId: UUID = idOf("workspace", "seed"),
 ) {
-    val userId: UUID = idOf("user", "seed")
-    val workspaceId: UUID = idOf("workspace", "seed")
-
     /** Empties the metadata (every family cascades from `users`) and seeds the fixed user and workspace. */
     fun reset() {
         jdbc.jdbcTemplate.execute("TRUNCATE users CASCADE")
@@ -167,7 +167,7 @@ class CompleteAnswerSeed(
         version: Int,
         status: PipelineVersionStatus,
         body: () -> String,
-    ) = artifact("parameter_sets", "parameter_set_versions", "parameter_set_id", name, version, status, body)
+    ) = artifactBody("parameter_sets", "parameter_set_versions", "parameter_set_id", name, version, status, body)
 
     /** A visualization version whose transform pins [transform]. */
     fun visualization(
@@ -184,7 +184,7 @@ class CompleteAnswerSeed(
                 transform = TransformBinding(ArtifactRef(transform.first, transform.second), emptyMap()),
                 config = JsonNodeFactory.instance.objectNode(),
             )
-        artifact("visualizations", "visualization_versions", "visualization_id", name, version, status) {
+        artifactBody("visualizations", "visualization_versions", "visualization_id", name, version, status) {
             BodyCodec.Visualization.write(body)
         }
     }
@@ -207,13 +207,14 @@ class CompleteAnswerSeed(
                 visualizations = emptyList(),
                 layout = DashboardLayout(),
             )
-        artifact("dashboards", "dashboard_versions", "dashboard_id", name, version, status) { BodyCodec.Dashboard.write(body) }
+        artifactBody("dashboards", "dashboard_versions", "dashboard_id", name, version, status) { BodyCodec.Dashboard.write(body) }
     }
 
     private fun owner() = mapOf("owner" to userId, "ws" to workspaceId)
 
+    /** An artifact version of [entities] whose stored body is exactly [body] (the entity row is created on first use). */
     @Suppress("LongParameterList") // the three table names of one family, then the row
-    private fun artifact(
+    fun artifactBody(
         entities: String,
         versions: String,
         foreignKey: String,

@@ -36,6 +36,7 @@ import co.datapipelines.scheduler.Schedule
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.visualization.DashboardRepository
 import co.datapipelines.visualization.VisualizationRepository
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldHaveSize
@@ -55,8 +56,9 @@ import java.util.UUID
 
 /**
  * #877 §B on a real PostgreSQL, for each of the twelve arms through the production arm catalog: paging V OCCURRENCES at
- * page size P costs exactly `max(1, ⌈V / P⌉)` statements (counted on the connection, [ObservedStatements]); every page
- * holds at most P; the pages concatenate to the one-page answer in the §A.3 total order with every occurrence once; a V
+ * page size P costs exactly `max(1, ⌈V / P⌉)` statements (counted on the connection, [ObservedStatements]), each of
+ * which READS at most P + 1 rows from the database (the SQL bound; an in-memory trim of an unbounded read is red); every
+ * page holds at most P; the pages concatenate to the one-page answer in the §A.3 total order with every occurrence once; a V
  * that is a multiple of P ends on a full page whose `next` is null; V = 0 is one statement and an empty page. Each
  * dependent holds up to TWO occurrences — two nodes of one pipeline version, two references of one dashboard, two
  * parameters of one set — so page size one walks the keyset through a repeated reference. Then each arm's scopes answer
@@ -96,8 +98,13 @@ class IncomingBoundedQueryTest {
         seedOccurrences(arm, occurrences)
         val whole = pages(arm, IncomingScope.LIVE, page = 256).single()
         statements.observed.clear()
+        statements.rowsRead.clear()
         val paged = pages(arm, IncomingScope.LIVE, page)
         statements.observed shouldHaveSize maxOf(1, (occurrences + page - 1) / page)
+        statements.rowsRead shouldHaveSize statements.observed.size
+        withClue("$arm at page $page: page statements that read more than ${page + 1} rows (rows read: ${statements.rowsRead})") {
+            statements.rowsRead.filter { rows -> rows > page + 1 }.shouldBeEmpty()
+        }
         paged.forEach { (it.edges.size <= page) shouldBe true }
         paged.dropLast(1).forEach { it.next shouldNotBe null }
         paged.last().next shouldBe null
