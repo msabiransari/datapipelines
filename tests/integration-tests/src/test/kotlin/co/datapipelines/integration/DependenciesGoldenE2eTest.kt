@@ -68,7 +68,7 @@ class DependenciesGoldenE2eTest {
     @Test
     fun `the goldens directory holds exactly the route cases and the web cases, at least the A47 floor`() {
         val files = Files.list(GOLDENS_DIR).use { s -> s.map { it.fileName.toString().removeSuffix(".json") }.toList().toSet() }
-        files shouldBe CASES.keys + WEB_CASES
+        files shouldBe CASES.keys + WEB_CASES + LANE_CASES
         files.size shouldBeGreaterThanOrEqual A47_FLOOR
     }
 
@@ -497,10 +497,17 @@ class DependenciesGoldenE2eTest {
             )
 
         /**
-         * A47's list: 3 acyclic + 9 operational + 12 relationships + 4 constraint tokens + 5 reasons + the MISSING twins,
-         * plus the payload budget's `wire_bytes` LIMIT 200 (#875 R1: §11.1's limit row names it beside the four walk limits).
+         * Route goldens another suite produces and compares: `DependenciesUnmetParameterNamesE2eTest` (#892) answers the
+         * dashboard tree whose pinned open draft no longer declares a bound name — the one golden carrying `unmet_names`.
          */
-        const val A47_FLOOR = 3 + 9 + 12 + 4 + 5 + 2 + 1
+        val LANE_CASES = setOf("constraint-parameter-names-unmet")
+
+        /**
+         * A47's list: 3 acyclic + 9 operational + 12 relationships + 4 constraint tokens + 5 reasons + the MISSING twins,
+         * plus the payload budget's `wire_bytes` LIMIT 200 (#875 R1: §11.1's limit row names it beside the four walk limits),
+         * plus the `parameter_names` constraint's `unmet_names` (#892, erratum (11)).
+         */
+        const val A47_FLOOR = 3 + 9 + 12 + 4 + 5 + 2 + 1 + 1
 
         val RELATIONSHIPS =
             setOf(
