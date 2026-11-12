@@ -17,17 +17,20 @@ import java.sql.DriverManager
  *
  * 1. two DRAFT templates over an in-JVM H2 datasource the workspace owns; pipeline A pins
  *    both, pipeline B pins the first — so the first is a SHARED object;
- * 2. the Release dialog on A shows the consent group CHECKED, one row per draft pin, the
- *    shared one saying "also pinned by 1 other draft pipeline", and an ENABLED Release;
- * 3. unchecking the box withholds Release and the rows fall back to the pre-142 refused
- *    wording ("release the template first") — the order rule stays visible; re-checking
- *    arms it again (the second transition is the one only a live listener can produce);
+ * 2. the Release dialog on A shows the RELEASE PLAN (#876 §F.2): one row per draft dependency,
+ *    each its own box CHECKED, the shared one saying "also pinned by 1 other draft pipeline"
+ *    (once, on its one row), and an ENABLED Release;
+ * 3. unchecking a box withholds Release and that row falls back to the refused wording
+ *    ("release it first") — the order rule stays visible; re-checking arms it again (the
+ *    second transition is the one only a live listener can produce);
  * 4. Release lands through the dialog's own POST: the toast names the templates released
  *    with the pipeline, and the audit table carries the two cascaded template events with
  *    their source plus the pipeline's event listing them — asserted at the TABLE.
  *
  * Falsification recorded in the handback: removing the checkbox's `name` makes the POST
- * carry no consent, the server refuses `dependency_not_released`, and step 4 goes red.
+ * carry no consent, the server refuses it, and step 4 goes red. The server-side half of the
+ * consent (A11) is its own case: a box left unticked with the submit forced open is refused
+ * 4xx and nothing flips, asserted at the database.
  */
 class ReleaseCascadeBrowserTest : BrowserSuite() {
     private fun ready() {
@@ -142,38 +145,39 @@ class ReleaseCascadeBrowserTest : BrowserSuite() {
         // below are labelled by theme, so pin it before the first one.
         ensureTheme("light")
 
-        // 2 — the dialog: the consent group, checked, one row per draft pin, the shared one
+        // 2 — the dialog: the release plan, one checked row per draft dependency, the shared one
         //     naming its other pinner; Release ENABLED (no checks on this version).
         val dialog = openDialog(releaseButton())
         // Located by the arm's hook, NOT by name — so stripping the checkbox's `name` (the
         // consent the POST carries) is caught at the release arm below, where it matters
-        // (the server refuses dependency_not_released and no success toast lands), and not by
-        // a selector that never finds the box.
-        val consent = dialog.locator("[data-consent-input]")
-        consent.waitFor()
+        // (the server refuses and no success toast lands), and not by a selector that never
+        // finds the box.
+        val sharedRow = draftRow(dialog, shared)
+        val ownRow = draftRow(dialog, own)
+        sharedRow.waitFor()
+        ownRow.waitFor()
+        dialog.locator("[data-release-row='draft']").count() shouldBe 2
+        val consent = sharedRow.locator("[data-consent-input]")
         consent.isChecked shouldBe true
-        dialog.innerText() shouldContain "Also release these 2 draft templates"
-        dialog.locator("[data-cascade-pin='$shared@1']").waitFor()
-        dialog.locator("[data-cascade-pin='$own@1']").waitFor()
-        dialog.locator("[data-cascade-pin='$shared@1'] [data-cascade-shared]").innerText() shouldContain
-            "also pinned by 1 other draft pipeline"
-        dialog.locator("[data-cascade-pin='$own@1'] [data-cascade-shared]").count() shouldBe 0
-        val release = dialog.locator("button[data-verb='pipeline-release-confirm']")
-        release.waitFor()
-        release.isDisabled shouldBe false
+        ownRow.locator("[data-consent-input]").isChecked shouldBe true
+        sharedRow.locator("[data-release-note]").innerText() shouldContain "also pinned by 1 other draft pipeline"
+        ownRow.locator("[data-release-note]").count() shouldBe 0
+        // isDisabled waits for the button to attach.
+        dialog.locator("button[data-verb='pipeline-release-confirm']").isDisabled shouldBe false
         // Checked: the consented wording is what the user sees; the refused one is hidden.
-        dialog.locator("[data-cascade-pin='$shared@1'] .plc-cascade-on").isVisible shouldBe true
-        dialog.locator("[data-cascade-pin='$shared@1'] .plc-cascade-off").isVisible shouldBe false
+        sharedRow.locator(".dp-release-on").isVisible shouldBe true
+        sharedRow.locator(".dp-release-off").isVisible shouldBe false
 
-        // 3 — unchecking withholds Release and restores today's refused wording; checking
-        //     again arms it (the live-listener transition).
+        // 3 — unchecking withholds Release and restores the refused wording on THAT row only;
+        //     checking again arms it (the live-listener transition).
         consent.uncheck()
         page.waitForFunction(
             "() => document.querySelector(\"#pe-dialog button[data-verb='pipeline-release-confirm']\").disabled === true",
         )
-        dialog.locator("[data-cascade-pin='$shared@1'] .plc-cascade-off").isVisible shouldBe true
-        dialog.locator("[data-cascade-pin='$shared@1'] .plc-cascade-off").innerText() shouldContain "release the template first"
-        dialog.locator("[data-cascade-pin='$shared@1'] .plc-cascade-on").isVisible shouldBe false
+        sharedRow.locator(".dp-release-off").isVisible shouldBe true
+        sharedRow.locator(".dp-release-off").innerText() shouldContain "release it first"
+        sharedRow.locator(".dp-release-on").isVisible shouldBe false
+        ownRow.locator(".dp-release-on").isVisible shouldBe true
         consent.check()
         page.waitForFunction(
             "() => document.querySelector(\"#pe-dialog button[data-verb='pipeline-release-confirm']\").disabled === false",
@@ -283,6 +287,84 @@ class ReleaseCascadeBrowserTest : BrowserSuite() {
         toast shouldContain "Also released: $template@"
         toast shouldNotContain "the draft templates it pinned were released with it"
         assertAuditedOverrideWithCascade(pipelineId, template)
+    }
+
+    /**
+     * #876 A11 — consent is the SERVER's rule, the disabled button only its courtesy. A draft
+     * dependency's box is left UNTICKED, then the page is forced past both of its own gates (the
+     * form's `required` validation off, the disabled submit re-enabled) and the dialog's own htmx
+     * POST goes out carrying a plan that omits that draft. The coordinator refuses it 4xx and
+     * nothing flips: the pipeline version and both templates are still DRAFT and no release event
+     * was written — asserted at the TABLES, never at the page.
+     */
+    @Test
+    fun `a draft left unticked is refused server-side with the submit forced open, and nothing flips`() {
+        startTrace()
+        ready()
+        page.navigate("$baseUrl/dashboard")
+        val fixture = seedFixture()
+
+        page.setViewportSize(1280, 900)
+        openWorkspace(fixture.pipelineId)
+        val dialog = openDialog(releaseButton())
+        val ownBox = draftRow(dialog, fixture.own).locator("[data-consent-input]")
+        ownBox.waitFor()
+        ownBox.uncheck()
+        waitDisabled(CONFIRM, true)
+
+        page.evaluate(
+            """(sel) => {
+              const button = document.querySelector(sel);
+              const form = button.closest('form');
+              form.noValidate = true;
+              form.setAttribute('novalidate', '');
+              button.disabled = false;
+            }""",
+            CONFIRM,
+        )
+        val response =
+            page.waitForResponse({ it.request().method() == "POST" && it.url().contains("/lifecycle/release") }) {
+                page.locator(CONFIRM).click()
+            }
+        val status = response.status()
+        val body = response.text()
+        println("A11 forced POST: status=$status body=${body.take(300)}")
+        (status in 400..499) shouldBe true
+        response.headers()["hx-redirect"] shouldBe null
+
+        assertNothingFlipped(fixture)
+    }
+
+    /** The pipeline's v1 and both templates' v1 are DRAFT, and no release event exists for any of them. */
+    private fun assertNothingFlipped(fixture: Fixture) {
+        DriverManager.getConnection(SharedBrowserE2e.jdbcUrl, SharedBrowserE2e.username, SharedBrowserE2e.password).use { connection ->
+            connection.createStatement().use { statement ->
+                val pipeline =
+                    statement.executeQuery(
+                        "SELECT status FROM pipeline_versions WHERE pipeline_id = '${fixture.pipelineId}' AND version = 1",
+                    )
+                pipeline.next() shouldBe true
+                pipeline.getString("status") shouldBe "DRAFT"
+                listOf(fixture.shared, fixture.own).forEach { template ->
+                    val rows =
+                        statement.executeQuery(
+                            "SELECT v.status FROM template_versions v JOIN templates t ON t.id = v.template_id" +
+                                " WHERE t.name = '$template' AND v.version = 1",
+                        )
+                    rows.next() shouldBe true
+                    rows.getString("status") shouldBe "DRAFT"
+                    rows.next() shouldBe false
+                }
+                val events =
+                    statement.executeQuery(
+                        "SELECT count(*) AS n FROM audit_log WHERE event IN ('pipeline.version.released', 'template.version.released')" +
+                            " AND (details_json->>'pipeline_id' = '${fixture.pipelineId}'" +
+                            " OR details_json->>'template_id' IN ('${fixture.shared}', '${fixture.own}'))",
+                    )
+                events.next() shouldBe true
+                events.getInt("n") shouldBe 0
+            }
+        }
     }
 
     /**
@@ -407,6 +489,12 @@ class ReleaseCascadeBrowserTest : BrowserSuite() {
         page.locator("#pe-dialog [data-lifecycle-dialog]").waitFor(Locator.WaitForOptions().setState(WaitForSelectorState.DETACHED))
     }
 
+    /** The plan row of the DRAFT dependency [name] (#876 §F.2: one row per node, its own box). */
+    private fun draftRow(
+        dialog: Locator,
+        name: String,
+    ): Locator = dialog.locator("[data-release-row='draft'][data-name='$name']")
+
     /** The workspace header's Release (the draft is the viewed version of a draft-only pipeline). */
     private fun releaseButton(): Locator = page.locator(".pe-topbar [data-verb='pipeline-release']")
 
@@ -431,15 +519,18 @@ class ReleaseCascadeBrowserTest : BrowserSuite() {
     private fun darkShotsThenReopen(shared: String): Locator {
         ensureTheme("dark")
         val darkDialog = openDialog(releaseButton())
-        darkDialog.locator("[data-cascade-pin='$shared@1']").waitFor()
+        val darkShared = draftRow(darkDialog, shared).locator("[data-consent-input]")
+        darkShared.waitFor()
         shot(darkDialog, "checked", "dark")
-        darkDialog.locator("[data-consent-input]").uncheck()
+        darkShared.uncheck()
         shot(darkDialog, "unchecked", "dark")
         closeDialog()
         ensureTheme("light")
         val again = openDialog(releaseButton())
-        again.locator("[data-consent-input]").waitFor()
-        again.locator("[data-consent-input]").isChecked shouldBe true
+        val boxes = again.locator("[data-consent-input]")
+        boxes.first().waitFor()
+        boxes.count() shouldBe 2
+        (0 until boxes.count()).forEach { boxes.nth(it).isChecked shouldBe true }
         return again
     }
 
@@ -497,6 +588,7 @@ class ReleaseCascadeBrowserTest : BrowserSuite() {
 
     private companion object {
         const val OVERRIDE = "#pe-dialog button[data-verb='pipeline-release-override']"
+        const val CONFIRM = "#pe-dialog button[data-verb='pipeline-release-confirm']"
         const val REASON = "Verified by hand against the source rollup."
     }
 }

@@ -5,6 +5,7 @@ import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.currentPrincipal
@@ -47,6 +48,8 @@ class TemplateLifecycleDialogController(
     private val audit: AuditEventSink,
     /** #877 §C.2 — the caller's view, which narrows a `template.in_use` refusal's echo (never the guard's decision). */
     private val lens: PromoterLens,
+    /** #876 §F.2 — the release dialog's plan: the session plan and its prerequisites, one planning read. */
+    private val previews: ReleasePreviews,
 ) : ShellPage {
     // ------------------------------------------------------------------ release
 
@@ -57,8 +60,14 @@ class TemplateLifecycleDialogController(
         @RequestParam name: String,
         @RequestParam(required = false) from: String?,
     ): String {
-        LifecycleVerbs.requireSession()
-        model.addAttribute("dlg", dialogs.release(currentPrincipal().requireWorkspace().id, name))
+        val principal = LifecycleVerbs.requireSession()
+        val workspaceId = principal.requireWorkspace().id
+        val dlg = dialogs.release(workspaceId, name)
+        model.addAttribute("dlg", dlg)
+        // #876 §F.2 — the plan the dialog renders and posts back: a template's imports are its dependencies.
+        if (dlg.refusal == null) {
+            model.addAttribute("rd", previews.dialog(ReleaseFamily.TEMPLATE, workspaceId, name, dlg.version, principal.userId))
+        }
         model.addAttribute("from", from ?: FROM_WORKSPACE)
         // 177 §D.8: the dialog's verb renders inside a role guard like every other verb — the route
         // already refuses the wrong role; the markup now says so too, and the exemption list is empty.
@@ -71,6 +80,8 @@ class TemplateLifecycleDialogController(
     fun release(
         @RequestParam name: String,
         @RequestParam bodyHash: String,
+        @RequestParam(name = "tree_hash", required = false) treeHash: String?,
+        @RequestParam(name = "include_dependencies", required = false) includeDependencies: List<String>?,
     ): ResponseEntity<String> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
@@ -84,7 +95,9 @@ class TemplateLifecycleDialogController(
                 message = "This template has no draft to release.",
                 details = mapOf("template_id" to name),
             )
-        releases.release(workspaceId, name, bodyHash, principal.userId)
+        // #876 §F.2 — the plan its GET rendered, into the SAME plan object the REST route parses.
+        val plan = ReleaseDialogPost.plan(ReleaseFamily.TEMPLATE, treeHash, includeDependencies)
+        releases.release(workspaceId, name, bodyHash, principal.userId, plan)
         // T187 — the release is audited on every surface that offers it: by the coordinator, inside the one
         // transaction (#873 §C.7); this handler writes none.
         return redirect(versionsTab(name, "released"))

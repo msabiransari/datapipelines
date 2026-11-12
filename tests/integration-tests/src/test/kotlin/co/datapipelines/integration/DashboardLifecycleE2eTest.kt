@@ -31,8 +31,10 @@ import java.util.UUID
  *
  * The authoring walk: a workspace admin creates a visualization (DRAFT) and a dashboard that pins it and sources a
  * released, read-only pipeline; `validate` answers `valid: true` against the dependencies' current state; the
- * release is refused `dashboard.release.dependency_not_released` while the visualization is a DRAFT, and — with
- * `release_pinned_visualizations=true` — by the VISUALIZATION's own gate (`visualization.release.tests_missing`);
+ * release is refused `dashboard.release.dependency_not_released` while the visualization is a DRAFT; the legacy
+ * `release_pinned_visualizations=true` flag with no plan is refused on purpose `dashboard.release.plan_required`
+ * (#876 round 3); and a PLAN ticking the visualization is refused by the VISUALIZATION's own gate
+ * (`visualization.release.tests_missing`), nothing flipped;
  * the pinned visualization cannot be purged (`visualization.version.pinned`); the draft is written under `If-Match`;
  * the version verbs refuse a draft (`not_released`, `not_discarded`); purging the sole draft version takes the
  * dashboard, and the entity purge takes another.
@@ -92,12 +94,14 @@ class DashboardLifecycleE2eTest {
 
     @Test
     @Order(3)
-    fun `release is refused while the pinned visualization is a DRAFT - and the consented cascade runs the visualization's gate`() {
+    fun `release is refused while the pinned visualization is a DRAFT - the alias needs a plan, a plan runs the visualization's gate`() {
         val refusedRelease = post("/api/v1/dashboards/$dashboardId/release", "", ADMIN_SESSION, ifMatch = dashboardHash)
         refused(refusedRelease, 409) shouldBe "dashboard.release.dependency_not_released"
 
-        val consented = "/api/v1/dashboards/$dashboardId/release?release_pinned_visualizations=true"
-        val cascaded = post(consented, "", ADMIN_SESSION, ifMatch = dashboardHash)
+        val legacy = "/api/v1/dashboards/$dashboardId/release?release_pinned_visualizations=true"
+        refused(post(legacy, "", ADMIN_SESSION, ifMatch = dashboardHash), 428) shouldBe "dashboard.release.plan_required"
+
+        val cascaded = post("/api/v1/dashboards/$dashboardId/release", planTickingVisualization(), ADMIN_SESSION, ifMatch = dashboardHash)
         refused(cascaded, 409) shouldBe "visualization.release.tests_missing"
 
         get("/api/v1/dashboards/$dashboardId", ADMIN_SESSION).jsonPath().getString("data.status") shouldBe "DRAFT"
@@ -197,6 +201,7 @@ class DashboardLifecycleE2eTest {
         refusals.groupingBy { it }.eachCount() shouldBe
             mapOf(
                 "dashboard.release.dependency_not_released" to 1,
+                "dashboard.release.plan_required" to 1,
                 "visualization.release.tests_missing" to 1,
                 "visualization.version.pinned" to 1,
                 "pipeline.execution.invalid_parameter_type" to 1,
@@ -210,6 +215,29 @@ class DashboardLifecycleE2eTest {
     }
 
     // ------------------------------------------------------------------------------- helpers
+
+    /**
+     * The release plan over the authoring dashboard's closure, ticking only the DRAFT visualization: the closure is the
+     * dashboard (n0), its RELEASED source pipeline (n1) with the RELEASED read template (n2), and the visualization (n3).
+     * The tree hash is [FamilyRootsFixture.treeHash]'s independent oracle over the committed rows, never the product's.
+     */
+    private fun planTickingVisualization(): String {
+        val fixture = FamilyRootsFixture(port, ADMIN_SESSION, WORKSPACE_ID, datasource = "")
+        val board = FamilyRootsFixture.Node("dashboard", "$ROOT/boards/revenue")
+        val source = FamilyRootsFixture.Node("pipeline", VISIBLE_PIPELINE)
+        val read = FamilyRootsFixture.Node("template", "$ROOT/templates/read.sql")
+        val chart = FamilyRootsFixture.Node("visualization", "$ROOT/charts/revenue")
+        val edges =
+            listOf(
+                FamilyRootsFixture.Edge(board, source, "sources[0].pipeline"),
+                FamilyRootsFixture.Edge(source, read, "nodes[0].template"),
+                FamilyRootsFixture.Edge(board, chart, "visualizations[0].visualization"),
+            )
+        val ids = fixture.nodeIds(board, edges)
+        ids.getValue(chart) shouldBe "n3"
+        val plan = mapOf("tree_hash" to fixture.treeHash(board, edges), "include_dependencies" to listOf(ids.getValue(chart)))
+        return mapper.writeValueAsString(plan)
+    }
 
     private fun refused(
         response: Response,

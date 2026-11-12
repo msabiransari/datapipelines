@@ -7,6 +7,7 @@ import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.visualization.DashboardErrorCodes
 import co.datapipelines.visualization.DashboardService
@@ -47,6 +48,8 @@ class DashboardLifecycleDialogController(
     private val dashboards: DashboardService,
     private val dialogs: DashboardLifecycleDialogModel,
     private val audit: AuditEventSink,
+    /** #876 §F.2 — the release dialog's plan: the session plan and its prerequisites, one planning read. */
+    private val previews: ReleasePreviews,
 ) : ShellPage {
     // ------------------------------------------------------------------ release
 
@@ -56,8 +59,14 @@ class DashboardLifecycleDialogController(
         model: Model,
         @PathVariable id: UUID,
     ): String {
-        LifecycleVerbs.requireSession()
-        model.addAttribute("dlg", dialogs.release(currentPrincipal().requireWorkspace().id, id))
+        val principal = LifecycleVerbs.requireSession()
+        val workspaceId = principal.requireWorkspace().id
+        val dlg = dialogs.release(workspaceId, id)
+        model.addAttribute("dlg", dlg)
+        // #876 §F.2 — the plan the dialog renders and posts back (tree_hash + the ticked drafts).
+        if (dlg.refusal == null) {
+            model.addAttribute("rd", previews.dialog(ReleaseFamily.DASHBOARD, workspaceId, dlg.name, dlg.version, principal.userId))
+        }
         // 177 §D.8: the dialog's verb renders inside a role guard like every other verb — the route
         // already refuses the wrong role; the markup now says so too, and the exemption list is empty.
         RoleModel.stamp(model)
@@ -69,7 +78,8 @@ class DashboardLifecycleDialogController(
     fun release(
         @PathVariable id: UUID,
         @RequestParam bodyHash: String,
-        @RequestParam(required = false, defaultValue = "false") releasePinnedVisualizations: Boolean,
+        @RequestParam(name = "tree_hash", required = false) treeHash: String?,
+        @RequestParam(name = "include_dependencies", required = false) includeDependencies: List<String>?,
     ): ResponseEntity<String> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
@@ -83,11 +93,12 @@ class DashboardLifecycleDialogController(
                 message = "This dashboard has no draft to release.",
                 details = mapOf("dashboard_id" to id.toString()),
             )
-        // D61: the ONE consent — without it a DRAFT visualization pin refuses
-        // dashboard.release.dependency_not_released as it always has; the server, never the
-        // checkbox, is the guard. The set and the source pins have no cascade: RELEASED or refused.
+        // #876 §F.2 — the plan its GET rendered (tree_hash + one include_dependencies per ticked draft), into the
+        // SAME plan object the REST route parses: an unticked draft or a stale hash is refused by the planner under
+        // the guard; the server, never the checkbox, is the guard.
+        val plan = ReleaseDialogPost.plan(ReleaseFamily.DASHBOARD, treeHash, includeDependencies)
         val released =
-            dashboards.release(workspaceId, id, bodyHash, principal.userId, releasePinnedVisualizations)
+            dashboards.release(workspaceId, id, bodyHash, principal.userId, releasePinnedVisualizations = false, plan = plan)
         // #873 §C.7 — the coordinator wrote every release event inside the one transaction; this handler writes none.
         return redirect(
             versionsTab(id, if (released.visualizationsReleased.isEmpty()) OK_RELEASED else OK_RELEASED_WITH_VISUALIZATIONS),

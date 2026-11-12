@@ -90,3 +90,14 @@ test("the menu's left edge never leaves the viewport", () => {
   assert.equal(at.left, 0);
   assert.equal(at.top, 42);
 });
+
+// #876 §F.2 — the release plan's arm: the shared dialog's `data-release-submittable` is the model's one boolean.
+// Only the literal "true" admits; a dialog with no plan element (null) has nothing to withhold. The
+// server refuses a forced POST regardless (the coordinator re-plans; A11) — this pins the courtesy half.
+test("the plan arm admits only the literal true, and an absent plan admits", () => {
+  assert.equal(dialogs.planAdmits("true"), true);
+  assert.equal(dialogs.planAdmits(null), true);
+  assert.equal(dialogs.planAdmits(undefined), true);
+  assert.equal(dialogs.planAdmits("false"), false);
+  assert.equal(dialogs.planAdmits("yes"), false); // any other word fails closed
+});

@@ -216,3 +216,36 @@
 .dp-deps-section[open] .dp-deps-chevron {
   transform: rotate(90deg);
 }
+
+/* #876 G6 §F.2 — the shared release dialog's plan (partials/release-dialog.html): one row per plan node and one text
+   row per datasource prerequisite. An unticked draft row swaps "released with it" for "release it first" (the
+   wording follows ITS box, pure CSS); a blocking row and an unavailable prerequisite read in the danger ink. The
+   row the plan graph selected carries data-release-selected. */
+.dp-release-rows {
+  list-style: none;
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  display: grid;
+  gap: var(--gap-xs);
+}
+
+.dp-release-row[data-release-selected] {
+  background: var(--surface-selected);
+}
+
+.dp-release-family {
+  color: var(--text-secondary);
+}
+
+.dp-release-blocking {
+  color: var(--app-danger-ink);
+}
+
+.dp-release-row:has([data-consent-input]:not(:checked)) .dp-release-on,
+.dp-release-row:not(:has([data-consent-input]:not(:checked))) .dp-release-off {
+  display: none;
+}
+
+.dp-release-graph > summary {
+  cursor: pointer;
+}

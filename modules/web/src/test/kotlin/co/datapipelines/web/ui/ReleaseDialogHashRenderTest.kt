@@ -19,8 +19,9 @@ import java.util.UUID
 /**
  * #416 — what the four Release dialogs actually SUBMIT. Each family's form must carry exactly ONE
  * hidden hash, named the way that family's POST binds it (`bodyHash` for pipelines, templates and
- * dashboards; `body_hash` for visualizations, beside `release_pinned_templates`), valued with the hash
- * of the draft the dialog read, and placed INSIDE the form the submit button belongs to — a hash in
+ * dashboards; `body_hash` for visualizations), valued with the hash of the draft the dialog read, and
+ * placed INSIDE the form the submit button belongs to — and, since #876 §F.2, exactly one `tree_hash`
+ * (the shared plan's digest) in that same form — a hash in
  * the wrong element is a form that posts nothing and a 400. The no-draft branch renders no form and
  * so no hash. The value goes through `th:value`, so a hostile hash is attribute-escaped, never
  * markup.
@@ -75,6 +76,13 @@ class ReleaseDialogHashRenderTest {
             withClue(family) { formAt shouldBeGreaterThan -1 }
             withClue(family) { formEnd shouldBeGreaterThan hashAt }
             withClue(family) { html.indexOf("type=\"submit\"", formAt) shouldBeLessThan formEnd }
+            // #876 §F.2: the plan's tree_hash rides the SAME form, once.
+            val treeHashes = HIDDEN.findAll(html).filter { it.groupValues[1] == "tree_hash" }.toList()
+            withClue(family) { treeHashes.size shouldBe 1 }
+            withClue(family) { treeHashes.single().groupValues[2] shouldBe ReleaseDialogFixtures.TREE_HASH }
+            val treeAt = html.indexOf(treeHashes.single().value)
+            withClue(family) { treeAt shouldBeGreaterThan formAt }
+            withClue(family) { formEnd shouldBeGreaterThan treeAt }
         }
     }
 
@@ -208,9 +216,13 @@ class ReleaseDialogHashRenderTest {
                     .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
             ).withRoles()
         context.setVariable("dlg", dialog)
+        context.setVariable("rd", ReleaseDialogFixtures.plan(ReleaseDialogFixtures.root(familyOf(view), "demo/root", 2)))
         context.setVariable("from", "editor")
         return COMMENT.replace(engine().process(view, context), "")
     }
+
+    /** `partials/<family>-lifecycle-release` → the family's plan wire key. */
+    private fun familyOf(view: String) = view.substringAfter("partials/").substringBefore("-lifecycle-release")
 
     private fun engine(): SpringTemplateEngine =
         SpringTemplateEngine().apply {

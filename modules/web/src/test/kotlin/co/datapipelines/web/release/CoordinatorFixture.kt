@@ -567,6 +567,39 @@ internal class CoordinatorFixture(
         legacyAliasAdmitted = legacyAliasAdmitted,
     )
 
+    /**
+     * #876 §F.4 — the coordinator production builds: every argument as [coordinator] passes it EXCEPT the alias arming
+     * rule, which is left to its DEFAULT (the [co.datapipelines.pipeline.release.LegacyReleaseAlias] constant), so a test
+     * of this one reads the constant rather than an injected boolean.
+     */
+    fun coordinatorAtDefaultAlias() =
+        ReleaseCoordinator(
+            releases = releases,
+            pipelines = pipelines,
+            planning =
+                ReleasePlanningWalk(
+                    ReleaseDependencyFamilies.registry(sources),
+                    bounds,
+                    TransactionOperations.withoutTransaction(),
+                    ReadIsolation.NONE,
+                    ReleasePlanningDeadline.NONE,
+                ),
+            participants =
+                listOf(
+                    PipelineReleaseParticipant(releases, pipelines),
+                    TemplateReleaseParticipant(templateReleases),
+                    ParameterSetReleaseParticipant(sets),
+                    VisualizationReleaseParticipant(visualizations),
+                    DashboardReleaseParticipant(dashboards),
+                ),
+            authorization = RecordingAuthorization(log, principal()),
+            guard = guard,
+            audit = audit,
+            transactions = TransactionTemplate(transactions),
+            bounds = bounds,
+            releaseIds = { releaseId },
+        )
+
     fun principal() = AuthenticatedPrincipal(actor, "author@datapipelines.test", "Author", AuthMethod.OIDC)
 
     /** The log without the permission rechecks, for order assertions about the writes alone. */

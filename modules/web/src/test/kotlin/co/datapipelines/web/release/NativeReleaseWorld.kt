@@ -160,26 +160,33 @@ internal class NativeReleaseWorld {
         schedules = NO_SCHEDULE_PINS,
     )
 
-    /** The production coordinator over [releases] and this world. */
-    fun coordinator(releases: PipelineReleaseService = service()) =
-        ReleaseCoordinator(
-            releases = releases,
-            pipelines = pipelines,
-            planning =
-                ReleasePlanningWalk(
-                    ReleaseDependencyFamilies.registry(sources),
-                    ReleaseBounds(),
-                    TransactionOperations.withoutTransaction(),
-                    ReadIsolation.NONE,
-                    ReleasePlanningDeadline.NONE,
-                ),
-            participants = listOf(PipelineReleaseParticipant(releases, pipelines), TemplateReleaseParticipant(templateReleases)),
-            authorization = RecordingAuthorization(mutableListOf(), principal()),
-            guard = { _, _ -> },
-            audit = { audited += it },
-            transactions = transactions,
-            bounds = ReleaseBounds(),
-        )
+    /**
+     * The production coordinator over [releases] and this world. [legacyAliasAdmitted] arms the bare cascade alias as
+     * the compatibility arm these cases pin (the [CoordinatorFixture] convention); #876 §F.4 flipped the production
+     * default, whose refusal `ReleaseCoordinatorTest` pins at the default.
+     */
+    fun coordinator(
+        releases: PipelineReleaseService = service(),
+        legacyAliasAdmitted: Boolean = true,
+    ) = ReleaseCoordinator(
+        releases = releases,
+        pipelines = pipelines,
+        planning =
+            ReleasePlanningWalk(
+                ReleaseDependencyFamilies.registry(sources),
+                ReleaseBounds(),
+                TransactionOperations.withoutTransaction(),
+                ReadIsolation.NONE,
+                ReleasePlanningDeadline.NONE,
+            ),
+        participants = listOf(PipelineReleaseParticipant(releases, pipelines), TemplateReleaseParticipant(templateReleases)),
+        authorization = RecordingAuthorization(mutableListOf(), principal()),
+        guard = { _, _ -> },
+        audit = { audited += it },
+        transactions = transactions,
+        bounds = ReleaseBounds(),
+        legacyAliasAdmitted = legacyAliasAdmitted,
+    )
 
     /** A release request for the world's pipeline — the surfaces' shape. */
     fun request(

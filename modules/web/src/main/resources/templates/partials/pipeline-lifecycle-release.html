@@ -1,18 +1,11 @@
-<!-- The Release dialog (ui-screens §4.3d, 102). The 094 §B shape: the pins are answered
-     BEFORE the button — a DISCARDED or MISSING template pin renders in the refused colour with
-     "release the template first" and the button does not exist, which is §5.3 precondition 2
-     pre-read, not a copy of the guard: the POST re-runs it in the service.
-
-     142: a DRAFT pin is no longer a dead end. It renders inside a consent group — "Also release
-     these N draft templates", CHECKED by default — one row per pinned version, naming the
-     template, the version and (when the used-by service says so) how many OTHER draft pipelines
-     pin it, because the promoter is releasing a shared object. Checked, the form posts
-     releasePinnedTemplates=true and the service releases those versions in the SAME transaction
-     as the pipeline flip, templates first. Unchecked, the rows fall back to today's refused
-     wording ("release the template first" — the order rule stays visible) and the submit is
-     withheld by lifecycle-dialog.js's consent arm; the wording swap is pure CSS (`:has()`), the
-     button's disabled state needs the script, and the server re-runs the guard on the POST
-     regardless — an unchecked box that reaches it refuses dependency_not_released. -->
+<!-- The pipeline Release dialog (ui-screens §4.3d, 102): the pipeline's own facts (last writer, the 7e needs-review
+     warnings, the 140 checks run and its footer) around the SHARED release plan (#876 §F.2–F.3,
+     partials/release-dialog.html :: plan). The plan replaced the 142 cascade group: every dependency of the draft —
+     not only its direct template pins — is a plan row, each DRAFT one its own checked box posting its node_id as
+     include_dependencies, with the plan's tree_hash beside it; a MISSING or DISCARDED dependency or an unavailable
+     datasource renders blocking and the submit stays disabled (and the checks do not run). The server re-plans and
+     re-checks everything on the POST regardless: an unticked draft, a stale tree_hash or an unavailable prerequisite
+     is refused there, never by the markup. -->
 <div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" data-lifecycle-dialog="pipeline-release">
   <div class="ds-card app-modal app-modal-md plc-release" role="dialog" aria-modal="true" aria-labelledby="plc-release-title">
     <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
@@ -32,26 +25,7 @@
         by <span th:text="${dlg.updatedBy}">Muhammad</span>.
       </p>
 
-      <!-- The ONLY branch without the button: a pin the release can neither pass nor cascade
-           past (§5.3) — every pin renders in the pre-142 shape, draft ones included, because
-           nothing the promoter can consent to here would let the release through. -->
-      <th:block th:if="${!#lists.isEmpty(dlg.blockingPins)}">
-        <p class="u-text-sm u-mb-xs">Template pins this release locks:</p>
-        <ul class="u-text-sm u-mb-md" data-release-pins>
-          <li th:each="p : ${dlg.pins}">
-            <span class="u-mono" th:text="${p.label}">demo/x.sql@1</span>
-            <span class="ds-badge ds-badge-default" th:classappend="${p.blocksRelease} ? 'ds-badge-danger'"
-                  th:text="${p.statusLabel}">RELEASED</span>
-            <span th:if="${p.blocksRelease}" class="tplx-danger"> — release the template first</span>
-          </li>
-        </ul>
-        <p class="u-secondary u-text-sm">
-          Releasing makes v<span th:text="${dlg.version}">3</span> the current version and locks it.
-        </p>
-      </th:block>
-
-      <form th:if="${#lists.isEmpty(dlg.blockingPins)}"
-            th:attr="hx-post=@{'/partials/pipelines/{id}/lifecycle/release'(id=${dlg.id})},
+      <form th:attr="hx-post=@{'/partials/pipelines/{id}/lifecycle/release'(id=${dlg.id})},
                      hx-swap='none'">
         <!-- #401: every surface answers HX-Redirect — the workspace reloads with the layout's
              flash (which names the cascaded templates, #407); the explorer's in-place
@@ -63,42 +37,7 @@
              splices in below submits it too. -->
         <input type="hidden" name="bodyHash" th:value="${dlg.bodyHash}" data-release-body-hash>
 
-        <th:block th:if="${!#lists.isEmpty(dlg.pins)}">
-          <p class="u-text-sm u-mb-xs">Template pins this release locks:</p>
-          <ul class="u-text-sm u-mb-xs" data-release-pins th:if="${!#lists.isEmpty(dlg.otherPins)}">
-            <li th:each="p : ${dlg.otherPins}">
-              <span class="u-mono" th:text="${p.label}">demo/x.sql@1</span>
-              <span class="ds-badge ds-badge-default" th:text="${p.statusLabel}">RELEASED</span>
-            </li>
-          </ul>
-
-          <!-- 142: the consent group. The checkbox is the consent; its name is the flag the
-               service reads. The rows carry BOTH wordings and CSS shows the one the box
-               selects (.plc-release:has(unchecked) below). -->
-          <div class="plc-cascade u-text-sm u-mb-md" data-release-cascade th:if="${!#lists.isEmpty(dlg.draftPins)}">
-            <label class="plc-cascade-consent">
-              <input type="checkbox" name="releasePinnedTemplates" value="true" checked data-consent-input>
-              <span th:if="${#lists.size(dlg.draftPins) == 1}">Also release this draft template with the pipeline</span>
-              <span th:if="${#lists.size(dlg.draftPins) != 1}"
-                    th:text="'Also release these ' + ${#lists.size(dlg.draftPins)} + ' draft templates with the pipeline'">Also release these 2 draft templates with the pipeline</span>
-            </label>
-            <ul class="plc-cascade-pins" data-cascade-pins>
-              <li th:each="p : ${dlg.draftPins}" th:attr="data-cascade-pin=${p.label}">
-                <span class="u-mono" th:text="${p.label}">demo/a.sql@1</span>
-                <span class="plc-cascade-on">
-                  <span class="ds-badge ds-badge-default" th:text="${p.statusLabel}">DRAFT</span>
-                  <span class="u-secondary"> — released with this pipeline</span><span
-                        th:if="${p.otherPinners > 0}" class="u-secondary" data-cascade-shared
-                        th:text="', also pinned by ' + ${p.otherPinners} + ' other draft pipeline' + (${p.otherPinners == 1} ? '' : 's')">, also pinned by 1 other draft pipeline</span>
-                </span>
-                <span class="plc-cascade-off">
-                  <span class="ds-badge ds-badge-danger" th:text="${p.statusLabel}">DRAFT</span>
-                  <span class="tplx-danger"> — release the template first</span>
-                </span>
-              </li>
-            </ul>
-          </div>
-        </th:block>
+        <div th:replace="~{partials/release-dialog :: plan(${rd})}"></div>
 
         <!-- 7e (transform-nodes design §8.2): a pinned version that cites a RETIRED learned fact
              is a WARNING, never a refusal — one row per such pin, above the confirm, naming each
@@ -124,7 +63,7 @@
              re-renders partials/pipeline-checks here and splices the submit footer below
              out-of-band, so the verdicts the user just saw are what the button offers. The
              submit starts DISABLED and only the run's own answer enables it. -->
-        <th:block th:if="${dlg.hasChecks}">
+        <th:block th:if="${dlg.hasChecks and rd.submittable}">
           <p class="u-text-sm u-mb-xs">Release checks on this version — running now:</p>
           <div id="plc-dialog-checks" class="u-mb-md"
                th:attr="hx-post=@{'/partials/pipelines/{id}/versions/{version}/checks/run?footer=release'(id=${dlg.id}, version=${dlg.version})},
@@ -135,10 +74,10 @@
         <p th:if="${!dlg.hasChecks}" class="u-secondary u-text-sm u-mb-md">No checks on this version.</p>
 
         <div id="plc-release-footer">
-          <button th:if="${!dlg.hasChecks and canAuthor == true}" type="submit" data-verb="pipeline-release-confirm" data-consent-submit
+          <button th:if="${!dlg.hasChecks and rd.submittable and canAuthor == true}" type="submit" data-verb="pipeline-release-confirm" data-consent-submit
                   class="ds-button ds-button-primary u-full" hx-disabled-elt="this"
                   th:text="'Release v' + ${dlg.version}">Release v3</button>
-          <button th:if="${dlg.hasChecks}" type="submit" disabled
+          <button th:if="${dlg.hasChecks or !rd.submittable}" type="submit" disabled data-consent-submit
                   class="ds-button ds-button-primary u-full"
                   th:text="'Release v' + ${dlg.version}">Release v3</button>
         </div>

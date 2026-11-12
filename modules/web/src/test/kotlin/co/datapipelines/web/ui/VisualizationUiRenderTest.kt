@@ -42,6 +42,7 @@ class VisualizationUiRenderTest {
         }
 
     private val vizId = UUID.randomUUID()
+    private val vizRoot = ReleaseDialogFixtures.root("visualization", "acme/charts/revenue", 2)
     private val leaf =
         VisualizationBrowseModel.LeafView(vizId, "acme/charts/revenue", "revenue", "Revenue", 3, released = true)
     private val draftLeaf =
@@ -146,7 +147,7 @@ class VisualizationUiRenderTest {
             .findAll(catalog)
             .map { it.groupValues[1] }
             .toList()
-            .takeLast(8) shouldBe DEPENDENCY_CATALOG
+            .takeLast(RELEASE_DEPENDENCY_CATALOG.size) shouldBe RELEASE_DEPENDENCY_CATALOG
         body shouldContain "data-nav-current=\"visualizations\""
         body shouldContain "id=\"dp-dialog\""
         // Every version switch is a boosted, rail-preserving navigation that keeps the tab (#714).
@@ -419,18 +420,20 @@ class VisualizationUiRenderTest {
     }
 
     @Test
-    fun `a releasable draft with a DRAFT script carries the ONE consent, checked, and from`() {
+    fun `876 - a releasable draft with a DRAFT script is a plan row, checked, posting its node id, and from`() {
         val dlg =
             release(
                 pin = VisualizationLifecycleDialogModel.PinView("acme/templates/t", 2, PipelineVersionStatus.DRAFT),
                 refusals = emptyList(),
             )
-        val html = dialog("visualization-lifecycle-release", dlg)
+        val rd = ReleaseDialogFixtures.plan(vizRoot, ReleaseDialogFixtures.draft("template", "acme/templates/t", 2))
+        val html = dialog("visualization-lifecycle-release", dlg, rd)
 
         html shouldContain "hx-post=\"/partials/visualizations/$vizId/lifecycle/release\""
-        html shouldContain "name=\"release_pinned_templates\""
-        html shouldContain "data-consent-input"
-        Regex("name=\"release_pinned_templates\"[^>]*checked").containsMatchIn(html) shouldBe true
+        html shouldNotContain "release_pinned_templates"
+        Regex("name=\"include_dependencies\" value=\"n-template-acme-templates-t-2\" checked[^>]*data-consent-input")
+            .containsMatchIn(html) shouldBe true
+        html shouldContain "name=\"tree_hash\" value=\"${ReleaseDialogFixtures.TREE_HASH}\""
         html shouldContain "name=\"from\" value=\"versions\""
         html shouldContain "data-verb=\"visualization-release-confirm\""
     }
@@ -442,10 +445,12 @@ class VisualizationUiRenderTest {
                 pin = VisualizationLifecycleDialogModel.PinView("acme/templates/t", 2, PipelineVersionStatus.RELEASED),
                 refusals = emptyList(),
             )
-        val html = dialog("visualization-lifecycle-release", dlg).replace(Regex("<!--[\\s\\S]*?-->"), "")
+        val rd = ReleaseDialogFixtures.plan(vizRoot, ReleaseDialogFixtures.released("template", "acme/templates/t", 2))
+        val html = dialog("visualization-lifecycle-release", dlg, rd).replace(Regex("<!--[\\s\\S]*?-->"), "")
 
         html shouldNotContain "release_pinned_templates"
-        html shouldContain "data-release-pins"
+        html shouldNotContain "name=\"include_dependencies\""
+        html shouldContain "data-release-row=\"released\""
     }
 
     @Test
@@ -456,6 +461,7 @@ class VisualizationUiRenderTest {
                 "partials/visualization-lifecycle-release",
                 webContext("/partials").withRoles(canAuthor = false).apply {
                     setVariable("dlg", dlg)
+                    setVariable("rd", ReleaseDialogFixtures.plan(vizRoot))
                     setVariable("from", "versions")
                 },
             )
@@ -679,11 +685,13 @@ class VisualizationUiRenderTest {
     private fun dialog(
         template: String,
         dlg: Any,
+        rd: ReleaseDialogModel = ReleaseDialogFixtures.plan(vizRoot),
     ): String =
         engine.process(
             "partials/$template",
             webContext("/partials").apply {
                 setVariable("dlg", dlg)
+                setVariable("rd", rd)
                 setVariable("from", "versions")
             },
         )

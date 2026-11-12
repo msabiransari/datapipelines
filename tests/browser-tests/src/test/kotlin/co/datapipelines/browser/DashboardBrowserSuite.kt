@@ -530,7 +530,7 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         return board
     }
 
-    /** The acceptance set through its REAL routes; its selector template is released WITH it (`release_pinned_templates`). */
+    /** The acceptance set through its REAL routes; its selector template is released WITH it (the dialog's plan, #876). */
     private fun createAndReleaseAcceptanceSet(
         name: String,
         cities: String,
@@ -564,15 +564,18 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
                     headers, body: JSON.stringify(body) });
                   if (!created.ok) return { error: created.status + ' ' + (await created.text()).slice(0, 300) };
                   const document_ = await created.json();
-                  const released = await fetch('/api/v1/parameter-sets/' + document_.data.id + '/release?release_pinned_templates=true',
-                    { method: 'POST', credentials: 'same-origin',
-                      headers: Object.assign({}, headers, { 'If-Match': document_.data.body_hash }), body: '' });
-                  if (!released.ok) return { error: 'release ' + released.status + ' ' + (await released.text()).slice(0, 300) };
-                  return { id: document_.data.id };
+                  return { id: document_.data.id, hash: document_.data.body_hash };
                 }""",
                 mapOf("name" to name, "set" to set),
             ) as Map<*, *>
         check(result["error"] == null) { "the parameter set $name failed: ${result["error"]}" }
+        val id = result["id"] as String
+        PlannedRelease.release(
+            page,
+            "/partials/parameter-sets/$id/lifecycle/release",
+            "/api/v1/parameter-sets/$id/release",
+            result["hash"] as String,
+        )
         return name
     }
 

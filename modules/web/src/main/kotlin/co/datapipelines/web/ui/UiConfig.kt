@@ -387,6 +387,23 @@ class UiConfig {
         authoring: co.datapipelines.pipeline.AuthoringGuard,
     ): TemplateLifecycleDialogModel = TemplateLifecycleDialogModel(templates, usage, actorNames, authoring)
 
+    /** #876 §F.3: the parameter-set release dialog's root facts (the plan is [releasePreviews]'s). */
+    @Bean
+    fun parameterSetLifecycleDialogModel(
+        sets: co.datapipelines.parameters.ParameterSetService,
+        actorNames: ActorNames,
+    ): ParameterSetLifecycleDialogModel = ParameterSetLifecycleDialogModel(sets, actorNames)
+
+    /**
+     * #876 §F.2: the release dialogs' planning read — the session plan and its datasource prerequisites from ONE
+     * read-only planning transaction, the read every release dialog GET renders (never the interactive tree route).
+     */
+    @Bean
+    fun releasePreviews(
+        planning: co.datapipelines.application.dependencies.ReleasePlanningWalk,
+        bounds: co.datapipelines.pipeline.release.ReleaseBounds,
+    ): ReleasePreviews = ReleasePreviews(planning, bounds)
+
     /**
      * #407 — the release flash's one-shot, session-held cascade names, shared by the
      * lifecycle dialog's release POST (the hold) and [ReleaseFlashAdvice] (the consume).

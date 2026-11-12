@@ -82,14 +82,20 @@ abstract class ParameterSetBrowserSuite : DashboardBrowserSuite() {
         return idOf(created) to hashOf(created)
     }
 
-    /** Releases the draft [hash] names - with its pinned templates when [withTemplates]; returns the new body hash. */
+    /**
+     * Releases the draft [hash] names - with its pinned DRAFT templates when [withTemplates], through the plan the
+     * set's release dialog renders (#876 §F.4: the bare `release_pinned_templates` alias is refused 428); returns the
+     * new body hash.
+     */
     protected fun release(
         id: String,
         hash: String,
         withTemplates: Boolean = false,
     ): String {
-        val query = if (withTemplates) "?release_pinned_templates=true" else ""
-        return hashOf(must("POST", "/api/v1/parameter-sets/$id/release$query", ifMatch = hash))
+        if (!withTemplates) return hashOf(must("POST", "/api/v1/parameter-sets/$id/release", ifMatch = hash))
+        return hashOf(
+            PlannedRelease.release(page, "/partials/parameter-sets/$id/lifecycle/release", "/api/v1/parameter-sets/$id/release", hash),
+        )
     }
 
     /** A new draft on top of the current head; returns the new body hash. */

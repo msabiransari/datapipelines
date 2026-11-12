@@ -36,12 +36,21 @@
  *    AFTER the click had opened the menu and shut it again (every Playwright click on a ⋯
  *    below the fold, LifecycleDialogBrowserTest, 2026-09-12). The placement rule is pure
  *    and exported (`menuPlacement`) for `node --test`.
+ *
+ * #876 §F.2 — the shared release dialog (partials/release-dialog.html) adds two duties. Its plan carries
+ * `data-release-submittable`; a plan that is not submittable (a MISSING or DISCARDED dependency, an unavailable
+ * datasource prerequisite, no tree_hash) keeps every gated submit disabled whatever the boxes say — the consent toggle
+ * acts only on a submittable dialog (`planAdmits`, a courtesy: the coordinator refuses the forced POST). And its
+ * "Show graph" region is a dependency pane: a landed dialog is scanned (`DependenciesMount.scan`) and a dialog that
+ * closes, or whose container's content is swapped out, is unmounted first (`DependenciesMount.unmount`) so no graph
+ * outlives its dialog.
  */
 (function () {
   'use strict';
 
   // #786: ax-dialog is the API versions page's container (api/endpoint.html).
-  var CONTAINERS = ['tx-dialog', 'pe-dialog', 'dp-dialog', 'ax-dialog'];
+  // #876: ps-dialog is the parameter-set workspace's (parameter-sets/workspace.html), the release shell's container.
+  var CONTAINERS = ['tx-dialog', 'pe-dialog', 'dp-dialog', 'ax-dialog', 'ps-dialog'];
 
   function openContainer() {
     for (var i = 0; i < CONTAINERS.length; i++) {
@@ -51,9 +60,26 @@
     return null;
   }
 
+  /** Tears down every dependency pane drawn inside [container] (#876: the release dialog's graph). */
+  function unmountPanes(container) {
+    if (container && window.DependenciesMount && typeof window.DependenciesMount.unmount === 'function') {
+      window.DependenciesMount.unmount(container);
+    }
+  }
+
   function closeDialog() {
     var container = openContainer();
-    if (container) container.innerHTML = '';
+    if (!container) return;
+    unmountPanes(container);
+    container.innerHTML = '';
+  }
+
+  /**
+   * #876 — the plan's verdict, the pure half: a dialog without a release plan has nothing to add (null); a plan
+   * admits its submit only when the server rendered it submittable.
+   */
+  function planAdmits(submittableAttr) {
+    return submittableAttr === null || submittableAttr === undefined || submittableAttr === 'true';
   }
 
   function firstControl(container) {
@@ -127,13 +153,15 @@
     var buttons = container.querySelectorAll('[data-min-chars-submit], [data-consent-submit]');
     var min = reason ? parseInt(reason.getAttribute('data-min-chars') || '10', 10) : 0;
     var consent = consentMet(boxes);
+    var plan = container.querySelector('[data-release-plan]');
+    var admitted = planAdmits(plan ? plan.getAttribute('data-release-submittable') : null);
     for (var i = 0; i < buttons.length; i++) {
       var button = buttons[i];
       var needsReason = button.hasAttribute('data-min-chars-submit');
       var needsConsent = button.hasAttribute('data-consent-submit');
       var reasonMet = !needsReason || (reason !== null && minCharsMet(reason.value, min));
       var consentOk = !needsConsent || consent;
-      button.disabled = !(reasonMet && consentOk);
+      button.disabled = !(admitted && reasonMet && consentOk);
     }
   }
 
@@ -164,6 +192,9 @@
     if (!container) return;
     armTypedConfirm(container);
     armReleaseGates(container);
+    if (window.DependenciesMount && typeof window.DependenciesMount.scan === 'function') {
+      window.DependenciesMount.scan(container);
+    }
     var focus = firstControl(container);
     if (focus) focus.focus();
   }
@@ -215,6 +246,13 @@
     // and splicing the submit footer in out-of-band) re-arms the inputs it just replaced.
     var open = openContainer();
     if (open && open !== target && open.contains(target)) rearm(open);
+  });
+
+  // #876 — a swap that REPLACES a container's dialog (a re-opened dialog, a refusal re-render) unmounts the panes the
+  // outgoing content drew first, exactly like a close.
+  document.body.addEventListener('htmx:beforeSwap', function (event) {
+    var target = event.detail && event.detail.target;
+    if (target && target.id && CONTAINERS.indexOf(target.id) !== -1) unmountPanes(target);
   });
 
   // ------------------------------------------------------------------ 4. menus
@@ -328,6 +366,7 @@
   var api = {
     confirmMatches: confirmMatches, closeDialog: closeDialog, closeMenus: closeMenus,
     menuPlacement: menuPlacement, minCharsMet: minCharsMet, consentMet: consentMet,
+    planAdmits: planAdmits,
   };
   if (typeof window !== 'undefined') window.lifecycleDialog = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

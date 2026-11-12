@@ -5,6 +5,7 @@ import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.visualization.ArtifactVersion
 import co.datapipelines.visualization.Purged
@@ -49,6 +50,8 @@ class VisualizationLifecycleDialogController(
     private val visualizations: VisualizationService,
     private val dialogs: VisualizationLifecycleDialogModel,
     private val audit: AuditEventSink,
+    /** #876 §F.2 — the release dialog's plan: the session plan and its prerequisites, one planning read. */
+    private val previews: ReleasePreviews,
 ) : ShellPage {
     // ------------------------------------------------------------------ release
 
@@ -60,7 +63,13 @@ class VisualizationLifecycleDialogController(
         @RequestParam(required = false) from: String?,
     ): String {
         val principal = LifecycleVerbs.requireSession()
-        model.addAttribute("dlg", dialogs.release(principal.requireWorkspace().id, id))
+        val workspaceId = principal.requireWorkspace().id
+        val dlg = dialogs.release(workspaceId, id)
+        model.addAttribute("dlg", dlg)
+        // #876 §F.2 — the plan the dialog renders and posts back (tree_hash + the ticked drafts).
+        if (dlg.canRelease) {
+            model.addAttribute("rd", previews.dialog(ReleaseFamily.VISUALIZATION, workspaceId, dlg.name, dlg.version, principal.userId))
+        }
         model.addAttribute("from", origin(from).wire)
         RoleModel.stamp(model)
         return "partials/visualization-lifecycle-release"
@@ -71,7 +80,8 @@ class VisualizationLifecycleDialogController(
     fun release(
         @PathVariable id: UUID,
         @RequestParam(name = "body_hash") bodyHash: String,
-        @RequestParam(name = "release_pinned_templates", required = false, defaultValue = "false") releasePinnedTemplates: Boolean,
+        @RequestParam(name = "tree_hash", required = false) treeHash: String?,
+        @RequestParam(name = "include_dependencies", required = false) includeDependencies: List<String>?,
         @RequestParam(required = false) from: String?,
     ): ResponseEntity<String> {
         val principal = LifecycleVerbs.requireSession()
@@ -81,9 +91,11 @@ class VisualizationLifecycleDialogController(
         // the dialog opened is a stale hash and the service answers visualization.version.conflict (the evidence
         // gate, which judges the current body, still answers first when the new draft has no green run).
         draftOf(workspaceId, id, version = null)
-        // D61 — the ONE consent: without it a DRAFT transform pin refuses release.dependency_not_released as it
-        // always has; the server, never the checkbox, is the guard.
-        val released = visualizations.release(workspaceId, id, bodyHash, principal.userId, releasePinnedTemplates)
+        // #876 §F.2 — the plan its GET rendered (tree_hash + one include_dependencies per ticked draft), into the SAME
+        // plan object the REST route parses: an unticked draft or a stale hash is refused by the planner under the
+        // guard; the server, never the checkbox, is the guard.
+        val plan = ReleaseDialogPost.plan(ReleaseFamily.VISUALIZATION, treeHash, includeDependencies)
+        val released = visualizations.release(workspaceId, id, bodyHash, principal.userId, releasePinnedTemplates = false, plan = plan)
         // #873 §C.7 — the coordinator wrote every release event inside the one transaction; this handler writes none.
         return redirect(workspaceTab(id, from, if (released.templatesReleased.isEmpty()) OK_RELEASED else OK_RELEASED_WITH_TEMPLATES))
     }

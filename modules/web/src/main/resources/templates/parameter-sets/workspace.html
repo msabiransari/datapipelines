@@ -33,9 +33,15 @@
     <!-- #876 G6 — the Dependencies arm's modules and mount (the three graph vendors are listed above). -->
     <script th:src="@{/js/dependencies/renderer.js}"></script>
     <script th:src="@{/js/dependencies/tree-view.js}"></script>
+    <script th:src="@{/js/dependencies/plan-view.js}"></script>
     <script th:src="@{/js/dependencies/list.js}"></script>
     <script th:src="@{/js/dependencies/source.js}"></script>
     <script data-page-mount th:src="@{/js/dependencies/mount.js}"></script>
+  </template>
+  <!-- #876 §F.3 — document-level wiring, run during the preparation (an empty catalog): the release dialog's chrome
+       (close, focus, the consent and plan gates) for #ps-dialog below; the loader prevents stacking. -->
+  <template id="ps-dialog-scripts" data-page-assets>
+    <script th:src="@{/js/lifecycle-dialog.js}"></script>
   </template>
 
   <div class="ps-root" th:attr="data-parameter-set-id=${parameterSetId}, data-active-tab=${activeTab}">
@@ -82,7 +88,19 @@
          th:href="@{/parameter-sets/{id}(id=${parameterSetId}, version=${v.version})}"
          th:attr="aria-current=${v.isViewed} ? 'page' : null"
          th:text="'v' + ${v.version} + ' — ' + ${v.status.name().toLowerCase()} + (${v.isCurrent} ? ' · current' : '')">v2 — released · current</a>
+      <!-- #876 §F.3 — the family's first human release shell: the draft's Release opens the SHARED release dialog
+           into #ps-dialog. Rendered for a role that may release (PARAMETER_SET_RELEASE: author, workspace admin,
+           super admin); the routes refuse every other role regardless. -->
+      <th:block th:with="draftRow=${versions.^[status.name() == 'DRAFT']}">
+        <button th:if="${canAuthor == true and draftRow != null}" type="button" class="ds-button ds-button-sm ds-button-primary"
+                data-verb="parameter-set-release"
+                th:attr="hx-get=@{'/partials/parameter-sets/{id}/lifecycle/release'(id=${parameterSetId})},
+                         hx-target='#ps-dialog', hx-swap='innerHTML'"
+                th:text="'Release v' + ${draftRow.version} + '…'">Release v3…</button>
+      </th:block>
     </nav>
+    <!-- The lifecycle dialogs' one container on this page (lifecycle-dialog.js CONTAINERS). -->
+    <div id="ps-dialog"></div>
 
     <!-- The choose-a-version state (workspace spec §3.1, rule 4): no body resolved for this caller, so there is
          nothing to render a graph OF. The admitted history is the affordance; no form, no evaluate. -->

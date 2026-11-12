@@ -184,7 +184,7 @@ class DependenciesGoldenE2eTest {
             val source = edges[2].to
             val query = edges[3].to
             val chart = edges[4].to
-            release(source)
+            release(source, query)
             val writer = writer(source, query)
             val retired = retired()
             val (imports, _) = fx.closure("template", "$PREFIX/imports")
@@ -211,10 +211,13 @@ class DependenciesGoldenE2eTest {
             ) + schedules.map { (condition, id) -> "tree-schedule-$condition" to "/api/v1/dependencies/schedule?id=$id" }
         }
 
-        private fun release(pipeline: FamilyRootsFixture.Node) {
-            val row = fx.row(pipeline)
+        /** Releases [pipeline] with a plan ticking its one DRAFT [template] (the legacy alias is refused since #876 round 3). */
+        private fun release(
+            pipeline: FamilyRootsFixture.Node,
+            template: FamilyRootsFixture.Node,
+        ) {
             fx
-                .send("POST", "/api/v1/pipelines/${row.uuid}/release?release_pinned_templates=true", "", row.hash)
+                .releaseWithPlan(pipeline, listOf(FamilyRootsFixture.Edge(pipeline, template, "nodes[0].template")))
                 .expect("release ${pipeline.name}", HTTP_OK)
         }
 
@@ -242,7 +245,7 @@ class DependenciesGoldenE2eTest {
         private fun retired(): String {
             val template = fx.sqlTemplate("$PREFIX/retired.sql")
             val pipeline = fx.pipeline("$PREFIX/retired", template)
-            release(pipeline)
+            release(pipeline, template)
             fx.send("POST", "/api/v1/pipelines/${fx.row(pipeline).uuid}/versions/1/discard", "").expect("discard", HTTP_OK)
             return pipeline.name
         }

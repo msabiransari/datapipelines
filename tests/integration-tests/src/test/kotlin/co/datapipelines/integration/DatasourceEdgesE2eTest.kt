@@ -39,12 +39,15 @@ import java.util.UUID
  * 1. the name lock: a parameter-set selector alone refuses the delete `datasource.in_use`, including one held only by a
  *    DISCARDED version of a live set (the pipeline scan's any-version rule over a live entity);
  * 2. a datasource that disappears and is recreated under the same name (a new row, a new incarnation, a re-grant) between
- *    plan and apply does not invalidate consent: the plan still APPLIES, on the plan and the compatibility path;
+ *    plan and apply does not invalidate consent: the plan still APPLIES, on the plan path and on the plan-less path (the
+ *    root alone, its template released first — the legacy alias is gone, #876 round 3);
  * 3. a datasource that disappears without recreation, held by a RELEASED child below a DRAFT root, refuses
  *    `pipeline.release.dependency_not_released` before any flip on both paths, nothing flipped and no audit row. A holder
  *    that FLIPS is refused earlier, outside the guarded transaction, by its native §12 revalidation
  *    (`pipeline.validation.unknown_datasource`, 400) — pinned here as observed, never reached by the prerequisite check;
- * 4. a legacy alias release whose closure names a datasource behaves as before U2;
+ * 4. the legacy alias (`release_pinned_templates=true`, no plan) on a closure naming a datasource is refused
+ *    `pipeline.release.plan_required` on purpose with nothing flipped (#876 round 3), and the same closure releases with
+ *    a plan: the datasource edge is a prerequisite, never a flip;
  * 5. a datasource granted only to ANOTHER workspace is the absent case: every refusal above and the plan wire deep-compare
  *    equal, both paths;
  * 6. the production planner's `prerequisites` lists `warehouse` once — two edges reach it — with its `readonly` flag, and
@@ -102,7 +105,7 @@ class DatasourceEdgesE2eTest {
         val draft = delete(DS_SET_ONLY)
 
         refusedInUse(draft, "DRAFT")
-        val released = fx.releaseCompatible(set)
+        val released = fx.releaseWithPlan(set, listOf(Edge(set, selector, "parameters[0].source.template")))
         withClue(released.asString().take(EXCERPT)) { released.statusCode shouldBe OK }
         val repointed = fx.send("PUT", "/api/v1/parameter-sets/${fx.row(set).uuid}", setDocument(selector, DS_REPOINT), fx.row(set).hash)
         withClue(repointed.asString().take(EXCERPT)) { repointed.statusCode shouldBe OK }
@@ -121,7 +124,8 @@ class DatasourceEdgesE2eTest {
     fun `2 - a datasource recreated under the same name between plan and apply does not invalidate consent`() {
         val fx = fx(DS_RECREATE)
         val (planned, plannedEdges) = pipeline(fx, "test/ds873/recreate/planned")
-        val (compatible, _) = pipeline(fx, "test/ds873/recreate/compatible")
+        val (compatible, compatibleEdges) = pipeline(fx, "test/ds873/recreate/compatible")
+        releaseTemplates(fx, compatibleEdges)
         val treeHash = fx.treeHash(planned, plannedEdges)
         val before = incarnation(DS_RECREATE)
         // The preview the consent is given on: the production planner, before the datasource disappears.
@@ -136,8 +140,8 @@ class DatasourceEdgesE2eTest {
         val applied = fx.releaseWithPlan(planned, plannedEdges, treeHash)
         withClue(applied.asString().take(EXCERPT)) { applied.statusCode shouldBe OK }
         fx.row(planned).status shouldBe "RELEASED"
-        val legacy = releaseLegacy(fx, compatible)
-        withClue(legacy.asString().take(EXCERPT)) { legacy.statusCode shouldBe OK }
+        val rootOnly = releaseRootOnly(fx, compatible)
+        withClue(rootOnly.asString().take(EXCERPT)) { rootOnly.statusCode shouldBe OK }
         fx.row(compatible).status shouldBe "RELEASED"
     }
 
@@ -147,23 +151,26 @@ class DatasourceEdgesE2eTest {
         val fx = fx(DS_GONE)
         // The prerequisite check's holder: a RELEASED child (it does not flip, so no native validation re-reads it).
         val (child, childEdges) = pipeline(fx, "test/ds873/gone/child")
-        withClue("the child is released while its datasource is granted") { releaseLegacy(fx, child).statusCode shouldBe OK }
+        releaseTemplates(fx, childEdges)
+        withClue("the child is released while its datasource is granted") { releaseRootOnly(fx, child).statusCode shouldBe OK }
         val (parentPlanned, plannedEdges) = parent(fx, "test/ds873/gone/parent_planned", child, childEdges)
         val (parentCompatible, _) = parent(fx, "test/ds873/gone/parent_compatible", child, childEdges)
         // The native holder: a DRAFT pipeline that flips, so its §12 revalidation runs before the guarded transaction.
         val (flipPlanned, flipEdges) = pipeline(fx, "test/ds873/gone/flip_planned")
         val (flipCompatible, flipCompatibleEdges) = pipeline(fx, "test/ds873/gone/flip_compatible")
-        val drafts = listOf(parentPlanned, parentCompatible) + (flipEdges + flipCompatibleEdges).flatMap { listOf(it.from, it.to) }
+        // The plan-less holder's template is released first (it names no datasource), so only its pipeline flips.
+        releaseTemplates(fx, flipCompatibleEdges)
+        val drafts = listOf(parentPlanned, parentCompatible, flipCompatible) + flipEdges.flatMap { listOf(it.from, it.to) }
 
         fun observe() =
             Observed(
                 prerequisite =
-                    refusals(CONFLICT, { planRelease(fx, parentPlanned, plannedEdges) }, { releaseLegacy(fx, parentCompatible) }),
+                    refusals(CONFLICT, { planRelease(fx, parentPlanned, plannedEdges) }, { releaseRootOnly(fx, parentCompatible) }),
                 native =
                     refusals(
                         BAD_REQUEST,
                         { planRelease(fx, flipPlanned, flipEdges, selectAll = true) },
-                        { releaseLegacy(fx, flipCompatible) },
+                        { releaseRootOnly(fx, flipCompatible) },
                     ),
                 wire = planWire(parentPlanned),
             )
@@ -180,7 +187,7 @@ class DatasourceEdgesE2eTest {
             (refusal["details"] as Map<String, Any?>)["blockers"] shouldBe listOf(BLOCKER)
         }
         listOf(theirs, absent).flatMap { it.native }.forEach { it["code"] shouldBe "pipeline.validation.unknown_datasource" }
-        withClue("other-workspace-only = absent, deep-compared: plan path, compatibility path, native holder, plan wire") {
+        withClue("other-workspace-only = absent, deep-compared: plan path, plan-less path, native holder, plan wire") {
             theirs shouldBe absent
         }
         withClue("nothing flipped") { drafts.map { fx.row(it).status }.toSet() shouldBe setOf("DRAFT") }
@@ -192,7 +199,7 @@ class DatasourceEdgesE2eTest {
         }
     }
 
-    /** One state's observations: the prerequisite refusals (plan, compatibility), the native ones, the plan wire. */
+    /** One state's observations: the prerequisite refusals (plan, plan-less), the native ones, the plan wire. */
     private data class Observed(
         val prerequisite: List<Map<String, Any?>>,
         val native: List<Map<String, Any?>>,
@@ -201,12 +208,21 @@ class DatasourceEdgesE2eTest {
 
     @Test
     @Order(5)
-    fun `4 - a legacy alias release whose closure names a datasource releases as before`() {
+    fun `4 - the legacy alias on a closure naming a datasource is refused plan_required, the same closure releases with a plan`() {
         val fx = fx(DS_LEGACY)
         val (root, edges) = pipeline(fx, "test/ds873/legacy/root")
         val audit = lastAuditId()
 
-        val released = releaseLegacy(fx, root)
+        val refused = releaseLegacyAlias(fx, root)
+
+        withClue(refused.asString().take(EXCERPT)) { refused.statusCode shouldBe PRECONDITION_REQUIRED }
+        refused.jsonPath().getString("error.code") shouldBe "pipeline.release.plan_required"
+        withClue("the refused alias flipped nothing and audited nothing, read at the tables") {
+            listOf(root, edges.single().to).map { fx.row(it).status } shouldBe listOf("DRAFT", "DRAFT")
+            releasedEventsAfter(audit) shouldBe emptyList()
+        }
+
+        val released = fx.releaseWithPlan(root, edges)
 
         withClue(released.asString().take(EXCERPT)) { released.statusCode shouldBe OK }
         listOf(root, edges.single().to).map { fx.row(it).status } shouldBe listOf("RELEASED", "RELEASED")
@@ -239,9 +255,10 @@ class DatasourceEdgesE2eTest {
         // Flipping holders: DRAFT pipelines whose native §12 revalidation passes while the datasource is still there.
         val (planned, plannedEdges) = pipeline(fx, "test/ds873/race/planned")
         val (compatible, compatibleEdges) = pipeline(fx, "test/ds873/race/compatible")
-        val drafts = (plannedEdges + compatibleEdges).flatMap { listOf(it.from, it.to) }
+        releaseTemplates(fx, compatibleEdges)
+        val drafts = plannedEdges.flatMap { listOf(it.from, it.to) } + compatible
         val hold = WorkspaceRowHold(postgres.jdbcUrl, postgres.username, postgres.password)
-        val sends = listOf({ planRelease(fx, planned, plannedEdges, selectAll = true) }, { releaseLegacy(fx, compatible) })
+        val sends = listOf({ planRelease(fx, planned, plannedEdges, selectAll = true) }, { releaseRootOnly(fx, compatible) })
 
         fun raced(
             disappear: () -> Unit,
@@ -404,8 +421,17 @@ class DatasourceEdgesE2eTest {
         return pipeline to listOf(Edge(pipeline, template, "nodes[0].template"))
     }
 
-    /** The compatibility path: `release_pinned_templates=true`, no plan, at the root's stored hash. */
-    private fun releaseLegacy(
+    /** The plan-less path: no flag, no plan, at the root's stored hash — only the root flips, every dependency already RELEASED. */
+    private fun releaseRootOnly(
+        fx: FamilyRootsFixture,
+        root: Node,
+    ): Response {
+        val row = fx.row(root)
+        return rest().header("If-Match", row.hash).post("/api/v1/pipelines/${row.uuid}/release")
+    }
+
+    /** The retired alias: `release_pinned_templates=true`, no plan — refused `plan_required` since #876 round 3. */
+    private fun releaseLegacyAlias(
         fx: FamilyRootsFixture,
         root: Node,
     ): Response {
@@ -414,6 +440,18 @@ class DatasourceEdgesE2eTest {
             .header("If-Match", row.hash)
             .queryParam("release_pinned_templates", "true")
             .post("/api/v1/pipelines/${row.uuid}/release")
+    }
+
+    /** Releases every DRAFT template an edge of [edges] reaches through the template's own route, each at its stored hash. */
+    private fun releaseTemplates(
+        fx: FamilyRootsFixture,
+        edges: List<Edge>,
+    ) {
+        edges.map { it.to }.filter { it.family == "template" }.forEach { template ->
+            val body = MAPPER.writeValueAsString(mapOf("name" to template.name))
+            val released = fx.send("POST", "/api/v1/templates/release", body, fx.row(template).hash)
+            withClue(released.asString().take(EXCERPT)) { released.statusCode shouldBe OK }
+        }
     }
 
     /** A DRAFT parent pipeline under [name] whose one PIPELINE node pins [child]@1; the edges in pin order. */
@@ -657,6 +695,7 @@ class DatasourceEdgesE2eTest {
         private const val CREATED = 201
         private const val NO_CONTENT = 204
         private const val BAD_REQUEST = 400
+        private const val PRECONDITION_REQUIRED = 428
         private const val CONFLICT = 409
         private const val EXCERPT = 800
         private const val H2_JDBC_URL = "jdbc:h2:mem:dsedges873;DB_CLOSE_DELAY=-1"
