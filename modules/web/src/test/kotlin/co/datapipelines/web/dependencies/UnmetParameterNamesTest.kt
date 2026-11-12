@@ -126,8 +126,8 @@ class UnmetParameterNamesTest {
 
         val unmet = UnmetParameterNames(registry, batchSize = 2).evaluate(graph, context())
 
-        sets.calls.map { it.size } shouldBe listOf(2, 1)
-        sets.calls.flatten().count { it == shared } shouldBe 1
+        withClue("the shared target is read once") { sets.calls.flatten().count { it == shared } shouldBe 1 }
+        withClue("three distinct targets at batch size 2") { sets.calls.map { it.size } shouldBe listOf(2, 1) }
         sets.calls.flatten().toSet() shouldBe setOf(shared, second, third)
         graph.edges
             .filter { it.constraints.isNotEmpty() }
