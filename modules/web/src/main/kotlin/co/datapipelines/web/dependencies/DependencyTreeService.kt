@@ -171,8 +171,8 @@ class DependencyTreeService(
             PipelineErrorCodes.Dependencies.REQUEST_INVALID,
             "The dependency tree request is invalid.",
             linkedMapOf(
-                PipelineErrorCodes.Dependencies.DETAIL_FIELD to refusal.field.wire,
-                PipelineErrorCodes.Dependencies.DETAIL_REASON to refusal.reason.wire,
+                DETAIL_FIELD to refusal.field.wire,
+                DETAIL_REASON to refusal.reason.wire,
             ),
         )
 
@@ -193,5 +193,11 @@ class DependencyTreeService(
 
         /** The WARN line's distinction: a provider's metadata read failed. */
         const val READ_MESSAGE = "Dependency metadata could not be read; retry."
+
+        /** The `details` key of a `dependencies.request.invalid` refusal naming the refused query field. */
+        const val DETAIL_FIELD = "field"
+
+        /** The `details` key naming the refusal's rule — one of G1's `RefusalReason` tokens. */
+        const val DETAIL_REASON = "reason"
     }
 }

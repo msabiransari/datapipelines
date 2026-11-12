@@ -7,6 +7,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.Test
 import org.springframework.web.bind.annotation.GetMapping
+import java.io.File
 
 /**
  * The transport table has exactly one row per production family (#875 G4): a ninth production family without a row is
@@ -80,19 +81,30 @@ class DependencyFamilyTransportTest {
 
     @Test
     fun `the catalog's reason tokens are exactly G1's refusal reasons`() {
-        val catalogued =
-            setOf(
-                PipelineErrorCodes.Dependencies.REASON_FAMILY_UNKNOWN,
-                PipelineErrorCodes.Dependencies.REASON_SELECTOR_INCOMPATIBLE,
-                PipelineErrorCodes.Dependencies.REASON_NAME_INVALID,
-                PipelineErrorCodes.Dependencies.REASON_ID_INVALID,
-                PipelineErrorCodes.Dependencies.REASON_VERSION_INVALID,
-                PipelineErrorCodes.Dependencies.REASON_VALUE_TOO_LONG,
-            )
+        // One authority for the tokens (G1's RefusalReason, what the service writes); this pins the §13.26 row to it, so a
+        // reason added to either side without the other is red. The tokens are not codes: they live in no PipelineErrorCodes
+        // object, whose every string the drift test and the MCP error-code generator read as a catalogued code.
+        val row =
+            repoFile("docs/pipeline-contract.md")
+                .readLines()
+                .single { it.startsWith("| `${PipelineErrorCodes.Dependencies.REQUEST_INVALID}` |") }
+        val catalogued = REASON_TOKEN.findAll(row).map { it.groupValues[1] }.toSet()
         catalogued shouldBe RefusalReason.entries.map { it.wire }.toSet()
     }
 
     private companion object {
         const val ROUTE_PREFIX = "/api/v1/dependencies/"
+
+        /** A backticked `details.reason` token in the §13.26 row: snake_case ending in the record's rule suffixes. */
+        val REASON_TOKEN = Regex("`([a-z]+(?:_[a-z]+)*_(?:invalid|incompatible|too_long|unknown))`")
+
+        fun repoFile(relativePath: String): File {
+            var dir: File? = File("").absoluteFile
+            while (dir != null) {
+                if (File(dir, "settings.gradle.kts").isFile) return File(dir, relativePath)
+                dir = dir.parentFile
+            }
+            error("repository root (settings.gradle.kts) not found walking up from ${File("").absolutePath}")
+        }
     }
 }
