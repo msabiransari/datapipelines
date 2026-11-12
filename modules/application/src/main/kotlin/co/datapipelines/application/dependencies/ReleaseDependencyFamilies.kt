@@ -11,6 +11,7 @@ import co.datapipelines.dependencies.LookupScope
 import co.datapipelines.dependencies.NodeFacts
 import co.datapipelines.dependencies.ObjectAddress
 import co.datapipelines.dependencies.ObjectRequest
+import co.datapipelines.dependencies.Operational
 import co.datapipelines.dependencies.Outcome
 import co.datapipelines.dependencies.OwnerScope
 import co.datapipelines.dependencies.PromotionCapability
@@ -114,12 +115,14 @@ object ReleaseDependencyFamilies {
     /**
      * The resolved outcome of a source's [node] for [identity], carrying [body] (the [ResolvedNode] itself, or a family's
      * richer body — the pipeline arm's [PipelineReleaseNode], #873 §F.1). One mapping for every adapted family, so the
-     * neutral facts of a release node never depend on which provider read it.
+     * neutral facts of a release node never depend on which provider read it. [operational] is the family's operational
+     * fact read with the node ([OperationalDependencySource], #902), null for a family that shows none; shown, never hashed.
      */
     fun <B : Any> resolved(
         identity: ReleaseNodeIdentity,
         node: ResolvedNode,
         body: B,
+        operational: Operational? = null,
     ): Outcome.Resolved<B> {
         check(node.identity == identity) { "the ${identity.family.wire} source answered ${node.identity} for $identity" }
         return Outcome.Resolved(
@@ -135,6 +138,7 @@ object ReleaseDependencyFamilies {
                     name = node.name,
                     versionInfo = VersionInfo.Artifact(identity.version),
                     lifecycle = lifecycleOf(node.status),
+                    operational = operational,
                     currentVersion = node.currentVersion,
                     bodyHash = node.bodyHash,
                 ),
@@ -200,8 +204,12 @@ internal class ReleaseSourceProvider(
     ): Outcome<ResolvedNode> {
         val identity = ReleaseDependencyFamilies.identityOf(request)
         if (identity == null || identity.family != family) return Outcome.Unsupported
-        val node = ReleaseDependencyFamilies.bounded(family, ceiling, context) { source.resolve(identity) } ?: return Outcome.Missing
-        return ReleaseDependencyFamilies.resolved(identity, node, body = node)
+        // #902: an operational source answers its fact from the same read, inside the same bound — one read either way.
+        val read =
+            ReleaseDependencyFamilies.bounded(family, ceiling, context) {
+                if (source is OperationalDependencySource) source.read(identity) else source.resolve(identity)?.let { SourceRead(it, null) }
+            } ?: return Outcome.Missing
+        return ReleaseDependencyFamilies.resolved(identity, read.node, body = read.node, operational = read.operational)
     }
 
     override fun outgoing(resolved: Outcome.Resolved<ResolvedNode>): List<Reference> =

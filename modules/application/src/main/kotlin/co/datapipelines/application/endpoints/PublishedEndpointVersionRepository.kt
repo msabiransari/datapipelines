@@ -67,16 +67,21 @@ class PublishedEndpointVersionRepository(
                 MAPPER,
             ).singleOrNull()
 
-    /** The version addressed by the API's immutable path (the release family's lookup key) — workspace-scoped. */
+    /**
+     * The version addressed by the API's immutable path (the release family's lookup key) — workspace-scoped. ONE
+     * statement answers the version row and the entity's id, current pointer and `is_enabled` (#902: the API node's
+     * operational fact rides this read, never a second statement).
+     */
     fun findByPath(
         workspaceId: UUID,
         pathPattern: String,
         version: Int,
-    ): Pair<EntityPointer, PublishedEndpointVersion>? =
+    ): Pair<EntityRead, PublishedEndpointVersion>? =
         jdbc
             .query(
                 """
-                SELECT e.id AS entity_id, e.current_version AS entity_current, v.endpoint_id, v.version, v.status,
+                SELECT e.id AS entity_id, e.current_version AS entity_current, e.is_enabled AS entity_enabled,
+                       v.endpoint_id, v.version, v.status,
                        v.pipeline_name, v.pipeline_version, v.timeout_seconds, v.description, v.body_hash, v.created_at,
                        v.created_by, v.released_at, v.released_by
                   FROM published_endpoints e
@@ -85,10 +90,21 @@ class PublishedEndpointVersionRepository(
                 """.trimIndent(),
                 mapOf("ws" to workspaceId, "path" to pathPattern, "version" to version),
             ) { rs, n ->
-                val pointer =
-                    EntityPointer(rs.getObject("entity_id", UUID::class.java), rs.getInt("entity_current").takeUnless { rs.wasNull() })
-                pointer to requireNotNull(MAPPER.mapRow(rs, n)) { "the version mapper answers a row" }
+                val entity =
+                    EntityRead(
+                        endpointId = rs.getObject("entity_id", UUID::class.java),
+                        currentVersion = rs.getInt("entity_current").takeUnless { rs.wasNull() },
+                        enabled = rs.getBoolean("entity_enabled"),
+                    )
+                entity to requireNotNull(MAPPER.mapRow(rs, n)) { "the version mapper answers a row" }
             }.singleOrNull()
+
+    /** The entity as [findByPath] reads it for a release node: its id, current pointer and `is_enabled` (#902). */
+    data class EntityRead(
+        val endpointId: UUID,
+        val currentVersion: Int?,
+        val enabled: Boolean,
+    )
 
     /** An entity's id and its current pointer, as read for a release node. */
     data class EntityPointer(

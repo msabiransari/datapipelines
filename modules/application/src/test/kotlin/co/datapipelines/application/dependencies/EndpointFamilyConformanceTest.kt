@@ -61,7 +61,7 @@ class EndpointFamilyConformanceTest {
     ) {
         every { versions.findByPath(workspaceId, path, version) } returns
             (
-                PublishedEndpointVersionRepository.EntityPointer(endpointId, currentVersion = 2) to
+                PublishedEndpointVersionRepository.EntityRead(endpointId, currentVersion = 2, enabled = true) to
                     PublishedEndpointVersion(
                         endpointId,
                         version,
