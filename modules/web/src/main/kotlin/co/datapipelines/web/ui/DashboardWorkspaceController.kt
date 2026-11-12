@@ -153,13 +153,16 @@ class DashboardWorkspaceController(
         val isSelected: Boolean,
     )
 
-    /** The tab set the page's query contract admits (#400's floor: five, Board the default). */
+    /** The tab set the page's query contract admits (#400's floor of five plus #876's Dependencies, Board the default). */
     enum class DashboardWorkspaceTab(
         val wire: String,
     ) {
         BOARD("board"),
         OVERVIEW("overview"),
         REFRESHES("refreshes"),
+
+        /** #876 G6: what the selected version depends on (record §13) — a dependencies/mount.js pane. */
+        DEPENDENCIES("dependencies"),
         VERSIONS("versions"),
         KEYS("keys"),
         ;
