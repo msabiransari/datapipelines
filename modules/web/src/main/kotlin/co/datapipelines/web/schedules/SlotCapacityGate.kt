@@ -27,7 +27,10 @@ class SlotCapacityGate(
 ) : CapacityGate {
     init {
         registry?.let {
-            Gauge.builder(IN_FLIGHT) { slots.inFlightFor(systemActor()).toDouble() }.register(it)
+            Gauge
+                .builder(IN_FLIGHT) { slots.inFlightFor(systemActor()).toDouble() }
+                .description("Scheduled executions holding a capacity slot on this instance, at most max-concurrent-runs")
+                .register(it)
         }
     }
 
