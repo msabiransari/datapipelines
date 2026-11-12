@@ -1,7 +1,6 @@
 package co.datapipelines.datasources
 
 import ch.qos.logback.classic.Logger
-import ch.qos.logback.classic.spi.ILoggingEvent
 import co.datapipelines.datasources.crypto.CredentialEncryptor
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldBeEmpty
