@@ -8,7 +8,9 @@
 # ships wget (healthcheck below) and curl.
 FROM eclipse-temurin:21-jre
 
-RUN groupadd --system datapipelines && useradd --system --gid datapipelines datapipelines
+# Fixed account ids (#753) so a pod's numeric runAsUser can name them (deployment.md §3.1); the reference
+# chart's securityContext and ImageUserPinSpecDriftTest read this line and hold the three equal.
+RUN groupadd --system --gid 999 datapipelines && useradd --system --uid 999 --gid datapipelines datapipelines
 
 # dp-lake (089 §D): bundle the DuckDB extensions a LAKE datasource loads, so the runtime
 # never INSTALLs and a hardened deployment needs no egress to extensions.duckdb.org
@@ -100,9 +102,10 @@ ENV LOADER_PATH=/app/lib,/opt/graaljs
 # THIS image as THIS image's user and writes exactly one file, /dp-egress-config/envoy.yaml. The directory is
 # the mountpoint of compose's egress-config named volume, owned by the app user 0755: Docker copies a fresh
 # volume's ownership and mode from the image directory it first mounts over (measured 2026-11-09, Docker 29:
-# a new volume mounted here is 999:999 0755), so the renderer needs neither root nor a writable root
-# filesystem, and Envoy (another uid) reads the 0644 file read-only. Nothing else in the image is writable by
-# the app user; the app itself never touches this path. The chart mounts an emptyDir here instead (fsGroup).
+# a new volume mounted here is 999:999 0755; now pinned on the `useradd` line, #753), so the renderer needs
+# neither root nor a writable root filesystem, and Envoy (another uid) reads the 0644 file read-only. Nothing
+# else in the image is writable by the app user; the app itself never touches this path. The chart mounts an
+# emptyDir here instead (fsGroup).
 RUN mkdir -p /dp-egress-config && chown datapipelines:datapipelines /dp-egress-config && chmod 0755 /dp-egress-config
 
 # Keep fresh native thread stacks for JVMs hosting the script isolate (#685).
