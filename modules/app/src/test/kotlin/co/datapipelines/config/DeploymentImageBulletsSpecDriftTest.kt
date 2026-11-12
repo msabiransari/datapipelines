@@ -160,6 +160,7 @@ class DeploymentImageBulletsSpecDriftTest {
                 Retired("UID 1000", "the user bullet pinned a UID the `useradd --system` account does not have"),
                 Retired("/app/app.jar", "the entrypoint bullet named a jar path the image does not use"),
                 Retired("baked into the image entrypoint", "the timezone paragraph claimed the entrypoint sets the UTC flag"),
+                Retired("Published to `ghcr.io", "§3.1 claimed a registry publish no workflow performs (#754)"),
             )
     }
 }
