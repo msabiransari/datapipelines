@@ -55,9 +55,10 @@
       </div>
     </div>
 
-    <!-- #376 — the page's two sections, one canonical URL each (`?tab=` is the closed set workspace | history; the viewed
-         version rides along so the header above keeps naming it). Full-document links, not client tabs: the History
-         arm renders no live form, so opening it never issues an evaluate (it would be a history row of its own). -->
+    <!-- #376 — the page's sections, one canonical URL each (`?tab=` is the closed set workspace | history | dependencies,
+         #876 adding the third; the viewed version rides along so the header above keeps naming it). Full-document links,
+         not client tabs: the History and Dependencies arms render no live form, so opening one never issues an evaluate
+         (it would be a history row of its own). -->
     <nav class="ps-tabs" aria-label="Workspace sections">
       <a class="ps-tab" hx-boost="true" data-ps-tab="workspace"
          th:classappend="${activeTab == 'workspace'} ? 'is-on'"
