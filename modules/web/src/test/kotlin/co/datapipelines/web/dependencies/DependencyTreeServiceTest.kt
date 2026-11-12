@@ -263,7 +263,7 @@ class DependencyTreeServiceTest {
         lensed(Lens()).read("name=acme/root&version=1", promoter).complete shouldBe false
     }
 
-    /** `acme/root` over [LEAVES] leaves — 11,463 bytes unreduced, 625 as its root alone; every [missingEvery]th absent. */
+    /** `acme/root` over [LEAVES] leaves — over [REDUCIBLE_BUDGET] unreduced, under it as its root alone; every [missingEvery]th absent. */
     private fun wideWorld(missingEvery: Int = 0) {
         val leaves = (1..LEAVES).map { exact(TEST_WIDGET, "acme/leaf_$it", 1) }
         leaves.forEachIndexed { index, leaf -> if (missingEvery == 0 || index % missingEvery != 0) widgets.put(leaf) }
