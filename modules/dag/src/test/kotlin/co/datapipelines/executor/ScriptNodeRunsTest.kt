@@ -672,6 +672,95 @@ class ScriptNodeRunsTest {
             error.message.shouldContain("10 rows")
         }
 
+    // ------------------------------------------- table mode: the §5.4 count of a caller output (#821)
+
+    private val tableModeContract =
+        ScriptContract(
+            mode = ScriptMode.TABLE,
+            inputs = mapOf("orders" to ScriptInput.Table(ORDER_COLUMNS)),
+            output = ScriptOutput.Table(OUT_COLUMNS),
+        )
+
+    private val fourOrders = (1..4).map { listOf(it, it * 100, "c$it") }
+
+    private val oneRowPerOrder = """[ inputs.orders.{ "order_id": order_id, "amount": amount_cents / 100, "customer_id": customer_id } ]"""
+
+    /** [copies] rows per input order, each copy's `order_id` offset by 100 so every row is distinct. */
+    private fun rowsPerOrder(copies: Int): String =
+        (0 until copies)
+            .map { copy ->
+                """inputs.orders.{ "order_id": order_id + ${copy * 100}, "amount": amount_cents / 100, "customer_id": customer_id }"""
+            }.reduce { acc, next -> "${'$'}append($acc, $next)" }
+
+    private val countWitness = listOf(ScriptInvariant("counted", "\$count(rows) >= 0", "witness"))
+
+    @Test
+    fun `a table caller output's gated rows count with its inputs - 4 in plus 8 out refuses at cap 8`() =
+        runBlocking<Unit> {
+            stageOrders(fourOrders)
+            val error =
+                failureOf(
+                    node(output = NodeOutput.Caller),
+                    support(resolved(tableModeContract, rowsPerOrder(2), countWitness), maxInputRows = 8),
+                )
+
+            error.code shouldBe PipelineErrorCodes.Script.INVARIANTS_TOO_LARGE
+            withClue("4 input rows + 8 gated caller rows") { error.details["rows"] shouldBe 12L }
+            error.details["max_input_rows"] shouldBe 8L
+        }
+
+    @Test
+    fun `a table caller output at exactly the cap passes and its invariants run - 4 plus 4 at cap 8`() =
+        runBlocking<Unit> {
+            stageOrders(fourOrders)
+            val invariants = listOf(ScriptInvariant("one_per_order", "\$count(rows) = \$count(inputs.orders)", "one row per order"))
+            val store = InMemoryResultStore()
+            val result =
+                run(
+                    node(output = NodeOutput.Caller),
+                    support(resolved(tableModeContract, oneRowPerOrder, invariants), maxInputRows = 8),
+                    resultStore = store,
+                )
+
+            result.invariantsChecked shouldBe 1
+            result.rowsIn shouldBe 4
+            result.rowsOut shouldBe 4
+            store.describe(result.callerResultRef!!)!!.totalRows shouldBe 4
+        }
+
+    @Test
+    fun `a table tempdb output counts its written table once, never its gated rows again - 4 plus 4 at cap 8`() =
+        runBlocking<Unit> {
+            stageOrders(fourOrders)
+            val result =
+                run(
+                    node(output = NodeOutput.Tempdb("order_lines")),
+                    support(resolved(tableModeContract, oneRowPerOrder, countWitness), maxInputRows = 8),
+                )
+
+            result.invariantsChecked shouldBe 1
+            result.rowsOut shouldBe 4
+            countOf("order_lines") shouldBe 4
+        }
+
+    @Test
+    fun `without invariants a table caller output above the cap is delivered - no read-back, no bound`() =
+        runBlocking<Unit> {
+            stageOrders(fourOrders)
+            val store = InMemoryResultStore()
+            val result =
+                run(
+                    node(output = NodeOutput.Caller),
+                    support(resolved(tableModeContract, rowsPerOrder(3)), maxInputRows = 8),
+                    resultStore = store,
+                )
+
+            result.rowsIn shouldBe 4
+            result.rowsOut shouldBe 12
+            result.invariantsChecked shouldBe 0
+            store.describe(result.callerResultRef!!)!!.totalRows shouldBe 12
+        }
+
     // ---------------------------------------------------------------- the pool's bounds (§4.3)
 
     @Test
