@@ -113,6 +113,37 @@ class JsonataReservedNamesTest {
     }
 
     @Test
+    fun `a nested eval cannot bind a reserved name`() {
+        // The inner shadow refuses and records the refusal PENDING; the library's OUTER
+        // `$eval` then replaces the throw with a cause-less D3121, so only the guard's
+        // pending refusal (JsonataEvaluationGuard.escaped) can still name the reserved bind
+        // (#304). The message assertions tell that recovered refusal from the replacement,
+        // which is the same exception type.
+        val bodies =
+            listOf(
+                "( \$eval('\$eval(\"\$__evaluate_entry := \$nonexistent\")'); $deep )",
+                "( \$eval('\$eval(\"\$__evaluate\" & \"_entry := \$nonexistent\")'); $deep )",
+            )
+        bodies.forEach { body ->
+            withClue(body) {
+                val compiled = engine.compile(body)
+                val caught = runCatching { engine.evaluate(compiled, null, limits) }.exceptionOrNull()
+                val refusal = caught.shouldBeInstanceOf<ScriptEvaluationException>()
+                refusal.message shouldContain "\$eval refused:"
+                refusal.message shouldContain "reserved"
+            }
+        }
+    }
+
+    @Test
+    fun `a nested eval still evaluates in the calling frame and still meets the depth bound`() {
+        engine.evaluate(engine.compile("( \$x := 2; \$eval('\$eval(\"\$x * 21\")') )"), null, limits) shouldBe 42
+        val caught =
+            runCatching { engine.evaluate(engine.compile("\$eval('\$eval(\"$deep\")')"), null, limits) }.exceptionOrNull()
+        caught.shouldBeInstanceOf<ScriptResourceLimitException>().kind shouldBe ScriptResourceLimitException.Kind.DEPTH
+    }
+
+    @Test
     fun `an ordinary eval still evaluates in the calling frame`() {
         engine.evaluate(engine.compile("( \$x := 2; \$eval(\"\$x * 21\") )"), null, limits) shouldBe 42
         engine.evaluate(engine.compile("\$eval(\"\$ + 1\", 41)"), null, limits) shouldBe 42

@@ -3,10 +3,16 @@ package co.datapipelines.web.pipelines
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.executor.ExecutorJson
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.RequestLimits
 import co.datapipelines.web.api.ApiException
+import com.fasterxml.jackson.core.JsonProcessingException
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.ints.shouldBeGreaterThan
+import io.kotest.matchers.ints.shouldBeLessThanOrEqual
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
@@ -260,10 +266,36 @@ class PipelineExecuteControllerTest {
     }
 
     @Test
+    fun `the malformed-body 400 quotes the parser's reason cut to its 200-character bound (#304)`() {
+        authenticate()
+        every { pipelines.findById(any(), pipelineId) } returns record
+        val body = "{\"parameters\": " + "x".repeat(LONG_TOKEN_CHARS)
+        // The input must make the parser's own reason longer than the bound, or the bound is
+        // never exercised: read it with the route's request mapper, untruncated.
+        val unbounded =
+            shouldThrow<JsonProcessingException> { RequestLimits.requestMapper(ExecutorJson.mapper).readTree(body) }
+        unbounded.originalMessage.length shouldBeGreaterThan MAX_READ_ERROR_CHARS
+        val refusal = shouldThrow<ApiException> { controller.execute(pipelineId, body, request()) }
+        refusal.message.shouldNotBeNull().length shouldBeLessThanOrEqual
+            "The execute request body could not be read: ".length + MAX_READ_ERROR_CHARS
+        refusal.code shouldBe "pipeline.execution.invalid_parameter_type"
+        refusal.details["reason"] shouldBe "malformed_json"
+        verify(exactly = 0) { launcher.launch(any()) }
+    }
+
+    @Test
     fun `the body is read before the pipeline is looked up - a malformed one costs no query (#291)`() {
         authenticate()
         shouldThrow<ApiException> { controller.execute(UUID.randomUUID(), "{", request()) }
             .details["reason"] shouldBe "malformed_json"
         verify(exactly = 0) { pipelines.findById(any(), any()) }
+    }
+
+    private companion object {
+        /** `PipelineExecuteController.MAX_READ_ERROR_CHARS` (private there): the parser reason's bound. */
+        const val MAX_READ_ERROR_CHARS = 200
+
+        /** A bad token long enough that the parser's reason outruns the bound. */
+        const val LONG_TOKEN_CHARS = 1000
     }
 }

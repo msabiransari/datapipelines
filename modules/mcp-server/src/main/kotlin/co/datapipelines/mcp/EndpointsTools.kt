@@ -216,7 +216,12 @@ object EndpointsTools {
         }
     }
 
-    /** `endpoints_delete` (mcp-server.md §6.2.26). Permission: `endpoint.unpublish`. Mutating. */
+    /**
+     * `endpoints_delete` (mcp-server.md §6.2.26). Permission: `endpoint.unpublish`. Mutating.
+     * Unpublish is BY the full stored path, so a legacy row stored past
+     * `EndpointPath.MAX_LENGTH`, whose echo is cut (#286), is deleted only by that path,
+     * and this tool refuses nothing by length (#304).
+     */
     class DeleteTool(
         private val publishing: EndpointPublishService,
     ) : McpTool {

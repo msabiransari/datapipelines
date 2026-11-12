@@ -202,7 +202,9 @@ class JsonataEngine(
      * Shadows `$eval` for this evaluation (#272): the string is parsed with the library's
      * own parser and a reserved bind is refused BEFORE the library evaluates it in the
      * calling frame. Anything else — including a string that does not parse, which keeps
-     * the library's own D3120 — goes to the library's `$eval` unchanged.
+     * the library's own D3120 — goes to the library's `$eval` unchanged. The string is
+     * parsed twice per call (the reserved-name walk, then the library's `functionEval`),
+     * accepted (#304) inside the evaluation pool's abandonment bound.
      */
     private fun bindEval(
         frame: Jsonata.Frame,
