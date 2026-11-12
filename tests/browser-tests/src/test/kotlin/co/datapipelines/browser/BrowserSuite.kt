@@ -876,9 +876,11 @@ abstract class BrowserSuite {
             registry.add("spring.datasource.url") { SharedBrowserE2e.jdbcUrl }
             registry.add("spring.datasource.username") { SharedBrowserE2e.username }
             registry.add("spring.datasource.password") { SharedBrowserE2e.password }
-            // #933 (a): a context the cache keeps between its classes holds few idle connections on the
-            // ONE shared server — at most 2, the rest closed after HikariCP's floor of 10 s. The
-            // product's maximum pool size stays, so a case under load keeps what production gives it.
+            // #933 (a): a context the cache keeps between its classes keeps an idle floor of 2 on the
+            // ONE shared server. A floor, not a cap: the pool can hold more, up to its maximum size,
+            // and an idle connection above the floor is retired only after the 10 s idle timeout
+            // (HikariCP's lowest), not at once. The product's maximum pool size stays, so a case
+            // under load keeps what production gives it.
             registry.add("spring.datasource.hikari.minimum-idle") { 2 }
             registry.add("spring.datasource.hikari.idle-timeout") { 10_000 }
             registry.add("datapipelines.redis.password") { "" }

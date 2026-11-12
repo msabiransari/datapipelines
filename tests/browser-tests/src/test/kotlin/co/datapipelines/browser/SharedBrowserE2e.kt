@@ -26,16 +26,20 @@ import java.sql.SQLException
  * `PipelineWorkspacePromoterAdmittedBrowserTest` and refused 94 cases. At the refusal the owners
  * were 8 cached application contexts' pools x 10 (Hikari's `minimumIdle` defaults to the pool
  * size) = 80, plus 156 pools of the `*-src-*` datasources the cases register against this server
- * x 2 (the product's `minimumIdle`) = 312: 392 of 400, the other 8 connections not yet
- * idle-retired; direct `DriverManager` connections were all closed. A registered datasource's pool
- * lives as long as its context and nothing in a run removes it, so the floor grew by 2 per
- * registering case (300 was crossed at `DashboardWorkspaceBrowserTest`).
+ * x 2 (the product's `minimumIdle`) = 312: 392 of 400 attributed by those idle floors, the other 8
+ * (2%) unassigned (no per-pool count was sampled); direct `DriverManager` connections were all
+ * closed. A registered datasource's pool lives as long as its context and nothing in a run removes
+ * it, so the floor grew by 2 per registering case (300 was crossed at
+ * `DashboardWorkspaceBrowserTest`).
  *
  * Bounded where it is produced, not here: [SOURCE_DATASOURCE_POOL_FIELDS] (every helper that
- * registers this server as a datasource keeps nothing warm) and [BrowserSuite]'s
- * `spring.datasource.hikari.*` (a cached context keeps at most 2 idle). Measured after, same run
- * shape and order: peak 29 (`DashboardWorkspaceBrowserTest`); at the end 10 contexts x at most 2
- * plus 160 registered pools x 0 idle = 22. [MAX_CONNECTIONS] therefore stays 400. [BrowserSuite]'s
+ * registers this server as a datasource sets an idle floor of 0) and [BrowserSuite]'s
+ * `spring.datasource.hikari.*` (a cached context's idle floor is 2). A floor is not a cap: a pool
+ * can hold more, up to its unchanged maximum size, and an idle connection above the floor is retired
+ * only after the idle timeout, not at once. Measured after, same run shape and order: peak 29
+ * (`DashboardWorkspaceBrowserTest`); at the end 22 connections, all idle, against a configured floor
+ * of 10 contexts x 2 plus 160 registered Postgres pools x 0 = 20; the other 2 are unassigned (no
+ * per-pool count was sampled). [MAX_CONNECTIONS] therefore stays 400. [BrowserSuite]'s
  * class-level budget check fails the class that pushes the server past
  * [CONNECTION_BUDGET_THRESHOLD], by name.
  */
