@@ -8,6 +8,7 @@ import co.datapipelines.auth.appPath
 import co.datapipelines.web.api.ApiErrorCatalog
 import co.datapipelines.web.config.EndpointsProperties
 import com.fasterxml.jackson.databind.ObjectMapper
+import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletRequest
@@ -71,7 +72,13 @@ class EndpointKeyBudgetFilter(
     private val windows = ConcurrentHashMap<String, Window>()
 
     /** Registered eagerly: a series that only appears once it is non-zero cannot be alerted on. */
-    private val saturations = meterRegistry.counter(SATURATED_METRIC)
+    private val saturations =
+        Counter
+            .builder(SATURATED_METRIC)
+            .description(
+                "The serve path's per-key request budget admitting a new api_caller key unmetered because its " +
+                    "tracked-key table is full (the budget's fail-open branch)",
+            ).register(meterRegistry)
 
     private class Window(
         val startedAtMillis: Long,

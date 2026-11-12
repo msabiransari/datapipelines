@@ -1,5 +1,6 @@
 package co.datapipelines.auth
 
+import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletRequest
@@ -67,7 +68,11 @@ class LoginRateLimitFilter(
     private val windows = ConcurrentHashMap<String, Window>()
 
     /** Registered eagerly: a series that only appears once it is non-zero cannot be alerted on. */
-    private val saturations = meterRegistry.counter(SATURATED_METRIC)
+    private val saturations =
+        Counter
+            .builder(SATURATED_METRIC)
+            .description("Login rate-limit admissions made with the tracked-client table full (the limiter's fail-open branch)")
+            .register(meterRegistry)
 
     private class Window(
         val startedAtMillis: Long,

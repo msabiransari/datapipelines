@@ -8,6 +8,7 @@ import co.datapipelines.visualization.VisualizationErrorCodes
 import co.datapipelines.visualization.VisualizationTestSessionService
 import co.datapipelines.web.api.ApiErrorCatalog
 import co.datapipelines.web.config.RequestLimitsProperties
+import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import jakarta.servlet.FilterChain
 import jakarta.servlet.ReadListener
@@ -85,7 +86,11 @@ class RequestBodyCapFilter(
     private val drains =
         DrainRoute.entries.associateWith { route ->
             DrainOutcome.entries.associateWith { outcome ->
-                meterRegistry.counter(DRAIN_METRIC, "outcome", outcome.tag, "route", route.tag)
+                Counter
+                    .builder(DRAIN_METRIC)
+                    .description("Refused-body drains")
+                    .tags("outcome", outcome.tag, "route", route.tag)
+                    .register(meterRegistry)
             }
         }
 
