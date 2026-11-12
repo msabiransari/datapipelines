@@ -4,6 +4,7 @@ import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.PostgreSQLContainer
 import org.testcontainers.utility.DockerImageName
 import java.sql.DriverManager
+import java.sql.SQLException
 
 /**
  * ONE Postgres and ONE Redis for this module's whole test JVM (round 060's convention —
@@ -18,6 +19,22 @@ import java.sql.DriverManager
  *
  * `withReuse(true)` is a no-op without the per-machine opt-in (DEVELOPMENT.md §9.2);
  * the drop-and-recreate at first touch either way makes a reused pair semantically fresh.
+ *
+ * **The connection budget (#933).** Every class of the module shares this ONE server, so its
+ * [MAX_CONNECTIONS] is a budget the whole run spends. Measured 2026-11-12 on 151 classes, one fork,
+ * alphabetical order (`spec/dependency-graph` `bd9eded1a`): the server reached 400 of 400 at
+ * `PipelineWorkspacePromoterAdmittedBrowserTest` and refused 94 cases. At the 300 crossing
+ * (`DashboardWorkspaceBrowserTest`, 305 backends, all idle) the owners were 2 cached application
+ * pools x 10 (Hikari's `minimumIdle` defaults to the pool size) = 20, plus 95 pools of the
+ * `dbr-src-*` datasources the dashboard cases register against this server = 285 (about 3 each:
+ * the product's `minimumIdle` 2 plus connections not yet idle-retired); direct `DriverManager`
+ * connections were all closed. A registered datasource's pool lives as long as its context and
+ * nothing in a run removes it, so demand grew by one pool per registering case.
+ *
+ * Bounded where it is produced, not here: [SOURCE_DATASOURCE_POOL_FIELDS] (every helper that
+ * registers this server as a datasource keeps nothing warm) and [BrowserSuite]'s
+ * `spring.datasource.hikari.*` (a cached context keeps few). [BrowserSuite]'s class-level budget
+ * check fails the class that pushes the server past [CONNECTION_BUDGET_THRESHOLD], by name.
  */
 internal object SharedBrowserE2e {
     private const val PG_IMAGE = "postgres:16-alpine"
@@ -28,6 +45,27 @@ internal object SharedBrowserE2e {
     private const val USER = "dp"
     private const val PASSWORD = "dp"
 
+    /**
+     * The shared server's `max_connections` — ONE constant: the container command and
+     * [BrowserSuite]'s budget check both read it. Raise it only under #933's rule: when the
+     * demand, bounded at its source, still peaks above 75% of it.
+     */
+    const val MAX_CONNECTIONS = 400
+
+    /** The budget check's threshold: 85% of [MAX_CONNECTIONS]. */
+    const val CONNECTION_BUDGET_THRESHOLD = MAX_CONNECTIONS * 85 / 100
+
+    /**
+     * The `pool.<hikariKey>` fields every helper that registers THIS server as a datasource posts
+     * with the form (#933 (b)): keep no connection warm (`minimumIdle` 0) and close an unused one
+     * after HikariCP's floor of 10 s. A case under load still gets the product's maximum pool size.
+     */
+    val SOURCE_DATASOURCE_POOL_FIELDS: Map<String, String> =
+        mapOf("pool.minimumIdle" to "0", "pool.idleTimeout" to "10000")
+
+    /** PostgreSQL's `too_many_connections` — what the server answers at [MAX_CONNECTIONS]. */
+    private const val TOO_MANY_CONNECTIONS = "53300"
+
     private const val REDIS_IMAGE = "redis:7-alpine"
     private const val REDIS_PORT = 6379
 
@@ -37,8 +75,8 @@ internal object SharedBrowserE2e {
             .withDatabaseName(DATABASE)
             .withUsername(USER)
             .withPassword(PASSWORD)
-            // Shared server, shared-sized connection budget (the SharedE2e finding).
-            .withCommand("postgres", "-c", "max_connections=400")
+            // Shared server, shared-sized connection budget (the SharedE2e finding; #933 above).
+            .withCommand("postgres", "-c", "max_connections=$MAX_CONNECTIONS")
             .withReuse(true)
             .also { container ->
                 container.start()
@@ -81,6 +119,47 @@ internal object SharedBrowserE2e {
     val redisHost: String get() = redis.host
 
     val redisPort: Int get() = redis.getMappedPort(REDIS_PORT)
+
+    /**
+     * #933's budget check, run once per class after its cases ([BrowserSuite]): ONE connection, ONE
+     * query — the server-wide client backends, this check's own included. Returns the line the
+     * class prints; throws an [AssertionError] naming the count, the ceiling, the threshold,
+     * [className] and #933 when the count is above [CONNECTION_BUDGET_THRESHOLD], and the same
+     * named error when the check itself is refused a connection at the ceiling (SQL state 53300).
+     */
+    fun checkConnectionBudget(className: String): String {
+        val count =
+            try {
+                DriverManager.getConnection(jdbcUrl, username, password).use { connection ->
+                    connection.createStatement().use { statement ->
+                        statement
+                            .executeQuery("SELECT count(*) FROM pg_stat_activity WHERE backend_type = 'client backend'")
+                            .use { rows ->
+                                rows.next()
+                                rows.getInt(1)
+                            }
+                    }
+                }
+            } catch (refused: SQLException) {
+                if (refused.sqlState != TOO_MANY_CONNECTIONS) throw refused
+                throw AssertionError(
+                    "#933 connection budget exceeded after $className: the budget check itself was refused a " +
+                        "connection (SQL state $TOO_MANY_CONNECTIONS) — the shared browser Postgres is at its ceiling " +
+                        "of $MAX_CONNECTIONS (threshold $CONNECTION_BUDGET_THRESHOLD). Bound the new demand where it " +
+                        "is produced (SharedBrowserE2e KDoc).",
+                    refused,
+                )
+            }
+        if (count > CONNECTION_BUDGET_THRESHOLD) {
+            throw AssertionError(
+                "#933 connection budget exceeded after $className: the shared browser Postgres holds $count client " +
+                    "connections, above the threshold $CONNECTION_BUDGET_THRESHOLD (85% of its ceiling " +
+                    "$MAX_CONNECTIONS). Bound the new demand where it is produced (SharedBrowserE2e KDoc).",
+            )
+        }
+        return "#933 connection budget after $className: $count client connections " +
+            "(threshold $CONNECTION_BUDGET_THRESHOLD, ceiling $MAX_CONNECTIONS)"
+    }
 
     /** The admin connection targets the `postgres` maintenance database — never the one being dropped. */
     private fun withAdminConnection(

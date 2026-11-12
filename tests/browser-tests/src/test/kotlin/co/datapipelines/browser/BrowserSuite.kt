@@ -16,6 +16,7 @@ import de.mkammerer.argon2.Argon2Factory
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.TestInfo
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.test.context.DynamicPropertyRegistry
@@ -854,6 +855,20 @@ abstract class BrowserSuite {
             playwright = null
         }
 
+        /**
+         * #933 — the connection budget's tripwire, once per class after its cases: the shared
+         * server's client count, printed into the class's own output, and a named failure of THIS
+         * class when it is above [SharedBrowserE2e.CONNECTION_BUDGET_THRESHOLD] (or the check is
+         * refused at the ceiling) — instead of dozens of unrelated-looking refusals in the classes
+         * that happen to run next. Not the repair: the demand is bounded where it is produced.
+         */
+        @JvmStatic
+        @AfterAll
+        fun checkConnectionBudget(testInfo: TestInfo) {
+            val className = testInfo.testClass.map { it.simpleName }.orElse(testInfo.displayName)
+            println(SharedBrowserE2e.checkConnectionBudget(className))
+        }
+
         @DynamicPropertySource
         @JvmStatic
         fun properties(registry: DynamicPropertyRegistry) {
@@ -861,6 +876,11 @@ abstract class BrowserSuite {
             registry.add("spring.datasource.url") { SharedBrowserE2e.jdbcUrl }
             registry.add("spring.datasource.username") { SharedBrowserE2e.username }
             registry.add("spring.datasource.password") { SharedBrowserE2e.password }
+            // #933 (a): a context the cache keeps between its classes holds few idle connections on the
+            // ONE shared server — at most 2, the rest closed after HikariCP's floor of 10 s. The
+            // product's maximum pool size stays, so a case under load keeps what production gives it.
+            registry.add("spring.datasource.hikari.minimum-idle") { 2 }
+            registry.add("spring.datasource.hikari.idle-timeout") { 10_000 }
             registry.add("datapipelines.redis.password") { "" }
             registry.add("datapipelines.redis.host") { SharedBrowserE2e.redisHost }
             registry.add("datapipelines.redis.port") { SharedBrowserE2e.redisPort }
