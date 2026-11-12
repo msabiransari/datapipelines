@@ -597,6 +597,7 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
                     name: args.name, displayName: 'Dashboard browser source', dialect: 'POSTGRES',
                     jdbcUrl: args.url, credentialKind: 'password', username: args.user, password: args.password,
                     description: 'the L3a conformance source',
+                    ...args.pool,
                   });
                   const res = await fetch('/partials/datasources', {
                     method: 'POST', credentials: 'same-origin',
@@ -609,6 +610,7 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
                     "url" to SharedBrowserE2e.jdbcUrl.substringBefore("?"),
                     "user" to SharedBrowserE2e.username,
                     "password" to SharedBrowserE2e.password,
+                    "pool" to SharedBrowserE2e.SOURCE_DATASOURCE_POOL_FIELDS,
                 ),
             ) as List<String>
         check(failures.isEmpty()) { "the datasource registration failed: $failures" }
