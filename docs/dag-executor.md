@@ -1,6 +1,6 @@
 # DAG Executor Specification
 
-**Status:** v1.42 (revised — see Change Log)
+**Status:** v1.43 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract spec](pipeline-contract.md), [Templates spec](templates.md), [Datasources spec](datasources.md), [Staging spec](staging.md)
 **Last updated:** 2026-11-12
@@ -1439,7 +1439,7 @@ Both writers are `modules/persistence`'s `BatchingWriter` ([Module Structure §5
 
 **Cancellation.** As before: an `emit` on an already-cancelled job persists nothing (the refusal the single persistence hop always had — which is why `emitTerminal` runs under `NonCancellable`); once persistence has started it finishes, and a cancellation that landed meanwhile is rethrown afterwards.
 
-**Shutdown and crash.** `ExecutionDrainLifecycle` reaches `liveExecutions = 0` only after every execution's `finally`. Event recording is awaited under the bounds above, and the writers drain afterwards ([Observability §7](observability.md)). An empty execution registry does not confirm an explicitly unconfirmed lifecycle write: a statement abandoned past its wait, or a terminal UPDATE deferred behind an unconfirmed insert (#325), can still be pending after `emit` returns. Its recovery depends on the database answering while the process and persistence pool remain available; a process exit can lose the deferred in-memory continuation. After a crash (`SIGKILL`), the stale sweep (§8.3) reaps any surviving RUNNING row as for a dead instance, even if the client already saw a terminal event. The `submit` path's queue, which has no caller yet, is another acknowledged-but-unwritten window.
+**Shutdown and crash.** `ExecutionDrainLifecycle` reaches `liveExecutions = 0` only after every execution's `finally`. Event recording is awaited under the bounds above, and the writers drain afterwards ([Observability §7](observability.md)). An empty execution registry does not confirm an explicitly unconfirmed lifecycle write: a statement abandoned past its wait, or a terminal UPDATE or result-history write deferred behind an unconfirmed insert (#325, #905), can still be pending after the execution finishes. Its recovery depends on the database answering while the process and persistence pool remain available; a process exit can lose the deferred in-memory continuation. After a crash (`SIGKILL`), the stale sweep (§8.3) reaps any surviving RUNNING row as for a dead instance, even if the client already saw a terminal event. The `submit` path's queue, which has no caller yet, is another acknowledged-but-unwritten window.
 
 ---
 
@@ -1657,6 +1657,7 @@ document a customer can read before they need it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-12 | v1.43 | #905 review F1 | §10.1 shutdown and crash: the result-history write deferred behind an unconfirmed insert is also an in-memory continuation that can remain pending after the execution finishes and be lost on process exit. |
 | 2026-11-12 | v1.42 | #905 result columns survive write ordering | §10.1 "lifecycle writes are bounded too" paragraph: the result-history write (`recordResult`) is ordered behind an unconfirmed RUNNING insert like the terminal UPDATE, and the terminal UPDATE keeps recorded result columns (writes them only when given values); a result write matching no row is one WARN. |
 | 2026-11-12 | v1.41 | #821 invariants count a table caller output | §6.3.4 invariants paragraph: the recorded gap is closed — a `table` caller output's gated rows count with its inputs toward `max-input-rows` (refused as `pipeline.script.invariants_too_large`), a tempdb output's gated rows are not counted twice, and nothing changes when no invariant is declared (record §5.4: rows + rejects + table inputs). |
 | 2026-11-12 | v1.40 | #463 review F1 | §8.2: distinguish measured rows from the fixed LAKE, ORACLE and MSSQL limits, record the host-run MSSQL experiment, and state the lifecycle and write-refusal claims at their measured scope. |
