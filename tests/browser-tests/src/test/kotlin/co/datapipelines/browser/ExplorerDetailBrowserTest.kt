@@ -57,9 +57,10 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
     /**
      * A pipeline and a template, both in a folder — the sidebar tree's root renders folders
      * only (§4.1), so a flat row would give the tree nothing to open. The REST seeding is
-     * cookie session plus the dp_csrf double-submit pair, in-page.
+     * cookie session plus the dp_csrf double-submit pair, in-page. Returns the probe PIPELINE's
+     * id (the usage case releases it, #930).
      */
-    private fun seed() {
+    private fun seed(): String {
         page.navigate("$baseUrl/dashboard")
         postJson(
             "/api/v1/templates",
@@ -71,7 +72,7 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
             """{"id":"test/second_probe","type":"sql","dialect":"POSTGRES",""" +
                 """"display_name":"second_probe","description":"a second leaf to select","body":"SELECT 2"}""",
         )
-        postJson(
+        return postJson(
             "/api/v1/pipelines",
             """{"name":"test/detail_probe","display_name":"detail_probe",""" +
                 // 138 §E: the sectioned shape the skill teaches — label, line, blank line, label…
@@ -79,14 +80,16 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
                 """overview card without wrapping into the acting column beside it.\n\nWindow and door\nOne year, chosen by year.",""" +
                 """"nodes":[{"id":"fq","type":"CALCULATOR","kind":"fiscal_quarter","context_key":"run_fiscal_quarter",""" +
                 """"inputs":{"date":"${'$'}current_date","fiscal_start":"${'$'}org_fiscal_start_date"}}]}""",
-        )
+        ).let(ScheduleFixtures::idIn)
     }
 
+    /** A 201-asserted in-page POST; returns the response body. */
     private fun postJson(
         url: String,
         body: String,
-    ) {
-        val status =
+    ): String {
+        @Suppress("UNCHECKED_CAST")
+        val result =
             page.evaluate(
                 """async (args) => {
                   const csrf = document.cookie.match(/(?:^|;\s*)dp_csrf=([^;]*)/);
@@ -96,11 +99,13 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
                               'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : ''},
                     body: args.body,
                   });
-                  return res.status;
+                  return {status: res.status, body: await res.text()};
                 }""",
                 mapOf("url" to url, "body" to body),
-            )
-        (status as Number).toInt() shouldBe 201
+            ) as Map<String, Any?>
+        val text = result["body"] as String? ?: ""
+        withClue({ "POST $url answered: ${text.take(400)}" }) { (result["status"] as Number).toInt() shouldBe 201 }
+        return text
     }
 
     /** The probe template's WORKSPACE, reached the way a reader does — the catalog row. */
@@ -522,8 +527,8 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         login(user.email, user.oneTimePassword)
         page.waitForURL("**/dashboard")
         createWorkspace(wsName)
-        seed()
-        seedSchedule(wsName, email, "test/nightly-usage", "pipeline:test/detail_probe")
+        val probe = seed()
+        seedSchedule(probe, "test/nightly-usage", "test/detail_probe")
 
         page.setViewportSize(1440, 900)
         openProbeWorkspace()
@@ -540,36 +545,32 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
     }
 
     /**
-     * A live schedule of EXACTLY [workspaceName] whose target names [pipelineName] — seeded
-     * straight into the shared Postgres with the same shape the scheduler's adapter writes
-     * (`executor_id = 'pipeline'`, `target_ref = 'pipeline:<name>'`). The workspace and user
-     * are matched by their full unique keys, never by a LIKE over the shared database.
+     * A live schedule named [scheduleName] over [pipelineName] — written the way the product writes
+     * one today: the probe pipeline (id [pipelineId], this case's own, in this case's own workspace)
+     * is RELEASED, then §20.2 saves the schedule at the current payload schema with an exact pin of
+     * that released v1.
+     *
+     * #930: this used to be a raw INSERT of the pre-#786 shape (`payload_schema_version = 1`, no
+     * version) over a DRAFT-only pipeline. The browser suite shares one database across classes, so
+     * every later class that booted its own Spring context ran the startup conversion over that row
+     * and refused to start (`reason=no_current`). A pinned schema-2 row over a released pipeline is
+     * never a conversion candidate, and it stays harmless even if this case dies before any cleanup.
      */
     private fun seedSchedule(
-        workspaceName: String,
-        userEmail: String,
+        pipelineId: String,
         scheduleName: String,
-        targetRef: String,
+        pipelineName: String,
     ) {
-        java.sql.DriverManager
-            .getConnection(SharedBrowserE2e.jdbcUrl, SharedBrowserE2e.username, SharedBrowserE2e.password)
-            .use { connection ->
-                connection.createStatement().use { statement ->
-                    statement.execute(
-                        """
-                        INSERT INTO schedules (id, workspace_id, name, executor_id, payload_schema_version, payload_json,
-                                               target_ref, cron, timezone, next_due_at, created_by, updated_by)
-                        SELECT gen_random_uuid(), w.id, '$scheduleName', 'pipeline', 1,
-                               jsonb_build_object('pipeline', right('$targetRef', - length('pipeline:'))),
-                               '$targetRef', '0 30 2 * * *', 'UTC', NOW() + interval '1 day', u.id, u.id
-                          FROM workspaces w
-                          CROSS JOIN users u
-                         WHERE w.name = '$workspaceName'
-                           AND u.email = '$userEmail'
-                        """.trimIndent(),
-                    )
-                }
-            }
+        ScheduleFixtures.release(page, pipelineId)
+        val created =
+            ScheduleFixtures.send(
+                page,
+                "POST",
+                "/api/v1/schedules",
+                """{"name":"$scheduleName","payload":{"pipeline":"$pipelineName","version":1},""" +
+                    """"cron":"${ScheduleFixtures.YEARLY}","timezone":"UTC"}""",
+            )
+        withClue({ "schedule create answered: ${created.body.take(400)}" }) { created.status shouldBe 201 }
     }
 
     @Test
