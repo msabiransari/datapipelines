@@ -91,12 +91,17 @@ tasks.test {
     // (#728): a guard added there must re-run that witness, which sees them only as text. The same
     // tree feeds RawListAppenderGuardTest, which since #756 also scans the shared log-capture module's
     // MAIN sources: without that include a raw appender added there would leave the guard UP-TO-DATE.
+    // Its duplicate-copy check walks every src tree: matching names there must also invalidate this task.
     inputs.files(
         fileTree(rootProject.file("..")) {
             include(
                 "modules/*/src/test/kotlin/**/*.kt",
                 "tests/*/src/test/kotlin/**/*.kt",
                 "modules/log-capture/src/main/kotlin/**/*.kt",
+                "modules/*/src/**/SnapshotListAppender.kt",
+                "modules/*/src/**/SnapshotListAppenderTest.kt",
+                "tests/*/src/**/SnapshotListAppender.kt",
+                "tests/*/src/**/SnapshotListAppenderTest.kt",
             )
         },
     )
