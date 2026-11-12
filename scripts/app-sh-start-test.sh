@@ -81,6 +81,17 @@ if [[ \$* == *"ps --format json"* ]]; then
 fi
 if [[ \$* == *"exec -T postgres"* ]]; then printf '%s' '$row'; exit 0; fi
 if [[ \$* == *"logs"* ]]; then echo '(stub: no logs)'; exit 0; fi
+# #281 the build path: the containerized \`./gradlew\` run. It OVERWRITES run-saw.log with
+# what modules/*/build held at this moment (what THIS build would have packaged on top of),
+# then writes the one output a real build would, so the NEXT start sees it.
+if [[ \${1:-} == run && \$* == *"./gradlew"* ]]; then
+  { echo "== modules/*/build when the build ran =="; ls -AR "$tmp"/modules/*/build 2>/dev/null; } >"$tmp/run-saw.log"
+  mkdir -p "$tmp/modules/app/build"
+  : >"$tmp/modules/app/build/from-docker.class"
+  exit 0
+fi
+# ... and the image build that follows it
+if [[ \${1:-} == build && \$* == *"-t "* ]]; then exit 0; fi
 FAKE
 }
 
@@ -98,6 +109,12 @@ CURL
 run_start() {
   (cd "$tmp" && PATH="$tmp/bin:$PATH" APP_COMPOSE_PROJECT="appstarttest$$" APP_HOST_PORT=18976 \
     HEALTH_WAIT_SECONDS="${1:-10}" bash app.sh --start --no-build 2>&1)
+}
+
+# run_start WITH the build (#281): the stub's `run ./gradlew` and `build -t` fakes answer it.
+run_start_build() {
+  (cd "$tmp" && PATH="$tmp/bin:$PATH" APP_COMPOSE_PROJECT="appstarttest$$" APP_HOST_PORT=18976 \
+    HEALTH_WAIT_SECONDS="${1:-10}" bash app.sh --start 2>&1)
 }
 
 run_start_demo() { # $1 = the --demo families
@@ -195,6 +212,96 @@ if grep -q "demo data loaded (" <<<"$out"; then
   fail "the success line was printed over a failed loader:
 $out"
 fi
+
+# 8. #281: --start never packages build outputs it did not write. A host `./gradlew` and
+#    the containerized one share modules/*/build; a checkout built by both packaged a jar
+#    holding a file its source no longer had. build() keeps a stamp in .gradle-docker/ and
+#    wipes the build dirs before its own build when they hold anything newer than that
+#    stamp (or when there is no stamp yet); a checkout only app.sh builds stays incremental.
+#    Each sub-case reads only the run-saw.log its OWN start wrote (deleted before each).
+stamp="$tmp/.gradle-docker/app-sh-build.stamp"
+linked="" ext=""
+# 8d/8e put real files OUTSIDE the sandbox; a failing assertion must not leave them behind.
+trap 'rm -rf "$tmp" ${linked:+"$linked"} ${ext:+"$ext"}' EXIT
+make_stub_docker "running" "admin@local.test|t"
+make_stub_curl up
+start_build_saw() { # runs one --start with the build; sets $out, fails when run-saw.log is missing
+  rm -f "$tmp/run-saw.log"
+  out=$(run_start_build 10) || fail "a --start with the build must exit 0, got:
+$out"
+  [ -s "$tmp/run-saw.log" ] || fail "the build's 'run ./gradlew' never ran (run-saw.log empty or missing):
+$out"
+}
+
+# 8a. Outputs of unknown origin and no stamp -> wiped BEFORE the build; run, then build -t.
+mkdir -p "$tmp/modules/app/build"
+: >"$tmp/modules/app/build/stale.class"
+[ -f "$tmp/modules/app/build/stale.class" ] || fail "8a: the planted stale.class does not exist"
+start_build_saw
+grep -q "wiping build outputs not written by app.sh" <<<"$out" || fail "8a: no stamp and a build dir must print the wiping line, got:
+$out"
+if grep -q "stale.class" "$tmp/run-saw.log"; then
+  fail "8a: the build ran on top of stale.class — the wipe did not happen before it:
+$(cat "$tmp/run-saw.log")"
+fi
+run_line=$(grep -n '^run .*\./gradlew' "$ARGV_LOG" | head -1 | cut -d: -f1)
+build_line=$(grep -n '^build -t ' "$ARGV_LOG" | head -1 | cut -d: -f1)
+[[ -n $run_line && -n $build_line ]] && ((run_line < build_line)) \
+  || fail "8a: expected 'run … ./gradlew' THEN 'build -t' in the argv log, got:
+$(cat "$ARGV_LOG")"
+[ -f "$stamp" ] || fail "8a: a successful build must leave the stamp at $stamp"
+
+# 8b. Nothing touched since -> no wipe: the previous build's output is there for this one.
+start_build_saw
+if grep -q "wiping" <<<"$out"; then
+  fail "8b: nothing was written since app.sh's own build, yet it wiped (every --start would be cold):
+$out"
+fi
+grep -q "from-docker.class" "$tmp/run-saw.log" \
+  || fail "8b: the previous build's from-docker.class was gone before this build — not incremental:
+$(cat "$tmp/run-saw.log")"
+
+# 8c. A file written after the stamp (a host build) -> wiped, both its file and the old ones.
+touch -d '+2 seconds' "$tmp/modules/app/build/host.class"
+start_build_saw
+grep -q "wiping build outputs not written by app.sh" <<<"$out" || fail "8c: a file newer than the stamp must trigger the wipe, got:
+$out"
+if grep -q -E "from-docker.class|host.class" "$tmp/run-saw.log"; then
+  fail "8c: the build ran on top of the old outputs:
+$(cat "$tmp/run-saw.log")"
+fi
+
+# 8d. A build dir that IS a symlink is unlinked, never followed. The wipe is triggered by the
+#     missing stamp: a symlink alone never triggers one (the newer-file scan does not follow it).
+linked="$(mktemp -d)"
+: >"$linked/keep.txt"
+rm -f "$stamp"
+mkdir -p "$tmp/modules/web"
+rm -rf "$tmp/modules/web/build"
+ln -s "$linked" "$tmp/modules/web/build"
+[ -f "$tmp/modules/web/build/keep.txt" ] || fail "8d: the symlinked build dir's keep.txt does not exist"
+start_build_saw
+grep -q "wiping build outputs not written by app.sh" <<<"$out" || fail "8d: no stamp must trigger the wipe, got:
+$out"
+[[ ! -e $tmp/modules/web/build && ! -L $tmp/modules/web/build ]] || fail "8d: the symlinked build dir was not removed"
+[ -f "$linked/keep.txt" ] || fail "8d: the wipe FOLLOWED the symlink and deleted $linked/keep.txt"
+rm -rf "$linked"
+
+# 8e. A module whose directory is a symlink out of the checkout: its build dir is SKIPPED
+#     and named, never removed and never scanned.
+ext="$(mktemp -d)"
+mkdir -p "$ext/build"
+: >"$ext/build/keep.txt"
+ln -s "$ext" "$tmp/modules/extmod"
+[ -f "$tmp/modules/extmod/build/keep.txt" ] || fail "8e: the external build dir's keep.txt does not exist"
+rm -f "$stamp"
+start_build_saw
+grep -q "skipping modules/extmod/build: its parent is a symlink out of this checkout" <<<"$out" \
+  || fail "8e: the symlinked module's build dir must be named as skipped, got:
+$out"
+[ -f "$ext/build/keep.txt" ] || fail "8e: the wipe deleted $ext/build/keep.txt, OUTSIDE the checkout"
+rm -f "$tmp/modules/extmod"
+rm -rf "$ext"
 
 # 4. THE REFUSAL (P34). Every argv the run issued is in the log; the ones the fakes above
 #    do not answer must exit non-zero. `compose up` WITHOUT `--wait` is the shape that took
