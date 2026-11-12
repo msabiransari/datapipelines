@@ -71,8 +71,8 @@
 }
 
 /* The canvas and the family-glyph layer over it (renderer.js glyphLayer): the layer ignores the pointer, so pan,
-   zoom and tap stay the canvas's, and clips a glyph panned out of the canvas. Each glyph is placed by a CSSOM
-   transform from its top left corner; its colour is the stylesheet's, so a theme switch recolours it. */
+   zoom and tap stay the canvas's, and clips a glyph panned out of the canvas. Each glyph is placed from its top left
+   corner by the CSSOM translate and scale properties; its colour is the stylesheet's, so a theme switch recolours it. */
 .dp-deps-stage {
   position: relative;
   min-width: 0;

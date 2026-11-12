@@ -26,8 +26,8 @@
    * drawing a lucide glyph. Cytoscape cannot draw a sprite `<symbol>` (an image URL cannot address one), and an image
    * on the canvas would not inherit `currentColor`; in the DOM the glyph takes its colour from the stylesheet, so a
    * theme switch recolours it with no token read, and no extra request or string-built image is needed. The layer
-   * ignores the pointer (pan, zoom and tap stay the canvas's), follows every render through a CSSOM transform (no
-   * style attribute markup, CSP-clean) and carries no payload text: the glyph name and the node id ride as attributes.
+   * ignores the pointer (pan, zoom and tap stay the canvas's), follows every render through the CSSOM `translate`
+   * and `scale` properties (no style attribute markup, CSP-clean) and carries no payload text: the glyph name and the node id ride as attributes.
    */
 
   var TOKENS = {
@@ -206,11 +206,13 @@
       glyphs.forEach(function (g) {
         if (!g.node || g.node.empty()) return;
         var box = g.node.renderedBoundingBox({ includeLabels: false, includeOverlays: false });
-        // The computed height is the icon token's, untouched by the transform (origin top left, in the CSS).
+        // The computed height is the icon token's: `scale` never changes it (the origin is the top left, in the CSS).
         var size = parseFloat(getComputedStyle(g.svg).height) || 0;
         var x = offsetX + box.x1 + GLYPH_INSET * zoom;
         var y = offsetY + box.y1 + (box.h - size * zoom) / 2;
-        g.svg.style.transform = "translate(" + x + "px, " + y + "px) scale(" + zoom + ")";
+        // The standalone properties apply translate, then scale, about that origin.
+        g.svg.style.translate = x + "px " + y + "px";
+        g.svg.style.scale = String(zoom);
       });
     }
     return { update: update };
