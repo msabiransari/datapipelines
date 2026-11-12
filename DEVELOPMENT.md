@@ -198,7 +198,9 @@ the repo Dockerfile as `datapipelines:local`, and runs the **production-shape
 stack** (`deploy/compose.yml` + the `compose.local-build.yml` image
 override — the same stack deployment.md Appendix A describes; secrets in
 git-ignored `deploy/secrets.env`, scaffolded with generated values on first
-run). `./app.sh --stop`
+run). A checkout also built by a host `./gradlew` has its `modules/*/build` removed by the
+next `--start`, once, because the container's build would otherwise package host outputs
+whose sources are gone (#281). `./app.sh --stop`
 stops it; `--status` / `--logs` inspect it. The rest of this section is the
 Gradle-on-host development flow the IDE path also uses:
 
