@@ -109,7 +109,8 @@ class H2StagingStopTest {
         val closeMs = timedClose(staging)
 
         closeMs shouldBeLessThan CLOSE_RETURNS_WITHIN_MS
-        val result = awaitStop(staging, outcome, SLACK_SECONDS, "after close() during withQuery with a ${LONG_TIMEOUT_SECONDS}s query timeout")
+        val what = "after close() during withQuery with a ${LONG_TIMEOUT_SECONDS}s query timeout"
+        val result = awaitStop(staging, outcome, SLACK_SECONDS, what)
         println("close during runaway withQuery: close() returned in ${closeMs}ms; the statement stopped within ${SLACK_SECONDS}s")
         result.exceptionOrNull().shouldBeInstanceOf<SQLException>().sqlState shouldBe CANCELLED_SQLSTATE
     }
