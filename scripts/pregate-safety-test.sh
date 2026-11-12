@@ -720,4 +720,165 @@ helper_out="$(gate_crash_reports "$H/start" "$H")" || fail 'helper: an equal-mti
 rc=0; helper_out="$(gate_crash_reports "$H/no-such-marker" "$H")" || rc=$?
 [ "$rc" -eq 1 ] && [[ "$helper_out" == *'start marker'*'missing — no report attributed'* ]] || fail 'helper: a missing marker attributed reports'
 ok 'crash helper: equal mtime attributed (find -newer would not), tests/* searched, symlinks and missing markers refused'
+
+# ---- #132: gate_crashed: tests that print a crash word are not tooling crashes ---------------
+# A weak token (NoSuchFileException, EOFException, OutOfMemoryError) is a crash UNLESS a fresh
+# (not older than the step's marker), parseable JUnit XML of the step carries it in a
+# <failure>/<error>; a strong token (worker exit value, daemon disappeared) is always a crash.
+# Every case runs; the block fails at its end on any RED or when fewer than 23 cases ran.
+G="$T/crash-word"; mkdir -p "$G"
+gc_ids=''; gc_red=0
+gc_check() { # gc_check <case> <expected> <actual>
+  gc_ids="$gc_ids ${1%%[a-z]}"
+  if [ "$2" = "$3" ]; then ok "#132 $1: $2"; else echo "  RED  #132 $1: expected $2, got $3" >&2; gc_red=$((gc_red + 1)); fi
+}
+gc_rc() { # prints crash | nocrash from a gate_crashed-style exit
+  if "$@"; then echo crash; else echo nocrash; fi
+}
+gc_log() { # gc_log <file> <token-line>... — a Gradle failing-test log carrying the lines
+  local f="$1"; shift
+  {
+    printf '> Task :modules:web:test\n\nFooTest > reads body FAILED\n'
+    printf '    %s\n' "$@"
+    printf '\n1 test completed, 1 failed\n\n> Task :modules:web:test FAILED\n\nFAILURE: Build failed with an exception.\n\n'
+    printf "* What went wrong:\nExecution failed for task ':modules:web:test'.\n> There were failing tests. See the report at: file:///x/modules/web/build/reports/tests/test/index.html\n\nBUILD FAILED in 12s\n"
+  } > "$f"
+}
+gc_xml() { # gc_xml <file> <failure|error|none> [<message> <text>] — one JUnit result file
+  local f="$1" kind="$2" msg="${3:-}" text="${4:-}" fails=0 errs=0 body=''
+  mkdir -p "$(dirname "$f")"
+  case "$kind" in
+    failure) fails=1; body="<failure message=\"$msg\" type=\"java.lang.AssertionError\">$text</failure>" ;;
+    error) errs=1; body="<error message=\"$msg\" type=\"java.lang.Exception\">$text</error>" ;;
+  esac
+  printf '<?xml version="1.0" encoding="UTF-8"?>\n<testsuite name="co.x.FooTest" tests="1" skipped="0" failures="%s" errors="%s">\n  <testcase name="reads body" classname="co.x.FooTest" time="0.1">%s</testcase>\n</testsuite>\n' \
+    "$fails" "$errs" "$body" > "$f"
+}
+gc_case() { # gc_case <name> → prints the case dir; marker <dir>/step.log.started touched FIRST
+  local d="$G/$1"; mkdir -p "$d"; : > "$d/step.log.started"; echo "$d"
+}
+gc_res() { echo "$1/modules/web/build/test-results/test/TEST-co.x.FooTest.xml"; }
+EOF_MSG='java.io.EOFException: unexpected end of stream'
+EOF_TEXT='java.io.EOFException: unexpected end of stream
+	at co.x.FooTest.readsBody(FooTest.kt:42)'
+gc_crashed() { local d="$1"; shift; gc_rc gate_crashed "$d/step.log" "$d/step.log.started" "$d/modules" "$d/tests" "$d/buildSrc" "$@"; }
+
+d="$(gc_case c1)"; printf 'java.io.EOFException\n' > "$d/step.log"
+gc_check C1 crash "$(gc_rc gate_crashed "$d/step.log")"
+
+d="$(gc_case c2)"; gc_log "$d/step.log" 'java.io.EOFException at FooTest.kt:42'
+gc_xml "$(gc_res "$d")" failure "$EOF_MSG" "$EOF_TEXT"
+gc_check C2 nocrash "$(gc_crashed "$d")"
+c2="$d"
+
+d="$(gc_case c3)"; cp "$c2/step.log" "$d/step.log"
+gc_xml "$(gc_res "$d")" failure "$EOF_MSG" "$EOF_TEXT"; touch -d '-1 hour' "$(gc_res "$d")"
+gc_check C3 crash "$(gc_crashed "$d")"
+
+d="$(gc_case c4)"; cp "$c2/step.log" "$d/step.log"; gc_xml "$(gc_res "$d")" none
+gc_check C4 crash "$(gc_crashed "$d")"
+c4="$d"
+
+d="$(gc_case c5)"; cp "$c2/step.log" "$d/step.log"
+gc_xml "$(gc_res "$d")" failure 'expected 200 but was 500' 'org.opentest4j.AssertionFailedError: expected 200 but was 500'
+gc_check C5 crash "$(gc_crashed "$d")"
+
+d="$(gc_case c6)"; cp "$c2/step.log" "$d/step.log"
+gc_xml "$T/c6-whole.xml" failure "$EOF_MSG" "$EOF_TEXT"
+mkdir -p "$(dirname "$(gc_res "$d")")"; head -c 230 "$T/c6-whole.xml" > "$(gc_res "$d")"
+grep -qF 'EOFException' "$(gc_res "$d")" || fail '#132 C6: the truncated XML lost the token (fixture premise)'
+gc_check C6 crash "$(gc_crashed "$d")"
+
+d="$(gc_case c7)"; cp "$c2/step.log" "$d/step.log"; printf 'Process worker finished with non-zero exit value 134\n' >> "$d/step.log"
+gc_xml "$(gc_res "$d")" failure "$EOF_MSG" "$EOF_TEXT"
+gc_check C7 crash "$(gc_crashed "$d")"
+
+d="$(gc_case c8)"; cp "$c2/step.log" "$d/step.log"; printf 'Gradle build daemon disappeared unexpectedly\n' >> "$d/step.log"
+gc_xml "$(gc_res "$d")" failure "$EOF_MSG" "$EOF_TEXT"
+gc_check C8 crash "$(gc_crashed "$d")"
+
+d="$(gc_case c9)"; gc_log "$d/step.log" 'java.io.EOFException at FooTest.kt:42' 'java.lang.OutOfMemoryError: Java heap space'
+gc_xml "$(gc_res "$d")" failure "$EOF_MSG" "$EOF_TEXT"
+gc_check C9 crash "$(gc_crashed "$d")"
+
+nopy="$T/c10-bin"; mkdir -p "$nopy"; ln -s "$(command -v grep)" "$nopy/grep"
+gc_check C10 crash "$( (PATH="$nopy"; gc_crashed "$c2") )"
+
+out="$(gate_crash_explain "$c2/step.log" "$c2/step.log.started" "$c2")"
+gc_check C11a empty "${out:-empty}"
+out="$(gate_crash_explain "$c4/step.log" "$c4/step.log.started" "$c4")"
+case "$out" in *'not a test-JVM abort'*) out=abort-line ;; esac
+gc_check C11b abort-line "$out"
+
+d="$(gc_case c12a)"; cp "$c2/step.log" "$d/step.log"; : > "$d/step.log.started"
+gc_xml "$d/buildSrc/build/test-results/test/TEST-co.x.FooTest.xml" failure "$EOF_MSG" "$EOF_TEXT"
+gc_check C12a fail "$(gate_classify_buildsrc 1 "$d/step.log" "$d/buildSrc/build/test-results/test" online)"
+d="$(gc_case c12b)"; cp "$c2/step.log" "$d/step.log"
+gc_xml "$d/buildSrc/build/test-results/test/TEST-co.x.FooTest.xml" none
+gc_check C12b crash "$(gate_classify_buildsrc 1 "$d/step.log" "$d/buildSrc/build/test-results/test" online)"
+
+GET_MSG='Could not GET resource: java.io.EOFException'
+d="$(gc_case c13)"; gc_log "$d/step.log" 'Could not GET resource' 'java.io.EOFException'
+gc_xml "$d/buildSrc/build/test-results/test/TEST-co.x.FooTest.xml" failure "$GET_MSG" "$GET_MSG"
+gc_check C13 fail "$(gate_classify_buildsrc 1 "$d/step.log" "$d/buildSrc/build/test-results/test" offline)"
+
+d="$(gc_case c14)"; gc_log "$d/step.log" 'Could not GET resource' 'java.io.EOFException'
+gc_xml "$d/buildSrc/build/test-results/test/TEST-co.x.FooTest.xml" failure "$GET_MSG" "$GET_MSG"
+gc_xml "$d/buildSrc/build/test-results/test/TEST-co.x.BarTest.xml" failure 'expected 1 but was 2' 'org.opentest4j.AssertionFailedError: expected 1 but was 2'
+gc_check C14 fail "$(gate_classify_buildsrc 1 "$d/step.log" "$d/buildSrc/build/test-results/test" offline)"
+
+d="$(gc_case c15)"; gc_log "$d/step.log" 'Could not resolve org.example:probe:1.0'
+gc_xml "$d/buildSrc/build/test-results/test/TEST-co.x.FooTest.xml" failure 'Could not resolve org.example:probe:1.0' 'Could not resolve org.example:probe:1.0'
+gc_check C15 skip "$(gate_classify_buildsrc 1 "$d/step.log" "$d/buildSrc/build/test-results/test" offline)"
+
+# C16/C17: the gate classifies each invocation before the next one rewrites the result files.
+d="$G/c16"; mkdir -p "$d"
+: > "$d/one.log.started"; cp "$c2/step.log" "$d/one.log"; gc_xml "$(gc_res "$d")" failure "$EOF_MSG" "$EOF_TEXT"
+gate_after_invocation 1 "$d/one.log" "$d/modules" "$d/tests" "$d/buildSrc" || true
+: > "$d/two.log.started"; printf 'BUILD SUCCESSFUL in 3s\n' > "$d/two.log"; gc_xml "$(gc_res "$d")" none
+gate_after_invocation 0 "$d/two.log" "$d/modules" "$d/tests" "$d/buildSrc" || true
+gc_check C16 nocrash "$(gc_rc gate_crashed "$d/one.log")"
+
+d="$G/c17"; mkdir -p "$d"
+: > "$d/one.log.started"; printf 'java.io.EOFException\nBUILD FAILED in 1s\n' > "$d/one.log"
+gate_after_invocation 1 "$d/one.log" "$d/modules" "$d/tests" "$d/buildSrc" || true
+: > "$d/two.log.started"; cp "$c2/step.log" "$d/two.log"; gc_xml "$(gc_res "$d")" failure "$EOF_MSG" "$EOF_TEXT"
+gate_after_invocation 1 "$d/two.log" "$d/modules" "$d/tests" "$d/buildSrc" || true
+gc_check C17a crash "$(gc_rc gate_crashed "$d/one.log")"
+gc_check C17b nocrash "$(gc_rc gate_crashed "$d/two.log")"
+
+# C18: gate.sh's run() classifies right after its ./gradlew line, output discarded, before
+# the echo that IS run()'s stdout.
+wiring="$(sed -n '/^run() {/,/^}/p' "$ROOT/scripts/gate.sh" | awk '
+  /^[[:space:]]*\.\/gradlew / { g = NR }
+  /^[[:space:]]*gate_after_invocation .*> \/dev\/null 2>&1/ { a = NR }
+  /^[[:space:]]*echo / { e = NR }
+  END { print ((g && a && e && g < a && a < e) ? "wired" : "unwired") }')"
+gc_check C18 wired "$wiring"
+
+d="$(gc_case c19)"; gc_log "$d/step.log" 'java.nio.file.NoSuchFileException at FooTest.kt:42'
+gc_xml "$(gc_res "$d")" error 'fixture file missing' 'java.nio.file.NoSuchFileException: /tmp/fixture.csv
+	at co.x.FooTest.readsBody(FooTest.kt:42)'
+gc_check C19 nocrash "$(gc_crashed "$d")"
+
+d="$(gc_case c20)"; gc_log "$d/step.log" 'java.lang.OutOfMemoryError at FooTest.kt:42'
+gc_xml "$(gc_res "$d")" error 'java.lang.OutOfMemoryError: Java heap space' 'boom'
+gc_check C20 nocrash "$(gc_crashed "$d")"
+
+d="$(gc_case c21)"; cp "$c2/step.log" "$d/step.log"
+gc_xml "$(gc_res "$d")" failure 'boom' "$EOF_TEXT"
+gc_check C21 nocrash "$(gc_crashed "$d")"
+
+d="$(gc_case c22)"; cp "$c2/step.log" "$d/step.log"
+gc_xml "$(gc_res "$d")" failure "$EOF_MSG" "$EOF_TEXT"; touch -r "$d/step.log.started" "$(gc_res "$d")"
+gc_check C22 nocrash "$(gc_crashed "$d")"
+
+d="$(gc_case c23)"; gc_log "$d/step.log" 'org.opentest4j.AssertionFailedError at FooTest.kt:42'
+gc_check C23a nocrash "$(gc_rc gate_crashed "$d/step.log")"
+gc_check C23b nocrash "$(gc_crashed "$d")"
+
+gc_ran="$(printf '%s\n' $gc_ids | sort -u | wc -l | tr -d ' ')"
+[ "$gc_red" -eq 0 ] || fail "#132: $gc_red case(s) RED"
+[ "$gc_ran" -ge 23 ] || fail "#132: only $gc_ran of 23 cases ran"
+ok "#132: $gc_ran cases — a crash word a fresh failed JUnit XML carries is a test failure; anything else stays a crash"
 echo '  crash-report self-test: PASS'
