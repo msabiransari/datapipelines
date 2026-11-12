@@ -462,6 +462,12 @@ class ScriptVocabularyGuardTest {
                     "the drawer/panel CSS transform, the geometry notes, and the row's never-rotating glyph reading (#701)",
                 ),
                 Triple(
+                    Regex("browser/(?:Dependencies(?:Dashboard|Visualization)BrowserTest|DependencyPaneBrowserSuite)\\.kt$"),
+                    Regex("\"transform\"|\"Transform template\"|chart with no transform"),
+                    "the Dependencies pane's browser classes (#876 G6): the pane's TRANSFORM_TEMPLATE label, a chart whose block " +
+                        "pins no template (the empty leaf) and the visualization body's `transform` key — a node noun stays red",
+                ),
+                Triple(
                     Regex("browser/DraftDashboardDependenciesBrowserTest\\.kt$"),
                     Regex("\"transform\"", setOf(IGNORE_CASE)),
                     "the visualization body's `transform` key (the block)",
@@ -585,6 +591,8 @@ class ScriptVocabularyGuardTest {
                     "    TRANSFORM_TEMPLATE(FamilyKey.VISUALIZATION, FamilyKey.TEMPLATE),",
                 "modules/web/src/main/resources/static/js/dependencies/tree-view.js" to
                     "    TRANSFORM_TEMPLATE: \"Transform template\",",
+                "tests/browser-tests/src/test/kotlin/co/datapipelines/browser/DependenciesVisualizationBrowserTest.kt" to
+                    "    fun `a chart with no transform is the empty leaf`() {",
                 XSLT_POLICY_PATH to "    $XSLT_POLICY_LINE",
                 "guard.css" to "transform: translateX(0);",
                 "guard.css" to "text-transform: uppercase;",
@@ -624,6 +632,8 @@ class ScriptVocabularyGuardTest {
                     "val TRANSFORM = FamilyKey(\"transform\")",
                 "modules/web/src/main/resources/static/js/dependencies/tree-view.js" to "    TRANSFORM: \"Transform\",",
                 "modules/web/src/main/resources/static/js/dependencies/tree-view.js" to "// a transform node's pane",
+                "tests/browser-tests/src/test/kotlin/co/datapipelines/browser/DependenciesDashboardBrowserTest.kt" to
+                    "        // the board's transform node",
                 XSLT_POLICY_PATH to "val transformNode = 1",
                 XSLT_POLICY_PATH to "$XSLT_POLICY_LINE // a TRANSFORM node",
                 "guard.css" to ".type-transform {",
