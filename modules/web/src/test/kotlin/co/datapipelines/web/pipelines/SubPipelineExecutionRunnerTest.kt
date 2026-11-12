@@ -418,7 +418,11 @@ class SubPipelineExecutionRunnerTest {
 
         val warns = emitterWarns { kotlinx.coroutines.runBlocking { runner(stub).run(pipelineNode(), context()) } }
 
-        val childId = stub.captured.single().executionId.toString()
+        val childId =
+            stub.captured
+                .single()
+                .executionId
+                .toString()
         warns.filter { "not found by its result columns write" in it && childId in it }.size shouldBe 1
     }
 

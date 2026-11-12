@@ -177,7 +177,12 @@ class ExecutionRepositoriesIntegrationTest {
         executions.create(record)
         val schema = listOf(ColumnSchema("month", LogicalType.DATE, nullable = false))
         executions.recordResult(record.executionId, 2, 1_024, schema).shouldBeTrue()
-        val schemaBefore = executions.findById(WORKSPACE_ID, record.executionId).shouldNotBeNull().resultSchemaJson.shouldNotBeNull()
+        val schemaBefore =
+            executions
+                .findById(WORKSPACE_ID, record.executionId)
+                .shouldNotBeNull()
+                .resultSchemaJson
+                .shouldNotBeNull()
 
         executions
             .complete(

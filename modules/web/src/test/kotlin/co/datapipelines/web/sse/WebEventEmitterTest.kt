@@ -447,8 +447,7 @@ class WebEventEmitterTest {
                 emitter.emit(PipelineCompleted(executionId, pipelineId, 3, NOW, NOW.plusMillis(900), 900, emptyList()))
             }
 
-        fun emitStarted() =
-            runBlocking { emitter.emit(ExecutionStarted(executionId, pipelineId, 3, emptyMap(), startedAt = NOW)) }
+        fun emitStarted() = runBlocking { emitter.emit(ExecutionStarted(executionId, pipelineId, 3, emptyMap(), startedAt = NOW)) }
 
         fun writeBehind(write: () -> Boolean) = emitter.writeBehindUnconfirmedInsert(executionId, "result columns write", write)
 
