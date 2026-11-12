@@ -69,6 +69,9 @@ internal object SharedBrowserE2e {
     /** PostgreSQL's `too_many_connections` — what the server answers at [MAX_CONNECTIONS]. */
     private const val TOO_MANY_CONNECTIONS = "53300"
 
+    /** Every client backend on the server — [MAX_CONNECTIONS] is server-wide, not per database. */
+    private const val CLIENT_BACKENDS_SQL = "SELECT count(*) FROM pg_stat_activity WHERE backend_type = 'client backend'"
+
     private const val REDIS_IMAGE = "redis:7-alpine"
     private const val REDIS_PORT = 6379
 
@@ -131,28 +134,7 @@ internal object SharedBrowserE2e {
      * named error when the check itself is refused a connection at the ceiling (SQL state 53300).
      */
     fun checkConnectionBudget(className: String): String {
-        val count =
-            try {
-                DriverManager.getConnection(jdbcUrl, username, password).use { connection ->
-                    connection.createStatement().use { statement ->
-                        statement
-                            .executeQuery("SELECT count(*) FROM pg_stat_activity WHERE backend_type = 'client backend'")
-                            .use { rows ->
-                                rows.next()
-                                rows.getInt(1)
-                            }
-                    }
-                }
-            } catch (refused: SQLException) {
-                if (refused.sqlState != TOO_MANY_CONNECTIONS) throw refused
-                throw AssertionError(
-                    "#933 connection budget exceeded after $className: the budget check itself was refused a " +
-                        "connection (SQL state $TOO_MANY_CONNECTIONS) — the shared browser Postgres is at its ceiling " +
-                        "of $MAX_CONNECTIONS (threshold $CONNECTION_BUDGET_THRESHOLD). Bound the new demand where it " +
-                        "is produced (SharedBrowserE2e KDoc).",
-                    refused,
-                )
-            }
+        val count = clientConnectionCount(className)
         if (count > CONNECTION_BUDGET_THRESHOLD) {
             throw AssertionError(
                 "#933 connection budget exceeded after $className: the shared browser Postgres holds $count client " +
@@ -163,6 +145,35 @@ internal object SharedBrowserE2e {
         return "#933 connection budget after $className: $count client connections " +
             "(threshold $CONNECTION_BUDGET_THRESHOLD, ceiling $MAX_CONNECTIONS)"
     }
+
+    /** [countClientBackends], with the server's refusal at its ceiling turned into #933's named error. */
+    private fun clientConnectionCount(className: String): Int =
+        try {
+            countClientBackends()
+        } catch (refused: SQLException) {
+            throw if (refused.sqlState == TOO_MANY_CONNECTIONS) {
+                AssertionError(
+                    "#933 connection budget exceeded after $className: the budget check itself was refused a " +
+                        "connection (SQL state $TOO_MANY_CONNECTIONS) — the shared browser Postgres is at its ceiling " +
+                        "of $MAX_CONNECTIONS (threshold $CONNECTION_BUDGET_THRESHOLD). Bound the new demand where it " +
+                        "is produced (SharedBrowserE2e KDoc).",
+                    refused,
+                )
+            } else {
+                refused
+            }
+        }
+
+    /** ONE connection, ONE query, closed: the server-wide client backends, the caller's own included. */
+    private fun countClientBackends(): Int =
+        DriverManager.getConnection(jdbcUrl, username, password).use { connection ->
+            connection.createStatement().use { statement ->
+                statement.executeQuery(CLIENT_BACKENDS_SQL).use { rows ->
+                    rows.next()
+                    rows.getInt(1)
+                }
+            }
+        }
 
     /** The admin connection targets the `postgres` maintenance database — never the one being dropped. */
     private fun withAdminConnection(
