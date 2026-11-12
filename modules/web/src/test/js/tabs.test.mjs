@@ -21,8 +21,26 @@ require(tabsPath);
 const { createTabs, resolve, TABS } = globalThis.window ? globalThis.window.PETabs : require(tabsPath);
 const core = require(corePath);
 
-test("the tab set is the closed six, Flow first", () => {
-  assert.deepEqual(TABS, ["flow", "overview", "parameters", "runs", "usage", "versions"]);
+test("the tab set is the closed seven (#876 adds Dependencies), Flow first", () => {
+  assert.deepEqual(TABS, ["flow", "overview", "parameters", "runs", "usage", "dependencies", "versions"]);
+});
+
+test("the client set IS the server enum: PipelineWorkspaceTab's wire values, in order (#876 sets move together)", () => {
+  const source = fs.readFileSync(path.resolve(here, "../../main/kotlin/co/datapipelines/web/ui/PipelineWorkspaceController.kt"), "utf8");
+  const start = source.indexOf("enum class PipelineWorkspaceTab(");
+  const body = source.slice(start, source.indexOf("companion object", start));
+  const wires = Array.from(body.matchAll(/^\s+[A-Z_]+\("([a-z-]+)"\),?$/gm), (m) => m[1]);
+  assert.ok(wires.length >= 7, `non-vacuity: ${wires.length} enum entries read`);
+  assert.deepEqual(TABS, wires);
+});
+
+test("Dependencies is a pipeline-read surface: admitted without the execution read, its own getters", () => {
+  const tabs = createTabs(false, "dependencies");
+  assert.equal(tabs.active, "dependencies");
+  assert.equal(tabs.dependenciesActive, true);
+  assert.equal(tabs.dependenciesHidden, false);
+  assert.equal(tabs.dependenciesAria, "true");
+  assert.equal(tabs.usageHidden, true);
 });
 
 test("createTabs resolves the server's tab; unknown and missing land on Flow", () => {
@@ -67,6 +85,7 @@ test("exactly one panel is visible: the active tab's hidden getter is false", ()
     parameters: tabs.parametersHidden,
     runs: tabs.runsHidden,
     usage: tabs.usageHidden,
+    dependencies: tabs.dependenciesHidden,
     versions: tabs.versionsHidden,
   };
   const visible = Object.entries(hidden).filter(([, v]) => v === false);
@@ -100,7 +119,7 @@ test("every getter reads `active` through its RECEIVER — Alpine's proxy sees t
   // The CSP build reads component data through a reactive proxy: a getter registers a
   // dependency only when it reads `this.active` with the proxy as receiver. A getter closed
   // over the raw object (#400's first adapter) never touches the proxy and never re-renders.
-  assert.equal(GETTERS.length, 18, "the template's contract: six names × active/hidden/aria");
+  assert.equal(GETTERS.length, 21, "the template's contract: seven names × active/hidden/aria");
   for (const name of GETTERS) {
     const seen = [];
     const proxy = new Proxy(createTabs(true, "flow"), {

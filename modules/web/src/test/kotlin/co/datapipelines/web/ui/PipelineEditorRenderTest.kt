@@ -262,6 +262,27 @@ class PipelineEditorRenderTest {
         html shouldContain "— draft"
     }
 
+    /**
+     * #876 G6: the Dependencies tab — a mount pane over the VIEWED version (the record NAME, not the display name;
+     * the server's version plus Alpine's in-page binding of it), hidden until opened, and the five dependency modules
+     * last in the on-mount catalog that already lists the three graph vendors.
+     */
+    @Test
+    fun `the Dependencies pane carries the record name and the viewed version, bound for an in-page switch`() {
+        val html = render()
+
+        html shouldContain "@click=\"selectDependenciesTab\">Dependencies</button>"
+        val pane = Regex("<div class=\"dp-deps\" data-dp-deps data-family=\"pipeline\"[^>]*>").find(html)?.value.orEmpty()
+        pane shouldContain "data-name=\"acme/p\""
+        pane shouldContain "data-version=\"1\""
+        pane shouldContain "x-bind:data-version=\"viewedVersion\""
+        Regex("id=\"pe-pane-dependencies\"[^>]*\\shidden\\s").containsMatchIn(html) shouldBe true
+        val catalog = html.substringAfter("<template id=\"pe-runtime-scripts\" data-page-assets=\"on-mount\">").substringBefore("</template>")
+        val sources = Regex("src=\"(/[^\"]+)\"").findAll(catalog).map { it.groupValues[1] }.toList()
+        sources.takeLast(5) shouldBe DEPENDENCY_MODULES
+        DEPENDENCY_CATALOG.take(3).forEach { vendor -> sources.count { it == vendor } shouldBe 1 }
+    }
+
     @Test
     fun `no admitted versions at all is the honest empty state`() {
         val html = render(hasSelectedBody = false, versions = emptyList())
@@ -335,6 +356,7 @@ class PipelineEditorRenderTest {
                 // #349: the Versions tab composes the explorer fragment, whose rows read `pipeline.id`.
                 setVariable("pipeline", mapOf("id" to LEAF_ID))
                 setVariable("pipelineName", "p")
+                setVariable("navCurrentPath", "acme/p")
                 setVariable("hasSelectedBody", hasSelectedBody)
                 setVariable("viewedVersion", if (hasSelectedBody) 1 else null)
                 setVariable("viewedLabel", if (hasSelectedBody) "v1 · released · current" else "no version selected")
