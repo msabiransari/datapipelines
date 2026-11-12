@@ -1,9 +1,12 @@
 package co.datapipelines.web.release
 
+import co.datapipelines.application.dependencies.IncomingArmCatalog
 import co.datapipelines.application.dependencies.PipelineReleaseFamily
 import co.datapipelines.application.dependencies.PostgresStatementCeiling
 import co.datapipelines.application.dependencies.ReleasePlanningDeadline
 import co.datapipelines.application.dependencies.ReleasePlanningWalk
+import co.datapipelines.application.dependencies.ScheduleTargetQueries
+import co.datapipelines.application.dependencies.ScheduleTargetShape
 import co.datapipelines.application.dependencies.dashboard.DashboardReleaseProvider
 import co.datapipelines.application.dependencies.parameterset.ParameterSetReleaseProvider
 import co.datapipelines.application.dependencies.prerequisites.RegistryPrerequisiteCheck
@@ -11,6 +14,7 @@ import co.datapipelines.application.dependencies.restore.WalkingRestoreDependenc
 import co.datapipelines.application.dependencies.template.TemplateReleaseProvider
 import co.datapipelines.application.dependencies.visualization.VisualizationReleaseProvider
 import co.datapipelines.application.endpoints.EndpointReleaseSteps
+import co.datapipelines.application.endpoints.PublishedEndpointVersionRepository
 import co.datapipelines.dependencies.FamilyDescriptor
 import co.datapipelines.dependencies.FamilyRegistry
 import co.datapipelines.parameters.ParameterSetRepository
@@ -29,6 +33,8 @@ import co.datapipelines.visualization.DashboardService
 import co.datapipelines.visualization.VisualizationRepository
 import co.datapipelines.visualization.VisualizationService
 import co.datapipelines.web.config.ReleaseDependencyProperties
+import co.datapipelines.web.schedules.PipelineGraphTarget
+import co.datapipelines.web.schedules.PipelineJobExecutor
 import co.datapipelines.web.templates.TemplateReleaseService
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.boot.context.properties.EnableConfigurationProperties
@@ -94,11 +100,24 @@ class ReleaseConfiguration {
      * The pipeline family over its release source (record §4; G2 adds the other artifact families). The source reads
      * through a repository over the ceiling's template, never the shared repository bean: only that template bounds each
      * statement (#786 R3). #873 §F.1: the pipeline arm — `PipelineDependencySource`'s read and pins, plus the version's
-     * `DATASOURCE` edges.
+     * `DATASOURCE` edges. #877 §B: its four inverse arms ([IncomingArmCatalog.pipeline]) read the dependents' own
+     * repositories over the same ceiling template.
      */
     @Bean
     fun pipelineDependencyFamily(ceiling: PostgresStatementCeiling): FamilyDescriptor<*> =
-        PipelineReleaseFamily.descriptor(PipelineRepository(ceiling.jdbc), ceiling)
+        PipelineReleaseFamily.descriptor(
+            PipelineRepository(ceiling.jdbc),
+            ceiling,
+            incoming =
+                IncomingArmCatalog.pipeline(
+                    PipelineRepository(ceiling.jdbc),
+                    DashboardRepository(ceiling.jdbc),
+                    PublishedEndpointVersionRepository(ceiling.jdbc),
+                    ScheduleTargetQueries(ceiling.jdbc),
+                    SCHEDULE_TARGET,
+                    ceiling,
+                ),
+        )
 
     /**
      * The template family's NATIVE provider (#873 §A.2: exactly one descriptor per family — it replaces G1's adapted
@@ -107,7 +126,18 @@ class ReleaseConfiguration {
      */
     @Bean
     fun templateDependencyFamily(ceiling: PostgresStatementCeiling): FamilyDescriptor<*> =
-        TemplateReleaseProvider(TemplateRepository(ceiling.jdbc), ceiling).descriptor()
+        TemplateReleaseProvider(
+            TemplateRepository(ceiling.jdbc),
+            ceiling,
+            incoming =
+                IncomingArmCatalog.template(
+                    PipelineRepository(ceiling.jdbc),
+                    TemplateRepository(ceiling.jdbc),
+                    ParameterSetRepository(ceiling.jdbc),
+                    VisualizationRepository(ceiling.jdbc),
+                    ceiling,
+                ),
+        ).descriptor()
 
     /**
      * The parameter-set family's native provider (#873 G2): selector-template and selector-datasource edges (§F.2), one
@@ -115,12 +145,21 @@ class ReleaseConfiguration {
      */
     @Bean
     fun parameterSetDependencyFamily(ceiling: PostgresStatementCeiling): FamilyDescriptor<*> =
-        ParameterSetReleaseProvider(ParameterSetRepository(ceiling.jdbc), TemplateRepository(ceiling.jdbc), ceiling).descriptor()
+        ParameterSetReleaseProvider(
+            ParameterSetRepository(ceiling.jdbc),
+            TemplateRepository(ceiling.jdbc),
+            ceiling,
+            incoming = IncomingArmCatalog.parameterSet(DashboardRepository(ceiling.jdbc), ceiling),
+        ).descriptor()
 
     /** The visualization family's native provider (#873 G2): the transform-template edge, one batch read per frontier. */
     @Bean
     fun visualizationDependencyFamily(ceiling: PostgresStatementCeiling): FamilyDescriptor<*> =
-        VisualizationReleaseProvider(VisualizationRepository(ceiling.jdbc), ceiling).descriptor()
+        VisualizationReleaseProvider(
+            VisualizationRepository(ceiling.jdbc),
+            ceiling,
+            incoming = IncomingArmCatalog.visualization(DashboardRepository(ceiling.jdbc), ceiling),
+        ).descriptor()
 
     /** The dashboard family's native provider (#873 G2): set, source-pipeline and visualization edges, one batch read per frontier. */
     @Bean
@@ -248,4 +287,19 @@ class ReleaseConfiguration {
             observer = observer,
             prerequisites = prerequisites,
         )
+
+    companion object {
+        /**
+         * #877 §B — the pipeline executor's stored payload as the schedule → pipeline inverse arm reads it: the
+         * `target_ref` prefix, the exact pin's payload field, the edge's JSON Pointer and the schema that stores an exact
+         * pin — the same vocabulary [PipelineGraphTarget] extracts outgoing with (A27 compares the two).
+         */
+        val SCHEDULE_TARGET =
+            ScheduleTargetShape(
+                targetRefPrefix = PipelineJobExecutor.TARGET_PREFIX,
+                versionField = PipelineGraphTarget.VERSION_FIELD,
+                sourcePath = PipelineGraphTarget.PIPELINE_POINTER,
+                exactFromSchema = PipelineJobExecutor.PAYLOAD_SCHEMA_VERSION,
+            )
+    }
 }

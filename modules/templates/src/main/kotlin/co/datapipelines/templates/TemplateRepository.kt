@@ -6,6 +6,10 @@ import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.SearchNeedle
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.pipeline.WriteSurface
+import co.datapipelines.pipeline.inverse.InverseRequest
+import co.datapipelines.pipeline.inverse.InverseRow
+import co.datapipelines.pipeline.inverse.InverseSql
+import co.datapipelines.pipeline.inverse.PinNodeRules
 import co.datapipelines.pipeline.release.RaceSavepoint
 import co.datapipelines.typesystem.Dialect
 import org.springframework.jdbc.core.RowMapper
@@ -1080,6 +1084,32 @@ class TemplateRepository(
             mapOf("name" to id, "workspaceId" to workspaceId),
         ) > 0
 
+    /**
+     * #877 §B.2 — ONE page of the stored IMPORT pins (`imports[i]`, the `imports_json` `{id, version, alias}` array) of
+     * this workspace's template versions the [InverseRequest.scope] selects, naming template [InverseRequest.targetKey] at
+     * [InverseRequest.targetVersion] or at any version: at most `limit + 1` rows, ONE statement, in the inverse total
+     * order. The same stored field `TemplateReleaseProvider.importsOf` extracts; the row's element id is the import's
+     * declared alias. The template family's importer arm reads it.
+     */
+    fun findImportPinOccurrences(request: InverseRequest): List<InverseRow> {
+        val stored = InverseSql.jsonInt("i.ref->'version'")
+        val exact = if (request.targetVersion == null) "" else "AND $stored = :targetVersion"
+        val occurrences =
+            """
+            SELECT t.id::text AS dependent_id, t.name AS dependent_name, v.version AS dependent_version,
+                   v.status AS dependent_status, 'imports[' || (i.ord - 1) || ']' AS source_path,
+                   $stored AS stored_version, i.ref->>'alias' AS element_id
+              FROM templates t
+              JOIN template_versions v ON v.template_id = t.id
+             CROSS JOIN LATERAL jsonb_array_elements(COALESCE(v.imports_json, '[]'::jsonb)) WITH ORDINALITY AS i(ref, ord)
+             WHERE t.workspace_id = :workspaceId AND ${InverseSql.scope(request.scope, "template_versions", "template_id", entity = "t")}
+               AND i.ref->>'id' = :targetKey
+               $exact
+            """.trimIndent()
+        val binds = mapOf("workspaceId" to request.workspaceId, "targetKey" to request.targetKey, "targetVersion" to request.targetVersion)
+        return InverseSql.page(jdbc, occurrences, binds, request)
+    }
+
     /** True when the template entity is LIVE (ACTIVE) — the §3.2 derivation read directly. */
     fun hasLiveVersion(
         workspaceId: UUID,
@@ -1443,6 +1473,18 @@ class TemplateRepository(
                 " WHERE t.workspace_id = :workspaceId"
 
         /**
+         * #877 §B.1 — the pipeline node-type rule for a template pin ([PinNodeRules.TEMPLATE], shared with the pipeline
+         * family's inverse and its outgoing extractor) over a lateral node alias `pnode`: the statements below that embed
+         * a pin predicate read it, never a copy.
+         */
+        private val TEMPLATE_PIN_NODE_P = PinNodeRules.typeIn("pnode", PinNodeRules.TEMPLATE)
+
+        /** The discard statement's embedded pin guard: a template-bearing node pinning `:name@:version`. */
+        private val DISCARD_TEMPLATE_PIN_P =
+            "$TEMPLATE_PIN_NODE_P AND pnode->'template'->>'id' = :name" +
+                " AND ${InverseSql.jsonInt("pnode->'template'->'version'")} = :version"
+
+        /**
          * The derived entity status (versioning §3.2, since V19 retired `is_deleted`): a
          * template is LIVE while it holds >= 1 DRAFT or RELEASED version. `t`-aliased probe.
          */
@@ -1797,8 +1839,7 @@ class TemplateRepository(
                        CROSS JOIN LATERAL jsonb_array_elements(pv.body_json->'nodes') AS pnode
                         WHERE pp.workspace_id = :workspaceId
                           AND pv.status IN ('DRAFT','RELEASED')
-                          AND pnode->'template'->>'id' = :name
-                          AND (pnode->'template'->>'version')::int = :version
+                          AND $DISCARD_TEMPLATE_PIN_P
                    )
                 RETURNING v.template_id, v.version, v.status, v.body_hash, v.created_at, v.created_by,
                           v.released_at, v.released_by, v.discarded_at, v.discarded_by, v.updated_by, v.updated_at,
@@ -1889,14 +1930,14 @@ class TemplateRepository(
                    SELECT 1 FROM pipeline_versions pv
                    CROSS JOIN LATERAL jsonb_array_elements(pv.body_json->'nodes') AS pnode
                     WHERE pv.pipeline_id = :pipelineId AND pv.status IN ('DRAFT','RELEASED')
-                      AND pnode->'template'->>'id' = t.name
+                      AND $TEMPLATE_PIN_NODE_P AND pnode->'template'->>'id' = t.name
                )
                AND NOT EXISTS (
                    SELECT 1 FROM pipeline_versions pv JOIN pipelines pp ON pp.id = pv.pipeline_id
                    CROSS JOIN LATERAL jsonb_array_elements(pv.body_json->'nodes') AS pnode
                     WHERE pv.pipeline_id <> :pipelineId
                       AND pp.workspace_id = :workspaceId
-                      AND pnode->'template'->>'id' = t.name
+                      AND $TEMPLATE_PIN_NODE_P AND pnode->'template'->>'id' = t.name
                )
              ORDER BY t.name
             """.trimIndent()

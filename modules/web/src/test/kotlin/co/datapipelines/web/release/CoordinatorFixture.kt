@@ -104,7 +104,6 @@ internal class CoordinatorFixture(
             io.mockk.spyk(
                 PipelineReleaseService(
                     pipelines,
-                    mockk(relaxed = true),
                     mockk<co.datapipelines.pipeline.PipelineValidator> {
                         every { validateOrThrow(any(), any(), any()) } answers { firstArg() }
                     },

@@ -849,25 +849,28 @@ class VersionLifecycleModelTest {
                 5,
             )
         val statuses = TemplateVersionStatuses { _, _, _ -> PipelineVersionStatus.RELEASED }
+        val releases =
+            PipelineReleaseService(
+                repository,
+                validator,
+                guard,
+                dashboards = NoDashboards,
+                endpointVersions = NoApiVersionPins,
+                schedules = NoSchedulePins,
+            )
         return PipelineService(
             pipelines = repository,
             validator = validator,
             drafts = PipelineDraftService(repository, guard),
-            releases =
-                PipelineReleaseService(
-                    repository,
-                    statuses,
-                    validator,
-                    guard,
-                    dashboards = NoDashboards,
-                    endpointVersions = NoApiVersionPins,
-                    schedules = NoSchedulePins,
-                ),
+            releases = releases,
             authoring = guard,
             draftTemplates = NoExclusiveDraftTemplates,
             dashboards = NoDashboards,
             endpointVersions = NoApiVersionPins,
             schedules = NoSchedulePins,
+            // #877 §E.3 — the model's `release` event is the pipeline participant's own seams (prepare, flip): its
+            // templates are always RELEASED, so the coordinator's dependency guard has nothing to decide here.
+            coordination = ReleaseCoordinationDoubles.setUp(releases, statuses),
             // The model's templates are always RELEASED, so a restore's pin recheck (#517 round three) passes.
             templateStatuses = statuses,
         )

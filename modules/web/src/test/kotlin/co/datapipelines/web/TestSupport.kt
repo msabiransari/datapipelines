@@ -278,8 +278,6 @@ fun pipelineServiceOver(
             io.mockk.every { writesManagedLake(any(), any()) } returns false
         },
     authoring: co.datapipelines.pipeline.AuthoringGuard = co.datapipelines.pipeline.AuthoringGuard(true),
-    templateVersions: co.datapipelines.pipeline.TemplateVersionStatuses =
-        co.datapipelines.pipeline.TemplateVersionStatuses { _, _, _ -> null },
 ): co.datapipelines.pipeline.PipelineService =
     co.datapipelines.pipeline.PipelineService(
         pipelines = pipelines,
@@ -288,7 +286,6 @@ fun pipelineServiceOver(
         releases =
             co.datapipelines.pipeline.PipelineReleaseService(
                 pipelines,
-                templateVersions,
                 validator,
                 authoring,
                 dashboards = NO_DASHBOARDS,
@@ -301,7 +298,18 @@ fun pipelineServiceOver(
         dashboards = NO_DASHBOARDS,
         endpointVersions = NO_API_VERSION_PINS,
         schedules = NO_SCHEDULE_PINS,
+        coordination = NO_RELEASES,
     )
+
+/**
+ * #877 §E.3 — the pipeline service's release coordinator for a construction that never releases: since the native
+ * release was retired the service has no release path without a coordinator, so a release here is a bug in the test,
+ * and it says so. A test that releases wires the real coordinator (`web/release`'s `NativeReleaseWorld`).
+ */
+val NO_RELEASES =
+    co.datapipelines.pipeline.release.PipelineReleaseCoordination {
+        error("this test never releases a pipeline: it wired NO_RELEASES")
+    }
 
 /** #320 — the pipeline service's dashboard port with no dashboards: explicit, the port has no default. */
 val NO_DASHBOARDS =

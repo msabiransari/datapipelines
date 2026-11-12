@@ -63,13 +63,12 @@ class McpServerWiringTest {
             TemplatesPurgeDraftTool(templates, usage, authoringGuard, McpFixtures.EVERYTHING_LENS, drafts),
         )
 
-    /** The composed reverse arrow over its four collaborators (#320 added the pipeline repository and the visualization scans). */
+    /** The composed reverse arrow over the inverse arms (#877 §C) — every arm answers empty here — and the not-found check. */
     private fun usage() =
         co.datapipelines.application.templates.TemplateUsage(
+            co.datapipelines.application.dependencies
+                .IncomingRows { _, _, _, _, _ -> emptyList() },
             co.datapipelines.templates.TemplateUsageService(templates, pipelines),
-            io.mockk.mockk<co.datapipelines.parameters.ParameterSetTemplatePins>(),
-            pipelines,
-            io.mockk.mockk<co.datapipelines.visualization.ArtifactDependents>(),
         )
 
     private fun tools(): List<McpTool> {
@@ -170,6 +169,30 @@ class McpServerWiringTest {
         assertAll(
             { dispatcher.toolNames().size shouldBe McpToolCatalog.NAMES.size },
             { dispatcher.toolNames() shouldContainExactlyInAnyOrder McpToolCatalog.NAMES },
+        )
+    }
+
+    /**
+     * #877 §C — one construction site: the tools read the context's `TemplateUsage` bean (an adapter over the inverse
+     * arms), never a copy built inline from the domain scans. `mcpTools` takes it as a parameter, and no main source of
+     * this module constructs one (the scan is non-vacuous: it must find the configuration file it guards).
+     */
+    @Test
+    fun `the tools take the TemplateUsage bean - no main source of this module constructs one`() {
+        val usageType = co.datapipelines.application.templates.TemplateUsage::class.java
+        val mcpTools = McpServerAutoConfiguration::class.java.declaredMethods.single { it.name == "mcpTools" }
+        val sources =
+            java.io
+                .File("src/main/kotlin")
+                .walkTopDown()
+                .filter { it.isFile && it.extension == "kt" }
+                .toList()
+        val constructing = sources.filter { Regex("""\bTemplateUsage\(""").containsMatchIn(it.readText()) }.map { it.name }
+
+        assertAll(
+            { mcpTools.parameterTypes.toList().contains(usageType) shouldBe true },
+            { sources.any { it.name == "McpServerAutoConfiguration.kt" } shouldBe true },
+            { constructing shouldBe emptyList() },
         )
     }
 

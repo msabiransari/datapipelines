@@ -4,6 +4,7 @@ import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Proxy
 import java.sql.Connection
 import java.sql.PreparedStatement
+import java.sql.ResultSet
 import java.util.Collections
 import javax.sql.DataSource
 
@@ -15,6 +16,9 @@ import javax.sql.DataSource
  *
  * The ceiling's own bookkeeping statements (they name `statement_timeout`) are neither recorded nor followed by [after].
  * The observation is a read on the statement's own connection; it changes no setting.
+ *
+ * #877 §B — [rowsRead] counts, per recorded query, the rows its result set yielded: what the DATABASE returned, which a
+ * caller that trims a page in memory cannot hide (a page statement without its `LIMIT` reads every occurrence).
  */
 class ObservedStatements(
     private val target: DataSource,
@@ -22,6 +26,9 @@ class ObservedStatements(
 ) {
     /** Every observed statement, in execution order: its SQL and the `statement_timeout` it executed under. */
     val observed: MutableList<Pair<String, String>> = Collections.synchronizedList(mutableListOf())
+
+    /** Per recorded `executeQuery`, in execution order: the rows its result set yielded (`next()` answering true). */
+    val rowsRead: MutableList<Int> = Collections.synchronizedList(mutableListOf())
 
     /** The timeouts alone, in order. */
     fun timeouts(): List<String> = observed.map { it.second }
@@ -57,7 +64,11 @@ class ObservedStatements(
                     }
                 observed += sql to timeout
                 try {
-                    call(raw, method, args) ?: NULL
+                    when (val answer = call(raw, method, args)) {
+                        null -> NULL
+                        is ResultSet -> counted(answer)
+                        else -> answer
+                    }
                 } finally {
                     after(sql)
                 }
@@ -65,6 +76,22 @@ class ObservedStatements(
                 null
             }
         }
+
+    /** [raw], counting into a new [rowsRead] slot every row `next()` advances to. */
+    private fun counted(raw: ResultSet): ResultSet {
+        val slot =
+            synchronized(rowsRead) {
+                rowsRead += 0
+                rowsRead.lastIndex
+            }
+        return proxy(raw) { method, args ->
+            if (method.name == "next") {
+                (call(raw, method, args) as Boolean).also { advanced -> if (advanced) rowsRead[slot] = rowsRead[slot] + 1 }
+            } else {
+                null
+            }
+        }
+    }
 
     /** A proxy of [target]'s interface that lets [intercept] answer a call (non-null) or passes it through. */
     private inline fun <reified T : Any> proxy(

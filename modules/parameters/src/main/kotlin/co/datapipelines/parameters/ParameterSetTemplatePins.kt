@@ -1,6 +1,10 @@
 package co.datapipelines.parameters
 
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.inverse.InverseRequest
+import co.datapipelines.pipeline.inverse.InverseRow
+import co.datapipelines.pipeline.inverse.InverseScope
+import co.datapipelines.pipeline.inverse.InverseSql
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import java.util.UUID
 
@@ -37,21 +41,21 @@ data class ParameterSetPin(
  * The statement lives beside [ParameterSetRepository] (same tables, same discipline) because
  * the JSONB predicate is the body shape's property — and the composition with the pipeline
  * scan is `application`'s (the record's §8.4), which sees only this class.
+ *
+ * #877 §B.3: every question pages the ONE native bounded query [ParameterSetRepository.findTemplatePinOccurrences] — the
+ * same statement the template family's parameter-set inverse arm reads — to exhaustion, and answers in its existing order.
  */
 class ParameterSetTemplatePins(
-    private val jdbc: NamedParameterJdbcTemplate,
+    jdbc: NamedParameterJdbcTemplate,
 ) {
+    private val sets = ParameterSetRepository(jdbc)
+
     /** One row per pinning parameter of one live set's working version, at exactly `templateId@version`. */
     fun workingVersionPins(
         workspaceId: UUID,
         templateId: String,
         version: Int,
-    ): List<ParameterSetPin> =
-        jdbc.query(
-            WORKING_PINS_SQL,
-            mapOf("workspaceId" to workspaceId, "templateId" to templateId, "pinnedVersion" to version),
-            MAPPER,
-        )
+    ): List<ParameterSetPin> = pins(workspaceId, templateId, version, InverseScope.WORKING).sortedWith(BY_NAME_THEN_PARAMETER)
 
     /**
      * One row per pinning parameter of every LIVE (DRAFT or RELEASED — never DISCARDED) set
@@ -62,156 +66,68 @@ class ParameterSetTemplatePins(
         workspaceId: UUID,
         templateId: String,
         version: Int,
-    ): List<ParameterSetPin> =
-        jdbc.query(
-            LIVE_VERSION_PINS_SQL,
-            mapOf("workspaceId" to workspaceId, "templateId" to templateId, "pinnedVersion" to version),
-            MAPPER,
-        )
+    ): List<ParameterSetPin> = pins(workspaceId, templateId, version, InverseScope.LIVE).sortedWith(BY_NAME_NEWEST_THEN_PARAMETER)
 
     /** The working-version pins of ANY version of `templateId` — the screen counts' lensed re-derivation. */
     fun workingVersionPins(
         workspaceId: UUID,
         templateId: String,
-    ): List<ParameterSetPin> =
-        jdbc.query(
-            COUNT_WORKING_PINS_ROWS_SQL,
-            mapOf("workspaceId" to workspaceId, "templateId" to templateId),
-            MAPPER,
-        )
+    ): List<ParameterSetPin> = pins(workspaceId, templateId, null, InverseScope.WORKING).sortedWith(BY_NAME_THEN_PARAMETER)
 
     /** One row per pinning parameter of ANY version ever stored, any pin of this template id. */
     fun anyVersionPins(
         workspaceId: UUID,
         templateId: String,
-    ): List<ParameterSetPin> =
-        jdbc.query(
-            ANY_PINS_SQL,
-            mapOf("workspaceId" to workspaceId, "templateId" to templateId),
-            MAPPER,
-        )
+    ): List<ParameterSetPin> = pins(workspaceId, templateId, null, InverseScope.ANY).sortedWith(BY_NAME_NEWEST_THEN_PARAMETER)
 
     /** The working-version pins grouped by pinned version, the SET as the unit — the screen-count twin. */
     fun countWorkingPinsByPinnedVersion(
         workspaceId: UUID,
         templateId: String,
     ): Map<Int, Int> =
-        jdbc
-            .query(
-                COUNT_WORKING_PINS_SQL,
-                mapOf("workspaceId" to workspaceId, "templateId" to templateId),
-            ) { rs, _ ->
-                rs.getInt("pinned_version") to rs.getInt("sets")
-            }.toMap()
+        pins(workspaceId, templateId, null, InverseScope.WORKING)
+            .let(::countByPinnedVersion)
 
-    private companion object {
-        /**
-         * The derived-ACTIVE predicate, the same expression [ParameterSetRepository] spells
-         * (`LIVE_S`) — repeated here because that constant is private to the frozen file and
-         * this scanner is a separate additive class over the same tables.
-         */
-        private const val LIVE_S =
-            "EXISTS (SELECT 1 FROM parameter_set_versions lv WHERE lv.parameter_set_id = %s.id" +
-                " AND lv.status IN ('DRAFT','RELEASED'))"
+    private fun pins(
+        workspaceId: UUID,
+        templateId: String,
+        version: Int?,
+        scope: InverseScope,
+    ): List<ParameterSetPin> =
+        InverseSql
+            .exhaust(InverseSql.EXHAUST_PAGE) { after ->
+                sets.findTemplatePinOccurrences(InverseRequest(workspaceId, templateId, version, scope, after, InverseSql.EXHAUST_PAGE))
+            }.let(::pinsOf)
 
-        private val WORKING_LIVE = LIVE_S.format("s")
+    /**
+     * #877 §C — the set arm's rows as this class's answers: ONE mapping and ONE order, read by these scans (which page
+     * the native query in place) and by the application adapter over `findIncoming` (which receives the same rows).
+     */
+    companion object {
+        /** The working listings' order: set name, then parameter. */
+        val BY_NAME_THEN_PARAMETER: Comparator<ParameterSetPin> = compareBy<ParameterSetPin> { it.setName }.thenBy { it.parameter }
 
-        /** The set analogue of `TemplateRepository`'s pin scans: the working version is the draft else the pointer. */
-        private val WORKING_PINS_SQL =
-            """
-            SELECT s.id AS set_id, s.name AS set_name, p->>'name' AS parameter,
-                   v.version AS set_version, v.status AS version_status,
-                   (p->'source'->'template'->>'version')::int AS pinned_version
-              FROM parameter_sets s
-              JOIN parameter_set_versions v
-                ON v.parameter_set_id = s.id
-               AND v.version = COALESCE(
-                       (SELECT d.version FROM parameter_set_versions d
-                         WHERE d.parameter_set_id = s.id AND d.status = 'DRAFT' LIMIT 1),
-                       s.current_version)
-             CROSS JOIN LATERAL jsonb_array_elements(v.body_json->'parameters') AS p
-             WHERE s.workspace_id = :workspaceId AND $WORKING_LIVE
-               AND p->'source'->'template'->>'id' = :templateId
-               AND (p->'source'->'template'->>'version')::int = :pinnedVersion
-             ORDER BY s.name, p->>'name'
-            """.trimIndent()
+        /** The live and any-version scans' order: set name, newest set version first, then parameter. */
+        val BY_NAME_NEWEST_THEN_PARAMETER: Comparator<ParameterSetPin> =
+            compareBy<ParameterSetPin> { it.setName }.thenByDescending { it.setVersion }.thenBy { it.parameter }
 
-        /** The record's §8.4 delete-guard evidence: every version ever, any pin of this template id. */
-        private val ANY_PINS_SQL =
-            """
-            SELECT s.id AS set_id, s.name AS set_name, p->>'name' AS parameter,
-                   v.version AS set_version, v.status AS version_status,
-                   (p->'source'->'template'->>'version')::int AS pinned_version
-              FROM parameter_sets s
-              JOIN parameter_set_versions v ON v.parameter_set_id = s.id
-             CROSS JOIN LATERAL jsonb_array_elements(v.body_json->'parameters') AS p
-             WHERE s.workspace_id = :workspaceId AND $WORKING_LIVE
-               AND p->'source'->'template'->>'id' = :templateId
-             ORDER BY s.name, v.version DESC, p->>'name'
-            """.trimIndent()
+        /** Rows as pins, unordered. The native scans cast the stored version; a non-integral one never counted as a pin. */
+        fun pinsOf(rows: List<InverseRow>): List<ParameterSetPin> =
+            rows.mapNotNull { row ->
+                row.storedVersion?.let { pinned ->
+                    ParameterSetPin(
+                        setId = row.dependentUuid,
+                        setName = row.dependentName,
+                        parameter = row.elementId.orEmpty(),
+                        setVersion = row.dependentVersion,
+                        versionStatus = checkNotNull(row.status) { "a set version has a status" },
+                        pinnedVersion = pinned,
+                    )
+                }
+            }
 
-        /** The discard/purge guard's evidence: LIVE set versions at this exact pin (D60's rule 1, sets included). */
-        private val LIVE_VERSION_PINS_SQL =
-            """
-            SELECT s.id AS set_id, s.name AS set_name, p->>'name' AS parameter,
-                   v.version AS set_version, v.status AS version_status,
-                   (p->'source'->'template'->>'version')::int AS pinned_version
-              FROM parameter_sets s
-              JOIN parameter_set_versions v ON v.parameter_set_id = s.id
-             CROSS JOIN LATERAL jsonb_array_elements(v.body_json->'parameters') AS p
-             WHERE s.workspace_id = :workspaceId AND $WORKING_LIVE
-               AND v.status IN ('DRAFT','RELEASED')
-               AND p->'source'->'template'->>'id' = :templateId
-               AND (p->'source'->'template'->>'version')::int = :pinnedVersion
-             ORDER BY s.name, v.version DESC, p->>'name'
-            """.trimIndent()
-
-        /** The working-version scan, every pinned version as rows — the screen counts' lensed re-derivation. */
-        private val COUNT_WORKING_PINS_ROWS_SQL =
-            """
-            SELECT s.id AS set_id, s.name AS set_name, p->>'name' AS parameter,
-                   v.version AS set_version, v.status AS version_status,
-                   (p->'source'->'template'->>'version')::int AS pinned_version
-              FROM parameter_sets s
-              JOIN parameter_set_versions v
-                ON v.parameter_set_id = s.id
-               AND v.version = COALESCE(
-                       (SELECT d.version FROM parameter_set_versions d
-                         WHERE d.parameter_set_id = s.id AND d.status = 'DRAFT' LIMIT 1),
-                       s.current_version)
-             CROSS JOIN LATERAL jsonb_array_elements(v.body_json->'parameters') AS p
-             WHERE s.workspace_id = :workspaceId AND $WORKING_LIVE
-               AND p->'source'->'template'->>'id' = :templateId
-             ORDER BY s.name, p->>'name'
-            """.trimIndent()
-
-        /** The working-version scan grouped by pinned version, sets as the unit (the screen-count twin). */
-        private val COUNT_WORKING_PINS_SQL =
-            """
-            SELECT (p->'source'->'template'->>'version')::int AS pinned_version,
-                   COUNT(DISTINCT s.id)::int AS sets
-              FROM parameter_sets s
-              JOIN parameter_set_versions v
-                ON v.parameter_set_id = s.id
-               AND v.version = COALESCE(
-                       (SELECT d.version FROM parameter_set_versions d
-                         WHERE d.parameter_set_id = s.id AND d.status = 'DRAFT' LIMIT 1),
-                       s.current_version)
-             CROSS JOIN LATERAL jsonb_array_elements(v.body_json->'parameters') AS p
-             WHERE s.workspace_id = :workspaceId AND $WORKING_LIVE
-               AND p->'source'->'template'->>'id' = :templateId
-             GROUP BY 1
-            """.trimIndent()
-
-        private val MAPPER = { rs: java.sql.ResultSet, _: Int ->
-            ParameterSetPin(
-                setId = UUID.fromString(rs.getString("set_id")),
-                setName = rs.getString("set_name"),
-                parameter = rs.getString("parameter"),
-                setVersion = rs.getInt("set_version"),
-                versionStatus = PipelineVersionStatus.valueOf(rs.getString("version_status")),
-                pinnedVersion = rs.getInt("pinned_version"),
-            )
-        }
+        /** Distinct sets per pinned template version (the template screen's per-version count). */
+        fun countByPinnedVersion(pins: List<ParameterSetPin>): Map<Int, Int> =
+            pins.groupBy { it.pinnedVersion }.mapValues { (_, pinning) -> pinning.map { it.setId }.distinct().size }
     }
 }

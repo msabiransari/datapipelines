@@ -3,6 +3,7 @@ package co.datapipelines.web.config
 import co.datapipelines.application.dependencies.EndpointDependencySource
 import co.datapipelines.application.dependencies.EndpointVersionPipelineConsumers
 import co.datapipelines.application.dependencies.PostgresStatementCeiling
+import co.datapipelines.application.dependencies.RegistryIncomingRows
 import co.datapipelines.application.dependencies.ReleaseDependencyFamilies
 import co.datapipelines.application.dependencies.ReleasePlanningWalk
 import co.datapipelines.application.endpoints.EndpointAuthorizer
@@ -24,6 +25,7 @@ import co.datapipelines.auth.ApiKeyService
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.WorkspaceLiveness
 import co.datapipelines.dependencies.FamilyDescriptor
+import co.datapipelines.dependencies.FamilyRegistry
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ResultConfig
 import co.datapipelines.executor.ResultStore
@@ -141,11 +143,12 @@ class EndpointsConfiguration {
 
     /**
      * #786 B.4 — the pipeline aggregate's answer to "which API versions pin this release?" (record §14, A39): a pipeline
-     * version discard or purge refuses while a DRAFT or RELEASED API version pins it.
+     * version discard or purge refuses while a DRAFT or RELEASED API version pins it. An adapter over the pipeline
+     * family's API arm (#877 §C), the registry read at the first question (no bean cycle).
      */
     @Bean
-    fun endpointVersionConsumers(versions: PublishedEndpointVersionRepository): EndpointVersionConsumers =
-        EndpointVersionPipelineConsumers(versions)
+    fun endpointVersionConsumers(dependencyFamilyRegistry: ObjectProvider<FamilyRegistry>): EndpointVersionConsumers =
+        EndpointVersionPipelineConsumers(RegistryIncomingRows(dependencyFamilyRegistry::getObject))
 
     /**
      * #786 — the native checks of an API version's exact pipeline pin, shared by creation, a draft save, the current

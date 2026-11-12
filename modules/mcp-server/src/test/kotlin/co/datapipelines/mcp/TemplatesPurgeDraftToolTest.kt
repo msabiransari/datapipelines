@@ -33,12 +33,17 @@ class TemplatesPurgeDraftToolTest {
     private val pipelines = mockk<PipelineRepository>()
     private val parameterPins = mockk<co.datapipelines.parameters.ParameterSetTemplatePins>()
     private val visualizationPins = mockk<co.datapipelines.visualization.ArtifactDependents>()
+
+    /** #877 §D — the importer arm's stored rows per target key, and the keys the tool asked it about. */
+    private val importRows = mutableMapOf<String, List<co.datapipelines.pipeline.inverse.InverseRow>>()
+    private val importerQuestions = mutableListOf<String>()
     private val usage =
         co.datapipelines.application.templates.TemplateUsage(
+            ScannedIncomingRows(pipelines, parameterPins, visualizationPins) { key ->
+                importerQuestions += key
+                importRows[key].orEmpty()
+            },
             TemplateUsageService(templates, pipelines),
-            parameterPins,
-            pipelines,
-            visualizationPins,
         )
 
     // #841: the purge runs on the draft service's guarded transaction; DIRECT + NONE here (no transaction, no lock).
@@ -75,6 +80,30 @@ class TemplatesPurgeDraftToolTest {
             visualizationPins.visualizationsPinningTemplate(McpFixtures.WORKSPACE_ID, id, null, co.datapipelines.visualization.PinScope.ANY)
         } returns pins.toList()
     }
+
+    /** One stored `imports[i]` of version [version] (status [status]) of template [importer], pinning the draft at v1. */
+    private fun importRow(
+        importer: String,
+        version: Int = 1,
+        status: PipelineVersionStatus = PipelineVersionStatus.DRAFT,
+    ) = co.datapipelines.pipeline.inverse.InverseRow(
+        java.util.UUID
+            .nameUUIDFromBytes(importer.toByteArray())
+            .toString(),
+        importer,
+        version,
+        status,
+        "imports[0]",
+        1,
+        "lib",
+    )
+
+    /** The templates' lens (`template.read`'s promoter cell) — admits only the names given. */
+    private fun narrowedTemplateLens(vararg admitted: String) =
+        PromoterLens {
+            co.datapipelines.application.lens
+                .LensedView(ReadLens.Everything, ReadLens.Only(admitted.toSet()))
+        }
 
     init {
         every { parameterPins.anyVersionPins(any(), any()) } returns emptyList()
@@ -210,6 +239,8 @@ class TemplatesPurgeDraftToolTest {
             // The hidden set is FLAGGED only - the refusal echoes neither a name nor a count of what the caller cannot see.
             { thrown.details["referencing_parameter_sets"] shouldBe emptyList<String>() },
             { thrown.details["pins_hidden"] shouldBe true },
+            // the echo's whole key set: a hidden pin adds the flag and nothing else (no count, no name)
+            { thrown.details.keys shouldBe setOf("template_id", "referencing_parameter_sets", "pins_hidden") },
             { thrown.message shouldContain "parameter set version(s) outside your view" },
             { thrown.message shouldNotContain "1 parameter set" },
             { thrown.message shouldNotContain "acme/sales/region_filters" },
@@ -278,6 +309,8 @@ class TemplatesPurgeDraftToolTest {
             { thrown.code shouldBe PipelineErrorCodes.Template.IN_USE },
             { thrown.details["referencing_visualizations"] shouldBe emptyList<String>() },
             { thrown.details["pins_hidden"] shouldBe true },
+            // the echo's whole key set: a hidden pin adds the flag and nothing else (no count, no name)
+            { thrown.details.keys shouldBe setOf("template_id", "referencing_visualizations", "pins_hidden") },
             { thrown.message shouldContain "visualization version(s) outside your view" },
             { thrown.message shouldNotContain "acme/charts/secret" },
             { thrown.message shouldNotContain "2 visualization" },
@@ -297,8 +330,96 @@ class TemplatesPurgeDraftToolTest {
         assertAll(
             { thrown.details["referencing_visualizations"] shouldBe listOf("acme/charts/shown") },
             { thrown.details["pins_hidden"] shouldBe true },
+            // the echo's whole key set: a hidden pin adds the flag and nothing else (no count, no name)
+            { thrown.details.keys shouldBe setOf("template_id", "referencing_visualizations", "pins_hidden") },
             { thrown.message shouldContain "acme/charts/shown and others outside your view" },
             { thrown.message shouldNotContain "acme/charts/secret" },
         )
+    }
+
+    @Test
+    fun `a DRAFT template that imports the draft refuses the purge - the fourth arm, named as the web guard names it (877)`() {
+        stubSoleDraft()
+        importRows[id] = listOf(importRow("acme/t/report.sql"), importRow("acme/t/report.sql", version = 2))
+
+        val thrown = shouldThrow<DatapipelinesException> { tool.call(McpArguments(mapOf("id" to id)), ctx) }
+
+        assertAll(
+            { thrown.code shouldBe PipelineErrorCodes.Template.IN_USE },
+            { thrown.details["template_id"] shouldBe id },
+            { thrown.details["referencing_templates"] shouldBe listOf("acme/t/report.sql") },
+            { thrown.details.containsKey("pins_hidden") shouldBe false },
+            {
+                thrown.message shouldBe
+                    "Version of template '$id' is pinned by 1 template version(s): acme/t/report.sql; discard or repoint them first."
+            },
+        )
+        verify(exactly = 0) { templates.purgeDraft(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a DISCARDED importer still refuses - the entity purge asks every stored version ever (R12)`() {
+        stubSoleDraft()
+        importRows[id] = listOf(importRow("acme/t/old.sql", status = PipelineVersionStatus.DISCARDED))
+
+        val thrown = shouldThrow<DatapipelinesException> { tool.call(McpArguments(mapOf("id" to id)), ctx) }
+
+        assertAll(
+            { thrown.code shouldBe PipelineErrorCodes.Template.IN_USE },
+            { thrown.details["referencing_templates"] shouldBe listOf("acme/t/old.sql") },
+            { importerQuestions shouldBe listOf(id) },
+        )
+        verify(exactly = 0) { templates.purgeDraft(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `an importer the caller's lens hides still refuses the purge - flagged, never named or counted (877)`() {
+        val narrowedTool = TemplatesPurgeDraftTool(templates, usage, AuthoringGuard(true), narrowedTemplateLens(id), drafts)
+        stubSoleDraft()
+        importRows[id] = listOf(importRow("acme/t/secret.sql"), importRow("acme/t/hidden.sql"))
+
+        val thrown = shouldThrow<DatapipelinesException> { narrowedTool.call(McpArguments(mapOf("id" to id)), ctx) }
+
+        assertAll(
+            { thrown.code shouldBe PipelineErrorCodes.Template.IN_USE },
+            { thrown.details["referencing_templates"] shouldBe emptyList<String>() },
+            { thrown.details["pins_hidden"] shouldBe true },
+            // the echo's whole key set: a hidden pin adds the flag and nothing else (no count, no name)
+            { thrown.details.keys shouldBe setOf("template_id", "referencing_templates", "pins_hidden") },
+            { thrown.message shouldContain "template version(s) outside your view" },
+            { thrown.message shouldNotContain "secret" },
+            { thrown.message shouldNotContain "hidden.sql" },
+            { thrown.message shouldNotContain "2 template" },
+        )
+        verify(exactly = 0) { templates.purgeDraft(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a lens that admits only some importers names those and flags the rest`() {
+        val narrowedTool =
+            TemplatesPurgeDraftTool(templates, usage, AuthoringGuard(true), narrowedTemplateLens(id, "acme/t/shown.sql"), drafts)
+        stubSoleDraft()
+        importRows[id] = listOf(importRow("acme/t/shown.sql"), importRow("acme/t/secret.sql"))
+
+        val thrown = shouldThrow<DatapipelinesException> { narrowedTool.call(McpArguments(mapOf("id" to id)), ctx) }
+
+        assertAll(
+            { thrown.details["referencing_templates"] shouldBe listOf("acme/t/shown.sql") },
+            { thrown.details["pins_hidden"] shouldBe true },
+            // the echo's whole key set: a hidden pin adds the flag and nothing else (no count, no name)
+            { thrown.details.keys shouldBe setOf("template_id", "referencing_templates", "pins_hidden") },
+            { thrown.message shouldContain "acme/t/shown.sql and others outside your view" },
+            { thrown.message shouldNotContain "secret" },
+        )
+    }
+
+    @Test
+    fun `an unpinned draft asks the importer arm once and is purged`() {
+        stubSoleDraft()
+
+        tool.call(McpArguments(mapOf("id" to id)), ctx)
+
+        importerQuestions shouldBe listOf(id)
+        verify(exactly = 1) { templates.purgeDraft(McpFixtures.WORKSPACE_ID, id, "hash-1", true) }
     }
 }

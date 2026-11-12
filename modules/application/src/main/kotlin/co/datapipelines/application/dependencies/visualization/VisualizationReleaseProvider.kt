@@ -1,6 +1,7 @@
 package co.datapipelines.application.dependencies.visualization
 
 import co.datapipelines.application.dependencies.ArtifactReleaseProvider
+import co.datapipelines.application.dependencies.IncomingArms
 import co.datapipelines.application.dependencies.StatementCeiling
 import co.datapipelines.application.dependencies.StoredVersion
 import co.datapipelines.dependencies.Operational
@@ -30,7 +31,8 @@ class VisualizationReleaseProvider(
     private val visualizations: VisualizationRepository,
     ceiling: StatementCeiling,
     private val now: () -> Instant = Instant::now,
-) : ArtifactReleaseProvider<VisualizationBody>(ReleaseFamily.VISUALIZATION, ceiling) {
+    incoming: IncomingArms? = null,
+) : ArtifactReleaseProvider<VisualizationBody>(ReleaseFamily.VISUALIZATION, ceiling, incoming) {
     override fun read(
         workspaceId: UUID,
         keys: List<Pair<String, Int>>,

@@ -48,6 +48,9 @@ object ProviderConformance {
         ) : References
     }
 
+    /** The inverse arm (#877 §A): the violations of [fixture]'s `findIncoming` — see [IncomingConformance]. */
+    fun <B : Any> checkIncoming(fixture: IncomingConformance.Fixture<B>): List<String> = IncomingConformance.check(fixture)
+
     /** The violations of [fixture]'s family, empty when the provider conforms. */
     fun <B : Any> check(fixture: Fixture<B>): List<String> {
         val family = fixture.descriptor.key

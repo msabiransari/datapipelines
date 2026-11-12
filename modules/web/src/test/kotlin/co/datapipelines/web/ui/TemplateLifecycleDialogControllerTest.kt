@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.application.lens.LensedView
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
@@ -61,7 +62,7 @@ class TemplateLifecycleDialogControllerTest {
             )
         mvc =
             MockMvcBuilders
-                .standaloneSetup(TemplateLifecycleDialogController(releases, templates, dialogs, audit))
+                .standaloneSetup(TemplateLifecycleDialogController(releases, templates, dialogs, audit, { LensedView.EVERYTHING }))
                 .setControllerAdvice(UiExceptionHandler())
                 .build()
     }
@@ -205,7 +206,7 @@ class TemplateLifecycleDialogControllerTest {
                     status = PipelineVersionStatus.DRAFT,
                 ),
             )
-        every { releases.purgeVersion(WORKSPACE, PATH, 2) } returns Unit
+        every { releases.purgeVersion(WORKSPACE, PATH, 2, LensedView.EVERYTHING) } returns Unit
 
         mvc
             .perform(
@@ -225,7 +226,7 @@ class TemplateLifecycleDialogControllerTest {
                 co.datapipelines.templates.TemplateVersionSummary(PATH, 2, Instant.now(), USER),
                 co.datapipelines.templates.TemplateVersionSummary(PATH, 1, Instant.now(), USER),
             )
-        every { releases.purgeVersion(WORKSPACE, PATH, 2) } returns Unit
+        every { releases.purgeVersion(WORKSPACE, PATH, 2, LensedView.EVERYTHING) } returns Unit
 
         mvc
             .perform(
@@ -254,12 +255,12 @@ class TemplateLifecycleDialogControllerTest {
                 .response.contentAsString
 
         response shouldContain "template.version.confirm_mismatch"
-        verify(exactly = 0) { releases.purgeVersion(any(), any(), any()) }
+        verify(exactly = 0) { releases.purgeVersion(any(), any(), any(), any()) }
     }
 
     @Test
     fun `discard - the redirect lands on the Versions tab with the flash`() {
-        every { releases.discardVersion(WORKSPACE, PATH, 1, USER) } returns draftDetail()
+        every { releases.discardVersion(WORKSPACE, PATH, 1, USER, LensedView.EVERYTHING) } returns draftDetail()
 
         mvc
             .perform(
@@ -273,7 +274,7 @@ class TemplateLifecycleDialogControllerTest {
 
     @Test
     fun `discard - the in-use refusal is Shape C with the real 409`() {
-        every { releases.discardVersion(WORKSPACE, PATH, 1, USER) } throws
+        every { releases.discardVersion(WORKSPACE, PATH, 1, USER, LensedView.EVERYTHING) } throws
             DatapipelinesException(
                 code = PipelineErrorCodes.Template.IN_USE,
                 message = "Version of template '$PATH' is pinned by 1 live pipeline version(s): nyc/rollup",
@@ -312,7 +313,7 @@ class TemplateLifecycleDialogControllerTest {
 
     @Test
     fun `purge entity - the confirm names the template, and the redirect carries the toast`() {
-        every { releases.purgeEntity(WORKSPACE, PATH) } returns Unit
+        every { releases.purgeEntity(WORKSPACE, PATH, LensedView.EVERYTHING) } returns Unit
 
         mvc
             .perform(

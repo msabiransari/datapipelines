@@ -1,6 +1,7 @@
 package co.datapipelines.application.dependencies.template
 
 import co.datapipelines.application.dependencies.ArtifactReleaseProvider
+import co.datapipelines.application.dependencies.IncomingArms
 import co.datapipelines.application.dependencies.StatementCeiling
 import co.datapipelines.application.dependencies.StoredVersion
 import co.datapipelines.dependencies.Reference
@@ -20,7 +21,8 @@ import java.util.UUID
 class TemplateReleaseProvider(
     private val templates: TemplateRepository,
     ceiling: StatementCeiling,
-) : ArtifactReleaseProvider<Template>(ReleaseFamily.TEMPLATE, ceiling) {
+    incoming: IncomingArms? = null,
+) : ArtifactReleaseProvider<Template>(ReleaseFamily.TEMPLATE, ceiling, incoming) {
     override fun read(
         workspaceId: UUID,
         keys: List<Pair<String, Int>>,

@@ -1,5 +1,10 @@
 package co.datapipelines.pipeline
 
+import co.datapipelines.pipeline.inverse.InverseRequest
+import co.datapipelines.pipeline.inverse.InverseRow
+import co.datapipelines.pipeline.inverse.InverseScope
+import co.datapipelines.pipeline.inverse.InverseSql
+import co.datapipelines.pipeline.inverse.PipelinePinRows
 import co.datapipelines.pipeline.release.RaceSavepoint
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.dao.DuplicateKeyException
@@ -208,6 +213,9 @@ class PipelineRepository(
      */
     private val tree = PipelineTreeQueries(jdbc, SELECT_COLUMNS, MAPPER)
 
+    /** The family's native bounded inverse statements (#877 §B.1) — every reverse-arrow scan below pages them. */
+    private val inverse = PipelineInverseQueries(jdbc)
+
     /** The pipeline's metadata row, or null when it does not exist, is soft-deleted, or lives in another workspace. */
     fun findById(
         workspaceId: UUID,
@@ -358,11 +366,8 @@ class PipelineRepository(
         workspaceId: UUID,
         datasourceName: String,
     ): List<DatasourceRef> =
-        jdbc.query(
-            ANY_DATASOURCE_REFS_SQL,
-            mapOf("workspaceId" to workspaceId, "datasourceName" to datasourceName),
-            DATASOURCE_REF_MAPPER,
-        )
+        exhaust(workspaceId, datasourceName, null, InverseScope.ANY, inverse::datasourceRefs)
+            .let(PipelinePinRows::datasourceRefs)
 
     /**
      * **One level** of the pipeline tree under [prefix] — its direct sub-folders and its
@@ -783,11 +788,9 @@ class PipelineRepository(
         templateId: String,
         version: Int,
     ): List<TemplatePin> =
-        jdbc.query(
-            WORKING_TEMPLATE_PINS_SQL,
-            mapOf("workspaceId" to workspaceId, "templateId" to templateId, "pinnedVersion" to version),
-            PIN_MAPPER,
-        )
+        exhaust(workspaceId, templateId, version, InverseScope.WORKING, inverse::templatePins)
+            .map(PipelinePinRows::templatePin)
+            .sortedWith(PipelinePinRows.BY_NAME_THEN_NODE)
 
     /**
      * **Is it safe to remove `templateId` (any version of it)?** (040 D1, question 2.)
@@ -809,11 +812,9 @@ class PipelineRepository(
         workspaceId: UUID,
         templateId: String,
     ): List<TemplatePin> =
-        jdbc.query(
-            ANY_TEMPLATE_PINS_SQL,
-            mapOf("workspaceId" to workspaceId, "templateId" to templateId),
-            PIN_MAPPER,
-        )
+        exhaust(workspaceId, templateId, null, InverseScope.ANY, inverse::templatePins)
+            .map(PipelinePinRows::templatePin)
+            .sortedWith(PipelinePinRows.BY_NAME_NEWEST_THEN_NODE)
 
     /**
      * Distinct live pipelines pinning each version of [templateId], counted over the
@@ -827,12 +828,8 @@ class PipelineRepository(
         workspaceId: UUID,
         templateId: String,
     ): Map<Int, Int> =
-        jdbc
-            .query(
-                COUNT_TEMPLATE_PINS_SQL,
-                mapOf("workspaceId" to workspaceId, "templateId" to templateId),
-            ) { rs, _ -> rs.getInt("pinned_version") to rs.getInt("pipelines") }
-            .toMap()
+        exhaust(workspaceId, templateId, null, InverseScope.WORKING, inverse::templatePins)
+            .let(PipelinePinRows::countByPinnedVersion)
 
     /**
      * The content hash of a candidate body, computed by the SAME database expression every
@@ -1207,6 +1204,34 @@ class PipelineRepository(
         ) > 0
 
     /**
+     * #877 §B.1 — ONE page of the stored template pins (`nodes[i].template`) of this workspace's pipeline versions the
+     * [InverseRequest.scope] selects, at [InverseRequest.targetVersion] or entity-wide, after the cursor: at most
+     * `limit + 1` rows, ONE statement, in the inverse total order. The template family's provider arm and every
+     * template-pin scan of this repository read it.
+     */
+    fun findTemplatePinOccurrences(request: InverseRequest): List<InverseRow> = inverse.templatePins(request)
+
+    /** #877 §B.1 — ONE page of the stored child-pipeline pins (`nodes[i].pipeline`); see [findTemplatePinOccurrences]. */
+    fun findChildPinOccurrences(request: InverseRequest): List<InverseRow> = inverse.childPins(request)
+
+    /**
+     * #877 §B.1 — ONE page of the stored datasource references (`nodes[i].source`, `nodes[i].output.datasource`) by
+     * datasource NAME (an entity-wide request only); see [findTemplatePinOccurrences].
+     */
+    fun findDatasourceOccurrences(request: InverseRequest): List<InverseRow> = inverse.datasourceRefs(request)
+
+    private fun exhaust(
+        workspaceId: UUID,
+        key: String,
+        version: Int?,
+        scope: InverseScope,
+        read: (InverseRequest) -> List<InverseRow>,
+    ): List<InverseRow> =
+        InverseSql.exhaust(InverseSql.EXHAUST_PAGE) { after ->
+            read(InverseRequest(workspaceId, key, version, scope, after, InverseSql.EXHAUST_PAGE))
+        }
+
+    /**
      * LIVE parent versions pinning `pipelineName@version` — graph rule 1's evidence (the
      * `pipeline.version.pinned` refusal names them). A parent version is LIVE when its own
      * status is DRAFT or RELEASED; a DISCARDED parent version's pin is inert and does not
@@ -1217,11 +1242,9 @@ class PipelineRepository(
         pipelineName: String,
         version: Int,
     ): List<TemplatePin> =
-        jdbc.query(
-            LIVE_PARENT_PINS_SQL,
-            mapOf("workspaceId" to workspaceId, "pipelineName" to pipelineName, "version" to version),
-            PIN_MAPPER,
-        )
+        exhaust(workspaceId, pipelineName, version, InverseScope.LIVE, inverse::childPins)
+            // A pipeline's own versions never count as its parents (the native scan excluded the target's id).
+            .let { rows -> PipelinePinRows.parents(rows, pipelineName) }
 
     /**
      * LIVE pipeline versions pinning `templateId@version` — the template-side twin of graph
@@ -1233,11 +1256,9 @@ class PipelineRepository(
         templateId: String,
         version: Int,
     ): List<TemplatePin> =
-        jdbc.query(
-            LIVE_TEMPLATE_VERSION_PINS_SQL,
-            mapOf("workspaceId" to workspaceId, "templateId" to templateId, "version" to version),
-            PIN_MAPPER,
-        )
+        exhaust(workspaceId, templateId, version, InverseScope.LIVE, inverse::templatePins)
+            .map(PipelinePinRows::templatePin)
+            .sortedWith(PipelinePinRows.BY_NAME_THEN_NODE)
 
     /**
      * **Is the entity LIVE (ACTIVE)?** — the §3.2 derivation, read directly. The
@@ -1724,114 +1745,6 @@ class PipelineRepository(
             """.trimIndent()
 
         /**
-         * 040 D1 question 1 — the working-version template-pin scan. The join picks each live
-         * pipeline's working version (DRAFT if one exists, else `current_version` — the §7 rule,
-         * made a join predicate here so the "which body" choice cannot drift from every other
-         * working-version reader); the lateral expands that one body's nodes, and containment
-         * matches the node's `template {id, version}` pin exactly (extra keys in the stored
-         * object would still match — containment, not equality — which is the safe direction).
-         */
-        val WORKING_TEMPLATE_PINS_SQL =
-            """
-            SELECT p.id AS pipeline_id, p.name AS pipeline_name, v.version AS pipeline_version,
-                   v.status AS version_status, node->>'id' AS node_id,
-                   (node->'template'->>'version')::int AS pinned_version
-              FROM pipelines p
-              JOIN pipeline_versions v
-                ON v.pipeline_id = p.id
-               AND v.version = COALESCE(
-                       (SELECT d.version FROM pipeline_versions d
-                         WHERE d.pipeline_id = p.id AND d.status = 'DRAFT' LIMIT 1),
-                       p.current_version)
-             CROSS JOIN LATERAL jsonb_array_elements(v.body_json->'nodes') AS node
-             WHERE p.workspace_id = :workspaceId AND $ENTITY_LIVE_P
-               AND node->'template' @> jsonb_build_object('id', :templateId, 'version', :pinnedVersion)
-             ORDER BY p.name, node->>'id'
-            """.trimIndent()
-
-        /** 040 D1 question 2 — every version ever, any pin of this template id. */
-        val ANY_TEMPLATE_PINS_SQL =
-            """
-            SELECT p.id AS pipeline_id, p.name AS pipeline_name, v.version AS pipeline_version,
-                   v.status AS version_status, node->>'id' AS node_id,
-                   (node->'template'->>'version')::int AS pinned_version
-              FROM pipelines p
-              JOIN pipeline_versions v ON v.pipeline_id = p.id
-             CROSS JOIN LATERAL jsonb_array_elements(v.body_json->'nodes') AS node
-             WHERE p.workspace_id = :workspaceId AND $ENTITY_LIVE_P
-               AND node->'template'->>'id' = :templateId
-             ORDER BY p.name, v.version DESC, node->>'id'
-            """.trimIndent()
-
-        /** 040 D6 — the working-version scan grouped by pinned version, pipelines as the unit. */
-        val COUNT_TEMPLATE_PINS_SQL =
-            """
-            SELECT (node->'template'->>'version')::int AS pinned_version,
-                   COUNT(DISTINCT p.id)::int AS pipelines
-              FROM pipelines p
-              JOIN pipeline_versions v
-                ON v.pipeline_id = p.id
-               AND v.version = COALESCE(
-                       (SELECT d.version FROM pipeline_versions d
-                         WHERE d.pipeline_id = p.id AND d.status = 'DRAFT' LIMIT 1),
-                       p.current_version)
-             CROSS JOIN LATERAL jsonb_array_elements(v.body_json->'nodes') AS node
-             WHERE p.workspace_id = :workspaceId AND $ENTITY_LIVE_P
-               AND node->'template'->>'id' = :templateId
-             GROUP BY 1
-            """.trimIndent()
-
-        /**
-         * 061/T79 — every version ever, any node referencing this datasource.
-         *
-         * The two node shapes are the ones [findAllByDatasource] already knows: a node's
-         * `source` (the datasource it reads from) and a node's `output.datasource` (the one it
-         * writes to). Expressed as `->>` comparisons over the lateral-expanded node rather
-         * than the containment `@>` that scan uses, because the lateral is already open here
-         * for `node->>'id'` — one pass, and the node id the refusal needs comes out of the
-         * same row.
-         *
-         * `source` is compared as text, so the reserved literal `tempdb` simply never matches
-         * a real datasource name (it is not one, contract §6), and a node whose `source` is a
-         * nested object rather than a string yields SQL NULL and is skipped.
-         */
-        val ANY_DATASOURCE_REFS_SQL =
-            """
-            SELECT p.id AS pipeline_id, p.name AS pipeline_name, v.version AS pipeline_version,
-                   v.status AS version_status, node->>'id' AS node_id
-              FROM pipelines p
-              JOIN pipeline_versions v ON v.pipeline_id = p.id
-             CROSS JOIN LATERAL jsonb_array_elements(v.body_json->'nodes') AS node
-             WHERE p.workspace_id = :workspaceId AND $ENTITY_LIVE_P
-               AND (node->>'source' = :datasourceName
-                    OR node->'output'->>'datasource' = :datasourceName)
-             ORDER BY p.name, v.version DESC, node->>'id'
-            """.trimIndent()
-
-        val DATASOURCE_REF_MAPPER =
-            RowMapper { rs: ResultSet, _: Int ->
-                DatasourceRef(
-                    pipelineId = rs.getObject("pipeline_id", UUID::class.java),
-                    pipelineName = rs.getString("pipeline_name"),
-                    pipelineVersion = rs.getInt("pipeline_version"),
-                    versionStatus = PipelineVersionStatus.fromWire(rs.getString("version_status")),
-                    nodeId = rs.getString("node_id"),
-                )
-            }
-
-        val PIN_MAPPER =
-            RowMapper { rs: ResultSet, _: Int ->
-                TemplatePin(
-                    pipelineId = rs.getObject("pipeline_id", UUID::class.java),
-                    pipelineName = rs.getString("pipeline_name"),
-                    pipelineVersion = rs.getInt("pipeline_version"),
-                    versionStatus = PipelineVersionStatus.fromWire(rs.getString("version_status")),
-                    nodeId = rs.getString("node_id"),
-                    pinnedVersion = rs.getInt("pinned_version"),
-                )
-            }
-
-        /**
          * versioning §9.2 + D60 (101) — the version-less import: allocation is
          * `max(version) + 1` (the pointer can be NULL or stale, never an allocator), and the
          * pointer moves ONLY when the entity has no current at all — the first import onto a
@@ -1972,8 +1885,7 @@ class PipelineRepository(
                         WHERE pp.workspace_id = :workspaceId
                           AND pv.status IN ('DRAFT','RELEASED')
                           AND pv.pipeline_id <> :pipelineId
-                          AND pnode->'pipeline'->>'name' = :pipelineName
-                          AND (pnode->'pipeline'->>'version')::int = :version
+                          AND ${PipelineInverseQueries.DISCARD_CHILD_PIN_P}
                    )
                 RETURNING $DETAIL_COLUMNS
             ), bumped AS (
@@ -2058,47 +1970,6 @@ class PipelineRepository(
                )
             RETURNING p.id, p.name, p.display_name, p.description, p.owner_id,
                       p.current_version, p.created_at, p.updated_at
-            """.trimIndent()
-
-        /**
-         * Graph rule 1's evidence scan (101) — LIVE parent versions pinning
-         * `pipelineName@version`. A pin is inert when its carrying version is DISCARDED, so
-         * the scan filters `pv.status IN ('DRAFT','RELEASED')`; the parent entity itself is
-         * found through the join (a discarded entity cannot hold live versions by
-         * derivation, so no extra predicate is needed).
-         */
-        val LIVE_PARENT_PINS_SQL =
-            """
-            SELECT pp.id AS pipeline_id, pp.name AS pipeline_name, pv.version AS pipeline_version,
-                   pv.status AS version_status, pnode->>'id' AS node_id, :version AS pinned_version
-              FROM pipelines pp
-              JOIN pipeline_versions pv ON pv.pipeline_id = pp.id
-             CROSS JOIN LATERAL jsonb_array_elements(pv.body_json->'nodes') AS pnode
-             WHERE pp.workspace_id = :workspaceId
-               AND pv.pipeline_id <> (SELECT id FROM pipelines WHERE name = :pipelineName AND workspace_id = :workspaceId)
-               AND pv.status IN ('DRAFT','RELEASED')
-               AND pnode->'pipeline'->>'name' = :pipelineName
-               AND (pnode->'pipeline'->>'version')::int = :version
-             ORDER BY pp.name, pnode->>'id'
-            """.trimIndent()
-
-        /**
-         * The template twin of [LIVE_PARENT_PINS_SQL] (101) — LIVE pipeline versions pinning
-         * `templateId@version`; the evidence behind `template.in_use` when a template
-         * version is discarded or purged.
-         */
-        val LIVE_TEMPLATE_VERSION_PINS_SQL =
-            """
-            SELECT pp.id AS pipeline_id, pp.name AS pipeline_name, pv.version AS pipeline_version,
-                   pv.status AS version_status, pnode->>'id' AS node_id, :version AS pinned_version
-              FROM pipelines pp
-              JOIN pipeline_versions pv ON pv.pipeline_id = pp.id
-             CROSS JOIN LATERAL jsonb_array_elements(pv.body_json->'nodes') AS pnode
-             WHERE pp.workspace_id = :workspaceId
-               AND pv.status IN ('DRAFT','RELEASED')
-               AND pnode->'template'->>'id' = :templateId
-               AND (pnode->'template'->>'version')::int = :version
-             ORDER BY pp.name, pnode->>'id'
             """.trimIndent()
 
         val MAPPER =

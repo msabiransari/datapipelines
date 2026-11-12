@@ -48,22 +48,20 @@ class TemplateLifecycleConfiguration {
         co.datapipelines.parameters.ParameterSetTemplatePins(jdbc)
 
     /**
-     * #194 lane D — the COMBINED reverse arrow as one bean: the template screen's model, the
-     * web delete guards and the MCP tool bean all consume it (the record's §8.4).
+     * #194 lane D — the COMBINED reverse arrow as ONE bean: the template screen's model, the
+     * web delete guards and the MCP tool bean all consume it (the record's §8.4). Since #877 §C
+     * an adapter over the template family's inverse arms (`findIncoming`, the registry read at
+     * the first question — no bean cycle); [usage] answers only its not-found refusal.
      */
     @Bean
     fun templateUsage(
-        pipelines: PipelineRepository,
-        templates: TemplateRepository,
-        parameterSets: co.datapipelines.parameters.ParameterSetTemplatePins,
-        // #320 — the visualizations' transform pins are the third arm.
-        dependents: co.datapipelines.visualization.ArtifactDependents,
+        dependencyFamilyRegistry: org.springframework.beans.factory.ObjectProvider<co.datapipelines.dependencies.FamilyRegistry>,
+        usage: co.datapipelines.templates.TemplateUsageService,
     ): co.datapipelines.application.templates.TemplateUsage =
         co.datapipelines.application.templates.TemplateUsage(
-            co.datapipelines.templates.TemplateUsageService(templates, pipelines),
-            parameterSets,
-            pipelines,
-            dependents,
+            co.datapipelines.application.dependencies
+                .RegistryIncomingRows(dependencyFamilyRegistry::getObject),
+            usage,
         )
 
     @Bean

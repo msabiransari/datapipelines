@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
@@ -44,6 +45,8 @@ class TemplateLifecycleDialogController(
     private val templates: TemplateRepository,
     private val dialogs: TemplateLifecycleDialogModel,
     private val audit: AuditEventSink,
+    /** #877 §C.2 — the caller's view, which narrows a `template.in_use` refusal's echo (never the guard's decision). */
+    private val lens: PromoterLens,
 ) : ShellPage {
     // ------------------------------------------------------------------ release
 
@@ -115,7 +118,7 @@ class TemplateLifecycleDialogController(
         val workspaceId = principal.requireWorkspace().id
         requireTypedConfirm(confirm, "v$version")
         val soleDraft = templates.listVersions(workspaceId, name).size == 1
-        releases.purgeVersion(workspaceId, name, version)
+        releases.purgeVersion(workspaceId, name, version, lens.viewFor(principal))
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.TEMPLATE_AUDIT_VERSION_PURGED,
@@ -163,7 +166,7 @@ class TemplateLifecycleDialogController(
     ): ResponseEntity<String> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
-        releases.discardVersion(workspaceId, name, version, principal.userId)
+        releases.discardVersion(workspaceId, name, version, principal.userId, lens.viewFor(principal))
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.TEMPLATE_AUDIT_VERSION_DISCARDED,
@@ -237,7 +240,7 @@ class TemplateLifecycleDialogController(
         // The typed confirm names the TEMPLATE (§9.6 keeps the name out of paths; the dialog
         // showed it as the thing to type).
         requireTypedConfirm(confirm, name)
-        releases.purgeEntity(workspaceId, name)
+        releases.purgeEntity(workspaceId, name, lens.viewFor(principal))
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.TEMPLATE_AUDIT_ENTITY_PURGED,
