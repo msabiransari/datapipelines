@@ -36,10 +36,11 @@ import kotlin.coroutines.coroutineContext
  *
  * ## What is still coordinated, and how narrowly
  *
- * Two things are shared across leases and guarded by one short `synchronized` section that
- * never covers JDBC, a callback, a suspension or a wait for a lease: the set of **table-name
- * reservations** (the deterministic `table_already_exists` guard, §4.5) and the **successful
- * staged-row total** [stats] reports (§8.2). Everything else is per lease.
+ * Shared across leases are the **table-name reservations** (the deterministic
+ * `table_already_exists` guard, §4.5), the **successful staged-row total** [stats] reports (§8.2),
+ * and statement registration with its closed flag. Each is guarded by a short `synchronized`
+ * section that never covers JDBC, a callback, a suspension or a wait for a lease. Everything else
+ * is per lease.
  *
  * ## Name ownership across creation, insertion and failure
  *
