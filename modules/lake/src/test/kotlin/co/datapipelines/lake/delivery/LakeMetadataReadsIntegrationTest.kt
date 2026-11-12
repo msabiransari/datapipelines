@@ -15,6 +15,7 @@ import co.datapipelines.lake.settle.LakeMetadataReads
 import co.datapipelines.lake.settle.LakeSettlementSweep
 import co.datapipelines.lake.settle.SettleBudget
 import co.datapipelines.lake.settle.SettleDeferCause
+import co.datapipelines.logcapture.SnapshotListAppender
 import co.datapipelines.pipeline.DatasourceRegistry
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue

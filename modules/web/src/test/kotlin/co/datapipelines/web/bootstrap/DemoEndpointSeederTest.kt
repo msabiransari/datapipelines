@@ -20,13 +20,13 @@ import co.datapipelines.auth.SecretHasher
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.Workspace
+import co.datapipelines.logcapture.capturingLogEvents
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineVersionDetail
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.release.ReleaseFamily
-import co.datapipelines.web.capturingLogEvents
 import co.datapipelines.web.config.EndpointsProperties
 import co.datapipelines.web.config.KeyRequestBudget
 import co.datapipelines.web.release.ReleaseCoordinator

@@ -2,7 +2,7 @@ package co.datapipelines.datasources.pooling
 
 import co.datapipelines.datasources.Fixtures
 import co.datapipelines.datasources.ManagedLakeTable
-import co.datapipelines.datasources.capturingLogs
+import co.datapipelines.logcapture.capturingLogs
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe

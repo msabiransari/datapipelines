@@ -13,10 +13,10 @@ import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutorConfig
 import co.datapipelines.executor.ExecutorMetrics
 import co.datapipelines.executor.InMemoryCancellationRegistry
+import co.datapipelines.logcapture.SnapshotListAppender
 import co.datapipelines.persistence.BatchSink
 import co.datapipelines.persistence.BatchingConfig
 import co.datapipelines.persistence.BatchingWriter
-import co.datapipelines.web.SnapshotListAppender
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe

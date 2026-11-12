@@ -416,7 +416,7 @@ class LakeInstanceOwnerTest {
      * Formatted messages logged while [block] ran — the shape `ConnectionPoolManagerTest` uses, read through
      * the module's snapshot capture (#484): every thread in the JVM logs into ROOT while it is attached.
      */
-    private fun capturingLogs(block: () -> Unit): List<String> = co.datapipelines.datasources.capturingLogs(block = block)
+    private fun capturingLogs(block: () -> Unit): List<String> = co.datapipelines.logcapture.capturingLogs(block = block)
 
     private fun answerOn(connection: Connection): Int =
         connection.createStatement().use { st ->

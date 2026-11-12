@@ -1,6 +1,7 @@
 package co.datapipelines
 
 import co.datapipelines.config.SharedRedis
+import co.datapipelines.logcapture.capturingLogEvents
 import co.datapipelines.web.config.AuthoringStartupCheck
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain

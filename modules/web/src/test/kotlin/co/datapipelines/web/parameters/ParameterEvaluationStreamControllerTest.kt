@@ -5,6 +5,7 @@ import ch.qos.logback.classic.Logger
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.logcapture.SnapshotListAppender
 import co.datapipelines.parameters.EvaluateResponse
 import co.datapipelines.parameters.EvaluationCaller
 import co.datapipelines.parameters.OrgEcho
@@ -23,7 +24,6 @@ import co.datapipelines.parameters.SelectorTasks
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.EVERYTHING_LENS
-import co.datapipelines.web.SnapshotListAppender
 import co.datapipelines.web.api.ApiErrorCatalog
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.config.SseProperties

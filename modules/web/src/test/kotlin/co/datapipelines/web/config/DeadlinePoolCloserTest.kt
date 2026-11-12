@@ -6,8 +6,8 @@ import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.pooling.ConnectionPool
 import co.datapipelines.datasources.pooling.ConnectionPoolManager
 import co.datapipelines.datasources.pooling.PoolLifecycleMetrics
+import co.datapipelines.logcapture.capturingLogEvents
 import co.datapipelines.typesystem.Dialect
-import co.datapipelines.web.capturingLogEvents
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe

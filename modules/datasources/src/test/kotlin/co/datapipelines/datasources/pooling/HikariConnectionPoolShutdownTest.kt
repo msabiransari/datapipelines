@@ -383,9 +383,9 @@ class HikariConnectionPoolShutdownTest {
     // ------------------------------------------------------------------ helpers
 
     /** The shared capture (#362): [waitUntil] polls the SAME appender [capturingLogs] writes — snapshot reads, no CME. */
-    private val appender = co.datapipelines.datasources.SnapshotListAppender()
+    private val appender = co.datapipelines.logcapture.SnapshotListAppender()
 
-    private fun capturingLogs(block: () -> Unit): List<String> = co.datapipelines.datasources.capturingLogs(appender, block)
+    private fun capturingLogs(block: () -> Unit): List<String> = co.datapipelines.logcapture.capturingLogs(appender, block)
 
     /** Polls the live log capture until [condition] holds — synchronised on the event, never on a fixed sleep. */
     private fun waitUntil(condition: (List<String>) -> Boolean) {

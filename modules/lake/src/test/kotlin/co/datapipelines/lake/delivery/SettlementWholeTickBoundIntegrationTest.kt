@@ -7,6 +7,7 @@ import co.datapipelines.lake.definitions.LakeApplyState
 import co.datapipelines.lake.definitions.LakeAuditEvents
 import co.datapipelines.lake.settle.LakeSettlementSweep
 import co.datapipelines.lake.settle.SettleBudget
+import co.datapipelines.logcapture.SnapshotListAppender
 import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.fail
 import io.kotest.assertions.withClue

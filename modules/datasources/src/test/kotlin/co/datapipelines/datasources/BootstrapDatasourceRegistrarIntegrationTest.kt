@@ -2,6 +2,7 @@ package co.datapipelines.datasources
 
 import ch.qos.logback.classic.Logger
 import co.datapipelines.datasources.crypto.CredentialEncryptor
+import co.datapipelines.logcapture.SnapshotListAppender
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldBeNull
