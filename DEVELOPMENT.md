@@ -1125,7 +1125,10 @@ failure-run snapshots are retained under the same policy.
 **A tooling crash is neither green nor red.** An OOM-killed daemon, `Could not write XML test
 results` (two builds sharing one `build/`), a corrupted result store — re-run before drawing any
 conclusion. `scripts/gate.sh` classifies these for you and is the scripted form of all of the
-above.
+above. A word such as `EOFException` that a test prints is a test failure when a fresh failed
+JUnit XML of that step carries it; with no such XML the log is still classified as a crash. The
+gate decides this right after each Gradle invocation, because the next one rewrites the result
+files.
 
 ### 9.5 Sizing the build for your machine
 
