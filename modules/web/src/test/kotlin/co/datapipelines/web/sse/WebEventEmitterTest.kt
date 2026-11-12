@@ -24,12 +24,19 @@ import io.mockk.slot
 import io.mockk.verify
 import io.mockk.verifyOrder
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.CyclicBarrier
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * The emitter hub (dag-executor §10) over mocked persistence: row creation on `execution_started`,
@@ -156,9 +163,10 @@ class WebEventEmitterTest {
         }
 
     /**
-     * The 306 merge's review (#325): a terminal UPDATE that matches NO row — the RUNNING insert was abandoned
-     * past its bound or never landed — is counted as a lifecycle write failure and logged, never silent, and
-     * nothing fabricates a COMPLETED. A real registry, not a mock: the assertion is the counter's value.
+     * The 306 merge's review (#325): a terminal UPDATE that matches NO row — the RUNNING insert never landed —
+     * is counted as a lifecycle write failure and logged, never silent, and nothing fabricates a COMPLETED. A
+     * real registry, not a mock: the assertion is the counter's value. (An insert that outlived its bound is
+     * the deferred path below: its UPDATE is ordered behind it, T1–T4.)
      */
     @Test
     fun `a terminal UPDATE that matches no row is counted as a lifecycle write failure - never a silent success`() =
@@ -175,6 +183,165 @@ class WebEventEmitterTest {
 
             registry.counter(ExecutorMetrics.EXECUTIONS_LIFECYCLE_WRITE_FAILED).count() shouldBe 1.0
         }
+
+    // ------------------------------------------------- #325: the terminal write behind an unconfirmed insert
+
+    /**
+     * T1 (#325): the RUNNING insert outlives its bound, the terminal event arrives before it lands — the UPDATE
+     * is ORDERED behind the insert, so the row ends SUCCESS, never RUNNING (and never swept ABORTED). Both emits
+     * return without the row; the write is counted once as unconfirmed.
+     */
+    @Test
+    fun `T1 - a terminal UPDATE behind an unconfirmed RUNNING insert lands after it - the row ends SUCCESS`() {
+        LateInsert().use { late ->
+            late.emitStartedAndCompleted()
+            late.rows[executionId] shouldBe null
+            late.failures() shouldBe 1.0
+
+            late.releaseInsert()
+            late.awaitStatus(ExecutionStatus.SUCCESS)
+            late.drain()
+            verify(exactly = 1) {
+                executionRepository.complete(executionId, ExecutionStatus.SUCCESS, any(), any(), any(), any(), any(), any(), any(), any())
+            }
+        }
+    }
+
+    /** T2 (#325): the late insert FAILS — the deferred UPDATE is dropped with one WARN, never dispatched. */
+    @Test
+    fun `T2 - a terminal UPDATE behind an insert that fails late is dropped with a WARN - never dispatched`() {
+        LateInsert(insertFails = true).use { late ->
+            val logs =
+                late.capturingWarns {
+                    late.emitStartedAndCompleted()
+                    late.releaseInsert()
+                    late.drain()
+                }
+            verify(exactly = 0) { executionRepository.complete(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) }
+            logs.filter { "terminal update is dropped" in it && executionId.toString() in it }.size shouldBe 1
+            late.failures() shouldBe 1.0
+        }
+    }
+
+    /** T3 (#325): the insert lands late, the deferred UPDATE THROWS — one WARN, no second count. */
+    @Test
+    fun `T3 - a deferred terminal UPDATE that throws is one WARN and not counted twice`() {
+        LateInsert(completeThrows = true).use { late ->
+            val logs =
+                late.capturingWarns {
+                    late.emitStartedAndCompleted()
+                    late.releaseInsert()
+                    late.drain()
+                }
+            verify(exactly = 1) { executionRepository.complete(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) }
+            logs.filter { "deferred terminal update" in it && executionId.toString() in it }.size shouldBe 1
+            late.failures() shouldBe 1.0
+        }
+    }
+
+    /** T4 (#325): the insert lands late, the deferred UPDATE matches no row — one WARN, no second count. */
+    @Test
+    fun `T4 - a deferred terminal UPDATE that matches no row is one WARN and not counted twice`() {
+        LateInsert(completeMatchesNoRow = true).use { late ->
+            val logs =
+                late.capturingWarns {
+                    late.emitStartedAndCompleted()
+                    late.releaseInsert()
+                    late.drain()
+                }
+            verify(exactly = 1) { executionRepository.complete(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) }
+            logs.filter { "deferred terminal update" in it && executionId.toString() in it }.size shouldBe 1
+            late.failures() shouldBe 1.0
+        }
+    }
+
+    /**
+     * The #325 rig: a 200 ms lifecycle bound, a 2-thread persistence pool (closed by [close]), an in-memory
+     * `pipeline_executions` whose `create` blocks on [insertGate] and `complete` updates only an existing row,
+     * and a real meter registry.
+     */
+    private inner class LateInsert(
+        insertFails: Boolean = false,
+        completeThrows: Boolean = false,
+        completeMatchesNoRow: Boolean = false,
+    ) : AutoCloseable {
+        val rows = ConcurrentHashMap<UUID, ExecutionStatus>()
+        private val insertGate = CountDownLatch(1)
+        private val pool = Executors.newFixedThreadPool(POOL_THREADS)
+        private val meters = SimpleMeterRegistry()
+        private val emitter =
+            WebEventEmitter(
+                context = ExecutionContext(pipelineId, 3, userId, correlationId, ExecutionTrigger.REST, "{}", workspaceId),
+                stream = null,
+                streams = registry,
+                eventLog = eventLog,
+                eventRepository = eventRepository,
+                executionRepository = executionRepository,
+                persistenceDispatcher = pool.asCoroutineDispatcher(),
+                lifecycleWriteTimeout = java.time.Duration.ofMillis(BOUND_MS),
+                metrics = ExecutorMetrics(meters),
+            )
+
+        init {
+            every { executionRepository.create(any()) } answers {
+                insertGate.await(TEN_SECONDS, TimeUnit.SECONDS)
+                if (insertFails) throw java.sql.SQLException("late insert failed", "08006")
+                rows[firstArg<ExecutionRecord>().executionId] = ExecutionStatus.RUNNING
+                firstArg()
+            }
+            every { executionRepository.complete(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } answers {
+                if (completeThrows) throw java.sql.SQLException("deferred update failed", "08006")
+                !completeMatchesNoRow && rows.computeIfPresent(firstArg()) { _, _ -> secondArg<ExecutionStatus>() } != null
+            }
+            every { eventRepository.append(any<UUID>(), any(), any(), any(), any()) } just runs
+            every { eventLog.append(any(), any()) } just runs
+        }
+
+        fun emitStartedAndCompleted() =
+            runBlocking {
+                emitter.emit(ExecutionStarted(executionId, pipelineId, 3, emptyMap(), startedAt = NOW))
+                emitter.emit(PipelineCompleted(executionId, pipelineId, 3, NOW, NOW.plusMillis(900), 900, emptyList()))
+            }
+
+        fun releaseInsert() = insertGate.countDown()
+
+        fun failures(): Double = meters.counter(ExecutorMetrics.EXECUTIONS_LIFECYCLE_WRITE_FAILED).count()
+
+        fun awaitStatus(status: ExecutionStatus) {
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(TEN_SECONDS)
+            while (rows[executionId] != status) {
+                withClue("row status ${rows[executionId]} within $TEN_SECONDS s") { (System.nanoTime() < deadline) shouldBe true }
+                Thread.sleep(POLL_MS)
+            }
+        }
+
+        /**
+         * Three rounds in which EVERY pool thread meets one barrier: a round completes only once each
+         * thread is free, so the insert's task, the continuation it ran and any UPDATE that continuation
+         * enqueued have all run by the end (releasing the gate alone proves nothing).
+         */
+        fun drain() {
+            repeat(DRAIN_ROUNDS) {
+                val barrier = CyclicBarrier(POOL_THREADS)
+                val tasks = (1..POOL_THREADS).map { pool.submit { barrier.await(TEN_SECONDS, TimeUnit.SECONDS) } }
+                tasks.forEach { it.get(TEN_SECONDS, TimeUnit.SECONDS) }
+            }
+        }
+
+        /** The emitter's WARN lines while [block] runs. */
+        fun capturingWarns(block: () -> Unit): List<String> =
+            co.datapipelines.web
+                .capturingLogEvents(
+                    org.slf4j.LoggerFactory.getLogger(WebEventEmitter::class.java) as ch.qos.logback.classic.Logger,
+                    block = block,
+                ).filter { it.level == ch.qos.logback.classic.Level.WARN }
+                .map { it.formattedMessage }
+
+        override fun close() {
+            insertGate.countDown()
+            pool.shutdownNow()
+        }
+    }
 
     /**
      * 149: a `node_progress` sample takes the SAME path every other event does — a durable row,
@@ -617,6 +784,12 @@ class WebEventEmitterTest {
         val NOW: Instant = Instant.parse("2026-08-05T14:30:00Z")
         const val INTERLEAVED = 60
         const val TEN_SECONDS = 10L
+
+        /** #325 rig: the lifecycle bound, the pool size, the drain rounds and the poll interval. */
+        const val BOUND_MS = 200L
+        const val POOL_THREADS = 2
+        const val DRAIN_ROUNDS = 3
+        const val POLL_MS = 20L
 
         /** The row that holds the one writer while both executions' first rows queue behind it. */
         val SENTINEL: UUID = UUID.fromString("5e471e11-0000-0000-0000-000000000266")
