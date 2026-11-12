@@ -100,6 +100,19 @@ class DependencyTreeRendererBrowserTest : DependencyPaneBrowserSuite() {
         common.single() shouldContain "of ${world.selector}"
         common.single() shouldContain "of ${world.query}"
         rows.filter { it.startsWith(world.datasource + "|") } shouldHaveSize 1
+        assertReadableList()
+        // The version cell: the name cell's own link would navigate.
+        page.locator("$board tr.dp-deps-row:has(td.dp-deps-name [title='${world.common}']) td:nth-child(3)").click()
+        page.locator("$board [data-dp-deps-view='graph']").click()
+        page.locator("$board .dp-deps-panel").innerText() shouldContain "Used here by 2 objects"
+        page.evaluate("s => document.querySelector(s + ' .dp-deps-canvas')._cyreg.cy.$('.dp-related').edges().length", board) shouldBe 2
+    }
+
+    /**
+     * The worked graph's list is readable at 1440px (the #106 lesson, ui-screens §3.7): one-line kind and version
+     * labels, no word ever split, and the tables fit the pane.
+     */
+    private fun assertReadableList() {
         // Readable width at 1440px (the #106 lesson, ui-screens §3.7): every kind label and version lays out on ONE line —
         // the first screenshot set "Dashboard" one syllable per line in an evenly split fixed-layout table.
         @Suppress("UNCHECKED_CAST")
@@ -145,11 +158,6 @@ class DependencyTreeRendererBrowserTest : DependencyPaneBrowserSuite() {
               return Math.max(...[l, ...l.querySelectorAll('table')].map(e => e.scrollWidth - e.clientWidth)); }""",
             board,
         ) shouldBe 0
-        // The version cell: the name cell's own link would navigate.
-        page.locator("$board tr.dp-deps-row:has(td.dp-deps-name [title='${world.common}']) td:nth-child(3)").click()
-        page.locator("$board [data-dp-deps-view='graph']").click()
-        page.locator("$board .dp-deps-panel").innerText() shouldContain "Used here by 2 objects"
-        page.evaluate("s => document.querySelector(s + ' .dp-deps-canvas')._cyreg.cy.$('.dp-related').edges().length", board) shouldBe 2
     }
 
     @Test
@@ -187,7 +195,11 @@ class DependencyTreeRendererBrowserTest : DependencyPaneBrowserSuite() {
         page.navigate("$baseUrl/templates/$loop?tab=dependencies")
         awaitSettled("#tw-pane-dependencies") shouldBe "cycle"
         notes("#tw-pane-dependencies") shouldContainExactly listOf(CYCLE_NOTE)
-        page.locator("#tw-pane-dependencies").innerText().lowercase().contains("release order:") shouldBe false
+        page
+            .locator("#tw-pane-dependencies")
+            .innerText()
+            .lowercase()
+            .contains("release order:") shouldBe false
     }
 
     @Test

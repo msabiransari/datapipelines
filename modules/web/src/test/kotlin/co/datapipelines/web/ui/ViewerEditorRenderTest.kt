@@ -95,7 +95,11 @@ class ViewerEditorRenderTest {
         Regex("data-version=\"\\d+\"").containsMatchIn(pane) shouldBe true
         Regex("id=\"tw-pane-dependencies\"[^>]*hidden").containsMatchIn(html) shouldBe true
         val catalog = html.substringAfter("<template data-page-assets=\"on-mount\">").substringBefore("</template>")
-        Regex("src=\"(/[^\"]+)\"").findAll(catalog).map { it.groupValues[1] }.toList().takeLast(8) shouldBe DEPENDENCY_CATALOG
+        Regex("src=\"(/[^\"]+)\"")
+            .findAll(catalog)
+            .map { it.groupValues[1] }
+            .toList()
+            .takeLast(8) shouldBe DEPENDENCY_CATALOG
     }
 
     @Test

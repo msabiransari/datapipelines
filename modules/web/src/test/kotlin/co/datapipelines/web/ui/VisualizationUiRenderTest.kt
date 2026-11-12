@@ -142,7 +142,11 @@ class VisualizationUiRenderTest {
         ).containsMatchIn(body) shouldBe true
         Regex("id=\"viz-pane-dependencies\"[^>]*data-lazy-url").containsMatchIn(body) shouldBe false
         val catalog = body.substringAfter("<template data-page-assets>").substringBefore("</template>")
-        Regex("src=\"(/[^\"]+)\"").findAll(catalog).map { it.groupValues[1] }.toList().takeLast(8) shouldBe DEPENDENCY_CATALOG
+        Regex("src=\"(/[^\"]+)\"")
+            .findAll(catalog)
+            .map { it.groupValues[1] }
+            .toList()
+            .takeLast(8) shouldBe DEPENDENCY_CATALOG
         body shouldContain "data-nav-current=\"visualizations\""
         body shouldContain "id=\"dp-dialog\""
         // Every version switch is a boosted, rail-preserving navigation that keeps the tab (#714).

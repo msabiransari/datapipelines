@@ -197,7 +197,11 @@ class DashboardUiRenderTest {
             .containsMatchIn(html) shouldBe true
         Regex("id=\"dp-pane-dependencies\"[^>]*data-lazy-url").containsMatchIn(html) shouldBe false
         val catalog = html.substringAfter("<template data-page-assets>").substringBefore("</template>")
-        Regex("src=\"(/[^\"]+)\"").findAll(catalog).map { it.groupValues[1] }.toList().takeLast(8) shouldBe DEPENDENCY_CATALOG
+        Regex("src=\"(/[^\"]+)\"")
+            .findAll(catalog)
+            .map { it.groupValues[1] }
+            .toList()
+            .takeLast(8) shouldBe DEPENDENCY_CATALOG
     }
 
     @Test
