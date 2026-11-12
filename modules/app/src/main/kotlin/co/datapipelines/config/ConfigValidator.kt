@@ -106,9 +106,6 @@ class ConfigValidator(
         /** configuration.md §3.3's default. */
         private const val DEFAULT_STAGING_MAX_MEMORY_MB = 1024L
 
-        /** configuration.md §3.2's default (156, #2), read when the operator key is unset. */
-        private const val DEFAULT_NODE_QUERY_TIMEOUT_MAX_SECONDS = 900
-
         /** Above this share of the max heap, the per-execution budget is a promise the JVM cannot keep. */
         private const val STAGING_PRESSURE_RATIO = 0.8
 
@@ -149,7 +146,7 @@ class ConfigValidator(
             checkLocalAuth(snapshot, violations)
             checkExecutorConcurrencyAlias(snapshot, violations, warnings)
             checkStagingBudgetPressure(snapshot, warnings)
-            checkExecutorQueryTimeoutByDialect(snapshot, violations)
+            ExecutorRules.checkExecutorQueryTimeoutByDialect(snapshot, violations)
             checkRedisAuthWarning(snapshot, warnings)
             // §3.1 (#488) — the Redis client bounds, their own file like the request limits.
             RedisRules.checkRedisTimeoutBounds(snapshot, violations)
@@ -677,43 +674,6 @@ class ConfigValidator(
                 "exceed the heap; the per-execution limit would then be enforced by an OOM rather than by " +
                 "pipeline.staging.memory_limit_exceeded. Lower one of the two keys, or raise the heap, if this " +
                 "deployment's pipelines actually stage near their budget (configuration.md §3.3)."
-        }
-
-        /**
-         * §7 / §3.2 (156, #2) — `node-query-timeout-max-seconds` and every entry of
-         * `node-query-timeout-seconds-by-dialect` are validated at boot, fail fast: a value an
-         * author's `settings.query_timeout_seconds` could never legally reach (because the
-         * ceiling itself is malformed or a dialect default already exceeds it) is worse
-         * discovered at the first save than at startup, in the one report every other §7
-         * violation reaches.
-         *
-         * `ExecutorProperties`'s own `init` refuses the same shapes for a DIRECTLY constructed
-         * instance (the defensive per-field pattern every key in that class already follows);
-         * this is the §7 twin that names the KEYS in the aggregated report, same relationship as
-         * [checkEndpointsTimeoutOrdering] to `EndpointsProperties.init`.
-         */
-        private fun checkExecutorQueryTimeoutByDialect(
-            snapshot: ConfigSnapshot,
-            violations: MutableList<String>,
-        ) {
-            val ceilingRaw = snapshot.executorNodeQueryTimeoutMaxSeconds?.trim()
-            val ceiling = ceilingRaw?.toIntOrNull()
-            if (ceilingRaw != null && (ceiling == null || ceiling <= 0)) {
-                violations +=
-                    "datapipelines.executor.node-query-timeout-max-seconds is '$ceilingRaw'; §3.2 requires a " +
-                    "positive integer."
-                return
-            }
-            val effectiveCeiling = ceiling ?: DEFAULT_NODE_QUERY_TIMEOUT_MAX_SECONDS
-            snapshot.executorNodeQueryTimeoutSecondsByDialect.forEach { (dialect, rawValue) ->
-                val where = "datapipelines.executor.node-query-timeout-seconds-by-dialect.$dialect"
-                val value = rawValue.trim().toIntOrNull()
-                if (value == null || value !in 1..effectiveCeiling) {
-                    violations +=
-                        "$where is '$rawValue'; §3.2 requires a positive integer no greater than " +
-                        "node-query-timeout-max-seconds ($effectiveCeiling)."
-                }
-            }
         }
 
         /**

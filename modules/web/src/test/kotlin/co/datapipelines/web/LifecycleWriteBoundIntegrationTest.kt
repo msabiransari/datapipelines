@@ -239,29 +239,36 @@ class LifecycleWriteBoundIntegrationTest {
         PrivatePostgres().use { pg ->
             PrivateRedis().use { redis ->
                 Rig(pg, redis.template, callerSeconds = BOUND_SECONDS, statementSeconds = DISARMED_STATEMENT_SECONDS).use { rig ->
-                    val id = UUID.randomUUID()
-                    // ONE emitter: it holds the unconfirmed insert's handle (a second rig.emitter(id) would not).
-                    val emitter = rig.emitter(id)
-                    pause(pg.container)
-                    try {
-                        runBlocking {
-                            withContext(NonCancellable) {
-                                emitter.emit(rig.startedEvent(id))
-                                emitter.emit(rig.completedEvent(id))
-                            }
-                        }
-                        withClue("the terminal write was counted once as unconfirmed") { rig.lifecycleWriteFailures() shouldBe 1.0 }
-                    } finally {
-                        unpause(pg.container)
-                    }
-
-                    // The insert lands at recovery and the UPDATE ordered behind it after it: never RUNNING for
-                    // the sweep to mark ABORTED under a client that saw pipeline_completed.
-                    awaitCondition { rig.executions.findById(Rig.WORKSPACE, id)?.status == ExecutionStatus.SUCCESS }
-                    withClue("the deferred UPDATE is not counted a second time") { rig.lifecycleWriteFailures() shouldBe 1.0 }
+                    bothWritesLateCase(pg, rig)
                 }
             }
         }
+    }
+
+    private fun bothWritesLateCase(
+        pg: PrivatePostgres,
+        rig: Rig,
+    ) {
+        val id = UUID.randomUUID()
+        // ONE emitter: it holds the unconfirmed insert's handle (a second rig.emitter(id) would not).
+        val emitter = rig.emitter(id)
+        pause(pg.container)
+        try {
+            runBlocking {
+                withContext(NonCancellable) {
+                    emitter.emit(rig.startedEvent(id))
+                    emitter.emit(rig.completedEvent(id))
+                }
+            }
+            withClue("the terminal write was counted once as unconfirmed") { rig.lifecycleWriteFailures() shouldBe 1.0 }
+        } finally {
+            unpause(pg.container)
+        }
+
+        // The insert lands at recovery and the UPDATE ordered behind it after it: never RUNNING for
+        // the sweep to mark ABORTED under a client that saw pipeline_completed.
+        awaitCondition { rig.executions.findById(Rig.WORKSPACE, id)?.status == ExecutionStatus.SUCCESS }
+        withClue("the deferred UPDATE is not counted a second time") { rig.lifecycleWriteFailures() shouldBe 1.0 }
     }
 
     // ------------------------------------------------- helpers

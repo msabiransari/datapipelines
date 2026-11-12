@@ -32,6 +32,11 @@ import org.junit.jupiter.api.Test
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.CyclicBarrier
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * The emitter hub (dag-executor §10) over mocked persistence: row creation on `execution_started`,
@@ -260,9 +265,9 @@ class WebEventEmitterTest {
         completeThrows: Boolean = false,
         completeMatchesNoRow: Boolean = false,
     ) : AutoCloseable {
-        val rows = java.util.concurrent.ConcurrentHashMap<UUID, ExecutionStatus>()
-        private val insertGate = java.util.concurrent.CountDownLatch(1)
-        private val pool = java.util.concurrent.Executors.newFixedThreadPool(POOL_THREADS)
+        val rows = ConcurrentHashMap<UUID, ExecutionStatus>()
+        private val insertGate = CountDownLatch(1)
+        private val pool = Executors.newFixedThreadPool(POOL_THREADS)
         private val meters = SimpleMeterRegistry()
         private val emitter =
             WebEventEmitter(
@@ -279,7 +284,7 @@ class WebEventEmitterTest {
 
         init {
             every { executionRepository.create(any()) } answers {
-                insertGate.await(TEN_SECONDS, java.util.concurrent.TimeUnit.SECONDS)
+                insertGate.await(TEN_SECONDS, TimeUnit.SECONDS)
                 if (insertFails) throw java.sql.SQLException("late insert failed", "08006")
                 rows[firstArg<ExecutionRecord>().executionId] = ExecutionStatus.RUNNING
                 firstArg()
@@ -303,7 +308,7 @@ class WebEventEmitterTest {
         fun failures(): Double = meters.counter(ExecutorMetrics.EXECUTIONS_LIFECYCLE_WRITE_FAILED).count()
 
         fun awaitStatus(status: ExecutionStatus) {
-            val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(TEN_SECONDS)
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(TEN_SECONDS)
             while (rows[executionId] != status) {
                 withClue("row status ${rows[executionId]} within $TEN_SECONDS s") { (System.nanoTime() < deadline) shouldBe true }
                 Thread.sleep(POLL_MS)
@@ -317,9 +322,9 @@ class WebEventEmitterTest {
          */
         fun drain() {
             repeat(DRAIN_ROUNDS) {
-                val barrier = java.util.concurrent.CyclicBarrier(POOL_THREADS)
-                val tasks = (1..POOL_THREADS).map { pool.submit { barrier.await(TEN_SECONDS, java.util.concurrent.TimeUnit.SECONDS) } }
-                tasks.forEach { it.get(TEN_SECONDS, java.util.concurrent.TimeUnit.SECONDS) }
+                val barrier = CyclicBarrier(POOL_THREADS)
+                val tasks = (1..POOL_THREADS).map { pool.submit { barrier.await(TEN_SECONDS, TimeUnit.SECONDS) } }
+                tasks.forEach { it.get(TEN_SECONDS, TimeUnit.SECONDS) }
             }
         }
 

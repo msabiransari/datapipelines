@@ -415,19 +415,30 @@ class WebEventEmitter(
                 contextJson = contextJson,
             )
         }
+        writeTerminalRow(event.executionId, update)
+    }
+
+    /**
+     * The terminal UPDATE's dispatch: bounded, as #311 made it — or, behind a RUNNING insert that outlived
+     * its bound, ordered behind that insert (#325).
+     */
+    private suspend fun writeTerminalRow(
+        executionId: UUID,
+        update: () -> Boolean,
+    ) {
         val insert = unconfirmedInsert.get()
         // A late insert that has landed by now is a confirmed one: the ordinary bounded path. One still
         // running, or one that failed late (a failed Deferred reads as cancelled), is ordered behind.
         if (insert != null && (!insert.isCompleted || insert.isCancelled)) {
-            completeBehindUnconfirmedInsert(insert, event.executionId, update)
+            completeBehindUnconfirmedInsert(insert, executionId, update)
             return
         }
         runCatching {
             withinLifecycleBound(update)
-        }.onSuccess { updated -> if (!updated) reportTerminalRowMissing(event.executionId) }
+        }.onSuccess { updated -> if (!updated) reportTerminalRowMissing(executionId) }
             .onFailure {
                 metrics?.lifecycleWriteFailed()
-                reportLifecycleWriteFailure(event.executionId, "not completed", "left RUNNING for the stale sweep", it)
+                reportLifecycleWriteFailure(executionId, "not completed", "left RUNNING for the stale sweep", it)
             }
     }
 
