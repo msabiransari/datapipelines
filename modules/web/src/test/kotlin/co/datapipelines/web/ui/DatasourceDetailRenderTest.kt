@@ -261,13 +261,6 @@ class DatasourceDetailRenderTest {
         html shouldNotContain ">region</dt>"
     }
 
-    // ------------------------------- 162 (#156): LAKE registry vs discovered-schema tree
-
-    /**
-     * The two Tables views never mix on one screen: LAKE keeps its registry heading, prose and
-     * tree id; every other dialect gets the schema-tree heading, prose and id, and neither
-     * dialect renders the other's markup.
-     */
     /**
      * #876 G6 U2 — every dialect's detail ends with the Dependencies section after Learned facts: closed by default, a
      * datasource pane carrying the machine name and nothing else (no version, no id), and the page's loader catalog
@@ -294,6 +287,13 @@ class DatasourceDetailRenderTest {
         }
     }
 
+    // ------------------------------- 162 (#156): LAKE registry vs discovered-schema tree
+
+    /**
+     * The two Tables views never mix on one screen: LAKE keeps its registry heading, prose and
+     * tree id; every other dialect gets the schema-tree heading, prose and id, and neither
+     * dialect renders the other's markup.
+     */
     @Test
     fun `LAKE renders the registry heading, prose and tree id, and nothing of the schema tree`() {
         val html = render(Dialect.LAKE)

@@ -49,7 +49,8 @@ class DependencyPaneEscapingBrowserTest : DependencyPaneBrowserSuite() {
         val layer =
             page.evaluate(
                 "s => { const l = document.querySelector(s + ' [data-dp-deps-glyphs]'); return l ? { tags: [...new Set(" +
-                    "[...l.querySelectorAll('*')].map(e => e.localName))].sort(), text: l.textContent, svgs: l.querySelectorAll('svg').length } : null; }",
+                    "[...l.querySelectorAll('*')].map(e => e.localName))].sort(), text: l.textContent," +
+                    " svgs: l.querySelectorAll('svg').length } : null; }",
                 board,
             ) as Map<String, Any?>?
         withClue("the glyph layer: $layer") {

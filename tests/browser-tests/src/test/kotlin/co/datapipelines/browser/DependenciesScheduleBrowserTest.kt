@@ -65,7 +65,8 @@ class DependenciesScheduleBrowserTest : DependencyPaneBrowserSuite() {
         // The second schedule, selected in the tree: a fresh closed section, its own single request when opened.
         page.locator("#schedule-tree-pane [data-leaf-name='$root/nightly/other']").click()
         page.waitForFunction(
-            "id => { const d = document.querySelector('#schedule-detail [data-schedule-detail]'); return !!d && d.getAttribute('data-schedule-id') === id; }",
+            "id => { const d = document.querySelector('#schedule-detail [data-schedule-detail]');" +
+                " return !!d && d.getAttribute('data-schedule-id') === id; }",
             second,
         )
         page.locator(scope).getAttribute("open") shouldBe null

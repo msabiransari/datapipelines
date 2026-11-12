@@ -51,7 +51,13 @@ class SchedulesDetailRenderTest {
      */
     @Test
     fun `every role's detail carries the closed Dependencies section and the page lists its catalog`() {
-        for ((role, roles) in listOf("author" to SchedulesRender.AUTHOR, "viewer" to SchedulesRender.VIEWER, "promoter" to SchedulesRender.PROMOTER)) {
+        val ladder =
+            listOf(
+                "author" to SchedulesRender.AUTHOR,
+                "viewer" to SchedulesRender.VIEWER,
+                "promoter" to SchedulesRender.PROMOTER,
+            )
+        for ((role, roles) in ladder) {
             val html = SchedulesRender.page(roles)
             val detail = SchedulesRender.skeleton(html, "sch-tpl-detail")
             withClue(role) {

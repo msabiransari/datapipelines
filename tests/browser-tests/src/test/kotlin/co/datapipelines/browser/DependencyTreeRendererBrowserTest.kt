@@ -518,10 +518,12 @@ class DependencyTreeRendererBrowserTest : DependencyPaneBrowserSuite() {
                 glyphs shouldHaveSize WORKED_NODES
                 glyphs.map { it["kind"] }.toSet() shouldBe FAMILY_GLYPHS.keys
                 glyphs.map { it["glyph"] } shouldBe glyphs.map { FAMILY_GLYPHS[it["kind"]] }
-                glyphs.filterNot {
-                    it["inside"] == true && it["beside"] == true && (it["width"] as Int) > 0 && it["visible"] == true &&
-                        it["color"] != it["fill"]
-                }.shouldBeEmpty()
+                val misplaced =
+                    glyphs.filterNot {
+                        it["inside"] == true && it["beside"] == true && (it["width"] as Int) > 0 && it["visible"] == true &&
+                            it["color"] != it["fill"]
+                    }
+                misplaced.shouldBeEmpty()
             }
             colours[theme] = glyphs.map { it["color"] as String }.toSet()
             shot("renderer-graph-glyphs-$theme")
