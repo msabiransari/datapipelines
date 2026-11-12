@@ -147,6 +147,21 @@
     return null;
   }
 
+  /**
+   * One payload constraint → its texts. A `parameter_names` constraint with a non-empty `unmet_names` (#908, record
+   * Draft 10 erratum (11): the bound names the reached set version does not declare, a subset of `names` in its
+   * order) gains a SECOND text after the met one, in words, so neither view needs colour or a class for it. It is
+   * a fact about a fully read edge, never a diagnostic: it touches no note and no state.
+   */
+  function constraintTexts(c) {
+    var text = constraintText(c);
+    if (text === null) return [];
+    if (c.kind === "parameter_names" && Array.isArray(c.unmet_names) && c.unmet_names.length > 0) {
+      return [text, "unmet parameters " + c.unmet_names.join(", ")];
+    }
+    return [text];
+  }
+
   /** The diagnostics as text notes and the pane's state (cycle > limit > incomplete > empty > ready). */
   function notesOf(data, nodeCount) {
     var notes = [];
@@ -209,9 +224,9 @@
         from: e.from,
         to: e.to,
         label: RELATIONSHIPS[e.relationship] || e.relationship,
-        constraints: (e.constraints || []).map(constraintText).filter(function (t) {
-          return t !== null;
-        }),
+        constraints: (e.constraints || []).reduce(function (texts, c) {
+          return texts.concat(constraintTexts(c));
+        }, []),
       };
     });
     var summary = notesOf(data, nodes.length);

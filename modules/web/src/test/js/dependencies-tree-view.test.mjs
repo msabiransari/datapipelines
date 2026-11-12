@@ -157,6 +157,45 @@ test("states are keyed by the diagnostic codes: cycle, limit, the DISCARDED leaf
   assert.deepEqual(shown.notes, ["Incomplete: some objects are not visible to you."], "generic wording, nothing about what is hidden");
 });
 
+// #908 — erratum (11): a parameter_names constraint's optional unmet_names (the bound names the reached set version
+// does not declare) is a SECOND constraint text after the met one; it is never a diagnostic, a note or a state.
+const UNMET = "constraint-parameter-names-unmet.json";
+const setEdge = model => model.edges.find(edge => edge.label === "Parameter set");
+
+test("#908 the unmet golden: the set edge shows the bound names and then the unmet ones, nothing else changes", () => {
+  const model = view.fromTreePayload(golden(UNMET));
+  assert.deepEqual(setEdge(model).constraints, ["requires parameters region, since", "unmet parameters since"]);
+  const others = model.edges.filter(edge => edge.label !== "Parameter set").map(edge => [edge.id, edge.constraints]);
+  assert.deepEqual(others, [["e1", []], ["e2", []], ["e3", ["needs read access"]], ["e4", []], ["e5", []]]);
+  assert.equal(model.state, "ready", "an unmet name is not a diagnostic");
+  assert.deepEqual(model.notes, []);
+});
+
+test("#908 the control: the same payload without unmet_names renders the met text alone", () => {
+  const data = clone(golden(UNMET));
+  delete data.edges[0].constraints[0].unmet_names;
+  assert.deepEqual(setEdge(view.fromTreePayload(data)).constraints, ["requires parameters region, since"]);
+});
+
+test("#908 unmet names keep payload order; an empty or non-array unmet_names adds nothing", () => {
+  const all = clone(golden(UNMET));
+  all.edges[0].constraints[0].unmet_names = ["region", "since"];
+  assert.deepEqual(setEdge(view.fromTreePayload(all)).constraints, ["requires parameters region, since", "unmet parameters region, since"]);
+  for (const odd of [[], null, "since", { 0: "since" }]) {
+    const data = clone(golden(UNMET));
+    data.edges[0].constraints[0].unmet_names = odd;
+    assert.deepEqual(setEdge(view.fromTreePayload(data)).constraints, ["requires parameters region, since"], JSON.stringify(odd));
+  }
+});
+
+test("#908 a hostile unmet name is data: kept verbatim inside the text", () => {
+  const hostile = "<img src=x onerror=alert(1)>";
+  const data = clone(golden(UNMET));
+  data.edges[0].constraints[0].names = ["region", hostile];
+  data.edges[0].constraints[0].unmet_names = [hostile];
+  assert.deepEqual(setEdge(view.fromTreePayload(data)).constraints, ["requires parameters region, " + hostile, "unmet parameters " + hostile]);
+});
+
 test("a leaf template with no imports is the empty state", () => {
   const leaf = view.fromTreePayload(golden("tree-template.json"));
   assert.equal(leaf.state, "empty");
