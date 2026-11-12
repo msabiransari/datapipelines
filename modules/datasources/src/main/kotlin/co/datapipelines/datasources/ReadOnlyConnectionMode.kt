@@ -12,9 +12,9 @@ import java.sql.Connection
  * ## Strength varies by dialect, and the table says which
  *
  * [enforcementFor] is a closed per-dialect table, exhaustive over [Dialect] with no `else`, so a
- * new dialect cannot ship without a decision. Every entry is a MEASUREMENT on the pinned driver
- * (`ReadOnlyConnectionModeIntegrationTest`, `ReadOnlyConnectionModeEmbeddedTest`), never driver
- * documentation:
+ * new dialect cannot ship without a decision. Entries other than the fixed LAKE, ORACLE and MSSQL
+ * limits are MEASUREMENTS on the pinned driver (`ReadOnlyConnectionModeIntegrationTest`,
+ * `ReadOnlyConnectionModeEmbeddedTest`), never driver documentation:
  *
  *  - [Enforcement.DATABASE] — the database itself refuses a write inside [within], with an
  *    `SQLException` from the driver. The mechanism is [Connection.setReadOnly] where the pinned
@@ -23,8 +23,8 @@ import java.sql.Connection
  *  - [Enforcement.DECLARATIVE_ONLY] — no measured mechanism: [within] runs the block as it is,
  *    and the path's guarantee stays the read-only rule plus a SELECT-only database user
  *    (datasources.md §5.7). LAKE, ORACLE and MSSQL are fixed here (LAKE's enforcement surface is
- *    the managed-table gate, ORACLE's driver is opt-in at build and MSSQL's container is
- *    host-gated, so no default run can measure them).
+ *    the managed-table gate, ORACLE's driver is opt-in at build, and MSSQL's shipped classification
+ *    is fixed independently of its host-gated experiment).
  *
  * No SQL text is parsed and no statement is built from input: every statement this object runs
  * is a constant of the table.
