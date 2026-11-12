@@ -268,6 +268,32 @@ class DatasourceDetailRenderTest {
      * tree id; every other dialect gets the schema-tree heading, prose and id, and neither
      * dialect renders the other's markup.
      */
+    /**
+     * #876 G6 U2 — every dialect's detail ends with the Dependencies section after Learned facts: closed by default, a
+     * datasource pane carrying the machine name and nothing else (no version, no id), and the page's loader catalog
+     * lists the eight Dependencies entries.
+     */
+    @Test
+    fun `the Dependencies section follows Learned facts, closed, with the name alone and the page's catalog`() {
+        Dialect.entries.forEach { dialect ->
+            val html = render(dialect)
+            withClue(dialect) {
+                val after = html.substringAfter(">Learned facts</h2>")
+                val section = after.substringAfter("<details class=\"dp-deps-section u-mt-lg\" data-ds-deps>").substringBefore("</details>")
+                (after.indexOf("data-ds-deps") >= 0) shouldBe true
+                section shouldContain "Dependencies</h2>"
+                section shouldContain
+                    "<div class=\"dp-deps\" data-dp-deps data-family=\"datasource\" data-dp-deps-state=\"idle\" data-name=\"sample-lake\">"
+                section shouldNotContain "data-version"
+                section shouldNotContain "data-id"
+                Regex("<details[^>]*data-ds-deps[^>]*\\bopen\\b").containsMatchIn(html) shouldBe false
+                val catalog = html.substringAfter("<template data-page-assets>").substringBefore("</template>")
+                Regex("src=\"(/[^\"]+)\"").findAll(catalog).map { it.groupValues[1] }.toList() shouldBe DEPENDENCY_CATALOG
+                catalog shouldContain "<script data-page-mount src=\"/js/dependencies/mount.js\">"
+            }
+        }
+    }
+
     @Test
     fun `LAKE renders the registry heading, prose and tree id, and nothing of the schema tree`() {
         val html = render(Dialect.LAKE)
