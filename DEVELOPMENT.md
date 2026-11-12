@@ -1252,11 +1252,14 @@ in-checkout finding after a deletion (#703), use the forced affected-task check 
 
 ### 9.6 Capturing log lines in a test
 
-A test that asserts on log output captures it through its module's `SnapshotListAppender` (one
-test-source copy per module, beside its own `SnapshotListAppenderTest`; no shared test-fixtures
-module) and reads `events()` or `messages()`, detached copies taken under the list's own lock. Its
-block helper attaches, detaches and stops around a block: `capturingLogEvents(logger) { … }`, or
-`capturingLogs { … }` over the root logger in `modules/datasources`. Logback's raw
+A test that asserts on log output captures it through the shared `SnapshotListAppender` of the
+test-only module `modules/log-capture` (#756; module-structure §5.23): the module declares
+`testImplementation(project(":modules:log-capture"))` — never another configuration, which
+`verifyModuleDependencies` refuses — and the test imports `co.datapipelines.logcapture.SnapshotListAppender`,
+`capturingLogEvents` or `capturingLogs`. It reads `events()` or `messages()`, detached copies taken
+under the list's own lock. The block helpers start, attach, detach and stop around a block:
+`capturingLogEvents(logger) { … }` for one logger, or `capturingLogs { … }` over the root logger.
+No module keeps its own copy of the helper or its test; the guard below refuses one. Logback's raw
 `ListAppender.list` is a plain `ArrayList` that every logging thread appends to — a pool, a
 scheduler, a coroutine dispatcher, Hikari's housekeeper, a Spring context — so reading it while any
 of them can still log is a `ConcurrentModificationException` or a torn read on a slow runner
@@ -1265,7 +1268,8 @@ the sole writer between attach and the last read, and it then says so on its con
 alone on the line directly above it when the construction line would pass 120 columns:
 `// raw-list-appender: synchronous — <the fact that makes it safe>`. `RawListAppenderGuardTest`
 (buildSrc, run by the gate and CI's cold job) refuses any other raw construction, naming it
-`path:line` (#484).
+`path:line` (#484), and refuses a `SnapshotListAppender.kt` or `SnapshotListAppenderTest.kt`
+outside `modules/log-capture` (#756).
 
 ---
 

@@ -572,6 +572,8 @@ class CommonConventionsPlugin : Plugin<Project> {
                 ":modules:dependency-contract" to 96,
                 // #266: measured baseline 97.27 on the module's first Kover run (30 tests), minus 2, floored.
                 ":modules:persistence" to 95,
+                // #756: measured baseline 90.91 (20/22 lines) on the module's first Kover run (6 tests), minus 2, floored.
+                ":modules:log-capture" to 88,
                 // 072: measured baseline 95.9 on the module's first Kover run, minus 2, floored.
                 ":modules:calculators" to 93,
                 // 7a: measured baseline 91.4 on the module's first Kover run, minus 2, floored.
