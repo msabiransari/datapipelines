@@ -448,7 +448,7 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
         seedDraftVersion(board)
 
         ensureTheme("light")
-        listOf("board", "overview", "refreshes", "versions").forEach { tab ->
+        listOf("board", "overview", "refreshes", "dependencies", "versions").forEach { tab ->
             page.navigate("$baseUrl/dashboards/$board?tab=$tab")
             page.waitForSelector("#dp-pane-" + tab + ":not([hidden])")
             page.waitForTimeout(300.0)
@@ -659,13 +659,13 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
     }
 
     /**
-     * #422 — the four tabs at the phone width too, Versions included: no sideways scroll, and the Versions
+     * #422 — the five tabs (#876: Dependencies) at the phone width too, Versions included: no sideways scroll, and the Versions
      * cells read relative with the absolute UTC stamp on `title`, never a raw ISO instant. Restores the viewport.
      */
     private fun assertVersionsAtPhoneAndDesktop(board: String) {
         val desktop = page.viewportSize()
         page.setViewportSize(PHONE_W, PHONE_H)
-        listOf("board", "overview", "refreshes", "versions").forEach { tab ->
+        listOf("board", "overview", "refreshes", "dependencies", "versions").forEach { tab ->
             page.navigate("$baseUrl/dashboards/$board?tab=$tab")
             page.waitForSelector("#dp-pane-" + tab + ":not([hidden])")
             if (tab == "versions") page.waitForSelector("#dp-pane-versions .ds-table")

@@ -129,6 +129,25 @@
               </div>
             </div>
           </section>
+
+          <!-- #876 G6 U2 (record §13) — what this schedule runs: the shared Dependencies pane in a section closed by
+               default, loaded the first time it is opened (dependencies/mount.js, `toggle`). detail.js sets the pane's
+               data-id (the ONLY thing the request sends) and data-revision (display only) from the schedule it read,
+               then scans the clone. It sits in the READING column, the wide one: at 1440px and wider the acting column
+               is a sticky, height-capped grid sized for the Runs card, and an open graph there would squeeze the runs. -->
+          <section class="ds-card">
+            <details class="dp-deps-section" data-sch-deps>
+              <summary class="app-card-h dp-deps-summary">
+                <h3><svg class="ds-icon ds-icon-sm dp-deps-chevron" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevron-right"></use></svg>Dependencies</h3>
+                <span class="app-card-note">the pipeline version it runs</span>
+              </summary>
+              <div class="app-card-b">
+                <div class="dp-deps" data-dp-deps data-family="schedule" data-dp-deps-state="idle">
+                  <p class="dp-deps-note" data-dp-deps-note role="status">Dependencies load when this section is opened.</p>
+                </div>
+              </div>
+            </details>
+          </section>
         </div>
 
         <!-- ============================================================= acting -->

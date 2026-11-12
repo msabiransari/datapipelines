@@ -30,7 +30,7 @@
     <script th:src="@{/js/lifecycle-dialog.js}"></script>
   </template>
   <!-- "on-mount": fetched while a navigation prepares, executed only once this page is in place,
-       Alpine LAST; the last entry, runtime.js, is the mount that activates the `.pe-root` exactly
+       Alpine LAST; runtime.js, the last entry before #876's Dependencies pane, is the mount that activates the `.pe-root` exactly
        once per root — on a cached history restore too, where the loader mounts the restored
        catalog and nothing in the snapshot replays. -->
   <template id="pe-runtime-scripts" data-page-assets="on-mount">
@@ -48,7 +48,7 @@
     <!-- 195: the Parameters sidebar's field view models — pure, node-tested, read
          by init.js and the template's paths. -->
     <script th:src="@{/js/pipeline-editor/param-fields.js}"></script>
-    <!-- #349/#420: the workspace's six-tab state machine (pure, node-tested) — Flow is the
+    <!-- #349/#420: the workspace's seven-tab state machine (pure, node-tested) — Flow is the
          graph tab; Runs is admitted only with the execution read. The admission and
          transition rule is the shared core's (workspace/tabs.js, the machine the dashboards
          and visualizations workspaces run), so the core loads FIRST; both load before
@@ -73,6 +73,14 @@
     <!-- Alpine boots LAST: the modules above own the alpine:init registration by then. -->
     <script th:src="@{/vendor/alpinejs/alpine.min.js}"></script>
     <script data-page-mount th:src="@{/js/pipeline-editor/runtime.js}"></script>
+    <!-- #876 G6 — the Dependencies pane's modules and mount (the three graph vendors are listed above), after the
+         workspace's activation: the pane's data-version is bound by Alpine from viewedVersion, so an in-page
+         version switch moves it and the mount re-fetches (A26). -->
+    <script th:src="@{/js/dependencies/renderer.js}"></script>
+    <script th:src="@{/js/dependencies/tree-view.js}"></script>
+    <script th:src="@{/js/dependencies/list.js}"></script>
+    <script th:src="@{/js/dependencies/source.js}"></script>
+    <script data-page-mount th:src="@{/js/dependencies/mount.js}"></script>
   </template>
 
   <script type="application/json" id="pipeline-data" th:if="${hasSelectedBody}" th:utext="${pipelineJson}"></script>
@@ -277,8 +285,8 @@
       <button class="pe-banner-dismiss" @click="dismissBanner" aria-label="Dismiss"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg></button>
     </div>
 
-    <!-- #349 — the workspace's six tabs (spec §4.1, D2): Flow is the graph tab and the
-         default; Overview, Parameters, Runs, Usage and Versions are the pipeline's
+    <!-- #349 — the workspace's seven tabs (spec §4.1, D2): Flow is the graph tab and the
+         default; Overview, Parameters, Runs, Usage, Dependencies (#876) and Versions are the pipeline's
          reading surfaces. A tab change is NAVIGATION ONLY — it swaps no execution state
          and cancels no run (§4.3). The tab set is closed server-side
          (PipelineWorkspaceTab); Runs renders — and loads — only for a caller with the
@@ -298,6 +306,8 @@
               x-bind:aria-selected="tabs.runsAria" @click="selectRunsTab">Runs</button>
       <button type="button" class="pe-tab" role="tab" id="pe-tab-usage" aria-controls="pe-pane-usage"
               x-bind:aria-selected="tabs.usageAria" @click="selectUsageTab">Usage</button>
+      <button type="button" class="pe-tab" role="tab" id="pe-tab-dependencies" aria-controls="pe-pane-dependencies"
+              x-bind:aria-selected="tabs.dependenciesAria" @click="selectDependenciesTab">Dependencies</button>
       <button type="button" class="pe-tab" role="tab" id="pe-tab-versions" aria-controls="pe-pane-versions"
               x-bind:aria-selected="tabs.versionsAria" @click="selectVersionsTab">Versions</button>
     </nav>
@@ -817,6 +827,18 @@
         <div class="pe-tab-note" x-show="usageLoading">Loading usage…</div>
         <div class="pe-tab-note" x-show="usageLoadFailed">The usage list could not be loaded. Reopen the tab to retry.</div>
         <div id="pe-usage-body" class="pe-tab-lazy"></div>
+      </div>
+
+      <!-- DEPENDENCIES (#876 G6) — what the VIEWED version depends on (record §13): templates, child pipelines and
+           datasources, transitively. Usage is the opposite direction. A dependencies/mount.js mount (never
+           ensureTabLoaded's partial path): the server renders the version it resolved, Alpine re-binds it on an
+           in-page switch, and the mount aborts and re-fetches on the change. -->
+      <div class="pe-pane pe-pane-dependencies" id="pe-pane-dependencies" role="tabpanel"
+           aria-labelledby="pe-tab-dependencies" hidden x-bind:hidden="tabs.dependenciesHidden">
+        <div class="dp-deps" data-dp-deps data-family="pipeline" data-dp-deps-state="idle"
+             th:attr="data-name=${navCurrentPath},data-version=${viewedVersion}" x-bind:data-version="viewedVersion">
+          <p class="dp-deps-note" data-dp-deps-note role="status">Dependencies load when this tab is opened.</p>
+        </div>
       </div>
 
       <!-- VERSIONS (#349) — the admitted history with provenance, run counts, current

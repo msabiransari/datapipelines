@@ -34,6 +34,15 @@
     <!-- The pure tab state machine plus DOM glue: mount each live or restored root once. -->
     <script th:src="@{/js/workspace/history.js}"></script>
     <script th:src="@{/js/template-editor/workspace.js}" data-page-mount></script>
+    <!-- #876 G6 — the Dependencies pane's renderer and its mount (record §13), after the tab strip's mount. -->
+    <script th:src="@{/vendor/dagre/dagre.min.js}"></script>
+    <script th:src="@{/vendor/cytoscape/cytoscape.min.js}"></script>
+    <script th:src="@{/vendor/cytoscape/cytoscape-dagre.js}"></script>
+    <script th:src="@{/js/dependencies/renderer.js}"></script>
+    <script th:src="@{/js/dependencies/tree-view.js}"></script>
+    <script th:src="@{/js/dependencies/list.js}"></script>
+    <script th:src="@{/js/dependencies/source.js}"></script>
+    <script th:src="@{/js/dependencies/mount.js}" data-page-mount></script>
   </template>
 
   <!--/* 110 §C — the phone band. Desktop-first BY DECISION: below 768px the band renders above
@@ -144,8 +153,8 @@
       </div>
     </div>
 
-    <!-- #398 — the workspace's six tabs (the tab floor, the pipelines twin's shape): Source is
-         the default; Overview, Render (authors, non-script), Runs, Used by and Versions are
+    <!-- #398 — the workspace's seven tabs (the tab floor, the pipelines twin's shape): Source is
+         the default; Overview, Render (authors, non-script), Runs, Used by, Dependencies (#876) and Versions are
          the template's reading surfaces. A tab change is NAVIGATION ONLY — it swaps no state
          and refetches nothing but the Runs tab's one lazy load. The tab set is closed
          server-side (TemplateWorkspaceTab); Render resolves to Source for a reader and for a
@@ -166,6 +175,8 @@
               hx-target="#tw-runs-body" hx-swap="innerHTML">Runs</button>
       <button type="button" class="tw-tab" role="tab" id="tw-tab-used" aria-controls="tw-pane-used"
               data-tw-tab="used-by" th:attr="aria-selected=${activeTab == 'used-by'} ? 'true' : 'false'">Used by</button>
+      <button type="button" class="tw-tab" role="tab" id="tw-tab-dependencies" aria-controls="tw-pane-dependencies"
+              data-tw-tab="dependencies" th:attr="aria-selected=${activeTab == 'dependencies'} ? 'true' : 'false'">Dependencies</button>
       <button type="button" class="tw-tab" role="tab" id="tw-tab-versions" aria-controls="tw-pane-versions"
               data-tw-tab="versions" th:attr="aria-selected=${activeTab == 'versions'} ? 'true' : 'false'">Versions</button>
     </nav>
@@ -356,6 +367,17 @@
               <div th:replace="~{partials/template-used-by :: usedBy}"></div>
             </div>
           </section>
+        </div>
+      </div>
+
+      <!-- DEPENDENCIES (#876 G6) — what THIS version depends on (record §13): its imports, transitively, as a graph
+           and a table. Used by is the opposite direction. A dependencies/mount.js mount, fetched the first time the
+           tab is shown. -->
+      <div class="tw-pane tw-pane-dependencies" id="tw-pane-dependencies" role="tabpanel" aria-labelledby="tw-tab-dependencies"
+           th:attr="hidden=${activeTab != 'dependencies'}">
+        <div class="dp-deps" data-dp-deps data-family="template" data-dp-deps-state="idle"
+             th:attr="data-name=${templateName},data-version=${viewedVersion}">
+          <p class="dp-deps-note" data-dp-deps-note role="status">Dependencies load when this tab is opened.</p>
         </div>
       </div>
 

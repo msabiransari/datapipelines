@@ -564,7 +564,7 @@ class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
         val BROWSER_TREE_READ =
             Regex("^GET [^ ]+/api/v1/(pipelines|templates|dashboards|visualizations|parameter-sets)/tree\\?root=&parent=$")
         val WIDTHS = listOf(1440 to 900, 1100 to 800, 390 to 844)
-        val TABS = listOf("preview", "overview", "evidence", "used-by", "versions")
+        val TABS = listOf("preview", "overview", "evidence", "used-by", "dependencies", "versions")
         val SHOTS = Paths.get("build", "reports", "399-visualizations")
 
         /** A raw ISO-8601 instant (`2026-10-01T09:00:00Z`) — the text #422 retired from the Versions cells. */

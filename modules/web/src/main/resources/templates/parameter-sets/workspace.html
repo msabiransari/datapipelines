@@ -30,6 +30,12 @@
     <script th:src="@{/js/parameter-workspace/inspector.js}"></script>
     <script th:src="@{/js/parameter-workspace/workspace.js}"></script>
     <script data-page-mount th:src="@{/js/parameter-workspace/runtime.js}"></script>
+    <!-- #876 G6 — the Dependencies arm's modules and mount (the three graph vendors are listed above). -->
+    <script th:src="@{/js/dependencies/renderer.js}"></script>
+    <script th:src="@{/js/dependencies/tree-view.js}"></script>
+    <script th:src="@{/js/dependencies/list.js}"></script>
+    <script th:src="@{/js/dependencies/source.js}"></script>
+    <script data-page-mount th:src="@{/js/dependencies/mount.js}"></script>
   </template>
 
   <div class="ps-root" th:attr="data-parameter-set-id=${parameterSetId}, data-active-tab=${activeTab}">
@@ -49,9 +55,10 @@
       </div>
     </div>
 
-    <!-- #376 — the page's two sections, one canonical URL each (`?tab=` is the closed set workspace | history; the viewed
-         version rides along so the header above keeps naming it). Full-document links, not client tabs: the History
-         arm renders no live form, so opening it never issues an evaluate (it would be a history row of its own). -->
+    <!-- #376 — the page's sections, one canonical URL each (`?tab=` is the closed set workspace | history | dependencies,
+         #876 adding the third; the viewed version rides along so the header above keeps naming it). Full-document links,
+         not client tabs: the History and Dependencies arms render no live form, so opening one never issues an evaluate
+         (it would be a history row of its own). -->
     <nav class="ps-tabs" aria-label="Workspace sections">
       <a class="ps-tab" hx-boost="true" data-ps-tab="workspace"
          th:classappend="${activeTab == 'workspace'} ? 'is-on'"
@@ -61,6 +68,10 @@
          th:classappend="${activeTab == 'history'} ? 'is-on'"
          th:href="${viewedVersion != null} ? @{/parameter-sets/{id}(id=${parameterSetId}, version=${viewedVersion}, tab='history')} : @{/parameter-sets/{id}(id=${parameterSetId}, tab='history')}"
          th:attr="aria-current=${activeTab == 'history'} ? 'page' : null">History</a>
+      <a class="ps-tab" hx-boost="true" data-ps-tab="dependencies"
+         th:classappend="${activeTab == 'dependencies'} ? 'is-on'"
+         th:href="${viewedVersion != null} ? @{/parameter-sets/{id}(id=${parameterSetId}, version=${viewedVersion}, tab='dependencies')} : @{/parameter-sets/{id}(id=${parameterSetId}, tab='dependencies')}"
+         th:attr="aria-current=${activeTab == 'dependencies'} ? 'page' : null">Dependencies</a>
     </nav>
 
     <!-- The version selector: every version the caller's lens admits, each link naming its EXACT version
@@ -114,7 +125,9 @@
 
       <div class="ps-stack">
         <section class="ps-card" aria-labelledby="ps-graph-title">
-          <h2 class="ps-card-title" id="ps-graph-title">Dependencies</h2>
+          <!-- #876 G6: "Parameter graph", so this card (the parameters' depends_on graph) is never confused with the
+               object-level Dependencies section above (record §13, last paragraph). -->
+          <h2 class="ps-card-title" id="ps-graph-title">Parameter graph</h2>
           <!-- Keyboard: Tab focuses the graph; Up/Down walk the parameters in display order, Left/Right follow the
                dependency edges, Home/End jump. The selection is announced through the live region below. -->
           <div id="ps-graph" class="ps-graph" tabindex="0" role="group"
@@ -135,6 +148,17 @@
       <h2 class="ps-card-title" id="ps-history-title">Evaluation history</h2>
       <div th:replace="~{partials/parameter-set-evaluations :: history}"></div>
       <div id="ps-history-detail" class="ps-history-detail-host" aria-live="polite"></div>
+    </section>
+
+    <!-- #876 G6 — the Dependencies arm (record §13): what the VIEWED version depends on — its selector templates and
+         datasources — as a graph and a table, fetched when the arm renders. No version viewed (the choose-a-version
+         state) leaves data-version absent and the pane says so, with no request. -->
+    <section class="ps-card" aria-labelledby="ps-dependencies-title" th:if="${activeTab == 'dependencies'}">
+      <h2 class="ps-card-title" id="ps-dependencies-title">Dependencies</h2>
+      <div class="dp-deps" data-dp-deps data-family="parameter_set" data-dp-deps-state="idle"
+           th:attr="data-name=${parameterSetName},data-version=${viewedVersion}">
+        <p class="dp-deps-note" data-dp-deps-note role="status">Dependencies load when this section is opened.</p>
+      </div>
     </section>
   </div>
 

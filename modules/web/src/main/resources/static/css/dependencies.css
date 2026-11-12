@@ -1,0 +1,218 @@
+/* #876 G6 — the object-level Dependencies pane (record §13): the status note, the graph/list toggle, the
+   Cytoscape canvas and its selection panel, and the accessible tables. Tokens only — every colour, length and
+   type size is a design-system variable; Cytoscape's own colours come from the same tokens through
+   dependencies/renderer.js's probe. The status chips are the shared `.ds-badge` tones (text + colour, WCAG 1.4.1). */
+
+.dp-deps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  padding: var(--space-3) var(--space-4);
+  min-width: 0;
+}
+
+.dp-deps-note,
+.dp-deps-text {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.dp-deps-text {
+  color: var(--text-primary);
+}
+
+.dp-deps-toggle {
+  display: flex;
+  gap: var(--gap-xs);
+}
+
+.dp-deps-toggle [aria-pressed="true"] {
+  border-color: var(--border-focus);
+  background: var(--surface-selected);
+}
+
+.dp-deps-notes {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--gap-xs);
+}
+
+/* One column: the canvas takes the pane's whole width (a side panel halved it, and Fit drew 11px labels at
+   about half size on a 1440px window); the selection panel reads below it. */
+.dp-deps-graph {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: var(--gap-sm);
+  min-width: 0;
+}
+
+.dp-deps-graph[hidden],
+.dp-deps-list[hidden],
+.dp-deps-toggle[hidden] {
+  display: none;
+}
+
+.dp-deps-toolbar {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: var(--gap-xs);
+}
+
+.dp-deps-canvas {
+  height: calc(var(--space-24) * 4.5);
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-default);
+  overflow: hidden;
+}
+
+/* The canvas and the family-glyph layer over it (renderer.js glyphLayer): the layer ignores the pointer, so pan,
+   zoom and tap stay the canvas's, and clips a glyph panned out of the canvas. Each glyph is placed from its top left
+   corner by the CSSOM translate and scale properties; its colour is the stylesheet's, so a theme switch recolours it. */
+.dp-deps-stage {
+  position: relative;
+  min-width: 0;
+}
+
+.dp-deps-glyphs {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  pointer-events: none;
+}
+
+.dp-deps-node-glyph {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  color: var(--text-secondary);
+}
+
+.dp-deps-canvas:focus-visible,
+.dp-deps-row:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.dp-deps-panel {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--text-sm);
+}
+
+.dp-deps-panel p {
+  margin: 0 0 var(--space-1);
+}
+
+.dp-deps-panel-heading {
+  font-weight: var(--weight-semibold);
+}
+
+.dp-deps-panel-list {
+  margin: 0 0 var(--space-2);
+  padding-left: var(--space-4);
+}
+
+.dp-deps-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-md);
+  min-width: 0;
+  overflow-x: auto;
+}
+
+/* Auto layout: each column takes its content's width (a fixed layout split six columns evenly and set "Dashboard"
+   one syllable per line). Kind, version and the relationship label never wrap; a name wraps after a "/"
+   (list.js's break opportunities) and keeps its segments whole; other text breaks anywhere it must. */
+.dp-deps-table {
+  width: 100%;
+  table-layout: auto;
+}
+
+.dp-deps-table td {
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+
+/* A name — in its own cell or inside a relationship, a constraint or an edge row — keeps each segment whole: its
+   column is at least its longest segment wide, and the table scrolls inside itself (data-table.css's unframed
+   table), never the page, when one segment is wider than the pane. */
+.dp-deps-table td.dp-deps-name,
+.dp-deps-table td.dp-deps-path,
+.dp-deps-table td.dp-deps-status {
+  overflow-wrap: break-word;
+}
+
+.dp-deps-table td.dp-deps-kind,
+.dp-deps-table td.dp-deps-nowrap {
+  white-space: nowrap;
+}
+
+/* The vendored badge never wraps; a datasource's long status ("Registered datasource · read-write") would hold its
+   column at one line and push the table past the pane, so inside the list it wraps between words (the status cell
+   keeps its words whole, above). */
+.dp-deps-table td.dp-deps-status .ds-badge {
+  white-space: normal;
+}
+
+.dp-deps-caption {
+  text-align: left;
+  font-weight: var(--weight-semibold);
+  padding-bottom: var(--space-1);
+}
+
+.dp-deps-row[aria-selected="true"] {
+  background: var(--surface-selected);
+}
+
+.dp-deps-kind-line {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-xs);
+}
+
+.dp-deps-root-mark {
+  margin-left: var(--space-1);
+}
+
+.dp-deps-diagnostic {
+  display: block;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+/* #876 G6 U2/U3 — a Dependencies SECTION on a details page (schedule, datasource, API): a <details> closed by
+   default whose summary is the card's header; the chevron turns when it opens. The pane inside loads on the first
+   open (mount.js, `toggle`). */
+.dp-deps-section > .dp-deps-summary {
+  cursor: pointer;
+  list-style: none;
+  padding-bottom: var(--space-4);
+}
+
+.dp-deps-section > .dp-deps-summary::-webkit-details-marker {
+  display: none;
+}
+
+.dp-deps-summary h2,
+.dp-deps-summary h3 {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  margin: 0;
+}
+
+.dp-deps-section > .dp-deps-summary:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.dp-deps-section[open] .dp-deps-chevron {
+  transform: rotate(90deg);
+}
