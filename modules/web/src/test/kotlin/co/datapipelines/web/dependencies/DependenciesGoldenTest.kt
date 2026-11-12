@@ -26,7 +26,8 @@ import java.time.Duration
 /**
  * **The enveloped goldens no authored workspace can produce** (#875 G4 §E, record A47) — a cycle (`acyclic: false`; the
  * product refuses cycles at save), each traversal `LIMIT` (`complete: false`, `acyclic: null`; the limits are process
- * configuration) and the two 503s. Each is the whole answer of the real [DependenciesController], projection and
+ * configuration), the payload budget's included (a tree over `max-wire-bytes` reduced to a prefix that fits, R1), and
+ * the two 503s. Each is the whole answer of the real [DependenciesController], projection and
  * [ApiExceptionHandler] over a stub pipeline family, normalised exactly as `DependenciesGoldenE2eTest` normalises the
  * route cases, and compared with its file in `src/test/resources/dependencies/goldens/` — the same directory, which that
  * test asserts holds exactly both halves. Every normalised answer is also written to `build/dependencies-goldens/`.
@@ -87,6 +88,7 @@ class DependenciesGoldenTest {
             "tree-limit-nodes" to answer(limits.copy(nodes = 2)) { chain(4) },
             "tree-limit-edges" to answer(limits.copy(edges = 1)) { fanOut(missing = false) },
             "tree-limit-diagnostics" to answer(limits.copy(diagnostics = 1)) { fanOut(missing = true) },
+            "tree-limit-wire-bytes" to answer(limits.copy(wireBytes = REDUCED_WIRE_BYTES)) { wide(WIDE_CHILDREN) },
             "metadata-unavailable" to
                 answer {
                     chain(1)
@@ -130,6 +132,12 @@ class DependenciesGoldenTest {
         pipelines.put(exact(FamilyKey.PIPELINE, ROOT, 1), Lifecycle.RELEASED, *below)
     }
 
+    /** `acme/root` pinning [children] released pipelines — over [REDUCED_WIRE_BYTES], reducible to a prefix of them. */
+    private fun wide(children: Int) {
+        val pinned = (1..children).map { pipelines.put(exact(FamilyKey.PIPELINE, "acme/child_$it", 1), Lifecycle.RELEASED) }
+        pipelines.put(exact(FamilyKey.PIPELINE, ROOT, 1), Lifecycle.RELEASED, *pinned.toTypedArray())
+    }
+
     /** `acme/root` pinning two pipelines — resolved, or ([missing]) absent, each then a `MISSING` diagnostic. */
     private fun fanOut(missing: Boolean) {
         val children = listOf("acme/left", "acme/right").map { exact(FamilyKey.PIPELINE, it, 1) }
@@ -144,7 +152,11 @@ class DependenciesGoldenTest {
         const val METADATA_UNAVAILABLE = "dependencies.metadata.unavailable"
         const val TOO_LARGE = "dependencies.response.too_large"
         const val OBSERVED_AT = "2026-01-01T00:00:00Z"
-        val LIMITS = listOf("depth", "nodes", "edges", "diagnostics")
+        const val REDUCED_WIRE_BYTES = 2_048
+        const val WIDE_CHILDREN = 6
+
+        /** The five traversal limits' case suffixes — §11.1's payload budget (`wire_bytes`) among them (#875 R1). */
+        val LIMITS = listOf("depth", "nodes", "edges", "diagnostics", "wire-bytes")
         val MAPPER = jacksonObjectMapper()
         val PIPELINE_ROW = DependencyFamilyTransport.production(DependenciesRequestTest.LENSES).row(FamilyKey.PIPELINE)
         val GOLDENS: Path = Path.of("src/test/resources/dependencies/goldens")

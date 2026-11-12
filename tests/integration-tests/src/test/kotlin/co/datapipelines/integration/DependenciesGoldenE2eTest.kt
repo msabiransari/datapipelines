@@ -491,12 +491,16 @@ class DependenciesGoldenE2eTest {
                 "tree-limit-nodes",
                 "tree-limit-edges",
                 "tree-limit-diagnostics",
+                "tree-limit-wire-bytes",
                 "metadata-unavailable",
                 "response-too-large",
             )
 
-        /** A47's list: 3 acyclic + 9 operational + 12 relationships + 4 constraint tokens + 5 reasons + the MISSING twins. */
-        const val A47_FLOOR = 3 + 9 + 12 + 4 + 5 + 2
+        /**
+         * A47's list: 3 acyclic + 9 operational + 12 relationships + 4 constraint tokens + 5 reasons + the MISSING twins,
+         * plus the payload budget's `wire_bytes` LIMIT 200 (#875 R1: §11.1's limit row names it beside the four walk limits).
+         */
+        const val A47_FLOOR = 3 + 9 + 12 + 4 + 5 + 2 + 1
 
         val RELATIONSHIPS =
             setOf(

@@ -8,10 +8,12 @@ import co.datapipelines.dependencies.Authority
 import co.datapipelines.dependencies.Deadline
 import co.datapipelines.dependencies.DeadlineExceeded
 import co.datapipelines.dependencies.DependencyWalker
+import co.datapipelines.dependencies.DiagnosticKind
 import co.datapipelines.dependencies.FamilyKey
 import co.datapipelines.dependencies.FamilyRegistry
 import co.datapipelines.dependencies.GraphLimits
 import co.datapipelines.dependencies.GraphSnapshot
+import co.datapipelines.dependencies.LimitKind
 import co.datapipelines.dependencies.MetadataSnapshot
 import co.datapipelines.dependencies.Purpose
 import co.datapipelines.dependencies.ReadIsolation
@@ -39,8 +41,10 @@ import java.time.Clock
  *    [readIsolation], the context carrying one [Deadline] with the statement limit on it; no lens enters the walk;
  * 5. a root that did not resolve, or (lensed) a resolved root the family's native lensed version read hides, is the
  *    native not-found — byte-identical for absent and hidden (§12, no oracle);
- * 6. the projection, and the payload held to `max-wire-bytes` (over it: `dependencies.response.too_large`, never a
- *    truncated tree).
+ * 6. the projection, and the payload held to `max-wire-bytes` (record §11.1's payload-budget limit): over it, the tree
+ *    reduced to the largest prefix of its nodes that fits, a `200` with `complete: false`, `acyclic: null` and G1's
+ *    `wire_bytes` LIMIT; only a tree whose roots alone with that LIMIT are still over is
+ *    `dependencies.response.too_large`, with no partial tree.
  *
  * A deadline that expires, or any provider read that fails (a `DataAccessException`, or the metadata transaction
  * itself failing — `TransactionException`), is `dependencies.metadata.unavailable` — no partial tree. Anything else is a
@@ -57,6 +61,15 @@ class DependencyTreeService(
     private val clock: Clock = Clock.systemUTC(),
 ) {
     private val walker = DependencyWalker(registry, limits, clock)
+
+    /** The one LIMIT a payload reduced to `max-wire-bytes` carries — G1's wording: the configured maximum, nothing more. */
+    private val wireBytesLimit =
+        WireDiagnostic(
+            DiagnosticKind.LIMIT.wire,
+            nodeId = null,
+            edgeId = null,
+            message = DependencyWalker.limitMessage(LimitKind.WIRE_BYTES, limits.wireBytes),
+        )
 
     /** The projected tree of [family]'s root named by [rawQuery], read for [principal]. */
     fun tree(
@@ -152,18 +165,63 @@ class DependencyTreeService(
         return graph
     }
 
+    /**
+     * The payload held to `max-wire-bytes` — record §11.1's payload-budget limit row (#875 R1). A payload that fits is
+     * returned unchanged. One that does not is [reduced] to the largest prefix of its nodes that fits with G1's
+     * `wire_bytes` LIMIT; only when the roots alone with that LIMIT are still over is it `dependencies.response.too_large`.
+     *
+     * The reduced size never shrinks as the kept count grows (each step only adds nodes, edges and diagnostics), so the
+     * largest count is found by bisection between "roots only" (fits) and "every node" (the whole payload plus the LIMIT,
+     * larger than the payload already over): at most `2 + ⌈log2(nodes)⌉` serializations of an already bounded graph —
+     * 12 for the default 1,000-node limit — each reduction one pass over the nodes, edges and diagnostics. Nothing is read.
+     */
     private fun bounded(data: DependencyTreeData): DependencyTreeData {
-        val bytes = mapper.writeValueAsBytes(data).size
-        if (bytes > limits.wireBytes) {
-            // ERROR with a stack (the handler's 5xx path): a tree this size within the traversal limits means the
-            // limits and the byte budget disagree — an operator's fact, never answered by a truncated tree.
+        val bytes = sizeOf(data)
+        if (bytes <= limits.wireBytes) return data
+        val roots = data.roots.toSet()
+        if (sizeOf(reduced(data, roots, kept = 0)) > limits.wireBytes) {
+            // ERROR with a stack (the handler's 5xx path): even the roots alone are over the budget — the limits and the
+            // byte budget disagree, an operator's fact, never answered by a partial tree.
             throw DatapipelinesException(
                 PipelineErrorCodes.Dependencies.RESPONSE_TOO_LARGE,
                 "The dependency tree is larger than the response budget.",
                 cause = IllegalStateException("projected tree is $bytes bytes; max-wire-bytes is ${limits.wireBytes}"),
             )
         }
-        return data
+        var fits = 0
+        var over = data.nodes.size
+        while (over - fits > 1) {
+            val middle = (fits + over) ushr 1
+            if (sizeOf(reduced(data, roots, middle)) <= limits.wireBytes) fits = middle else over = middle
+        }
+        return reduced(data, roots, fits)
+    }
+
+    private fun sizeOf(data: DependencyTreeData): Int = mapper.writeValueAsBytes(data).size
+
+    /**
+     * [data] cut to the roots and its first [kept] nodes in its own node order; the edges both of whose ends are kept and
+     * the diagnostics naming no node or edge, or only kept ones, each in its order and no id renumbered; then ONE
+     * `wire_bytes` LIMIT in G1's wording (`limit-wire-bytes.json`'s shape) — `complete: false`, `acyclic: null`.
+     */
+    private fun reduced(
+        data: DependencyTreeData,
+        roots: Set<String>,
+        kept: Int,
+    ): DependencyTreeData {
+        val nodes = data.nodes.filterIndexed { index, node -> index < kept || node.nodeId in roots }
+        val nodeIds = nodes.mapTo(HashSet()) { it.nodeId }
+        val edges = data.edges.filter { it.from in nodeIds && it.to in nodeIds }
+        val edgeIds = edges.mapTo(HashSet()) { it.edgeId }
+        val diagnostics =
+            data.diagnostics.filter { (it.nodeId == null || it.nodeId in nodeIds) && (it.edgeId == null || it.edgeId in edgeIds) }
+        return data.copy(
+            nodes = nodes,
+            edges = edges,
+            diagnostics = diagnostics + wireBytesLimit,
+            complete = false,
+            acyclic = null,
+        )
     }
 
     private fun requestInvalid(refusal: Parsed.Refused) =

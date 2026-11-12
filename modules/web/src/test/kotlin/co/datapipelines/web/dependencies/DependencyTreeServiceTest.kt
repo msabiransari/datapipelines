@@ -5,11 +5,14 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.dependencies.FamilyKey
+import co.datapipelines.dependencies.GraphLimits
 import co.datapipelines.dependencies.ResolvedIdentity
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.typesystem.DatapipelinesException
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
@@ -164,6 +167,135 @@ class DependencyTreeServiceTest {
         tooLarge.cause.shouldBeInstanceOf<IllegalStateException>()
     }
 
+    @Test
+    fun `a reducible over-budget tree is a 200 with the wire_bytes LIMIT, the root kept - record 11_1`() {
+        val tree = wideTree(TREE_LIMITS.copy(wireBytes = REDUCIBLE_BUDGET))
+
+        tree.roots shouldBe listOf("n0")
+        tree.nodes.first().name shouldBe "acme/root"
+        tree.complete shouldBe false
+        tree.acyclic shouldBe null
+        tree.diagnostics.last() shouldBe
+            WireDiagnostic("LIMIT", null, null, "The wire_bytes limit (4096) was reached; the graph is incomplete.")
+        (bytesOf(tree) <= REDUCIBLE_BUDGET) shouldBe true
+    }
+
+    @Test
+    fun `the reduction keeps the largest node prefix that fits - one node more is over the budget`() {
+        wideWorld()
+        val full = readWith(TREE_LIMITS)
+        val tree = readWith(TREE_LIMITS.copy(wireBytes = REDUCIBLE_BUDGET))
+        val kept = tree.nodes.size
+
+        (kept in 2 until full.nodes.size) shouldBe true
+        tree.nodes shouldBe full.nodes.take(kept)
+        (bytesOf(tree) <= REDUCIBLE_BUDGET) shouldBe true
+        (bytesOf(cut(full, kept + 1, tree.diagnostics.last())) > REDUCIBLE_BUDGET) shouldBe true
+    }
+
+    @Test
+    fun `a reduced tree names only kept nodes and edges - roots, edge ends, diagnostics`() {
+        wideWorld(missingEvery = 3)
+        val full = readWith(TREE_LIMITS)
+        val budget = bytesOf(full) / 2
+        val tree = readWith(TREE_LIMITS.copy(wireBytes = budget))
+        val nodeIds = tree.nodes.map { it.nodeId }.toSet()
+        val edgeIds = tree.edges.map { it.edgeId }.toSet()
+
+        tree.roots.all { it in nodeIds } shouldBe true
+        tree.edges.all { it.from in nodeIds && it.to in nodeIds } shouldBe true
+        tree.diagnostics.all { (it.nodeId == null || it.nodeId in nodeIds) && (it.edgeId == null || it.edgeId in edgeIds) } shouldBe true
+        // in their order, never renumbered: exactly the full tree's kept rows, then the one LIMIT
+        tree.edges shouldBe full.edges.filter { it.from in nodeIds && it.to in nodeIds }
+        tree.diagnostics.dropLast(1) shouldBe full.diagnostics.filter { it.nodeId == null || it.nodeId in nodeIds }
+        // non-vacuous: the cut kept some MISSING diagnostics and dropped others
+        withClue("kept ${tree.diagnostics.size - 1} of ${full.diagnostics.size}") {
+            ((tree.diagnostics.size - 1) in 1 until full.diagnostics.size) shouldBe true
+        }
+        (bytesOf(tree) <= budget) shouldBe true
+    }
+
+    @Test
+    fun `the same over-budget input twice is reduced to byte-identical output`() {
+        wideWorld(missingEvery = 3)
+        val limits = TREE_LIMITS.copy(wireBytes = REDUCIBLE_BUDGET)
+
+        MAPPER.writeValueAsBytes(readWith(limits)).toList() shouldBe MAPPER.writeValueAsBytes(readWith(limits)).toList()
+    }
+
+    @Test
+    fun `a payload exactly at the budget is unchanged with no LIMIT - one byte less and it is reduced`() {
+        wideWorld()
+        val full = readWith(TREE_LIMITS)
+        val exactly = bytesOf(full)
+
+        readWith(TREE_LIMITS.copy(wireBytes = exactly)) shouldBe full
+        full.diagnostics.none { it.code == "LIMIT" } shouldBe true
+        readWith(TREE_LIMITS.copy(wireBytes = exactly - 1)).complete shouldBe false
+    }
+
+    @Test
+    fun `the roots alone with the LIMIT at the budget are a 200 - one byte under is response_too_large`() {
+        wideWorld()
+        val rootOnly = readWith(TREE_LIMITS.copy(wireBytes = REDUCIBLE_BUDGET)).let { cut(it, 1, it.diagnostics.last()) }
+        // the LIMIT names the budget itself: the floor is the root-only size with a maximum of the same digit count
+        val floor = bytesOf(rootOnly.copy(diagnostics = listOf(limitAt(bytesOf(rootOnly)))))
+        bytesOf(rootOnly.copy(diagnostics = listOf(limitAt(floor - 1)))) shouldBe floor
+
+        readWith(TREE_LIMITS.copy(wireBytes = floor)).nodes.map { it.nodeId } shouldBe listOf("n0")
+        val refused = refusal { readWith(TREE_LIMITS.copy(wireBytes = floor - 1)) }
+        refused.code shouldBe PipelineErrorCodes.Dependencies.RESPONSE_TOO_LARGE
+        refused.cause.shouldBeInstanceOf<IllegalStateException>()
+    }
+
+    @Test
+    fun `under a budget that would reduce the tree, a hidden root still answers exactly as an absent one`() {
+        wideWorld()
+        val tight = TREE_LIMITS.copy(wireBytes = REDUCIBLE_BUDGET)
+        val lensed = { lens: RootLens -> treeService(listOf(widgets), listOf(stubRow(TEST_WIDGET, lens = lens)), limits = tight) }
+        val promoter = member(WorkspaceRole.PROMOTER)
+
+        val absent = refusal { lensed(Lens()).read("name=acme/absent&version=1", promoter) }
+        val hidden = refusal { lensed(Lens(resolved = false)).read("name=acme/root&version=1", promoter) }
+
+        (hidden.code to hidden.message) shouldBe (absent.code to absent.message)
+        hidden.details shouldBe absent.details
+        lensed(Lens()).read("name=acme/root&version=1", promoter).complete shouldBe false
+    }
+
+    /** `acme/root` over [LEAVES] leaves — 11,463 bytes unreduced, 625 as its root alone; every [missingEvery]th absent. */
+    private fun wideWorld(missingEvery: Int = 0) {
+        val leaves = (1..LEAVES).map { exact(TEST_WIDGET, "acme/leaf_$it", 1) }
+        leaves.forEachIndexed { index, leaf -> if (missingEvery == 0 || index % missingEvery != 0) widgets.put(leaf) }
+        widgets.put(exact(TEST_WIDGET, "acme/root", 1), targets = leaves.toTypedArray())
+    }
+
+    private fun wideTree(limits: GraphLimits): DependencyTreeData {
+        wideWorld()
+        return readWith(limits)
+    }
+
+    private fun readWith(limits: GraphLimits) =
+        treeService(listOf(widgets), listOf(stubRow(TEST_WIDGET)), limits = limits).read("name=acme/root&version=1")
+
+    /** The oracle, built from the FULL tree by the brief's rule: the first [count] nodes, their edges and diagnostics. */
+    private fun cut(
+        full: DependencyTreeData,
+        count: Int,
+        limit: WireDiagnostic,
+    ): DependencyTreeData {
+        val nodes = full.nodes.take(count)
+        val ids = nodes.map { it.nodeId }.toSet()
+        val edges = full.edges.filter { it.from in ids && it.to in ids }
+        val diagnostics = full.diagnostics.filter { it.nodeId == null || it.nodeId in ids } + limit
+        return full.copy(nodes = nodes, edges = edges, diagnostics = diagnostics, complete = false, acyclic = null)
+    }
+
+    private fun limitAt(maximum: Int) =
+        WireDiagnostic("LIMIT", null, null, "The wire_bytes limit ($maximum) was reached; the graph is incomplete.")
+
+    private fun bytesOf(data: DependencyTreeData) = MAPPER.writeValueAsBytes(data).size
+
     /** A test root lens answering [request] before the walk and [resolved] after it. */
     private class Lens(
         private val request: Boolean = true,
@@ -184,6 +316,10 @@ class DependencyTreeServiceTest {
     }
 
     private companion object {
+        const val LEAVES = 20
+        const val REDUCIBLE_BUDGET = 4_096
+        val MAPPER = jacksonObjectMapper()
+
         init {
             require(TEST_WIDGET !in FamilyKey.PRODUCTION) { "test_widget must stay outside production" }
         }

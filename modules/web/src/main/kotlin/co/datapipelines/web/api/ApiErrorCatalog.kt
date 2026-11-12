@@ -207,7 +207,7 @@ object ApiErrorCatalog {
             // #875 — the metadata walk ran out of its deadline or a provider read failed: retryable, `Retry-After`
             // ([retryAfterSeconds]), never a partial tree.
             PipelineErrorCodes.Dependencies.METADATA_UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
-            // #875 — the projected tree is over `max-wire-bytes` inside the traversal limits: a configuration defect.
+            // #875 — the projected tree is over `max-wire-bytes` even reduced to its roots: a configuration defect.
             PipelineErrorCodes.Dependencies.RESPONSE_TOO_LARGE to HttpStatus.SERVICE_UNAVAILABLE,
             // §12's duplicate_name row documents HTTP 409 ("mapped from the UNIQUE constraint").
             PipelineErrorCodes.Validation.DUPLICATE_NAME to HttpStatus.CONFLICT,

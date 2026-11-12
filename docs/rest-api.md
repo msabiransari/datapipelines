@@ -3040,11 +3040,11 @@ fingerprint or a hidden count.
 | Incompatible selector shape, native grammar refused, non-UUID `id`, bad or out-of-range `version`, a value over 200 characters or not UTF-8 | `400 dependencies.request.invalid` with `details.field` and `details.reason` |
 | Unauthenticated, or a key of any kind | the platform's existing 401, or `403 endpoint.key_kind_refused` |
 | Root missing, in another workspace, ungranted, or not admitted by the promoter's lens | that family's existing not-found code and 404, identical for missing and hidden roots |
-| A traversal limit (depth, nodes, edges, diagnostics, payload budget) reached | `200` with `complete: false`, `acyclic: null` and a `LIMIT` diagnostic naming the limit |
+| A traversal limit (depth, nodes, edges, diagnostics, payload budget) reached | `200` with `complete: false`, `acyclic: null` and a `LIMIT` diagnostic naming the limit. Over the payload budget (`max-wire-bytes`) the tree is reduced, reading nothing more: the roots and the longest prefix of its nodes (in node order) that fits, the edges between kept nodes and the diagnostics naming only kept nodes and edges, ids unchanged, then one `LIMIT` naming `wire_bytes` |
 | Unsupported nodes inside the closure | `200` with an `UNSUPPORTED_FAMILY` diagnostic and `complete: false` |
 | A DISCARDED version in the closure, the root included | `200` with a `DISCARDED` diagnostic on its node; its own dependencies are not expanded, so `complete: false` and `acyclic: null` |
 | The metadata walk exceeds `metadata-timeout-seconds`, a statement exceeds `statement-timeout-seconds`, or a provider read fails | `503 dependencies.metadata.unavailable`, `Retry-After: 5`, no partial tree; logged once at WARN without a stack |
-| The projected payload is still over `max-wire-bytes` after the limits | `503 dependencies.response.too_large`; logged at ERROR with the stack |
+| The projected payload is still over `max-wire-bytes` after the tree was reduced to its roots | `503 dependencies.response.too_large`, no partial tree; logged at ERROR with the stack |
 | Any other failure | the platform's existing generic 500 envelope |
 
 The bounds are the `datapipelines.release.dependencies.*` keys
@@ -3052,8 +3052,10 @@ The bounds are the `datapipelines.release.dependencies.*` keys
 read-only READ COMMITTED transaction. Every provider statement is bounded by the lesser of
 `statement-timeout-seconds` and the time left on the one `metadata-timeout-seconds` deadline.
 
-Every case above is pinned by an enveloped golden answer, one file per case, in
-`modules/web/src/test/resources/dependencies/goldens/`.
+Every case above that the routes produce is pinned by an enveloped golden answer, one file per case, in
+`modules/web/src/test/resources/dependencies/goldens/`. Two rows have none: unsupported nodes (every production
+family is readable, so no route reaches one; the dependency contract's own fixture pins that payload) and the generic
+500 (the platform's handler, pinned where it is defined).
 
 ---
 
@@ -3061,7 +3063,7 @@ Every case above is pinned by an enveloped golden answer, one file per case, in
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-11 | v2.117 | #875 dependency trees (G4) | **New §25 Dependency trees, additive:** the eight session-only routes `GET /api/v1/dependencies/<family>`, each with its family's READ permission, return the bounded dependency closure of one root (`name` + `version`, `id` for a schedule, `name` alone for a datasource) as the frozen dependency-graph wire contract. Refusals are catalogued in pipeline-contract §13.26; a hidden or missing root answers its family's own not-found. No key kind is admitted. A DISCARDED version is a terminal node (`complete: false`, `acyclic: null`). Each case is pinned by an enveloped golden. |
+| 2026-11-11 | v2.117 | #875 dependency trees (G4) | **New §25 Dependency trees, additive:** the eight session-only routes `GET /api/v1/dependencies/<family>`, each with its family's READ permission, return the bounded dependency closure of one root (`name` + `version`, `id` for a schedule, `name` alone for a datasource) as the frozen dependency-graph wire contract. Refusals are catalogued in pipeline-contract §13.26; a hidden or missing root answers its family's own not-found. No key kind is admitted. A DISCARDED version is a terminal node (`complete: false`, `acyclic: null`). A tree over `max-wire-bytes` is reduced to the longest prefix of its nodes that fits and answers `200` with a `wire_bytes` `LIMIT`; only a tree whose roots alone do not fit answers `503 dependencies.response.too_large`. Each case the routes produce is pinned by an enveloped golden. |
 | 2026-11-11 | v2.116 | #894 endpoint-root audit provenance — a deliberate break | **§5.10** (the audit paragraph): a template row an API release cascades carries `cascade_from_api_endpoint_id` and the API's `cascade_from_version`, and no longer `cascade_from_pipeline_id` holding the API's id (owner ruling 2026-11-11, an explicit exception to the frozen release-dependencies record §11). A pipeline release's rows are unchanged; rows written before #894 are not rewritten. No route, field, permission or role changed. |
 | 2026-11-11 | v2.115 | #896 review F2 | **§9.1:** distinguish `global: true` (super-admin-only) from `global: false` (accepted on create below super admin); the update rule in §9.4 still requires super admin for either value. No wire or authorization change. |
 | 2026-11-11 | v2.114 | #896 review F1 | **§9.3:** a by-name read is not-found when the datasource is not granted to the active workspace, whoever owns it. Ownership by another workspace alone does not make a granted datasource invisible. |
