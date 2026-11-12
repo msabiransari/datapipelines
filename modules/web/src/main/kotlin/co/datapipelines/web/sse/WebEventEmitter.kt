@@ -477,7 +477,7 @@ class WebEventEmitter(
      * RUNNING insert pending, [write] runs here, on the caller's thread, as such writes always did;
      * behind a RUNNING insert that outlived [lifecycleWriteTimeout] it is registered on that insert's
      * completion handle and, once the insert lands, runs once as a task on [persistenceDispatcher] —
-     * dropped with one WARN when the insert failed. Never blocks, never throws, never counts
+     * dropped with one WARN when the insert failed. Never waits for a pending insert, never throws, never counts
      * `lifecycle_write_failed` (the run's terminal UPDATE already counted the unconfirmed insert).
      * [write] returning false (0 rows updated) or throwing is one WARN naming the execution id and
      * [what], wherever it ran.
