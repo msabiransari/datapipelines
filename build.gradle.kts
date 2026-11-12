@@ -144,13 +144,13 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
     // datasource/API/schedule identities never get a permanent pipeline-specific home. An entry here is the change
     // a reviewer must refuse; DependencyContractBoundaryTest fences the import side.
     ":modules:dependency-contract" to emptySet(),
-    // #266 — layer 0 beside typesystem: the generic batching writer (an ordered, bounded group
-    // commit in front of a store). Stdlib, coroutines and slf4j only; the stores' sinks live with
-    // the modules that own the stores (`auth`, `web`). An entry here would teach the primitive
-    // about a store, which is the thing it exists not to know.
     // #756 — layer 0, TEST-ONLY: the shared Logback snapshot capture (module-structure §5.23). Logback only; every
     // edge INTO it is a `testImplementation`, which verifyModuleDependencies enforces (testOnlyModules below).
     ":modules:log-capture" to emptySet(),
+    // #266 — layer 0 beside typesystem: the generic batching writer (an ordered, bounded group
+    // commit in front of a store). Its main sources use stdlib, coroutines and slf4j only; the stores'
+    // sinks live with the modules that own the stores (`auth`, `web`). A production dependency here
+    // would teach the primitive about a store, which is the thing it exists not to know.
     ":modules:persistence" to setOf(
         // #756 — test-only: the shared log capture (module-structure §5.23).
         ":modules:log-capture",

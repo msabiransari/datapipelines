@@ -354,9 +354,10 @@ micrometer-core = { module = "io.micrometer:micrometer-core" }
 # exporting registry is a deployment concern; library modules keep micrometer-core only.
 micrometer-registry-prometheus = { module = "io.micrometer:micrometer-registry-prometheus" }
 slf4j-api = { module = "org.slf4j:slf4j-api" }
-# Tests only, and only where no Spring Boot starter already brings it: modules/persistence's
-# suite records the writer's WARN lines with a ListAppender (#266b — a store's message must
-# never reach a log line). The version is the Spring Boot BOM's, the one every starter uses.
+# Test tooling: modules/log-capture exposes this as api for the shared snapshot capture (#756).
+# Its consumers use testImplementation only. modules/persistence also declares the backend for
+# its writer's WARN assertions (#266b — a store's message must never reach a log line).
+# The version is the Spring Boot BOM's, the one every starter uses.
 logback-classic = { module = "ch.qos.logback:logback-classic" }
 
 # --- Markdown rendering (033 docs-in-app; NOT BOM-managed) -------------------
