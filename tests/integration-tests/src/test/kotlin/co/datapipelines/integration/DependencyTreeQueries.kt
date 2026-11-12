@@ -77,7 +77,7 @@ internal object DependencyTreeQueries {
      * and schedule in [workspaceId]). The H2 [datasource] is registered first through REST by [registrar] — a super
      * admin's session active in the same workspace, which the registration is granted to — because the parameter set's
      * selector is PROVED against it at save, so a row seeded by SQL with a stand-in credential cannot back the closure.
-     * The source pipeline is RELEASED with its pinned template — a schedule refuses an unreleased target.
+     * The source pipeline is RELEASED with its pinned template (through a release plan) — a schedule refuses an unreleased target.
      */
     @Suppress("LongParameterList") // the world one seed is authored in
     fun seed(
@@ -98,10 +98,7 @@ internal object DependencyTreeQueries {
         val source = edges[2].to
         val query = edges[3].to
         val chart = edges[4].to
-        val pipeline = fx.row(source)
-        fx
-            .send("POST", "/api/v1/pipelines/${pipeline.uuid}/release?release_pinned_templates=true", "", pipeline.hash)
-            .ok("release ${source.name}")
+        fx.releaseWithPlan(source, listOf(edges[3])).ok("release ${source.name}")
         val endpoint = "/${prefix.replace('/', '_')}/v1/tree"
         fx
             .send("POST", "/api/v1/endpoints", """{"path": "$endpoint", "pipeline": "${source.name}", "pipeline_version": 1}""")

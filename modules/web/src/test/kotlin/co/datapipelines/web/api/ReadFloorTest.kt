@@ -118,6 +118,8 @@ class ReadFloorTest {
         // record's rule, the dashboard family's rows now named here).
         familyOf("/partials/dashboards/{id}/lifecycle/release") shouldBeFamily Family.LIFECYCLE_DIALOGS
         familyOf("/partials/dashboards/{id}/lifecycle/purge-entity") shouldBeFamily Family.LIFECYCLE_DIALOGS
+        // #876 §F.3 — the parameter set's release dialog is a lifecycle dialog, never the family's read.
+        familyOf("/partials/parameter-sets/{id}/lifecycle/release") shouldBeFamily Family.LIFECYCLE_DIALOGS
         familyOf("/partials/dashboards/{id}/refreshes") shouldBeFamily Family.DASHBOARD_RUNTIME
         // #556 — each family overview is its family's read, never the catch-all.
         familyOf("/overview/parameter-sets") shouldBeFamily Family.PARAMETER_SETS
@@ -240,8 +242,9 @@ class ReadFloorTest {
             // #399 — the visualization family's seven join on the same rule.
             // #786 — the API family's six join too: the draft dialog is the form of the draft save (`endpoint.publish`),
             // the release dialog `endpoint.release`, and discard / restore / purge / switch `endpoint.version.manage`.
-            // The floor is the family's measured count with them (31).
-            floor = 31,
+            // #876 §F.3 — the parameter set's release dialog joins on the same rule: its GET is the form of the
+            // release, so it floors at `parameter_set.release`. The floor is the family's measured count with it (32).
+            floor = 32,
             permissions =
                 setOf(
                     Permission.PIPELINE_VERSION_MANAGE,
@@ -262,6 +265,7 @@ class ReadFloorTest {
                     Permission.ENDPOINT_PUBLISH,
                     Permission.ENDPOINT_RELEASE,
                     Permission.ENDPOINT_VERSION_MANAGE,
+                    Permission.PARAMETER_SET_RELEASE,
                 ),
             matches = { path -> path.contains("/lifecycle/") },
         ),

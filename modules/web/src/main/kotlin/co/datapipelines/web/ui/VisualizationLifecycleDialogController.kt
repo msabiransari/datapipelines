@@ -5,6 +5,7 @@ import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.visualization.ArtifactVersion
 import co.datapipelines.visualization.Purged
@@ -15,6 +16,8 @@ import co.datapipelines.web.pipelines.LifecycleVerbs
 import org.springframework.http.ResponseEntity
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
+import org.springframework.util.LinkedMultiValueMap
+import org.springframework.util.MultiValueMap
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
@@ -49,6 +52,8 @@ class VisualizationLifecycleDialogController(
     private val visualizations: VisualizationService,
     private val dialogs: VisualizationLifecycleDialogModel,
     private val audit: AuditEventSink,
+    /** #876 §F.2 — the release dialog's plan: the session plan and its prerequisites, one planning read. */
+    private val previews: ReleasePreviews,
 ) : ShellPage {
     // ------------------------------------------------------------------ release
 
@@ -60,7 +65,15 @@ class VisualizationLifecycleDialogController(
         @RequestParam(required = false) from: String?,
     ): String {
         val principal = LifecycleVerbs.requireSession()
-        model.addAttribute("dlg", dialogs.release(principal.requireWorkspace().id, id))
+        val workspaceId = principal.requireWorkspace().id
+        val dlg = dialogs.release(workspaceId, id)
+        model.addAttribute("dlg", dlg)
+        // #876 §F.2 — the plan the dialog renders and posts back (tree_hash + the ticked drafts). Built for every draft,
+        // whatever the native refusals say: the plan owns the dependency rows, so a MISSING or DISCARDED transform pin is
+        // its blocking row beside the native cases and evidence refusals.
+        if (dlg.hasDraft) {
+            model.addAttribute("rd", previews.dialog(ReleaseFamily.VISUALIZATION, workspaceId, dlg.name, dlg.version, principal.userId))
+        }
         model.addAttribute("from", origin(from).wire)
         RoleModel.stamp(model)
         return "partials/visualization-lifecycle-release"
@@ -71,19 +84,25 @@ class VisualizationLifecycleDialogController(
     fun release(
         @PathVariable id: UUID,
         @RequestParam(name = "body_hash") bodyHash: String,
-        @RequestParam(name = "release_pinned_templates", required = false, defaultValue = "false") releasePinnedTemplates: Boolean,
+        @RequestParam(name = "tree_hash", required = false) treeHash: String?,
+        @RequestParam(name = "include_dependencies", required = false) includeDependencies: List<String>?,
         @RequestParam(required = false) from: String?,
+        /** #876 §F.2 — the optional per-node check overrides, read raw (ReleaseDialogPost pairs them by index). */
+        @RequestParam form: MultiValueMap<String, String> = LinkedMultiValueMap(),
     ): ResponseEntity<String> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
         // #416 — [bodyHash] is the hash the DIALOG read (you release what you tested). The draft is read here only
-        // to refuse the no-draft case; its CURRENT hash is never the one released, so a draft that changed after
-        // the dialog opened is a stale hash and the service answers visualization.version.conflict (the evidence
-        // gate, which judges the current body, still answers first when the new draft has no green run).
+        // to refuse the no-draft case; its CURRENT hash is never the one released. A draft that changed after the
+        // dialog opened is refused before anything flips: the plan's tree_hash covers the root's draft, so the planner
+        // answers visualization.release.plan_conflict first; the service's own visualization.version.conflict still
+        // answers a current plan posted with a stale body_hash.
         draftOf(workspaceId, id, version = null)
-        // D61 — the ONE consent: without it a DRAFT transform pin refuses release.dependency_not_released as it
-        // always has; the server, never the checkbox, is the guard.
-        val released = visualizations.release(workspaceId, id, bodyHash, principal.userId, releasePinnedTemplates)
+        // #876 §F.2 — the plan its GET rendered (tree_hash + one include_dependencies per ticked draft), into the SAME
+        // plan object the REST route parses: an unticked draft or a stale hash is refused by the planner under the
+        // guard; the server, never the checkbox, is the guard.
+        val plan = ReleaseDialogPost.plan(ReleaseFamily.VISUALIZATION, treeHash, includeDependencies, form)
+        val released = visualizations.release(workspaceId, id, bodyHash, principal.userId, releasePinnedTemplates = false, plan = plan)
         // #873 §C.7 — the coordinator wrote every release event inside the one transaction; this handler writes none.
         return redirect(workspaceTab(id, from, if (released.templatesReleased.isEmpty()) OK_RELEASED else OK_RELEASED_WITH_TEMPLATES))
     }

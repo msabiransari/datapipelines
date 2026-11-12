@@ -147,7 +147,8 @@ class PipelineLifecycleDialogModel(
         /**
          * #416 — the body hash of the SAME draft the dialog's version and last-writer facts come
          * from. The form posts it back and the release is made AT it, so a draft that changed after
-         * the dialog opened is refused `pipeline.version.conflict`, never released silently. Empty on
+         * the dialog opened is refused, never released silently — `pipeline.release.plan_conflict` from
+         * the plan's tree_hash first, `pipeline.version.conflict` for a current plan at a stale hash. Empty on
          * the no-draft branch, whose [refusal] renders no form. The default keeps the render tests'
          * hand-built dialogs compiling; both production constructions pass it explicitly.
          */
@@ -634,5 +635,23 @@ class PipelineLifecycleDialogModel(
         /** The keys of a kept template's `referencedBy` — the `template.in_use` keys the REST `kept_draft_templates` uses. */
         const val KEPT_BY_SETS = "referencing_parameter_sets"
         const val KEPT_BY_VISUALIZATIONS = "referencing_visualizations"
+    }
+}
+
+/**
+ * #876 §F.2 — the pipeline release dialog's one remark on a plan row (142): a DRAFT template this pipeline pins that
+ * OTHER draft pipelines also pin says so, because the promoter is releasing a shared object. Read from the dialog's
+ * own pin facts (the used-by service's count), matched to the plan node by template name and exact version.
+ */
+object PipelineReleaseNotes {
+    fun otherPinners(
+        dialog: PipelineLifecycleDialogModel.ReleaseDialog,
+        node: co.datapipelines.pipeline.release.ClosureNode,
+    ): String? {
+        if (node.identity.family != co.datapipelines.pipeline.release.ReleaseFamily.TEMPLATE) return null
+        val pin = dialog.draftPins.firstOrNull { it.id == node.identity.entityId && it.version == node.identity.version }
+        val others = pin?.otherPinners ?: 0
+        if (others <= 0) return null
+        return ", also pinned by $others other draft pipeline" + if (others == 1) "" else "s"
     }
 }

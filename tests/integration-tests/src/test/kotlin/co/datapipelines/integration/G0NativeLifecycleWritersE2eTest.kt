@@ -304,11 +304,11 @@ class G0NativeLifecycleWritersE2eTest {
         withClue(datasource.asString()) { datasource.statusCode shouldBe 201 }
         callTool("templates_create", G0Lifecycle.templateArguments(G0Lifecycle.TEMPLATE))
         val source = create(Family.PIPELINE, G0Lifecycle.SOURCE)
-        val released =
-            rest()
-                .header("If-Match", draftHash(Family.PIPELINE, source))
-                .queryParam("release_pinned_templates", "true")
-                .post("/api/v1/pipelines/$source/release")
+        // The pinned template is released through its own route first (the legacy cascade flag is refused since #876 r3).
+        val templateReleased =
+            byName(G0Lifecycle.TEMPLATE).header("If-Match", templateHash(G0Lifecycle.TEMPLATE)).post("/api/v1/templates/release")
+        withClue(templateReleased.asString()) { templateReleased.statusCode shouldBe 200 }
+        val released = rest().header("If-Match", draftHash(Family.PIPELINE, source)).post("/api/v1/pipelines/$source/release")
         withClue(released.asString()) { released.statusCode shouldBe 200 }
         val chart = create(Family.VISUALIZATION, G0Lifecycle.SOURCE_CHART)
         evidence(chart)

@@ -99,7 +99,7 @@ class ViewerEditorRenderTest {
             .findAll(catalog)
             .map { it.groupValues[1] }
             .toList()
-            .takeLast(8) shouldBe DEPENDENCY_CATALOG
+            .takeLast(RELEASE_DEPENDENCY_CATALOG.size) shouldBe RELEASE_DEPENDENCY_CATALOG
     }
 
     @Test

@@ -3,7 +3,6 @@ package co.datapipelines.web.ui
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
-import co.datapipelines.pipeline.TemplateVersionStatuses
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.visualization.ArtifactVersion
 import co.datapipelines.visualization.DashboardService
@@ -21,10 +20,12 @@ import java.util.UUID
  * the 094 §B discipline: the question is answered BEFORE the button exists, a refused branch carries no button, and
  * every fact is the SAME read the service's own guard makes, so the dialog and the POST cannot disagree:
  *
- * - Release: at least one test case (the service's first check), the transform pin's status through
- *   [TemplateVersionStatuses] (the cascade's own read — RELEASED passes, DRAFT is the ONE consent's row,
- *   MISSING/DISCARDED refuse), then the [ReleaseEvidence] verdict for exactly this draft (the gate the release runs in
- *   its transaction: latest run for this hash, GREEN, the mechanical check passing now).
+ * - Release: the family's NATIVE facts only — a working draft, at least one test case (the service's first check),
+ *   then the [ReleaseEvidence] verdict for exactly this draft (the gate the release runs in its transaction: latest
+ *   run for this hash, GREEN, the mechanical check passing now). The transform pin and everything below it are the
+ *   release PLAN's (#876 §F.2, `ReleasePreviews`): a MISSING or DISCARDED pin is the plan's blocking row and keeps
+ *   the submit disabled, a DRAFT one is its checked box — this model no longer reads a pin's status, so the
+ *   dependency presentation and the submit blocking have one owner.
  * - Discard / purge: the pin guard — the dashboards whose LIVE versions pin this version (refused `version.pinned`).
  *
  * The POST still re-runs every guard — a run, a pin or an edit can land between the dialog opening and the click;
@@ -35,7 +36,6 @@ import java.util.UUID
 class VisualizationLifecycleDialogModel(
     private val visualizations: VisualizationService,
     private val dashboards: DashboardService,
-    private val templateStatuses: TemplateVersionStatuses,
     private val evidence: ReleaseEvidence,
     private val actors: ActorNames,
     private val authoring: AuthoringGuard,
@@ -45,23 +45,6 @@ class VisualizationLifecycleDialogModel(
         val code: String,
         val message: String,
     )
-
-    /** The transform pin as the release gate reads it. */
-    data class PinView(
-        val name: String,
-        val version: Int,
-        /** Null = the pinned template version does not exist (MISSING refuses). */
-        val status: PipelineVersionStatus?,
-    ) {
-        val label: String get() = "$name@$version"
-        val statusLabel: String get() = status?.name ?: "MISSING"
-
-        /** The ONE consent's row: a DRAFT template pin the release can release with the visualization. */
-        val cascadable: Boolean get() = status == PipelineVersionStatus.DRAFT
-
-        /** Anything but RELEASED or a cascadable DRAFT refuses. */
-        val blocks: Boolean get() = status != PipelineVersionStatus.RELEASED && !cascadable
-    }
 
     // ------------------------------------------------------------------ release
 
@@ -73,12 +56,13 @@ class VisualizationLifecycleDialogModel(
         val updatedBy: String,
         val updatedAgo: String,
         val caseCount: Int,
-        val pin: PinView?,
-        /** The refusals the POST would answer, in the service's order; empty = the button renders. */
+        /** The native refusals the POST would answer, in the service's order; empty = the button renders. */
         val refusals: List<Refusal>,
     ) {
         val canRelease: Boolean get() = refusals.isEmpty()
-        val needsConsent: Boolean get() = pin?.cascadable == true
+
+        /** A working draft exists, so the dialog renders its release plan (whatever the native refusals say). */
+        val hasDraft: Boolean get() = refusals.none { it.code == VisualizationErrorCodes.VERSION_NOT_DRAFT }
     }
 
     fun release(
@@ -95,7 +79,6 @@ class VisualizationLifecycleDialogModel(
                 updatedBy = "",
                 updatedAgo = "",
                 caseCount = 0,
-                pin = null,
                 refusals =
                     listOf(
                         Refusal(VisualizationErrorCodes.VERSION_NOT_DRAFT, "This visualization has no draft — nothing to release."),
@@ -108,15 +91,7 @@ class VisualizationLifecycleDialogModel(
                 ?.cases
                 .orEmpty()
                 .size
-        val pin =
-            body.transform?.template?.let {
-                PinView(
-                    it.name,
-                    it.version,
-                    templateStatuses.statusOf(workspaceId, it.name, it.version),
-                )
-            }
-        val refusals = releaseRefusals(workspaceId, id, working, caseCount, pin)
+        val refusals = releaseRefusals(workspaceId, id, working, caseCount)
         return ReleaseDialog(
             id = id,
             name = working.record.name,
@@ -125,21 +100,20 @@ class VisualizationLifecycleDialogModel(
             updatedBy = actorName(working.detail.updatedBy ?: working.detail.createdBy),
             updatedAgo = RelativeTime.since(working.detail.updatedAt ?: working.detail.createdAt, Instant.now()),
             caseCount = caseCount,
-            pin = pin,
             refusals = refusals,
         )
     }
 
     /**
-     * The release refusals in the service's order: no test cases, then a blocking transform pin, then — only when
-     * there are cases — the evidence gate's own verdict (the same port the POST consults).
+     * The native release refusals in the service's order: no test cases, then — only when there are cases — the
+     * evidence gate's own verdict (the same port the POST consults). A blocking transform pin is not here: it is the
+     * plan's blocking row (#876 §F.2), and the coordinator refuses it on the POST.
      */
     private fun releaseRefusals(
         workspaceId: UUID,
         id: UUID,
         working: ArtifactVersion<VisualizationBody>,
         caseCount: Int,
-        pin: PinView?,
     ): List<Refusal> =
         buildList {
             if (caseCount == 0) {
@@ -147,15 +121,6 @@ class VisualizationLifecycleDialogModel(
                     Refusal(
                         VisualizationErrorCodes.RELEASE_TESTS_MISSING,
                         "The draft has no test cases — a release needs at least one.",
-                    ),
-                )
-            }
-            if (pin != null && pin.blocks) {
-                add(
-                    Refusal(
-                        VisualizationErrorCodes.RELEASE_DEPENDENCY_NOT_RELEASED,
-                        "Template ${pin.label} is ${pin.statusLabel} — only a RELEASED pin, or a DRAFT one released with this " +
-                            "visualization, can be released.",
                     ),
                 )
             }
