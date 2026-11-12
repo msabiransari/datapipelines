@@ -15,7 +15,7 @@ import java.util.function.Predicate
  * #876 round 4 — the three corrections the lander's verdict asked a browser to witness, each authored through the real
  * REST routes ([DependencyPaneBrowserSuite]) and each refusal asserted at the TABLES:
  *
- * - **R1** — a visualization whose cases and evidence pass (no native refusal, an enabled submit) has its transform pin
+ * - **R1** — a visualization whose cases and evidence pass (no native refusal, an enabled submit) has its template pin
  *   DISCARDED or deleted (MISSING): the dialog renders the RELEASE PLAN with that pin as its blocking row (never the
  *   dialog model's own pin refusal); no enabled submit exists, and a forced POST of the plan the page rendered is
  *   refused `visualization.release.dependency_not_released` with nothing flipped. (The evidence gate re-runs the
@@ -29,7 +29,7 @@ import java.util.function.Predicate
  */
 class ReleaseDialogRound4BrowserTest : DependencyPaneBrowserSuite() {
     @Test
-    fun `876 R1 - a DISCARDED or MISSING transform pin is the plan's blocking row - no enabled submit, a forced POST flips nothing`() {
+    fun `876 R1 - a DISCARDED or MISSING template pin is the plan's blocking row - no enabled submit, a forced POST flips nothing`() {
         startTrace()
         val root = ready("rd4pin")
         for (status in listOf("DISCARDED", "MISSING")) {
