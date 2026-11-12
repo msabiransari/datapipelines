@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.232
+**Status:** v1.233
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-11-11
+**Last updated:** 2026-11-12
 ---
 
 ## 1. Purpose
@@ -1067,7 +1067,10 @@ reads, not a credential. `ReleaseDialogHashRenderTest` pins the rendered field p
 
 The templates twin is addressed by NAME in query/body ([§9.6](template-hierarchy-design.md#96-addressing-the-name-never-travels-in-a-url-path-segment-normative-measured)):
 `GET /partials/templates/lifecycle/{verb}?name=&version=`. It has every dialog above except
-Switch — templates are pinned by version; there is no served pointer to switch. The pipeline
+Switch — templates are pinned by version; there is no served pointer to switch. Its Discard,
+Purge and Purge-entity dialogs list every family that pins the version — pipelines, parameter
+sets, visualizations and, since #907, the templates whose `imports` pin it — and the Discard
+dialog renders no button while any of them does. The pipeline
 purge-draft POST rides the **versioned** purge (`DELETE /api/v1/pipelines/{id}/versions/{v}`
 beneath): the dialog names an explicit version, so there is no two-writer hash protocol to
 honour, and the typed confirm carries the same fact the button states.
@@ -3177,6 +3180,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-12 | v1.233 | #907 template dialogs list importing templates | **§4.3d, the templates twin:** the Discard, Purge and Purge-entity dialogs list the templates whose `imports` pin the version (`data-discard-pinner-template`, `data-purge-pinner-template`, `data-purge-entity-pinner-template`) beside the pipelines, parameter sets and visualizations, and the Discard dialog withholds its button while any of the four pins it — before this an importer-only pin offered a Discard the guard then refused, and the entity purge's pinner list hid an importer-only list entirely. No route, field or code changes. |
 | 2026-10-25 | v1.232 | #713 — renumbered at merge after #786's v1.231 | **§4.16:** the docs pages' performance ladder — eight of the twenty-six public docs pages measured under the site's Lighthouse 95 floor at base (ui-screens 62–63, rest-api 66–85, auth 79–80, pipeline-contract 85–86, the rest 90–93; main-thread style+layout 1.5–3.8 s, DOM up to 9.5k elements). Two mechanisms: `DocsCatalog` wraps each `h2`-to-`h2` run of the rendered body into `<section class="doc-part">` (a rendering post-pass; no text, id, link or heading-level change — `DocsPartWrappingTest` pins the parts, their boundaries and heading ids byte-identical to the flat renderer's anchor contract), and `docs.css` gives the parts plus long `.doc-body table`/`pre` blocks `content-visibility: auto` with `contain-intrinsic-size: auto var(--doc-intrinsic-block)` (`480px`, the sheet's one sanctioned length literal — `DocsCssTokenTest`). Measured after (min of 3 runs per page, 26 pages): 25 of 26 at 97–100; ui-screens remains 92–94 — its cost is the document itself (758 KB HTML, FCP-bound), an editorial split follow-up, not a rendering fix. `scripts/site-lighthouse.sh` now watches the six under-floor-at-base docs pages (auth, rest-api, pipeline-contract, mcp-server, datasources, metadata-db) and measures their accessibility on a cv-suspended `/__cv-off/` render — owner ruling 2026-10-25, because Lighthouse 12.8.2's axe-based contrast/target-size audits mis-read skip-rendered subtrees (7 violations with cv, 0 without, same DOM; real contrast ≈ 13:1; evidence in the 713 evidence dir); the suspension selectors mirror this sheet's rules under `DocsContentVisibilitySuspensionDriftTest`. Real-browser anchors case: `DocsAnchorsBrowserTest` (deep fragment lands, cross-reference walks, below-fold sections stay in the accessibility tree and DOM text index, chrome navigation unchanged) — and it caught a real defect: a deep fragment rested thousands of pixels short of its heading. Three measured causes, layered: the destination is computed from the placeholder layout and never re-run; the chrome scrolls smooth everywhere, so a re-scroll is an animation across tens of thousands of pixels; and CSS cannot express "the parts before the one containing `:target`" (`:has()` may not nest inside `:has()`). Fixed by the docs-anchors block in the public layout's `site.js` — mark the parts above the target rendered, then an instant, bounded, frame-spaced re-scroll until the heading holds, on load and `hashchange`. No route, authorization or template change. |
 | 2026-11-11 | v1.231 | #786 U2 schedules pin exact versions | **§4.20, the form and the detail**: the form gains a **Version** picker — the pipeline's exact versions with their status, one the deployment does not run disabled with its reason, the newest RELEASED version preselected on create (else the newest eligible draft), the stored pin on edit; the job is `{pipeline, version: <n>}`; version refusals land at the Version field; the release-first line now means "no version this deployment runs". The detail shows `pinned to v<n>`. The page subtitle, the Schedules guide and the pipeline discard dialog's schedules evidence (§4.3d) no longer say a schedule follows the current version. |
 | 2026-11-10 | v1.230 | #786 U1 API versions | **§4.18b (new): the API versions page** — the versions table, the version and API cards kept apart, and six native lifecycle dialogs (draft, release, purge, switch, discard, restore) over the REST twins' rows, the purge behind the typed confirm (`endpoint.version.confirm_mismatch`); §4.18's endpoint path links to it. |
