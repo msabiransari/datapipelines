@@ -1,5 +1,6 @@
 package co.datapipelines.browser
 
+import com.microsoft.playwright.Locator
 import com.microsoft.playwright.TimeoutError
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.throwables.shouldThrowAny
@@ -350,8 +351,16 @@ class SiteShotsDriverStepsBrowserTest : BrowserSuite() {
         page
             .locator(".ds-table tbody tr")
             .all()
-            .single { it.locator("td:first-child > span").first().innerText().trim() == name }
+            .single { rowName(it) == name }
             .locator("td:nth-child(6)")
+            .innerText()
+            .trim()
+
+    /** A datasource row's name: the first span of its first cell. */
+    private fun rowName(row: Locator): String =
+        row
+            .locator("td:first-child > span")
+            .first()
             .innerText()
             .trim()
 
