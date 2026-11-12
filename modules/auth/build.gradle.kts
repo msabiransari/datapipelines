@@ -12,6 +12,10 @@ dependencies {
     api(project(":modules:persistence"))
 
     implementation(libs.argon2.jvm)
+    // #847 — the library's own binding type (Argon2Library.argon2id_verify takes a JNA Size_t), so
+    // SecretHasher can tell a native fault from a wrong password. The jna version argon2-jvm already
+    // puts on the runtime classpath; declared here only to compile against it.
+    implementation(libs.jna)
     implementation(libs.jjwt.api)
     runtimeOnly(libs.jjwt.impl)
     runtimeOnly(libs.jjwt.jackson)
