@@ -85,6 +85,8 @@ class ConfigValidatorCheckCountTest {
                 "modules/app/src/main/kotlin/co/datapipelines/config/SchedulerNotificationRules.kt",
                 // #785 — the §3.36 managed-lake rules, split out for the same size reason.
                 "modules/app/src/main/kotlin/co/datapipelines/config/LakeRules.kt",
+                // #325 — the §3.2 lifecycle-write ceiling, split out for the same size reason.
+                "modules/app/src/main/kotlin/co/datapipelines/config/ExecutorRules.kt",
             )
     }
 }

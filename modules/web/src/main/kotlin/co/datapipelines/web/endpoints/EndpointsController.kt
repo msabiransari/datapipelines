@@ -142,6 +142,9 @@ class EndpointsController(
     /**
      * §19.5 — unpublish. Idempotent-ish: an unknown path is a 404, never a silent success.
      * This is also the FIX for a legacy row (#274) — the one verb the tree offers it.
+     * Unpublish is BY the full stored path, so a legacy row stored past
+     * `EndpointPath.MAX_LENGTH`, whose echo is cut (#286), is deleted only by that path,
+     * and this verb refuses nothing by length (#304).
      */
     @DeleteMapping
     @ResponseStatus(HttpStatus.NO_CONTENT)
