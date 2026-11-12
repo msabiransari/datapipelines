@@ -444,6 +444,10 @@ class TemplateWorkspaceControllerTest {
         controller.workspace("/$name", null, "render", render, MockHttpServletRequest())
         // A viewer's render request never reaches the render pane: the tab resolves first.
         render["activeTab"] shouldBe "source"
+
+        val dependencies = ExtendedModelMap()
+        controller.workspace("/$name", null, "dependencies", dependencies, MockHttpServletRequest())
+        dependencies["activeTab"] shouldBe "dependencies"
     }
 
     @Test

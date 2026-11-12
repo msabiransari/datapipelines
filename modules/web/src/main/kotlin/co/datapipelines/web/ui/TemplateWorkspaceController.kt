@@ -195,6 +195,9 @@ class TemplateWorkspaceController(
         RENDER("render"),
         RUNS("runs"),
         USED_BY("used-by"),
+
+        /** #876 G6: what the viewed version depends on (record §13) — a dependencies/mount.js pane. */
+        DEPENDENCIES("dependencies"),
         VERSIONS("versions"),
         ;
 
