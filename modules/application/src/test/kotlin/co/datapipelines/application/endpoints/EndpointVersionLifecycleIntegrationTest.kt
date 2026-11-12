@@ -354,7 +354,7 @@ class EndpointVersionLifecycleIntegrationTest {
         service.version(principal(), api.id, 3).shouldBeNull()
         versions.findCurrent(api.id).shouldNotBeNull().version shouldBe 1
         val (entity, byPath) = versions.findByPath(workspaceId, api.pathPattern, 2).shouldNotBeNull()
-        entity shouldBe PublishedEndpointVersionRepository.EntityPointer(api.id, 1)
+        entity shouldBe PublishedEndpointVersionRepository.EntityRead(api.id, 1, enabled = true)
         byPath.version shouldBe 2
         versions.findByPath(UUID.randomUUID(), api.pathPattern, 2).shouldBeNull()
         withClue("E.2: no path leaves a version-less entity behind") { versions.countVersionless() shouldBe 0 }

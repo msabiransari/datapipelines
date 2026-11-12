@@ -20,7 +20,9 @@
         },
         "resolution": "resolved",
         "lifecycle": "DRAFT",
-        "operational": null,
+        "operational": {
+          "enabled": true
+        },
         "current_version": 1,
         "body_hash": "0000000000000000000000000000000000000000000000000000000000000001",
         "capabilities": {

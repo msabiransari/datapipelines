@@ -2,8 +2,8 @@ package co.datapipelines.application.dependencies
 
 import co.datapipelines.application.endpoints.EndpointVersionBody
 import co.datapipelines.application.endpoints.PublishedEndpointVersionRepository
+import co.datapipelines.dependencies.Operational
 import co.datapipelines.pipeline.PipelineVersionStatus
-import co.datapipelines.pipeline.release.DependencySource
 import co.datapipelines.pipeline.release.PipelineDependencySource
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseNodeIdentity
@@ -19,16 +19,23 @@ import co.datapipelines.pipeline.release.ResolvedNode
  *
  * A DISCARDED version resolves (a restore recheck names it) but its pin is never walked, the rule every release source
  * follows. An absent path or version answers null — the graph's MISSING.
+ *
+ * #902 (record §11.1 `api_endpoint { enabled }`): the node's operational fact is the entity's `is_enabled`, read by the
+ * same `findByPath` statement as the version row — entity-level, so a DISCARDED version shows it too; shown, never
+ * hashed (§5.3).
  */
 class EndpointDependencySource(
     private val versions: PublishedEndpointVersionRepository,
-) : DependencySource {
-    override fun resolve(identity: ReleaseNodeIdentity): ResolvedNode? {
+) : OperationalDependencySource {
+    override fun read(identity: ReleaseNodeIdentity): SourceRead? {
         if (identity.family != ReleaseFamily.ENDPOINT) return null
         val (entity, version) = versions.findByPath(identity.workspaceId, identity.entityId, identity.version) ?: return null
         val status = PipelineDependencySource.statusOf(version.status)
         val pins = if (version.status == PipelineVersionStatus.DISCARDED) emptyList() else pinsOf(identity.workspaceId, version.body)
-        return ResolvedNode(identity, identity.entityId, status, version.bodyHash, entity.currentVersion, pins, entity.endpointId)
+        return SourceRead(
+            ResolvedNode(identity, identity.entityId, status, version.bodyHash, entity.currentVersion, pins, entity.endpointId),
+            Operational.ApiEndpoint(entity.enabled),
+        )
     }
 
     companion object {
@@ -37,7 +44,7 @@ class EndpointDependencySource(
 
         /**
          * The API family's raw-body EXTRACTION (#877 §E.1, the A27 oracle): the one pin a stored API body names — the
-         * exact pipeline version at [PIN_PATH] — whatever the version's status ([resolve] suppresses a DISCARDED body's
+         * exact pipeline version at [PIN_PATH] — whatever the version's status ([read] suppresses a DISCARDED body's
          * pins; that is traversal, not extraction).
          */
         fun pinsOf(
