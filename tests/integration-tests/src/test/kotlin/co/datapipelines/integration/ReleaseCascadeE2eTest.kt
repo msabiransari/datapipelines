@@ -38,35 +38,42 @@ import java.util.UUID
  *
  * 1. two templates created over MCP land as DRAFT v1 (D55); pipeline A pins both, pipeline B
  *    pins the first — the shared-object shape;
- * 2. releasing A over REST WITHOUT `release_pinned_templates` is refused
+ * 2. releasing A over REST with NO plan and no flag is refused
  *    `409 pipeline.release.dependency_not_released` in the shared details shape of #517 (record
  *    §14: `root`, `blockers[]` with `node_id/family/name/version/status/reason/paths`,
  *    `blockers_truncated`) naming BOTH draft pins — the §14 switch replaced #142's
- *    `template_id` / `pins_not_released` keys at once, with no deprecation window;
+ *    `template_id` / `pins_not_released` keys at once, with no deprecation window; the legacy
+ *    `release_pinned_templates=true` flag with no plan is refused on purpose
+ *    `428 pipeline.release.plan_required` (#876 round 3: the alias is no longer admitted) and the
+ *    database still shows A and both templates DRAFT;
  * 3. **#517, a plan over a changed snapshot:** a plan carrying the preview's `tree_hash` is
  *    first proven accepted (an unticked draft answers `dependency_not_released`, which only a
  *    matching digest reaches), then a template body is edited WITHOUT a version change and the
  *    same plan is refused `409 pipeline.release.plan_conflict` — statuses and audit unchanged.
  *    The digest is computed by an oracle of this test's own ([treeHash]), never by the product;
- * 4. **atomicity, falsified:** releasing A WITH the flag but a STALE `If-Match` makes the
- *    pipeline flip fail AFTER the two templates flipped inside the same transaction. The
- *    answer is `409 pipeline.version.conflict`, both templates are still DRAFT, A is still a
- *    draft, and the audit table carries no released event for any of the three — asserted at
- *    the TABLE, because an in-memory fake cannot see a skipped hop;
- * 5. releasing A with the flag and the right hash releases both templates at their pinned
- *    version and A itself, and the audit log holds three events: one
+ * 4. **a stale `If-Match` on a plan:** releasing A with a plan ticking both templates but a STALE
+ *    `If-Match` is refused `409 pipeline.release.plan_conflict` at the root's own preparation
+ *    (`details.node_id` `n0`), BEFORE any flip — the plan path checks the root's hash outside the
+ *    transaction, so the stale hash can no longer fail A's flip after the templates flipped (#142's
+ *    alias did). Both templates are still DRAFT, A is still a draft, and the audit table carries no
+ *    released event for any of the three — asserted at the TABLE. The rollback AFTER the dependency
+ *    flips is `PipelineDependencyReleaseRollbackE2eTest`'s (trigger plants on the plan path);
+ * 5. releasing A with a plan ticking both templates and the right hash releases both templates at
+ *    their pinned version and A itself, and the audit log holds three events: one
  *    `template.version.released` per template carrying `cascade_from_pipeline_id` /
  *    `cascade_from_version`, then A's `pipeline.version.released` with `templates_released`;
- * 6. B is untouched and now pins a RELEASED version: it releases WITHOUT the flag, its event
- *    carries an empty `templates_released`, and the shared template was released exactly once;
+ * 6. B is untouched and now pins a RELEASED version: it releases with no plan and no flag, its
+ *    event carries an empty `templates_released`, and the shared template was released exactly once;
  * 7. **#517, the plan path:** pipeline C pins a new DRAFT template and the released one; a plan
  *    ticking the draft releases both in one transaction, the response appends
  *    `dependencies_released`, and every audit row carries the one `release_id`, the cascaded row
  *    its `cascade_root`.
  *
- * Cases 4–6 are #142's, byte for byte (the brief's falsification 6 replays their responses
- * captured at the base): the legacy alias keeps its exact behaviour until S6 (#522).
+ * Cases 4–6 are #142's cascade expectations (audit keys, atomicity, the shared template released
+ * once), now driven through a plan: the legacy alias without a plan is refused `plan_required`
+ * since #876 round 3, so no case here reaches a cascade through the bare flag.
  */
+@Suppress("LargeClass") // one ordered walk over one fixture: a split would boot the application twice, as the sibling E2Es' walks
 @SpringBootTest(
     classes = [co.datapipelines.DatapipelinesApplication::class],
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -175,17 +182,21 @@ class ReleaseCascadeE2eTest {
         return created["id"].asText() to created["draft"]["body_hash"].asText()
     }
 
+    /**
+     * A release with no plan body. With [legacyAlias] it carries `release_pinned_templates=true`, which is refused
+     * `428 pipeline.release.plan_required` (#876 round 3); without it only the pipeline flips.
+     */
     private fun release(
         pipelineId: String,
         hash: String,
-        cascade: Boolean,
+        legacyAlias: Boolean,
     ): ValidatableResponse {
         val request =
             given()
                 .port(port)
                 .asSession(ADMIN_SESSION)
                 .header("If-Match", hash)
-        if (cascade) request.queryParam("release_pinned_templates", "true")
+        if (legacyAlias) request.queryParam("release_pinned_templates", "true")
         return request.`when`().post("/api/v1/pipelines/$pipelineId/release").then()
     }
 
@@ -345,8 +356,8 @@ class ReleaseCascadeE2eTest {
 
     @Test
     @Order(2)
-    fun `without the flag the release is refused dependency_not_released, naming both draft pins in the shared shape`() {
-        release(pipelineA, hashA, cascade = false)
+    fun `without a plan the release is refused - no flag dependency_not_released, the legacy flag plan_required, nothing flips`() {
+        release(pipelineA, hashA, legacyAlias = false)
             .statusCode(409)
             .body("error.code", equalTo("pipeline.release.dependency_not_released"))
             .body(
@@ -371,6 +382,21 @@ class ReleaseCascadeE2eTest {
         templateStatus(TEMPLATE_ONE) shouldBe "DRAFT"
         templateStatus(TEMPLATE_TWO) shouldBe "DRAFT"
         pipelineStatus(pipelineA) shouldBe "DRAFT"
+
+        // #876 round 3: the legacy flag with no plan is refused on purpose, before anything is read or flipped.
+        release(pipelineA, hashA, legacyAlias = true)
+            .statusCode(428)
+            .body("error.code", equalTo("pipeline.release.plan_required"))
+        withClue("the refused alias flipped nothing and audited nothing, read at the tables") {
+            versionStatuses(pipelineA, TEMPLATE_ONE) shouldBe ("DRAFT" to "DRAFT")
+            versionStatuses(pipelineA, TEMPLATE_TWO) shouldBe ("DRAFT" to "DRAFT")
+            templateStatus(TEMPLATE_ONE) shouldBe "DRAFT"
+            templateStatus(TEMPLATE_TWO) shouldBe "DRAFT"
+            pipelineStatus(pipelineA) shouldBe "DRAFT"
+            auditRows("template.version.released", TEMPLATE_ONE).size shouldBe 0
+            auditRows("template.version.released", TEMPLATE_TWO).size shouldBe 0
+            auditRows("pipeline.version.released", pipelineA).size shouldBe 0
+        }
     }
 
     @Test
@@ -420,21 +446,21 @@ class ReleaseCascadeE2eTest {
 
     @Test
     @Order(4)
-    fun `atomicity falsified - a stale hash after the templates flipped rolls everything back and audits nothing`() {
-        // The stale hash is the injected failure: the service releases both templates FIRST
-        // (inside the metadata transaction), then the pipeline's flip statement matches no
-        // row at this hash and throws — and the TransactionTemplate rolls the templates back.
-        release(pipelineA, STALE_HASH, cascade = true)
+    fun `a stale hash on a plan is refused plan_conflict at the root before any flip - nothing released, nothing audited`() {
+        // The stale hash is the injected failure: the plan consents to both templates, the root's preparation sees
+        // a body that is not the one the caller holds — nothing of the cascade may start.
+        releaseWithPlan(pipelineA, STALE_HASH, previewOfA(), listOf("n1", "n2"))
             .statusCode(409)
-            .body("error.code", equalTo("pipeline.version.conflict"))
-            .body("error.details.current_body_hash", equalTo(hashA))
+            .body("error.code", equalTo("pipeline.release.plan_conflict"))
+            .body("error.details.reason", equalTo("snapshot_changed"))
+            .body("error.details.node_id", equalTo("n0"))
 
         withClue("no template is left released with the pipeline still a draft") {
             templateStatus(TEMPLATE_ONE) shouldBe "DRAFT"
             templateStatus(TEMPLATE_TWO) shouldBe "DRAFT"
             pipelineStatus(pipelineA) shouldBe "DRAFT"
         }
-        withClue("the audit log carries nothing for a rolled-back cascade") {
+        withClue("the audit log carries nothing for the refused cascade") {
             auditRows("template.version.released", TEMPLATE_ONE).size shouldBe 0
             auditRows("template.version.released", TEMPLATE_TWO).size shouldBe 0
             auditRows("pipeline.version.released", pipelineA).size shouldBe 0
@@ -443,8 +469,8 @@ class ReleaseCascadeE2eTest {
 
     @Test
     @Order(5)
-    fun `with the flag both templates release at their pinned version, then the pipeline - three audit events`() {
-        release(pipelineA, hashA, cascade = true)
+    fun `with a plan ticking both templates they release at their pinned version, then the pipeline - three audit events`() {
+        releaseWithPlan(pipelineA, hashA, previewOfA(), listOf("n1", "n2"))
             .statusCode(200)
             .body("data.status", equalTo("RELEASED"))
             .body("data.version", equalTo(1))
@@ -492,7 +518,7 @@ class ReleaseCascadeE2eTest {
     fun `the second draft pipeline now pins a RELEASED version - it releases without the flag, cascading nothing`() {
         pipelineStatus(pipelineB) shouldBe "DRAFT"
 
-        release(pipelineB, hashB, cascade = false)
+        release(pipelineB, hashB, legacyAlias = false)
             .statusCode(200)
             .body("data.status", equalTo("RELEASED"))
 
@@ -639,7 +665,10 @@ class ReleaseCascadeE2eTest {
         val template = "test/restore_517_outbound.sql"
         createTemplate(901, template)
         val (id, hash) = createPipeline(902, "test/restore_517_outbound", listOf(template))
-        release(id, hash, cascade = true).statusCode(200)
+        val root = Snap("pipeline", "test/restore_517_outbound", 1, "DRAFT", hash, null)
+        val pinned = Snap("template", template, 1, "DRAFT", templateHashes.getValue(template), null)
+        val preview = treeHash(listOf(root, pinned), listOf(Triple(root, pinned, "nodes[0].template")))
+        releaseWithPlan(id, hash, preview, listOf("n1")).statusCode(200)
         given()
             .port(port)
             .asSession(ADMIN_SESSION)
@@ -681,7 +710,7 @@ class ReleaseCascadeE2eTest {
         (draft.newHash == draft.oldHash) shouldBe false
         val auditBefore = auditRows("pipeline.version.released", draft.id).size
 
-        release(draft.id, draft.oldHash, cascade = false)
+        release(draft.id, draft.oldHash, legacyAlias = false)
             .statusCode(409)
             .body("error.code", equalTo("pipeline.version.conflict"))
             .body("error.details.current_body_hash", equalTo(draft.newHash))
@@ -695,7 +724,7 @@ class ReleaseCascadeE2eTest {
             .body("data.draft.body_hash", equalTo(draft.newHash))
             .body("data.current_version", equalTo(if (hadRelease) 1 else null))
 
-        release(draft.id, draft.newHash, cascade = false).statusCode(200).body("data.status", equalTo("RELEASED"))
+        release(draft.id, draft.newHash, legacyAlias = false).statusCode(200).body("data.status", equalTo("RELEASED"))
         given()
             .port(port)
             .asSession(ADMIN_SESSION)
@@ -747,7 +776,7 @@ class ReleaseCascadeE2eTest {
                 .jsonPath()
         val id = created.getString("data.id")
         val oldHash = created.getString("data.body_hash")
-        if (hadRelease) release(id, oldHash, cascade = false).statusCode(200)
+        if (hadRelease) release(id, oldHash, legacyAlias = false).statusCode(200)
         val edited =
             given()
                 .port(port)

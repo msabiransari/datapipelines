@@ -362,6 +362,22 @@ class ReleaseCoordinatorTest {
         fx.writes() shouldBe emptyList()
     }
 
+    /**
+     * #876 §F.4 (record §25.4 D15): the coordinator built with the DEFAULT arming argument — the constant, not an
+     * injected boolean — refuses a bare `release_pinned_templates` with `pipeline.release.plan_required` (428), and
+     * nothing runs. Red when [co.datapipelines.pipeline.release.LegacyReleaseAlias.LEGACY_ALIAS_WITHOUT_PLAN_ADMITTED]
+     * is true again.
+     */
+    @Test
+    fun `at the default arming rule a bare alias is plan_required and nothing runs`() {
+        val direct = fx.pipeline("test/direct-default", listOf(t1))
+
+        val error = refused { fx.coordinatorAtDefaultAlias().release(fx.request(direct, alias = true)) }
+
+        error.code shouldBe "pipeline.release.plan_required"
+        fx.writes() shouldBe emptyList()
+    }
+
     @Test
     fun `the legacy alias never reaches past the root's direct template pins - a draft child still blocks`() {
         val error = refused { fx.coordinator().release(fx.request(a, alias = true)) }

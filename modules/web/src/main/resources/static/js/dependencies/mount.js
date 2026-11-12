@@ -23,6 +23,12 @@
    * snapshot is inert and CSP-clean and the restored pane starts fresh. The pane root carries the ready marker
    * `data-dp-deps-state`: idle | no-version | loading | ready | empty | incomplete | cycle | limit | not-available |
    * try-again | server-failure | stale.
+   *
+   * A RELEASE-PLAN pane (`data-dp-deps-source="release-plan"`, the release dialog's "Show graph" region, §F.2) is the
+   * same pane with a different source: its view is built by `DependencyTree.fromReleaseRows` from the plan rows the
+   * dialog GET rendered around it (the nearest `[data-release-plan]`), so it makes NO request. Selecting one of its
+   * nodes marks the matching plan row (`data-release-selected`) and never touches a checkbox; the Graph/List choice
+   * is the page's stored one, and `unmount(dialog container)` tears it down like any pane.
    */
 
   if (typeof window === "undefined" || window.DependenciesMount) return;
@@ -179,6 +185,24 @@
       state.selected = id;
       if (state.list) state.list.select(id);
       if (state.graph) state.graph.select(id);
+      if (planRoot()) markPlanRow(id);
+    }
+
+    /** The release dialog's plan this pane draws, or null for a tree pane. */
+    function planRoot() {
+      if (pane.getAttribute("data-dp-deps-source") !== "release-plan") return null;
+      return pane.closest("[data-release-plan]");
+    }
+
+    /** Marks the plan row of node [id] (compared as text, never built into a selector); other rows lose the mark. */
+    function markPlanRow(id) {
+      var root = planRoot();
+      if (!root) return;
+      var rows = root.querySelectorAll("[data-release-row][data-node-id]");
+      for (var i = 0; i < rows.length; i++) {
+        if (rows[i].getAttribute("data-node-id") === id) rows[i].setAttribute("data-release-selected", "");
+        else rows[i].removeAttribute("data-release-selected");
+      }
     }
 
     function showMode() {
@@ -235,6 +259,10 @@
         setState("server-failure");
         return;
       }
+      renderView(view);
+    }
+
+    function renderView(view) {
       state.view = view;
       view.notes.forEach(function (text) {
         var p = document.createElement("p");
@@ -271,6 +299,19 @@
       clearViews();
       state.loaded = true;
       state.stale = false;
+      var plan = planRoot();
+      if (pane.getAttribute("data-dp-deps-source") === "release-plan") {
+        // The release dialog's graph: drawn from the rendered plan rows, never fetched (record §12).
+        var planView = null;
+        try {
+          planView = plan && window.DependencyTree.fromReleaseRows ? window.DependencyTree.fromReleaseRows(plan) : null;
+        } catch (_) {
+          planView = null;
+        }
+        if (planView) renderView(planView);
+        else setState("server-failure");
+        return;
+      }
       var selector = selectorOf(pane);
       if (window.DependencySource.requestUrl(selector) === null) {
         loader.abort();

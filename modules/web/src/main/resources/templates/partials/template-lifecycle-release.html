@@ -1,6 +1,7 @@
-<!-- The template Release dialog (ui-screens §4.3d/§4.6, 102). Templates have no §5.3 pin
-     gate of their own — a template's imports resolve at save time — so the dialog states the
-     draft facts and the lock; the not_draft branch opens with no button. -->
+<!-- The template Release dialog (ui-screens §4.3d/§4.6, 102): the draft facts and the lock around the SHARED
+     release plan (#876 §F.2–F.3, partials/release-dialog.html :: plan) — a template's imports are its dependencies,
+     each DRAFT one a checked box posting its node_id, the plan's tree_hash beside them. The not_draft branch opens
+     with no button; a plan that is not submittable renders the submit disabled. -->
 <div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" data-lifecycle-dialog="template-release">
   <div class="ds-card app-modal app-modal-md" role="dialog" aria-modal="true" aria-labelledby="tlc-release-title">
     <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
@@ -29,10 +30,14 @@
              catalog, when the verb removed the template) — there is no detail pane left to
              re-render in place. `from` rides along for the surface's own audit. -->
         <input type="hidden" name="from" th:value="${from}">
-        <!-- #416: the hash of the draft THIS dialog read; the POST releases AT it, so a draft
-             changed after the dialog opened answers template.version.conflict. -->
+        <!-- #416: the hash of the draft THIS dialog read; the POST releases AT it. A draft changed
+             after the dialog opened is refused: the plan's tree_hash answers template.release.plan_conflict
+             first, and a current plan with a stale bodyHash still answers template.version.conflict. -->
         <input type="hidden" name="bodyHash" th:value="${dlg.bodyHash}" data-release-body-hash>
-        <button th:if="${canAuthor == true}" type="submit" data-verb="template-release-confirm" class="ds-button ds-button-primary u-full" hx-disabled-elt="this"
+        <div th:replace="~{partials/release-dialog :: plan(${rd})}"></div>
+        <button th:if="${canAuthor == true}" type="submit" data-verb="template-release-confirm" data-consent-submit
+                class="ds-button ds-button-primary u-full" hx-disabled-elt="this"
+                th:attr="disabled=${!rd.submittable} ? 'disabled' : null"
                 th:text="'Release v' + ${dlg.version}">Release v2</button>
       </form>
     </th:block>

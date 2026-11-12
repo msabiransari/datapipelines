@@ -377,6 +377,7 @@ class RoleWalkE2eTest {
 
         // The walk reaches past `web`: the health controller lives in `modules/app`.
         handlers.map { it.handler } shouldContainAll listOf("HealthController#health", "HealthController#ready")
+        println("event=rolewalk.handlers count=${handlers.size}")
         handlers.size shouldBeGreaterThanOrEqual MINIMUM_HANDLERS
         assertRouteLiterals(handlers)
     }
@@ -715,10 +716,16 @@ class RoleWalkE2eTest {
          * #875 (2026-11-11) adds the eight dependency tree routes, each walked with a seeded root: 366 routes (viewer
          * 162 / 204, author 307 / 59, promoter 149 / 217, workspace admin 340 / 26, super admin 366 / 0), 421 handlers,
          * 366 route literals; 61 tools, unchanged.
+         *
+         * #876 (2026-11-12) adds the parameter set's release dialog, GET and POST
+         * `/partials/parameter-sets/{id}/lifecycle/release` on `parameter_set.release`: 368 routes (viewer 162 / 206,
+         * author 309 / 59, promoter 149 / 219, workspace admin 342 / 26, super admin 368 / 0), 423 handlers (the walk's
+         * `event=rolewalk.handlers` line), 368 route literals; 61 tools, unchanged. The new GET answers the walk without
+         * a query, so [KNOWN_QUERY_ONLY] is unchanged (42).
          */
-        private const val MINIMUM_ROUTES = 366
-        private const val MINIMUM_HANDLERS = 421
-        private const val MINIMUM_ROUTE_LITERALS = 366
+        private const val MINIMUM_ROUTES = 368
+        private const val MINIMUM_HANDLERS = 423
+        private const val MINIMUM_ROUTE_LITERALS = 368
 
         // Include nested braces in a variable's regex constraint, such as an id's length quantifier.
         private val ROUTE_VARIABLE = Regex("\\{(?:[^{}]|\\{[^{}]*})+}")

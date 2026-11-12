@@ -249,7 +249,13 @@ class DependencyTreeRendererBrowserTest : DependencyPaneBrowserSuite() {
         val second = sqlTemplate("$root/second_only.sql")
         val id = pipeline("$root/raced", first, datasource)
         val created = api("GET", "/api/v1/pipelines/$id", null)
-        api("POST", "/api/v1/pipelines/$id/release?release_pinned_templates=true", "", created.data("body_hash"))
+        // #876 §F.4: v1 and its draft template released together through the dialog's plan (the bare alias is 428).
+        PlannedRelease.release(
+            page,
+            "/partials/pipelines/$id/lifecycle/release",
+            "/api/v1/pipelines/$id/release",
+            created.data("body_hash"),
+        )
         redraftWithTemplate(id, second)
         val trace = mutableListOf<String>()
         val hold = holdTreeResponses()

@@ -230,11 +230,15 @@ class G0NativeTransferWritersE2eTest {
         val (created, pipelineFailed) = callTool("pipelines_create", PIPELINE_ARGUMENTS)
         withClue(created) { pipelineFailed shouldBe false }
         pipelineId = created["id"].asText()
-        val released =
+        // The pinned template is released through its own route first (the legacy cascade flag is refused since #876 r3).
+        val templateReleased =
             rest()
-                .header("If-Match", created["draft"]["body_hash"].asText())
-                .queryParam("release_pinned_templates", "true")
-                .post("/api/v1/pipelines/$pipelineId/release")
+                .contentType(ContentType.JSON)
+                .header("If-Match", template["body_hash"].asText())
+                .body(mapper.writeValueAsString(mapOf("name" to TEMPLATE)))
+                .post("/api/v1/templates/release")
+        withClue(templateReleased.asString()) { templateReleased.statusCode shouldBe 200 }
+        val released = rest().header("If-Match", created["draft"]["body_hash"].asText()).post("/api/v1/pipelines/$pipelineId/release")
         withClue(released.asString()) { released.statusCode shouldBe 200 }
 
         val visualization = post("/api/v1/visualizations", VISUALIZATION_DOCUMENT)

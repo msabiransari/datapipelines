@@ -19,3 +19,13 @@ internal val DEPENDENCY_CATALOG =
 
 /** The five module entries a page that already lists the three graph vendors adds (the pipeline editor). */
 internal val DEPENDENCY_MODULES = DEPENDENCY_CATALOG.drop(3)
+
+/**
+ * #876 §F.2 — the catalog of a page that also opens a release dialog (the five family workspaces): the release plan's
+ * view-model builder `plan-view.js` rides right after `tree-view.js`, whose glyphs and family words it reads.
+ */
+internal val RELEASE_DEPENDENCY_CATALOG =
+    DEPENDENCY_CATALOG.flatMap { if (it == "/js/dependencies/tree-view.js") listOf(it, "/js/dependencies/plan-view.js") else listOf(it) }
+
+/** The six module entries a release-dialog page that already lists the three graph vendors adds (the pipeline editor). */
+internal val RELEASE_DEPENDENCY_MODULES = RELEASE_DEPENDENCY_CATALOG.drop(3)

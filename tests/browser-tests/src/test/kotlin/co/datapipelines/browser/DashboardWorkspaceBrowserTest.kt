@@ -348,7 +348,7 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
 
     @Test
     @Order(4)
-    fun `the release dialog opens into the dialog container - the D61 rows name the pins`() {
+    fun `the release dialog opens into the dialog container - the plan rows name the pins`() {
         startTrace()
         val root = ready("dpdlg")
         val board = seedBoardWithGrid(root)
@@ -360,8 +360,12 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
         page.waitForSelector("#dp-dialog [data-lifecycle-dialog='dashboard-release']")
         val dialog = page.locator("#dp-dialog .app-modal")
         dialog.innerText() shouldContain "Release v2?"
-        // The released pins render as locked rows; no draft pin, so no cascade consent group.
-        dialog.innerText() shouldContain "Dependencies this release locks"
+        // #876: the shared release plan replaces D61's "locks" group — the released pins (four pipelines, four
+        // visualizations) are RELEASED text rows with no input; only a DRAFT row carries a box.
+        dialog.innerText() shouldContain "This release covers:"
+        val released = page.locator("#dp-dialog [data-release-row='released']")
+        released.count() shouldBe 8
+        released.locator("input").count() shouldBe 0
         // Close is emptying the container: the dialog leaves without a navigation.
         page.click("#dp-dialog [data-lifecycle-close]")
         page.waitForTimeout(250.0)

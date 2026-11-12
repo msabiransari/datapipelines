@@ -7,12 +7,14 @@ package co.datapipelines.pipeline.release
  */
 object LegacyReleaseAlias {
     /**
-     * **The arming rule (brief resolution 1, #522).** True: a bare `release_pinned_templates=true` without any plan field
-     * keeps the #142 direct-template cascade, because the pipeline dialog posts exactly that until S6 (#522) teaches it
-     * `tree_hash`. The alias together with a plan field is always `plan_invalid` (two authorities). S6 flips this to
-     * false, after which the bare alias refuses `pipeline.release.plan_required` (428) as record §6 and §17 row 6 rule.
+     * **The arming rule (brief resolution 1, #522; flipped by #876 §F.4, record §25.4 D15).** False: every release dialog
+     * now posts the plan its GET rendered (`tree_hash` + `include_dependencies`), so a bare `release_pinned_templates=true`
+     * or `release_pinned_visualizations=true` without any plan field refuses `<root family>.release.plan_required` (428)
+     * as record §6 and §17 row 6 rule — on every surface, whatever the closure holds. The alias together with a plan
+     * field stays `plan_invalid` (two authorities). [selection] and [order] remain for the coordinator's compatibility
+     * arm, reachable only by a coordinator constructed with the alias admitted (its tests).
      */
-    const val LEGACY_ALIAS_WITHOUT_PLAN_ADMITTED = true
+    const val LEGACY_ALIAS_WITHOUT_PLAN_ADMITTED = false
 
     /**
      * The DRAFT dependencies the root pins DIRECTLY in the families its legacy consent named — what the alias consents to

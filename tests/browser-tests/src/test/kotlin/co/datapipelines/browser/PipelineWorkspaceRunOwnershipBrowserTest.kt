@@ -42,26 +42,15 @@ class PipelineWorkspaceRunOwnershipBrowserTest : BrowserSuite() {
         sourceName = "wsrun-src-" + generatedPassword("d").take(6).lowercase()
         EditorRunFixtures.registerSourceDatasource(page, baseUrl, sourceName)
         val id = EditorRunFixtures.createStageChainPipeline(page, name, sourceName, 400_000)
-        // POST leaves v1 the DRAFT: release it first, or the v2 PUT would overwrite it.
-        // The 142 cascade releases the draft template pins WITH the pipeline.
-        page.evaluate(
-            """async ([id]) => {
-              const csrf = document.cookie.match(/(?:^|;\s*)dp_csrf=([^;]*)/);
-              const cur = await (await fetch('/api/v1/pipelines/' + id, { credentials: 'same-origin' })).json();
-              const rel =
-                await fetch('/api/v1/pipelines/' + id + '/release?release_pinned_templates=true', {
-                  method: 'POST', credentials: 'same-origin',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : '',
-                    'If-Match': cur.data.body_hash,
-                  },
-                  body: '{}',
-                });
-              if (!rel.ok) throw new Error('v1 release ' + rel.status + ' body=' + (await rel.text()).slice(0, 200));
-            }""",
-            arrayOf(id),
-        )
+        // POST leaves v1 the DRAFT: release it first, or the v2 PUT would overwrite it. Its draft template pins are
+        // released WITH the pipeline through the plan its release dialog renders (#876 §F.4: the bare alias is 428).
+        val v1Hash =
+            page.evaluate(
+                "async ([id]) => (await (await fetch('/api/v1/pipelines/' + id," +
+                    " { credentials: 'same-origin' })).json()).data.body_hash",
+                arrayOf(id),
+            ) as String
+        PlannedRelease.release(page, "/partials/pipelines/$id/lifecycle/release", "/api/v1/pipelines/$id/release", v1Hash)
         // v2: a different body — one CALCULATOR node, distinct id.
         val result =
             page.evaluate(

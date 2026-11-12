@@ -253,6 +253,7 @@
     versionLabel: versionLabel,
     RELATIONSHIPS: RELATIONSHIPS,
     GLYPHS: GLYPHS,
+    FAMILY_LABELS: FAMILY_LABELS,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   if (typeof window !== "undefined") {
@@ -260,5 +261,8 @@
     ns.fromTreePayload = fromTreePayload;
     ns.hrefFor = hrefFor;
     ns.versionLabel = versionLabel;
+    // plan-view.js (the release dialog's adapter) draws with the SAME glyphs and family words.
+    ns.GLYPHS = GLYPHS;
+    ns.FAMILY_LABELS = FAMILY_LABELS;
   }
 })();

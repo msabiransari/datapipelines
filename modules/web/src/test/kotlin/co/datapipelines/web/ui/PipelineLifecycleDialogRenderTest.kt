@@ -1,6 +1,11 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.web.ui.ReleaseDialogFixtures.blocking
+import co.datapipelines.web.ui.ReleaseDialogFixtures.draft
+import co.datapipelines.web.ui.ReleaseDialogFixtures.plan
+import co.datapipelines.web.ui.ReleaseDialogFixtures.released
+import co.datapipelines.web.ui.ReleaseDialogFixtures.root
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -28,77 +33,78 @@ import java.util.UUID
 class PipelineLifecycleDialogRenderTest {
     @Test
     fun `release - a clean draft offers the button and states the lock`() {
-        val html = renderRelease(pins = listOf(pin("demo/x.sql@3", PipelineVersionStatus.RELEASED)))
+        val html = renderRelease(plan = plan(ROOT, released("template", "demo/x.sql", 3)))
 
         html shouldContain "Release v3?"
         html shouldContain "the current version and locks it."
         html shouldContain ">Release v3</button>"
-        html shouldContain "data-release-pins"
+        // #876 §F.2: the shared plan sits in the form — the RELEASED pin is a chip row, the tree_hash rides beside it.
+        html shouldContain "data-release-plan"
+        html shouldContain "data-release-row=\"released\" data-node-id=\"n-template-demo-x.sql-3\""
+        html shouldContain "name=\"tree_hash\" value=\"${ReleaseDialogFixtures.TREE_HASH}\""
+        html shouldContain "data-release-submittable=\"true\""
     }
 
     @Test
-    fun `release - 142 - a DRAFT template pin is a checked consent row, and the button IS rendered`() {
+    fun `release - 876 - a DRAFT dependency is its own checked include_dependencies row, and the button IS rendered`() {
         val html =
             renderRelease(
-                pins =
-                    listOf(
-                        pin("demo/x.sql@2", PipelineVersionStatus.DRAFT, otherPinners = 1),
-                        pin("demo/y.sql@1", PipelineVersionStatus.RELEASED),
+                plan =
+                    plan(
+                        ROOT,
+                        draft("template", "demo/x.sql", 2, note = ", also pinned by 1 other draft pipeline"),
+                        released("template", "demo/y.sql", 1),
                     ),
             )
 
-        // The consent box: checked by default, named after the flag the service reads.
-        html shouldContain "name=\"releasePinnedTemplates\""
-        html shouldContain "checked data-consent-input"
-        html shouldContain "Also release this draft template with the pipeline"
-        // The row names the template, the version, and the other draft pipelines pinning it.
-        html shouldContain "data-cascade-pin=\"demo/x.sql@2\""
+        // The box: checked by default, posting the plan node's id as include_dependencies (the 142 flag is gone).
+        html shouldNotContain "releasePinnedTemplates"
+        html shouldContain "name=\"include_dependencies\" value=\"n-template-demo-x.sql-2\" checked required data-consent-input"
+        // The family's remark rides the row: the other draft pipelines pinning the template.
         html shouldContain ", also pinned by 1 other draft pipeline<"
-        // Both wordings are in the markup — the CSS shows the one the box selects — so the
-        // order rule stays visible when the box is unchecked.
-        html shouldContain "released with this pipeline"
-        html shouldContain "release the template first"
-        // The RELEASED pin is in the plain list, the draft one is NOT (one row per pin).
-        html shouldContain "demo/y.sql@1"
-        html shouldContain "data-release-pins"
+        // Both wordings are in the markup — the CSS shows the one the box selects.
+        html shouldContain "released with it"
+        html shouldContain "release it first"
+        html shouldContain "data-release-row=\"released\" data-node-id=\"n-template-demo-y.sql-1\""
         // And the submit exists, consent-gated.
         html shouldContain "data-verb=\"pipeline-release-confirm\" data-consent-submit"
     }
 
     @Test
-    fun `release - 142 - the consent group pluralises and omits the shared line at zero other pinners`() {
+    fun `release - 876 - every DRAFT dependency is one row and only a shared one carries the remark`() {
         val html =
             renderRelease(
-                pins =
-                    listOf(
-                        pin("demo/x.sql@2", PipelineVersionStatus.DRAFT),
-                        pin("demo/z.sql@4", PipelineVersionStatus.DRAFT, otherPinners = 3),
+                plan =
+                    plan(
+                        ROOT,
+                        draft("template", "demo/x.sql", 2),
+                        draft("template", "demo/z.sql", 4, note = ", also pinned by 3 other draft pipelines"),
                     ),
             )
 
-        html shouldContain "Also release these 2 draft templates with the pipeline"
+        Regex("name=\"include_dependencies\"").findAll(html).count() shouldBe 2
         html shouldContain ", also pinned by 3 other draft pipelines<"
-        // Exactly one shared line: the zero-pinner row carries none.
-        Regex("data-cascade-shared").findAll(html).count() shouldBe 1
-        html shouldNotContain "<ul class=\"u-text-sm u-mb-xs\" data-release-pins"
+        Regex("data-release-note").findAll(html).count() shouldBe 1
     }
 
     @Test
-    fun `release - 142 - a DRAFT pin beside a MISSING one is the pre-142 refused shape - no consent, no button`() {
+    fun `release - 876 - a DRAFT dependency beside a MISSING one is blocking - the submit is rendered DISABLED and no check runs`() {
         val html =
             renderRelease(
-                pins =
-                    listOf(
-                        pin("demo/x.sql@2", PipelineVersionStatus.DRAFT),
-                        pin("gone/missing.sql@9", null),
-                    ),
+                plan = plan(ROOT, draft("template", "demo/x.sql", 2), blocking("template", "gone/missing.sql", 9)),
+                hasChecks = true,
             )
 
-        html shouldContain "demo/x.sql@2"
+        html shouldContain "data-release-row=\"blocking\""
         html shouldContain "MISSING"
-        html shouldContain "release the template first"
-        html shouldNotContain "data-consent-input"
-        html shouldNotContain "<button type=\"submit\""
+        html shouldContain "blocks the release"
+        html shouldContain "data-release-submittable=\"false\""
+        html shouldContain "data-release-blocked"
+        html shouldNotContain "data-verb=\"pipeline-release-confirm\""
+        html shouldContain "<button type=\"submit\" disabled data-release-pending"
+        html shouldNotContain "data-consent-submit"
+        // The checks would answer an enabled footer: they do not run under a blocked plan.
+        html shouldNotContain "checks/run"
     }
 
     /**
@@ -118,6 +124,7 @@ class PipelineLifecycleDialogRenderTest {
                         pin("demo/rainy.jsonata@2", PipelineVersionStatus.RELEASED, retiredFacts = listOf(retired)),
                         pin("demo/x.sql@3", PipelineVersionStatus.RELEASED),
                     ),
+                plan = plan(ROOT, released("template", "demo/rainy.jsonata", 2), released("template", "demo/x.sql", 3)),
             )
 
         html shouldContain "data-release-needs-review"
@@ -145,12 +152,33 @@ class PipelineLifecycleDialogRenderTest {
     }
 
     @Test
-    fun `release - a MISSING template pin refuses the same way`() {
-        val html = renderRelease(pins = listOf(pin("gone/missing.sql@9", null)))
+    fun `release - a MISSING template dependency refuses the same way`() {
+        val html = renderRelease(plan = plan(ROOT, blocking("template", "gone/missing.sql", 9)))
 
         html shouldContain "MISSING"
-        html shouldContain "release the template first"
-        html shouldNotContain "<button type=\"submit\""
+        html shouldContain "blocks the release"
+        html shouldNotContain "data-verb=\"pipeline-release-confirm\""
+    }
+
+    @Test
+    fun `release - 876 - an unavailable datasource prerequisite is a text row that disables the submit`() {
+        val html =
+            renderRelease(
+                plan =
+                    plan(
+                        ROOT,
+                        released("template", "ops/q", 1),
+                        prerequisites = listOf(ReleaseDialogModel.PrerequisiteRow("gone", available = false, readonly = null)),
+                    ),
+            )
+
+        html shouldContain "data-release-prerequisite"
+        html shouldContain "data-status=\"unavailable\""
+        html shouldContain "Datasource gone is not available"
+        // A prerequisite is never an input.
+        html shouldNotContain "name=\"include_dependencies\""
+        html shouldContain "data-release-submittable=\"false\""
+        html shouldNotContain "data-verb=\"pipeline-release-confirm\""
     }
 
     @Test
@@ -182,6 +210,7 @@ class PipelineLifecycleDialogRenderTest {
         val html =
             render("partials/pipeline-lifecycle-release") {
                 setVariable("dlg", releaseDialog(pins = emptyList(), hasChecks = true))
+                setVariable("rd", plan(ROOT))
                 setVariable("from", "editor")
             }
 
@@ -194,6 +223,53 @@ class PipelineLifecycleDialogRenderTest {
         html shouldContain "id=\"plc-release-footer\""
         html shouldContain "disabled"
         html shouldNotContain "data-verb=\"pipeline-release-confirm\""
+    }
+
+    @Test
+    fun `876 R2 - the pending-checks placeholder is outside the consent evaluator - no gate attribute, disabled, for a submittable plan`() {
+        val html = renderRelease(plan = plan(ROOT), hasChecks = true)
+
+        val footer = html.substringAfter("id=\"plc-release-footer\"").substringBefore("</div>")
+        val buttons = Regex("<button[^>]*>").findAll(footer).map { it.value }.toList()
+        // ONE button, the placeholder: lifecycle-dialog.js's evaluateReleaseGates acts on data-consent-submit and
+        // data-min-chars-submit only, so a ticked plan checkbox cannot enable it before the checks footer replaces it.
+        buttons.size shouldBe 1
+        buttons.single() shouldContain "data-release-pending"
+        buttons.single() shouldContain "disabled"
+        buttons.single() shouldNotContain "data-consent-submit"
+        buttons.single() shouldNotContain "data-min-chars-submit"
+    }
+
+    @Test
+    fun `876 R3 - a DRAFT pipeline dependency row offers its own collapsed check override, paired node and reason`() {
+        val child = draft("pipeline", "sales/daily", 5)
+        val html = renderRelease(plan = plan(ROOT, child, draft("template", "sales/query", 2), released("pipeline", "sales/old", 1)))
+
+        val overrides = Regex("<details[^>]*data-release-override[^>]*>").findAll(html).toList()
+        overrides.size shouldBe 1
+        overrides.single().value shouldContain "data-node-id=\"${child.nodeId}\""
+        Regex("<input type=\"hidden\" name=\"check_override_node\" value=\"([^\"]+)\">")
+            .findAll(html)
+            .map { it.groupValues[1] }
+            .toList() shouldBe listOf(child.nodeId)
+        Regex("<textarea name=\"check_override_reason\"[^>]*minlength=\"10\"").findAll(html).count() shouldBe 1
+        // The root's own override field is the checks footer's (overrideChecksReason), never a plan row's.
+        html shouldNotContain "name=\"overrideChecksReason\""
+    }
+
+    @Test
+    fun `876 R3 - the per-row override renders only for a role shown the root's override - a promoter sees none`() {
+        val html =
+            render("partials/pipeline-lifecycle-release") {
+                withRoles(canRead = true, canExecute = false, canAuthor = false, canPromote = true, roleLabel = "promoter")
+                setVariable("dlg", releaseDialog(pins = emptyList()))
+                setVariable("rd", plan(ROOT, draft("pipeline", "sales/daily", 5)))
+                setVariable("from", "editor")
+            }
+
+        html shouldNotContain "data-release-override"
+        html shouldNotContain "check_override_node"
+        html shouldNotContain "check_override_reason"
     }
 
     @Test
@@ -696,9 +772,14 @@ class PipelineLifecycleDialogRenderTest {
         refusal = null,
     )
 
-    private fun renderRelease(pins: List<PipelineLifecycleDialogModel.PinView>): String =
+    private fun renderRelease(
+        pins: List<PipelineLifecycleDialogModel.PinView> = emptyList(),
+        plan: ReleaseDialogModel = plan(ROOT),
+        hasChecks: Boolean = false,
+    ): String =
         render("partials/pipeline-lifecycle-release") {
-            setVariable("dlg", releaseDialog(pins))
+            setVariable("dlg", releaseDialog(pins, hasChecks))
+            setVariable("rd", plan)
             setVariable("from", "editor")
         }
 
@@ -827,6 +908,7 @@ class PipelineLifecycleDialogRenderTest {
 
     private companion object {
         val LEAF_ID: UUID = UUID.fromString("22222222-2222-2222-2222-222222222222")
+        val ROOT = root("pipeline", "nyc/mobility/probe", 3)
         val COMMENT = Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL)
     }
 }

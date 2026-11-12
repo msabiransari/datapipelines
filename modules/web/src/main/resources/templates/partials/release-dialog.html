@@ -1,0 +1,146 @@
+<!--/* The shared release dialog (#876 §F.2–F.3; record §8 release treatment, §12; the 2026-10-13 release-dependencies
+     design §9). Every release dialog renders the RELEASE PLAN its GET built (ReleasePreviews: the session plan and
+     its datasource prerequisites from ONE planning read) through these fragments — never the interactive tree
+     payload, which is a different contract and never authorizes anything.
+
+     `plan(rd)` sits INSIDE the family's form: one row per plan node (the closure holds each identity once, so a draft
+     shared by several branches is ONE row), one text row per prerequisite, the plan's tree_hash as a hidden input and
+     its edges once as a hidden list. A selectable DRAFT is a checkbox, checked, posting its node_id as
+     include_dependencies; RELEASED is a chip; MISSING or DISCARDED is blocking text; a prerequisite is never an input
+     and never a graph node. A DRAFT pipeline row also carries its own optional check override (check_override_node +
+     check_override_reason, paired by index into the plan's check_overrides). `data-release-submittable` is the model's one boolean: lifecycle-dialog.js keeps every
+     gated submit disabled while it is false — a courtesy, the coordinator refuses the forced POST (A11). Every value
+     reaches the page through th:text / th:attr; nothing here is an inline style or an inline script.
+
+     `dialog` is the whole dialog for a family with no facts of its own beside the plan (the
+     parameter set's first release shell, §F.3): the last-written line, the root's body hash, the plan, the submit. It
+     reads the model's `dlg` (the root's facts), `rd` (the plan), `releaseAction` (the POST route) and `releaseVerb`. */-->
+<th:block xmlns:th="http://www.thymeleaf.org">
+
+<div th:fragment="plan(rd)" class="dp-release-plan u-mb-md" data-release-plan
+     th:attr="data-release-submittable=${rd.submittable},data-release-family=${rd.family}">
+  <p th:if="${rd.refusal != null}" class="dp-release-blocking u-text-sm" data-release-plan-refusal
+     th:text="${rd.refusal}">The dependencies could not be planned.</p>
+
+  <th:block th:if="${rd.refusal == null}">
+    <!-- The plan's digest as THIS read computed it: the POST is refused stale if anything it covers changed. -->
+    <input th:if="${rd.treeHash != null}" type="hidden" name="tree_hash" th:value="${rd.treeHash}" data-release-tree-hash>
+
+    <p class="u-text-sm u-mb-xs">This release covers:</p>
+    <ul class="dp-release-rows u-text-sm" data-release-rows>
+      <li th:each="row : ${rd.rows}" class="dp-release-row"
+          th:attr="data-release-row=${row.kindWire},data-node-id=${row.nodeId},data-family=${row.family},data-name=${row.name},data-version=${row.version},data-status=${row.status}">
+        <th:block th:if="${row.kindWire == 'root'}">
+          <span class="dp-release-family" th:text="${row.familyLabel}">Dashboard</span>
+          <span class="u-mono" th:text="${row.name}">sales/board</span>
+          <span th:text="${row.versionLabel}">v3</span>
+          <span class="ds-badge ds-badge-default" th:text="${row.status}">DRAFT</span>
+          <span class="u-secondary"> — released by this action</span>
+        </th:block>
+        <label th:if="${row.kindWire == 'draft'}" class="dp-release-consent">
+          <input type="checkbox" name="include_dependencies" th:value="${row.nodeId}" checked required data-consent-input
+                 th:attr="aria-label=${'Release ' + row.familyLabel + ' ' + row.name + ' ' + row.versionLabel + ' with it'}">
+          <span class="dp-release-family" th:text="${row.familyLabel}">Pipeline</span>
+          <span class="u-mono" th:text="${row.name}">sales/daily</span>
+          <span th:text="${row.versionLabel}">v5</span>
+          <span class="ds-badge ds-badge-warning" th:text="${row.status}">DRAFT</span>
+          <span class="dp-release-on u-secondary"> — released with it</span>
+          <span class="dp-release-off dp-release-blocking"> — release it first</span>
+          <span th:if="${row.note != null}" class="u-secondary" data-release-note th:text="${row.note}">, also pinned by 1 other draft pipeline</span>
+        </label>
+        <!-- A DRAFT PIPELINE dependency is the only family with release checks, and the plan does not know its
+             verdict (no checks run for a dependency here), so every such row offers its OWN override, collapsed:
+             the hidden node id and the reason post as one check_override_node / check_override_reason pair, a
+             blank reason is no override, and the coordinator judges the pair (a node of the plan, released by
+             it, given once). Shown to the callers the root's override is shown to; the root's reason is never
+             this row's. The reason is text through th:attr only. -->
+        <details th:if="${row.kindWire == 'draft' and row.family == 'pipeline' and canAuthor == true}"
+                 class="dp-release-override u-text-sm" data-release-override
+                 th:attr="data-node-id=${row.nodeId}">
+          <summary class="ds-button ds-button-ghost ds-button-sm tplx-danger">Override its failing checks…</summary>
+          <input type="hidden" name="check_override_node" th:value="${row.nodeId}">
+          <p class="u-secondary u-text-sm u-mt-md">
+            If the release checks of <span class="u-mono" th:text="${row.name}">sales/daily</span> do not pass, its
+            release is blocked; a reason here overrides them — the reason is recorded on its release's audit event.
+          </p>
+          <textarea name="check_override_reason" class="ds-textarea u-mt-md" rows="2" minlength="10"
+                    th:attr="aria-label=${'Override reason for ' + row.name + ' ' + row.versionLabel}"
+                    placeholder="Why this release is safe despite the failing checks (at least 10 characters)"></textarea>
+        </details>
+        <th:block th:if="${row.kindWire == 'released'}">
+          <span class="dp-release-family" th:text="${row.familyLabel}">Parameter set</span>
+          <span class="u-mono" th:text="${row.name}">sales/filters</span>
+          <span th:text="${row.versionLabel}">v1</span>
+          <span class="ds-badge ds-badge-default" th:text="${row.status}">RELEASED</span>
+        </th:block>
+        <th:block th:if="${row.kindWire == 'blocking'}">
+          <span class="dp-release-family" th:text="${row.familyLabel}">Template</span>
+          <span class="u-mono" th:text="${row.name}">sales/query</span>
+          <span th:text="${row.versionLabel}">v1</span>
+          <span class="ds-badge ds-badge-danger" th:text="${row.status}">MISSING</span>
+          <span class="dp-release-blocking"> — blocks the release</span>
+        </th:block>
+      </li>
+      <!-- A prerequisite is text, never an input: an absent datasource and one granted only to another workspace
+           render the same row (the planner resolves both through the scoped provider), and an unknown access
+           mode is never rendered as either word. -->
+      <li th:each="p : ${rd.prerequisites}" class="dp-release-row" data-release-prerequisite
+          th:classappend="${!p.available} ? 'dp-release-blocking'"
+          th:attr="data-kind='datasource',data-name=${p.name},data-status=${p.status}">
+        <span class="dp-release-family">Prerequisite</span>
+        <span th:text="${p.text}">Datasource warehouse — available, read-only</span>
+      </li>
+    </ul>
+    <ul hidden data-release-edges>
+      <li th:each="e : ${rd.edges}" th:attr="data-from=${e.from},data-to=${e.to},data-path=${e.path}"></li>
+    </ul>
+
+    <p th:if="${!rd.submittable}" class="dp-release-blocking u-text-sm" data-release-blocked>
+      This release cannot go ahead until every blocking row above is resolved.
+    </p>
+
+    <!-- The graph of the SAME rows, collapsed: drawn by plan-view.js from the attributes above when it opens — no
+         request (record §12). Selecting a node marks its row; it never ticks or unticks a box (§13). -->
+    <details class="dp-release-graph u-mb-md" data-release-graph th:if="${!#lists.isEmpty(rd.dependencies)}">
+      <summary class="u-text-sm">Show graph</summary>
+      <p class="u-secondary u-text-sm">Prerequisites are listed above.</p>
+      <div class="dp-deps" data-dp-deps data-dp-deps-source="release-plan" data-dp-deps-state="idle"
+           th:attr="data-family=${rd.family}">
+        <p class="dp-deps-note" data-dp-deps-note role="status">Dependencies load when this section is opened.</p>
+      </div>
+    </details>
+  </th:block>
+</div>
+
+<div th:fragment="dialog" class="u-backdrop" th:attr="data-lifecycle-dialog=${releaseVerb}">
+  <div class="ds-card app-modal app-modal-md" role="dialog" aria-modal="true" aria-labelledby="rd-release-title">
+    <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
+            aria-label="Close" data-lifecycle-close>
+      <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+    </button>
+    <h2 class="ds-title u-m0 u-mb-md" id="rd-release-title"
+        th:text="'Release v' + ${dlg.version} + '?'">Release v2?</h2>
+
+    <p th:if="${dlg.refusal != null}" class="u-secondary u-text-sm" th:text="${dlg.refusal.message}">No draft.</p>
+
+    <th:block th:if="${dlg.refusal == null}">
+      <p class="u-secondary u-text-sm">
+        Last written <span th:title="${#temporals.format(dlg.updatedAt, 'yyyy-MM-dd HH:mm')}" th:text="${dlg.updatedAgo}">2 hours ago</span>
+        by <span th:text="${dlg.updatedBy}">Muhammad</span>.
+      </p>
+      <form th:attr="hx-post=${releaseAction},hx-swap='none'">
+        <!-- The hash of the root draft THIS dialog read: the POST releases AT it (a changed draft is a conflict). -->
+        <input type="hidden" name="bodyHash" th:value="${dlg.bodyHash}" data-release-body-hash>
+        <div th:replace="~{partials/release-dialog :: plan(${rd})}"></div>
+        <p class="u-secondary u-text-sm u-mb-md">
+          Releasing makes v<span th:text="${dlg.version}">2</span> the current version and locks it.
+        </p>
+        <button th:if="${canAuthor == true}" type="submit" data-consent-submit class="ds-button ds-button-primary u-full"
+                hx-disabled-elt="this" th:attr="data-verb=${releaseVerb + '-confirm'},disabled=${!rd.submittable} ? 'disabled' : null"
+                th:text="'Release v' + ${dlg.version}">Release v2</button>
+      </form>
+    </th:block>
+  </div>
+</div>
+
+</th:block>

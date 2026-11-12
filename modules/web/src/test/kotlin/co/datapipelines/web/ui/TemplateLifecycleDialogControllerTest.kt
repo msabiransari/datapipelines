@@ -6,6 +6,7 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.release.ReleasePlanRequest
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateVersionDetail
 import co.datapipelines.typesystem.DatapipelinesException
@@ -40,6 +41,7 @@ import java.util.UUID
  */
 class TemplateLifecycleDialogControllerTest {
     private val releases = mockk<TemplateReleaseService>()
+    private val previews = mockk<ReleasePreviews>(relaxed = true)
     private val templates = mockk<TemplateRepository>()
     private val dialogs = mockk<TemplateLifecycleDialogModel>()
     private val audit = PipelineLifecycleDialogControllerTest.RecordingAudit()
@@ -62,8 +64,9 @@ class TemplateLifecycleDialogControllerTest {
             )
         mvc =
             MockMvcBuilders
-                .standaloneSetup(TemplateLifecycleDialogController(releases, templates, dialogs, audit, { LensedView.EVERYTHING }))
-                .setControllerAdvice(UiExceptionHandler())
+                .standaloneSetup(
+                    TemplateLifecycleDialogController(releases, templates, dialogs, audit, { LensedView.EVERYTHING }, previews),
+                ).setControllerAdvice(UiExceptionHandler())
                 .build()
     }
 
@@ -75,7 +78,7 @@ class TemplateLifecycleDialogControllerTest {
     @Test
     fun `release - the redirect lands on the workspace's Versions tab with the flash`() {
         every { templates.findDraftDetail(WORKSPACE, PATH) } returns draftDetail()
-        every { releases.release(WORKSPACE, PATH, "h2", USER) } returns
+        every { releases.release(WORKSPACE, PATH, "h2", USER, PLAN) } returns
             TemplateReleaseService.Released(draftDetail().copy(status = PipelineVersionStatus.RELEASED), template(version = 2))
 
         mvc
@@ -84,6 +87,8 @@ class TemplateLifecycleDialogControllerTest {
                     .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                     .param("name", PATH)
                     .param("bodyHash", "h2")
+                    .param("tree_hash", TREE_HASH)
+                    .param("include_dependencies", "n1")
                     .param("from", "editor")
                     .header("HX-Request", "true"),
             ).andExpect(
@@ -99,7 +104,7 @@ class TemplateLifecycleDialogControllerTest {
     @Test
     fun `release - a stale surface's from value answers the same redirect (there is one page)`() {
         every { templates.findDraftDetail(WORKSPACE, PATH) } returns draftDetail()
-        every { releases.release(WORKSPACE, PATH, "h2", USER) } returns
+        every { releases.release(WORKSPACE, PATH, "h2", USER, PLAN) } returns
             TemplateReleaseService.Released(draftDetail().copy(status = PipelineVersionStatus.RELEASED), template(version = 2))
 
         mvc
@@ -108,6 +113,8 @@ class TemplateLifecycleDialogControllerTest {
                     .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                     .param("name", PATH)
                     .param("bodyHash", "h2")
+                    .param("tree_hash", TREE_HASH)
+                    .param("include_dependencies", "n1")
                     .header("HX-Request", "true"),
             ).andExpect(header().string("HX-Redirect", "/templates/nyc/mobility/probe.sql?tab=versions&ok=released"))
     }
@@ -116,7 +123,7 @@ class TemplateLifecycleDialogControllerTest {
     fun `release - 416 - the posted hash is released even when the draft has moved on since the dialog opened`() {
         // The draft is at h3 NOW (draftDetail is h2 — build a moved one); the dialog read h2.
         every { templates.findDraftDetail(WORKSPACE, PATH) } returns draftDetail().copy(bodyHash = "h3-fresh")
-        every { releases.release(WORKSPACE, PATH, "h2", USER) } returns
+        every { releases.release(WORKSPACE, PATH, "h2", USER, PLAN) } returns
             TemplateReleaseService.Released(draftDetail().copy(status = PipelineVersionStatus.RELEASED), template(version = 2))
 
         mvc
@@ -125,17 +132,19 @@ class TemplateLifecycleDialogControllerTest {
                     .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                     .param("name", PATH)
                     .param("bodyHash", "h2")
+                    .param("tree_hash", TREE_HASH)
+                    .param("include_dependencies", "n1")
                     .header("HX-Request", "true"),
             ).andExpect(header().string("HX-Redirect", "/templates/nyc/mobility/probe.sql?tab=versions&ok=released"))
 
-        verify(exactly = 1) { releases.release(WORKSPACE, PATH, "h2", USER) }
-        verify(exactly = 0) { releases.release(any(), any(), "h3-fresh", any()) }
+        verify(exactly = 1) { releases.release(WORKSPACE, PATH, "h2", USER, PLAN) }
+        verify(exactly = 0) { releases.release(any(), any(), "h3-fresh", any(), any()) }
     }
 
     @Test
     fun `release - 416 - a stale dialog hash is forwarded as posted, never replaced by the fresh draft's, and answers the 409 conflict`() {
         every { templates.findDraftDetail(WORKSPACE, PATH) } returns draftDetail().copy(bodyHash = "h3-fresh")
-        every { releases.release(WORKSPACE, PATH, "h2-stale", USER) } throws
+        every { releases.release(WORKSPACE, PATH, "h2-stale", USER, PLAN) } throws
             DatapipelinesException(
                 code = PipelineErrorCodes.Template.VERSION_CONFLICT,
                 message = "The draft changed since you loaded it.",
@@ -148,6 +157,8 @@ class TemplateLifecycleDialogControllerTest {
                         .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                         .param("name", PATH)
                         .param("bodyHash", "h2-stale")
+                        .param("tree_hash", TREE_HASH)
+                        .param("include_dependencies", "n1")
                         .header("HX-Request", "true"),
                 ).andExpect(status().isConflict)
                 .andExpect(header().string("HX-Retarget", "#toast"))
@@ -155,8 +166,8 @@ class TemplateLifecycleDialogControllerTest {
                 .response.contentAsString
 
         response shouldContain "template.version.conflict"
-        verify(exactly = 1) { releases.release(WORKSPACE, PATH, "h2-stale", USER) }
-        verify(exactly = 0) { releases.release(any(), any(), "h3-fresh", any()) }
+        verify(exactly = 1) { releases.release(WORKSPACE, PATH, "h2-stale", USER, PLAN) }
+        verify(exactly = 0) { releases.release(any(), any(), "h3-fresh", any(), any()) }
         audit.events shouldBe emptyList()
     }
 
@@ -171,14 +182,14 @@ class TemplateLifecycleDialogControllerTest {
             ).andExpect(status().isBadRequest)
 
         verify(exactly = 0) { templates.findDraftDetail(any(), any()) }
-        verify(exactly = 0) { releases.release(any(), any(), any(), any()) }
+        verify(exactly = 0) { releases.release(any(), any(), any(), any(), any()) }
     }
 
     @Test
     fun `release - 416 - a hostile hash value reaches the service verbatim and is the conflict, never a 500`() {
         val hostile = "'\"; DROP TABLE template_version; --<script>" + "x".repeat(5000)
         every { templates.findDraftDetail(WORKSPACE, PATH) } returns draftDetail()
-        every { releases.release(WORKSPACE, PATH, hostile, USER) } throws
+        every { releases.release(WORKSPACE, PATH, hostile, USER, PLAN) } throws
             DatapipelinesException(
                 code = PipelineErrorCodes.Template.VERSION_CONFLICT,
                 message = "The draft changed since you loaded it.",
@@ -190,6 +201,8 @@ class TemplateLifecycleDialogControllerTest {
                     .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                     .param("name", PATH)
                     .param("bodyHash", hostile)
+                    .param("tree_hash", TREE_HASH)
+                    .param("include_dependencies", "n1")
                     .header("HX-Request", "true"),
             ).andExpect(status().isConflict)
     }
@@ -353,5 +366,7 @@ class TemplateLifecycleDialogControllerTest {
         val WORKSPACE: UUID = UUID.fromString("00000000-0000-0000-0000-000000000010")
         const val PATH = "nyc/mobility/probe.sql"
         val USER: UUID = UUID.fromString("00000000-0000-0000-0000-000000000001")
+        const val TREE_HASH = "v1:0123456789abcdef"
+        val PLAN = ReleasePlanRequest(TREE_HASH, listOf("n1"))
     }
 }

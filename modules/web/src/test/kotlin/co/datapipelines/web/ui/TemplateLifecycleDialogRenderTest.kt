@@ -27,12 +27,15 @@ class TemplateLifecycleDialogRenderTest {
         val html =
             render("partials/template-lifecycle-release") {
                 setVariable("dlg", releaseDialog())
+                setVariable("rd", ReleaseDialogFixtures.plan(ReleaseDialogFixtures.root("template", "nyc/mobility/probe.sql", 2)))
                 setVariable("from", "explorer")
             }
 
         html shouldContain "Release v2?"
         html shouldContain "a pin without a number"
         html shouldContain ">Release v2</button>"
+        // #876 §F.2: the shared plan rides the form (forced: the partial now reads `rd`).
+        html shouldContain "data-release-plan"
     }
 
     @Test

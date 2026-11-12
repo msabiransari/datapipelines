@@ -319,8 +319,9 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
     /**
      * #416 — a release posts the draft hash the DIALOG read. The dialog opens on the draft as it is, the draft
      * changes underneath it (a valid REST write with the right If-Match, as a colleague or an agent would make),
-     * and the dialog is then submitted: the old hash reaches the service, which refuses it `pipeline.version.conflict`
-     * (409, the toast carries the code) and releases NOTHING. Before this lane the POST re-read the draft and
+     * and the dialog is then submitted: the old hash reaches the service, which refuses it (409, the toast carries the
+     * code: `pipeline.release.plan_conflict` since #876, whose plan `tree_hash` covers the root's draft;
+     * `pipeline.version.conflict` before) and releases NOTHING. Before this lane the POST re-read the draft and
      * released whatever it found, so the changed draft went live unseen. The control: a dialog opened AFTER the change
      * releases it, so the refusal is the stale hash and nothing broader.
      */
@@ -344,14 +345,14 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
         val currentHash = bodyHashOf(probeId)
         (currentHash == dialogHash) shouldBe false
 
-        // Submit the OLD dialog: 409 pipeline.version.conflict, rendered as the toast, nothing released.
+        // Submit the OLD dialog: 409 pipeline.release.plan_conflict (#876), rendered as the toast, nothing released.
         val refused =
             page.waitForResponse({ it.url().contains("/lifecycle/release") }) {
                 staleDialog.locator("button[type=submit]").click()
             }
         refused.status() shouldBe 409
         page.locator("#toast .ds-toast").first().waitFor()
-        page.locator("#toast .ds-toast").first().innerText() shouldContain "pipeline.version.conflict"
+        page.locator("#toast .ds-toast").first().innerText() shouldContain "pipeline.release.plan_conflict"
         currentVersionOf(probeId) shouldBe null
         bodyHashOf(probeId) shouldBe currentHash
 
