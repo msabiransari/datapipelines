@@ -470,6 +470,7 @@ class AuthHttpBoundaryTest {
         val error = error(response)
         error["code"] shouldBe AuthErrorCodes.SECRET_VERIFICATION_UNAVAILABLE
         error["message"] shouldBe "Secret verification is temporarily unavailable"
+        (mapper.readValue(response.body, Map::class.java)["correlation_id"] as String).shouldNotBeBlank()
         response.body.orEmpty() shouldNotContain "emory"
         response.body.orEmpty() shouldNotContain "-22"
         withClue("the throwing verify must have been REACHED, not bypassed by the outcome cache") {
