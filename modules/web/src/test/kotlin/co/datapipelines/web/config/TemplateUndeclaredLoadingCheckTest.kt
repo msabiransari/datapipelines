@@ -3,6 +3,7 @@ package co.datapipelines.web.config
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
+import co.datapipelines.logcapture.capturingLogEvents
 import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.pipeline.WriteSurface
@@ -10,7 +11,6 @@ import co.datapipelines.templates.TemplateDraft
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.SharedPostgres
-import co.datapipelines.web.capturingLogEvents
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe

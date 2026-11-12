@@ -16,6 +16,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.slf4j.api)
 
+    // #756 — the shared snapshot log capture (module-structure §5.23); test-only, testImplementation alone.
+    testImplementation(project(":modules:log-capture"))
     testImplementation(libs.kotlinx.coroutines.test)
     // A logging backend for the suite alone: it records the writer's WARN lines and asserts a
     // store's exception message never reaches them (#266b). Production stays on slf4j-api.

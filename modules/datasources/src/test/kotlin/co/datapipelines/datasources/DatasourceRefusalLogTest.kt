@@ -2,6 +2,7 @@ package co.datapipelines.datasources
 
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.spi.ILoggingEvent
+import co.datapipelines.logcapture.SnapshotListAppender
 import co.datapipelines.persistence.FailureShape
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect

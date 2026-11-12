@@ -41,6 +41,8 @@ dependencies {
     implementation(libs.jackson.module.kotlin)
     implementation(libs.slf4j.api)
 
+    // #756 — the shared snapshot log capture (module-structure §5.23); test-only, testImplementation alone.
+    testImplementation(project(":modules:log-capture"))
     testImplementation(libs.kotlinx.coroutines.test)
     // H2 backs both the real per-execution tempdb and the stand-in "source database" in unit
     // tests, so the executor is exercised against a real driver rather than a mocked Connection.

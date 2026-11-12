@@ -235,8 +235,8 @@ open class WorkspaceService(
     }
 
     /**
-     * Creates a workspace (D-R11: super admins only — the capability gate is
-     * [ScopeMatrix.RestOperation.MANAGE_INSTANCE_WORKSPACES] at the interceptor, and this
+     * Creates a workspace (D-R11: super admins only — the permission gate is
+     * [Permission.WORKSPACE_CREATE] at the interceptor, and this
      * re-asserts it because a service must not depend on having been called from a governed
      * route). The creator enters as the workspace ADMIN.
      *

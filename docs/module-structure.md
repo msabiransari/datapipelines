@@ -1,9 +1,9 @@
 # Module Structure Specification
 
-**Status:** v1.17 (frozen contract — additive-only changes after this point)
+**Status:** v1.18 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** (all other specs — this spec operationalizes them into code structure)
-**Last updated:** 2026-11-08
+**Last updated:** 2026-11-12
 
 ---
 
@@ -47,6 +47,7 @@ datapipelines/
 │   ├── graph/                           # the generic Dag<T> primitive, layer 0 (§5.17)
 │   ├── dependency-contract/             # the neutral business-object dependency contract, layer 0, #868 (§5.22)
 │   ├── persistence/                     # the generic batching writer — ordered group commit, layer 0 (§5.19)
+│   ├── log-capture/                     # the shared test log capture — TEST-ONLY, layer 0, #756 (§5.23)
 │   ├── calculators/                     # [Calculators catalog] — pure kinds, layer 0 (§5.14)
 │   ├── scripting/                       # Script engine seam, layer 0 (§5.15)
 │   ├── pipeline-contract/               # [Pipeline Contract spec]
@@ -77,6 +78,7 @@ datapipelines/
 | `graph` | [dag-executor.md §3](dag-executor.md#3-dag-data-structure) (this spec, §5.17) | The generic DAG primitive — `Dag<T>`, `DagBuilder<T>` (topological order, cycle detection, reverse index). Stdlib only, no internal dependencies: moved out of `dag` (#194) so a module below the executor can build a graph without inheriting the executor's dependency set. Package `co.datapipelines.dag`, kept on purpose. | — (no persistence) |
 | `dependency-contract` | (this spec, §5.22; the dependency-graph design record) | The neutral business-object dependency contract (#868 G1): immutable graph types (`ObjectRequest`, `Node`, `Edge`, `GraphSnapshot`), the closed §11.1 vocabularies, the provider contract and its conformance harness, the DI-assembled `FamilyRegistry`, the bounded `DependencyWalker` and its internal fingerprint, `GraphLimits` and `Deadline`; the §11.1 wire schema and payload goldens as main resources. Kotlin/JDK only, no internal dependencies. | — (no persistence; providers read through their families' repositories in `application/dependencies`) |
 | `persistence` | [DAG Executor §10](dag-executor.md#10-sse-event-integration), [Auth §10](auth.md) (this spec, §5.19) | The generic batching writer (#266) — `BatchingWriter<T>`: an ordered, bounded, partitioned group commit in front of ONE store, with a bounded wait that falls back to the caller's own write, a singles retry that isolates a poison row, and a bounded shutdown drain. Knows no store: each supplies a `BatchSink`. Stdlib, coroutines and slf4j only. | — (writes whatever its sinks write; owns no table) |
+| `log-capture` | (this spec, §5.23) | TEST-ONLY (#756): the one shared Logback snapshot capture — `SnapshotListAppender` (appends and snapshot reads under the list's own monitor, #362/#391), `capturingLogEvents(logger, …)` and the root-logger `capturingLogs(…)`. Consumed by `testImplementation` alone; `verifyModuleDependencies` refuses any other edge into it. Logback only, no internal dependencies. | — (no persistence) |
 | `scripting` | (this spec, §5.15) | The script engine seam: `ScriptEngine` (JSONata in-process; JavaScript in a GraalJS isolate, #8), one registry wired in web and injected into the validator, test runner and node support, the evaluation pool, the type gate, canonical JSON. Pure library — evaluates untrusted script bodies with no I/O surface. | — (no persistence) |
 | `pipeline-contract` | [pipeline-contract.md](pipeline-contract.md) | Pipeline JSON model, validation, ExecutionContext type. | `PipelineRepository` → `pipelines`, `pipeline_versions` |
 | `templates` | [templates.md](templates.md) | Freemarker integration, library macros, template registry, versioning. | `TemplateRepository` → `templates`, `template_versions` |
@@ -115,6 +117,9 @@ layer 0 — no internal deps
 ┌──────────────┐ ┌─────────┐ ┌───────────────┐ ┌─────────────────────┐
 │  typesystem  │ │  graph  │ │  persistence  │ │ dependency-contract │
 └──────────────┘ └─────────┘ └───────────────┘ └─────────────────────┘
+┌───────────────┐
+│  log-capture  │  TEST-ONLY ← testImplementation of persistence, datasources, auth, dag, parameters,
+└───────────────┘               lake, web, app, tests/integration-tests — never a runtime edge (§5.23)
 
 layer 1 — typesystem (auth also persistence)
 ┌──────────────┐ ┌─────────────┐ ┌──────────────┐ ┌───────────┐ ┌────────┐
@@ -187,24 +192,25 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 | `typesystem` | *(none)* |
 | `graph` | *(none)* |
 | `dependency-contract` | *(none)* |
-| `persistence` | *(none)* |
+| `log-capture` | *(none)* |
+| `persistence` | `log-capture` |
 | `calculators` | `typesystem` |
 | `scripting` | `typesystem` |
 | `pipeline-contract` | `typesystem`, `calculators` |
 | `templates` | `typesystem`, `pipeline-contract`, `scripting` |
-| `datasources` | `typesystem`, `persistence` |
+| `datasources` | `typesystem`, `persistence`, `log-capture` |
 | `staging` | `typesystem` |
-| `auth` | `typesystem`, `pipeline-contract`, `persistence` |
+| `auth` | `typesystem`, `pipeline-contract`, `persistence`, `log-capture` |
 | `scheduler` | `typesystem`, `pipeline-contract` |
-| `dag` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `staging`, `scripting`, `graph`, `persistence` |
-| `parameters` | `typesystem`, `graph`, `pipeline-contract`, `templates`, `datasources` |
+| `dag` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `staging`, `scripting`, `graph`, `persistence`, `log-capture` |
+| `parameters` | `typesystem`, `graph`, `pipeline-contract`, `templates`, `datasources`, `log-capture` |
 | `visualization` | `typesystem`, `pipeline-contract`, `templates`, `parameters` |
-| `lake` | `typesystem`, `persistence`, `datasources`, `staging`, `pipeline-contract`, `scheduler`, `auth` |
+| `lake` | `typesystem`, `persistence`, `datasources`, `staging`, `pipeline-contract`, `scheduler`, `auth`, `log-capture` |
 | `application` | `typesystem`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `parameters`, `visualization`, `dependency-contract`, `scheduler` |
 | `mcp-server` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `application`, `parameters`, `visualization` |
-| `web` | `typesystem`, `calculators`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server`, `scheduler`, `parameters`, `persistence`, `visualization`, `lake`, `dependency-contract` |
-| `app` | `web` |
-| `tests/integration-tests` | `app` |
+| `web` | `typesystem`, `calculators`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server`, `scheduler`, `parameters`, `persistence`, `visualization`, `lake`, `dependency-contract`, `log-capture` |
+| `app` | `web`, `log-capture` |
+| `tests/integration-tests` | `app`, `log-capture` |
 | `tests/browser-tests` | `app`, `web` |
 
 Notes on the shape (explanatory, not additional rules):
@@ -222,6 +228,7 @@ Notes on the shape (explanatory, not additional rules):
 - `web` lists everything it touches **explicitly**. It could reach most of these transitively through `mcp-server`; declaring them is what makes the table checkable.
 - `application` is where a use case goes when it needs MORE THAN ONE aggregate. The rule, in one sentence: **cross-aggregate use cases live in `application`; single-aggregate ones live with the aggregate that owns them.** `PipelineService` is therefore in `pipeline-contract`, and `ExecutionLauncher` — which needs the pipeline aggregate AND `dag`'s reservation store — is in `application`. Nothing in `application` may import a `web` or `mcp` type; `ArchitectureGuardTest` fails the build on one.
 - `app` lists `web` only. It contains `main()`, configuration (including the single `metadataTransactionManager`, §8.5), logback config, and the Flyway migrations (§3.1) — no domain code.
+- `log-capture` (#756) is the one **test-only** module: the shared Logback snapshot capture that replaced nine module-local test-source copies. It is listed in the nine rows whose test sources capture logs (`persistence`, `datasources`, `auth`, `dag`, `parameters`, `lake`, `web`, `app`, `tests/integration-tests`), and every one of those edges is a `testImplementation`: `verifyModuleDependencies` fails when any configuration whose name does not start with `test` declares it (its `testOnlyModules` set), so test tooling never reaches a runtime classpath. `persistence`'s row is therefore no longer empty, but its main sources still have no internal dependency. The §4.3 "no `common` module" rule is unchanged: this module holds one fixture and carries its own guard.
 - A module may use `api(project(...))` instead of `implementation(...)` only where its own public API exposes the other module's types (e.g. `pipeline-contract` exposes `ColumnSchema` from `typesystem`). The allowed-set is the same either way.
 
 **Enforcement:** a Gradle verification task compares each subproject's declared project dependencies against this table and fails the build on any extra entry. Adding an edge means editing this table first — that is the review gate.
@@ -230,7 +237,7 @@ Notes on the shape (explanatory, not additional rules):
 
 Some concerns touch every module:
 - **Logging** — SLF4J + Logback (or structured logging via `minlog`/`logstash-logback-encoder`). Each module logs via SLF4J API; the actual logback config lives in `app`.
-- **Error handling** — every module's exceptions extend a base `DatapipelinesException`, which lives in `typesystem`. There is deliberately **no `common` module**: the §4.2 table is exhaustive, and a catch-all module is where layering rules go to die.
+- **Error handling** — every module's exceptions extend a base `DatapipelinesException`, which lives in `typesystem`. There is deliberately **no `common` module**: the §4.2 table is exhaustive, and a catch-all module is where layering rules go to die. The test-only `log-capture` (§5.23) is not one: it holds a single test fixture, and `verifyModuleDependencies` refuses every non-test edge into it.
 - **Configuration** — typed config classes per module, composed into the global `app` config.
 - **Metrics** — Micrometer API in modules, actual metrics registry configured in `app`.
 
@@ -813,6 +820,22 @@ build's `allowedInternalDependencies` map carries the same closed set).
 
 **Tests:** the walk's acceptance goldens (A02 identity memo, A03 longest path, A04 every limit at and over, A05 leaves, A28 the synthetic `test_widget` family), the batch call counts and the fake-clock deadline, the fingerprint golden and each excluded input varied, every vocabulary enumerated with its count, the conformance harness over the synthetic family, the wire suite (every golden validates against the schema, schema enums equal the types' tokens both ways, every token/variant/reason covered by a golden), `DependencyContractBoundaryTest`.
 
+### 5.23 `log-capture`
+
+**Dependencies (internal):** none — layer 0. **Dependencies (external):** `logback-classic` as `api` (BOM-managed, no version), because the helper's public signatures expose Logback's `Logger`, `ILoggingEvent` and `ListAppender` to its consumers' test sources.
+
+**TEST-ONLY.** Every consumer declares it with `testImplementation(project(":modules:log-capture"))`; `verifyModuleDependencies` fails on an edge from any configuration whose name does not start with `test` (only Kover's own self-edge in its exact plumbing configurations is exempt, as for every module), so the module never reaches a runtime classpath. Its sources sit in `src/main` only so that other modules can depend on them; nothing here is product code.
+
+**Public API (package `co.datapipelines.logcapture`, #756):**
+- `SnapshotListAppender` — a Logback `ListAppender<ILoggingEvent>` that starts itself, appends under its list's own monitor, and reads only detached snapshots: `events()` (the original events with their metadata, in capture order) and `messages()` (their formatted messages). The #362 `ConcurrentModificationException` and the #391 torn reads came from iterating the live list while another thread logged.
+- `capturingLogEvents(logger, appender = SnapshotListAppender(), block): List<ILoggingEvent>` — attaches to one logger for the block.
+- `capturingLogs(appender = SnapshotListAppender(), block): List<String>` — attaches to the ROOT logger and returns formatted messages; pass a shared appender when a poll must read the same capture the block writes.
+- Both (re)start the appender before attaching and detach and stop it in a `finally`, so a throwing block never leaves it attached and a reused appender records again.
+
+**Why it is its own module.** Until #756 every capturing module carried its own copy (nine, byte-identical but for the package line, one of them divergent). The owner ruled for one shared test-only module (2026-11-10, option A) over the earlier "one test-source copy per module" convention. `RawListAppenderGuardTest` (buildSrc) scans this module's main sources beside every test source, exempts the helper file by name, and refuses a module-local copy of the helper or its test anywhere else (`DEVELOPMENT.md` §9.6).
+
+**Tests:** `SnapshotListAppenderTest` — a returned snapshot stays unchanged after another append; snapshots keep event identity, level, arguments and throwable metadata; a throwing capture detaches and stops; a finite producer and reader see ordered independent snapshots; writer threads appending while a reader takes snapshots (no `ConcurrentModificationException`, nothing lost); the root-logger capture formats messages, detaches on a throw and records again when reused.
+
 ## 6. Version Catalog
 
 `gradle/libs.versions.toml` — single source of truth for third-party versions.
@@ -1319,6 +1342,7 @@ Before considering the module structure "ready":
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-12 | v1.18 | 756 (#756) | New TEST-ONLY layer-0 module `log-capture` (§3, §3.1, §4.1, §4.2 row and note, §4.3, §5.23): the one shared Logback snapshot capture replaces nine module-local `SnapshotListAppender` copies; the nine capturing modules declare it with `testImplementation` alone, and `verifyModuleDependencies` refuses any non-test edge into it. No production dependency change. |
 | 2026-11-08 | v1.17 | 860 (#860) | §5.20: the `chart` kind v1's schema, save-rule, support-table and column classes; the `RendererConfigValidator` row no longer names a Plotly shape check (the kind is retired). |
 | 2026-11-06 | v1.16 | 818e (#818) | §5.6: the dedicated reader-lease scheduler and its datasource port, without a module dependency change. |
 | 2026-11-05 | v1.15 | 818d (#818) | §5.6: the pool reaper ticks on its own scheduler, `poolReaperTaskScheduler` (one daemon thread, `dp-reaper`), declared in `web`'s `PoolReaperSchedulingConfiguration`; every other `@Scheduled` job stays on `dp-scheduled`. Still exactly one `@EnableScheduling`. No module or dependency change. |

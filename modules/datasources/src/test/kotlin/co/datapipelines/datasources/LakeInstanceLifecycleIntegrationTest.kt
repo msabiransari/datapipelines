@@ -7,6 +7,7 @@ import co.datapipelines.datasources.pooling.ConnectionPoolManager
 import co.datapipelines.datasources.pooling.HikariConnectionPool
 import co.datapipelines.datasources.pooling.LakeInstanceInitializer
 import co.datapipelines.datasources.pooling.LakeViewInit
+import co.datapipelines.logcapture.SnapshotListAppender
 import co.datapipelines.persistence.FailureShape
 import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.throwables.shouldThrow
@@ -473,7 +474,7 @@ class LakeInstanceLifecycleIntegrationTest {
      * Formatted messages logged while [block] ran — the shape `ConnectionPoolManagerTest` uses, read through
      * the module's snapshot capture (#484): every thread in the JVM logs into ROOT while it is attached.
      */
-    private fun capturingLogs(block: () -> Unit): List<String> = co.datapipelines.datasources.capturingLogs(block = block)
+    private fun capturingLogs(block: () -> Unit): List<String> = co.datapipelines.logcapture.capturingLogs(block = block)
 
     /**
      * The physical connection's identity behind a lease. #816: a LAKE lease is the author-SQL

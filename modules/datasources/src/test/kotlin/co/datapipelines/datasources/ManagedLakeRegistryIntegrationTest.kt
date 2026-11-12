@@ -1,6 +1,7 @@
 package co.datapipelines.datasources
 
 import co.datapipelines.datasources.pooling.ManagedLakeGeneration
+import co.datapipelines.logcapture.capturingLogs
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.throwables.shouldThrow

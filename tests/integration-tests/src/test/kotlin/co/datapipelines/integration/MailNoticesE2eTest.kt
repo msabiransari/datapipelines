@@ -1,6 +1,7 @@
 package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.logcapture.SnapshotListAppender
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe

@@ -1,9 +1,10 @@
-package co.datapipelines.parameters
+package co.datapipelines.logcapture
 
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.LoggingEvent
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
@@ -12,11 +13,16 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
-/** Deterministic #391 guards, using private loggers and finite, joined producer work. */
+/**
+ * Deterministic #391 guards, using private loggers and finite, joined producer work (the four cases the web
+ * copy carried), plus the #362 writer-thread stress case and the root-logger variant `capturingLogs` (#756).
+ */
 class SnapshotListAppenderTest {
     private fun logger(): Logger =
-        (LoggerFactory.getLogger("co.datapipelines.parameters.snapshot.${UUID.randomUUID()}") as Logger).apply {
+        (LoggerFactory.getLogger("co.datapipelines.logcapture.snapshot.${UUID.randomUUID()}") as Logger).apply {
             isAdditive = false
             level = Level.INFO
         }
@@ -129,8 +135,75 @@ class SnapshotListAppenderTest {
         appender.messages() shouldBe (0 until EVENTS).map { "event=producer n=$it" }
     }
 
+    /**
+     * #362 — the capture's reads are SNAPSHOTS: reader threads iterate a copy, so logger threads appending
+     * in a tight loop cannot trip a `ConcurrentModificationException`, no event is torn and none is lost.
+     * Iterating the live backing list while the writers run went red with exactly that exception.
+     */
+    @Test
+    fun `reads snapshot while writer threads append - no ConcurrentModificationException and nothing lost`() {
+        val logger = logger()
+        val appender = SnapshotListAppender()
+        val stop = AtomicBoolean(false)
+        val written = AtomicInteger()
+        var reads = 0
+        val captured =
+            capturingLogEvents(logger, appender) {
+                val writers =
+                    (1..WRITERS).map { thread ->
+                        Thread {
+                            while (!stop.get()) {
+                                logger.info("event=stress.writer thread={}", thread)
+                                written.incrementAndGet()
+                            }
+                        }.apply { start() }
+                    }
+                try {
+                    val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(STRESS_MILLIS)
+                    while (System.nanoTime() < deadline) {
+                        appender.messages().forEach { line -> line.startsWith("event=stress.writer thread=") shouldBe true }
+                        reads++
+                    }
+                } finally {
+                    stop.set(true)
+                    writers.forEach { it.join(TimeUnit.SECONDS.toMillis(WAIT_SECONDS)) }
+                }
+                writers.none { it.isAlive } shouldBe true
+            }
+        (reads > MIN_READS) shouldBe true
+        withClue("every event a writer logged is captured") { captured.size shouldBe written.get() }
+    }
+
+    @Test
+    fun `the root-logger capture formats messages, detaches on a throw and records again when reused`() {
+        val root = LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME) as Logger
+        val logger = LoggerFactory.getLogger("co.datapipelines.logcapture.root.${UUID.randomUUID()}") as Logger
+        logger.level = Level.INFO
+        val appender = SnapshotListAppender()
+        capturingLogs(appender) { logger.info("event=root.first value={}", 1) }.own() shouldBe listOf("event=root.first value=1")
+        shouldThrow<IllegalStateException> {
+            capturingLogs(appender) {
+                logger.info("event=root.before_failure")
+                error("synthetic root capture failure")
+            }
+        }.message shouldBe "synthetic root capture failure"
+        root.isAttached(appender) shouldBe false
+        appender.isStarted shouldBe false
+        logger.info("event=root.while_detached")
+        // A SECOND capture on the same, now stopped, appender must still record: the entry start() is the pin.
+        capturingLogs(appender) { logger.info("event=root.second") }.own() shouldBe
+            listOf("event=root.first value=1", "event=root.before_failure", "event=root.second")
+        root.isAttached(appender) shouldBe false
+    }
+
+    /** The root logger is the JVM's: this case reads only its own lines, so unrelated output cannot interleave. */
+    private fun List<String>.own(): List<String> = filter { it.startsWith("event=root.") }
+
     private companion object {
         const val EVENTS = 32
         const val WAIT_SECONDS = 5L
+        const val WRITERS = 4
+        const val STRESS_MILLIS = 2_000L
+        const val MIN_READS = 10
     }
 }

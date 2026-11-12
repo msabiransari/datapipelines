@@ -1,6 +1,7 @@
 package co.datapipelines.auth
 
 import co.datapipelines.auth.SharedPostgres.dataSource
+import co.datapipelines.logcapture.capturingLogEvents
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldHaveSize
