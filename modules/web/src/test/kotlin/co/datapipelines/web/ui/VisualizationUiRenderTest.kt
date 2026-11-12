@@ -127,13 +127,20 @@ class VisualizationUiRenderTest {
         body shouldContain "/js/visualization-preview.js"
         body shouldContain ">acme/charts/revenue<"
         body shouldContain "v3 · released · current"
-        Regex("data-dp-tab=\"").findAll(body).toList().size shouldBe 5
+        Regex("data-dp-tab=\"").findAll(body).toList().size shouldBe 6
         body shouldContain "Preview (test fixtures)"
         body shouldContain "data-lazy-url=\"/partials/visualizations/$vizId/preview?version=3\""
         body shouldContain "data-lazy-url=\"/partials/visualizations/$vizId/overview?version=3\""
         body shouldContain "data-lazy-url=\"/partials/visualizations/$vizId/versions?version=3\""
         body shouldContain "data-lazy-url=\"/partials/visualizations/$vizId/evidence\""
         body shouldContain "data-lazy-url=\"/partials/visualizations/$vizId/used-by\""
+        // #876 G6: the Dependencies pane is a mount over the SELECTED version, not a lazy partial.
+        body shouldContain ">Dependencies</button>"
+        Regex("<div class=\"dp-deps\" data-dp-deps data-family=\"visualization\"[^>]*data-name=\"acme/charts/revenue\"[^>]*data-version=\"3\"")
+            .containsMatchIn(body) shouldBe true
+        Regex("id=\"viz-pane-dependencies\"[^>]*data-lazy-url").containsMatchIn(body) shouldBe false
+        val catalog = body.substringAfter("<template data-page-assets>").substringBefore("</template>")
+        Regex("src=\"(/[^\"]+)\"").findAll(catalog).map { it.groupValues[1] }.toList().takeLast(8) shouldBe DEPENDENCY_CATALOG
         body shouldContain "data-nav-current=\"visualizations\""
         body shouldContain "id=\"dp-dialog\""
         // Every version switch is a boosted, rail-preserving navigation that keeps the tab (#714).
@@ -156,7 +163,7 @@ class VisualizationUiRenderTest {
         val html = workspace(bundle = "2d", activeTab = "evidence")
 
         Regex("id=\"viz-pane-evidence\"[^>]*hidden").containsMatchIn(html) shouldBe false
-        for (other in listOf("preview", "overview", "used-by", "versions")) {
+        for (other in listOf("preview", "overview", "used-by", "dependencies", "versions")) {
             Regex("id=\"viz-pane-$other\"[^>]*hidden=\"hidden\"").containsMatchIn(html) shouldBe true
         }
         html shouldContain "data-active-tab=\"evidence\""

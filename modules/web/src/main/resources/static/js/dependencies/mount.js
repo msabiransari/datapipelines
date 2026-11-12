@@ -320,6 +320,12 @@
       setState("idle");
       var styled = pane.querySelectorAll("[style]");
       for (var i = 0; i < styled.length; i++) styled[i].removeAttribute("style");
+      // A save that does NOT replace the page (a pushed URL over a partial swap) leaves this pane live: bind it again
+      // once the save's task is over, so it never stays blank. A replaced page has disconnected it by then.
+      bound.delete(pane);
+      setTimeout(function () {
+        if (pane.isConnected) bind(pane);
+      }, 0);
     };
     live.push(state);
     // The restored copy of a snapshot carries whatever the saved page drew: start from nothing.
