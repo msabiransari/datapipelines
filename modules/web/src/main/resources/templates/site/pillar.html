@@ -34,7 +34,7 @@
         <li><strong>Revoking one person means rotating a shared password</strong>, and then finding every config that held it.</li>
         <li><strong>There is no audit trail.</strong> The database sees one login. It cannot tell you which agent, on whose behalf, ran what.</li>
       </ul>
-      <p>This server is the other shape: the credentials live in the deployment, the agent gets a key with its own role, chosen when a person creates it and never more than theirs, and the key is the thing you revoke and audit.</p>
+      <p class="section-note">This server is the other shape: the credentials live in the deployment, the agent gets a key with its own role, chosen when a person creates it and never more than theirs, and the key is the thing you revoke and audit.</p>
     </div>
   </section>
 
@@ -117,8 +117,8 @@
         </p>
       </div>
       <!-- claim: docs/mcp-server.md §3.2 -->
-      <p>All of them over one endpoint: <code>POST {host}/mcp</code>, Streamable HTTP, stateless by default.</p>
-      <p><a th:href="@{/docs/mcp-server}">Read the MCP server specification &rarr;</a></p>
+      <p class="section-note">All of them over one endpoint: <code>POST {host}/mcp</code>, Streamable HTTP, stateless by default.</p>
+      <p class="section-note"><a th:href="@{/docs/mcp-server}">Read the MCP server specification &rarr;</a></p>
     </div>
   </section>
 

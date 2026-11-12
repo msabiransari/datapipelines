@@ -3016,6 +3016,13 @@ code {
   color: var(--text-secondary);
 }
 
+/* #741 — a short note set directly in a section container, beside a block (a caveat, a
+   cross-link row), reads at the site measure instead of the full container. Every such
+   `<p>` carries a class; SitePublicPresentationGuardTest rule 6 refuses an unclassed one. */
+.section-note {
+  max-width: var(--site-measure);
+}
+
 .split {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
