@@ -239,6 +239,8 @@ class TemplatesPurgeDraftToolTest {
             // The hidden set is FLAGGED only - the refusal echoes neither a name nor a count of what the caller cannot see.
             { thrown.details["referencing_parameter_sets"] shouldBe emptyList<String>() },
             { thrown.details["pins_hidden"] shouldBe true },
+            // the echo's whole key set: a hidden pin adds the flag and nothing else (no count, no name)
+            { thrown.details.keys shouldBe setOf("template_id", "referencing_parameter_sets", "pins_hidden") },
             { thrown.message shouldContain "parameter set version(s) outside your view" },
             { thrown.message shouldNotContain "1 parameter set" },
             { thrown.message shouldNotContain "acme/sales/region_filters" },
@@ -307,6 +309,8 @@ class TemplatesPurgeDraftToolTest {
             { thrown.code shouldBe PipelineErrorCodes.Template.IN_USE },
             { thrown.details["referencing_visualizations"] shouldBe emptyList<String>() },
             { thrown.details["pins_hidden"] shouldBe true },
+            // the echo's whole key set: a hidden pin adds the flag and nothing else (no count, no name)
+            { thrown.details.keys shouldBe setOf("template_id", "referencing_visualizations", "pins_hidden") },
             { thrown.message shouldContain "visualization version(s) outside your view" },
             { thrown.message shouldNotContain "acme/charts/secret" },
             { thrown.message shouldNotContain "2 visualization" },
@@ -326,6 +330,8 @@ class TemplatesPurgeDraftToolTest {
         assertAll(
             { thrown.details["referencing_visualizations"] shouldBe listOf("acme/charts/shown") },
             { thrown.details["pins_hidden"] shouldBe true },
+            // the echo's whole key set: a hidden pin adds the flag and nothing else (no count, no name)
+            { thrown.details.keys shouldBe setOf("template_id", "referencing_visualizations", "pins_hidden") },
             { thrown.message shouldContain "acme/charts/shown and others outside your view" },
             { thrown.message shouldNotContain "acme/charts/secret" },
         )
@@ -378,6 +384,8 @@ class TemplatesPurgeDraftToolTest {
             { thrown.code shouldBe PipelineErrorCodes.Template.IN_USE },
             { thrown.details["referencing_templates"] shouldBe emptyList<String>() },
             { thrown.details["pins_hidden"] shouldBe true },
+            // the echo's whole key set: a hidden pin adds the flag and nothing else (no count, no name)
+            { thrown.details.keys shouldBe setOf("template_id", "referencing_templates", "pins_hidden") },
             { thrown.message shouldContain "template version(s) outside your view" },
             { thrown.message shouldNotContain "secret" },
             { thrown.message shouldNotContain "hidden.sql" },
@@ -398,6 +406,8 @@ class TemplatesPurgeDraftToolTest {
         assertAll(
             { thrown.details["referencing_templates"] shouldBe listOf("acme/t/shown.sql") },
             { thrown.details["pins_hidden"] shouldBe true },
+            // the echo's whole key set: a hidden pin adds the flag and nothing else (no count, no name)
+            { thrown.details.keys shouldBe setOf("template_id", "referencing_templates", "pins_hidden") },
             { thrown.message shouldContain "acme/t/shown.sql and others outside your view" },
             { thrown.message shouldNotContain "secret" },
         )
