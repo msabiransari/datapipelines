@@ -29,10 +29,10 @@ import org.springframework.web.servlet.ModelAndView
  * nobody until a super admin grants it through the API"*. This is that screen.
  *
  * ## Super admin, not workspace admin
- * The prompt for this round put the grants section on `canAdminWorkspace` and declared
- * `MUTATE_WORKSPACE_DATASOURCES`. Both are contradicted by the authority: auth.md §7.6's
- * "Grant / revoke a datasource to a workspace" row is `admin` scope + `super_admin` role, and
- * `ScopeMatrix.RestOperation.MANAGE_DATASOURCE_GRANTS` carries exactly that. §7.6 wins (the
+ * The prompt for this round put the grants section on `canAdminWorkspace` and
+ * declared the author-level datasource mutate permission. Both are contradicted by the authority: auth.md §7.6's
+ * "Grant / revoke a datasource to a workspace" row, `datasource.grant`, admits the super admin alone, and
+ * [Permission.DATASOURCE_GRANT] carries exactly that. §7.6 wins (the
  * prompt says so itself), and the reasoning is in the REST controller's own KDoc: a grant list
  * names every workspace on the instance holding one, which is the cross-workspace disclosure
  * D-R5 exists to prevent for everyone below super admin. A workspace admin registering a
@@ -116,7 +116,7 @@ class DatasourceGrantsPartialController(
      *
      * [DatasourceRegistry.get] is the UNFILTERED read, deliberately: a super admin grants
      * datasources their own active workspace has never been granted, which is the whole point
-     * of the verb. `MANAGE_DATASOURCE_GRANTS` on every handler is what makes it safe.
+     * of the verb. [Permission.DATASOURCE_GRANT] on every handler is what makes it safe.
      */
     private fun render(
         model: Model,
