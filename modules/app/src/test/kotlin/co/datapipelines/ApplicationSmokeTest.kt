@@ -292,6 +292,38 @@ class ApplicationSmokeTest {
         runtime.size shouldBeGreaterThanOrEqual RUNTIME_METER_FLOOR
     }
 
+    /** #715 / #716 A.1: the measurement, printed before any edit. */
+    @Test
+    fun `meter registries and undescribed datapipelines meters - measured`() {
+        println("event=meter.registries shape=production ${meterRegistryShape(applicationContext)}")
+        val runtime = meterRegistry.meters.filter { it.id.name.startsWith(MeterCatalogue.PREFIX) }
+        runtime
+            .filter { it.id.description.isNullOrBlank() }
+            .map { it.id.name to it.id.tags.map { tag -> tag.key } }
+            .distinct()
+            .sortedBy { it.first }
+            .forEach { (name, tagKeys) -> println("event=meter.undescribed name=$name tag_keys=$tagKeys") }
+        val (typed, withoutHelp) = scrapeFamilies()
+        println("event=meter.scrape type_families=${typed.size} without_help=${withoutHelp.size} ${withoutHelp.joinToString(",")}")
+        println("event=meter.scrape typed=${typed.joinToString(",")}")
+    }
+
+    /**
+     * The `datapipelines_*` families of the management scrape, taken from their `# TYPE` lines, and the
+     * subset with no `# HELP` line or a blank one. The exporter OMITS the HELP line of an undescribed
+     * family rather than writing a blank one, so the families come from TYPE, independently of HELP.
+     */
+    private fun scrapeFamilies(): Pair<Set<String>, Set<String>> {
+        val lines = get(managementPort, "/actuator/prometheus").body().lines()
+        fun families(kind: String) =
+            lines
+                .filter { it.startsWith("# $kind $SCRAPE_PREFIX") }
+                .map { it.removePrefix("# $kind ").split(' ', limit = 2) }
+        val typed = families("TYPE").map { it[0] }.toSortedSet()
+        val helped = families("HELP").filter { it.size == 2 && it[1].isNotBlank() }.map { it[0] }.toSet()
+        return typed to (typed - helped).toSortedSet()
+    }
+
     /**
      * The composition wiring (design 2026-08-13-pipeline-node-type §4.1), asserted at the bean
      * graph the assembled app actually boots: the `SubPipelineRunner` port and the
@@ -331,6 +363,9 @@ class ApplicationSmokeTest {
 
         /** The scrape's first lines printed as lane evidence (#708). */
         private const val SCRAPE_EVIDENCE_LINES = 20
+
+        /** `MeterCatalogue.PREFIX` as the Prometheus exporter spells a family name. */
+        private const val SCRAPE_PREFIX = "datapipelines_"
 
         /** The eagerly-registered `datapipelines.*` meters a booted app holds (gauges and eager counters). */
         private const val RUNTIME_METER_FLOOR = 10
