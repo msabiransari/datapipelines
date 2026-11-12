@@ -2440,8 +2440,9 @@
 
   /**
    * Renderer registration: the first-party adapters call this at load — `kind`, the major `version`
-   * the wire's `renderer.version` is matched against, and `create(context) → {renderData, renderEmpty?,
-   * renderStatus?, resize?, dispose?}`; optionally `judge(occurrence, {charts}) → null | {code, message, details}`,
+   * the wire's `renderer.version` is matched against, and `create(context) → {renderData(occurrenceRef, rows,
+   * bindings), renderEmpty()?, renderStatus?, resize?, dispose?}` (#852: `rows` is the data frame's row count,
+   * `bindings` its columnar `{path: [values]}`); optionally `judge(occurrence, {charts}) → null | {code, message, details}`,
    * `needsBundle(occurrence) → "2d" | "3d"` and `libraries` (the chart kind's identities). A host registers its own
    * kind the same way, before init.
    */
@@ -3206,10 +3207,13 @@
       onAction: function (callback) {
         listeners.action = callback;
       },
-      renderData: function (occurrence, refreshId, rows, bindings) {
-        var handle = implemented[occurrence.name];
+      // #852 — the handle's own three arguments (`rows` = the frame's row count, `bindings` = the
+      // columnar `{path: [values]}`). The runtime calls the mounted handle directly; this
+      // contract function forwards the same three to it.
+      renderData: function (occurrenceRef, rows, bindings) {
+        var handle = implemented[occurrenceRef.name];
         if (!handle) return Promise.resolve("no-data");
-        return Promise.resolve(handle.renderData(occurrence, refreshId, rows, bindings));
+        return Promise.resolve(handle.renderData(occurrenceRef, rows, bindings));
       },
       renderStatus: function (occurrence, status) {
         var handle = implemented[occurrence.name];
