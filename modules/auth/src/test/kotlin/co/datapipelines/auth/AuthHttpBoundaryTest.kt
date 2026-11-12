@@ -17,10 +17,13 @@ import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.boot.test.web.client.TestRestTemplate
 import org.springframework.boot.test.web.server.LocalServerPort
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Primary
 import org.springframework.http.HttpEntity
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpMethod
@@ -41,6 +44,8 @@ import java.time.Instant
 import java.util.Base64
 import java.util.Date
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * AU-TEST-5: the auth contract asserted **at the wire**, over the real filter chain
@@ -67,6 +72,8 @@ class AuthHttpBoundaryTest {
 
     @Autowired private lateinit var authFilters: AuthFilters
 
+    @Autowired private lateinit var faultable: FaultableSecretHasher
+
     @LocalServerPort
     private var port: Int = 0
 
@@ -92,8 +99,45 @@ class AuthHttpBoundaryTest {
      * this test's `@TestConfiguration` also keeps it out of every other context, since
      * Boot's `TestTypeExcludeFilter` bars test-nested classes from component scanning.
      */
+    /**
+     * #847 — the production bounded hasher with a fault switch: while [failing] is on, `verify`
+     * throws the native-fault exception (no real memory pressure anywhere). Every call is counted,
+     * so a case can prove the fault was actually REACHED rather than bypassed by the outcome cache.
+     */
+    class FaultableSecretHasher(
+        private val real: SecretHasher,
+    ) : SecretHasher by real {
+        val failing = AtomicBoolean(false)
+        val verifyCalls = AtomicInteger()
+
+        override fun verify(
+            encodedHash: String,
+            raw: String,
+        ): Boolean {
+            verifyCalls.incrementAndGet()
+            if (failing.get()) {
+                throw SecretVerificationUnavailableException(
+                    Argon2SecretHasher.MEMORY_ALLOCATION_ERROR,
+                    IllegalStateException("argon2id_verify failed: Memory allocation error (-22)"),
+                )
+            }
+            return real.verify(encodedHash, raw)
+        }
+    }
+
     @TestConfiguration
     class ProbeConfiguration {
+        /**
+         * #847 — @Primary under its OWN name, with the production bean injected BY NAME, so the
+         * wrapper never injects itself and every SecretHasher consumer (ApiKeyService included)
+         * gets it. With the switch off it is the production hasher.
+         */
+        @Bean
+        @Primary
+        fun faultableSecretHasher(
+            @Qualifier("secretHasher") real: SecretHasher,
+        ): FaultableSecretHasher = FaultableSecretHasher(real)
+
         @Controller
         class ProbeController {
             /** Public probe — §8.3 permitAll. */
@@ -402,6 +446,40 @@ class AuthHttpBoundaryTest {
 
         response.statusCode.value() shouldBe 200
         mapper.readValue(response.body, Map::class.java)["auth_method"] shouldBe "API_KEY"
+    }
+
+    /**
+     * #847 — the only proof through the real chain: the real [ApiKeyService] → an UNCACHED
+     * verification → [ApiKeyFilter] → [AuthEntryPoint]. The key is minted HERE, never a class-wide
+     * seeded one: `AuthCache.verifiedSecret` answers a warmed key from the cache before calling the
+     * verifier, so a key another case already used would bypass the fault.
+     */
+    @Test
+    fun `a native verification fault answers 503 through the real chain and is not cached`() {
+        val freshKey = seedUserKey("dpk_FAULTKEYAAAA", user.id, "fault-key", expiresAt = null)
+        val callsBefore = faultable.verifyCalls.get()
+        val response =
+            try {
+                faultable.failing.set(true)
+                call(HttpMethod.POST, "/mcp", headers(apiKey = freshKey))
+            } finally {
+                faultable.failing.set(false)
+            }
+
+        response.statusCode.value() shouldBe 503
+        val error = error(response)
+        error["code"] shouldBe AuthErrorCodes.SECRET_VERIFICATION_UNAVAILABLE
+        error["message"] shouldBe "Secret verification is temporarily unavailable"
+        response.body.orEmpty() shouldNotContain "emory"
+        response.body.orEmpty() shouldNotContain "-22"
+        withClue("the throwing verify must have been REACHED, not bypassed by the outcome cache") {
+            faultable.verifyCalls.get() shouldBe callsBefore + 1
+        }
+
+        // The failure was not cached: the same key answers 200 once the native side recovers.
+        val recovered = call(HttpMethod.POST, "/mcp", headers(apiKey = freshKey))
+        recovered.statusCode.value() shouldBe 200
+        mapper.readValue(recovered.body, Map::class.java)["auth_method"] shouldBe "API_KEY"
     }
 
     /**

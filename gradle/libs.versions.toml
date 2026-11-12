@@ -185,6 +185,12 @@ parquet = "1.17.1"
 # renders honestly as literal "- [ ]" without it.
 commonmark = "0.30.0"
 argon2-jvm = "2.12"
+# #847 — argon2-jvm's own JNA binding types (Argon2Library, Size_t) at COMPILE scope, so
+# Argon2SecretHasher can read the native verify code the library's boolean API hides. The
+# version argon2-jvm-nolibs 2.12's pom already pins (runtime scope) and auth's
+# runtimeClasspath already resolves; already in verification-metadata.xml. Not BOM-managed.
+# Nothing new enters the build.
+jna = "5.16.0"
 jjwt = "0.13.0"
 mockk = "1.14.11"
 kotest = "6.2.3"
@@ -322,6 +328,7 @@ duckdb-jdbc = { module = "org.duckdb:duckdb_jdbc", version.ref = "duckdb-jdbc" }
 
 # --- Auth / crypto (NOT BOM-managed) -----------------------------------------
 argon2-jvm = { module = "de.mkammerer:argon2-jvm", version.ref = "argon2-jvm" }
+jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
 jjwt-api = { module = "io.jsonwebtoken:jjwt-api", version.ref = "jjwt" }
 jjwt-impl = { module = "io.jsonwebtoken:jjwt-impl", version.ref = "jjwt" }
 jjwt-jackson = { module = "io.jsonwebtoken:jjwt-jackson", version.ref = "jjwt" }

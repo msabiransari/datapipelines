@@ -8,6 +8,7 @@ private const val HTTP_FORBIDDEN = 403
 private const val HTTP_NOT_FOUND = 404
 private const val HTTP_TOO_MANY_REQUESTS = 429
 private const val HTTP_CONFLICT = 409
+private const val HTTP_SERVICE_UNAVAILABLE = 503
 
 /**
  * Request attributes shared between the auth filters and the Spring Security
@@ -141,6 +142,15 @@ object AuthErrorCodes {
     const val PRINCIPAL_DEACTIVATED = "auth.principal_deactivated"
 
     /**
+     * #847 — 503: the native Argon2 verification of a password or key secret failed for a reason
+     * that is not a mismatch (memory allocation, a stored hash that does not decode). Nothing is
+     * known about the credential, so it is neither accepted nor counted as a wrong one (auth.md
+     * §5A.5, §9). Every surface that verifies a secret answers it — the unknown-email path too,
+     * so it is no enumeration signal.
+     */
+    const val SECRET_VERIFICATION_UNAVAILABLE = "auth.secret_verification.unavailable"
+
+    /**
      * 091 — an issuance whose EXPIRY is not a usable one: an unknown preset, a custom date
      * that is not a date, or an expiry already in the past. A 400, unlike every other code
      * here: nothing is wrong with the caller's credential, the request body is wrong.
@@ -186,6 +196,7 @@ object AuthErrorCodes {
             KEY_NAME_TAKEN,
             KEY_WORKSPACE_INACTIVE,
             PRINCIPAL_DEACTIVATED,
+            SECRET_VERIFICATION_UNAVAILABLE,
         )
 
     /**
@@ -466,6 +477,28 @@ class PrincipalDeactivatedException(
         HTTP_UNAUTHORIZED,
         "Account deactivated",
         "This account has been deactivated. Contact an administrator.",
+    )
+
+/**
+ * The native secret verification could not answer (#847, auth.md §9): [nativeCode] is argon2's
+ * return code — neither `ARGON2_OK` nor `ARGON2_VERIFY_MISMATCH` — and [cause] carries the
+ * library's own text. Both ride on the exception for the server log and the stack only: the
+ * message, the user message and the (empty) details are FIXED, so the envelope never carries
+ * the native text or code.
+ *
+ * Fail closed: it authenticates nobody, and every caller lets it propagate BEFORE a failure
+ * counter, an audit row or a cache admit, so it counts as no attempt. 503 because the fault is
+ * the server's and transient, not the caller's credential.
+ */
+class SecretVerificationUnavailableException(
+    val nativeCode: Int,
+    cause: Throwable?,
+) : AuthException(
+        AuthErrorCodes.SECRET_VERIFICATION_UNAVAILABLE,
+        HTTP_SERVICE_UNAVAILABLE,
+        "Secret verification is temporarily unavailable",
+        "Sign-in is temporarily unavailable on our side. Try again in a moment; if it keeps happening, contact an administrator.",
+        cause = cause,
     )
 
 /**

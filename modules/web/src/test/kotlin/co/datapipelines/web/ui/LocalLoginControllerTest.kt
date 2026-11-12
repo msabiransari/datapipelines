@@ -212,6 +212,38 @@ class LocalLoginControllerTest {
         }
     }
 
+    /**
+     * #847 — a native verification fault is not a wrong password: the exception propagates out of the
+     * controller (no redirect string, no cookie), and over the wire the advice answers 503 with no
+     * `Location` — never `/login?error=credentials`.
+     */
+    @Test
+    fun `a native verification fault propagates and answers 503, never the credentials redirect`() {
+        every { clientAddressResolver.clientAddressOf(any()) } returns "127.0.0.1"
+        every { localAuthService.authenticate(any(), any(), any(), any()) } throws
+            co.datapipelines.auth.SecretVerificationUnavailableException(-22, null)
+
+        val (request, response) = post("local@x.test", "correct horse")
+        io.kotest.assertions.throwables.shouldThrow<co.datapipelines.auth.SecretVerificationUnavailableException> {
+            controller.login("local@x.test", "correct horse", request, response)
+        }
+        response.cookies.size shouldBe 0
+
+        val mvc =
+            MockMvcBuilders
+                .standaloneSetup(controller)
+                .setControllerAdvice(UiExceptionHandler())
+                .build()
+        val answer =
+            mvc
+                .perform(mvcPost("/login").param("email", "local@x.test").param("password", "correct horse"))
+                .andExpect(status().isServiceUnavailable)
+                .andReturn()
+                .response
+        answer.getHeader("Location") shouldBe null
+        answer.redirectedUrl shouldBe null
+    }
+
     /** The same wire, the reference answer — so the two are compared, not asserted separately. */
     @Test
     fun `a wrong password over the same wire is that identical 302`() {
