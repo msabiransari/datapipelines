@@ -313,6 +313,18 @@ abstract class DependencyPaneBrowserSuite : BrowserSuite() {
             scope,
         ) as List<String>
 
+    /** The rows of the pane's edge table as the user reads them: `from|relationship|to` (#876 U2). */
+    @Suppress("UNCHECKED_CAST")
+    protected fun edgeRows(
+        scope: String,
+        on: Page = page,
+    ): List<String> =
+        on.evaluate(
+            "s => Array.from(document.querySelectorAll(s + ' [data-dp-deps-list=\"edges\"] tbody tr')).map(tr => {" +
+                " const c = tr.querySelectorAll('td'); return [c[0], c[1], c[2]].map(td => td.textContent.trim()).join('|'); })",
+            scope,
+        ) as List<String>
+
     /** The pane's text notes (cycle, limit, empty, incomplete). */
     @Suppress("UNCHECKED_CAST")
     protected fun notes(

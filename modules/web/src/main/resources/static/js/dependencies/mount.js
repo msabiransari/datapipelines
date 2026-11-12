@@ -29,6 +29,7 @@
 
   var NOTES = {
     idle: "Dependencies load when this tab is opened.",
+    "idle-section": "Dependencies load when this section is opened.",
     "no-version": "Select a version to see its dependencies.",
     loading: "Loading dependencies…",
     "not-available": "These dependencies are not available.",
@@ -155,7 +156,9 @@
 
     function setState(name, extra) {
       pane.setAttribute("data-dp-deps-state", name);
-      note.textContent = extra !== undefined ? extra : NOTES[name] || "";
+      // A pane in a details section (schedule, datasource, API pages) is opened, not selected as a tab.
+      var key = name === "idle" && pane.closest("details") ? "idle-section" : name;
+      note.textContent = extra !== undefined ? extra : NOTES[key] || "";
     }
 
     function clearViews() {
