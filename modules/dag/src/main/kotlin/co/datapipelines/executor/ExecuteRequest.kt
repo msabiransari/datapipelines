@@ -131,6 +131,15 @@ data class ExecuteRequest(
     val inheritedLakeLineage: co.datapipelines.pipeline.LakeExecutionLineage? = null,
     /** Established by the execute entry point from effective authority; never supplied by a caller payload. */
     val lakeAppendGrant: co.datapipelines.pipeline.LakeAppendGrant? = null,
+    /**
+     * #463: this run promised to read only — a dashboard source (refresh or draft preview) or a
+     * published GET endpoint, and every child either composes. Each DQL node's datasource
+     * statements then run inside `ReadOnlyConnectionMode.within` (dag-executor §8.2's per-dialect
+     * table): refused BY THE DATABASE where the dialect measures `DATABASE`. False for every
+     * writable surface (UI/REST, the scheduler, MCP `pipelines_execute`). A PIPELINE node's child
+     * request inherits it.
+     */
+    val readOnly: Boolean = false,
     /** Internal admission check inherited by children and applied to their exact loaded bodies. */
     val pipelineAdmission: ((Pipeline, UUID, Int) -> Unit)? = null,
 )

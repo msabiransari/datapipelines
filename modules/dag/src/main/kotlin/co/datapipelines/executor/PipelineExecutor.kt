@@ -1079,6 +1079,7 @@ class PipelineExecutor(
             lakeAppendSession = resources.session,
             lakeLineage = resources.lineage,
             lakeDeliveryNodeId = resources.deliveryNodeId,
+            readOnly = request.readOnly,
             pipelineAdmission = request.pipelineAdmission,
             // 108 §D: the staging drain's per-batch count lands in the stats collector and, at
             // most once per `progress-write-interval-seconds`, in the row. The snapshot is built
