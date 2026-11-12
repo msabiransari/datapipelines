@@ -113,7 +113,6 @@ class TemplateVersionProbeIntegrationTest {
                 releases =
                     PipelineReleaseService(
                         pipelines,
-                        statuses,
                         pipelineValidator,
                         authoring,
                         dashboards = NO_DASHBOARDS,
@@ -127,6 +126,7 @@ class TemplateVersionProbeIntegrationTest {
                 schedules = co.datapipelines.web.NO_SCHEDULE_PINS,
                 templateStatuses = statuses,
                 templateIds = wiring.templateIds(templates),
+                coordination = co.datapipelines.web.NO_RELEASES,
             )
     }
 

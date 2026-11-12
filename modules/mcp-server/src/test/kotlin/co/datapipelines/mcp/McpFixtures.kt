@@ -16,7 +16,7 @@ import co.datapipelines.pipeline.PipelineReleaseService
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineValidator
-import co.datapipelines.pipeline.TemplateVersionStatuses
+import co.datapipelines.pipeline.release.PipelineReleaseCoordination
 import co.datapipelines.templates.Template
 import co.datapipelines.typesystem.Dialect
 import com.fasterxml.jackson.databind.JsonNode
@@ -130,12 +130,10 @@ object McpFixtures {
                 io.mockk.every { writesManagedLake(any(), any()) } returns false
             },
         authoring: AuthoringGuard = AuthoringGuard(true),
-        templateVersions: TemplateVersionStatuses = TemplateVersionStatuses { _, _, _ -> null },
         drafts: PipelineDraftService = PipelineDraftService(pipelines, authoring),
         releases: PipelineReleaseService =
             PipelineReleaseService(
                 pipelines,
-                templateVersions,
                 validator,
                 authoring,
                 dashboards = mockk(relaxed = true),
@@ -179,6 +177,7 @@ object McpFixtures {
             // #786 B.4 — nor API versions or schedules pinning a pipeline version (relaxed: every read answers empty).
             endpointVersions = mockk(relaxed = true),
             schedules = mockk(relaxed = true),
+            coordination = PipelineReleaseCoordination { error("this test never releases") },
         )
 
     fun request(

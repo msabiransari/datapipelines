@@ -19,10 +19,13 @@ import co.datapipelines.pipeline.PipelineVersionDetail
 import co.datapipelines.pipeline.PipelineVersionRecord
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.WriteSurface
+import co.datapipelines.pipeline.release.PipelineReleaseCoordination
+import co.datapipelines.pipeline.release.PipelineReleaseRequest
 import co.datapipelines.web.api.ApiException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
+import io.mockk.MockKMatcherScope
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -58,6 +61,10 @@ class PipelinesControllerTest {
     private val drafts = mockk<PipelineDraftService>()
     private val releases = mockk<PipelineReleaseService>()
 
+    // #877 §E.3 — every release runs through the coordinator; the controller cases stub IT, as they stubbed the native
+    // release before (what the request carried is matched in [releaseRequest]).
+    private val coordination = mockk<PipelineReleaseCoordination>()
+
     // 056: the controller takes the SERVICE, built here over the very same mocks this suite
     // already stubbed — so every `every { repository… }` / `every { drafts… }` below still fires
     // unchanged and not one assertion in this file moved.
@@ -91,6 +98,7 @@ class PipelinesControllerTest {
                     dashboards = co.datapipelines.web.NO_DASHBOARDS,
                     endpointVersions = co.datapipelines.web.NO_API_VERSION_PINS,
                     schedules = co.datapipelines.web.NO_SCHEDULE_PINS,
+                    coordination = coordination,
                 ),
             audit = audit,
             checkRunner = io.mockk.mockk(relaxed = true),
@@ -336,7 +344,7 @@ class PipelinesControllerTest {
         shouldThrow<ApiException> { controller.release(pipelineId, null) }.details["reason"] shouldBe "precondition_missing"
 
         val draftBody = """{"schema_version":1,"name":"monthly_revenue"}"""
-        every { releases.release(any(), pipelineId, "hash-v2", userId) } returns
+        every { coordination.release(releaseRequest()) } returns
             PipelineReleaseService.Released(record.copy(currentVersion = 2), releasedDetail.copy(version = 2), draftBody)
 
         val data = controller.release(pipelineId, "hash-v2").data
@@ -360,7 +368,7 @@ class PipelinesControllerTest {
     fun `release answers caller_output and the audit row carries the word - its exact key set`() {
         authenticate()
         val draftBody = """{"schema_version":1,"name":"monthly_revenue"}"""
-        every { releases.release(any(), pipelineId, "hash-v2", userId) } returns
+        every { coordination.release(releaseRequest()) } returns
             PipelineReleaseService.Released(
                 record.copy(currentVersion = 2),
                 releasedDetail.copy(version = 2),
@@ -386,7 +394,7 @@ class PipelinesControllerTest {
     fun `release - 7e - the body carries warnings, empty when clean and verbatim when a pin needs review`() {
         authenticate()
         val draftBody = """{"schema_version":1,"name":"monthly_revenue"}"""
-        every { releases.release(any(), pipelineId, "hash-v2", userId) } returns
+        every { coordination.release(releaseRequest()) } returns
             PipelineReleaseService.Released(record.copy(currentVersion = 2), releasedDetail.copy(version = 2), draftBody)
 
         controller
@@ -400,7 +408,7 @@ class PipelinesControllerTest {
                 co.datapipelines.pipeline.TemplateRef("test/rainy.jsonata", 2),
                 listOf(co.datapipelines.pipeline.RetiredFactCitation("fact-old", "superseded", "fact-new")),
             )
-        every { releases.release(any(), pipelineId, "hash-v2", userId) } returns
+        every { coordination.release(releaseRequest()) } returns
             PipelineReleaseService.Released(
                 record.copy(currentVersion = 2),
                 releasedDetail.copy(version = 2),
@@ -422,7 +430,7 @@ class PipelinesControllerTest {
         authenticate()
         val draftBody = """{"schema_version":1,"name":"monthly_revenue"}"""
         // The flag is FORWARDED, not read off a default: a stub that answers only for `true`.
-        every { releases.release(any(), pipelineId, "hash-v2", userId, null, true) } returns
+        every { coordination.release(releaseRequest(alias = true)) } returns
             PipelineReleaseService.Released(
                 record.copy(currentVersion = 2),
                 releasedDetail.copy(version = 2),
@@ -453,7 +461,7 @@ class PipelinesControllerTest {
     @Test
     fun `release - 142 - without the flag the pipeline event carries an EMPTY templates_released and no template event`() {
         authenticate()
-        every { releases.release(any(), pipelineId, "hash-v2", userId, null, false) } returns
+        every { coordination.release(releaseRequest(alias = false)) } returns
             PipelineReleaseService.Released(record.copy(currentVersion = 2), releasedDetail.copy(version = 2), "{}")
 
         controller.release(pipelineId, "hash-v2")
@@ -612,6 +620,7 @@ class PipelinesControllerTest {
                         dashboards = co.datapipelines.web.NO_DASHBOARDS,
                         endpointVersions = co.datapipelines.web.NO_API_VERSION_PINS,
                         schedules = co.datapipelines.web.NO_SCHEDULE_PINS,
+                        coordination = coordination,
                     ),
                 audit = audit,
                 checkRunner = io.mockk.mockk(relaxed = true),
@@ -631,4 +640,18 @@ class PipelinesControllerTest {
         val delete = shouldThrow<co.datapipelines.typesystem.DatapipelinesException> { receiver.delete(pipelineId) }
         delete.code shouldBe "pipeline.authoring.disabled"
     }
+
+    /**
+     * The release request the controller hands the coordinator for this suite's pipeline at `hash-v2`: no override, no
+     * plan (these cases release without a preview), and [alias] as the 142 query flag forwarded it.
+     */
+    private fun MockKMatcherScope.releaseRequest(alias: Boolean = false) =
+        match<PipelineReleaseRequest> {
+            it.pipelineId == pipelineId &&
+                it.expectedHash == "hash-v2" &&
+                it.actor == userId &&
+                it.overrideChecksReason == null &&
+                it.releasePinnedTemplates == alias &&
+                it.plan?.present != true
+        }
 }

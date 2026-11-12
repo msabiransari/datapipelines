@@ -51,8 +51,10 @@ import java.util.UUID
  * planning walk over [PipelineDependencySource] and the template statuses, the writer guard, the strict audit and a
  * transaction manager that marks a transaction active between `begin` and `commit`/`rollback` (as the real one does).
  *
- * The tests stub [pipelines], [templates] and [validator] exactly as the native unit test did; the world adds only the
- * reads the coordinator makes on top (the record by id and name, the version detail the walk reads).
+ * The tests stub [pipelines], [templates] and [validator] exactly as the native unit test did (the name says whose
+ * shape this is: `PipelineReleaseServiceTest`'s, before #877 retired the native release); the world adds only the reads
+ * the coordinator makes on top (the record by id and name, the version detail the walk reads). [templates] is the
+ * planning walk's template status source; a template release is the template participant's `releaseExact`.
  */
 internal class NativeReleaseWorld {
     // Fixed ids: two worlds built for one case answer byte-identical records (the parity compares whole results).
@@ -142,24 +144,16 @@ internal class NativeReleaseWorld {
     fun releasedFlip() =
         PipelineRepository.Released(record(currentVersion = VERSION), draftDetail().copy(status = PipelineVersionStatus.RELEASED))
 
-    /** The release service as production constructs it, over this world's mocks. */
+    /** The release service as production constructs it, over this world's mocks: the coordinator's pipeline participant. */
     fun service(
         authoring: Boolean = true,
         checkGate: ReleaseCheckGate = ReleaseCheckGate.NONE,
         reviewMarks: TemplateReviewMarks = TemplateReviewMarks.NONE,
     ) = PipelineReleaseService(
         pipelines,
-        templates,
         validator,
         AuthoringGuard(authoring),
         checkGate = checkGate,
-        templateReleaser = { _, id, version, _ ->
-            TemplateRef(id, version).also {
-                onTemplateRelease(it)
-                templatesReleased += it
-            }
-        },
-        transactions = transactions,
         reviewMarks = reviewMarks,
         dashboards = dashboards,
         endpointVersions = NO_API_VERSION_PINS,

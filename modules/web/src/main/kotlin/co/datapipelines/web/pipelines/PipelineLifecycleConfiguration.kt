@@ -22,8 +22,6 @@ import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import co.datapipelines.templates.TemplateRepository
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-import org.springframework.transaction.PlatformTransactionManager
-import org.springframework.transaction.support.TransactionTemplate
 
 /**
  * The pipeline aggregate's service and the version-lifecycle collaborators it composes
@@ -71,8 +69,9 @@ class PipelineLifecycleConfiguration {
     /**
      * The release cascade's write (versioning §5.3 precondition 2, 142), as the port
      * `pipeline-contract` declares — the same module-arrow arrangement as
-     * [templateVersionStatuses], now for the one WRITE the pipeline aggregate asks of
-     * `templates`. It rides [TemplateReleaseService.releasePinned], i.e. the template's own
+     * [templateVersionStatuses], now for the one WRITE the parameter-set and visualization
+     * releases ask of `templates` (the pipeline's own release cascades through the release
+     * coordinator's template participant since #877 §E.3). It rides [TemplateReleaseService.releasePinned], i.e. the template's own
      * release path: one implementation of "release a template", so the direct verb
      * (`POST /api/v1/templates/release`, the template dialog) and the cascaded one cannot
      * drift. Wrapped here rather than moved down to `application`: that module is for
@@ -102,32 +101,24 @@ class PipelineLifecycleConfiguration {
     @Suppress("LongParameterList") // one collaborator per release precondition and port
     fun pipelineReleaseService(
         pipelines: PipelineRepository,
-        templates: TemplateVersionStatuses,
         validator: PipelineValidator,
         authoring: AuthoringGuard,
-        metadataTransactionManager: PlatformTransactionManager,
         checkGate: ReleaseCheckGate,
-        templateReleaser: TemplateReleaser,
         reviewMarks: TemplateReviewMarks,
         dashboards: PipelineVersionConsumers,
         // #786 B.4 — the live API versions and schedules that pin a draft refuse its purge (record §14, A39).
         endpointVersions: co.datapipelines.pipeline.EndpointVersionConsumers,
         schedules: co.datapipelines.pipeline.ScheduleConsumers,
-        bounds: co.datapipelines.pipeline.release.ReleaseBounds,
     ): PipelineReleaseService =
         PipelineReleaseService(
             pipelines,
-            templates,
             validator,
             authoring,
             checkGate = checkGate,
-            templateReleaser = templateReleaser,
-            transactions = TransactionTemplate(metadataTransactionManager),
             reviewMarks = reviewMarks,
             dashboards = dashboards,
             endpointVersions = endpointVersions,
             schedules = schedules,
-            bounds = bounds,
         )
 
     /**

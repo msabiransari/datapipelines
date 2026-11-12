@@ -19,6 +19,7 @@ import co.datapipelines.pipeline.PipelineVersionStatus.DISCARDED
 import co.datapipelines.pipeline.PipelineVersionStatus.DRAFT
 import co.datapipelines.pipeline.PipelineVersionStatus.RELEASED
 import co.datapipelines.pipeline.SchedulePin
+import co.datapipelines.pipeline.release.PipelineReleaseCoordination
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
@@ -103,6 +104,7 @@ class ApiAndScheduleConsumersIntegrationTest {
                 dashboards = NoDashboards,
                 endpointVersions = apiConsumers,
                 schedules = scheduleConsumers,
+                coordination = PipelineReleaseCoordination { error("this test never releases") },
             )
     }
 
