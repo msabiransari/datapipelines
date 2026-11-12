@@ -36,7 +36,17 @@
     "server-failure": "The dependencies could not be loaded.",
     stale: "Version changed — reload to see this version's dependencies.",
   };
-  var VIEW_KEY = "dp.deps.view";
+  /*
+   * The Graph/List choice is per PAGE (brief §A.3): one localStorage key holds a JSON list of [path, view] pairs,
+   * newest last, at most VIEW_PAGES_MAX — a new page drops the oldest, so the key never grows past that bound. The page
+   * identity is the path without its query string, so a page keeps its choice across its own `?tab=` and
+   * `?version=` changes. Only the path and the word "graph" or "list" are written; every pair is validated on read
+   * and anything else is ignored (the page's default stands). A page never chosen on: List under
+   * prefers-reduced-motion, Graph otherwise.
+   */
+  var VIEW_KEY = "dp.deps.views";
+  var VIEW_PAGES_MAX = 50;
+  var VIEWS = ["graph", "list"];
   var bound = new WeakSet();
   var live = [];
 
@@ -68,22 +78,52 @@
     };
   }
 
-  function preferredView() {
+  function pageIdentity() {
+    return window.location.pathname;
+  }
+
+  /** The stored pairs that are well formed; a missing, refused or malformed key reads as none. */
+  function storedViews() {
+    var raw = null;
     try {
-      var stored = window.localStorage ? window.localStorage.getItem(VIEW_KEY) : null;
-      if (stored === "graph" || stored === "list") return stored;
+      raw = window.localStorage ? window.localStorage.getItem(VIEW_KEY) : null;
     } catch (_) {
-      /* storage refused (privacy mode): the default stands */
+      return []; // storage refused (privacy mode): every page keeps its default
     }
+    if (raw === null) return [];
+    var parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (_) {
+      return [];
+    }
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(function (pair) {
+        return Array.isArray(pair) && pair.length === 2 && typeof pair[0] === "string" && VIEWS.indexOf(pair[1]) !== -1;
+      })
+      .slice(-VIEW_PAGES_MAX);
+  }
+
+  function preferredView() {
+    var page = pageIdentity();
+    var pairs = storedViews();
+    for (var i = pairs.length - 1; i >= 0; i--) if (pairs[i][0] === page) return pairs[i][1];
     var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     return reduced ? "list" : "graph";
   }
 
   function rememberView(view) {
+    if (VIEWS.indexOf(view) === -1) return;
+    var page = pageIdentity();
+    var pairs = storedViews().filter(function (pair) {
+      return pair[0] !== page;
+    });
+    pairs.push([page, view]);
     try {
-      if (window.localStorage) window.localStorage.setItem(VIEW_KEY, view);
+      if (window.localStorage) window.localStorage.setItem(VIEW_KEY, JSON.stringify(pairs.slice(-VIEW_PAGES_MAX)));
     } catch (_) {
-      /* not persisted; the toggle still works for this page */
+      /* not persisted (refused or full); the toggle still works for this page */
     }
   }
 
@@ -351,6 +391,8 @@
     scan(main || document.getElementById("app-main") || document.body);
   };
   window.DependenciesMount.scan = scan;
+  // The per-page view choice, for the unit test that drives this file in a VM (no page code calls these).
+  window.DependenciesMount._views = { preferred: preferredView, remember: rememberView, key: VIEW_KEY, max: VIEW_PAGES_MAX };
   window.__dpHistoryStyleCleanups = window.__dpHistoryStyleCleanups || [];
   window.__dpHistoryStyleCleanups.push(beforeHistorySave);
 })();

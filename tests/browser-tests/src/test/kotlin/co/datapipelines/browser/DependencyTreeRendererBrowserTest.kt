@@ -1,6 +1,7 @@
 package co.datapipelines.browser
 
 import com.microsoft.playwright.Page
+import com.microsoft.playwright.options.ReducedMotion
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
@@ -23,8 +24,8 @@ import java.nio.file.Paths
  * errors, (b) the §5.4 worked graph — every object with a text status, a shared object drawn once and its dependents
  * highlighted, (c) the list's keyboard, (d) a self-import cycle, (e) the node limit, (f) the A26 race, (g) a 200-character
  * name, (h) the empty leaf, (i) the mount on a cold load, a boosted round trip and a history restore, (j) the
- * choose-a-version state, (k) the request shape, (l) the links and (m) every graph node's family glyph in both
- * themes.
+ * choose-a-version state, (k) the request shape, (l) the links, (m) every graph node's family glyph in both themes
+ * and (n) the Graph/List choice kept per page.
  *
  * (e) runs against a LOW node limit set for this class's own application context ([LIMIT], the brief's first option):
  * the limit is real G4 behaviour, not a fulfilled payload, and the §5.4 graph's nine objects fit under it.
@@ -528,6 +529,64 @@ class DependencyTreeRendererBrowserTest : DependencyPaneBrowserSuite() {
         withClue("the glyph colour follows the theme: $colours") { colours["dark"] shouldNotBe colours["light"] }
         errors.shouldBeEmpty()
         drainCspViolations().filter { !it.contains(PLAYWRIGHT_SCREENSHOT_HASH) }.shouldBeEmpty()
+    }
+
+    /** The view the pane under [scope] shows: the toggle button the pane marks pressed. */
+    private fun activeView(scope: String): String =
+        requireNotNull(page.getAttribute("$scope [data-dp-deps-view][aria-pressed='true']", "data-dp-deps-view")) {
+            "no pressed view button under $scope"
+        }
+
+    private fun openPane(
+        path: String,
+        pane: String,
+    ): String {
+        page.navigate("$baseUrl$path")
+        awaitSettled(pane) shouldBe "ready"
+        return activeView(pane)
+    }
+
+    @Test
+    fun `(n) the Graph or List choice is per page - independent, kept on reload, restore and query change, List under reduced motion`() {
+        startTrace()
+        val world = seedWorkedGraph(ready("depview"))
+        val boardPath = "/dashboards/${world.dashboardId}"
+        val pipelinePath = "/pipelines/${world.pipelineId}"
+        val pipelinePane = "#pe-pane-dependencies"
+        openPane("$boardPath?tab=dependencies", board) shouldBe "graph"
+        page.locator("$board [data-dp-deps-view='list']").click()
+        activeView(board) shouldBe "list"
+        withClue("an unvisited page keeps its own default; the board's choice is not its") {
+            openPane("$pipelinePath?tab=dependencies", pipelinePane) shouldBe "graph"
+        }
+        page.locator("$pipelinePane [data-dp-deps-view='graph']").click()
+        withClue("the board kept its own choice") { openPane("$boardPath?tab=dependencies", board) shouldBe "list" }
+        page.reload()
+        awaitSettled(board) shouldBe "ready"
+        withClue("a reload") { activeView(board) shouldBe "list" }
+        withClue("a version and a tab change on the same page") {
+            openPane("$boardPath?version=1&tab=dependencies", board) shouldBe "list"
+            page.navigate("$baseUrl$boardPath?tab=board")
+            openPane("$boardPath?tab=dependencies&version=1", board) shouldBe "list"
+        }
+        // A boosted step away and Back: the board comes back from the history cache, its pane bound afresh.
+        follow(pipelinePath)
+        page.goBack()
+        page.waitForURL { it.contains(boardPath) && it.contains("tab=dependencies") }
+        page.waitForFunction("s => !!document.querySelector(s + ' [data-dp-deps]')", board)
+        awaitSettled(board) shouldBe "ready"
+        withClue("a history restore") { activeView(board) shouldBe "list" }
+        page.emulateMedia(Page.EmulateMediaOptions().setReducedMotion(ReducedMotion.REDUCE))
+        withClue("an unvisited page under reduced motion") {
+            openPane("/templates/${world.query}?tab=dependencies", "#tw-pane-dependencies") shouldBe "list"
+        }
+        withClue("a stored choice outranks the default") { openPane("$pipelinePath?tab=dependencies", pipelinePane) shouldBe "graph" }
+        @Suppress("UNCHECKED_CAST")
+        val stored = page.evaluate("() => JSON.parse(localStorage.getItem('dp.deps.views'))") as List<List<String>>
+        withClue("one key: only the chosen pages' paths, each with the word chosen") {
+            stored.sortedBy { it[0] } shouldBe listOf(listOf(boardPath, "list"), listOf(pipelinePath, "graph")).sortedBy { it[0] }
+            page.evaluate("() => Object.keys(localStorage).filter(k => k.startsWith('dp.deps'))") shouldBe listOf("dp.deps.views")
+        }
     }
 
     companion object {
