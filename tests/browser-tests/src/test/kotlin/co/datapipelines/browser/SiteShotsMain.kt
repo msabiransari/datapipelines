@@ -74,7 +74,8 @@ import java.nio.file.StandardCopyOption
  * `-PshotsSet=app` skips the marketing list and instead photographs every top-level screen
  * at BOTH 1440x900 and 2560x1440, in light AND dark — the dark pass driven through the
  * settings theme select (the control a user has), never an emulation, and the account put
- * back on light afterwards so a later `site` run's assertion still holds. One Playwright
+ * back on light on every exit of the dark pass ([Shots.withTheme], #546) — a later `site` run
+ * would heal a stray dark preference anyway ([Shots.ensureLightTheme]). One Playwright
  * video of a full boosted-navigation click-through is recorded alongside
  * (app/boost-navigation.webm), from its own context so the still-shot contexts stay clean.
  * Everything lands in an `app/` subfolder of the same output directory.
@@ -387,10 +388,8 @@ object SiteShotsMain {
                 }
 
                 else -> {
-                    withSignedInPage(email, password) { page ->
-                        assertLightTheme(page)
-                        Shots(page).captureAll()
-                    } + heroExtras(email, password)
+                    withSignedInPage(email, password) { page -> Shots(page).captureSite() } +
+                        heroExtras(email, password)
                 }
             }
         println("siteShots: wrote ${taken.size} artifacts to ${outDir.toAbsolutePath()}")
@@ -400,8 +399,9 @@ object SiteShotsMain {
     /**
      * Owns the whole browser session — Playwright, the browser, the context — so [main] reads as
      * the six steps it is and each resource still closes in reverse order on any exit path.
-     * The theme assertion is the CALLER's business: the `site` list specifies light and asserts
-     * it; the `app` list drives both themes on purpose.
+     * The theme is the CALLER's business: the `site` list specifies light, heals a stored dark
+     * theme to it and asserts it ([Shots.captureSite], #546); the `app` list drives both themes
+     * on purpose.
      */
     private fun <T> withSignedInPage(
         email: String,
@@ -481,18 +481,6 @@ object SiteShotsMain {
         check(!page.url().contains("/settings/password")) {
             "the account still owes a forced password change — sign in once by hand first"
         }
-    }
-
-    /**
-     * The shots are specified as LIGHT theme. The theme is a user preference falling back to
-     * `datapipelines.ui.theme`, so it is a property of the deployment and the account, not of
-     * this driver — assert it rather than fight it.
-     */
-    private fun assertLightTheme(page: Page) {
-        page.navigate("$baseUrl/dashboard")
-        val href = page.locator("#theme-link").getAttribute("href") ?: ""
-        val dark = href.contains("dark")
-        check(!dark) { "the account's theme resolves to $href — the shot list specifies light" }
     }
 
     /**
@@ -721,17 +709,68 @@ object SiteShotsMain {
         /**
          * The `app` set (076 §E): every top-level screen at BOTH review widths in BOTH
          * themes. The theme is the account's preference, driven through the settings UI —
-         * the control a user has, never a stylesheet hack — and put back on light at the
-         * end so a later `site` run's light-theme assertion still holds.
+         * the control a user has, never a stylesheet hack — and the dark pass runs inside
+         * [withTheme], so the account is put back on light on EVERY exit, a failed capture
+         * included (#546: a dark pass that threw used to leave the account dark).
          */
         fun captureApp(): List<String> {
             Files.createDirectories(outDir.resolve(APP_DIR))
-            setTheme("light")
-            captureAppPasses("light")
-            setTheme("dark")
-            captureAppPasses("dark")
-            setTheme("light")
+            setTheme(THEME_LIGHT)
+            captureAppPasses(THEME_LIGHT)
+            withTheme(THEME_DARK) { captureAppPasses(THEME_DARK) }
             return written
+        }
+
+        /**
+         * The `site` set (#546): heal the account's theme to light FIRST, then the list. The
+         * list is specified as light; a stored dark preference — left by an interrupted dark
+         * pass, or set by hand — is the driver's own state to repair, never a reason to refuse.
+         */
+        fun captureSite(): List<String> {
+            ensureLightTheme()
+            return captureAll()
+        }
+
+        /**
+         * Puts the account on light when it is not, printing the write so the run log says
+         * what it changed, then asserts the resolved theme on a fresh page. Idempotent: an
+         * account already on light issues no preference write (the [setTheme] early return).
+         */
+        internal fun ensureLightTheme() {
+            if (currentTheme() != THEME_LIGHT) {
+                println("  theme: the account was on $THEME_DARK — setting $THEME_LIGHT through the settings select")
+            }
+            setTheme(THEME_LIGHT)
+            assertTheme(THEME_LIGHT)
+        }
+
+        /**
+         * Runs [block] with the account on [theme], restoring [restore] on EVERY exit (#546).
+         * The block's own exception stays the primary one; a restore that then fails is
+         * attached to it as suppressed, never swallowed. After a block that returned normally,
+         * a failed restore is THE error — the account was left on the wrong theme. The first
+         * [setTheme] sits inside the guarded region too: a switch that half-happened (the
+         * preference written, the stylesheet swap never observed) is restored like any other.
+         */
+        internal fun <T> withTheme(
+            theme: String,
+            restore: String = THEME_LIGHT,
+            block: () -> T,
+        ): T {
+            val result =
+                try {
+                    setTheme(theme)
+                    block()
+                } catch (primary: Throwable) {
+                    try {
+                        setTheme(restore)
+                    } catch (restoreFailure: Throwable) {
+                        primary.addSuppressed(restoreFailure)
+                    }
+                    throw primary
+                }
+            setTheme(restore)
+            return result
         }
 
         private fun captureAppPasses(theme: String) {
@@ -863,31 +902,79 @@ object SiteShotsMain {
          * write, and this set runs against prod. Cards a run never touched show their idle
          * state; the per-node run numbers are `home-run-result`'s story.
          *
-         * Room to read the names: the dock is collapsed to its tab bar and the settings
-         * sidebar parked at its floor — both through the user controls (the dock's toggle,
-         * the splitter's Home key), both restored before the run's other editor capture,
-         * which reads the dock. A fresh browser context means localStorage remembers none of
-         * it past the run.
+         * Room to read the names: the dock is collapsed to its tab bar through the user control
+         * (the dock's toggle) and restored before the run's other editor capture, which reads
+         * the dock. The settings sidebar and its splitter were withdrawn in #349
+         * (ui-screens.md, "No duplicate full description/settings sidebar"), so the graph
+         * already owns the width; the two splitter steps that outlived them are gone (#549).
+         * A fresh browser context means localStorage remembers none of it past the run.
          */
         private fun homeAgentBuilds() {
-            setRailCollapsed(true)
             try {
-                openEditor(showcase)
-                page.locator(".pe-dock-toggle:visible").first().click()
-                page.locator(".pe-dock-collapsed").waitFor()
-                val splitter = page.locator(".pe-sidebar-splitter")
-                splitter.focus()
-                splitter.press("Home")
-                fitGraph()
+                frameAgentBuilds()
                 if (canvasPaintsSanely("home-agent-builds.png")) shoot("home-agent-builds.png")
             } finally {
-                if (page.locator(".pe-dock-collapsed").count() > 0) {
-                    page.locator(".pe-dock-toggle:visible").first().click()
-                    page.locator(".pe-dock:not(.pe-dock-collapsed)").waitFor()
-                }
-                page.locator(".pe-sidebar-splitter").dblclick()
-                setRailCollapsed(false)
+                unframeAgentBuilds()
             }
+        }
+
+        /**
+         * The dock's state before [frameAgentBuilds] first touched it — written BEFORE that
+         * first click, so a frame that throws half-way is still undone by [unframeAgentBuilds];
+         * null when no frame is outstanding.
+         */
+        private var dockWasOpenBeforeFrame: Boolean? = null
+
+        /**
+         * The `home-agent-builds` framing (#549): rail collapsed, editor open on [pipeline],
+         * dock collapsed, graph fitted. There is no "start-up settled" signal to wait for: on a
+         * short window the workspace COLLAPSES the dock by default (init.js applyDockDefault,
+         * #615) and keeps re-deciding on every resize of `.pe-panes` until the dock is
+         * touched. So the first click on the ONE visible toggle — whichever direction — is the
+         * gesture that makes the dock the person's and ends the automatic default; after it the
+         * state is stable, and a second click collapses it when the first one opened it.
+         * [afterCollapse] is a test seam (a no-op in production) that runs once the dock is
+         * collapsed, before the fit.
+         */
+        internal fun frameAgentBuilds(
+            pipeline: String = showcase,
+            afterCollapse: () -> Unit = {},
+        ) {
+            setRailCollapsed(true)
+            openEditor(pipeline)
+            dockWasOpenBeforeFrame = page.locator(".pe-dock.pe-dock-collapsed").count() == 0
+            page.locator(".pe-dock-toggle:visible").first().click()
+            if (page.locator(".pe-dock.pe-dock-collapsed").count() == 0) {
+                page.locator(DOCK_COLLAPSE).click()
+            }
+            page.locator(".pe-dock.pe-dock-collapsed").waitFor()
+            afterCollapse()
+            fitGraph()
+            val collapsed = page.locator(".pe-dock-collapsed").count()
+            check(collapsed == 1) { "home-agent-builds framed with $collapsed collapsed docks — expected exactly one" }
+        }
+
+        /**
+         * Undoes [frameAgentBuilds] ON THE EDITOR PAGE (#549): the dock goes back to open only
+         * when it was open before the frame touched it, then the rail is restored through the
+         * CURRENT page's own toggle — [setRailCollapsed] would navigate away first. A page with
+         * no rail toggle (an [openEditor] that failed) falls back to [setRailCollapsed].
+         */
+        internal fun unframeAgentBuilds() {
+            val restoreDock = dockWasOpenBeforeFrame == true
+            dockWasOpenBeforeFrame = null
+            if (restoreDock && page.locator(".pe-dock.pe-dock-collapsed").count() > 0) {
+                page.locator(DOCK_RESTORE).click()
+                page.locator(".pe-dock:not(.pe-dock-collapsed)").waitFor()
+            }
+            if (page.locator("#rail-collapse").count() == 0) {
+                setRailCollapsed(false)
+                return
+            }
+            if (page.locator("html.rail-collapsed").count() > 0) {
+                page.locator("#rail-collapse").click()
+            }
+            page.locator("html:not(.rail-collapsed)").waitFor()
         }
 
         /**
@@ -930,14 +1017,65 @@ object SiteShotsMain {
         private fun datasources() {
             page.navigate("$baseUrl/datasources")
             waitFor(".ds-table")
-            // "last-test outcome visible" means the probe has actually run — click every Test
-            // and wait for its response, never a sleep.
-            page.locator("button:has-text('Test')").all().forEach { button ->
-                page.waitForResponse({ it.url().contains("/test") }) { button.click() }
-            }
+            probeAndReloadDatasources()
             settle()
             shoot("datasources.png")
         }
+
+        /**
+         * "Latest connection test outcomes" (how-it-works.html) means every probe has run AND
+         * the table shows it (#545). Per row that renders the Test verb, the click is awaited
+         * on THAT button's own `hx-post` (POST, its exact path, [rowTimeoutMs]) — a row that
+         * never answers fails by name instead of as one anonymous 30 s wait. The verb answers
+         * with a toast only; the Last-test cell is server-rendered and nothing re-renders it,
+         * so the list is navigated again and every probed row must have left `never tested`.
+         * Returns the probed datasource names, in table order.
+         */
+        internal fun probeAndReloadDatasources(rowTimeoutMs: Double = EXECUTION_TIMEOUT_MS): List<String> {
+            val probed = mutableListOf<String>()
+            page.locator(".ds-table tbody tr:has($DATASOURCE_TEST)").all().forEach { row ->
+                val name = rowName(row)
+                val button = row.locator(DATASOURCE_TEST)
+                val path =
+                    requireNotNull(button.getAttribute("hx-post")) {
+                        "datasource '$name': its Test button renders without an hx-post"
+                    }
+                try {
+                    page.waitForResponse(
+                        { it.request().method() == "POST" && URI(it.url()).rawPath == path },
+                        Page.WaitForResponseOptions().setTimeout(rowTimeoutMs),
+                    ) { button.click() }
+                } catch (timeout: com.microsoft.playwright.TimeoutError) {
+                    throw IllegalStateException(
+                        "datasource '$name': no response to its Test (POST $path) within ${rowTimeoutMs.toLong()} ms",
+                        timeout,
+                    )
+                }
+                probed += name
+            }
+            check(probed.isNotEmpty()) { "the datasource list rendered no row with a Test verb — nothing was probed" }
+            page.navigate("$baseUrl/datasources")
+            waitFor(".ds-table")
+            val cells =
+                page.locator(".ds-table tbody tr").all().associate { row ->
+                    rowName(row) to row.locator("td:nth-child(6)").innerText().trim()
+                }
+            probed.forEach { name ->
+                val cell = cells[name] ?: error("datasource '$name' was probed but has no row after the reload")
+                check(!cell.contains(NEVER_TESTED)) {
+                    "datasource '$name' was probed but its Last-test cell still reads '$cell' after the reload"
+                }
+            }
+            return probed
+        }
+
+        /** A datasource row's name: the first span of its first cell (partials/datasources.html). */
+        private fun rowName(row: com.microsoft.playwright.Locator): String =
+            row
+                .locator("td:first-child > span")
+                .first()
+                .innerText()
+                .trim()
 
         private fun templateExplorer() {
             // #398: the catalog at rest, then the SIDEBAR tree's expanded folder — the page
@@ -1247,12 +1385,13 @@ object SiteShotsMain {
 
         /**
          * The theme toggle is a feature; show it once (093 §C). Driven through the settings
-         * select — the control a user has, never an emulation or a stylesheet hack — and put
-         * back on light immediately, so the `site` set's light-theme assertion still holds on
-         * the next run and every other shot in THIS run has already been taken.
+         * select — the control a user has, never an emulation or a stylesheet hack — inside
+         * [withTheme], so the account is back on light on EVERY exit, a failed capture
+         * included (#546); every other shot in THIS run has already been taken.
          */
-        private fun shellDark() {
-            setTheme("dark")
+        private fun shellDark() = withTheme(THEME_DARK) { shellDarkCapture() }
+
+        private fun shellDarkCapture() {
             page.navigate("$baseUrl/pipelines")
             waitFor("#pipeline-list-wrapper")
             // #350: the pipeline tree is the resource browser's (#554), which a Pipelines page
@@ -1262,7 +1401,6 @@ object SiteShotsMain {
             folderPrefixes(showcase).forEach { expandTreeFolder("pipelines", it) }
             page.locator("#nav-tree-pipelines a[title='$showcase']").waitFor()
             shoot("shell-dark.png")
-            setTheme("light")
         }
 
         private fun editorRunAndGraph() {
@@ -1720,6 +1858,14 @@ object SiteShotsMain {
     private val THEME_HREF = Regex("""/themes/([a-z]+)\.css""")
 
     private const val FIT_SETTLE_MS = 400.0
+
+    /** The dock's one control, by the label each direction carries (editor.html). */
+    private const val DOCK_COLLAPSE = "button.pe-dock-toggle[aria-label='Collapse dock']"
+    private const val DOCK_RESTORE = "button.pe-dock-toggle[aria-label='Restore dock']"
+
+    /** A datasource row's connection-test verb, and the badge of a row never probed (partials/datasources.html). */
+    private const val DATASOURCE_TEST = "button[data-verb='datasource-test']"
+    private const val NEVER_TESTED = "never tested"
 
     private const val WAIT_MS = 30_000.0
     private const val EXECUTION_TIMEOUT_MS = 180_000.0
