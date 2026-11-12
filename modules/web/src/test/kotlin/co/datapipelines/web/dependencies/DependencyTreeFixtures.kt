@@ -34,7 +34,9 @@ import org.springframework.transaction.support.TransactionOperations
 import java.net.URI
 import java.net.URLEncoder
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
+import java.time.ZoneId
 import java.time.ZoneOffset
 import java.util.UUID
 
@@ -45,6 +47,21 @@ internal val TREE_WS: UUID = UUID.fromString("00000000-0000-0000-0000-0000000008
 internal val TEST_WIDGET = FamilyKey("test_widget")
 
 internal val TREE_CLOCK: Clock = Clock.fixed(Instant.parse("2026-11-11T00:00:00Z"), ZoneOffset.UTC)
+
+/** A clock a test moves by hand — what a provider's read "takes" (#875 §D): time passes only when the test says so. */
+internal class MovingTreeClock(
+    private var now: Instant = TREE_CLOCK.instant(),
+) : Clock() {
+    fun advance(by: Duration) {
+        now = now.plus(by)
+    }
+
+    override fun instant(): Instant = now
+
+    override fun getZone(): ZoneId = ZoneOffset.UTC
+
+    override fun withZone(zone: ZoneId?): Clock = this
+}
 
 internal val TREE_LIMITS =
     GraphLimits(depth = 32, nodes = 1024, edges = 4096, diagnostics = 100, wireBytes = 1_048_576, lockWaitSeconds = 5)
@@ -92,7 +109,7 @@ internal fun member(
  */
 internal class StubFamily(
     val key: FamilyKey,
-    private val capabilities: Capabilities = FamilyKey.PRODUCTION[key] ?: Capabilities.NONE,
+    val capabilities: Capabilities = FamilyKey.PRODUCTION[key] ?: Capabilities.NONE,
 ) : DependencyProvider<List<Reference>> {
     private val objects = LinkedHashMap<ObjectRequest, Outcome.Resolved<List<Reference>>>()
     val calls = ArrayList<List<ObjectRequest>>()
@@ -159,8 +176,9 @@ internal fun treeService(
     view: () -> LensedView = { LensedView.EVERYTHING },
     transactions: TransactionOperations = TransactionOperations.withoutTransaction(),
     clock: Clock = TREE_CLOCK,
+    descriptors: List<FamilyDescriptor<*>> = families.map { it.descriptor() },
 ) = DependencyTreeService(
-    registry = FamilyRegistry(families.map { it.descriptor() }),
+    registry = FamilyRegistry(descriptors),
     transport = DependencyFamilyTransport(rows),
     limits = limits,
     transactions = transactions,
