@@ -146,6 +146,7 @@ class ParameterSetsWorkspaceModelTest {
     @Test
     fun `the tab set is closed - unknown or missing falls to workspace`() {
         ParameterSetWorkspaceTab.fromWire("history") shouldBe ParameterSetWorkspaceTab.HISTORY
+        ParameterSetWorkspaceTab.fromWire("dependencies") shouldBe ParameterSetWorkspaceTab.DEPENDENCIES
         ParameterSetWorkspaceTab.fromWire("workspace") shouldBe ParameterSetWorkspaceTab.WORKSPACE
         ParameterSetWorkspaceTab.fromWire("nonsense") shouldBe ParameterSetWorkspaceTab.WORKSPACE
         ParameterSetWorkspaceTab.fromWire(null) shouldBe ParameterSetWorkspaceTab.WORKSPACE

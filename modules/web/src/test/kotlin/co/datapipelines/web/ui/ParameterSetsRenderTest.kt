@@ -197,7 +197,10 @@ class ParameterSetsRenderTest {
             "inspector.js",
             "workspace.js",
         ).forEach { catalog shouldContain it }
-        catalog.trimEnd() shouldEndWith "<script data-page-mount src=\"/js/parameter-workspace/runtime.js\"></script>"
+        // #876 G6: the runtime stays the workspace's mount; the Dependencies arm's five modules follow it, their mount last.
+        val sources = Regex("src=\"(/[^\"]+)\"").findAll(catalog).map { it.groupValues[1] }.toList()
+        sources.takeLast(6) shouldBe listOf("/js/parameter-workspace/runtime.js") + DEPENDENCY_MODULES
+        catalog.trimEnd() shouldEndWith "<script data-page-mount src=\"/js/dependencies/mount.js\"></script>"
         val outside = html.replace(catalog, "")
         outside shouldNotContain "datapipelines-dashboard.js"
         outside shouldNotContain "cytoscape"

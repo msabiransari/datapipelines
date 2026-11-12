@@ -124,14 +124,17 @@ class ParameterSetsWorkspaceModel(
 
     /**
      * The tab set the page's query contract admits (workspace spec §6.2): the closed set
-     * `workspace | history`, an unknown or missing value is `workspace`. `history` renders the set's
-     * evaluation records (#376, spec §6.4) in place of the live form and the graph.
+     * `workspace | history | dependencies`, an unknown or missing value is `workspace`. `history` renders the
+     * set's evaluation records (#376, spec §6.4) in place of the live form and the graph; `dependencies` (#876 G6,
+     * record §13) renders the object-level dependency tree of the viewed version — its selector templates and
+     * datasources — through dependencies/mount.js, distinct from the workspace arm's internal parameter graph.
      */
     enum class ParameterSetWorkspaceTab(
         val wire: String,
     ) {
         WORKSPACE("workspace"),
         HISTORY("history"),
+        DEPENDENCIES("dependencies"),
         ;
 
         companion object {
