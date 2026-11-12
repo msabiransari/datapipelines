@@ -1058,12 +1058,14 @@ last-writer facts, placed before the checks footer on the pipeline dialog so the
 Release / Override submit posts it too. The POST binds it as REQUIRED (a missing value is a 400 at
 binding, before any read) and releases AT it: the draft is read only to refuse the no-draft case, and
 its CURRENT hash is never the one released. A draft that changed after the dialog opened is therefore
-`pipeline.version.conflict` / `template.version.conflict` / `dashboard.version.conflict` /
-`visualization.version.conflict` (409, Shape C), and the visualization evidence gate, which judges the
-CURRENT body, still answers first when the new draft has no green run. A refused no-draft dialog renders
+refused 409 with nothing released. Since #876 the plan's `tree_hash` covers the root's draft too, so the
+planner refuses it first, as `<family>.release.plan_conflict` (`details.reason = snapshot_changed`). Before
+#876 it was `<family>.version.conflict`. The visualization evidence gate, which judges the CURRENT body, still answers
+first when the new draft has no green run. A refused no-draft dialog renders
 no form and so no hash. The hash is an optimistic-concurrency token already present in the version
 reads, not a credential. `ReleaseDialogHashRenderTest` pins the rendered field per family;
-`LifecycleDialogBrowserTest` drives a pipeline dialog stale and sees the 409 with nothing released.
+`LifecycleDialogBrowserTest` drives a pipeline dialog stale and sees the 409 with nothing released;
+`ReleaseDialogStaleHashBrowserTest` does the same for templates, dashboards and visualizations.
 
 The templates twin is addressed by NAME in query/body ([§9.6](template-hierarchy-design.md#96-addressing-the-name-never-travels-in-a-url-path-segment-normative-measured)):
 `GET /partials/templates/lifecycle/{verb}?name=&version=`. It has every dialog above except
@@ -3196,7 +3198,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-12 | v1.240 | #876 U4 the shared release dialog | **§4.3d** Release row: every family's dialog renders the one release plan (one row per closure node, each DRAFT dependency its own checked `include_dependencies` box, RELEASED badges, blocking MISSING/DISCARDED text, datasource prerequisites as text rows with one wording for absent and foreign, the plan's `tree_hash`, a collapsed graph of the same rows with no request) in place of the 142 consent group; the bare alias is 428 (versioning v1.40). The #416 paragraph names five families. **§4.24** (visualizations) and **§4.21** (dashboards) lifecycle rows: the plan rows replace the one consent checkbox. **§4.23:** the parameter set's first release surface, "Release v`<n>`…" into `#ps-dialog`. **§4.4** draft lifecycle actions say so. |
+| 2026-11-12 | v1.240 | #876 U4 the shared release dialog | **§4.3d** Release row: every family's dialog renders the one release plan (one row per closure node, each DRAFT dependency its own checked `include_dependencies` box, RELEASED badges, blocking MISSING/DISCARDED text, datasource prerequisites as text rows with one wording for absent and foreign, the plan's `tree_hash`, a collapsed graph of the same rows with no request) in place of the 142 consent group; the bare alias is 428 (versioning v1.40). The #416 paragraph names five families, and a draft changed under an open dialog is now refused `<family>.release.plan_conflict` (the plan's `tree_hash` covers the root's draft), not `<family>.version.conflict`. **§4.24** (visualizations) and **§4.21** (dashboards) lifecycle rows: the plan rows replace the one consent checkbox. **§4.23:** the parameter set's first release surface, "Release v`<n>`…" into `#ps-dialog`. **§4.4** draft lifecycle actions say so. |
 | 2026-11-12 | v1.239 | #908 unmet parameter names in the Dependencies views | **§4.4, §4.21**: a dashboard's parameter-set edge whose `parameter_names` constraint carries `unmet_names` (#892, dependency-graph record erratum (11)) shows a second constraint text, `unmet parameters <names>`, after `requires parameters <names>` — in the List view's edge and node Constraints cells and the graph's selection panel; words, not colour; not a diagnostic, so the pane stays ready with no note. Also drops a stray comma in §4.21's Dependencies text. Tests: `dependencies-tree-view.test.mjs`, `DependenciesUnmetNamesBrowserTest`. |
 | 2026-11-12 | v1.238 | #876 G6 the API version's Dependencies card | **§4.18b**: a Dependencies card between the version card and the API card, only when a version is selected — the SELECTED version's tree (the API version with its lifecycle and enabled/disabled, its one **Pipeline** edge to the pinned pipeline version), a `<details>` closed by default, one tree read carrying the stored path and the viewed version on first open; no tab strip, another version is a page load. Tests: `EndpointVersionsPageRenderTest`, `DependenciesApiEndpointBrowserTest`. |
 | 2026-11-12 | v1.237 | #876 G6 the datasource's Dependencies section | **§4.5c**: after Learned facts, a Dependencies section — the shared pane in a `<details>` closed by default, one tree read carrying the datasource's name alone on first open; the honest leaf (`Unversioned`, `Registered datasource · read-only\|read-write`, **No dependencies**), no Used-by line. Tests: `DatasourceDetailRenderTest`, `DependenciesDatasourceBrowserTest`. |

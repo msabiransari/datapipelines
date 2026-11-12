@@ -112,7 +112,8 @@ class ParameterSetReleaseDialogBrowserTest : DependencyPaneBrowserSuite() {
         val drawn = drawn("#dp-dialog")!!
         (drawn["nodes"] as Number).toInt() shouldBe 6
         (drawn["edges"] as Number).toInt() shouldBe 6
-        (drawn["labels"] as List<*>).count { (it as String).contains(world.clean) } shouldBe 1
+        // The drawn label breaks a folder path after every "/" with U+200B (renderer.js graphLabel); the name is the same.
+        (drawn["labels"] as List<*>).count { (it as String).replace("​", "").contains(world.clean) } shouldBe 1
 
         // A11 through this dialog: clean unticked, the page forced past its own gates — refused, nothing flipped.
         dialog.locator("[data-release-row='draft'][data-name='${world.clean}'] [data-consent-input]").uncheck()
@@ -126,23 +127,67 @@ class ParameterSetReleaseDialogBrowserTest : DependencyPaneBrowserSuite() {
     }
 
     /**
-     * §F.2 Unavailable prerequisite, run 1 (no datasource of that name exists): pipeline `ops/load` whose only artifact
-     * dependency is a RELEASED template and whose DQL node names the vanished datasource. The row reads "Datasource …
-     * is not available", the submit is disabled, and a forced POST is refused 409 with the datasource blocker while the
-     * pipeline stays DRAFT.
+     * §F.2 Unavailable prerequisite, run 1 (no datasource of that name exists), through the pipeline's dialog, with the
+     * two holders #873 pinned (`DatasourceEdgesE2eTest` case 3). `load` is the brief's fixture: its only artifact
+     * dependency is a RELEASED template and its own DQL node names the vanished datasource. `parent` is a DRAFT pipeline
+     * over a RELEASED `child` whose DQL node names it. Both dialogs read "Datasource … is not available" with the submit
+     * disabled. A forced POST is refused either way and nothing flips, but by different guards. `load` flips, so its
+     * native revalidation refuses first, outside the guarded transaction: 400 `pipeline.validation.unknown_datasource`.
+     * `child` does not flip, so only the coordinator's apply-time prerequisite check sees it: 409
+     * `pipeline.release.dependency_not_released` with the versionless datasource blocker.
      */
     @Test
-    fun `an unavailable datasource is a blocking text row, the submit disabled, and a forced POST 409 flips nothing`() {
+    fun `an unavailable datasource is a blocking text row, the submit disabled, and a forced POST is refused flipping nothing`() {
         startTrace()
         val root = ready("psrelgone")
         val datasource = registerDatasource()
         val query = sqlTemplate("$root/q.sql")
         releaseTemplate(query)
-        val pipelineId = pipeline("$root/load", query, datasource)
-        // The datasource vanishes after authoring (its grants cascade): the plan still names it, nothing serves it.
+        val loadId = pipeline("$root/load", query, datasource)
+        val childId = pipeline("$root/child", query, datasource)
+        PlannedRelease.release(
+            page,
+            "/partials/pipelines/$childId/lifecycle/release",
+            "/api/v1/pipelines/$childId/release",
+            requireNotNull(pipelineHash(childId)),
+        )
+        val parentId = parentPipeline("$root/parent", "$root/child")
+        // The datasource vanishes after authoring (its grants cascade): the plans still name it, nothing serves it.
         sql("DELETE FROM datasources WHERE name = '$datasource'")
         countTreeRequests()
 
+        // The native holder: refused 400 by its own revalidation.
+        val load = openPipelineDialog(loadId, datasource)
+        val loadHash = load.locator("input[name='tree_hash']").inputValue()
+        val native = forcedPostResponse("#pe-dialog")
+        native.first shouldBe 400
+        native.second shouldContain "pipeline.validation.unknown_datasource"
+        restRelease("/api/v1/pipelines/$loadId/release", loadHash, pipelineHash(loadId))["code"] shouldBe
+            "pipeline.validation.unknown_datasource"
+
+        // The prerequisite holder: refused 409 by the coordinator. The dialog's refusal is the toast (code +
+        // correlation); the blocker's shape is the REST envelope's, read with the SAME plan the dialog rendered.
+        val parent = openPipelineDialog(parentId, datasource)
+        val parentHash = parent.locator("input[name='tree_hash']").inputValue()
+        val response = forcedPostResponse("#pe-dialog")
+        response.first shouldBe 409
+        response.second shouldContain "pipeline.release.dependency_not_released"
+        val refusal = restRelease("/api/v1/pipelines/$parentId/release", parentHash, pipelineHash(parentId))
+        refusal["status"] shouldBe 409
+        refusal["code"] shouldBe "pipeline.release.dependency_not_released"
+        refusal["blockers"] shouldBe listOf("datasource|$datasource|unavailable")
+
+        listOf(loadId, parentId).forEach { id ->
+            scalar("SELECT status FROM pipeline_versions WHERE pipeline_id = '$id' AND version = 1") shouldBe "DRAFT"
+        }
+        treeRequests shouldBe emptyList()
+    }
+
+    /** Opens [pipelineId]'s release dialog and asserts the unavailable [datasource] row and the disabled submit. */
+    private fun openPipelineDialog(
+        pipelineId: String,
+        datasource: String,
+    ): Locator {
         page.navigate("$baseUrl/pipelines/$pipelineId")
         page.waitForSelector(".pe-root")
         page.locator(".pe-topbar [data-verb='pipeline-release']").click()
@@ -152,19 +197,7 @@ class ParameterSetReleaseDialogBrowserTest : DependencyPaneBrowserSuite() {
         row.innerText() shouldContain "Datasource $datasource is not available"
         dialog.locator("[data-release-plan]").getAttribute("data-release-submittable") shouldBe "false"
         dialog.locator("button[type=submit]").first().isDisabled shouldBe true
-
-        val treeHash = dialog.locator("input[name='tree_hash']").inputValue()
-        val response = forcedPostResponse("#pe-dialog")
-        response.first shouldBe 409
-        response.second shouldContain "pipeline.release.dependency_not_released"
-        // The dialog's refusal is the toast (code + correlation); the blocker's shape is the REST envelope's, read with
-        // the SAME plan the dialog rendered.
-        val refusal = restRelease("/api/v1/pipelines/$pipelineId/release", treeHash, pipelineHash(pipelineId))
-        refusal["status"] shouldBe 409
-        refusal["code"] shouldBe "pipeline.release.dependency_not_released"
-        refusal["blockers"] shouldBe listOf("datasource|$datasource|unavailable")
-        scalar("SELECT status FROM pipeline_versions WHERE pipeline_id = '$pipelineId' AND version = 1") shouldBe "DRAFT"
-        treeRequests shouldBe emptyList()
+        return dialog
     }
 
     // ------------------------------------------------------------------ the dialog
