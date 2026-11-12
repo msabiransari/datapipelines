@@ -71,6 +71,8 @@ dependencies {
     implementation(libs.slf4j.api)
 
     // --- Tests -------------------------------------------------------------------
+    // #756 — the shared snapshot log capture (module-structure §5.23); test-only, testImplementation alone.
+    testImplementation(project(":modules:log-capture"))
     testImplementation(libs.spring.boot.starter.test)
     testImplementation(libs.kotlinx.coroutines.test)
     // Module-local integration tests: a Postgres container running app's real V1

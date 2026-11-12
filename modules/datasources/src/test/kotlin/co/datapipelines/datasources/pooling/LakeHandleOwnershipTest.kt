@@ -289,7 +289,7 @@ class LakeHandleOwnershipTest {
         }
 
     // A snapshot (#484): the ROOT capture sees every thread in the JVM, so it is the module's helper.
-    private fun capturingLogs(block: () -> Unit): List<String> = co.datapipelines.datasources.capturingLogs(block = block)
+    private fun capturingLogs(block: () -> Unit): List<String> = co.datapipelines.logcapture.capturingLogs(block = block)
 
     private fun waitUntil(condition: () -> Boolean) {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(WAIT_S)

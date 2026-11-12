@@ -1,5 +1,6 @@
 package co.datapipelines.executor
 
+import co.datapipelines.logcapture.SnapshotListAppender
 import co.datapipelines.pipeline.ContextKeys
 import co.datapipelines.pipeline.Node
 import co.datapipelines.pipeline.NodeOutput

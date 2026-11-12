@@ -2,6 +2,8 @@ package co.datapipelines.integration
 
 import ch.qos.logback.classic.Level
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.logcapture.SnapshotListAppender
+import co.datapipelines.logcapture.capturingLogEvents
 import io.kotest.matchers.comparables.shouldBeLessThan
 import io.kotest.matchers.shouldBe
 import io.restassured.builder.ResponseBuilder

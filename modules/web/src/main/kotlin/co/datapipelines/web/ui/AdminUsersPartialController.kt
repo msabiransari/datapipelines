@@ -246,7 +246,7 @@ class AdminUsersPartialController(
     /**
      * The row's action endpoint: the admin-users page's existing verb family (route prefix,
      * the `PATCH` + row-swap shape, CSRF from the layout). The identity reset (#187) has its
-     * OWN literal route below — a new `RestOperation` — but renders through the same
+     * OWN literal route below — its own `Permission` row, `user.identity_reset` — but renders through the same
      * [saved] response the family shares.
      */
     @PatchMapping("/partials/admin/users/{userId}/{action}")

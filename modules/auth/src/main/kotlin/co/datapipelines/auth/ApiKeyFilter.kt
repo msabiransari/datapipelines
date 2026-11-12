@@ -34,6 +34,12 @@ import java.util.concurrent.ThreadLocalRandom
  * The rejection the *caller* sees is unchanged: [AuthEntryPoint] still answers
  * `auth.api_key.invalid`.
  *
+ * ## A native verification fault is not a rejection (#847)
+ * [SecretVerificationUnavailableException] means the server could not CHECK the secret — not that
+ * the key was refused. It is stashed for [AuthEntryPoint] exactly like a rejection (so the caller
+ * gets the 503 envelope), logged once at ERROR, and NOT audited as `auth.api_key.rejected`: the
+ * key was never judged, and an operator must not read a server fault as a credential attack.
+ *
  * ## The MCP key is MCP-only (#215 B2, owner ruling 2026-09-24)
  * A valid `mcp`-kind key presented anywhere but `/mcp` is REFUSED here, before any permission
  * is asked — the mirror image of `McpAuthFilter`, which refuses the other two kinds ON `/mcp`: the
@@ -114,6 +120,20 @@ class ApiKeyFilter(
                 auditLogger.log(event = "auth.api_key.used", userId = principal.userId, keyId = principal.keyId)
             }
             return principal
+        } catch (e: SecretVerificationUnavailableException) {
+            // #847 — the secret was never judged: stashed for the entry point's 503, but no
+            // `auth.api_key.rejected` row. The native code and text ride on the exception
+            // (stack), never on the credential. Caught BEFORE the general AuthException.
+            request.setAttribute(AuthAttributes.AUTH_ERROR, e)
+            log.error(
+                "event={} path={} client={} native_code={}",
+                AuthErrorCodes.SECRET_VERIFICATION_UNAVAILABLE,
+                request.requestURI,
+                clientAddressResolver.clientAddressOf(request),
+                e.nativeCode,
+                e,
+            )
+            return null
         } catch (e: AuthException) {
             request.setAttribute(AuthAttributes.AUTH_ERROR, e)
             val client = clientAddressResolver.clientAddressOf(request)

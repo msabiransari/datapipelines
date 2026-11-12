@@ -1,9 +1,9 @@
 # Staging (H2) Specification
 
-**Status:** v1.23 (frozen contract — additive-only changes after this point)
+**Status:** v1.24 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Configuration spec](configuration.md)
-**Last updated:** 2026-11-04
+**Last updated:** 2026-11-12
 
 ---
 
@@ -140,6 +140,8 @@ suspend fun <T> withQuery(sql: String, block: suspend (ResultSet) -> T): T = poo
     }
 }
 ```
+
+**Statements are bounded** (#815). A statement `withQuery` or `execute` runs carries `query-timeout-seconds`, and `close()` cancels each of them still running — `withQuery`'s through its execution and the cursor reading — before it closes the pool, so the last lease comes back and the database dies without waiting the timeout out (measured on the pinned driver: a 1 s timeout stopped a runaway after 1,012 ms total; a cross-thread cancel stopped it within a few milliseconds of the cancel call, SQLState `57014`). Statements created inside `withConnection` are the caller's to bound: the executor's carry `node-query-timeout-seconds` and are registered for its own `Statement.cancel()` ([DAG Executor §9](dag-executor.md#9-tempdb-lifecycle-integration)). **Known limit:** a cancel that lands before a statement has entered the driver does nothing; a positive query timeout bounds that window, and `0` disables the timeout bound.
 
 The `block` is where the executor does the downstream work:
 - A downstream node's stage operation (streaming into a new H2 table).
@@ -782,6 +784,7 @@ These are documented in the authoring guide (future).
 - **Pool tests** (`H2ConnectionPoolTest`): the cap is never exceeded and waiters queue; capacity one makes progress under more ready tasks than dispatcher threads; a waiter cancelled in the queue leaves capacity for the next caller; a dirtied session (schema, search path, variable, local temporary table, time zone, timeouts, isolation, an uncommitted insert) is forcibly reused at capacity one and shown clean with the insert rolled back, not committed; a failed reset discards the connection and replaces it before closing when it is the last; close is idempotent, refuses new leases, never waits for an active lease, and the late return finishes cleanup exactly once; an opener failure returns its permit; no method returns a connection.
 - **Lifecycle tests beyond §3.4** (`H2StagingPoolLifecycleTest`): close against an open cursor; creation failure after the operational connection opened destroys the half-built database; a database shut down under a lease fails that lease and `close()` still does not throw; a partial table whose drop refuses keeps its name owned; a stage cancelled mid-drain at capacity one still rolls back; child rows are pulled between leases, never inside one; two executions cannot see each other's objects; every physical connection is the restricted user.
 - **Lifecycle tests**: after `close()`, a new lease is refused AND a fresh connection to the same `jdbc:h2:mem:exec_{id}` URL finds the **`STAGING_EXEC` user gone** (`SELECT COUNT(*) FROM INFORMATION_SCHEMA.USERS WHERE UPPER(USER_NAME)='STAGING_EXEC'` = 0 — case-insensitively, because `DATABASE_TO_LOWER=TRUE` stores the unquoted-created user as `staging_exec`; the bare literal would count 0 while the user was alive, exactly the vacuous shape this test exists to rule out) — this is the regression test for `DB_CLOSE_DELAY=-1` ever returning. It must key on something the §3.4 cleanup does **not** remove: an *empty* fresh database no longer distinguishes "destroyed" from "survived-but-emptied" now that cleanup drops the tables before closing, so the old "sees an empty database" assertion is satisfied even if the DB survived — the user (dropped only when the DB itself dies) is the falsifiable signal. Separately, prove the §3.4 enumerate+`DROP TABLE` belt actually runs: hold a second peer connection open to the same URL so the DB survives `connection.close()`, `close()` the instance, then assert **through the peer** that the staged tables are gone. Also: `close()` on a connection already broken does not throw.
+- **Statement bounds** (`H2StagingStopTest`, #815): a runaway statement through `execute` stops at the query timeout; `close()` during a runaway `execute` or `withQuery` execution returns at once and the statement stops, and the returning lease destroys the database; a `withQuery` statement stays registered while its callback reads the cursor and is released when it returns.
 - **Memory-limit test**: stage past a deliberately small `max_memory_mb`; assert `pipeline.staging.memory_limit_exceeded` and that the measured in-process JVM-heap reading (not an estimate) drove the decision — with the budget anchored to a measured baseline + headroom, since the reading is JVM-heap-wide (§8.2).
 - **Type round-trip tests** for every canonical type:
   - Source value → staged → queried back → wire-encoded → asserted equal to source.
@@ -837,6 +840,7 @@ Out of scope for v1:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-12 | v1.24 | 815 (#815) | §3.3: H2 `execute` carries `query-timeout-seconds` as `withQuery` does, and `close()` cancels every `execute`/`withQuery` statement still running before it closes the pool — the bounds §8.5 states for DuckDB; `withConnection` statements stay the caller's to bound, and a cancel landing before the driver does nothing. §12: `H2StagingStopTest`. Timeouts are not frozen (§13); no contract change. |
 | 2026-11-04 | v1.23 | 795 merge review | §8.5: one shared guard in `typesystem`, neutral disclosure wording, the zero-timeout limitation, and the missing process-memory admission check (#819). Scratch validation failure leaves pre-existing files untouched. |
 | 2026-11-03 | v1.22 | 795 (#795) dp-lake P1 DuckDB staging | New **§8.5 The DuckDB engine**: a file-backed database per execution under `<java.io.tmpdir>/dp-staging`, its scratch reserved before it opens (`scratch_exhausted`), its configuration locked with external access off before author SQL can reach it, every lease a duplicate of the locked root; `memory_limit` = `staging-memory-limit`, with the engine's own reading behind `memory_limit_exceeded`; spill and file bounded by the reservation (`scratch_limit_exceeded`), with the 2× peak and the after-statement check stated as known limits; a temporary raw-text gate on author SQL (owner ruling 2026-11-03). §3.1 the engine-dispatching factory; §7.1 the admission keys DuckDB reads (no key of its own); §7.2 the two new codes and the DuckDB cases of three existing ones; §10 `memoryUsedBytes` per engine; §10.1 rewritten as current; §12 the DuckDB tests; §13 the DuckDB type mapping frozen beside H2's, its storage and numbers not; §14's DuckDB item narrowed to a global default. |
 | 2026-10-26 | v1.21 | #361 landing follow-up | §8.2: use one JVM heap snapshot for cheap and post-GC samples, preventing a heap resize between separate committed/free reads from yielding a negative budget measurement. Whole-JVM accounting and collection cadence are unchanged. |

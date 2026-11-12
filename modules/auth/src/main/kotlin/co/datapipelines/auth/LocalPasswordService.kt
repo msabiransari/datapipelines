@@ -114,6 +114,8 @@ class LocalPasswordService(
             return ChangeResult.AccountLocked
         }
         policyViolation(newPassword)?.let { return ChangeResult.PolicyViolation(it) }
+        // #847 — a native verification fault THROWS SecretVerificationUnavailableException out of
+        // here (503), before the counter, the cache invalidation and the audit row: it is no attempt.
         if (!secretHasher.verify(credential.passwordHash, currentPassword)) {
             // Counted and audited on the SAME counter as login (auth.md §5A.3). Before this,
             // the endpoint verified the current password with no lockout, no counting and no

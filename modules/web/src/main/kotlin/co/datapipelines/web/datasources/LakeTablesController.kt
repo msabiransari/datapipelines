@@ -4,7 +4,6 @@ import co.datapipelines.application.datasources.LakeTableRegistryService
 import co.datapipelines.application.datasources.toWireMap
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiResponse
@@ -30,8 +29,8 @@ import org.springframework.web.bind.annotation.RestController
  * the D8 mutation gate, the LAKE-only refusal and the duplicate/not-found mappings are all the
  * service's.
  *
- * Scope: `author` (auth.md §7.6 — [ScopeMatrix.RestOperation.MUTATE_LAKE_TABLES]),
- * the datasource-mutation floor these operations are. Mutating a GLOBAL datasource additionally
+ * Permission: author and above (auth.md §7.6 — [Permission.LAKE_TABLE_MANAGE]).
+ * Mutating a GLOBAL datasource additionally
  * requires admin — a D8 rule the service's injected gate enforces, not a scope, so it does not
  * appear on the annotations.
  *

@@ -6,6 +6,7 @@ import co.datapipelines.calculators.CalculatorRegistry
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.LakeBrokenTable
+import co.datapipelines.datasources.ReadOnlyConnectionMode
 import co.datapipelines.datasources.ResultRowReader
 import co.datapipelines.persistence.FailureShape
 import co.datapipelines.pipeline.CalculatorInputResolver
@@ -156,6 +157,8 @@ data class NodeExecutionContext(
     val lakeLineage: co.datapipelines.pipeline.LakeExecutionLineage? = null,
     /** The one delivery node whose successful SQL must be followed by the trusted re-list. */
     val lakeDeliveryNodeId: String? = null,
+    /** [ExecuteRequest.readOnly]: DQL datasource statements run in the per-lease read-only mode (#463). */
+    val readOnly: Boolean = false,
     /** The root surface's admission check, retained through every composed child execution. */
     val pipelineAdmission: ((Pipeline, UUID, Int) -> Unit)? = null,
 )
@@ -521,10 +524,12 @@ class NodeRunner(
     /**
      * `CREATE TABLE <table> AS <sql>` on the staging connection.
      *
-     * Run through `withConnection` rather than `Staging.execute` so the statement gets a
-     * `queryTimeout` and is registered for `Statement.cancel()`: staging sets **no** timeout on
-     * `execute`/`withConnection`, so author tempdb SQL could otherwise hold its leased connection
-     * for as long as it liked with the execution timeout as the only backstop. The memory budget
+     * Run through `withConnection` rather than `Staging.execute` so the statement gets the node's
+     * `queryTimeout` and is registered for the node's `Statement.cancel()`: staging bounds
+     * `execute` and `withQuery` with its own `query-timeout-seconds` and cancels them only when the
+     * whole database closes, and it bounds **no** `withConnection` statement, so this one is the
+     * executor's to bound — otherwise author tempdb SQL could hold its leased connection for as
+     * long as it liked with the execution timeout as the only backstop. The memory budget
      * `execute` would have checked is checked explicitly afterwards ([checkStagingBudget]).
      *
      * ## Why the row count is a second statement
@@ -776,8 +781,18 @@ class NodeRunner(
             }
         return connection.use { conn ->
             when (node.type) {
+                // #463: on a read-only run the per-lease mode encloses datasourceQuery whole and owns the restore;
+                // an entry failure fails closed with the connect code (this `use` closes the lease), a restore
+                // failure after a returned query fails like a refused streaming commit.
                 NodeType.DQL -> {
-                    datasourceQuery(node, conn, bound, ctx, startedAt, resolved, datasource.dialect)
+                    ReadOnlyConnectionMode.within(
+                        connection = conn,
+                        dialect = datasource.dialect,
+                        discard = { datasourceRegistry.poolFor(datasource).discard(it) },
+                        active = ctx.readOnly,
+                        onEntryFailure = { asNodeFailure(it, NodePhase.CONNECT, node.id) },
+                        onExitFailure = SourceCommit::commitFailedSignal,
+                    ) { datasourceQuery(node, conn, bound, ctx, startedAt, resolved, datasource.dialect) }
                 }
 
                 NodeType.DML -> {
@@ -1269,8 +1284,11 @@ internal object SourceCommit {
         }
     }
 
-    /** The success-path refusal as the node's own failure: the catalogued code, the refusal as cause. */
-    private fun commitFailedSignal(refusal: Throwable): NodeFailedSignal =
+    /**
+     * The success-path refusal as the node's own failure: the catalogued code, the refusal as cause. Internal
+     * for the read-only mode's restore failure after a returned query (#463), which fails the node the same way.
+     */
+    internal fun commitFailedSignal(refusal: Throwable): NodeFailedSignal =
         NodeFailedSignal(
             MappedError(
                 code = PipelineErrorCodes.Node.COMMIT_FAILED,

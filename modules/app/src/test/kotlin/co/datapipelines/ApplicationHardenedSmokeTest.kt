@@ -1,6 +1,7 @@
 package co.datapipelines
 
 import co.datapipelines.config.SharedRedis
+import co.datapipelines.logcapture.capturingLogEvents
 import co.datapipelines.web.config.AuthoringStartupCheck
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -11,6 +12,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.client.TestRestTemplate
+import org.springframework.context.ApplicationContext
 import org.springframework.core.env.Environment
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
@@ -65,9 +67,18 @@ class ApplicationHardenedSmokeTest {
     @Autowired
     private lateinit var authoringStartupCheck: AuthoringStartupCheck
 
+    @Autowired
+    private lateinit var applicationContext: ApplicationContext
+
     @Test
     fun `a hardened deployment boots and is healthy`() {
         rest.getForEntity("/health", String::class.java).statusCode.value() shouldBe 200
+    }
+
+    /** #716: extra evidence only, when this class runs; nothing depends on it (it can skip). */
+    @Test
+    fun `the hardened context's meter registries - measured`() {
+        println("event=meter.registries shape=hardened ${meterRegistryShape(applicationContext)}")
     }
 
     /**

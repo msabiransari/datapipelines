@@ -375,8 +375,11 @@ class ApiErrorCatalogSpecDriftTest {
          * 507 → 508 with #786 U2 (recounted with [STATUS_ROW_REGEX]): §13.19 gains
          * `schedule.validation.payload_schema_unsupported` (400, the `schedule.validation.` family default), the
          * stored schema-1 payload's refusal, landed in the SAME commit as its constants.
+         * 508 → 509 with #847 (recounted with [STATUS_ROW_REGEX] on base 906a1ab4d = 508): §13.7 gains
+         * `auth.secret_verification.unavailable` (503), landed in the SAME commit as its constants and
+         * catalog row.
          */
-        const val SECTION_13_ROW_COUNT = 508
+        const val SECTION_13_ROW_COUNT = 509
 
         /**
          * §12's distinct validation codes.

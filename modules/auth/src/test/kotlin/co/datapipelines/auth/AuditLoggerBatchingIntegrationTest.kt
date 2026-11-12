@@ -2,6 +2,7 @@ package co.datapipelines.auth
 
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.IThrowableProxy
+import co.datapipelines.logcapture.SnapshotListAppender
 import co.datapipelines.persistence.BatchingConfig
 import co.datapipelines.persistence.BatchingHooks
 import co.datapipelines.persistence.BatchingWriter

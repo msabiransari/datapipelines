@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v2.112 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37) and 2026-11-11 (v2.112) rows for the deliberate breaks)
+**Status:** v2.113 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37) and 2026-11-11 (v2.112) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-11-11
+**Last updated:** 2026-11-12
 
 ---
 
@@ -2233,7 +2233,11 @@ That rule is what makes `GET` safe here, and it is not a formality: `GET` is ret
 preloaded by browsers and followed by crawlers. It is checked when the API is created and at every draft save,
 and **re-checked on every serve** of the exact pipeline version the API's current version pins. The pin never
 moves when the pipeline's current version moves: a later pipeline release reaches the URL only through a new API
-version that pins it, released or switched to explicitly.
+version that pins it, released or switched to explicitly. Every serve also runs read-only at the connection (#463): each
+`DQL` datasource statement of the pinned version and of its composed children runs in the per-lease read-only mode,
+so on the dialects marked `DATABASE` in [DAG Executor §8.2](dag-executor.md#82-error-code-mapping)'s table the
+database itself refuses a write (`pipeline.node.query_execution_failed`), and on the others the rule above and a
+SELECT-only database user remain the guard.
 
 Every path variable must name a declared parameter of that version
 (`400 endpoint.path_variable_unknown`); the pipeline may declare more, and they come from the
@@ -2951,6 +2955,7 @@ browser persistence. Clients must reject foreign/stale responses even after abor
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-12 | v2.113 | #463 read-only execution at the connection | **§19.2:** one sentence — every serve runs each DQL datasource statement of the pinned version and its children in the per-lease read-only mode; the database refuses a write on the `DATABASE` dialects of the DAG Executor §8.2 table, the rule and a SELECT-only user stay the guard elsewhere. Additive. |
 | 2026-11-11 | v2.112 | #786 U2 schedules pin exact versions — a deliberate break | **§20.1, §20.2, §20.8:** the pipeline payload is schema 2, `{"pipeline", "version": <int ≥ 1>}`: a schedule runs one exact version; `"version": "current"` (schema 1) is refused `400 schedule.validation.payload_invalid` (`details.reason=version_current_refused`), `latest` by name, a missing or non-integer version too; the pin must exist (`target_not_found`) and be eligible under the posture (`target_not_released`). `payload_schema_version` reads `2`; a leftover schema-1 row is refused `400 schedule.validation.payload_schema_unsupported` on update, unblock and Run now. The upgrade converts every live schedule in place (only the version selector changes). A pin-changing update joins the create's writer guard. |
 | 2026-11-11 | v2.111 | #786 U1 R1 (API versions — guarded entity deletion) | **§19.5:** `DELETE /api/v1/endpoints` is the guarded entity deletion — an API holding a RELEASED (current or not) or DISCARDED version is refused `409 endpoint.version.last_release` with nothing removed (entity, pointer, versions, bindings); a draft-only API and a legacy row are deleted as before. MCP `endpoints_delete` answers the same ([MCP §6.2.26](mcp-server.md#6226-endpoints_delete)). A new refusal on an existing route; no route, field or permission change. |
 | 2026-11-10 | v2.110 | #841 metadata writer protocol (G0) — renumbered at merge after #860's v2.109 | **§9, §19, §20.2, §20.5:** datasource writes (register, update, credential, delete, grant, revoke), endpoint publish/unpublish, a schedule create and a target-changing schedule edit run under the metadata writer guard (release-dependencies design §4.4); an exhausted wait is `409 datasource.write.busy` / `endpoint.write.busy` / `schedule.write.busy` (`details.lock_wait_seconds`, nothing written). A schedule create validates its target under the guard. Additive: new refusals on existing routes, no route or field change. |

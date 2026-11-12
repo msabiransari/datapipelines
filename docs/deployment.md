@@ -1,9 +1,9 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.69
+**Status:** v1.70
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-11-11
+**Last updated:** 2026-11-12
 
 ---
 
@@ -30,13 +30,13 @@ This is **lighter than the core specs** — most operational concerns are the op
 
 ### 3.1 Docker image
 
-Published to `ghcr.io/datapipelines/datapipelines:{version}` and `docker.io/datapipelines/datapipelines:{version}` (mirror).
+**Distribution.** This repository does not publish the image to a registry: its workflows are read-only and no script pushes. Build it from a checkout (`./app.sh --start`, or `./gradlew :modules:app:bootJar` and `docker build -t datapipelines:local .`) and point `deploy/compose.local-build.yml` (`IMAGE_TAG`) or the chart's `image.repository` and `image.tag` at it. The reference `deploy/compose.yml` and the chart default to `ghcr.io/datapipelines/datapipelines:1.0.0`, a name nothing in this repository produces.
 
 - **Base image**: `eclipse-temurin:21-jre` (the Ubuntu glibc JRE 21 image, chosen over a smaller alpine base because argon2-jvm loads its native library through JNA, which ships glibc binaries).
 - **Layers**: single stage: the boot jar is built on the host (`./gradlew :modules:app:bootJar`) and copied in; the image adds the DuckDB extension bundle, the GraalJS isolate with its pre-installed resource cache, and the third-party notices file.
 - **Bundled DuckDB extensions (dp-lake)**: `httpfs`, `aws`, `iceberg` and `avro` for DuckDB core v1.5.5, pre-populated under `/opt/duckdb/extensions/v1.5.5/<platform>/` (`<platform>` = `linux_amd64` or `linux_arm64`, following the build's `TARGETARCH`) and activated by the image's `ENV DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY` — a LAKE datasource `LOAD`s them from disk and never `INSTALL`s at runtime, so no egress to `extensions.duckdb.org` is needed ([Configuration §3.25](configuration.md)). Adds ~108 MB uncompressed (~39 MB downloaded at build). The eight decompressed binaries (four per platform) are pinned in `deploy/duckdb-extensions.sha256`; the extension build layer runs `sha256sum -c --ignore-missing --strict` before `USER` and refuses a mismatch. `/app/THIRD-PARTY-NOTICES` includes the extensions at their footer commits, their copyrights and licences, and their pinned linked closure: direct and transitive vcpkg ports, the DuckDB core `third_party` components, and code bundled inside ports (the committed closure files and re-pin procedure are described below).
 - **Size target**: < 250 MB compressed.
-- **User**: non-root (`datapipelines`, a system account created with `useradd --system`; no fixed UID — a chart or compose `runAsUser` must not assume 1000).
+- **User**: non-root `datapipelines`, a system account with fixed ids: UID 999, GID 999 (`groupadd --system --gid 999`, `useradd --system --uid 999`, Dockerfile); the reference chart's application Deployment pins `runAsUser`/`runAsGroup`/`fsGroup` to 999 (`ImageUserPinSpecDriftTest` holds the three equal), and a pod that runs the application under its own numeric user names 999; Compose sets no `user:` and inherits the image account (the egress renderer's no-override rule, §4.3, is unchanged); the chart's `egress-config-render` init container is the one deliberate exception — it runs this image as 65532 with an `fsGroup`-backed `emptyDir`.
 - **Entrypoint**: `["java", "-Dpolyglot.engine.userResourceCache=/opt/graaljs/resources", "-jar", "/app/datapipelines.jar"]` (exec form). The image defines no JVM-flags hook: a JVM option variable (`JAVA_TOOL_OPTIONS` and friends) would reach the JVM without one, which is why the shipped deploy files refuse those names (§6.4, §9).
 
 **Bumping DuckDB (the runbook, #781).** The version catalog's `duckdb-jdbc`
@@ -1688,6 +1688,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-12 | v1.70 | #753/#754 image account ids and distribution | **§3.1:** the image's `datapipelines` account has fixed ids, UID/GID 999 (the id the unpinned system account already received), and the reference chart's application pod `securityContext` pins `runAsUser`/`runAsGroup`/`fsGroup` to the same 999 instead of 1000, an id the image never had; `ImageUserPinSpecDriftTest` holds the Dockerfile, the chart and this bullet equal. Chart 0.4.0 → 0.4.1. The section no longer claims a registry publish: nothing in this repository pushes the image; build it from a checkout and point Compose or the chart at it. |
 | 2026-11-11 | v1.69 | #889 demo API retirement through the lifecycle | **Appendix B, the demo API:** where authoring is enabled, blanking the key (or a manifest that drops a path) retires a released demo API through the API version verbs — draft purged, every released version discarded, the row kept; the revoked demo key gets `401`, another valid bound key `503 endpoint.pipeline_not_released` — instead of deleting it; a key set again releases a new version of the same API. Where authoring is disabled the managed key is revoked but the API is not retired and keeps serving to other valid bound keys — a known limitation tracked by #897, with the operator's workaround. |
 | 2026-11-11 | v1.68 | #786 schedules pin exact versions (U2) | **§8.2:** schedules join the upgrade's in-place conversion — each live schema-1 schedule (and its queued runs) is pinned to the version CURRENT names, only the version selector changing; a schedule whose pipeline has no current version refuses the start with `kind=schedule` lines; both kinds are checked before anything is written. |
 | 2026-11-10 | v1.67 | #786 API versions, exact pins (U1) | **§8.2:** the upgrade to API versions — stop the one server, apply, read the conversion report, or the refusal list with its fix (release the pipeline or delete the API on the previous version, then upgrade). No floor, no `Recreate`. Schedules join the same step in #786's second unit. |

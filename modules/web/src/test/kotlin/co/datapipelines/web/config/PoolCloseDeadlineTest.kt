@@ -5,7 +5,7 @@ import co.datapipelines.datasources.pooling.ConnectionPool
 import co.datapipelines.datasources.pooling.ManagedLakeGeneration
 import co.datapipelines.datasources.pooling.PoolCloser
 import co.datapipelines.datasources.pooling.PoolLifecycleMetrics
-import co.datapipelines.web.capturingLogEvents
+import co.datapipelines.logcapture.capturingLogEvents
 import com.zaxxer.hikari.HikariDataSource
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe

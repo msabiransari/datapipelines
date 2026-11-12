@@ -356,6 +356,10 @@ open class ApiKeyService(
     /**
      * Argon2id verify of the full key against the stored hash (§7.3 step 6), through
      * the per-key outcome cache so the hash cost is paid once per TTL (AUTH-SEC-3).
+     *
+     * A native verification fault (#847) throws [SecretVerificationUnavailableException] out of
+     * the verifier: [AuthCache.verifiedSecret] admits only a returned `true`, so nothing is cached,
+     * and no [ApiKeyInvalidException] is raised — the caller's boundary answers 503.
      */
     private fun verifySecret(
         record: ApiKey,

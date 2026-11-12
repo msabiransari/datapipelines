@@ -144,19 +144,36 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
     // datasource/API/schedule identities never get a permanent pipeline-specific home. An entry here is the change
     // a reviewer must refuse; DependencyContractBoundaryTest fences the import side.
     ":modules:dependency-contract" to emptySet(),
+    // #756 — layer 0, TEST-ONLY: the shared Logback snapshot capture (module-structure §5.23). Logback only; every
+    // edge INTO it is a `testImplementation`, which verifyModuleDependencies enforces (testOnlyModules below).
+    ":modules:log-capture" to emptySet(),
     // #266 — layer 0 beside typesystem: the generic batching writer (an ordered, bounded group
-    // commit in front of a store). Stdlib, coroutines and slf4j only; the stores' sinks live with
-    // the modules that own the stores (`auth`, `web`). An entry here would teach the primitive
-    // about a store, which is the thing it exists not to know.
-    ":modules:persistence" to emptySet(),
+    // commit in front of a store). Its main sources use stdlib, coroutines and slf4j only; the stores'
+    // sinks live with the modules that own the stores (`auth`, `web`). A production dependency here
+    // would teach the primitive about a store, which is the thing it exists not to know.
+    ":modules:persistence" to setOf(
+        // #756 — test-only: the shared log capture (module-structure §5.23).
+        ":modules:log-capture",
+    ),
     ":modules:pipeline-contract" to setOf(":modules:typesystem", ":modules:calculators"),
     ":modules:templates" to setOf(":modules:typesystem", ":modules:pipeline-contract", ":modules:scripting"),
     // `persistence` since #336: FailureShape for the lease's cleanup WARNs (module-structure §5.4).
-    ":modules:datasources" to setOf(":modules:typesystem", ":modules:persistence"),
+    ":modules:datasources" to setOf(
+        ":modules:typesystem",
+        ":modules:persistence",
+        // #756 — test-only: the shared log capture (module-structure §5.23).
+        ":modules:log-capture",
+    ),
     ":modules:staging" to setOf(":modules:typesystem"),
     // #266 — the audit log's batching writer (module-structure §5.19); #504b adds `pipeline-contract`
     // for the shared SearchNeedle rule alone, one published object, boundary-tested like the scheduler's.
-    ":modules:auth" to setOf(":modules:typesystem", ":modules:pipeline-contract", ":modules:persistence"),
+    ":modules:auth" to setOf(
+        ":modules:typesystem",
+        ":modules:pipeline-contract",
+        ":modules:persistence",
+        // #756 — test-only: the shared log capture (module-structure §5.23).
+        ":modules:log-capture",
+    ),
     // #9 scheduler — the durable occurrence engine (scheduler design revision §6.2). Pipeline-agnostic
     // by construction: `pipeline-contract` is allowed for the published name grammar alone (A2), and
     // the module's own SchedulerBoundaryTest refuses every other pipeline import. No `dag`, `auth`
@@ -176,6 +193,8 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         ":modules:pipeline-contract",
         ":modules:scheduler",
         ":modules:auth",
+        // #756 — test-only: the shared log capture (module-structure §5.23).
+        ":modules:log-capture",
     ),
     ":modules:dag" to setOf(
         ":modules:typesystem",
@@ -192,6 +211,8 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         // #321 — `FailureShape` only: the stale sweep's and the event retention's failure lines name a
         // store failure by its class and SQLState. `dag` does not sit on the batching writer (§4.2 note).
         ":modules:persistence",
+        // #756 — test-only: the shared log capture (module-structure §5.23).
+        ":modules:log-capture",
     ),
     // #194 lane B (parameter-engine record §2.2/§2.4) — the parameter engine, layer 4 beside `dag`.
     // `pipeline-contract` is compiled against (TemplateRef, the name grammars, the template/datasource
@@ -204,6 +225,8 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         ":modules:pipeline-contract",
         ":modules:templates",
         ":modules:datasources",
+        // #756 — test-only: the shared log capture (module-structure §5.23).
+        ":modules:log-capture",
     ),
     // #10 dashboards (implementation spec §1, record D29) — the two documents (visualizations and
     // dashboards), their readers/validators, repositories, lifecycle and transfer. Layer 5, above
@@ -278,9 +301,12 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         // #868 G1 — the release wiring assembles the production family registry, the GraphLimits object and the
         // ReleasePlanningDeadline seam (web/release/ReleaseConfiguration).
         ":modules:dependency-contract",
+        // #756 — test-only: the shared log capture (module-structure §5.23).
+        ":modules:log-capture",
     ),
-    ":modules:app" to setOf(":modules:web"),
-    ":tests:integration-tests" to setOf(":modules:app"),
+    // #756 — test-only `log-capture` on both (module-structure §5.23).
+    ":modules:app" to setOf(":modules:web", ":modules:log-capture"),
+    ":tests:integration-tests" to setOf(":modules:app", ":modules:log-capture"),
     ":tests:browser-tests" to setOf(":modules:app", ":modules:web"),
 )
 
@@ -338,7 +364,7 @@ fun parseLayeringDiagram(docText: String): String {
 
 val verifyModuleDependencies = tasks.register("verifyModuleDependencies") {
     group = "verification"
-    description = "Fails if any module declares a project dependency outside its module-structure.md §4.2 row, if the §4.2 table and this build's map disagree, or if a §4.2 module is absent from the §4.1 diagram."
+    description = "Fails if any module declares a project dependency outside its module-structure.md §4.2 row, if a test-only module is declared outside a test configuration, if the §4.2 table and this build's map disagree, or if a §4.2 module is absent from the §4.1 diagram."
 
     val moduleStructureDoc = layout.projectDirectory.file("docs/module-structure.md")
     inputs.file(moduleStructureDoc)
@@ -361,10 +387,34 @@ val verifyModuleDependencies = tasks.register("verifyModuleDependencies") {
                 }
                 .toSet()
         }
+    // #756 — modules that exist for test sources only (module-structure §4.2 note, §5.23). An edge
+    // into one from a configuration whose name does not start with `test` would put test tooling
+    // on a production classpath. Snapshotted here like `declared`, with the SAME exclusion: only the
+    // Kover plugin's own self-edge in its exact plumbing configurations is skipped — a cross-module
+    // `kover(project(":modules:log-capture"))` is still a violation.
+    val testOnlyModules = setOf(":modules:log-capture")
+    val nonTestEdgesIntoTestOnly: List<String> = subprojects
+        .filter { it.buildFile.exists() }
+        .flatMap { sub ->
+            sub.configurations
+                .filterNot { it.name.startsWith("test") }
+                .flatMap { cfg ->
+                    val isKoverPlumbing = cfg.name in koverPlumbingConfigurations
+                    cfg.dependencies.withType(ProjectDependency::class.java)
+                        .filterNot { isKoverPlumbing && it.path == sub.path }
+                        .filter { it.path in testOnlyModules }
+                        .map { dep ->
+                            "${sub.path} declares ${dep.path} in its '${cfg.name}' configuration, but ${dep.path} " +
+                                "is test-only — declare it with testImplementation (§4.2 note)"
+                        }
+                }
+        }
+        .sorted()
     val allowed = allowedInternalDependencies
 
     doLast {
         val violations = mutableListOf<String>()
+        violations += nonTestEdgesIntoTestOnly
         declared.forEach { (modulePath, deps) ->
             val row = allowed[modulePath]
             if (row == null) {
