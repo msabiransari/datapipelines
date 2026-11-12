@@ -671,8 +671,141 @@ class PromoterLensSweepTest {
         }
     }
 
+    /**
+     * #875 (record erratum (8)(b)): the lens decides the tree's ROOT only. Each lensed family's admitted root answers its
+     * tree; the visible `lp/pins_hidden` answers a COMPLETE tree that carries the hidden `lt/behind.sql` it pins (kept out
+     * of test 1's leak scan for exactly that reason); a visible API's older version pinning a hidden pipeline answers
+     * exactly as an absent API (the version read decides, not the entity read); a schedule on a hidden pipeline answers
+     * exactly as an absent id while one on a visible pipeline answers; and the datasource route has no lens — the
+     * promoter's answer is the author's.
+     */
     @Test
     @Order(7)
+    fun `as the promoter a tree route admits the root its family's read admits, and the admitted tree is whole`() {
+        ensureSeeded()
+        val promoter = sessionFor(PROMOTER)
+        DependencyTreeQueries.LENSED.contains("datasource") shouldBe false
+        VISIBLE_TREE_ROOTS.forEach { (family, root) ->
+            val path = DependencyTreeQueries.path(family, root.first, root.second)
+            withClue("GET $path") { call(path, promoter).status shouldBe HTTP_OK }
+        }
+        hiddenTreeRootsAnswerAsAbsent(promoter)
+        val pins = getJson(DependencyTreeQueries.path("pipeline", "$P/pins_hidden", 1), promoter).path("data")
+        withClue("the admitted root's tree is whole: the hidden template it pins rides, resolved") {
+            pins.path("complete").asBoolean() shouldBe true
+            pins.path("nodes").any {
+                it.path("family").asText() == "template" && it.path("name").asText() == "$T/behind.sql" &&
+                    it.path("resolution").asText() == "resolved"
+            } shouldBe true
+        }
+
+        // A visible API's OLDER version pinning a hidden pipeline: the API is admitted, that version is not — its own
+        // version read refuses it, and so does its tree (the entity read alone would have admitted it).
+        addEndpointVersion(VISIBLE_ENDPOINT, version = 2, pipeline = "$P/behind", pipelineVersion = 1)
+        val olderApi = call(DependencyTreeQueries.path("api_endpoint", "/api$VISIBLE_ENDPOINT", 2), promoter)
+        val absentApi = call(DependencyTreeQueries.path("api_endpoint", "/api/lens/v1/nobody_owns_this", 2), promoter)
+        withClue("a visible API's version pinning a hidden pipeline is the absent API's 404") {
+            olderApi.status shouldBe HTTP_NOT_FOUND
+            olderApi.fingerprint shouldBe absentApi.fingerprint
+        }
+        withClue("the author reads that version's tree — the pair above was not vacuous") {
+            call(DependencyTreeQueries.path("api_endpoint", "/api$VISIBLE_ENDPOINT", 2), sessionFor(AUTHOR)).status shouldBe HTTP_OK
+        }
+
+        val hiddenSchedule = authorSchedule("lsch/hidden_behind", "$P/behind", 1)
+        val visibleSchedule = authorSchedule("lsch/visible_newer", "$P/newer", 3)
+        val hidden = call(DependencyTreeQueries.path("schedule", hiddenSchedule), promoter)
+        val absent = call(DependencyTreeQueries.path("schedule", ABSENT_UUID), promoter)
+        withClue("a schedule on a hidden pipeline is the absent id's 404, byte for byte") {
+            hidden.status shouldBe HTTP_NOT_FOUND
+            hidden.fingerprint.replace(hiddenSchedule, "") shouldBe absent.fingerprint
+        }
+        withClue("a schedule on a visible pipeline answers its tree") {
+            call(DependencyTreeQueries.path("schedule", visibleSchedule), promoter).status shouldBe HTTP_OK
+        }
+        withClue("the author, who is not lensed, gets the hidden schedule's tree — the pair above was not vacuous") {
+            call(DependencyTreeQueries.path("schedule", hiddenSchedule), sessionFor(AUTHOR)).status shouldBe HTTP_OK
+        }
+
+        val datasource = DependencyTreeQueries.path("datasource", "tempdb")
+        withClue("GET $datasource: no lens, so the promoter's answer is the author's") {
+            val mine = call(datasource, promoter)
+            val authors = call(datasource, sessionFor(AUTHOR))
+            mine.status shouldBe authors.status
+            // A tree carries its own observed_at; the nodes are what a lens would have changed.
+            if (mine.status == HTTP_OK) {
+                MAPPER.readTree(mine.body).path("data").path("nodes") shouldBe MAPPER.readTree(authors.body).path("data").path("nodes")
+            } else {
+                mine.fingerprint shouldBe authors.fingerprint
+            }
+        }
+    }
+
+    /**
+     * #875 §12, no oracle: the sweep's differential compares a 404 by status only (other routes' refusals may echo the
+     * id); a tree route's not-found names nothing, so each lensed family's hidden root answers the absent root's WHOLE
+     * body, byte for byte but the correlation id.
+     */
+    private fun hiddenTreeRootsAnswerAsAbsent(promoter: (RequestSpecification) -> RequestSpecification) {
+        HIDDEN_TREE_ROOTS.forEach { (family, roots) ->
+            roots.forEach { (key, version) ->
+                val hidden = call(DependencyTreeQueries.path(family, key, version), promoter)
+                val absent = call(DependencyTreeQueries.path(family, absentTreeKey(family), version), promoter)
+                withClue("$family $key@$version: the hidden root's 404 is the absent root's, byte for byte") {
+                    hidden.status shouldBe HTTP_NOT_FOUND
+                    hidden.body.replace(CORRELATION_ID, "") shouldBe absent.body.replace(CORRELATION_ID, "")
+                }
+            }
+        }
+        withClue("the author reads a hidden root's tree — the pairs above were not vacuous") {
+            call(DependencyTreeQueries.path("pipeline", "$P/behind", 1), sessionFor(AUTHOR)).status shouldBe HTTP_OK
+        }
+    }
+
+    /** #875: a RELEASED, non-current version of [path]'s API pinning [pipeline] — the current pointer does not move. */
+    private fun addEndpointVersion(
+        path: String,
+        version: Int,
+        pipeline: String,
+        pipelineVersion: Int,
+    ) {
+        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute(
+                    "INSERT INTO published_endpoint_versions (endpoint_id, version, status, pipeline_name, pipeline_version, " +
+                        "timeout_seconds, description, body_hash, released_at, released_by, created_by) " +
+                        "SELECT e.id, $version, 'RELEASED', '$pipeline', $pipelineVersion, e.timeout_seconds, e.description, " +
+                        "'lens-older-$version', NOW(), e.created_by, e.created_by FROM published_endpoints e " +
+                        "WHERE e.workspace_id = '$WS_ID' AND e.path_pattern = '$path'",
+                )
+            }
+        }
+    }
+
+    /** #875: a schedule authored through REST as the lens walk's author, on a released pipeline; its id. */
+    private fun authorSchedule(
+        name: String,
+        pipeline: String,
+        version: Int,
+    ): String {
+        val response =
+            sessionFor(AUTHOR)(given().port(port))
+                .cookie(CSRF_COOKIE, CSRF)
+                .header(CSRF_HEADER, CSRF)
+                .contentType(ContentType.JSON)
+                .body(
+                    """{"name": "$name", "payload": {"pipeline": "$pipeline", "version": $version},
+                       "cron": "0 3 * * *", "timezone": "UTC"}""",
+                ).`when`()
+                .post("/api/v1/schedules")
+                .then()
+                .extract()
+        withClue("create schedule $name: ${response.asString().take(LEAK_EXCERPT)}") { response.statusCode() shouldBe HTTP_CREATED }
+        return response.jsonPath().getString("data.id")
+    }
+
+    @Test
+    @Order(8)
     fun `with the target unreachable the promoter sees nothing, is told once per window, and the counter moved`() {
         ensureSeeded()
         // A snapshot (#484): the booted application's threads log while the capture is attached.
@@ -756,6 +889,14 @@ class PromoterLensSweepTest {
      */
     private fun identifierPairs(route: Route): List<Pair<String, String>> =
         when {
+            // #875: a tree route names its root in the query; each hidden root of its family against an absent one.
+            DependencyTreeQueries.familyOf(route.pattern) != null -> {
+                val family = requireNotNull(DependencyTreeQueries.familyOf(route.pattern))
+                HIDDEN_TREE_ROOTS[family].orEmpty().map { (key, version) ->
+                    DependencyTreeQueries.path(family, key, version) to DependencyTreeQueries.path(family, absentTreeKey(family))
+                }
+            }
+
             "{id}" in route.pattern && "pipelines" in route.pattern -> {
                 HIDDEN_PIPELINE_IDS.map { substitute(route.pattern, it.toString(), ABSENT_NAME) to route.path }
             }
@@ -767,6 +908,15 @@ class PromoterLensSweepTest {
             else -> {
                 emptyList()
             }
+        }
+
+    /** #875: a well-formed root of [family] that exists nowhere — the tree differential's control. */
+    private fun absentTreeKey(family: String): String =
+        when (family) {
+            "template" -> "$ABSENT_NAME.sql"
+            "api_endpoint" -> "/api/lens/v1/nobody_owns_this"
+            "schedule" -> ABSENT_UUID
+            else -> ABSENT_NAME
         }
 
     /** `(pattern, "Class#method")` for every GET handler, off `RequestMappingHandlerMapping` by reflection. */
@@ -999,6 +1149,7 @@ class PromoterLensSweepTest {
         private const val API_KEY_HEADER = "DP-API-Key"
         private const val SECRET_BYTES = 32
         private const val HTTP_OK = 200
+        private const val HTTP_CREATED = 201
         private const val HTTP_BAD_REQUEST = 400
         private const val HTTP_FORBIDDEN = 403
         private const val HTTP_NOT_FOUND = 404
@@ -1094,6 +1245,31 @@ class PromoterLensSweepTest {
         private val HIDDEN_VISUALIZATIONS = listOf("$V/draft_only", "$V/only_hidden_pin")
         private const val HIDDEN_ENDPOINT = "/lens/v1/hidden_behind"
         private const val VISIBLE_ENDPOINT = "/lens/v1/visible_newer"
+
+        /**
+         * #875: every seeded root the lens hides, by tree family, at the version its row holds — test 1 pairs each with an
+         * absent root. Schedules are authored by test 7 (no SQL seed carries one); a datasource has no lens.
+         */
+        private val HIDDEN_TREE_ROOTS: Map<String, List<Pair<String, Int>>> =
+            mapOf(
+                "pipeline" to listOf("$P/draft_only" to 1, "$P/on_target_same" to 2, "$P/behind" to 1),
+                "template" to listOf("$T/draft_only.sql" to 1, "$T/on_target_same.sql" to 2, "$T/behind.sql" to 1),
+                "parameter_set" to listOf("$S/draft_only" to 1, "$S/on_target_same" to 1),
+                "visualization" to listOf("$V/draft_only" to 1, "$V/only_hidden_pin" to 1),
+                "dashboard" to listOf("$D/draft_only" to 1, "$D/on_target_same" to 1),
+                "api_endpoint" to listOf("/api$HIDDEN_ENDPOINT" to 1),
+            )
+
+        /** #875: one admitted root per lensed artifact family, at its released version — each must answer its tree. */
+        private val VISIBLE_TREE_ROOTS: Map<String, Pair<String, Int>> =
+            mapOf(
+                "pipeline" to ("$P/newer" to 3),
+                "template" to ("$T/newer.sql" to 3),
+                "parameter_set" to ("$S/absent_there" to 1),
+                "visualization" to ("$V/absent_there" to 1),
+                "dashboard" to ("$D/absent_there" to 1),
+                "api_endpoint" to ("/api$VISIBLE_ENDPOINT" to 1),
+            )
 
         /** Everything a promoter's answer must never carry: the hidden names, ids and the hidden endpoint's path. */
         private val HIDDEN_TOKENS: List<String> =

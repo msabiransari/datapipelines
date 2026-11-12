@@ -191,6 +191,47 @@ class WireContractTest {
     }
 
     @Test
+    fun `unmet_names is optional, never empty, never null, never a duplicate, and only on a parameter_names constraint`() {
+        val data = WireFiles.validator()
+        val golden = WireFiles.data.getValue(UNMET_GOLDEN)
+        val unmet = golden.items("edges").flatMap { it.items("constraints") }.filter { it.has("unmet_names") }
+        withClue("the golden carries the property it exists for") { unmet.size shouldBe 1 }
+        unmet.forEach { c ->
+            val names = c.items("names").map { it.asText() }
+            val missing = c.items("unmet_names").map { it.asText() }
+            withClue("a subset of names, in names' order") { missing shouldBe names.filter { it in missing } }
+        }
+        val refused =
+            mapOf<String, (ObjectNode) -> Unit>(
+                "empty" to { it.putArray("unmet_names") },
+                "null" to { it.putNull("unmet_names") },
+                "duplicate" to { it.putArray("unmet_names").add("since").add("since") },
+                "blank name" to { it.putArray("unmet_names").add("") },
+                "64 characters" to { it.putArray("unmet_names").add("a".repeat(64)) },
+            )
+        refused.forEach { (case, edit) ->
+            val changed = golden.deepCopy<JsonNode>()
+            edit(constraintOf(changed, "parameter_names"))
+            withClue("unmet_names $case") { data.validate(changed).shouldNotBeEmpty() }
+        }
+        val elsewhere = WireFiles.data.getValue("constraint-datasource-access-read").deepCopy<JsonNode>()
+        constraintOf(elsewhere, "datasource_access").putArray("unmet_names").add("region")
+        withClue("unmet_names on a datasource_access constraint") { data.validate(elsewhere).shouldNotBeEmpty() }
+        val sixtyThree = golden.deepCopy<JsonNode>()
+        constraintOf(sixtyThree, "parameter_names").putArray("unmet_names").add("a".repeat(63))
+        withClue("63 characters is the native bound") { data.validate(sixtyThree).shouldBeEmpty() }
+    }
+
+    private fun constraintOf(
+        payload: JsonNode,
+        kind: String,
+    ): ObjectNode =
+        payload
+            .items("edges")
+            .flatMap { it.items("constraints") }
+            .first { it.path("kind").asText() == kind } as ObjectNode
+
+    @Test
     fun `every node carries entity_id - a string exactly when it resolved, one id per object - counted`() {
         var resolved = 0
         var unresolved = 0
@@ -260,6 +301,9 @@ class WireContractTest {
         /** Non-vacuity floors of the entity_id scan: the corpus has 90 resolved and 2 non-resolved nodes (#890). */
         const val MIN_RESOLVED_NODES = 41
         const val MIN_UNRESOLVED_NODES = 2
+
+        /** #892 (erratum (11)): the one golden carrying `unmet_names`. */
+        const val UNMET_GOLDEN = "constraint-parameter-names-unmet"
     }
 }
 

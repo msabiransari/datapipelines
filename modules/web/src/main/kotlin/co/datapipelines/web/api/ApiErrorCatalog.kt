@@ -143,6 +143,9 @@ object ApiErrorCatalog {
             // #464 §13.24 — the navigation trees: the family's one caller refusal is the invalid
             // request or continuation (400); the two 503s are explicit rows below.
             "navigation." to HttpStatus.BAD_REQUEST,
+            // #875 — the dependency trees: the family's one caller refusal is the invalid request (400); the two 503s are
+            // explicit rows below. A hidden or absent root answers its own family's not-found, never a code here.
+            "dependencies." to HttpStatus.BAD_REQUEST,
         )
 
     /** Every code whose status differs from its family default (§13, rest-api §7.6). */
@@ -201,6 +204,11 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Navigation.VIEW_UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
             // #464 §13.24 — one node's metadata alone exceeds the page budget: no page can carry it.
             PipelineErrorCodes.Navigation.METADATA_TOO_LARGE to HttpStatus.SERVICE_UNAVAILABLE,
+            // #875 — the metadata walk ran out of its deadline or a provider read failed: retryable, `Retry-After`
+            // ([retryAfterSeconds]), never a partial tree.
+            PipelineErrorCodes.Dependencies.METADATA_UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
+            // #875 — the projected tree is over `max-wire-bytes` even reduced to its roots: a configuration defect.
+            PipelineErrorCodes.Dependencies.RESPONSE_TOO_LARGE to HttpStatus.SERVICE_UNAVAILABLE,
             // §12's duplicate_name row documents HTTP 409 ("mapped from the UNIQUE constraint").
             PipelineErrorCodes.Validation.DUPLICATE_NAME to HttpStatus.CONFLICT,
             PipelineErrorCodes.Import.VERSION_CONFLICT to HttpStatus.CONFLICT,
@@ -595,12 +603,14 @@ object ApiErrorCatalog {
      * derives from somebody else's machine, logged at WARN without a stack. Unlike
      * [CALLER_DOWNSTREAM_DOWN] there is no cause chain to summarize: the refusal is thrown
      * deliberately, after the view reported why. `navigation.metadata.too_large` is deliberately
-     * NOT here — a node over the page budget is a server-side defect and keeps its stack.
+     * NOT here — a node over the page budget is a server-side defect and keeps its stack. The same split holds for the
+     * dependency trees (#875): `dependencies.metadata.unavailable` is here, `dependencies.response.too_large` is not.
      */
     val EXPECTED_UNAVAILABLE: Set<String> =
         // #786 E.3 — beside the view, the release-planning deadline's refusal, one per family (record §25.4: WARN
         // without stack).
-        setOf(PipelineErrorCodes.Navigation.VIEW_UNAVAILABLE) + RELEASE_METADATA_UNAVAILABLE
+        setOf(PipelineErrorCodes.Navigation.VIEW_UNAVAILABLE, PipelineErrorCodes.Dependencies.METADATA_UNAVAILABLE) +
+            RELEASE_METADATA_UNAVAILABLE
 
     /** #786 E.3 — every family's `<family>.release.metadata_unavailable` (record §25.4, erratum (6)). */
     private val RELEASE_METADATA_UNAVAILABLE: Set<String>
@@ -614,7 +624,10 @@ object ApiErrorCatalog {
                 PipelineErrorCodes.Endpoint.RELEASE_METADATA_UNAVAILABLE,
             )
 
-    /** The `Retry-After` the navigation view 503 answers (#464 §13.24): a constant, never derived from input. */
+    /**
+     * The `Retry-After` the navigation view 503 answers (#464 §13.24): a constant, never derived from input. The
+     * dependency trees' metadata 503 (#875) answers the same wait.
+     */
     const val RETRY_AFTER_VIEW_UNAVAILABLE_SECONDS = 5
 
     /** The `Retry-After` a release-planning deadline 503 answers (#786 E.3, record §25.4): a constant. */
@@ -624,6 +637,7 @@ object ApiErrorCatalog {
     fun retryAfterSeconds(code: String): Int? =
         when (code) {
             PipelineErrorCodes.Navigation.VIEW_UNAVAILABLE -> RETRY_AFTER_VIEW_UNAVAILABLE_SECONDS
+            PipelineErrorCodes.Dependencies.METADATA_UNAVAILABLE -> RETRY_AFTER_VIEW_UNAVAILABLE_SECONDS
             in RELEASE_METADATA_UNAVAILABLE -> RETRY_AFTER_RELEASE_METADATA_SECONDS
             else -> null
         }
@@ -711,6 +725,8 @@ object ApiErrorCatalog {
             // #464 §13.24 — the family line is the 400's: the cursor or the folder it named is stale,
             // and reloading the tree is the remedy. The two 503s carry their own overrides.
             "navigation." to "The navigation tree changed under you. Reload it and try again.",
+            // #875 — the family line is the 400's: the link or address that asked for the tree is malformed.
+            "dependencies." to "That dependency view link isn't valid. Open the object again and retry.",
             // #785 §13.25 — the managed lake's fence: another operation holds the table, or the catalog is
             // being restored. Never returned live in P2 (NEVER_RETURNED_LIVE); the line is the manual's.
             // #798 §13.25 — the definitions' family line, placed BEFORE `lake.` (the first matching prefix wins).
@@ -794,6 +810,11 @@ object ApiErrorCatalog {
                 "The navigation view isn't available right now. Try again in a few seconds.",
             PipelineErrorCodes.Navigation.METADATA_TOO_LARGE to
                 "One item here has too much to list on one page. Quote the correlation id when reporting this.",
+            // #875 — the dependency trees' two 503s: an outage to wait out, and a tree over the response budget.
+            PipelineErrorCodes.Dependencies.METADATA_UNAVAILABLE to
+                "The dependencies couldn't be read right now. Try again in a few seconds.",
+            PipelineErrorCodes.Dependencies.RESPONSE_TOO_LARGE to
+                "This object has too many dependencies to show at once. Quote the correlation id when reporting this.",
             PipelineErrorCodes.Datasource.DUPLICATE_NAME to
                 "A connection with that name already exists. Pick a different name.",
             PipelineErrorCodes.Datasource.NOT_FOUND to

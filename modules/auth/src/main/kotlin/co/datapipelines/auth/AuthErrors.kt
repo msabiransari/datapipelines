@@ -254,6 +254,8 @@ object AuthErrorCodes {
             "navigation." to "1324-navigation-trees",
             // #785 — the managed lake's catalog fence (§13.25), anchored with the family (the 194b lesson).
             "lake." to "1325-managed-lake",
+            // #875 — the dependency trees' refusals (§13.26), anchored with the family (the 194b lesson).
+            "dependencies." to "1326-dependency-trees",
         )
 }
 

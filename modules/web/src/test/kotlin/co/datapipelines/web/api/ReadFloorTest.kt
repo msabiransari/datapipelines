@@ -55,6 +55,14 @@ class ReadFloorTest {
         wrong.joinToString("\n").also { withClue(it) { wrong.shouldBeEmpty() } }
     }
 
+    /** #875: a dependency tree route is its own family, never the family whose word is its segment. */
+    @Test
+    fun `the dependency tree routes classify as their own family`() {
+        familyOf("/api/v1/dependencies/parameter_set") shouldBeFamily Family.DEPENDENCY_TREES
+        familyOf("/api/v1/dependencies/dashboard") shouldBeFamily Family.DEPENDENCY_TREES
+        familyOf("/api/v1/dependencies/pipeline") shouldBeFamily Family.DEPENDENCY_TREES
+    }
+
     /** Non-vacuity: every family classifies the handlers it exists for. */
     @Test
     fun `every family actually classifies handlers`() {
@@ -149,6 +157,27 @@ class ReadFloorTest {
         val permissions: Set<Permission>,
         val matches: (String) -> Boolean,
     ) {
+        /**
+         * #875 (G4) — the eight dependency tree routes, `GET /api/v1/dependencies/<family>`: each declares its OWN
+         * family's READ (design record erratum (8)(a)), so the family admits exactly those eight and its floor is the
+         * eight routes. FIRST, so no family below can claim a tree route by a substring of its family segment.
+         */
+        DEPENDENCY_TREES(
+            floor = 8,
+            permissions =
+                setOf(
+                    Permission.PIPELINE_READ,
+                    Permission.TEMPLATE_READ,
+                    Permission.PARAMETER_SET_READ,
+                    Permission.VISUALIZATION_READ,
+                    Permission.DASHBOARD_READ,
+                    Permission.ENDPOINT_READ,
+                    Permission.SCHEDULE_READ,
+                    Permission.DATASOURCE_READ,
+                ),
+            matches = { path -> path.startsWith("/api/v1/dependencies/") },
+        ),
+
         /** D11: own unless workspace admin, promoter none — never READ_RESOURCES. */
         EXECUTIONS(
             floor = 6,
