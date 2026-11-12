@@ -154,8 +154,9 @@ run() { # run <logfile> <args...>  → echoes exit code, never pipes gradle
 # have actually seen (scripts/lib/gate-stages.sh, shared with the buildSrc
 # stage below); it answers from the class run() stored right after the
 # invocation, since a crash word a test reported in its JUnit XML is a test
-# failure and the next invocation rewrites that XML (#132). gate_crash_explain() then names a crashed test JVM's HotSpot
-# report (module, path, signal and frame lines only) or says why there is none
+# failure and the next invocation rewrites that XML (#132).
+# gate_crash_explain() then names a crashed test JVM's HotSpot report
+# (module, path, signal and frame lines only) or says why there is none
 # (#773, DEVELOPMENT.md §9.4) — the same helper pregate.sh calls.
 
 fails=0; crashes=0; skips=0
