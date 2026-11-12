@@ -74,8 +74,9 @@ class ConfigValidator(
          * `checkLakeBounds` (§3.36 — the managed lake, judged only when it is enabled).
          * 45 since #818 added `LakeRules.checkLakeReads` (§3.36 — the managed reads' bounds, record §10 RULING 4).
          * 46 since #786 added `PostureRules.checkHardenedAuthoring` (§3.23 — a hardened deployment does not author).
+         * 47 since #325 added `ExecutorRules.checkLifecycleWriteCeiling` (§3.2 — the lifecycle bound under the start wait).
          */
-        internal const val CHECK_COUNT = 46
+        internal const val CHECK_COUNT = 47
 
         /**
          * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
@@ -152,6 +153,8 @@ class ConfigValidator(
             checkRedisAuthWarning(snapshot, warnings)
             // §3.1 (#488) — the Redis client bounds, their own file like the request limits.
             RedisRules.checkRedisTimeoutBounds(snapshot, violations)
+            // §3.2 (#325) — the lifecycle-write bound under the scheduler's start wait, its own file too.
+            ExecutorRules.checkLifecycleWriteCeiling(snapshot, violations)
             checkOrgSettings(snapshot, violations)
             ScriptRules.checkScriptBounds(snapshot, violations)
             // §3.30 (#194) — the parameter engine's limits, in their own file like the script bounds.
@@ -900,6 +903,7 @@ class ConfigValidator(
                 executorMaxConcurrentGlobal = environment.getProperty("datapipelines.executor.max-concurrent-executions-global"),
                 executorMaxConcurrentPerInstance = environment.getProperty("datapipelines.executor.max-concurrent-executions-per-instance"),
                 executorNodeQueryTimeoutMaxSeconds = environment.getProperty("datapipelines.executor.node-query-timeout-max-seconds"),
+                executorLifecycleWriteTimeoutSeconds = environment.getProperty("datapipelines.executor.lifecycle-write-timeout-seconds"),
                 datasourcesManagedRetireCeilingSeconds =
                     environment.getProperty("datapipelines.datasources.managed-retire-ceiling-seconds"),
                 executorNodeQueryTimeoutSecondsByDialect = executorNodeQueryTimeoutSecondsByDialect(environment),
@@ -1152,6 +1156,8 @@ internal data class ConfigSnapshot(
     val executorMaxConcurrentPerInstance: String? = null,
     /** §3.2 (156, #2) — raw string so a non-numeric value is a NAMED violation, not a binder crash. */
     val executorNodeQueryTimeoutMaxSeconds: String? = null,
+    /** §3.2 (#325) — raw, so a value past the start-wait ceiling or not a number is a NAMED violation. */
+    val executorLifecycleWriteTimeoutSeconds: String? = null,
     /**
      * §3.36 (#824) — `datapipelines.datasources.managed-retire-ceiling-seconds`, raw; empty = derived from
      * [executorNodeQueryTimeoutMaxSeconds] (datasources.md §5.2). The reads rule's ceiling term.
@@ -1257,6 +1263,7 @@ internal data class ConfigSnapshot(
             "executorMaxConcurrentGlobal=$executorMaxConcurrentGlobal, " +
             "executorMaxConcurrentPerInstance=$executorMaxConcurrentPerInstance, " +
             "executorNodeQueryTimeoutMaxSeconds=$executorNodeQueryTimeoutMaxSeconds, " +
+            "executorLifecycleWriteTimeoutSeconds=$executorLifecycleWriteTimeoutSeconds, " +
             "datasourcesManagedRetireCeilingSeconds=$datasourcesManagedRetireCeilingSeconds, " +
             "executorNodeQueryTimeoutSecondsByDialect=$executorNodeQueryTimeoutSecondsByDialect, " +
             "stagingMaxMemoryMb=$stagingMaxMemoryMb, " +

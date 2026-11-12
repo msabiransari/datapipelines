@@ -75,6 +75,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  *   UPDATE the emit returns within the bound with the counter incremented and the row still
  *   RUNNING (never a fabricated COMPLETED); at recovery the abandoned UPDATE lands — also
  *   asserted. The reap-by-sweep arm runs on the locked case, where no abandoned writer races it.
+ * - **Both writes late** (D, #325) — the paused database takes neither the insert nor the terminal
+ *   UPDATE; the emitter orders the UPDATE behind the unconfirmed insert, so at recovery the row
+ *   lands RUNNING and then SUCCESS, never left for the sweep.
  *
  * Private containers throughout: a paused SHARED Postgres would stall every later suite in this
  * JVM (the #266 rule). Red with the bound removed (both constructor args planted to
@@ -224,6 +227,38 @@ class LifecycleWriteBoundIntegrationTest {
 
                     // The abandoned statement lands at recovery — unconfirmed, not lost.
                     awaitCondition { rig.executions.findById(Rig.WORKSPACE, id)!!.status == ExecutionStatus.SUCCESS }
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------- D: paused database, BOTH writes late (#325)
+
+    @Test
+    fun `D - a terminal UPDATE behind an unconfirmed RUNNING insert lands after it at recovery - the row ends SUCCESS`() {
+        PrivatePostgres().use { pg ->
+            PrivateRedis().use { redis ->
+                Rig(pg, redis.template, callerSeconds = BOUND_SECONDS, statementSeconds = DISARMED_STATEMENT_SECONDS).use { rig ->
+                    val id = UUID.randomUUID()
+                    // ONE emitter: it holds the unconfirmed insert's handle (a second rig.emitter(id) would not).
+                    val emitter = rig.emitter(id)
+                    pause(pg.container)
+                    try {
+                        runBlocking {
+                            withContext(NonCancellable) {
+                                emitter.emit(rig.startedEvent(id))
+                                emitter.emit(rig.completedEvent(id))
+                            }
+                        }
+                        withClue("the terminal write was counted once as unconfirmed") { rig.lifecycleWriteFailures() shouldBe 1.0 }
+                    } finally {
+                        unpause(pg.container)
+                    }
+
+                    // The insert lands at recovery and the UPDATE ordered behind it after it: never RUNNING for
+                    // the sweep to mark ABORTED under a client that saw pipeline_completed.
+                    awaitCondition { rig.executions.findById(Rig.WORKSPACE, id)?.status == ExecutionStatus.SUCCESS }
+                    withClue("the deferred UPDATE is not counted a second time") { rig.lifecycleWriteFailures() shouldBe 1.0 }
                 }
             }
         }

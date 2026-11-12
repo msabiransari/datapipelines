@@ -17,6 +17,7 @@ import co.datapipelines.executor.ExecutorMetrics
 import co.datapipelines.persistence.FailureShape
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -110,8 +111,20 @@ data class ExecutionContext(
  * database that answers slowly — is cancelled at the statement and frees its thread. What each
  * timeout means is stated where it is caught: a RUNNING insert past the bound is `recorded = false`
  * (fail-closed for scheduled runs, WARN-and-continue for interactive ones), a terminal UPDATE past
- * it leaves the row RUNNING for the stale sweep and is counted
- * (`datapipelines.executions.lifecycle_write_failed`) — never a fabricated COMPLETED.
+ * it is counted (`datapipelines.executions.lifecycle_write_failed`) — never a fabricated COMPLETED.
+ *
+ * ## A terminal write never overtakes its unconfirmed insert (#325)
+ * The two writes are dispatched separately, so without an order between them a terminal UPDATE
+ * could reach the database BEFORE a RUNNING insert that outlived its bound: 0 rows updated, then
+ * the late insert lands RUNNING and the stale sweep marks it ABORTED for a run whose client saw it
+ * complete. The emitter therefore keeps the unconfirmed insert's completion handle, and the
+ * terminal step registers its UPDATE as a continuation of it instead of dispatching it: the
+ * insert lands → the UPDATE is dispatched as a task on [persistenceDispatcher]; the insert fails →
+ * the UPDATE is dropped with one WARN (there is no row to complete). No pool thread ever waits for
+ * the insert, and the terminal emit adds no second wait — it counts the write once as
+ * unconfirmed and returns. A deferred UPDATE that fails or matches no row is logged, not counted
+ * again. A fail-closed (scheduled) run never reaches a terminal event, so a late insert of its own
+ * is still the stale sweep's to reap.
  *
  * ## Failure policy
  * A persistence failure is logged and **swallowed** — deliberately, and only here. dag-executor
@@ -139,8 +152,9 @@ class WebEventEmitter(
     private val lifecycleWriteTimeout: Duration = Duration.ZERO,
     /**
      * #311 — counts `datapipelines.executions.lifecycle_write_failed` when the terminal UPDATE
-     * fails or does not return within [lifecycleWriteTimeout]: the row is left RUNNING for the
-     * stale sweep, and the counter is how an operator tells that apart from silence. Null in
+     * fails or does not return within [lifecycleWriteTimeout], or is ordered behind a RUNNING insert
+     * that did not (#325): the row's outcome is unconfirmed, and the counter is how an operator
+     * tells that apart from silence. Null in
      * direct constructions that carry no metrics; the application passes `ExecutorMetrics`.
      */
     private val metrics: ExecutorMetrics? = null,
@@ -192,6 +206,13 @@ class WebEventEmitter(
     private val emitted =
         java.util.concurrent.atomic
             .AtomicBoolean(false)
+
+    /**
+     * #325 — the completion handle of a RUNNING insert that outlived [lifecycleWriteTimeout] (null
+     * when the insert was confirmed, failed within the bound, or the bound is off). The terminal
+     * UPDATE is ordered behind it (class KDoc).
+     */
+    private val unconfirmedInsert = AtomicReference<Deferred<*>?>(null)
 
     /** The execution id, once `execution_started` has been seen. Null before that. */
     fun executionIdOrNull(): UUID? = executionId.get()
@@ -275,8 +296,10 @@ class WebEventEmitter(
             withinLifecycleBound {
                 executionRepository.create(recordFor(event))
             }
-        }.onFailure { reportLifecycleWriteFailure(event.executionId, "not created", "not written yet", it) }
-            .isSuccess
+        }.onFailure {
+            if (it is LifecycleWriteUnconfirmedException) unconfirmedInsert.set(it.pending)
+            reportLifecycleWriteFailure(event.executionId, "not created", "not written yet", it)
+        }.isSuccess
 
     private fun recordFor(event: ExecutionStarted) =
         ExecutionRecord(
@@ -299,7 +322,9 @@ class WebEventEmitter(
      * The two lifecycle writes' caller-side bound (#311): hands [block] to [persistenceDispatcher]
      * and waits at most [lifecycleWriteTimeout]. Past the bound the WAIT returns — the statement
      * keeps running on the pool thread and may still land when the database recovers — and the
-     * caller is told via [LifecycleWriteUnconfirmedException] so it can state the outcome honestly.
+     * caller is told via [LifecycleWriteUnconfirmedException] so it can state the outcome honestly;
+     * the exception carries the statement's completion handle (#325: the terminal UPDATE is ordered
+     * behind an unconfirmed insert's).
      * Unbounded ([Duration.ZERO]) keeps the plain blocking hop, the pre-#311 shape every direct
      * construction gets. The statements themselves carry the same bound as a JDBC `queryTimeout`
      * (`ExecutionRepository`), so a database that answers slowly is cancelled at the statement and
@@ -313,7 +338,7 @@ class WebEventEmitter(
             runCatching { block() }.fold(onSuccess = done::complete, onFailure = done::completeExceptionally)
         }
         return withTimeoutOrNull(lifecycleWriteTimeout.toMillis()) { done.await() }
-            ?: throw LifecycleWriteUnconfirmedException(lifecycleWriteTimeout)
+            ?: throw LifecycleWriteUnconfirmedException(lifecycleWriteTimeout, done)
     }
 
     /**
@@ -325,10 +350,13 @@ class WebEventEmitter(
      * be wrong for any result larger than a page.
      *
      * A failure — or a write that outlives [lifecycleWriteTimeout] — is counted
-     * (`datapipelines.executions.lifecycle_write_failed`) and logged with the execution id; the row
-     * is left RUNNING for the stale sweep to reap. Never a fabricated COMPLETED: an unconfirmed
-     * write is reported as unconfirmed, which is also why nothing retries it here (a retry would
-     * double the wait and park a second pool thread on the same hung database).
+     * (`datapipelines.executions.lifecycle_write_failed`) and logged with the execution id. Never a
+     * fabricated COMPLETED: an unconfirmed write is reported as unconfirmed, which is also why
+     * nothing retries it here (a retry would double the wait and park a second pool thread on the
+     * same hung database); an unconfirmed UPDATE may still land when the database recovers.
+     *
+     * Behind an unconfirmed RUNNING insert (#325) the UPDATE is not dispatched here at all: it is
+     * registered as that insert's continuation ([completeBehindUnconfirmedInsert]).
      */
     private suspend fun completeExecutionRow(event: ExecutionEvent) {
         val (status, failedNodeId, errorJson) =
@@ -372,19 +400,30 @@ class WebEventEmitter(
                 is PipelineFailed -> event.contextSnapshot
                 is ExecutionAborted -> event.contextSnapshot
             }.takeIf { it.isNotEmpty() }?.let { serializedContext(event.executionId, it) }
+        // Everything that can throw — the stats serialization, the aborted duration's row read — runs
+        // where the UPDATE runs (inside the bound's runCatching, or deferred after the late insert
+        // has landed), so it can never escape emit.
+        val update = {
+            executionRepository.complete(
+                executionId = event.executionId,
+                status = status,
+                completedAt = event.timestamp,
+                durationMs = durationMsOf(event),
+                nodeStatsJson = SseJson.mapper.writeValueAsString(nodeStats),
+                failedNodeId = failedNodeId,
+                errorJson = errorJson,
+                contextJson = contextJson,
+            )
+        }
+        val insert = unconfirmedInsert.get()
+        // A late insert that has landed by now is a confirmed one: the ordinary bounded path. One still
+        // running, or one that failed late (a failed Deferred reads as cancelled), is ordered behind.
+        if (insert != null && (!insert.isCompleted || insert.isCancelled)) {
+            completeBehindUnconfirmedInsert(insert, event.executionId, update)
+            return
+        }
         runCatching {
-            withinLifecycleBound {
-                executionRepository.complete(
-                    executionId = event.executionId,
-                    status = status,
-                    completedAt = event.timestamp,
-                    durationMs = durationMsOf(event),
-                    nodeStatsJson = SseJson.mapper.writeValueAsString(nodeStats),
-                    failedNodeId = failedNodeId,
-                    errorJson = errorJson,
-                    contextJson = contextJson,
-                )
-            }
+            withinLifecycleBound(update)
         }.onSuccess { updated -> if (!updated) reportTerminalRowMissing(event.executionId) }
             .onFailure {
                 metrics?.lifecycleWriteFailed()
@@ -393,15 +432,81 @@ class WebEventEmitter(
     }
 
     /**
-     * The UPDATE matched no row: the RUNNING insert was abandoned past its bound or never landed (the
-     * composition case, #325). Counted like a failed terminal write — the row, if it lands late, is RUNNING
-     * and the stale sweep reaps it; nothing here fabricates a COMPLETED.
+     * #325 — the terminal UPDATE ordered behind a RUNNING insert that outlived its bound. Nothing
+     * waits: the write is counted ONCE as unconfirmed (the existing "did not return within" WARN)
+     * and [update] is registered on the insert's completion handle. The continuation runs on the
+     * thread that completed the insert (or here, if it completed meanwhile) and only DISPATCHES —
+     * never runs — the UPDATE as a task on [persistenceDispatcher]: the insert landed → the UPDATE
+     * runs there (its own failure or 0 rows is one WARN, not a second count); the insert failed →
+     * the UPDATE is dropped with one WARN. An aborted run's duration is read in that task, after
+     * the row exists.
+     */
+    private fun completeBehindUnconfirmedInsert(
+        insert: Deferred<*>,
+        id: UUID,
+        update: () -> Boolean,
+    ) {
+        metrics?.lifecycleWriteFailed()
+        reportLifecycleWriteFailure(
+            id,
+            "not completed",
+            "ordered behind its unconfirmed RUNNING insert",
+            LifecycleWriteUnconfirmedException(lifecycleWriteTimeout),
+        )
+        insert.invokeOnCompletion { insertFailure ->
+            if (insertFailure != null) {
+                log.warn(
+                    "pipeline_executions row for execution {} was never created (error={} sql_state={}) — its terminal update is dropped.",
+                    id,
+                    insertFailure.javaClass.simpleName,
+                    FailureShape.sqlState(insertFailure),
+                )
+            } else {
+                // A completion handler must not throw: a pool that refuses the task is one WARN.
+                runCatching { persistenceDispatcher.dispatch(EmptyCoroutineContext) { runDeferredUpdate(id, update) } }
+                    .onFailure {
+                        log.warn(
+                            "pipeline_executions row for execution {}: its deferred terminal update could not be dispatched: error={}",
+                            id,
+                            it.javaClass.simpleName,
+                        )
+                    }
+            }
+        }
+    }
+
+    /** The deferred terminal UPDATE on [persistenceDispatcher]: already counted, so WARN only. */
+    private fun runDeferredUpdate(
+        executionId: UUID,
+        update: () -> Boolean,
+    ) {
+        runCatching(update)
+            .onSuccess { updated ->
+                if (!updated) {
+                    log.warn(
+                        "pipeline_executions row for execution {} not found by its deferred terminal update (0 rows updated).",
+                        executionId,
+                    )
+                }
+            }.onFailure {
+                log.warn(
+                    "pipeline_executions row for execution {} not completed by its deferred terminal update: error={} sql_state={}",
+                    executionId,
+                    it.javaClass.simpleName,
+                    FailureShape.sqlState(it),
+                )
+            }
+    }
+
+    /**
+     * The UPDATE matched no row: the RUNNING insert never landed (failed inside its bound). Counted like a
+     * failed terminal write; nothing here fabricates a COMPLETED. An insert that outlived its bound never
+     * reaches this point — its UPDATE is ordered behind it (#325).
      */
     private fun reportTerminalRowMissing(executionId: UUID) {
         metrics?.lifecycleWriteFailed()
         log.warn(
-            "pipeline_executions row for execution {} not found at completion (0 rows updated) — " +
-                "a late RUNNING insert is left for the stale sweep.",
+            "pipeline_executions row for execution {} not found at completion (0 rows updated).",
             executionId,
         )
     }
@@ -504,11 +609,13 @@ class ExecutionRecordUnwritableException(
  * #311: a lifecycle write (the RUNNING insert, the terminal UPDATE) did not return within the
  * emitter's bound. "Not confirmed" — the statement may still be running on the pool thread and
  * may land when the database recovers — so the callers report the outcome honestly: the insert's
- * false drives the fail-closed rule, the terminal UPDATE leaves the row RUNNING for the stale
- * sweep and is counted. Never thrown as a CancellationException subtype: the await's timeout is
+ * false drives the fail-closed rule (and its [pending] handle orders the terminal UPDATE behind
+ * it, #325), the terminal UPDATE's is counted. Never thrown as a CancellationException subtype: the await's timeout is
  * converted here, inside the `NonCancellable` block, so no caller can mistake it for the job's
  * own cancellation.
  */
 private class LifecycleWriteUnconfirmedException(
     val bound: Duration,
+    /** The statement's completion handle: it completes when the abandoned statement does (#325). */
+    val pending: Deferred<*>? = null,
 ) : RuntimeException("The lifecycle write did not return within $bound; its outcome is unconfirmed.")
