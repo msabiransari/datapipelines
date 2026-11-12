@@ -283,8 +283,8 @@ ln -s "$linked" "$tmp/modules/web/build"
 start_build_saw
 grep -q "wiping build outputs not written by app.sh" <<<"$out" || fail "8d: no stamp must trigger the wipe, got:
 $out"
-[[ ! -e $tmp/modules/web/build && ! -L $tmp/modules/web/build ]] || fail "8d: the symlinked build dir was not removed"
 [ -f "$linked/keep.txt" ] || fail "8d: the wipe FOLLOWED the symlink and deleted $linked/keep.txt"
+[[ ! -e $tmp/modules/web/build && ! -L $tmp/modules/web/build ]] || fail "8d: the symlinked build dir was not removed"
 rm -rf "$linked"
 
 # 8e. A module whose directory is a symlink out of the checkout: its build dir is SKIPPED
@@ -296,10 +296,10 @@ ln -s "$ext" "$tmp/modules/extmod"
 [ -f "$tmp/modules/extmod/build/keep.txt" ] || fail "8e: the external build dir's keep.txt does not exist"
 rm -f "$stamp"
 start_build_saw
+[ -f "$ext/build/keep.txt" ] || fail "8e: the wipe deleted $ext/build/keep.txt, OUTSIDE the checkout"
 grep -q "skipping modules/extmod/build: its parent is a symlink out of this checkout" <<<"$out" \
   || fail "8e: the symlinked module's build dir must be named as skipped, got:
 $out"
-[ -f "$ext/build/keep.txt" ] || fail "8e: the wipe deleted $ext/build/keep.txt, OUTSIDE the checkout"
 rm -f "$tmp/modules/extmod"
 rm -rf "$ext"
 
