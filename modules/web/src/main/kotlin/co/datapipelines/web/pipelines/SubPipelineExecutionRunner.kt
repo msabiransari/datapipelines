@@ -314,6 +314,8 @@ class SubPipelineExecutionRunner(
         // logical time, never on the child's own start instant.
         reference = ctx.reference,
         lakeAppendGrant = ctx.lakeAppendGrant,
+        // #463: a read-only parent's children read only too; a writable parent's stay writable.
+        readOnly = ctx.readOnly,
         pipelineAdmission = ctx.pipelineAdmission,
     )
 
