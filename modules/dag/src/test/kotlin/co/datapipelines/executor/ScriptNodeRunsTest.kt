@@ -45,6 +45,7 @@ import java.util.UUID
  * inputs are written through `stageRows`, exactly as an upstream DQL node would leave them,
  * so what the node reads is what production reads.
  */
+@Suppress("LargeClass") // one SCRIPT node contract over one real H2 staging fixture; the #821 table-mode count cases share it
 class ScriptNodeRunsTest {
     private val executionId = UUID.randomUUID()
     private val staging: Staging = Fixtures.stagingFactory().create(executionId)
