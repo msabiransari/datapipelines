@@ -17,6 +17,10 @@ import java.lang.management.MemoryMXBean
 import java.sql.Connection
 import java.sql.ResultSet
 import java.sql.ResultSetMetaData
+import java.sql.SQLException
+import java.sql.Statement
+import java.util.Collections
+import java.util.IdentityHashMap
 import java.util.UUID
 import kotlin.coroutines.coroutineContext
 
@@ -54,6 +58,17 @@ import kotlin.coroutines.coroutineContext
  * *before* egress re-derivation can see it (§3.2). `mapColumn` (not `map`) is used so an
  * unknown source type's §8.2 warning can name its column; those warnings ride out on
  * [StageResult.warnings] and never fail the node.
+ *
+ * ## The two bounds on the author statements this class creates (§3.3, #815)
+ *
+ * [withQuery] and [execute] set the configured `query-timeout-seconds` on their statement, and
+ * [close] cancels each one still running before it closes the pool, so a runaway does not keep
+ * its lease — and the database — alive until the timeout. A statement is registered for its
+ * execute and, for a cursor, its reading; once [close] ran no new one registers. Two limits, both
+ * left to the query timeout: a [withConnection] statement is the caller's to bound (the executor
+ * sets the timeout and cancels it with the node), and H2's `cancel()` does nothing to a statement
+ * that has not yet entered the driver, so a [close] landing in that window misses it (probe, #815).
+ * A zero query timeout disables the timeout bound, including that window.
  */
 class H2Staging internal constructor(
     override val executionId: UUID,
@@ -68,6 +83,12 @@ class H2Staging internal constructor(
 
     /** Observability counter (§8.2): total rows staged, reported by [stats], never a limit input. */
     private var stagedRowTotal = 0L
+
+    /** Statements [withQuery] and [execute] have inside the driver now, by identity — what [close] cancels. */
+    private val running: MutableSet<Statement> = Collections.newSetFromMap(IdentityHashMap())
+
+    /** Set by [close] under [bookkeeping]: no statement registers after the cancel pass. */
+    private var closed = false
 
     override suspend fun <T> withConnection(block: suspend (Connection) -> T): T = pool.lease(LeaseKind.AUTHOR, block)
 
@@ -136,12 +157,23 @@ class H2Staging internal constructor(
                 // A cursor closed inside the block takes its statement with it, and `use` closes
                 // the statement regardless (§3.3) — before the lease returns.
                 stmt.closeOnCompletion()
-                block(stmt.executeQuery(sql))
+                inFlight(stmt) { block(stmt.executeQuery(sql)) }
             }
         }
 
+    /**
+     * Bounded as [withQuery] is: the configured query timeout, and [close] cancels it. The timeout
+     * set here does not leak to the next lease — an AUTHOR lease's return resets `QUERY_TIMEOUT`
+     * ([H2SessionReset]).
+     */
     override suspend fun execute(sql: String): Long {
-        val affected = pool.lease(LeaseKind.AUTHOR) { connection -> connection.createStatement().use { it.executeUpdate(sql) }.toLong() }
+        val affected =
+            pool.lease(LeaseKind.AUTHOR) { connection ->
+                connection.createStatement().use { stmt ->
+                    stmt.queryTimeout = config.queryTimeoutSeconds
+                    inFlight(stmt) { stmt.executeUpdate(sql) }.toLong()
+                }
+            }
         // execute() may write to staging; measure the footprint after it (§8.2) — outside the
         // lease, since the reading is the JVM's and needs no connection.
         checkMemoryBudget()
@@ -162,7 +194,9 @@ class H2Staging internal constructor(
     }
 
     /**
-     * Destroys the staging database (§3.4): the enumerate-and-drop belt runs on one owned
+     * Destroys the staging database (§3.4): first cancels every statement [withQuery] and [execute]
+     * still have running (class KDoc), so their leases come back now rather than at the timeout;
+     * then the enumerate-and-drop belt runs on one owned
      * connection when no lease is outstanding — or on the last late return when one is — and
      * every owned connection is closed; the last close destroys the in-memory database. Never
      * waits for a lease still inside the driver and does not throw for any SQL or runtime
@@ -170,6 +204,12 @@ class H2Staging internal constructor(
      * was closed and the pool is terminal.
      */
     override fun close() {
+        val toCancel =
+            synchronized(bookkeeping) {
+                closed = true
+                running.toList()
+            }
+        toCancel.forEach(::cancel)
         val outcome = pool.close { connection -> H2StagingSql.dropStagedTables(connection, executionId) }
         if (outcome.leasesOutstanding > 0) {
             log.warn(
@@ -193,6 +233,39 @@ class H2Staging internal constructor(
             physicalOpened = pool.physicalOpened,
             leaseWaitNanos = pool.leaseWaitNanos,
         )
+
+    /** Statements [withQuery] and [execute] have running now — a measurement for tests. */
+    internal val inFlightStatements: Int get() = synchronized(bookkeeping) { running.size }
+
+    // ------------------------------------------------------------ statement bounds
+
+    /**
+     * Runs [body] with [statement] registered, so [close] can cancel it: around the execute and, for
+     * a cursor, its reading. Refused once [close] ran, so no statement starts after its cancel pass.
+     */
+    private suspend fun <T> inFlight(
+        statement: Statement,
+        body: suspend () -> T,
+    ): T {
+        synchronized(bookkeeping) {
+            check(!closed) { "staging database for execution $executionId is closed" }
+            running += statement
+        }
+        try {
+            return body()
+        } finally {
+            synchronized(bookkeeping) { running -= statement }
+        }
+    }
+
+    /** The driver refuses `cancel()` on a statement that closed meanwhile: it finished, nothing to stop. */
+    private fun cancel(statement: Statement) {
+        try {
+            statement.cancel()
+        } catch (e: SQLException) {
+            log.debug("tempdb statement of execution {} had already closed when close() cancelled it: {}", executionId, e.message)
+        }
+    }
 
     // ------------------------------------------------------------ table ownership
 
