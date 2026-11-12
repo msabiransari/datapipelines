@@ -111,11 +111,6 @@ class IncomingArms(
             elementId = row.elementId,
             followsCurrent = row.followsCurrent,
         )
-
-    companion object {
-        /** No arms: a family nothing references (a dashboard, a schedule, an API) — every dependent family is Unsupported. */
-        fun none(target: FamilyKey): IncomingArms = IncomingArms(target, emptyList(), StatementCeiling.NONE)
-    }
 }
 
 /** The contract's dependent scope as the native queries' — the same three questions under one definition. */

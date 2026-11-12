@@ -341,6 +341,18 @@ class ScriptVocabularyGuardTest {
                         "key — a node noun stays red here",
                 ),
                 Triple(
+                    Regex(
+                        "^modules/(?:application/src/test/kotlin/co/datapipelines/application/" +
+                            "(?:dependencies/Incoming(?:BoundedQuery|ConformancePostgres)Test|" +
+                            "templates/TemplateUsageTest)|mcp-server/src/test/kotlin/co/datapipelines/mcp/ScannedIncomingRows|" +
+                            "web/src/test/kotlin/co/datapipelines/web/incoming/(?:CompleteAnswerSeed|IncomingCompleteAnswerTest|" +
+                            "IncomingParityCorpus))\\.kt$",
+                    ),
+                    Regex("transform(?: pins| = |: Pair|\\.template)|TransformBinding"),
+                    "the #877 inverse arms' seeds and fixtures (G7): a visualization version's block pin, its stored path and " +
+                        "its binding class — a node noun stays red here",
+                ),
+                Triple(
                     Regex("^docs/rest-api\\.md$"),
                     Regex("transform pin|transform template|the transform|transform,|transform`", setOf(IGNORE_CASE)),
                     "the visualization/dashboard rows and the runtime stage list (the block)",

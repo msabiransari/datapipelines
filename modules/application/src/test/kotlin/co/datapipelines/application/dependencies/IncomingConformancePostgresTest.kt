@@ -69,7 +69,7 @@ class IncomingConformancePostgresTest {
 
     @Test
     @Suppress("LongMethod") // one declarative seed + case table per target; splitting it hides which rows the cases cover
-    fun `the template target answers its four arms - node pins, imports, selectors, transforms`() {
+    fun `the template target answers its four arms - node pins, imports, selectors, visualization block pins`() {
         seed.template("lib", 1, library = true)
         seed.template("lib", 2, library = true)
         seed.pipeline("job", 1, RELEASED, templates = listOf("lib" to 1, "lib" to 2, "lib" to 1))
