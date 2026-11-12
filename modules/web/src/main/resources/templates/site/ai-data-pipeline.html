@@ -36,7 +36,7 @@
         in the columns that exist and the values they actually hold, instead of inferring a schema from table names.
       </p>
       <!-- claim: docs/mcp-server.md §6.2.19 -->
-      <p>
+      <p class="section-note">
         Introspection is a read, and it is governed like everything else: the server builds the statement and quotes
         every identifier itself; the agent supplies names, never SQL fragments.
       </p>
@@ -54,7 +54,7 @@
         because they are code.
       </p>
       <!-- claim: docs/templates.md §7.2, docs/templates.md §8.4 -->
-      <p>
+      <p class="section-note">
         Values reach the SQL as bound parameters, never as interpolated strings. The template engine refuses the
         interpolated form outright. That rule is not there for tidiness; it is what keeps an agent-authored query
         from becoming an injection surface.
@@ -73,12 +73,12 @@
         is still exactly what ran last quarter.
       </p>
       <!-- claim: docs/versioning.md §10.1 -->
-      <p>
+      <p class="section-note">
         Moving a release into a higher environment is a human, UI-triggered action, and there is no MCP tool for
         promotion and no schedule. An agent can author and run; a person promotes.
       </p>
       <!-- claim: docs/rest-api.md §19 — a released pipeline as an endpoint; docs/scheduler.md §1 — a schedule runs a pipeline at a cron pattern's occurrences; docs/dashboards.md §1, docs/dashboards.md §2.2 — a dashboard pins released pipeline versions and one parameter set -->
-      <p>
+      <p class="section-note">
         The pipeline then feeds the rest of the product: a <a th:href="@{/published-api}">published endpoint</a>
         serves a release, a <a th:href="@{/pipeline-scheduling}">schedule</a> runs it on a cron pattern, and a
         <a th:href="@{/sql-dashboards}">dashboard</a> pins released versions, with filters from a
@@ -134,7 +134,7 @@
         <li><strong>Not a no-code builder.</strong> The artifact is SQL and JSON, on purpose, because that is what survives review.</li>
         <li><strong>Not a model.</strong> Bring your own agent. This is the surface it works against and the governance it works under.</li>
       </ul>
-      <p><a th:href="@{/text-to-sql-agent}">How this compares with a text-to-SQL tool &rarr;</a> &middot;
+      <p class="section-note"><a th:href="@{/text-to-sql-agent}">How this compares with a text-to-SQL tool &rarr;</a> &middot;
          <a th:href="@{/compare/airflow}">vs Airflow &rarr;</a> &middot;
          <a th:href="@{/compare/dbt}">vs dbt &rarr;</a></p>
     </div>

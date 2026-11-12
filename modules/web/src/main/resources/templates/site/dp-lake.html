@@ -98,7 +98,7 @@
         included, on <a th:href="@{/demo-data}">the demo-data page</a>.
       </p>
       <!-- claim: docs/environments.md §5 -->
-      <p>
+      <p class="section-note">
         The seeded showcase pipeline <code>nyc/mobility/taxi_vs_rideshare</code> asks one question
         across engines: rideshare zone-days from the lake, yellow-taxi trips from Postgres,
         the borough lookup from SQLite and the day's rainfall from MySQL. The per-mode rain
@@ -139,7 +139,7 @@
           <strong>Aggregate in the lake, not in the cursor.</strong> The full trip table is 471.9 million rows behind a result cap. Push the aggregation into the lake node. That is what the engine and the pruning are for. Let the pipeline carry the answer, not the raw rows.
         </li>
       </ul>
-      <p><a th:href="@{/federated-query}">Federated query &rarr;</a> &middot;
+      <p class="section-note"><a th:href="@{/federated-query}">Federated query &rarr;</a> &middot;
          <a th:href="@{/docs/datasources}">Datasources specification &rarr;</a> &middot;
          <a th:href="@{/docs/environments}">Run the demo &rarr;</a></p>
     </div>
