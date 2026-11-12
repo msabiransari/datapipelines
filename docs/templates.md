@@ -3,7 +3,7 @@
 **Status:** v1.25 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Configuration Reference](configuration.md), [Metadata DB spec](metadata-db.md)
-**Last updated:** 2026-11-03
+**Last updated:** 2026-11-12
 
 ---
 
