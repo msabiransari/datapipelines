@@ -194,6 +194,38 @@ class TemplateLifecycleDialogModelTest {
             "Pinned by 1 importing template(s): acme/reports/b.sql — a pinned template is never deleted."
     }
 
+    @Test
+    fun `purge - a draft only importers pin is refused and the dialog lists each importer once, on both arms (907)`() {
+        stubExists()
+        every { templates.findVersionDetail(any(), any(), any()) } returns versionOf(DRAFT)
+        // A draft that leaves other versions: the exact-version arm (liveVersionPins).
+        every { templates.listVersions(any(), any()) } returns
+            listOf(
+                TemplateVersionSummary(NAME, 1, Instant.now(), USER, RELEASED),
+                TemplateVersionSummary(NAME, 2, Instant.now(), USER, DRAFT),
+            )
+        every { usage.liveVersionPins(WS, NAME, 2) } returns
+            pins(importers = listOf(importPin("acme/reports/a.sql", 2), importPin("acme/reports/a.sql", 1)))
+
+        val kept = model.purge(WS, NAME, 2)
+        kept.soleVersion shouldBe false
+        kept.inUsePipelines shouldBe emptyList()
+        kept.inUseTemplates shouldBe listOf("acme/reports/a.sql")
+        val keptRefusal = checkNotNull(kept.refusal)
+        keptRefusal.code shouldBe "template.in_use"
+        keptRefusal.message shouldBe
+            "Version 2 is pinned by 1 importing template(s): acme/reports/a.sql — repoint or discard them first."
+
+        // The sole draft: the entity rule (everPins), as the service asks.
+        every { templates.listVersions(any(), any()) } returns listOf(TemplateVersionSummary(NAME, 2, Instant.now(), USER, DRAFT))
+        every { usage.everPins(WS, NAME) } returns pins(importers = listOf(importPin("acme/reports/b.sql")))
+
+        val sole = model.purge(WS, NAME, 2)
+        sole.soleVersion shouldBe true
+        sole.inUseTemplates shouldBe listOf("acme/reports/b.sql")
+        checkNotNull(sole.refusal).code shouldBe "template.in_use"
+    }
+
     private companion object {
         val WS: UUID = UUID.fromString("00000000-0000-0000-0000-000000000010")
         val ID: UUID = UUID.fromString("22222222-2222-2222-2222-222222222222")

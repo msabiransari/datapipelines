@@ -1,6 +1,7 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.pipeline.PipelineVersionStatus
+import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
@@ -149,6 +150,117 @@ class TemplateLifecycleDialogRenderTest {
     }
 
     @Test
+    fun `907 - an importer-only draft purge lists the importing template, buttonless`() {
+        val purge =
+            render("partials/template-lifecycle-purge") {
+                setVariable(
+                    "dlg",
+                    purgeDialog(inUse = emptyList()).copy(
+                        inUseTemplates = listOf(IMPORTER),
+                        refusal = TemplateLifecycleDialogModel.Refusal("template.in_use", "pinned by 1 importing template(s)"),
+                    ),
+                )
+                setVariable("from", "explorer")
+            }
+        purge shouldContain "data-purge-pinner-template"
+        purge shouldContain ">$IMPORTER</li>"
+        purge shouldNotContain "<button type=\"submit\""
+        purge shouldNotContain "data-confirm-input"
+    }
+
+    @Test
+    fun `907 - an importer-only pin withholds Discard and lists the importing template, the unpinned twin keeps the button`() {
+        val unpinned =
+            render("partials/template-lifecycle-discard") {
+                setVariable("dlg", discardDialog())
+                setVariable("from", "explorer")
+            }
+        // The positive control on the SAME fixture and context: the button's absence below is the partial's decision.
+        unpinned shouldContain "data-verb=\"template-discard-confirm\""
+
+        val pinned =
+            render("partials/template-lifecycle-discard") {
+                setVariable("dlg", discardDialog().copy(pinnerTemplates = listOf(IMPORTER)))
+                setVariable("from", "explorer")
+            }
+        pinned shouldContain "cannot be discarded"
+        pinned shouldContain "importing template"
+        pinned shouldContain "data-discard-pinner-template"
+        pinned shouldContain ">$IMPORTER</li>"
+        pinned shouldNotContain "<button type=\"submit\""
+        pinned shouldNotContain "template-discard-confirm"
+        pinned shouldNotContain "hx-post"
+    }
+
+    @Test
+    fun `907 - an importer-only entity purge renders the list with the importing template, buttonless`() {
+        val entity =
+            render("partials/template-lifecycle-purge-entity") {
+                setVariable(
+                    "dlg",
+                    purgeEntityDialog(TemplateLifecycleDialogModel.Refusal("template.in_use", "pinned")).copy(
+                        inUseTemplates = listOf(IMPORTER),
+                    ),
+                )
+                setVariable("from", "explorer")
+            }
+        entity shouldContain "data-purge-entity-pinnerPipelines"
+        entity shouldContain "data-purge-entity-pinner-template"
+        entity shouldContain ">$IMPORTER</li>"
+        entity shouldNotContain "<button type=\"submit\""
+        entity shouldNotContain "data-confirm-input"
+    }
+
+    @Test
+    fun `907 - a pipeline and an importer together are both listed, one row per distinct importer`() {
+        val importers = listOf(IMPORTER, "acme/reports/b.sql")
+        val dialogs =
+            listOf(
+                "partials/template-lifecycle-purge" to
+                    purgeDialog(inUse = listOf("nyc/rollup")).copy(inUseTemplates = importers),
+                "partials/template-lifecycle-discard" to
+                    discardDialog().copy(pinnerPipelines = listOf("nyc/rollup"), pinnerTemplates = importers),
+                "partials/template-lifecycle-purge-entity" to
+                    purgeEntityDialog(TemplateLifecycleDialogModel.Refusal("template.in_use", "pinned"), inUse = listOf("nyc/rollup"))
+                        .copy(inUseTemplates = importers),
+            )
+        dialogs.forEach { (view, dlg) ->
+            val html =
+                render(view) {
+                    setVariable("dlg", dlg)
+                    setVariable("from", "explorer")
+                }
+            html shouldContain ">nyc/rollup</li>"
+            importers.forEach { html shouldContain ">$it</li>" }
+            Regex("""data-[a-z-]+-pinner-template""").findAll(html).count() shouldBe importers.size
+            html shouldNotContain "<button type=\"submit\""
+        }
+    }
+
+    @Test
+    fun `907 - a hostile importer name is escaped on all three dialogs`() {
+        val hostile = "\"><script>alert(1)</script>"
+        val refusal = TemplateLifecycleDialogModel.Refusal("template.in_use", "pinned")
+        val dialogs =
+            listOf(
+                "partials/template-lifecycle-purge" to
+                    purgeDialog(inUse = emptyList()).copy(inUseTemplates = listOf(hostile), refusal = refusal),
+                "partials/template-lifecycle-discard" to discardDialog().copy(pinnerTemplates = listOf(hostile)),
+                "partials/template-lifecycle-purge-entity" to purgeEntityDialog(refusal).copy(inUseTemplates = listOf(hostile)),
+            )
+        dialogs.forEach { (view, dlg) ->
+            val html =
+                render(view) {
+                    setVariable("dlg", dlg)
+                    setVariable("from", "explorer")
+                }
+            html shouldContain "&lt;script&gt;alert(1)&lt;/script&gt;"
+            html shouldNotContain "<script>alert(1)"
+            html shouldNotContain hostile
+        }
+    }
+
+    @Test
     fun `restore - states the pointer outcome both ways`() {
         val moves =
             render("partials/template-lifecycle-restore") {
@@ -288,6 +400,7 @@ class TemplateLifecycleDialogRenderTest {
 
     private companion object {
         const val PATH = "nyc/mobility/probe.sql"
+        const val IMPORTER = "acme/reports/a.sql"
         val COMMENT = Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL)
     }
 }
