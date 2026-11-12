@@ -88,10 +88,16 @@ tasks.test {
         .withPathSensitivity(PathSensitivity.NAME_ONLY)
         .withPropertyName("repoFilesReadByBuildSrcTests")
     // The module and integration test sources RepoTestInputsTest scans for absent-path assertions
-    // (#728): a guard added there must re-run that witness, which sees them only as text.
+    // (#728): a guard added there must re-run that witness, which sees them only as text. The same
+    // tree feeds RawListAppenderGuardTest, which since #756 also scans the shared log-capture module's
+    // MAIN sources: without that include a raw appender added there would leave the guard UP-TO-DATE.
     inputs.files(
         fileTree(rootProject.file("..")) {
-            include("modules/*/src/test/kotlin/**/*.kt", "tests/*/src/test/kotlin/**/*.kt")
+            include(
+                "modules/*/src/test/kotlin/**/*.kt",
+                "tests/*/src/test/kotlin/**/*.kt",
+                "modules/log-capture/src/main/kotlin/**/*.kt",
+            )
         },
     )
         .withPathSensitivity(PathSensitivity.RELATIVE)
