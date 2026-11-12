@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.118 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37) and 2026-11-11 (v2.112, v2.116) rows for the deliberate breaks)
+**Status:** v2.119 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37) and 2026-11-11 (v2.112, v2.116) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-11-12
@@ -3025,6 +3025,9 @@ Diagnostic = { code: "MISSING" | "DISCARDED" | "UNSUPPORTED_FAMILY" | "CYCLE" | 
                node_id | null, edge_id | null, message }
 ```
 
+An `api_endpoint` node's `operational.enabled` is the API's `is_enabled` on every walk, read with the
+version itself; it is shown and never hashed, and a node that did not resolve carries `operational: null`.
+
 `entity_id` is the stable id of a resolved node's object: an entity UUID, or a datasource's name. It is
 `null` for every other resolution. `node_id` and `edge_id` are opaque local locators, never authority.
 `acyclic` is `true` or `false` only when the whole closure was enumerated (`complete: true`); otherwise
@@ -3080,6 +3083,7 @@ family is readable, so no route reaches one; the dependency contract's own fixtu
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-12 | v2.119 | #902 API enabled on the tree node | **§25:** an `api_endpoint` node now carries `operational: { enabled }` — the API's `is_enabled` — as §25's grammar already promised; it was `null` on every walk before. Shown, never hashed: the body hash and the tree fingerprint are unchanged, and a node that did not resolve still carries `null`. No route, field, permission or `schema_version` change. |
 | 2026-11-12 | v2.118 | #892 unmet parameter names | **§25, additive:** a dashboard's `parameter_names` edge constraint gains the optional `unmet_names` — the bound names the reached set version does not declare, a subset of `names` in its order. It is absent when every name is met and when the set is `missing`, never `[]` or `null`, and it changes no other field. `schema_version` stays `1`. |
 | 2026-11-11 | v2.117 | #875 dependency trees (G4) | **New §25 Dependency trees, additive:** the eight session-only routes `GET /api/v1/dependencies/<family>`, each with its family's READ permission, return the bounded dependency closure of one root (`name` + `version`, `id` for a schedule, `name` alone for a datasource) as the frozen dependency-graph wire contract. Refusals are catalogued in pipeline-contract §13.26; a hidden or missing root answers its family's own not-found. No key kind is admitted. A DISCARDED version is a terminal node (`complete: false`, `acyclic: null`). A tree over `max-wire-bytes` is reduced to the longest prefix of its nodes that fits and answers `200` with a `wire_bytes` `LIMIT`; only a tree whose roots alone do not fit answers `503 dependencies.response.too_large`. Each case the routes produce is pinned by an enveloped golden. |
 | 2026-11-11 | v2.116 | #894 endpoint-root audit provenance — a deliberate break | **§5.10** (the audit paragraph): a template row an API release cascades carries `cascade_from_api_endpoint_id` and the API's `cascade_from_version`, and no longer `cascade_from_pipeline_id` holding the API's id (owner ruling 2026-11-11, an explicit exception to the frozen release-dependencies record §11). A pipeline release's rows are unchanged; rows written before #894 are not rewritten. No route, field, permission or role changed. |

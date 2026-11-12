@@ -452,6 +452,52 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
             .count() shouldBe 0
     }
 
+    /**
+     * #907: a sole-draft LIBRARY only an importing template pins. The entity purge dialog names the
+     * importer under its own hook and offers no typed confirm and no button — the guard's refusal,
+     * shown before the click (the list container's condition once ignored importers).
+     */
+    @Test
+    fun `907 - an importer-only pin lists the importing template in the entity purge dialog, buttonless`() {
+        startTrace()
+        ready()
+        page.navigate("$baseUrl/dashboard")
+        val library = "test/lifecycle_library.sql"
+        val importer = "test/lifecycle_importer.sql"
+        createTemplate(library, "<#function suffix><#return '-lib'></#function>", library = true)
+        createTemplate(
+            importer,
+            "SELECT '${'$'}{lib.suffix()}' AS c",
+            imports = """[{"id":"$library","version":1,"alias":"lib"}]""",
+        )
+
+        page.setViewportSize(1280, 900)
+        selectLeafOf(library)
+        val entityDialog = openDialog(page.locator(".tw-topbar button", Page.LocatorOptions().setHasText("Purge template")))
+        withClue("entity purge dialog: ${entityDialog.innerHTML()}") {
+            entityDialog.locator("[data-purge-entity-pinner-template]").allInnerTexts() shouldBe listOf(importer)
+            entityDialog.locator("button[type=submit]").count() shouldBe 0
+            entityDialog.locator("[data-confirm-input]").count() shouldBe 0
+        }
+        entityDialog.innerText() shouldContain "importing template"
+    }
+
+    private fun createTemplate(
+        id: String,
+        body: String,
+        library: Boolean = false,
+        imports: String = "[]",
+    ) {
+        val (status, response) =
+            send(
+                "POST",
+                "/api/v1/templates",
+                """{"id":"$id","dialect":"POSTGRES","display_name":"${id.substringAfterLast('/')}",""" +
+                    """"description":"907 importer pin","is_library":$library,"imports":$imports,"body":"$body"}""",
+            )
+        withClue("create $id: $response") { status shouldBe 201 }
+    }
+
     // -------------------------------------------------- every dialog, light and dark, two widths
 
     @Test

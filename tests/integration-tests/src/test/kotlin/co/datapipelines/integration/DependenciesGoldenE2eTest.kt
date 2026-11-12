@@ -85,9 +85,6 @@ class DependenciesGoldenE2eTest {
                 n.path("operational").takeUnless { it.isNull }?.let { "${n.path("family").asText()}:$it" }
             }.toSet() shouldBe
             OPERATIONAL
-        withClue("KNOWN GAP #902: no provider sets an API's enabled fact; when it lands, re-stamp both API goldens and drop this") {
-            nodes.filter { it.path("family").asText() == "api_endpoint" }.map { it.path("operational").isNull }.toSet() shouldBe setOf(true)
-        }
         nodes.mapNotNull { it.path("lifecycle").takeUnless { l -> l.isNull }?.asText() }.toSet() shouldBe
             setOf("DRAFT", "RELEASED", "DISCARDED")
         // `acyclic` is decided only over a whole closure. A DISCARDED node is terminal and leaves the closure incomplete
@@ -526,9 +523,11 @@ class DependenciesGoldenE2eTest {
             )
         val CONSTRAINTS = setOf("parameter_names", "datasource_access:read", "datasource_access:write", "datasource_dialect")
 
-        /** §11.1's nine variants less the two API ones no provider sets yet (#902, the known-gap assertion above). */
+        /** All nine §11.1 operational variants (the two API ones since #902: the API node shows the entity's `is_enabled`). */
         val OPERATIONAL =
             setOf(
+                """api_endpoint:{"enabled":true}""",
+                """api_endpoint:{"enabled":false}""",
                 """schedule:{"condition":"enabled"}""",
                 """schedule:{"condition":"paused"}""",
                 """schedule:{"condition":"blocked"}""",
