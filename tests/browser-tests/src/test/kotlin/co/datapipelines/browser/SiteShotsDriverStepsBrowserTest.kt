@@ -22,7 +22,7 @@ import org.junit.jupiter.api.Test
  *
  *  - #549: the `home-agent-builds` framing ([SiteShotsMain.Shots.frameAgentBuilds] /
  *    [SiteShotsMain.Shots.unframeAgentBuilds]) collapses the dock whichever way the workspace
- *    started it (#615: at 1440x900 the dock STARTS collapsed), and puts the editor back as it
+ *    started it (#615: the default depends on the available canvas height), and puts the editor back as it
  *    found it, a frame that failed half-way included — with no step on the withdrawn sidebar
  *    splitter (#349).
  *  - #546: a stored dark theme is healed at run start ([SiteShotsMain.Shots.ensureLightTheme]),
