@@ -17,7 +17,7 @@ import java.util.UUID
  *
  * Two template-specific facts. The pin evidence is `template.in_use` (graph rule 1: no
  * `template.version.pinned` exists — the in-use scan IS the refusal), read from [usage] — the SAME
- * evidence [TemplateReleaseService] refuses with, over pipelines, parameter sets and (#320) visualizations,
+ * evidence [TemplateReleaseService] refuses with, over pipelines, parameter sets, visualizations and importing templates,
  * so the list a dialog shows is the list the POST would name. And there is no Switch
  * dialog: templates are pinned by exact version, so there is no served pointer a human would
  * roll back.
@@ -115,7 +115,7 @@ class TemplateLifecycleDialogModel(
                 details = mapOf("template_id" to id, "version" to version, "status" to detail.status.name),
             )
         }
-        // The purge's own guard, pre-read: a live version of a pipeline, a parameter set or a visualization pinning
+        // The purge's own guard, pre-read: a live pipeline, parameter set, visualization or importing template version pinning
         // THIS version is `template.in_use` and the purge would refuse — the dialog shows who, with no button. The
         // sole draft's purge takes the template with it, so it is the entity rule (any version ever), exactly as
         // the service asks.
@@ -261,7 +261,7 @@ class TemplateLifecycleDialogModel(
             )
         }
         val soleDraft = versions.size == 1 && versions.single().status == PipelineVersionStatus.DRAFT
-        // Graph rule 3's template arm: the ANY-version scan the delete guard itself runs, all three aggregates.
+        // Graph rule 3's template arm: the ANY-version scan the delete guard itself runs, all four families.
         val pins = usage.everPins(workspaceId, id)
         return PurgeEntityDialog(
             id = id,
@@ -292,7 +292,7 @@ class TemplateLifecycleDialogModel(
         )
     }
 
-    /** The pinners in one phrase: the pipelines first (as the refusal always said), then the sets, then the visualizations. */
+    /** The pinners in one phrase: pipelines, parameter sets, visualizations, then importing templates. */
     private fun pinSentence(pins: TemplateUsage.Pins): String =
         listOfNotNull(
             pins.pipelines
