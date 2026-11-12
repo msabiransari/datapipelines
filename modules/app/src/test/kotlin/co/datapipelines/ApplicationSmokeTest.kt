@@ -339,10 +339,12 @@ class ApplicationSmokeTest {
      */
     private fun scrapeFamilies(): Pair<Set<String>, Set<String>> {
         val lines = get(managementPort, "/actuator/prometheus").body().lines()
+
         fun families(kind: String) =
             lines
                 .filter { it.startsWith("# $kind $SCRAPE_PREFIX") }
                 .map { it.removePrefix("# $kind ").split(' ', limit = 2) }
+
         val typed = families("TYPE").map { it[0] }.toSortedSet()
         val helped = families("HELP").filter { it.size == 2 && it[1].isNotBlank() }.map { it[0] }.toSet()
         return typed to (typed - helped).toSortedSet()
