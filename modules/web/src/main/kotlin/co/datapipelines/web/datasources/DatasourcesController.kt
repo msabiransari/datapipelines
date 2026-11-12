@@ -6,7 +6,6 @@ import co.datapipelines.application.datasources.DatasourceUpdateService
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceUsages
@@ -52,9 +51,9 @@ import java.util.UUID
  * ## The D8 gates — [DatasourceWorkspaceRules]
  *
  * One shared component answers "who may write what" for this controller AND the UI's form
- * partial, so the two surfaces cannot drift. The scope floor for the three CUD verbs is
- * [ScopeMatrix.RestOperation.MUTATE_WORKSPACE_DATASOURCES] (author); admin-ness and the
- * config gate are not scopes and live in the rules.
+ * partial, so the two surfaces cannot drift. The permission floor for the three CUD verbs is
+ * [Permission.DATASOURCE_MANAGE] (workspace admin and super admin); the super-admin rules and the
+ * config gate are not permissions and live in the rules.
  *
  * ## The registry owns the rest
  *
