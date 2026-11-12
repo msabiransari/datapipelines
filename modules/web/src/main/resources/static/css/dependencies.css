@@ -39,10 +39,12 @@
   gap: var(--gap-xs);
 }
 
+/* One column: the canvas takes the pane's whole width (a side panel halved it, and Fit drew 11px labels at
+   about half size on a 1440px window); the selection panel reads below it. */
 .dp-deps-graph {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, calc(var(--space-24) * 3));
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: var(--gap-sm);
   min-width: 0;
 }
@@ -101,14 +103,38 @@
   overflow-x: auto;
 }
 
+/* Auto layout: each column takes its content's width (a fixed layout split six columns evenly and set "Dashboard"
+   one syllable per line). Kind, version and the relationship label never wrap; a name wraps after a "/"
+   (list.js's break opportunities) and keeps its segments whole; other text breaks anywhere it must. */
 .dp-deps-table {
   width: 100%;
-  table-layout: fixed;
+  table-layout: auto;
 }
 
 .dp-deps-table td {
   overflow-wrap: anywhere;
   vertical-align: top;
+}
+
+/* A name — in its own cell or inside a relationship, a constraint or an edge row — keeps each segment whole: its
+   column is at least its longest segment wide, and the table scrolls inside itself (data-table.css's unframed
+   table), never the page, when one segment is wider than the pane. */
+.dp-deps-table td.dp-deps-name,
+.dp-deps-table td.dp-deps-path,
+.dp-deps-table td.dp-deps-status {
+  overflow-wrap: break-word;
+}
+
+.dp-deps-table td.dp-deps-kind,
+.dp-deps-table td.dp-deps-nowrap {
+  white-space: nowrap;
+}
+
+/* The vendored badge never wraps; a datasource's long status ("Registered datasource · read-write") would hold its
+   column at one line and push the table past the pane, so inside the list it wraps between words (the status cell
+   keeps its words whole, above). */
+.dp-deps-table td.dp-deps-status .ds-badge {
+  white-space: normal;
 }
 
 .dp-deps-caption {
@@ -121,15 +147,10 @@
   background: var(--surface-selected);
 }
 
-.dp-deps-kind {
-  display: flex;
+.dp-deps-kind-line {
+  display: inline-flex;
   align-items: center;
   gap: var(--gap-xs);
-}
-
-.dp-deps-name a,
-.dp-deps-name span {
-  overflow-wrap: anywhere;
 }
 
 .dp-deps-root-mark {

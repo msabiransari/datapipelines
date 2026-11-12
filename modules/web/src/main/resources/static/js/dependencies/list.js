@@ -32,15 +32,28 @@
     return svg;
   }
 
+  /**
+   * A folder-path name as text with a line-break opportunity after every "/": a long name wraps between its
+   * segments, and only a segment wider than its column breaks inside (the cell's overflow-wrap).
+   */
+  function pathText(parent, name) {
+    var parts = String(name).split("/");
+    parts.forEach(function (part, i) {
+      parent.appendChild(document.createTextNode(i < parts.length - 1 ? part + "/" : part));
+      if (i < parts.length - 1) parent.appendChild(document.createElement("wbr"));
+    });
+    return parent;
+  }
+
   /** The node's name cell: a link to its exact version when the view built one, plain text otherwise. */
   function nameCell(node) {
     var cell = el("td", "dp-deps-name");
     var target;
     if (node.href) {
-      target = el("a", null, node.name);
+      target = pathText(el("a"), node.name);
       target.setAttribute("href", node.href);
     } else {
-      target = el("span", null, node.name);
+      target = pathText(el("span"), node.name);
     }
     target.setAttribute("title", node.name);
     cell.appendChild(target);
@@ -89,20 +102,23 @@
       tr.setAttribute("data-tone", n.tone);
       tr.setAttribute("tabindex", index === 0 ? "0" : "-1");
       tr.setAttribute("aria-selected", "false");
+      // The cell stays a table cell; the glyph and its label sit in one unbroken line inside it.
       var kind = el("td", "dp-deps-kind");
-      kind.appendChild(glyph(n.glyph));
-      kind.appendChild(el("span", null, n.familyLabel));
+      var kindLine = el("span", "dp-deps-kind-line");
+      kindLine.appendChild(glyph(n.glyph));
+      kindLine.appendChild(el("span", null, n.familyLabel));
+      kind.appendChild(kindLine);
       tr.appendChild(kind);
       tr.appendChild(nameCell(n));
-      tr.appendChild(el("td", null, n.versionLabel));
-      var statusCell = el("td");
+      tr.appendChild(el("td", "dp-deps-nowrap", n.versionLabel));
+      var statusCell = el("td", "dp-deps-status");
       statusCell.appendChild(el("span", "ds-badge " + (TONE_BADGE[n.tone] || "ds-badge-default"), n.statusText));
       n.diagnostics.forEach(function (message) {
         statusCell.appendChild(el("span", "dp-deps-diagnostic", message));
       });
       tr.appendChild(statusCell);
-      tr.appendChild(el("td", null, n.isRoot ? "Root" : (incoming[n.id] || []).join("; ")));
-      tr.appendChild(el("td", null, (constraintsTo[n.id] || []).join("; ")));
+      tr.appendChild(pathText(el("td", "dp-deps-path"), n.isRoot ? "Root" : (incoming[n.id] || []).join("; ")));
+      tr.appendChild(pathText(el("td", "dp-deps-path"), (constraintsTo[n.id] || []).join("; ")));
       body.appendChild(tr);
       rows.push(tr);
     });
@@ -116,10 +132,10 @@
     view.edges.forEach(function (e) {
       var tr = el("tr");
       tr.setAttribute("data-edge-id", e.id);
-      tr.appendChild(el("td", null, byId[e.from] ? byId[e.from].name + " " + byId[e.from].versionLabel : ""));
-      tr.appendChild(el("td", null, e.label));
-      tr.appendChild(el("td", null, byId[e.to] ? byId[e.to].name + " " + byId[e.to].versionLabel : ""));
-      tr.appendChild(el("td", null, e.constraints.join("; ")));
+      tr.appendChild(pathText(el("td", "dp-deps-path"), byId[e.from] ? byId[e.from].name + " " + byId[e.from].versionLabel : ""));
+      tr.appendChild(el("td", "dp-deps-nowrap", e.label));
+      tr.appendChild(pathText(el("td", "dp-deps-path"), byId[e.to] ? byId[e.to].name + " " + byId[e.to].versionLabel : ""));
+      tr.appendChild(pathText(el("td", "dp-deps-path"), e.constraints.join("; ")));
       edgeBody.appendChild(tr);
     });
     edgesTable.appendChild(edgeBody);
