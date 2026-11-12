@@ -255,6 +255,131 @@ class WebEventEmitterTest {
         }
     }
 
+    // ------------------------------------------------- #905: the result write behind an unconfirmed insert
+
+    /** #905 W1: no insert pending — the write runs on the caller's thread before the call returns, as always. */
+    @Test
+    fun `W1 - with no pending insert a later row write runs on the caller - inline`() =
+        runTest {
+            every { executionRepository.create(any()) } answers { firstArg() }
+            every { eventRepository.append(any<UUID>(), any(), any(), any(), any()) } just runs
+            every { eventLog.append(any(), any()) } just runs
+            val emitter = emitter()
+            emitter.emit(ExecutionStarted(executionId, pipelineId, 3, emptyMap(), startedAt = NOW))
+            val caller = Thread.currentThread()
+            val ranOn = mutableListOf<Thread>()
+
+            emitter.writeBehindUnconfirmedInsert(executionId, "result columns write") {
+                ranOn += Thread.currentThread()
+                true
+            }
+
+            ranOn shouldBe listOf(caller)
+        }
+
+    /**
+     * #905 W2: the insert outlived its bound — the write does not run while it is in flight, and runs ONCE on
+     * the persistence pool once it lands; the caller is never blocked and nothing is counted.
+     */
+    @Test
+    fun `W2 - a row write behind an unconfirmed RUNNING insert runs once on the pool after it lands`() {
+        LateInsert().use { late ->
+            late.emitStarted()
+            val ranOn = java.util.concurrent.CopyOnWriteArrayList<Thread>()
+            late.writeBehind {
+                ranOn += Thread.currentThread()
+                late.rows.containsKey(executionId)
+            }
+            // Registered, not run: the insert still holds its pool thread (a drain would wait on it).
+            ranOn.size shouldBe 0
+
+            late.releaseInsert()
+            late.drain()
+            ranOn.size shouldBe 1
+            late.isPoolThread(ranOn.single()) shouldBe true
+            late.failures() shouldBe 0.0
+        }
+    }
+
+    /** #905 W3: the late insert FAILS — the write is dropped with one WARN naming the execution, never run. */
+    @Test
+    fun `W3 - a row write behind an insert that fails late is dropped with one WARN`() {
+        LateInsert(insertFails = true).use { late ->
+            var ran = 0
+            val logs =
+                late.capturingWarns {
+                    late.emitStarted()
+                    late.writeBehind {
+                        ran++
+                        true
+                    }
+                    late.releaseInsert()
+                    late.drain()
+                }
+            ran shouldBe 0
+            logs.filter { "result columns write is dropped" in it && executionId.toString() in it }.size shouldBe 1
+            late.failures() shouldBe 0.0
+        }
+    }
+
+    /** #905 W4: the pool refuses the deferred task — one WARN naming the execution; nothing throws. */
+    @Test
+    fun `W4 - a refused dispatch of the deferred row write is one WARN and never throws`() {
+        LateInsert().use { late ->
+            var ran = 0
+            val logs =
+                late.capturingWarns {
+                    late.emitStarted()
+                    late.writeBehind {
+                        ran++
+                        true
+                    }
+                    late.refuseDispatch()
+                    late.releaseInsert()
+                    late.drain()
+                }
+            ran shouldBe 0
+            logs
+                .filter { "deferred result columns write could not be dispatched" in it && executionId.toString() in it }
+                .size shouldBe 1
+        }
+    }
+
+    /** #905 W5: a write that matches no row is one WARN naming the execution — inline and deferred alike. */
+    @Test
+    fun `W5 - a row write that matches no row is one WARN wherever it ran`() {
+        every { executionRepository.create(any()) } answers { firstArg() }
+        every { eventRepository.append(any<UUID>(), any(), any(), any(), any()) } just runs
+        every { eventLog.append(any(), any()) } just runs
+        val inline =
+            warnsDuring {
+                val emitter = emitter()
+                runBlocking { emitter.emit(ExecutionStarted(executionId, pipelineId, 3, emptyMap(), startedAt = NOW)) }
+                emitter.writeBehindUnconfirmedInsert(executionId, "result columns write") { false }
+            }
+        inline.filter { "not found by its result columns write" in it && executionId.toString() in it }.size shouldBe 1
+
+        LateInsert().use { late ->
+            val deferred =
+                late.capturingWarns {
+                    late.emitStarted()
+                    late.writeBehind { false }
+                    late.releaseInsert()
+                    late.drain()
+                }
+            deferred.filter { "not found by its deferred result columns write" in it && executionId.toString() in it }.size shouldBe 1
+        }
+    }
+
+    /** The emitter's WARN lines while [block] runs. */
+    private fun warnsDuring(block: () -> Unit): List<String> =
+        co.datapipelines.logcapture
+            .capturingLogEvents(
+                org.slf4j.LoggerFactory.getLogger(WebEventEmitter::class.java) as ch.qos.logback.classic.Logger,
+                block = block,
+            ).filter { it.level == ch.qos.logback.classic.Level.WARN }
+            .map { it.formattedMessage }
+
     /**
      * The #325 rig: a 200 ms lifecycle bound, a 2-thread persistence pool (closed by [close]), an in-memory
      * `pipeline_executions` whose `create` blocks on [insertGate] and `complete` updates only an existing row,
@@ -267,7 +392,26 @@ class WebEventEmitterTest {
     ) : AutoCloseable {
         val rows = ConcurrentHashMap<UUID, ExecutionStatus>()
         private val insertGate = CountDownLatch(1)
-        private val pool = Executors.newFixedThreadPool(POOL_THREADS)
+        private val poolThreads = java.util.concurrent.CopyOnWriteArraySet<Thread>()
+        private val pool =
+            Executors.newFixedThreadPool(POOL_THREADS) { task -> Thread(task).also(poolThreads::add) }
+        private val refusing =
+            java.util.concurrent.atomic
+                .AtomicBoolean(false)
+
+        /** The pool as a dispatcher that refuses every task once [refuseDispatch] was called (#905 W4). */
+        private val dispatcher =
+            object : kotlinx.coroutines.CoroutineDispatcher() {
+                private val delegate = pool.asCoroutineDispatcher()
+
+                override fun dispatch(
+                    context: kotlin.coroutines.CoroutineContext,
+                    block: Runnable,
+                ) {
+                    if (refusing.get()) throw java.util.concurrent.RejectedExecutionException("refused by the test")
+                    delegate.dispatch(context, block)
+                }
+            }
         private val meters = SimpleMeterRegistry()
         private val emitter =
             WebEventEmitter(
@@ -277,7 +421,7 @@ class WebEventEmitterTest {
                 eventLog = eventLog,
                 eventRepository = eventRepository,
                 executionRepository = executionRepository,
-                persistenceDispatcher = pool.asCoroutineDispatcher(),
+                persistenceDispatcher = dispatcher,
                 lifecycleWriteTimeout = java.time.Duration.ofMillis(BOUND_MS),
                 metrics = ExecutorMetrics(meters),
             )
@@ -302,6 +446,14 @@ class WebEventEmitterTest {
                 emitter.emit(ExecutionStarted(executionId, pipelineId, 3, emptyMap(), startedAt = NOW))
                 emitter.emit(PipelineCompleted(executionId, pipelineId, 3, NOW, NOW.plusMillis(900), 900, emptyList()))
             }
+
+        fun emitStarted() = runBlocking { emitter.emit(ExecutionStarted(executionId, pipelineId, 3, emptyMap(), startedAt = NOW)) }
+
+        fun writeBehind(write: () -> Boolean) = emitter.writeBehindUnconfirmedInsert(executionId, "result columns write", write)
+
+        fun refuseDispatch() = refusing.set(true)
+
+        fun isPoolThread(thread: Thread): Boolean = thread in poolThreads
 
         fun releaseInsert() = insertGate.countDown()
 
@@ -329,13 +481,7 @@ class WebEventEmitterTest {
         }
 
         /** The emitter's WARN lines while [block] runs. */
-        fun capturingWarns(block: () -> Unit): List<String> =
-            co.datapipelines.logcapture
-                .capturingLogEvents(
-                    org.slf4j.LoggerFactory.getLogger(WebEventEmitter::class.java) as ch.qos.logback.classic.Logger,
-                    block = block,
-                ).filter { it.level == ch.qos.logback.classic.Level.WARN }
-                .map { it.formattedMessage }
+        fun capturingWarns(block: () -> Unit): List<String> = warnsDuring(block)
 
         override fun close() {
             insertGate.countDown()

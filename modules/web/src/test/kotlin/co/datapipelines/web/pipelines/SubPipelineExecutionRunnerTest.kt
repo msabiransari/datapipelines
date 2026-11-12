@@ -395,6 +395,48 @@ class SubPipelineExecutionRunnerTest {
         }
 
     /**
+     * #905 — a child's stored result is recorded through the child's emitter (ordered behind an
+     * unconfirmed RUNNING insert): a write that matches no row is the emitter's one WARN.
+     */
+    @Test
+    fun `a child result write that matches no row is one WARN from the child's emitter`() {
+        stubRegistry()
+        val stub = ExecutorStub()
+        stub.drive = { req -> stub.success(req).copy(resultRef = "dp:result:${req.executionId}") }
+        every { resultStore.describe(any()) } answers {
+            co.datapipelines.executor.StoredResultView(
+                key = firstArg(),
+                executionId = requireNotNull(stub.captured.single().executionId),
+                schema = emptyList(),
+                firstPage = emptyList(),
+                totalRows = 9,
+                bytes = 90,
+                expiresAt = Instant.EPOCH,
+            )
+        }
+        every { executionRepository.recordResult(any(), 9L, 90L, emptyList()) } returns false
+
+        val warns = emitterWarns { kotlinx.coroutines.runBlocking { runner(stub).run(pipelineNode(), context()) } }
+
+        val childId =
+            stub.captured
+                .single()
+                .executionId
+                .toString()
+        warns.filter { "not found by its result columns write" in it && childId in it }.size shouldBe 1
+    }
+
+    /** The run emitter's WARN lines while [block] runs (#905: the result write is the emitter's). */
+    private fun emitterWarns(block: () -> Unit): List<String> =
+        co.datapipelines.logcapture
+            .capturingLogEvents(
+                org.slf4j.LoggerFactory.getLogger(co.datapipelines.web.sse.WebEventEmitter::class.java)
+                    as ch.qos.logback.classic.Logger,
+                block = block,
+            ).filter { it.level == ch.qos.logback.classic.Level.WARN }
+            .map { it.formattedMessage }
+
+    /**
      * A13 — the frozen reference time is inherited like the principal and the workspace: a
      * scheduled composition's whole family resolves its bindings on the parent's logical time.
      * A root that had none (every direct execution) leaves the child's null too.

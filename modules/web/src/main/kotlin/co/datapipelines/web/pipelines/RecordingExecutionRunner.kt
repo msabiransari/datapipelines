@@ -175,20 +175,26 @@ class RecordingExecutionRunner(
                 }
                 throw error
             }
-        recordResultColumns(result)
+        recordResultColumns(result, emitter)
         return result
     }
 
     /**
      * The §10.2 result-history columns — same write [ExecutionStreamLauncher] performs for REST runs;
      * the emitter's terminal event carries no result size, so they land after `execute` returns.
-     * Bookkeeping only: a failure is logged, never fails the completed execution.
+     * Bookkeeping only: a failure is logged, never fails the completed execution. #905: the write
+     * goes through the run's [emitter], ordered behind an unconfirmed RUNNING insert.
      */
-    private fun recordResultColumns(result: ExecutionResult) {
+    private fun recordResultColumns(
+        result: ExecutionResult,
+        emitter: WebEventEmitter,
+    ) {
         val ref = result.resultRef ?: return
         runCatching {
             val view = resultStore.describe(ref) ?: return
-            executionRepository.recordResult(result.executionId, view.totalRows, view.bytes, view.schema)
+            emitter.writeBehindUnconfirmedInsert(result.executionId, RESULT_COLUMNS_WRITE) {
+                executionRepository.recordResult(result.executionId, view.totalRows, view.bytes, view.schema)
+            }
         }.onFailure { log.warn("Result columns for execution {} not recorded.", result.executionId, it) }
     }
 

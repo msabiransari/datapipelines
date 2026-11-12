@@ -167,6 +167,57 @@ class ExecutionRepositoriesIntegrationTest {
     }
 
     /**
+     * #905 — the two writes are dispatched separately, so `recordResult` can land BEFORE the terminal
+     * update (the update deferred behind a late RUNNING insert, #325). A terminal update that passes no
+     * result values must keep what was recorded; one that passes values still writes them.
+     */
+    @Test
+    fun `a terminal update without result values keeps a result recorded before it, and one with values writes them`() {
+        val record = running()
+        executions.create(record)
+        val schema = listOf(ColumnSchema("month", LogicalType.DATE, nullable = false))
+        executions.recordResult(record.executionId, 2, 1_024, schema).shouldBeTrue()
+        val schemaBefore =
+            executions
+                .findById(WORKSPACE_ID, record.executionId)
+                .shouldNotBeNull()
+                .resultSchemaJson
+                .shouldNotBeNull()
+
+        executions
+            .complete(
+                executionId = record.executionId,
+                status = ExecutionStatus.SUCCESS,
+                completedAt = Instant.now().truncatedTo(ChronoUnit.MILLIS),
+                durationMs = 42,
+                nodeStatsJson = NODE_STATS_JSON,
+            ).shouldBeTrue()
+
+        val kept = executions.findById(WORKSPACE_ID, record.executionId).shouldNotBeNull()
+        kept.status shouldBe ExecutionStatus.SUCCESS
+        kept.durationMs shouldBe 42
+        kept.completedAt.shouldNotBeNull()
+        kept.resultRowCount shouldBe 2
+        kept.resultSizeBytes shouldBe 1_024
+        kept.resultSchemaJson shouldBe schemaBefore
+
+        executions
+            .complete(
+                executionId = record.executionId,
+                status = ExecutionStatus.SUCCESS,
+                completedAt = Instant.now().truncatedTo(ChronoUnit.MILLIS),
+                durationMs = 43,
+                nodeStatsJson = NODE_STATS_JSON,
+                resultRowCount = 7,
+                resultSizeBytes = 70,
+            ).shouldBeTrue()
+
+        val written = executions.findById(WORKSPACE_ID, record.executionId).shouldNotBeNull()
+        written.resultRowCount shouldBe 7
+        written.resultSizeBytes shouldBe 70
+    }
+
+    /**
      * #328 A — the D2 record: the stored result's schema rides `recordResult` and reads back
      * as the `{name, type, nullable}` array, element by element. DECIMAL carries precision (the
      * §7.1 rule); a null `nullable` is recorded as JSON's absence and read back as absent —
