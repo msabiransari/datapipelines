@@ -20,7 +20,7 @@ class VisualizationReleaseCascadeRollbackE2eTest {
     private var port: Int = 0
 
     @Test
-    fun `stale A with GREEN B rolls back the eligible template cascade - matching B commits both`() {
+    fun `stale A with GREEN B is refused at preparation before any flip - matching B commits both`() {
         VisualizationReleaseCascadeFixtures(port, JWT_SECRET).use { fixture ->
             fixture.prepare()
             val templateBefore = fixture.templateState()
@@ -34,7 +34,7 @@ class VisualizationReleaseCascadeRollbackE2eTest {
             val templateAfter = fixture.templateState()
             val visualizationAfter = fixture.visualizationState()
             println("event=cascade453.stale template=$templateAfter visualization=$visualizationAfter")
-            withClue("the production outer transaction must roll back the already executed template release") {
+            withClue("the stale expected hash is refused in prepare, before the release transaction: no template flip ran") {
                 templateAfter shouldBe templateBefore
             }
             visualizationAfter shouldBe visualizationBefore

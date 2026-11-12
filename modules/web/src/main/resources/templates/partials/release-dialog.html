@@ -7,7 +7,8 @@
      shared by several branches is ONE row), one text row per prerequisite, the plan's tree_hash as a hidden input and
      its edges once as a hidden list. A selectable DRAFT is a checkbox, checked, posting its node_id as
      include_dependencies; RELEASED is a chip; MISSING or DISCARDED is blocking text; a prerequisite is never an input
-     and never a graph node. `data-release-submittable` is the model's one boolean: lifecycle-dialog.js keeps every
+     and never a graph node. A DRAFT pipeline row also carries its own optional check override (check_override_node +
+     check_override_reason, paired by index into the plan's check_overrides). `data-release-submittable` is the model's one boolean: lifecycle-dialog.js keeps every
      gated submit disabled while it is false — a courtesy, the coordinator refuses the forced POST (A11). Every value
      reaches the page through th:text / th:attr; nothing here is an inline style or an inline script.
 
@@ -47,6 +48,25 @@
           <span class="dp-release-off dp-release-blocking"> — release it first</span>
           <span th:if="${row.note != null}" class="u-secondary" data-release-note th:text="${row.note}">, also pinned by 1 other draft pipeline</span>
         </label>
+        <!-- A DRAFT PIPELINE dependency is the only family with release checks, and the plan does not know its
+             verdict (no checks run for a dependency here), so every such row offers its OWN override, collapsed:
+             the hidden node id and the reason post as one check_override_node / check_override_reason pair, a
+             blank reason is no override, and the coordinator judges the pair (a node of the plan, released by
+             it, given once). Shown to the callers the root's override is shown to; the root's reason is never
+             this row's. The reason is text through th:attr only. -->
+        <details th:if="${row.kindWire == 'draft' and row.family == 'pipeline' and canAuthor == true}"
+                 class="dp-release-override u-text-sm" data-release-override
+                 th:attr="data-node-id=${row.nodeId}">
+          <summary class="ds-button ds-button-ghost ds-button-sm tplx-danger">Override its failing checks…</summary>
+          <input type="hidden" name="check_override_node" th:value="${row.nodeId}">
+          <p class="u-secondary u-text-sm u-mt-md">
+            If the release checks of <span class="u-mono" th:text="${row.name}">sales/daily</span> do not pass, its
+            release is blocked; a reason here overrides them — the reason is recorded on its release's audit event.
+          </p>
+          <textarea name="check_override_reason" class="ds-textarea u-mt-md" rows="2" minlength="10"
+                    th:attr="aria-label=${'Override reason for ' + row.name + ' ' + row.versionLabel}"
+                    placeholder="Why this release is safe despite the failing checks (at least 10 characters)"></textarea>
+        </details>
         <th:block th:if="${row.kindWire == 'released'}">
           <span class="dp-release-family" th:text="${row.familyLabel}">Parameter set</span>
           <span class="u-mono" th:text="${row.name}">sales/filters</span>

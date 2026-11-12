@@ -147,7 +147,8 @@ class PipelineLifecycleDialogModel(
         /**
          * #416 — the body hash of the SAME draft the dialog's version and last-writer facts come
          * from. The form posts it back and the release is made AT it, so a draft that changed after
-         * the dialog opened is refused `pipeline.version.conflict`, never released silently. Empty on
+         * the dialog opened is refused, never released silently — `pipeline.release.plan_conflict` from
+         * the plan's tree_hash first, `pipeline.version.conflict` for a current plan at a stale hash. Empty on
          * the no-draft branch, whose [refusal] renders no form. The default keeps the render tests'
          * hand-built dialogs compiling; both production constructions pass it explicitly.
          */

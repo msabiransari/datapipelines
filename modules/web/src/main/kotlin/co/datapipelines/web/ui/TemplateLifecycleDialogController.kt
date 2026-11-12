@@ -14,6 +14,8 @@ import co.datapipelines.web.templates.TemplateReleaseService
 import org.springframework.http.ResponseEntity
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
+import org.springframework.util.LinkedMultiValueMap
+import org.springframework.util.MultiValueMap
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestParam
@@ -82,13 +84,16 @@ class TemplateLifecycleDialogController(
         @RequestParam bodyHash: String,
         @RequestParam(name = "tree_hash", required = false) treeHash: String?,
         @RequestParam(name = "include_dependencies", required = false) includeDependencies: List<String>?,
+        /** #876 §F.2 — the optional per-node check overrides, read raw (ReleaseDialogPost pairs them by index). */
+        @RequestParam form: MultiValueMap<String, String> = LinkedMultiValueMap(),
     ): ResponseEntity<String> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
-        // #416 — [bodyHash] is the hash the DIALOG read (§4.2). The draft is read here only to
-        // refuse the no-draft case; its CURRENT hash is never the one released, so a draft that
-        // changed after the dialog opened is a stale hash and the service answers
-        // template.version.conflict.
+        // #416 — [bodyHash] is the hash the DIALOG read (§4.2: you release what you tested). The draft is read here
+        // only to refuse the no-draft case; its CURRENT hash is never the one released. A draft that changed after the
+        // dialog opened is refused before anything flips: the plan's tree_hash covers the root's draft, so the planner
+        // answers template.release.plan_conflict first; the service's own template.version.conflict still answers a
+        // current plan posted with a stale bodyHash.
         templates.findDraftDetail(workspaceId, name)
             ?: throw DatapipelinesException(
                 code = PipelineErrorCodes.Template.VERSION_NOT_DRAFT,
@@ -96,7 +101,7 @@ class TemplateLifecycleDialogController(
                 details = mapOf("template_id" to name),
             )
         // #876 §F.2 — the plan its GET rendered, into the SAME plan object the REST route parses.
-        val plan = ReleaseDialogPost.plan(ReleaseFamily.TEMPLATE, treeHash, includeDependencies)
+        val plan = ReleaseDialogPost.plan(ReleaseFamily.TEMPLATE, treeHash, includeDependencies, form)
         releases.release(workspaceId, name, bodyHash, principal.userId, plan)
         // T187 — the release is audited on every surface that offers it: by the coordinator, inside the one
         // transaction (#873 §C.7); this handler writes none.

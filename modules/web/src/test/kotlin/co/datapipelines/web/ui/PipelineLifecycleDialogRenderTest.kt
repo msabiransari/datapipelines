@@ -101,7 +101,8 @@ class PipelineLifecycleDialogRenderTest {
         html shouldContain "data-release-submittable=\"false\""
         html shouldContain "data-release-blocked"
         html shouldNotContain "data-verb=\"pipeline-release-confirm\""
-        html shouldContain "<button type=\"submit\" disabled data-consent-submit"
+        html shouldContain "<button type=\"submit\" disabled data-release-pending"
+        html shouldNotContain "data-consent-submit"
         // The checks would answer an enabled footer: they do not run under a blocked plan.
         html shouldNotContain "checks/run"
     }
@@ -222,6 +223,53 @@ class PipelineLifecycleDialogRenderTest {
         html shouldContain "id=\"plc-release-footer\""
         html shouldContain "disabled"
         html shouldNotContain "data-verb=\"pipeline-release-confirm\""
+    }
+
+    @Test
+    fun `876 R2 - the pending-checks placeholder is outside the consent evaluator - no gate attribute, disabled, for a submittable plan`() {
+        val html = renderRelease(plan = plan(ROOT), hasChecks = true)
+
+        val footer = html.substringAfter("id=\"plc-release-footer\"").substringBefore("</div>")
+        val buttons = Regex("<button[^>]*>").findAll(footer).map { it.value }.toList()
+        // ONE button, the placeholder: lifecycle-dialog.js's evaluateReleaseGates acts on data-consent-submit and
+        // data-min-chars-submit only, so a ticked plan checkbox cannot enable it before the checks footer replaces it.
+        buttons.size shouldBe 1
+        buttons.single() shouldContain "data-release-pending"
+        buttons.single() shouldContain "disabled"
+        buttons.single() shouldNotContain "data-consent-submit"
+        buttons.single() shouldNotContain "data-min-chars-submit"
+    }
+
+    @Test
+    fun `876 R3 - a DRAFT pipeline dependency row offers its own collapsed check override, paired node and reason`() {
+        val child = draft("pipeline", "sales/daily", 5)
+        val html = renderRelease(plan = plan(ROOT, child, draft("template", "sales/query", 2), released("pipeline", "sales/old", 1)))
+
+        val overrides = Regex("<details[^>]*data-release-override[^>]*>").findAll(html).toList()
+        overrides.size shouldBe 1
+        overrides.single().value shouldContain "data-node-id=\"${child.nodeId}\""
+        Regex("<input type=\"hidden\" name=\"check_override_node\" value=\"([^\"]+)\">")
+            .findAll(html)
+            .map { it.groupValues[1] }
+            .toList() shouldBe listOf(child.nodeId)
+        Regex("<textarea name=\"check_override_reason\"[^>]*minlength=\"10\"").findAll(html).count() shouldBe 1
+        // The root's own override field is the checks footer's (overrideChecksReason), never a plan row's.
+        html shouldNotContain "name=\"overrideChecksReason\""
+    }
+
+    @Test
+    fun `876 R3 - the per-row override renders only for a role shown the root's override - a promoter sees none`() {
+        val html =
+            render("partials/pipeline-lifecycle-release") {
+                withRoles(canRead = true, canExecute = false, canAuthor = false, canPromote = true, roleLabel = "promoter")
+                setVariable("dlg", releaseDialog(pins = emptyList()))
+                setVariable("rd", plan(ROOT, draft("pipeline", "sales/daily", 5)))
+                setVariable("from", "editor")
+            }
+
+        html shouldNotContain "data-release-override"
+        html shouldNotContain "check_override_node"
+        html shouldNotContain "check_override_reason"
     }
 
     @Test

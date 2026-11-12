@@ -1,14 +1,15 @@
 <!-- The Release dialog for a visualization (#399) — the dashboard release dialog's shape (#400) over the
      visualization family's EXISTING rule (the service's order: at least one test case; the transform pin
      RELEASED, or DRAFT and released with it through the plan below; then the evidence gate — the latest run
-     for this exact draft GREEN and the mechanical check passing now). The 094 §B shape: every
-     refusal is answered BEFORE the button — a refused dialog lists what the POST would answer and the
-     button does not exist. The POST re-runs every guard in the service regardless.
+     for this exact draft GREEN and the mechanical check passing now). The 094 §B shape: every NATIVE
+     refusal (no draft, no test case, the evidence gate) is answered BEFORE the button — a refused dialog
+     lists what the POST would answer and the button does not exist. The POST re-runs every guard regardless.
 
      #876 §F.2–F.3: the D61 consent group (the bare cascade flag) became the SHARED release plan (partials/release-dialog.html :: plan) —
      the transform template and everything below it are plan rows, each DRAFT one a checked box posting its node_id
-     as include_dependencies, beside the plan's tree_hash; a plan that is not submittable renders the submit
-     disabled. -->
+     as include_dependencies, beside the plan's tree_hash. The plan renders for every draft, beside the native
+     refusals: it alone presents the dependencies, so a MISSING or DISCARDED transform pin is its blocking row and
+     a plan that is not submittable renders the submit disabled (lifecycle-dialog.js never enables it). -->
 <div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" data-lifecycle-dialog="visualization-release">
   <div class="ds-card app-modal app-modal-md dp-release" role="dialog" aria-modal="true" aria-labelledby="viz-release-title">
     <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
@@ -34,21 +35,23 @@
       </ul>
     </th:block>
 
-    <form th:if="${dlg.canRelease}"
+    <form th:if="${dlg.hasDraft and rd != null}"
           th:attr="hx-post=@{'/partials/visualizations/{id}/lifecycle/release'(id=${dlg.id})},
                    hx-swap='none'">
       <input type="hidden" name="from" th:value="${from}">
-      <!-- #416: the hash of the draft THIS dialog read (snake_case); the POST
-           releases AT it, so a draft changed after the dialog opened answers visualization.version.conflict. -->
+      <!-- #416: the hash of the draft THIS dialog read (snake_case); the POST releases AT it. A draft changed
+           after the dialog opened is refused: the plan's tree_hash answers visualization.release.plan_conflict
+           first, and a current plan with a stale body_hash still answers visualization.version.conflict. -->
       <input type="hidden" name="body_hash" th:value="${dlg.bodyHash}" data-release-body-hash>
       <div th:replace="~{partials/release-dialog :: plan(${rd})}"></div>
 
-      <p class="u-secondary u-text-sm u-mb-md">
+      <p th:if="${dlg.canRelease}" class="u-secondary u-text-sm u-mb-md">
         Releasing makes v<span th:text="${dlg.version}">2</span> the current version and locks it; dashboards
         pin it by version.
       </p>
 
-      <button th:if="${canAuthor == true}" type="submit" data-verb="visualization-release-confirm" data-consent-submit
+      <!-- Only a dialog the native rules admit has a button (094 §B); the plan then decides whether it is enabled. -->
+      <button th:if="${canAuthor == true and dlg.canRelease}" type="submit" data-verb="visualization-release-confirm" data-consent-submit
               class="ds-button ds-button-primary u-full" hx-disabled-elt="this"
               th:attr="disabled=${!rd.submittable} ? 'disabled' : null"
               th:text="'Release v' + ${dlg.version}">Release v2</button>

@@ -32,9 +32,10 @@
              re-render is gone (no page renders its pane). -->
         <input type="hidden" name="from" th:value="${from}">
         <!-- #416: the hash of the draft THIS dialog read. The POST releases AT it, so a draft
-             changed after the dialog opened answers pipeline.version.conflict instead of being
-             released silently. It sits in the form, so the check-override footer the run
-             splices in below submits it too. -->
+             changed after the dialog opened is refused instead of being released silently: the
+             plan's tree_hash answers pipeline.release.plan_conflict first, and a current plan with
+             a stale bodyHash still answers pipeline.version.conflict. It sits in the form, so the
+             check-override footer the run splices in below submits it too. -->
         <input type="hidden" name="bodyHash" th:value="${dlg.bodyHash}" data-release-body-hash>
 
         <div th:replace="~{partials/release-dialog :: plan(${rd})}"></div>
@@ -77,7 +78,10 @@
           <button th:if="${!dlg.hasChecks and rd.submittable and canAuthor == true}" type="submit" data-verb="pipeline-release-confirm" data-consent-submit
                   class="ds-button ds-button-primary u-full" hx-disabled-elt="this"
                   th:text="'Release v' + ${dlg.version}">Release v3</button>
-          <button th:if="${dlg.hasChecks or !rd.submittable}" type="submit" disabled data-consent-submit
+          <!-- The pending placeholder carries NO gate attribute: lifecycle-dialog.js's consent evaluator never
+               touches it, so it stays disabled until the checks run's own footer replaces it (that footer's
+               submits carry data-consent-submit). A plan that is not submittable keeps it disabled for good. -->
+          <button th:if="${dlg.hasChecks or !rd.submittable}" type="submit" disabled data-release-pending
                   class="ds-button ds-button-primary u-full"
                   th:text="'Release v' + ${dlg.version}">Release v3</button>
         </div>

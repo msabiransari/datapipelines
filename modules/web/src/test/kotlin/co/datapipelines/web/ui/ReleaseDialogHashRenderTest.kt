@@ -194,7 +194,6 @@ class ReleaseDialogHashRenderTest {
         updatedBy = if (refused) "" else "Muhammad",
         updatedAgo = if (refused) "" else "2 hours ago",
         caseCount = if (refused) 0 else 1,
-        pin = null,
         refusals =
             if (refused) {
                 listOf(VisualizationLifecycleDialogModel.Refusal("visualization.version.not_draft", "No draft."))

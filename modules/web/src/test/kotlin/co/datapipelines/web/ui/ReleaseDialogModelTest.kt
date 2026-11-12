@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.application.dependencies.PlannedClosure
 import co.datapipelines.application.dependencies.ReleasePlanningWalk
+import co.datapipelines.pipeline.release.CheckOverride
 import co.datapipelines.pipeline.release.DependencySource
 import co.datapipelines.pipeline.release.ReleaseBounds
 import co.datapipelines.pipeline.release.ReleaseClosure
@@ -25,6 +26,7 @@ import io.kotest.matchers.string.shouldStartWith
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.Test
+import org.springframework.util.LinkedMultiValueMap
 import java.util.UUID
 
 /**
@@ -214,6 +216,51 @@ class ReleaseDialogModelTest {
         val plan = ReleaseDialogPost.plan(ReleaseFamily.PIPELINE, "v1:abc", null)
         plan.treeHash shouldBe "v1:abc"
         plan.includeDependencies shouldBe emptyList()
+    }
+
+    @Test
+    fun `876 R3 - ReleaseDialogPost pairs each check_override_node with its check_override_reason by index`() {
+        val form =
+            LinkedMultiValueMap<String, String>().apply {
+                add(ReleaseDialogPost.OVERRIDE_NODE, "n-daily")
+                add(ReleaseDialogPost.OVERRIDE_REASON, "Feed late, checked by hand, safe")
+                add(ReleaseDialogPost.OVERRIDE_NODE, "n-weekly")
+                add(ReleaseDialogPost.OVERRIDE_REASON, "")
+                add(ReleaseDialogPost.OVERRIDE_NODE, "n-clean")
+                add(ReleaseDialogPost.OVERRIDE_REASON, "  \t ")
+                // The root's own reason is a different field: it is never one of the plan's overrides.
+                add("overrideChecksReason", "the root's reason, never a child's")
+            }
+
+        val plan = ReleaseDialogPost.plan(ReleaseFamily.DASHBOARD, "v1:abc", listOf("n-daily", "n-weekly"), form)
+
+        // A blank-after-trim reason is no override; the kept reason is the posted text, untrimmed, for the coordinator.
+        plan.checkOverrides shouldBe listOf(CheckOverride("n-daily", "Feed late, checked by hand, safe"))
+        plan.includeDependencies shouldBe listOf("n-daily", "n-weekly")
+    }
+
+    @Test
+    fun `876 R3 - no pair, or only blank reasons, is a null checkOverrides - the plan the REST route builds without one`() {
+        ReleaseDialogPost.plan(ReleaseFamily.PIPELINE, "v1:abc", null).checkOverrides.shouldBeNull()
+        ReleaseDialogPost.checkOverrides(ReleaseFamily.PIPELINE, listOf("n1"), listOf(" ")).shouldBeNull()
+        ReleaseDialogPost.checkOverrides(ReleaseFamily.PIPELINE, null, null).shouldBeNull()
+    }
+
+    @Test
+    fun `876 R3 - mismatched counts are plan_invalid at check_overrides, under the root's family, echoing no value`() {
+        val mismatched: List<Pair<List<String>?, List<String>>> =
+            listOf(
+                listOf("n1", "n2") to listOf("long enough reason"),
+                listOf("n1") to emptyList(),
+                null to listOf("x"),
+            )
+        for ((nodes, reasons) in mismatched) {
+            val thrown =
+                shouldThrow<DatapipelinesException> { ReleaseDialogPost.checkOverrides(ReleaseFamily.DASHBOARD, nodes, reasons) }
+            thrown.code shouldBe "dashboard.release.plan_invalid"
+            thrown.details["field"] shouldBe "check_overrides"
+            thrown.message.orEmpty().contains("long enough reason") shouldBe false
+        }
     }
 
     // ------------------------------------------------------------------ fixtures

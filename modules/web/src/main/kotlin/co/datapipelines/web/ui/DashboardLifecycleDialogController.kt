@@ -16,6 +16,8 @@ import co.datapipelines.web.pipelines.LifecycleVerbs
 import jakarta.servlet.http.HttpServletResponse
 import org.springframework.http.ResponseEntity
 import org.springframework.ui.Model
+import org.springframework.util.LinkedMultiValueMap
+import org.springframework.util.MultiValueMap
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
@@ -80,13 +82,16 @@ class DashboardLifecycleDialogController(
         @RequestParam bodyHash: String,
         @RequestParam(name = "tree_hash", required = false) treeHash: String?,
         @RequestParam(name = "include_dependencies", required = false) includeDependencies: List<String>?,
+        /** #876 §F.2 — the optional per-node check overrides, read raw (ReleaseDialogPost pairs them by index). */
+        @RequestParam form: MultiValueMap<String, String> = LinkedMultiValueMap(),
     ): ResponseEntity<String> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
-        // #416 — [bodyHash] is the hash the DIALOG read (§4.2: you release what you tested). The
-        // draft is read here only to refuse the no-draft case; its CURRENT hash is never the one
-        // released, so a draft that changed after the dialog opened is a stale hash and the
-        // service answers dashboard.version.conflict.
+        // #416 — [bodyHash] is the hash the DIALOG read (§4.2: you release what you tested). The draft is read here
+        // only to refuse the no-draft case; its CURRENT hash is never the one released. A draft that changed after the
+        // dialog opened is refused before anything flips: the plan's tree_hash covers the root's draft, so the planner
+        // answers dashboard.release.plan_conflict first; the service's own dashboard.version.conflict still answers a
+        // current plan posted with a stale bodyHash.
         dashboards.findWorking(workspaceId, ReadLens.Everything, id)?.takeIf { it.detail.status == PipelineVersionStatus.DRAFT }
             ?: throw DatapipelinesException(
                 code = DashboardErrorCodes.VERSION_NOT_DRAFT,
@@ -96,7 +101,7 @@ class DashboardLifecycleDialogController(
         // #876 §F.2 — the plan its GET rendered (tree_hash + one include_dependencies per ticked draft), into the
         // SAME plan object the REST route parses: an unticked draft or a stale hash is refused by the planner under
         // the guard; the server, never the checkbox, is the guard.
-        val plan = ReleaseDialogPost.plan(ReleaseFamily.DASHBOARD, treeHash, includeDependencies)
+        val plan = ReleaseDialogPost.plan(ReleaseFamily.DASHBOARD, treeHash, includeDependencies, form)
         val released =
             dashboards.release(workspaceId, id, bodyHash, principal.userId, releasePinnedVisualizations = false, plan = plan)
         // #873 §C.7 — the coordinator wrote every release event inside the one transaction; this handler writes none.

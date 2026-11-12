@@ -8,6 +8,8 @@ import co.datapipelines.web.pipelines.LifecycleVerbs
 import org.springframework.http.ResponseEntity
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
+import org.springframework.util.LinkedMultiValueMap
+import org.springframework.util.MultiValueMap
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
@@ -59,12 +61,14 @@ class ParameterSetLifecycleDialogController(
         @RequestParam bodyHash: String,
         @RequestParam(name = "tree_hash", required = false) treeHash: String?,
         @RequestParam(name = "include_dependencies", required = false) includeDependencies: List<String>?,
+        /** #876 §F.2 — the optional per-node check overrides, read raw (ReleaseDialogPost pairs them by index). */
+        @RequestParam form: MultiValueMap<String, String> = LinkedMultiValueMap(),
     ): ResponseEntity<String> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
         // The plan its GET rendered, into the SAME plan object the REST route parses: a stale tree_hash, an unticked
         // draft or an unavailable datasource is refused by the planner under the guard, before any flip.
-        val plan = ReleaseDialogPost.plan(ReleaseFamily.PARAMETER_SET, treeHash, includeDependencies)
+        val plan = ReleaseDialogPost.plan(ReleaseFamily.PARAMETER_SET, treeHash, includeDependencies, form)
         val released = sets.release(workspaceId, id, bodyHash, principal.userId, releasePinnedTemplates = false, plan = plan)
         val url = "/parameter-sets/$id?version=${released.version.detail.version}&ok=released"
         return ResponseEntity.ok().header("HX-Redirect", url).body("")

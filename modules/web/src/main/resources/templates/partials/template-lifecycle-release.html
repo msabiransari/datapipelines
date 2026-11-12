@@ -30,8 +30,9 @@
              catalog, when the verb removed the template) — there is no detail pane left to
              re-render in place. `from` rides along for the surface's own audit. -->
         <input type="hidden" name="from" th:value="${from}">
-        <!-- #416: the hash of the draft THIS dialog read; the POST releases AT it, so a draft
-             changed after the dialog opened answers template.version.conflict. -->
+        <!-- #416: the hash of the draft THIS dialog read; the POST releases AT it. A draft changed
+             after the dialog opened is refused: the plan's tree_hash answers template.release.plan_conflict
+             first, and a current plan with a stale bodyHash still answers template.version.conflict. -->
         <input type="hidden" name="bodyHash" th:value="${dlg.bodyHash}" data-release-body-hash>
         <div th:replace="~{partials/release-dialog :: plan(${rd})}"></div>
         <button th:if="${canAuthor == true}" type="submit" data-verb="template-release-confirm" data-consent-submit

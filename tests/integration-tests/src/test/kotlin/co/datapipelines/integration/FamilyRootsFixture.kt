@@ -78,6 +78,7 @@ internal class FamilyRootsFixture(
         name: String,
         template: Node,
         parameters: Map<String, Any> = emptyMap(),
+        checks: List<Map<String, Any?>> = emptyList(),
     ): Node {
         val node =
             mapOf(
@@ -90,7 +91,8 @@ internal class FamilyRootsFixture(
             )
         val document =
             mapOf("name" to name, "display_name" to "Family roots", "description" to "#873", "nodes" to listOf(node)) +
-                (if (parameters.isEmpty()) emptyMap() else mapOf("parameters" to parameters))
+                (if (parameters.isEmpty()) emptyMap() else mapOf("parameters" to parameters)) +
+                (if (checks.isEmpty()) emptyMap() else mapOf("checks" to checks))
         created(send("POST", "/api/v1/pipelines", mapper.writeValueAsString(document)))
         return Node("pipeline", name)
     }
@@ -168,12 +170,13 @@ internal class FamilyRootsFixture(
     fun dashboardClosure(
         prefix: String,
         bindRegion: Boolean = false,
+        sourceChecks: List<Map<String, Any?>> = emptyList(),
     ): Pair<Node, List<Edge>> {
         val selectorTemplate = sqlTemplate("$prefix/selector.sql", SELECTOR_BODY)
         val set = parameterSet("$prefix/set", selectorTemplate)
         val query = sqlTemplate("$prefix/query.sql")
         val declared = if (bindRegion) mapOf("region" to mapOf("type" to "STRING", "required" to false)) else emptyMap()
-        val source = pipeline("$prefix/source", query, declared)
+        val source = pipeline("$prefix/source", query, declared, sourceChecks)
         val shape = jsonataTemplate("$prefix/shape.jsonata")
         val chart = visualization("$prefix/chart", shape)
         val board = dashboard("$prefix/board", set, source, chart, if (bindRegion) listOf("region") else emptyList())
@@ -218,16 +221,24 @@ internal class FamilyRootsFixture(
     /**
      * The family's release DIALOG POST carrying a plan (#876 §F: template, parameter set, visualization and dashboard each
      * have one — a session form with the CSRF double-submit): the oracle's `tree_hash` and every node but the root as
-     * repeated `include_dependencies` fields, at the root's stored hash. The planned twin of [releaseWithPlan].
+     * repeated `include_dependencies` fields, at the root's stored hash. The planned twin of [releaseWithPlan]. [include]
+     * narrows the ticked rows and [extra] adds fields (#876 round 4: the per-row `check_override_node` /
+     * `check_override_reason` pairs, the pipeline root's `overrideChecksReason`), each repeated in its list's order; with
+     * [htmx] the POST is an htmx request, so a refusal answers the toast that carries its code.
      */
     fun releaseDialog(
         root: Node,
         edges: List<Edge>,
         treeHash: String = treeHash(root, edges),
-    ): Response {
-        val ids = nodeIds(root, edges).filterKeys { it != root }.values.toList()
-        return form(dialogPath(root), dialogFields(root) + mapOf("tree_hash" to listOf(treeHash), "include_dependencies" to ids))
-    }
+        include: List<String> = nodeIds(root, edges).filterKeys { it != root }.values.toList(),
+        extra: Map<String, List<String>> = emptyMap(),
+        htmx: Boolean = false,
+    ): Response =
+        form(
+            dialogPath(root),
+            dialogFields(root) + mapOf("tree_hash" to listOf(treeHash), "include_dependencies" to include) + extra,
+            htmx,
+        )
 
     /**
      * The dialog POST of [root] WITHOUT a plan field — and, for the families that read one before #876 round 3, with the
@@ -279,11 +290,13 @@ internal class FamilyRootsFixture(
     private fun form(
         path: String,
         fields: Map<String, List<String>>,
+        htmx: Boolean = false,
     ): Response =
         given()
             .port(port)
             .asSession(session)
             .contentType(ContentType.URLENC)
+            .apply { if (htmx) header("HX-Request", "true") }
             .apply { fields.filterValues { it.isNotEmpty() }.forEach { (key, values) -> formParam(key, *values.toTypedArray()) } }
             .post(path)
 

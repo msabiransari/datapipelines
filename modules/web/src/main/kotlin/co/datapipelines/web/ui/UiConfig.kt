@@ -291,12 +291,10 @@ class UiConfig {
     fun visualizationLifecycleDialogModel(
         visualizations: co.datapipelines.visualization.VisualizationService,
         dashboards: co.datapipelines.visualization.DashboardService,
-        templateStatuses: co.datapipelines.pipeline.TemplateVersionStatuses,
         evidence: co.datapipelines.visualization.ReleaseEvidence,
         actorNames: ActorNames,
         authoring: co.datapipelines.pipeline.AuthoringGuard,
-    ): VisualizationLifecycleDialogModel =
-        VisualizationLifecycleDialogModel(visualizations, dashboards, templateStatuses, evidence, actorNames, authoring)
+    ): VisualizationLifecycleDialogModel = VisualizationLifecycleDialogModel(visualizations, dashboards, evidence, actorNames, authoring)
 
     /** 067: the pipelines screen's one model, shared by the page and the partial controllers. */
     @Bean

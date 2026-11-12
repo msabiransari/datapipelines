@@ -3,7 +3,7 @@
 **Status:** v3.77 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
-**Last updated:** 2026-11-11
+**Last updated:** 2026-11-12
 
 ---
 
@@ -924,7 +924,7 @@ Since slice (b) there is **one** axis, the ROLE ([§7.5](#75-key-roles), [§11A]
 | `pipeline.version.manage` | Discard a draft, discard / restore / purge a version, and the lifecycle dialogs for them. REST/UI: `POST /api/v1/pipelines/{id}/draft/discard`, `DELETE /api/v1/pipelines/{id}/versions/{version}`, `POST /api/v1/pipelines/{id}/versions/{version}/discard`, `POST /api/v1/pipelines/{id}/versions/{version}/restore`, `GET /partials/pipelines/{id}/lifecycle/discard`, `POST /partials/pipelines/{id}/lifecycle/discard`, `GET /partials/pipelines/{id}/lifecycle/purge`, `POST /partials/pipelines/{id}/lifecycle/purge`, `GET /partials/pipelines/{id}/lifecycle/restore`, `POST /partials/pipelines/{id}/lifecycle/restore` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ |
 | `pipeline.delete` | Delete a pipeline (the editor's purge-entity dialog). REST/UI: `DELETE /api/v1/pipelines/{id}`, `GET /partials/pipelines/{id}/lifecycle/purge-entity`, `POST /partials/pipelines/{id}/lifecycle/purge-entity` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ |
 | `pipeline.import` | Import a pipeline. REST/UI: `POST /api/v1/pipelines/import` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ |
-| `pipeline.release` | Release a version (the release dialog; since 7e the response's `warnings` and the dialog's needs-review rows — a field on this release, no new route) — and every dependency the plan flips, under that family's `*.release` (#517: a release plan's selected drafts, each re-checked against the caller's role for its own family; since #876 a bare legacy `release_pinned_templates` is refused 428 `pipeline.release.plan_required` before any role is read). REST/UI: `POST /api/v1/pipelines/{id}/release`, `GET /partials/pipelines/{id}/lifecycle/release`, `POST /partials/pipelines/{id}/lifecycle/release` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ |
+| `pipeline.release` | Release a version (the release dialog; since 7e the response's `warnings` and the dialog's needs-review rows — a field on this release, no new route) — and every dependency the plan flips, under that family's `*.release` (#517: a release plan's selected drafts, each re-checked against the caller's role for its own family; since #876 a bare legacy `release_pinned_templates` is refused 428 `pipeline.release.plan_required` before the coordinator's dependency-role checks — the route's `@RequiredScope` still runs first). REST/UI: `POST /api/v1/pipelines/{id}/release`, `GET /partials/pipelines/{id}/lifecycle/release`, `POST /partials/pipelines/{id}/lifecycle/release` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ |
 | `pipeline.switch_version` | Switch the served version — the rollback lever. REST/UI: `POST /api/v1/pipelines/{id}/current`, `GET /partials/pipelines/{id}/lifecycle/switch`, `POST /partials/pipelines/{id}/lifecycle/switch` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ |
 | `pipeline.execute` | Execute a pipeline. REST/UI: `POST /api/v1/pipelines/{id}/execute`. MCP: `pipelines_execute` | ✓ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ |
 | `pipeline.run_checks` | Run a version's release checks. REST/UI: `POST /api/v1/pipelines/{id}/versions/{version}/checks/run`, `POST /partials/pipelines/{id}/versions/{version}/checks/run`. MCP: `pipelines_run_checks` | ✓ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ |
