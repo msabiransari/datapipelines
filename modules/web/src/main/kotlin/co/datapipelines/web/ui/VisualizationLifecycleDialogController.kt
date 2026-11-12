@@ -70,7 +70,7 @@ class VisualizationLifecycleDialogController(
         model.addAttribute("dlg", dlg)
         // #876 §F.2 — the plan the dialog renders and posts back (tree_hash + the ticked drafts). Built for every draft,
         // whatever the native refusals say: the plan owns the dependency rows, so a MISSING or DISCARDED transform pin is
-        // its blocking row beside cases and evidence that pass.
+        // its blocking row beside the native cases and evidence refusals.
         if (dlg.hasDraft) {
             model.addAttribute("rd", previews.dialog(ReleaseFamily.VISUALIZATION, workspaceId, dlg.name, dlg.version, principal.userId))
         }
