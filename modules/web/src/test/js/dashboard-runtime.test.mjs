@@ -602,6 +602,40 @@ test("a data frame renders, shows success, then settles to ready without a new s
   assert.ok(adapter.log.includes("status:chart:ready"), "success settles to ready: " + adapter.log.join("|"));
 });
 
+// #852 — the runtime's only data call: the mounted handle gets (occurrenceRef, rows, bindings),
+// `rows` the frame's row COUNT and `bindings` its columnar {path: [values]}; nothing else.
+test("#852: a data frame calls the mounted handle's renderData with exactly (occurrenceRef, rows, bindings)", async () => {
+  let args = null;
+  let mountedOccurrence = null;
+  const adapter = scriptedAdapter({
+    mountVisualization: (occurrence) => {
+      if (occurrence.name === "chart") mountedOccurrence = occurrence;
+      return Promise.resolve({
+        renderData: function () {
+          if (occurrence.name === "chart") args = Array.from(arguments);
+          return Promise.resolve("rendered");
+        },
+      });
+    },
+  });
+  const fetchImpl = fakeFetch();
+  fetchImpl.on("/runtime/visualizations", (url, init) => {
+    const refreshId = JSON.parse(init.body).refresh_id;
+    return fetchImpl.stream([
+      fetchImpl.frame("visualization_data", { refresh_id: refreshId, name: "chart", type: "visualization", bindings: { x: [1, 2, 3] }, rows: 3, bytes: 24 }),
+    ]);
+  });
+  const { instance } = await boot({ fetch: fetchImpl, adapter });
+  try {
+    await instance.refresh({ scope: "targets", targets: ["chart"] });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.ok(mountedOccurrence, "the chart occurrence mounted");
+    assert.deepEqual(args, [{ name: "chart", type: "visualization", occurrence: mountedOccurrence }, 3, { x: [1, 2, 3] }]);
+  } finally {
+    instance.dispose();
+  }
+});
+
 /** A hand-driven setTimeout for the instance's `_env`: `tick(ms)` fires every timer due by then, in order. */
 function manualClock() {
   let now = 0;
@@ -2508,12 +2542,12 @@ test("an empty draw whose deadline fires after its refresh was superseded publis
   const hungAdapter = scriptedAdapter({
     mountVisualization: () =>
       Promise.resolve({
-        renderData: (ref, refreshId) => {
-          calls.push("renderData:" + refreshId);
+        renderData: (ref, rows) => {
+          calls.push("renderData:" + rows);
           return Promise.resolve("rendered");
         },
-        renderEmpty: (ref, refreshId) => {
-          calls.push("renderEmpty:" + refreshId);
+        renderEmpty: () => {
+          calls.push("renderEmpty");
           return new Promise(() => {}); // refresh 1's empty draw never settles
         },
       }),

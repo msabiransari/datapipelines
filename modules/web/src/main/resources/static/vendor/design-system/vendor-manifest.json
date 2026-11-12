@@ -220,7 +220,7 @@
       "js/datapipelines-dashboard-kpi.js"
     ],
     "sha256": {
-      "js/datapipelines-dashboard.js": "6d822dacfb30ab059d2af183a4d17332e49407b2d8054653a32314e3af96e0bc",
+      "js/datapipelines-dashboard.js": "4d8fd6b56e3d94562d5578f3d3d9254916ba4b20069c62f20edaf4aded00239e",
       "js/datapipelines-dashboard-chart.js": "4b56c48b95f28d0ebfddc753afbdcd527745edcd0b6c4b76500984905c6bf42c",
       "js/datapipelines-dashboard-plotly.js": "85da47639cfc25ffe658becc713808e8294b6e547fa27265505201b9dc35c3fb",
       "js/datapipelines-dashboard-table.js": "3412e46ba63d4e045ac33fc7d3305352ab9da5bff015863b5dc96d4e56ce9e39",
