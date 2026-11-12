@@ -4,11 +4,15 @@ import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.WriteSurface
+import co.datapipelines.pipeline.inverse.InverseRequest
+import co.datapipelines.pipeline.inverse.InverseScope
+import co.datapipelines.pipeline.inverse.InverseSql
 import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
+import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
@@ -658,6 +662,23 @@ class TemplateRepositoryIntegrationTest {
         repository.findVersion(workspaceId, "test/shift.sql", 1)?.dialect shouldBe Dialect.POSTGRES
         repository.lookupVersion(workspaceId, "test/shift.sql", 1)?.dialect shouldBe Dialect.POSTGRES
         repository.lookupVersion(workspaceId, "test/shift.sql", 2)?.dialect shouldBe Dialect.MYSQL
+    }
+
+    @Test
+    fun `the inverse import pages walk a repeated import by keyset - limit + 1 rows, every occurrence once`() {
+        // #877 §B: report imports lib@1 twice in ONE version, summary once — three occurrences, the page unit.
+        val lib = "test/lib.sql"
+        val twice = listOf(TemplateImport(lib, 1, "a"), TemplateImport(lib, 1, "b"))
+        repository.createReleased(workspaceId, draft(id = "test/report.sql", imports = twice), actor)
+        repository.createReleased(workspaceId, draft(id = "test/summary.sql", imports = listOf(TemplateImport(lib, 1, "s"))), actor)
+        val request = InverseRequest(workspaceId, lib, 1, InverseScope.LIVE, null, 1)
+
+        repository.findImportPinOccurrences(request) shouldHaveSize 2
+        val paged = InverseSql.exhaust(1) { after -> repository.findImportPinOccurrences(request.copy(after = after)) }
+        paged shouldContainExactly repository.findImportPinOccurrences(request.copy(limit = InverseSql.EXHAUST_PAGE))
+        paged.map { it.dependentName to it.sourcePath } shouldContainExactlyInAnyOrder
+            listOf("test/report.sql" to "imports[0]", "test/report.sql" to "imports[1]", "test/summary.sql" to "imports[0]")
+        paged.filter { it.dependentName == "test/report.sql" }.map { it.elementId } shouldContainExactly listOf("a", "b")
     }
 
     @Test

@@ -1,7 +1,12 @@
 package co.datapipelines.parameters
 
+import co.datapipelines.pipeline.inverse.InverseRequest
+import co.datapipelines.pipeline.inverse.InverseScope
+import co.datapipelines.pipeline.inverse.InverseSql
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
+import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import java.util.UUID
@@ -83,6 +88,34 @@ class ParameterSetTemplatePinsIntegrationTest {
         scanner.liveVersionPins(workspaceId, pin.id, pin.version).shouldBeEmpty()
         scanner.anyVersionPins(workspaceId, pin.id).size shouldBe 1
         scanner.countWorkingPinsByPinnedVersion(workspaceId, pin.id) shouldBe emptyMap()
+    }
+
+    @Test
+    fun `the inverse selector pages walk a repeated pin by keyset - limit + 1 rows, every occurrence once`() {
+        // #877 §B: two parameters of ONE set version select the same template, a second set one — three occurrences.
+        val pin = harness.template("acme/lib/regions.sql", "SELECT 1 AS value, 1 AS display_value, TRUE AS is_default")
+        val source = """"source":{"template":{"id":"${pin.id}","version":${pin.version}},"datasource":"warehouse"}"""
+        val twice =
+            harness.document(
+                """{"name":"acme/sales/twice","display_name":"Twice","parameters":[
+                   {"name":"state","label":"State","type":"STRING","kind":"SELECT","cardinality":"SINGLE",$source},
+                   {"name":"region","label":"Region","type":"STRING","kind":"SELECT","cardinality":"SINGLE",$source}]}""",
+            )
+        val once =
+            harness.document(
+                """{"name":"acme/sales/once","display_name":"Once","parameters":[
+                   {"name":"state","label":"State","type":"STRING","kind":"SELECT","cardinality":"SINGLE",$source}]}""",
+            )
+        harness.create(twice)
+        harness.create(once)
+        val repository = ParameterSetRepository(ParametersTestDb.jdbc)
+        val request = InverseRequest(workspaceId, pin.id, pin.version, InverseScope.LIVE, null, 1)
+
+        repository.findTemplatePinOccurrences(request) shouldHaveSize 2
+        val paged = InverseSql.exhaust(1) { after -> repository.findTemplatePinOccurrences(request.copy(after = after)) }
+        paged shouldContainExactly repository.findTemplatePinOccurrences(request.copy(limit = InverseSql.EXHAUST_PAGE))
+        paged.map { it.dependentName to it.elementId } shouldContainExactlyInAnyOrder
+            listOf("acme/sales/twice" to "state", "acme/sales/twice" to "region", "acme/sales/once" to "state")
     }
 
     @Test
