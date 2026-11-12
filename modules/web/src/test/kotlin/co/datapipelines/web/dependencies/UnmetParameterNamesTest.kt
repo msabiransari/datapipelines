@@ -277,7 +277,11 @@ class UnmetParameterNamesTest {
             DependenciesConfiguration.treeLimits(it.toBounds(), it)
         }
 
-    private fun edgeConstraint(data: DependencyTreeData): Map<String, Any> = data.edges.single().constraints.single()
+    private fun edgeConstraint(data: DependencyTreeData): Map<String, Any> =
+        data.edges
+            .single()
+            .constraints
+            .single()
 
     @Suppress("UNCHECKED_CAST")
     private fun Map<String, Any>.unmetNames(): List<String> = getValue(UNMET) as List<String>

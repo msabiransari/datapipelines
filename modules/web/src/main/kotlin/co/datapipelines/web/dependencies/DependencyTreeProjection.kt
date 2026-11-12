@@ -194,12 +194,18 @@ object DependencyTreeProjection {
         unmetOf: (Constraint.ParameterNames) -> List<String>?,
     ): Map<String, Any> =
         when (constraint) {
-            is Constraint.ParameterNames ->
-                linkedMapOf<String, Any>("kind" to constraint.kind.wire, "names" to constraint.names).apply {
-                    unmetOf(constraint)?.let { put(UNMET_NAMES, it) }
-                }
+            is Constraint.ParameterNames -> parameterNames(constraint, unmetOf(constraint))
             is Constraint.DatasourceAccess -> linkedMapOf("kind" to constraint.kind.wire, "mode" to constraint.mode.wire)
             is Constraint.DatasourceDialect -> linkedMapOf("kind" to constraint.kind.wire, "dialect" to constraint.dialect)
+        }
+
+    /** `kind`, `names`, then `unmet_names` only when [unmet] is non-null — absent, never `[]` or `null`. */
+    private fun parameterNames(
+        constraint: Constraint.ParameterNames,
+        unmet: List<String>?,
+    ): Map<String, Any> =
+        linkedMapOf<String, Any>("kind" to constraint.kind.wire, "names" to constraint.names).apply {
+            unmet?.let { put(UNMET_NAMES, it) }
         }
 
     private fun diagnostic(diagnostic: Diagnostic): WireDiagnostic =
